@@ -30,17 +30,14 @@ flowchart TB
         model["MODEL<br/>mathematical semantics"]
         program["PROGRAM<br/>asupersync Rust"]
         proof["PROOF<br/>Lean and certificates"]
+        model ~~~ program ~~~ proof
     end
 
     evidence["EVIDENCE<br/>counterexamples · closures · receipts<br/>coverage · causal explanations"]
     workbench["WORKBENCH<br/>human IDE / CLI / TUI · agent protocol · Forge"]
 
-    intent --> model
-    intent --> program
-    intent --> proof
-    model --> evidence
-    program --> evidence
-    proof --> evidence
+    intent --> planes
+    planes --> evidence
     evidence --> workbench
 ```
 
