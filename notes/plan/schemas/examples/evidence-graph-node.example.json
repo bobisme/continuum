@@ -1,5 +1,5 @@
 {
-  "artifact": "cp_demo1",
+  "artifact": "crash_demo1",
   "kind": "counterexample",
   "labels": [
     "durability",

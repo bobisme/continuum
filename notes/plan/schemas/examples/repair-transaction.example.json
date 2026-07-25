@@ -8,21 +8,32 @@
       "kind": "rust"
     }
   ],
-  "failure": "cp_demo1",
+  "failure": "crash_demo1",
+  "gate_profile": "phase-b",
   "gates": [
     {
       "evidence": [
         "diff_demo1"
       ],
-      "name": "intent_diff",
+      "name": "intent_integrity",
       "status": "pass"
     },
     {
       "evidence": [
         "ev_replay2"
       ],
-      "name": "exact_replay",
+      "name": "exact_regression",
       "status": "pass"
+    },
+    {
+      "evidence": [],
+      "name": "incremental_parity",
+      "status": "not_yet_enforced"
+    },
+    {
+      "evidence": [],
+      "name": "certificate_rebuild",
+      "status": "not_yet_enforced"
     }
   ],
   "hypothesis": "publish reply only after storage sync",

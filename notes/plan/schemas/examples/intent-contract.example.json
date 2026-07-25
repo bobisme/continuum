@@ -3,6 +3,7 @@
     {
       "classification": "storage",
       "expression": "SyncCompleted implies stable recovery",
+      "fidelity_profile": "contractual",
       "id": "A-storage"
     }
   ],
@@ -25,6 +26,7 @@
       "observer": "client"
     }
   ],
+  "completion_policy": "stutter-forever",
   "fairness": [
     {
       "action": "SyncCompleted",
@@ -43,6 +45,12 @@
   },
   "intent_id": "in_ack_v1",
   "name": "durable acknowledgements",
+  "nondeterminism": [
+    {
+      "class": "scheduler",
+      "site": "delivery_order"
+    }
+  ],
   "observers": [
     {
       "events": [
@@ -69,9 +77,30 @@
     "assumptions": "review",
     "assurance": "no-downgrade",
     "bounds": "no-decrease",
+    "completion_policy": "review",
+    "fairness": "review",
     "faults": "no-removal",
+    "non_vacuity": "no-removal",
     "observers": "review",
-    "properties": "locked"
+    "properties": "locked",
+    "trust_boundaries": "no-expansion"
   },
-  "schema_version": "1.0"
+  "schema_version": "1.0",
+  "scope": {
+    "abstraction_level": "protocol",
+    "components": [
+      "crate::register"
+    ],
+    "fragments": [
+      "Finite"
+    ]
+  },
+  "trust_boundaries": {
+    "opaque": [
+      "os-scheduler"
+    ],
+    "trusted": [
+      "storage-pack:storage-posix-v1"
+    ]
+  }
 }

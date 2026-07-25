@@ -2,8 +2,19 @@
   "assurance": {
     "class": "bounded",
     "envelope": {
-      "faults": 1,
-      "nodes": 2
+      "bounds": {
+        "faults": 1,
+        "nodes": 2
+      },
+      "fairness": "weak(SyncCompleted)",
+      "memory_model": "sequential-consistency",
+      "observer": "client",
+      "proof_status": "finite-closure-certificate",
+      "schedules": "exhaustive",
+      "values": "exact",
+      "unknowns": [
+        "production storage profile assumed (contractual)"
+      ]
     }
   },
   "content_budget": {
@@ -22,7 +33,8 @@
   ],
   "guarantees": [
     "ReplayPreserving",
-    "PropertyPreserving"
+    "PropertyPreserving",
+    "OneMinimal"
   ],
   "intent": "in_ack_v1",
   "omissions": [
@@ -34,7 +46,7 @@
     }
   ],
   "question": "why did AckImpliesDurable fail?",
-  "replay": "cp_demo1",
+  "replay": "crash_demo1",
   "schema_version": "1.0",
   "selected": [
     {

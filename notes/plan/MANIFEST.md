@@ -6,9 +6,9 @@
 
 ## Summary
 
-- Inventoried files, excluding this manifest and checksums: **296**
-- Bytes, excluding this manifest and checksums: **1,040,028**
-- Approximate Markdown words: **95,933**
+- Inventoried files, excluding this manifest and checksums: **297**
+- Bytes, excluding this manifest and checksums: **1,174,266**
+- Approximate Markdown words: **112,721**
 - ADRs: **52**
 - RFCs: **40**
 - Research programs: **36**
@@ -22,7 +22,7 @@
 | `.ctm` | 4 |
 | `.json` | 38 |
 | `.lean` | 17 |
-| `.md` | 210 |
+| `.md` | 211 |
 | `.py` | 18 |
 | `.rs` | 1 |
 | `.toml` | 5 |
@@ -32,7 +32,7 @@
 
 | Area | Files |
 |---|---:|
-| `.` | 5 |
+| `.` | 6 |
 | `adr` | 53 |
 | `archive` | 3 |
 | `benchmarks` | 6 |
@@ -54,7 +54,8 @@
 - `README.md` — 6,514 bytes — Continuum Project Dossier — Revision 3
 - `REVISION_3_CHANGELOG.md` — 3,101 bytes — Revision 3 Changelog
 - `VALIDATION_REPORT.md` — 4,736 bytes — Dossier Validation Report — Revision 3
-- `plan.md` — 56,318 bytes — Continuum: Revision 3 Master Implementation Plan
+- `plan.md` — 72,725 bytes — Continuum: Revision 3 Master Implementation Plan
+- `plan.review.1.md` — 73,838 bytes — Review of `plan.md` (Revision 3 Master Implementation Plan) and the accompanying dossier
 - `validation-results.json` — 947 bytes
 ### `adr`
 
@@ -301,18 +302,18 @@
 - `rfcs/0023-checked-choreographic-projection.md` — 703 bytes — RFC 0023: Checked Choreographic Projection
 - `rfcs/0024-proof-receipt-format.md` — 695 bytes — RFC 0024: Proof Receipt Format
 - `rfcs/0025-property-directed-abstraction-loop.md` — 694 bytes — RFC 0025: Property-Directed Abstraction Loop
-- `rfcs/0026-continuumd-native-protocol.md` — 1,330 bytes — RFC 0026: `continuumd` Native Protocol
-- `rfcs/0027-agent-tool-protocol.md` — 911 bytes — RFC 0027: Agent Tool Protocol
-- `rfcs/0028-context-pack-format.md` — 939 bytes — RFC 0028: Context Pack Format and Compiler
+- `rfcs/0026-continuumd-native-protocol.md` — 6,771 bytes — RFC 0026: `continuumd` Native Protocol
+- `rfcs/0027-agent-tool-protocol.md` — 4,920 bytes — RFC 0027: Agent Tool Protocol
+- `rfcs/0028-context-pack-format.md` — 5,207 bytes — RFC 0028: Context Pack Format and Compiler
 - `rfcs/0029-causal-verification-debugger.md` — 808 bytes — RFC 0029: Causal Verification Debugger
-- `rfcs/0030-incremental-semantic-query-engine.md` — 939 bytes — RFC 0030: Incremental Semantic Query Engine
-- `rfcs/0031-semantic-and-intent-diff.md` — 814 bytes — RFC 0031: Semantic and Intent Diff
-- `rfcs/0032-repair-transaction-protocol.md` — 783 bytes — RFC 0032: Repair Transaction Protocol
+- `rfcs/0030-incremental-semantic-query-engine.md` — 5,661 bytes — RFC 0030: Incremental Semantic Query Engine
+- `rfcs/0031-semantic-and-intent-diff.md` — 5,716 bytes — RFC 0031: Semantic and Intent Diff
+- `rfcs/0032-repair-transaction-protocol.md` — 6,178 bytes — RFC 0032: Repair Transaction Protocol
 - `rfcs/0033-continuum-forge.md` — 985 bytes — RFC 0033: Continuum Forge
 - `rfcs/0034-continuum-bench.md` — 811 bytes — RFC 0034: ContinuumBench Task and Grader Contract
 - `rfcs/0035-isolated-lean-proof-service.md` — 812 bytes — RFC 0035: Isolated Lean Proof Service
 - `rfcs/0036-proof-oriented-correspondence.md` — 772 bytes — RFC 0036: Proof-Oriented Model/Program Correspondence
-- `rfcs/0037-intent-contract.md` — 694 bytes — RFC 0037: Intent Contract Schema and Policy
+- `rfcs/0037-intent-contract.md` — 7,136 bytes — RFC 0037: Intent Contract Schema and Policy
 - `rfcs/0038-multi-agent-evidence-graph.md` — 728 bytes — RFC 0038: Multi-Agent Evidence Graph
 - `rfcs/0039-explanation-engine.md` — 663 bytes — RFC 0039: Explanation Engine
 - `rfcs/0040-protocol-adapters.md` — 713 bytes — RFC 0040: LSP, DAP, MCP, SARIF, and CLI Adapters
@@ -322,33 +323,33 @@
 - `schemas/assurance-result.schema.json` — 5,339 bytes
 - `schemas/benchmark-task.schema.json` — 1,938 bytes
 - `schemas/cir.schema.json` — 11,792 bytes
-- `schemas/context-pack.schema.json` — 3,890 bytes
+- `schemas/context-pack.schema.json` — 6,224 bytes
 - `schemas/corpus-port.schema.json` — 4,098 bytes
 - `schemas/crashpack.schema.json` — 3,848 bytes
 - `schemas/domain-pack.schema.json` — 4,674 bytes
-- `schemas/evidence-graph-node.schema.json` — 1,901 bytes
+- `schemas/evidence-graph-node.schema.json` — 2,032 bytes
 - `schemas/examples/benchmark-task.example.json` — 612 bytes
-- `schemas/examples/context-pack.example.json` — 1,059 bytes
+- `schemas/examples/context-pack.example.json` — 1,425 bytes
 - `schemas/examples/counterexample.crashpack.json` — 1,178 bytes
 - `schemas/examples/diehard.corpus-port.json` — 1,760 bytes
-- `schemas/examples/evidence-graph-node.example.json` — 389 bytes
+- `schemas/examples/evidence-graph-node.example.json` — 392 bytes
 - `schemas/examples/finite-closure.proof-receipt.json` — 1,365 bytes
 - `schemas/examples/finite-proof.assurance.json` — 1,681 bytes
-- `schemas/examples/intent-contract.example.json` — 1,402 bytes
+- `schemas/examples/intent-contract.example.json` — 1,997 bytes
 - `schemas/examples/minimal.cir.json` — 1,102 bytes
-- `schemas/examples/repair-transaction.example.json` — 644 bytes
+- `schemas/examples/repair-transaction.example.json` — 898 bytes
 - `schemas/examples/semantic-diff.example.json` — 754 bytes
 - `schemas/examples/storage-pack.manifest.json` — 1,698 bytes
 - `schemas/examples/synthesis-candidate.example.json` — 563 bytes
-- `schemas/examples/verification-task.example.json` — 533 bytes
+- `schemas/examples/verification-task.example.json` — 532 bytes
 - `schemas/examples/workspace-snapshot.example.json` — 521 bytes
-- `schemas/intent-contract.schema.json` — 6,939 bytes
+- `schemas/intent-contract.schema.json` — 9,406 bytes
 - `schemas/proof-receipt.schema.json` — 3,943 bytes
-- `schemas/repair-transaction.schema.json` — 2,996 bytes
-- `schemas/semantic-diff.schema.json` — 3,713 bytes
+- `schemas/repair-transaction.schema.json` — 4,880 bytes
+- `schemas/semantic-diff.schema.json` — 3,891 bytes
 - `schemas/synthesis-candidate.schema.json` — 2,761 bytes
-- `schemas/verification-task.schema.json` — 2,391 bytes
-- `schemas/workspace-snapshot.schema.json` — 2,060 bytes
+- `schemas/verification-task.schema.json` — 2,753 bytes
+- `schemas/workspace-snapshot.schema.json` — 2,301 bytes
 ### `spikes`
 
 - `spikes/R3_SPIKE_REPORT.md` — 5,932 bytes — Revision 3 Executable Spike Report

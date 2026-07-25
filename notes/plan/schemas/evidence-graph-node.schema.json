@@ -16,12 +16,17 @@
         "program",
         "proof_goal",
         "candidate",
+        "invariant_candidate",
+        "ranking_candidate",
+        "abstraction_map",
         "counterexample",
         "explanation",
+        "repair_hypothesis",
         "patch",
         "run",
         "certificate",
         "receipt",
+        "benchmark_result",
         "conflict",
         "decision"
       ]
@@ -34,7 +39,7 @@
       "uniqueItems": true
     },
     "node_id": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^ev_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "provenance": {

@@ -1,20 +1,90 @@
 {
   "$id": "https://continuum.dev/schema/repair-transaction.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "gate_name": {
+      "enum": [
+        "base_replay",
+        "patch_application",
+        "intent_integrity",
+        "exact_regression",
+        "neighborhood",
+        "property_mutation",
+        "defect_mutants",
+        "refinement_coverage",
+        "certificate_rebuild",
+        "incremental_parity",
+        "code_and_security",
+        "receipt_generation"
+      ]
+    }
+  },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "promoted"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gates": {
+            "minItems": 12,
+            "not": {
+              "contains": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "fail",
+                      "inconclusive"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          },
+          "receipt": {
+            "pattern": "^receipt_[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "semantic_diff": {
+            "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "receipt",
+          "semantic_diff"
+        ]
+      }
+    }
+  ],
   "properties": {
+    "actor": {
+      "type": "string"
+    },
     "base_intent": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "base_workspace": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "candidate_workspace": {
       "anyOf": [
         {
-          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "pattern": "^ws_[A-Za-z0-9_-]+$",
           "type": "string"
         },
         {
@@ -48,9 +118,24 @@
       },
       "type": "array"
     },
+    "evaluation_policy": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "failure": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^crash_[A-Za-z0-9_-]+$",
       "type": "string"
+    },
+    "gate_profile": {
+      "description": "Phase-staged promotion profile (plan §21). Gates outside the profile must be listed with status not_yet_enforced, never omitted or passed.",
+      "enum": [
+        "phase-b",
+        "phase-c",
+        "phase-d",
+        "default"
+      ]
     },
     "gates": {
       "items": {
@@ -64,7 +149,7 @@
             "type": "array"
           },
           "name": {
-            "type": "string"
+            "$ref": "#/$defs/gate_name"
           },
           "status": {
             "enum": [
@@ -72,7 +157,8 @@
               "pass",
               "fail",
               "inconclusive",
-              "not_applicable"
+              "not_applicable",
+              "not_yet_enforced"
             ]
           }
         },
@@ -90,7 +176,7 @@
     "receipt": {
       "anyOf": [
         {
-          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "pattern": "^receipt_[A-Za-z0-9_-]+$",
           "type": "string"
         },
         {
@@ -99,7 +185,7 @@
       ]
     },
     "repair_id": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^rt_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "schema_version": {
@@ -139,6 +225,7 @@
     "hypothesis",
     "candidate_workspace",
     "status",
+    "gate_profile",
     "gates"
   ],
   "title": "Repair Transaction",

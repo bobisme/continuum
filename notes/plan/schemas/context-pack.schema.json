@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "assurance": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "class": {
           "enum": [
@@ -16,24 +16,103 @@
           ]
         },
         "envelope": {
+          "additionalProperties": false,
+          "description": "Every dimension names its producer or reads a typed unsupported value; dimensions are never silently omitted (plan B11).",
+          "properties": {
+            "bounds": {
+              "type": "object"
+            },
+            "fairness": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "memory_model": {
+              "enum": [
+                "sequential-consistency",
+                "c11-fragment",
+                "unsupported"
+              ]
+            },
+            "observer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "proof_status": {
+              "enum": [
+                "none",
+                "finite-closure-certificate",
+                "checked-certificate",
+                "trusted-solver",
+                "kernel-checked",
+                "unsupported"
+              ]
+            },
+            "schedules": {
+              "enum": [
+                "exhaustive",
+                "reduced",
+                "sampled",
+                "unsupported"
+              ]
+            },
+            "values": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "unknowns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "bounds",
+            "schedules",
+            "memory_model",
+            "proof_status",
+            "unknowns"
+          ],
           "type": "object"
         }
       },
       "required": [
-        "class"
+        "class",
+        "envelope"
       ],
       "type": "object"
     },
     "content_budget": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nodes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tokens": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "context_id": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^ctx_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "evidence": {
       "items": {
-        "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+        "pattern": "^ev_[A-Za-z0-9_-]+$",
         "type": "string"
       },
       "type": "array"
@@ -63,13 +142,27 @@
     },
     "guarantees": {
       "items": {
-        "type": "string"
+        "enum": [
+          "ReplayPreserving",
+          "PropertyPreserving",
+          "ProofRelevant",
+          "HeuristicRelevant",
+          "OneMinimal",
+          "CardinalityMinimal",
+          "CausallyMinimal",
+          "ValueMinimal",
+          "OwnerMinimal",
+          "FaultMinimal",
+          "ExplanationMinimal",
+          "CausallyClosed",
+          "CounterfactualUnderNamedModel"
+        ]
       },
       "type": "array",
       "uniqueItems": true
     },
     "intent": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "omissions": {
@@ -105,7 +198,7 @@
     "replay": {
       "anyOf": [
         {
-          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "pattern": "^crash_[A-Za-z0-9_-]+$",
           "type": "string"
         },
         {
@@ -170,7 +263,7 @@
       ]
     },
     "workspace": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     }
   },

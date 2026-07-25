@@ -1,6 +1,20 @@
 {
   "$id": "https://continuum.dev/schema/intent-contract.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "policy_verb": {
+      "enum": [
+        "unlocked",
+        "proposal-only",
+        "review",
+        "locked",
+        "no-decrease",
+        "no-removal",
+        "no-downgrade",
+        "no-expansion"
+      ]
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "assumptions": {
@@ -19,6 +33,15 @@
           },
           "expression": {
             "type": "string"
+          },
+          "fidelity_profile": {
+            "description": "Declared domain-pack fidelity this assumption relies on (RFC 0002). Profiles are not automatically ordered.",
+            "enum": [
+              "ideal",
+              "contractual",
+              "platform-qualified",
+              "adversarial-envelope"
+            ]
           },
           "id": {
             "type": "string"
@@ -121,6 +144,15 @@
       "minItems": 1,
       "type": "array"
     },
+    "completion_policy": {
+      "description": "Behavior-completion policy for terminal states (RFC 0015). No engine may silently change this.",
+      "enum": [
+        "stutter-forever",
+        "deadlock-violation",
+        "finite-trace-only",
+        "closed"
+      ]
+    },
     "fairness": {
       "items": {
         "additionalProperties": false,
@@ -173,11 +205,38 @@
       "type": "object"
     },
     "intent_id": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "name": {
       "type": "string"
+    },
+    "nondeterminism": {
+      "description": "Typed choice classes per choice site. Probabilistic, timed, and epistemic classes are declarative until the ADR-0016 lanes ship (plan B11).",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "enum": [
+              "demonic",
+              "angelic",
+              "scheduler",
+              "probabilistic",
+              "timed",
+              "epistemic"
+            ]
+          },
+          "site": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "site",
+          "class"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     },
     "observers": {
       "items": {
@@ -240,84 +299,114 @@
       "additionalProperties": false,
       "properties": {
         "assumptions": {
-          "enum": [
-            "unlocked",
-            "proposal-only",
-            "review",
-            "locked",
-            "no-decrease",
-            "no-removal",
-            "no-downgrade"
-          ]
+          "$ref": "#/$defs/policy_verb"
         },
         "assurance": {
-          "enum": [
-            "unlocked",
-            "proposal-only",
-            "review",
-            "locked",
-            "no-decrease",
-            "no-removal",
-            "no-downgrade"
-          ]
+          "$ref": "#/$defs/policy_verb"
         },
         "bounds": {
-          "enum": [
-            "unlocked",
-            "proposal-only",
-            "review",
-            "locked",
-            "no-decrease",
-            "no-removal",
-            "no-downgrade"
-          ]
+          "$ref": "#/$defs/policy_verb"
+        },
+        "completion_policy": {
+          "$ref": "#/$defs/policy_verb"
+        },
+        "fairness": {
+          "$ref": "#/$defs/policy_verb"
         },
         "faults": {
-          "enum": [
-            "unlocked",
-            "proposal-only",
-            "review",
-            "locked",
-            "no-decrease",
-            "no-removal",
-            "no-downgrade"
-          ]
+          "$ref": "#/$defs/policy_verb"
+        },
+        "non_vacuity": {
+          "$ref": "#/$defs/policy_verb"
         },
         "observers": {
-          "enum": [
-            "unlocked",
-            "proposal-only",
-            "review",
-            "locked",
-            "no-decrease",
-            "no-removal",
-            "no-downgrade"
-          ]
+          "$ref": "#/$defs/policy_verb"
         },
         "properties": {
-          "enum": [
-            "unlocked",
-            "proposal-only",
-            "review",
-            "locked",
-            "no-decrease",
-            "no-removal",
-            "no-downgrade"
-          ]
+          "$ref": "#/$defs/policy_verb"
+        },
+        "trust_boundaries": {
+          "$ref": "#/$defs/policy_verb"
         }
       },
       "required": [
         "properties",
         "assumptions",
+        "fairness",
         "bounds",
         "observers",
         "faults",
+        "trust_boundaries",
+        "non_vacuity",
+        "completion_policy",
         "assurance"
       ],
       "type": "object"
     },
     "schema_version": {
       "const": "1.0"
+    },
+    "scope": {
+      "additionalProperties": false,
+      "properties": {
+        "abstraction_level": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "components": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fragments": {
+          "description": "Declared semantic fragments (ADR-0025). Intent-diff guarantees apply within declared fragments; outside them classification is Unknown and fails closed (plan §5.3).",
+          "items": {
+            "enum": [
+              "Finite",
+              "Symbolic",
+              "Temporal",
+              "Probabilistic",
+              "Theorem",
+              "Runtime"
+            ]
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "components",
+        "fragments"
+      ],
+      "type": "object"
+    },
+    "trust_boundaries": {
+      "additionalProperties": false,
+      "properties": {
+        "opaque": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "trusted": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "trusted",
+        "opaque"
+      ],
+      "type": "object"
     }
   },
   "required": [
@@ -326,9 +415,12 @@
     "claims",
     "assumptions",
     "observers",
+    "scope",
+    "trust_boundaries",
     "bounds",
     "fault_model",
     "fairness",
+    "completion_policy",
     "assurance",
     "policy"
   ],

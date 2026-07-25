@@ -131,6 +131,7 @@ The universal operation shape is:
   + evidence references
   + new snapshot or continuation
   + explicit omissions/unknowns
+  + allowed next operations, warnings, cost, and epoch identities
 ```
 
 This shape applies equally to:
@@ -146,6 +147,29 @@ This shape applies equally to:
 - `review`.
 
 No semantic state is hidden in a terminal process, editor connection, chat session, or MCP transport.
+
+---
+
+## 0.3 Claim status of this plan
+
+This plan uses the dossier claim lattice (`README.md`). Unless marked
+otherwise, sections here are DESIGN (accepted architecture, not evidence).
+The following are explicitly weaker:
+
+- HYPOTHESIS: §6 general context compilation, §8.3 neighborhood adequacy,
+  §9 sub-file-granularity incremental trust, §12 causal explanation science,
+  §14 Forge co-synthesis and quality-diversity, §16 bidirectional lenses,
+  production partial-order conformance (Phase F). Each is owned by a
+  research lane with kill criteria (see §24.5).
+- Evidence boundary: no Lean source in this dossier has been parsed,
+  elaborated, or kernel-checked; no theorem may be described as
+  machine-checked (`VALIDATION_REPORT.md`, `docs/18` C035). The Revision 3
+  spikes are finite Python reference experiments that validate artifact
+  shapes and interaction contracts, not engines, scale, concurrency,
+  persistence, or soundness (`docs/53`, "What remains unproven").
+- G0 status: 8 of 15 G0 items have spike evidence; G0-DX-06 (the actual
+  neighborhood/mutation campaign), DX-09, DX-10, DX-11, DX-13, DX-14, and
+  DX-15 currently have neither evidence nor a redesign decision.
 
 ---
 
@@ -194,6 +218,15 @@ Bidirectional assistance can propose edits, but ambiguity produces a conflict an
 ### B11 — Assurance is an envelope, not a badge
 
 Every result describes dimensions such as bounds, faults, fairness, values, schedules, weak-memory model, observer, proof status, and unknowns. “Verified” alone is prohibited in machine output.
+
+Every envelope dimension names its producing engine or carries a typed
+`Unsupported` value; a dimension is never silently omitted. Until the
+weak-memory lane ships (ADR-0032), every envelope's memory dimension reads
+`Unsupported(sequential-consistency-only)`. Until the timed and
+probabilistic extensions ship (ADR-0016), Continuum does not advertise
+timed or probabilistic proof support in any machine output, and timing
+fields in Intent Contracts are declarative assumptions, not checked
+semantics.
 
 ### B12 — Agents are untrusted search procedures
 
@@ -351,18 +384,28 @@ cargo continuum init
 cargo continuum check
 ```
 
+`cargo continuum init` also proposes draft Intent Contracts from property
+templates, the domain-pack library, and observed effect footprints. Drafts
+enter the registry at status `Proposed`; they gain protection (INV-001)
+only on explicit acceptance. Continuum never silently promotes an inferred
+intent to protected status, and never claims a generated model is the
+intended abstraction.
+
 The first result is concise:
 
 ```text
-FAIL  AckImpliesDurable
+FAILURE  AckImpliesDurable          intent in_7c2… (unchanged)
+assurance  bounded: ≤3 nodes · ≤2 faults · exhaustive schedules · SC memory
 
 Ack became observable before the corresponding write became durable.
 Causal core: 4 events · 2 tasks · 1 cancellation
 Abstract mismatch: acked +1, durable unchanged
+Unknown: production storage profile assumed (contractual)
 
-replay   cp_7m3...
-debug    continuum debug cp_7m3...
-explain  continuum explain cp_7m3... --level causal
+replay   crash_7m3...
+debug    continuum debug crash_7m3...
+explain  continuum explain crash_7m3... --level causal
+repair   continuum repair begin crash_7m3...
 ```
 
 No Java installation, model-config archaeology, or megabytes of state dumps.
@@ -373,7 +416,7 @@ An agent does not invoke arbitrary shell text. It calls:
 
 ```json
 {
-  "operation": "verify.start",
+  "operation": "verification.start",
   "snapshot": "ws_4f...",
   "intent": "in_91...",
   "target": "property:AckImpliesDurable",
@@ -402,7 +445,7 @@ cargo continuum refine --from program:lease --to model:lease-service
 ### 3.4 Repair path
 
 ```bash
-continuum repair begin cp_7m3...
+continuum repair begin crash_7m3...
 continuum repair apply --patch patch.diff --hypothesis "publish only after sync"
 continuum repair evaluate rt_2c...
 continuum repair promote rt_2c...
@@ -413,7 +456,7 @@ Promotion returns a receipt only after all policy gates close.
 ### 3.5 Invention path
 
 ```bash
-continuum forge synthesize models/broadcast.cml \
+continuum forge synthesize models/broadcast.ctm \
   --holes delivery_rule,ack_rule,state_summary \
   --objective latency,persistent-writes \
   --diversity behavior \
@@ -464,12 +507,19 @@ A workspace snapshot contains content identities for:
 - domain-pack manifests;
 - dependency lockfiles;
 - toolchain and semantic epochs;
-- Intent Contract;
+- the content identity of the governing Intent Contract (a reference, not
+  the contract itself);
 - generated correspondence;
 - proof environment;
 - configuration.
 
 Snapshots form a Merkle DAG. A tool call never means “whatever is currently on disk”; it means a named snapshot. Clients may create a snapshot from a working tree, overlay an in-memory editor buffer, or fork an existing snapshot.
+
+Intent Contracts are stored and versioned only in the intent registry,
+outside every writable or forkable snapshot. `workspace.fork` preserves the
+intent binding by identity; rebinding a snapshot lineage to a different
+intent is a privileged operation that produces a semantic intent diff and
+invalidates dependent evidence (INV-001).
 
 ### 4.3 Native protocol
 
@@ -498,16 +548,48 @@ ws_* workspace snapshot
 in_* intent contract
 model_* elaborated model
 cir_* causal execution graph
-cp_* crashpack
+crash_* crashpack
 ctx_* Context Pack
 proof_* proof artifact
+ps_* proof state
+task_* task
+ev_* evidence node
+dbg_* debugger branch
 receipt_* signed/checked receipt
 rt_* repair transaction
 forge_* synthesis archive
 cont_* resumable task continuation
 ```
 
-Opaque handles prevent clients from guessing structure. Authorization is checked independently of handle possession.
+Handles carry a kind prefix but are otherwise structureless and
+unforgeable; clients cannot derive one handle from another. Authorization
+is checked independently of handle possession.
+
+### 4.5 Operational contract of `continuumd`
+
+The daemon is part of the trust spine; its operational behavior is
+specified, verified, and gated (G1), not left to implementation:
+
+- **Crash safety.** Publication commits content before index; a crash
+  leaves unreachable content eligible for GC, never a stale index entry.
+  On restart, `Running` tasks resume from their last committed
+  continuation or transition to `Failed` with a typed reason — never to a
+  silently reconstructed state. An index verifier (fsck) ships with the
+  daemon.
+- **Storage lifecycle.** Artifacts are garbage-collected by reachability
+  from named roots, receipts, and retention policy. The daemon reports
+  storage attribution by artifact class. Disk exhaustion during
+  publication aborts atomically (INV-017); it never truncates.
+- **Purge without breaking receipts.** Sensitive artifact classes are
+  encrypted at rest per artifact; purge shreds the key and replaces
+  content with a typed `Redacted(reason, commitment)` stub. Receipts
+  referencing purged content remain structurally verifiable and report
+  the redaction; claims requiring the hidden data downgrade per §18.4.
+- **Multi-user baseline.** Remote mode requires an identity model;
+  capabilities are minted, scoped, delegated, and revoked through daemon
+  operations recorded in the audit log. Cross-user computation sharing is
+  off by default: content-addressed dedup across principals is an
+  existence oracle and requires an explicit sharing policy.
 
 ---
 
@@ -537,10 +619,20 @@ claims
   property AST + stable semantic name
 assumptions
   environment, fairness, timing, failure, trust
+  domain-pack fidelity profile per effect family
+    (ideal | contractual | platform-qualified | adversarial-envelope)
+  behavior completion policy
+    (stutter-forever | deadlock-violation | finite-trace-only | closed)
+  nondeterminism classes per choice site
+    (demonic | angelic | scheduler | probabilistic† | timed† | epistemic†)
+    († declarative until ADR-0016 lanes ship — see B11)
 observers
   state/event/knowledge/security projections
 scope
-  model/program components and abstraction level
+  model/program components, abstraction level, and semantic fragment
+  declarations (ADR-0025)
+trust boundaries
+  trusted and opaque components and effects
 bounds
   values, processes, faults, schedules, depth
 assurance policy
@@ -566,7 +658,18 @@ A semantic diff is not text diff. It classifies:
 - unsupported semantic change;
 - unchanged intent.
 
-Where implication is decidable or solver-checkable, Continuum proves the direction. Otherwise it emits a proof obligation or `Unknown` rather than guessing.
+Where implication is decidable or solver-checkable, Continuum proves the
+direction. Otherwise it emits a proof obligation or `Unknown` rather than
+guessing. `Unknown` fails closed: an intent change classified `Unknown`
+blocks ordinary promotion exactly as a confirmed privileged change does,
+pending review.
+
+Each intent field declares its semantic fragment (ADR-0025:
+`Finite / Symbolic / Temporal / Probabilistic / Theorem / Runtime`), so
+"supported" is a checkable predicate. The diff guarantee is: within
+declared supported fragments, every property weakening, assumption
+strengthening, bound decrease, observer coarsening, fault removal, and
+assurance downgrade is classified as privileged; outside them, `Unknown`.
 
 ### 5.4 Intent locks
 
@@ -576,6 +679,10 @@ CI policy can lock fields:
 [intent.policy]
 properties = "maintainer-review"
 assumptions = "maintainer-review"
+fairness = "maintainer-review"
+trust_boundaries = "no-expansion"
+non_vacuity = "no-removal"
+completion_policy = "maintainer-review"
 bounds = "no-decrease"
 faults = "no-removal"
 assurance = "no-downgrade"
@@ -852,7 +959,10 @@ Dependencies distinguish:
 
 This enables precise invalidation and useful “why did this re-run?” explanations.
 
-### 9.5 Clean-build Tribunal
+### 9.5 Incremental Parity Audit
+
+(Renamed from “clean-build Tribunal”; **Tribunal** refers exclusively to
+the TLA+ corpus oracle harness of ADR-0021.)
 
 CI and sampled local runs compare incremental and clean artifacts:
 
@@ -896,17 +1006,21 @@ The Agent–Computer Interface follows these rules:
 ```text
 workspace.create / fork / diff / seal
 intent.get / diff / propose_revision
+verification.start / result / await
 model.check / explore / compare
 program.extract / run / replay
 refinement.check / explain
 proof.goal / attempt / check / slice
+debug.open / state / enabled / step_event / step_abstract / reverse_causal /
+  branch / compare / why_enabled / why_blocked / export
 context.compile / expand
 failure.explain / minimize / branch
-repair.begin / apply / evaluate / promote
+repair.begin / apply / attach / evaluate / resume / review / promote / reject
 forge.create / step / archive / materialize
 benchmark.run
 task.status / cancel / resume / subscribe
 evidence.get / query / verify
+query.explain_reuse / explain_invalidation / clean_compare
 ```
 
 ### 10.3 Error taxonomy
@@ -1012,6 +1126,7 @@ Edges name checker/evidence when applicable.
 ```text
 Proposed
 Observed
+Sampled
 Bounded
 Validated
 Proved
@@ -1021,6 +1136,14 @@ Superseded
 ```
 
 Only trusted services can promote into `Validated` or `Proved`. Agent votes or confidence cannot.
+
+`Inconclusive` carries a typed reason per INV-008 (`Unsupported`,
+`ResourceExhausted`, `EngineError`, `InsufficientTelemetry`,
+`AbstractionAmbiguity`, `IncompleteProofSearch`). `Validated` records
+whether solver evidence is `CHECKED_CERTIFICATE` or `TRUSTED_SOLVER`; the
+two never render identically. Parameterized results carry
+`checked(N=k)` / `cutoff_checked(N≤k)` / `proved(∀N)` and are structurally
+distinct in every surface. Budget exhaustion is never a verdict.
 
 ### 11.5 Whiteboard compiler
 
@@ -1160,7 +1283,7 @@ Human CLI output is stable, terse by default, and expandable:
 ```bash
 continuum check --summary
 continuum check --json
-continuum explain cp_x --level semantic
+continuum explain crash_x --level semantic
 continuum evidence show receipt_x
 ```
 
@@ -1446,7 +1569,7 @@ Expose agent operations and immutable resources. Explicit state handles enable m
 ```bash
 cargo continuum check
 cargo continuum explore
-cargo continuum replay cp_x
+cargo continuum replay crash_x
 cargo continuum review --base main
 ```
 
@@ -1552,6 +1675,11 @@ security-policy compliance
 behavioral novelty
 ```
 
+Grading is ordered per RFC 0034: intent integrity → security → semantic
+correctness → evidence validity → hidden-variant generalization → cost →
+explanation. A zero in intent integrity caps the total score at failure.
+Leaderboards are Pareto fronts; no single ranking hides cost or assurance.
+
 ### 19.4 Dataset construction
 
 Sources include:
@@ -1566,6 +1694,11 @@ Sources include:
 - real project migrations.
 
 Train/dev/test partitions isolate semantic families and source hashes to reduce leakage.
+
+A named subset of corpus families is held out from all development,
+tuning, and regression use and graded only by the isolated ContinuumBench
+grader. G9's “80 families at declared parity” is measured on the
+development set plus a final, single evaluation of the held-out set.
 
 ### 19.5 Reward-hacking suite
 
@@ -1599,6 +1732,10 @@ continuum-cir
 continuum-observer
 continuum-refinement
 continuum-certificate
+continuum-kernel-core
+continuum-kernel-sat
+continuum-kernel-smt
+continuum-kernel-temporal
 continuum-evidence
 continuum-context
 continuum-semantic-diff
@@ -1629,6 +1766,14 @@ continuum-sarif
 Dependency rules:
 
 - proof/certificate checker does not depend on search engines;
+- the `continuum-kernel-*` crates form the trusted checking base: no shared
+  optimized evaluator code with any engine, no async, no unsafe, no plugins
+  or dynamic loading, a <15,000 non-test-line covenant (docs/03), and a
+  serialization boundary between every engine and the kernel — a
+  certificate is checked from its wire form, never from shared memory;
+- in certified lanes, content identity is exact canonical identity; hash
+  collisions are resolved by canonical comparison; 256-bit-hash identity is
+  permitted only in explicitly labeled non-certified modes (ADR-0013);
 - model core does not depend on asupersync;
 - adapters do not own semantic state;
 - Forge depends on verifier interfaces, never vice versa;
@@ -1638,6 +1783,18 @@ Dependency rules:
 ---
 
 ## 21. Implementation program
+
+### 21.1 Resourcing, licensing, and study posture
+
+Phases are gate-driven, not time-driven. Each phase names an owner and a
+minimum viable team; a phase without both is `BLOCKED`, not in progress.
+Phase A additionally resolves: the product license (permissive, compatible
+with asupersync and solver adapters); a per-family redistribution audit for
+the corpus before any public benchmark release; and the rule that foreign
+oracle tooling (TLC, Apalache, solvers) never ships in release binaries
+(ADR-0029). The G8 usability gate is defined against a preregistered
+minimal study: the four docs/34 acceptance workflows, cohort sizes and
+metrics fixed per docs/48 before the study runs.
 
 ### Phase A — Trust spine and ACI kernel
 
@@ -1650,7 +1807,11 @@ Deliver:
 - Context Pack v0;
 - semantic diff v0;
 - executable finite reference engine and certificates from Revision 2;
-- agent protocol spike parity.
+- agent protocol spike parity;
+- Lean environment pinned and seed modules kernel-checked; T0/T1 theorems
+  (transition-system safety, stuttering simulation, finite-closure
+  certificate soundness) compile with no `sorry` and empty axiom manifests,
+  per ADR-0022.
 
 Exit: Die Hard and Dining Philosophers can be checked through native API, CLI, and an agent client with identical artifacts.
 
@@ -1658,7 +1819,12 @@ Exit: Die Hard and Dining Philosophers can be checked through native API, CLI, a
 
 Deliver:
 
-- asupersync semantic adapter;
+- asupersync semantic adapter (one adapter crate, exact version pin,
+  explicit semantic-hook contract, adapter conformance corpus; the model
+  core never depends on asupersync);
+- CML core-fragment parser and elaborator (Finite fragment; enough for the
+  replicated register and Wave 0 ports; the programmatic model API remains
+  supported);
 - storage/network/process packs;
 - replicated register;
 - causal minimizer;
@@ -1666,7 +1832,15 @@ Deliver:
 - repair transactions;
 - exact and neighboring replay.
 
-Exit: an agent fixes ack-before-durable without changing intent and produces a promotion receipt.
+Exit: an agent fixes ack-before-durable without changing intent and
+produces a promotion receipt under the Phase B gate profile.
+
+Promotion gate profiles are phase-staged. Each §8.2 gate enters the default
+profile when its producing subsystem ships: gates 1–8 and 11–12 in Phase B;
+gate 10 (clean/incremental agreement) in Phase C; gate 9 (certificate and
+proof rebuild) in Phase D. A receipt must name its profile and list
+not-yet-enforced gates as `NotYetEnforced` — never as passed. A Phase B
+receipt is therefore structurally distinguishable from a Phase D receipt.
 
 ### Phase C — Interactive scale
 
@@ -1674,11 +1848,23 @@ Deliver:
 
 - incremental semantic database;
 - LSP/DAP/SARIF;
-- clean-build Tribunal;
+- Incremental Parity Audit (§9.5);
 - proof Context Packs;
-- Wave 0/1 corpus interaction tasks.
+- Wave 0/1 corpus interaction tasks (29 families, pinned to
+  `tlaplus/Examples@91c22ea…`) at their required parity per
+  `corpus/tla-examples/PARITY_LEVELS.md`;
+- CML language stability: normalized semantic AST frozen before surface
+  syntax; formatter and migration tool ship before syntax stability
+  (docs/11 §14).
 
-Exit: normal edit/check/explain loop is subsecond for local changes and trustworthy under differential audit.
+Exit: the edit/check/explain loop meets the docs/34 latency table (p50/p95
+per interaction) on the reference workload; incremental results are
+trustworthy under differential audit; reduction engines show zero
+reachability mismatch against the unreduced reference on the no-reduction
+corpus, and certified claims fall back to the unreduced baseline until the
+reduction's certificate lane matures (docs/08 R04); semantic artifacts are
+byte-identical across the docs/19 determinism matrix (worker counts, build
+modes, platforms, hash seeds).
 
 ### Phase D — Proof and liveness
 
@@ -1688,7 +1874,8 @@ Deliver:
 - fairness/liveness debugger;
 - invariant/ranking synthesis;
 - proof repair service;
-- refinement receipts.
+- refinement receipts;
+- corpus Waves 2–3 at required parity.
 
 Exit: one nontrivial corpus protocol has safety and liveness evidence plus real-code refinement.
 
@@ -1709,6 +1896,10 @@ Exit: Forge rediscovers known solutions and produces at least one behaviorally n
 Deliver:
 
 - production partial-order evidence;
+- foreign-runtime instrumentation lane (tokio): journal observable
+  lifecycle/channel/time events, mark uncontrolled effects opaque, and emit
+  correspondingly bounded assurance envelopes — an adoption bridge, not a
+  claim of controlled semantics;
 - instrumentation synthesis;
 - remote proof/verification workers;
 - all 80 corpus families at declared parity;
@@ -1721,39 +1912,73 @@ Exit: Continuum replaces bespoke DST plus separate TLA+ workflow in at least two
 
 ## 22. Release gates
 
+The normative gate scheme is `docs/52_RELEASE_GATES_REV3.md` (G0–G10); this
+section summarizes it. Legacy gate citations in Revision 2 ADRs (0001–0035)
+and RFCs (0001–0025) refer to the Revision 2 scheme in `docs/26` and may
+not be cited without translation; the translation sweep is part of the
+specification pass in §25. No document may introduce a new gate numbering.
+
+| Phase (§21) | Gates it must close |
+|---|---|
+| A | G0 (falsification), G1 (workbench identity and lifecycle), G2 (ACI) |
+| B | G3 (intent integrity), G4 (causal debugging and real repair) |
+| C | G5 (incremental trust) |
+| D | G6 (proof service) |
+| E | G7 (Forge) |
+| F | G8 (human usability), G9 (corpus parity), G10 (Continuum 1.0) |
+
 ### G0 — Load-bearing falsification
 
 All items in [`notes/G0_SPIKE_MATRIX.md`](notes/G0_SPIKE_MATRIX.md) have evidence or explicit redesign.
 
-### G1 — Agent-computer interface
+### G1 — Workbench identity and lifecycle
+
+- snapshots, handles, and artifacts are immutable and content-addressed;
+- requests are idempotent under idempotency keys;
+- cancellation closes obligations and publishes no partial finality;
+- artifact publication is transactional (INV-017);
+- authorization is checked independently of handle possession;
+- daemon crash recovery leaves no stale index entries or orphan tasks (§4.5).
+
+### G2 — Agent-computer interface
 
 - no terminal parsing required;
 - explicit handles and resumability;
 - stale state rejected;
-- Context Pack improves agent benchmark effectiveness;
-- protected intent detects all benchmark gaming mutations.
+- Context Pack improves agent benchmark effectiveness.
 
-### G2 — Real repair
+### G3 — Intent integrity
+
+- every benchmark gaming mutation in supported fragments is classified as a
+  privileged intent change;
+- mutations outside supported fragments classify as `Unknown` and block
+  ordinary promotion rather than passing silently;
+- intent policy locks are enforced; evidence is invalidated on intent
+  revision;
+- no ordinary repair promotes with a protected-intent change.
+
+### G4 — Causal debugging and real repair
 
 - correct asupersync implementation and multiple mutants;
 - causal explanation and debugger;
-- repair transaction closes exact, neighborhood, mutation, proof, and clean-build gates.
+- repair transaction closes exact, neighborhood, and mutation gates under
+  the Phase B gate profile (§21).
 
-### G3 — Human usability
+### G5 — Incremental trust
 
-- task study shows explanation improves diagnosis;
-- confidence calibration does not worsen;
-- progressive disclosure reaches exact artifacts;
-- no critical workflow requires formal-methods folklore.
+- incremental results continuously match clean builds under the
+  Incremental Parity Audit;
+- interactive latency targets (docs/34) hold on the reference workload;
+- cache and publication are crash-safe.
 
-### G4 — Proof and incrementality
+### G6 — Proof service
 
-- Lean foundations kernel-check;
-- incremental results continuously match clean builds;
+- Lean foundations kernel-check (Revision 2 and Revision 3 theorems, no
+  placeholders);
 - certificate mutations are rejected;
 - proof Context Packs improve proof-worker success/cost.
 
-### G5 — Forge
+### G7 — Forge
 
 - safety and non-vacuity;
 - hidden variant generalization;
@@ -1761,14 +1986,40 @@ All items in [`notes/G0_SPIKE_MATRIX.md`](notes/G0_SPIKE_MATRIX.md) have evidenc
 - diversity archive has semantic, not merely syntactic, spread;
 - unrealizability produces reusable evidence where supported.
 
-### G6 — Continuum 1.0
+### G8 — Human usability
 
-- 80 validated TLA+ families at declared parity;
+- task study shows explanation improves diagnosis (per the preregistered
+  study in §21.1);
+- confidence calibration does not worsen;
+- progressive disclosure reaches exact artifacts;
+- accessibility: no critical workflow requires color or a rendered graph;
+- no critical workflow requires formal-methods folklore.
+
+### G9 — Corpus parity
+
+- 80 validated TLA+ families at their declared parity level
+  (`corpus/tla-examples/PARITY_LEVELS.md`), measured per §19.4's held-out
+  discipline.
+
+### G10 — Continuum 1.0
+
 - two real project migrations;
 - production evidence path;
 - public ContinuumBench;
 - documented assurance envelopes;
+- agent-driven repair used on real changes under review;
+- operating cost acceptable;
 - zero known paths for unprivileged agent to promote false evidence.
+
+### Release blocker doctrine
+
+A missing feature can be documented as unsupported. A misleading assurance
+result, replay failure, stale receipt, hidden intent change, or
+unauthorized evidence promotion is a release blocker at every gate. A
+confirmed false-positive success verdict triggers the soundness incident
+policy in `docs/09`: block release, revoke affected claim IDs, publish
+affected semantic epochs, ship an artifact scanner, add a permanent
+regression.
 
 ---
 
@@ -1829,15 +2080,52 @@ Continuum must narrow or redesign if:
 - Forge mostly discovers vacuous or overfit protocols;
 - all practical power comes from a loose collection of external tools rather than shared semantics;
 - a second real project requires engine-specific surgery rather than domain packs;
-- users systematically misread bounded evidence as proof despite UX controls.
+- users systematically misread bounded evidence as proof despite UX controls;
+- asupersync integration requires invasive scheduler forks that cannot be
+  stabilized behind the pinned adapter contract (docs/08 R06);
+- the foreign-runtime instrumentation lane cannot produce useful envelopes
+  for tokio-based systems, leaving no adoption bridge;
+- domain packs cannot demonstrate conformance to their fidelity profiles on
+  real systems, making applied durability/network claims unearned
+  (docs/08 R10);
+- a candid comparison shows Quint plus existing DST tooling would be
+  cheaper and equally strong for the target users; a “yes” after G4 closes
+  is a program-level failure signal.
 
 Failure of a frontier research lane does not kill Continuum. Failure of the single-semantic-contract, intent-integrity, replay, or evidence architecture does.
+
+## 24.5 Frontier lane register
+
+Every HYPOTHESIS-class capability in this plan is owned by a research lane
+with a baseline, a quantitative promotion threshold, a kill criterion, and
+a named fallback. The register is authoritative for lane status; no plan
+section may claim a lane's output without its status.
+
+| Capability | Lane | Threshold / kill | Fallback |
+|---|---|---|---|
+| General context compilation (§6) | research/25, /32 | pack-ablated agent benchmark win; kill if packs induce wrong repairs | plain causal slice + expansion |
+| Causal minimization (§6, §12) | research/01, /26 | ≥10× on non-artificial traces; kill if cost dominates verification | 1-minimal delta debugging only |
+| Sub-file incremental trust (§9) | research/27 | clean-parity at sampled rate; kill if capture untrustworthy below module granularity | module-granularity invalidation |
+| Forge co-synthesis + QD (§14) | research/29, /30 | rediscovery suite; kill if joint search loses to staged | staged synthesis; Pareto archive only |
+| Production conformance (Phase F) | research/05 | monitorability-gated; thresholds TBD (must be added — currently absent) | Lab-replay evidence only |
+| Cancellation calculus (§0, B19) | research/09 | mutation corpus; thresholds TBD (must be added — currently absent) | runtime checking only |
+| Bidirectional lenses (§16) | research/31 | ambiguity rate; kill if most mappings too ambiguous | get-only projection + drift detection |
+| Proof repair (§15.4) | research/28 | vs source/LSP loop baseline; kill if repair proposes weakening | context packs + human proof work |
+| Certificate overhead | docs/31 | checking ≤10% of search time | reduce certified-lane scope |
 
 ---
 
 ## 25. Immediate execution
 
 The exact first 30 pull requests are in [`notes/START_HERE_IMPLEMENTATION.md`](notes/START_HERE_IMPLEMENTATION.md).
+
+Before PR 5 (native protocol kernel) freezes any interface, the seven
+load-bearing Revision 3 RFCs — 0026, 0027, 0028, 0030, 0031, 0032, 0037 —
+are expanded from summaries to specifications: field types, enums,
+classification lattices, IDL, versioning, and RFC-2119 language, each
+reconciled one-to-one with this plan's corresponding section. Where plan
+prose and RFC disagree, the RFC is corrected and becomes normative. The
+plan is a map, not the spec.
 
 The first demonstration should be brutally concrete:
 
@@ -1863,6 +2151,15 @@ Result: ack_guard = synced
 ```
 
 This is deliberately small. It closes the complete product loop—from intent through invention and proof—before the project scales outward.
+
+The executed spikes behind this demonstration carry their own boundaries,
+which this plan adopts: the 200→4 event reduction was measured on a
+synthetic trace whose 196 noise events are semantically inert, so it
+validates the Context Pack artifact shape, not the general context
+compiler; the synthesis result was selected from a seven-candidate finite
+grammar and is not evidence that protocol synthesis will scale; the
+evidence-graph spike validates the authority policy table, not
+authenticated enforcement, concurrency, or Byzantine agents.
 
 ---
 

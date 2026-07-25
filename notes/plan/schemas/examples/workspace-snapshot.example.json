@@ -19,7 +19,7 @@
     {
       "digest": "sha256:f2",
       "overlay": true,
-      "path": "model.cml"
+      "path": "model.ctm"
     }
   ],
   "intent": "in_ack_v1",

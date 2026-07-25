@@ -17,11 +17,11 @@
   "intent": "in_ack_v1",
   "operation": "verification.start",
   "schema_version": "1.0",
+  "snapshot": "ws_demo1",
   "status": "suspended",
   "target": {
     "id": "AckImpliesDurable",
     "kind": "property"
   },
-  "task_id": "task_demo1",
-  "workspace": "ws_demo1"
+  "task_id": "task_demo1"
 }

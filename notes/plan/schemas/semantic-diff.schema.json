@@ -4,19 +4,19 @@
   "additionalProperties": false,
   "properties": {
     "after_intent": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "after_workspace": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "before_intent": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "before_workspace": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "diff_id": {
@@ -82,7 +82,16 @@
               "weakened",
               "expanded",
               "contracted",
+              "refined",
+              "coarsened",
+              "merged",
+              "split",
+              "upgraded",
+              "downgraded",
+              "added",
+              "removed",
               "incomparable",
+              "unsupported",
               "unknown"
             ]
           }

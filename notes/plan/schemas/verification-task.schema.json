@@ -6,7 +6,23 @@
     "budget": {
       "additionalProperties": false,
       "properties": {
+        "candidates": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cpu_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "proof_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "solver_ms": {
           "minimum": 0,
           "type": "integer"
         },
@@ -28,7 +44,7 @@
     "continuation": {
       "anyOf": [
         {
-          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "pattern": "^cont_[A-Za-z0-9_-]+$",
           "type": "string"
         },
         {
@@ -54,23 +70,29 @@
     },
     "evidence": {
       "items": {
-        "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+        "pattern": "^ev_[A-Za-z0-9_-]+$",
         "type": "string"
       },
       "type": "array"
     },
     "idempotency_key": {
+      "minLength": 1,
       "type": "string"
     },
     "intent": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "operation": {
+      "pattern": "^[a-z]+\\.[a-z_]+$",
       "type": "string"
     },
     "schema_version": {
       "const": "1.0"
+    },
+    "snapshot": {
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
+      "type": "string"
     },
     "status": {
       "enum": [
@@ -99,11 +121,7 @@
       "type": "object"
     },
     "task_id": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
-      "type": "string"
-    },
-    "workspace": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^task_[A-Za-z0-9_-]+$",
       "type": "string"
     }
   },
@@ -111,8 +129,9 @@
     "schema_version",
     "task_id",
     "operation",
-    "workspace",
+    "snapshot",
     "intent",
+    "idempotency_key",
     "status",
     "budget",
     "epochs"
