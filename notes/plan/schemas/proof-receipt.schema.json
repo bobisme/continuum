@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schemas/proof-receipt.schema.json",
+  "title": "Continuum Proof Receipt",
+  "type": "object",
+  "required": [
+    "format", "version", "receipt_id", "claim", "closure", "epochs",
+    "transformations", "certificate", "checker", "lean", "reproduce"
+  ],
+  "properties": {
+    "format": { "const": "continuum-proof-receipt" },
+    "version": { "type": "string" },
+    "receipt_id": { "type": "string" },
+    "claim": {
+      "type": "object",
+      "required": ["kind", "text", "property_hash", "verdict"],
+      "properties": {
+        "kind": {
+          "enum": ["safety", "liveness", "refinement", "reduction", "conformance", "hyperproperty"]
+        },
+        "text": { "type": "string" },
+        "property_hash": { "type": "string" },
+        "verdict": { "enum": ["established", "refuted"] }
+      },
+      "additionalProperties": false
+    },
+    "closure": {
+      "type": "object",
+      "required": ["model_hash", "assumptions_hash", "observers_hash"],
+      "properties": {
+        "model_hash": { "type": "string" },
+        "implementation_hash": { "type": "string" },
+        "assumptions_hash": { "type": "string" },
+        "observers_hash": { "type": "string" },
+        "domain_pack_hashes": {
+          "type": "array", "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "epochs": {
+      "type": "object",
+      "required": ["semantic", "proof"],
+      "properties": {
+        "semantic": { "type": "string" },
+        "proof": { "type": "string" },
+        "corpus": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "transformations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "input_hash", "output_hash", "preservation", "evidence_hash"],
+        "properties": {
+          "name": { "type": "string" },
+          "input_hash": { "type": "string" },
+          "output_hash": { "type": "string" },
+          "preservation": {
+            "enum": ["equivalence", "simulation", "trace-language", "property", "equisatisfiable"]
+          },
+          "evidence_hash": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "certificate": {
+      "type": "object",
+      "required": ["kind", "hash"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "closed-set", "inductive-invariant", "simulation", "fair-scc-exclusion",
+            "ranking", "lrat", "veripb", "smt-proof", "game-strategy", "lean-theorem"
+          ]
+        },
+        "hash": { "type": "string" },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "checker": {
+      "type": "object",
+      "required": ["name", "version", "source_hash", "binary_hash"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "source_hash": { "type": "string" },
+        "binary_hash": { "type": "string" },
+        "independent": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "lean": {
+      "type": "object",
+      "required": ["version", "theorems", "imports", "axioms"],
+      "properties": {
+        "version": { "type": "string" },
+        "theorems": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "imports": { "type": "array", "items": { "type": "string" } },
+        "axioms": { "type": "array", "items": { "type": "string" } },
+        "environment_hash": { "type": "string" },
+        "independent_checker": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "reproduce": {
+      "type": "array", "minItems": 1, "items": { "type": "string" }
+    },
+    "signatures": {
+      "type": "array", "items": { "type": "object", "additionalProperties": true }
+    }
+  },
+  "additionalProperties": false
+}

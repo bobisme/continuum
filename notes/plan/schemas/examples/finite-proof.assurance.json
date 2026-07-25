@@ -1,0 +1,63 @@
+{
+  "format": "continuum-assurance-result",
+  "version": "0.1.0",
+  "claim": {
+    "id": "C007",
+    "kind": "safety",
+    "predicate_hash": "blake3:3333333333333333333333333333333333333333333333333333333333333333",
+    "text": "Agreement holds for the configured finite domain."
+  },
+  "verdict": "established",
+  "scope": {
+    "semantics_version": "cir-0.1",
+    "subject_hash": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+    "bounds": {
+      "nodes": 3,
+      "values": 2,
+      "max_crashes": 2
+    },
+    "pack_profiles": [
+      "storage/append-log-v0"
+    ],
+    "observers": [
+      "client"
+    ]
+  },
+  "assumptions": [],
+  "evidence": [
+    {
+      "kind": "finite-exact",
+      "engine": "continuum-explicit",
+      "engine_version": "0.1.0",
+      "artifact_hash": "blake3:4444444444444444444444444444444444444444444444444444444444444444",
+      "metrics": {
+        "states": 812,
+        "transitions": 3941
+      },
+      "complete": true
+    },
+    {
+      "kind": "certificate",
+      "engine": "continuum-kernel",
+      "engine_version": "0.1.0",
+      "artifact_hash": "blake3:5555555555555555555555555555555555555555555555555555555555555555",
+      "complete": true
+    }
+  ],
+  "trusted_components": [
+    {
+      "name": "continuum-kernel",
+      "version": "0.1.0",
+      "role": "closed-set certificate checker",
+      "hash": "blake3:6666666666666666666666666666666666666666666666666666666666666666",
+      "independently_checked": true
+    }
+  ],
+  "limitations": [
+    {
+      "kind": "bound",
+      "text": "Finite domain: three nodes, two values, at most two crashes."
+    }
+  ],
+  "certificate": "closed-set.cert"
+}

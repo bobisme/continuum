@@ -1,0 +1,104 @@
+{
+  "$id": "https://continuum.dev/schema/workspace-snapshot.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "dependencies": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "digest"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "epochs": {
+      "additionalProperties": false,
+      "properties": {
+        "proof": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "semantic": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "semantic",
+        "protocol",
+        "proof"
+      ],
+      "type": "object"
+    },
+    "files": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "overlay": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "root_digest": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "workspace_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workspace_id",
+    "root_digest",
+    "files",
+    "dependencies",
+    "epochs",
+    "intent"
+  ],
+  "title": "Workspace Snapshot",
+  "type": "object"
+}

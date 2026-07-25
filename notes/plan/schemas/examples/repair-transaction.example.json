@@ -1,0 +1,34 @@
+{
+  "base_intent": "in_ack_v1",
+  "base_workspace": "ws_demo1",
+  "candidate_workspace": "ws_demo2",
+  "changes": [
+    {
+      "digest": "sha256:patch",
+      "kind": "rust"
+    }
+  ],
+  "failure": "cp_demo1",
+  "gates": [
+    {
+      "evidence": [
+        "diff_demo1"
+      ],
+      "name": "intent_diff",
+      "status": "pass"
+    },
+    {
+      "evidence": [
+        "ev_replay2"
+      ],
+      "name": "exact_replay",
+      "status": "pass"
+    }
+  ],
+  "hypothesis": "publish reply only after storage sync",
+  "receipt": null,
+  "repair_id": "rt_demo1",
+  "schema_version": "1.0",
+  "semantic_diff": "diff_demo1",
+  "status": "ready"
+}

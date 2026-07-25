@@ -1,0 +1,30 @@
+{
+  "dependencies": [
+    {
+      "digest": "git:d2bf",
+      "name": "asupersync"
+    }
+  ],
+  "epochs": {
+    "proof": "lean-4.32.1",
+    "protocol": "3.0",
+    "semantic": "sem-3"
+  },
+  "files": [
+    {
+      "digest": "sha256:f1",
+      "overlay": false,
+      "path": "src/lib.rs"
+    },
+    {
+      "digest": "sha256:f2",
+      "overlay": true,
+      "path": "model.cml"
+    }
+  ],
+  "intent": "in_ack_v1",
+  "parent": null,
+  "root_digest": "sha256:abc",
+  "schema_version": "1.0",
+  "workspace_id": "ws_demo1"
+}

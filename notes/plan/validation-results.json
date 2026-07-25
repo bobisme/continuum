@@ -1,0 +1,51 @@
+{
+  "checks": {
+    "benchmark_tasks": {
+      "tasks": 3
+    },
+    "corpus_inventory": {
+      "extended": 39,
+      "validated": 80
+    },
+    "csv": {
+      "corpus/tla-examples/other-examples.csv": 39,
+      "corpus/tla-examples/validated-examples.csv": 80
+    },
+    "empty_files": {
+      "files": 298
+    },
+    "json": {
+      "files": 38
+    },
+    "lean_source": {
+      "files": 17,
+      "kernel_checked": false
+    },
+    "markdown_fences": {
+      "files": 211
+    },
+    "markdown_links": {
+      "links": 169
+    },
+    "numbering": {
+      "adr": 52,
+      "bibliography_entries": 159,
+      "rfcs": 40
+    },
+    "python": {
+      "files": 18
+    },
+    "schemas": {
+      "pairs": 15
+    },
+    "spikes": {
+      "assertions": 30,
+      "revision_2_runner": "",
+      "revision_3_runner": "wrote spikes/results/r3-spike-results.json; 8 spike groups passed"
+    },
+    "toml": {
+      "files": 5
+    }
+  },
+  "status": "pass"
+}

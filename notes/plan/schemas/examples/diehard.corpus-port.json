@@ -1,0 +1,58 @@
+{
+  "format": "continuum-corpus-port",
+  "version": "0.1.0",
+  "port_id": "TV-009",
+  "corpus": {
+    "name": "tlaplus/Examples",
+    "repository": "https://github.com/tlaplus/Examples",
+    "commit": "91c22ea537853196ed1e03e9ad91693ec37642de"
+  },
+  "source": {
+    "family_path": "specifications/DieHard",
+    "modules": ["DieHard.tla", "DieHard_proof.tla"],
+    "models": ["DieHard.cfg"],
+    "content_hash": "blake3:source-diehard-placeholder"
+  },
+  "native": {
+    "modules": ["corpus/tla-examples/ports/TV-009/DieHard.ctm"],
+    "configs": ["corpus/tla-examples/ports/TV-009/default.model.toml"],
+    "semantic_epoch": "continuum-semantics-1",
+    "state_relation": "big/small integer identity",
+    "action_relation": "six named jug actions"
+  },
+  "required_parity": "P4",
+  "achieved_parity": "P1",
+  "features": ["finite", "stuttering", "invariant-counterexample", "proof"],
+  "models": [
+    {
+      "id": "default",
+      "mode": "exhaustive",
+      "expected": "safety-failure",
+      "facts": {
+        "reachable_states": 16,
+        "labeled_transitions": 96,
+        "shortest_failure_depth": 6
+      },
+      "evidence": ["spikes/results/spike-results.json"]
+    }
+  ],
+  "lean": {
+    "theorems": ["Continuum.Examples.DieHard.solution_ends_with_four_gallons"],
+    "receipt": "blocked:lean-not-compiled",
+    "axiom_manifest": "blocked:lean-not-compiled"
+  },
+  "runtime_refinement": {
+    "status": "not-planned"
+  },
+  "mutations": [
+    {
+      "id": "M1",
+      "description": "SmallToBig subtracts the wrong transferred amount",
+      "expected_detection": "successor/reachable-graph differential"
+    }
+  ],
+  "status": "in-progress",
+  "intentional_differences": [
+    "Native CML syntax is not a textual translation of TLA+."
+  ]
+}

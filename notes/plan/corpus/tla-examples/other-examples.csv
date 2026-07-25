@@ -1,0 +1,40 @@
+id,title,location_class,category,policy
+TO-001,Blocking Queue,external,shared-memory/concurrency,tracked-external-expansion
+TO-002,IEEE 802.16 WiMAX Protocols,external,network/protocol,tracked-external-expansion
+TO-003,On the diversity of asynchronous communication,external,distributed/semantics,tracked-external-expansion
+TO-004,Caesar,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-005,CASPaxos,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-006,DataPort,in-tree-pdf,network/protocol,mandatory-after-validated
+TO-007,egalitarian-paxos,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-008,fastpaxos,in-tree-pdf,distributed/consensus,mandatory-after-validated
+TO-009,fpaxos,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-010,HLC,in-tree-unvalidated,time/clocks,mandatory-after-validated
+TO-011,L1,in-tree-pdf,network/protocol,mandatory-after-validated
+TO-012,leaderless,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-013,losa_ap,in-tree-unvalidated,distributed/allocation,mandatory-after-validated
+TO-014,losa_rda,in-tree-pdf,distributed/linearizability,mandatory-after-validated
+TO-015,m2paxos,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-016,mongo-repl-tla,in-tree-unvalidated,distributed/replication,mandatory-after-validated
+TO-017,MultiPaxos,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-018,naiad,in-tree-pdf,distributed/dataflow,mandatory-after-validated
+TO-019,nfc04,in-tree-unvalidated,nonfunctional/properties,mandatory-after-validated
+TO-020,raft,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-021,SnapshotIsolation,in-tree-unvalidated,storage/transactions,mandatory-after-validated
+TO-022,SyncConsensus,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-023,Termination,in-tree-unvalidated,distributed/termination,mandatory-after-validated
+TO-024,Tla-tortoise-hare,in-tree-unvalidated,sequential-algorithm,mandatory-after-validated
+TO-025,VoldemortKV,in-tree-unvalidated,storage/replication,mandatory-after-validated
+TO-026,Tencent-Paxos,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-027,Paxos (external),external,distributed/consensus,tracked-external-expansion
+TO-028,Lock-Free Set,external,shared-memory/lock-free,tracked-external-expansion
+TO-029,ParallelRaft,in-tree-unvalidated,distributed/consensus,mandatory-after-validated
+TO-030,CRDT-Bug,external,distributed/crdt,tracked-external-expansion
+TO-031,asyncio-lock,external,shared-memory/concurrency,tracked-external-expansion
+TO-032,Raft with cluster changes,external,distributed/consensus,tracked-external-expansion
+TO-033,MET for CRDT-Redis,external,distributed/crdt,tracked-external-expansion
+TO-034,Parallel increment,external,shared-memory/concurrency,tracked-external-expansion
+TO-035,Streamlet,external,distributed/blockchain,tracked-external-expansion
+TO-036,Petri Nets,external,true-concurrency,tracked-external-expansion
+TO-037,CRDT,external,distributed/crdt,tracked-external-expansion
+TO-038,Azure Cosmos DB,external,storage/consistency,tracked-external-expansion
+TO-039,Simple Microwave Oven,external,cyber-physical,tracked-external-expansion

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schemas/corpus-port.schema.json",
+  "title": "Continuum Corpus Port Manifest",
+  "type": "object",
+  "required": [
+    "format", "version", "port_id", "corpus", "source", "native",
+    "required_parity", "features", "models", "mutations", "status"
+  ],
+  "properties": {
+    "format": { "const": "continuum-corpus-port" },
+    "version": { "type": "string" },
+    "port_id": { "type": "string", "pattern": "^[A-Z]+-[0-9]+$" },
+    "corpus": {
+      "type": "object",
+      "required": ["name", "repository", "commit"],
+      "properties": {
+        "name": { "type": "string" },
+        "repository": { "type": "string" },
+        "commit": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["family_path", "modules"],
+      "properties": {
+        "family_path": { "type": "string" },
+        "modules": {
+          "type": "array", "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "models": {
+          "type": "array", "items": { "type": "string" }, "default": []
+        },
+        "content_hash": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "native": {
+      "type": "object",
+      "required": ["modules", "semantic_epoch"],
+      "properties": {
+        "modules": {
+          "type": "array", "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "configs": {
+          "type": "array", "items": { "type": "string" }, "default": []
+        },
+        "semantic_epoch": { "type": "string" },
+        "state_relation": { "type": "string" },
+        "action_relation": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "required_parity": {
+      "enum": ["P0", "P1", "P2", "P3", "P4", "P5"]
+    },
+    "achieved_parity": {
+      "enum": ["P0", "P1", "P2", "P3", "P4", "P5"]
+    },
+    "features": {
+      "type": "array", "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "models": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "mode", "expected", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "mode": {
+            "enum": ["exhaustive", "simulation", "generation", "symbolic", "proof"]
+          },
+          "expected": {
+            "enum": [
+              "success", "safety-failure", "liveness-failure", "deadlock-failure",
+              "assumption-failure", "unsupported-source", "proof-success"
+            ]
+          },
+          "facts": { "type": "object", "additionalProperties": true },
+          "evidence": {
+            "type": "array", "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "lean": {
+      "type": "object",
+      "properties": {
+        "theorems": { "type": "array", "items": { "type": "string" } },
+        "receipt": { "type": "string" },
+        "axiom_manifest": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "runtime_refinement": {
+      "type": "object",
+      "properties": {
+        "target": { "type": "string" },
+        "status": { "enum": ["not-planned", "planned", "bounded", "proved"] },
+        "receipt": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "mutations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "expected_detection"],
+        "properties": {
+          "id": { "type": "string" },
+          "description": { "type": "string" },
+          "expected_detection": { "type": "string" },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "status": {
+      "enum": ["inventoried", "in-progress", "blocked", "parity-met", "superseded"]
+    },
+    "intentional_differences": {
+      "type": "array", "items": { "type": "string" }, "default": []
+    }
+  },
+  "additionalProperties": false
+}

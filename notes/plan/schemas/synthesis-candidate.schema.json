@@ -1,0 +1,127 @@
+{
+  "$id": "https://continuum.dev/schema/synthesis-candidate.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidate_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "components": {
+      "additionalProperties": false,
+      "properties": {
+        "abstraction": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "algorithm": {
+          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        "implementation": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "invariant": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ranking": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "algorithm"
+      ],
+      "type": "object"
+    },
+    "counterexamples": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "descriptors": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "evidence": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "forge_problem": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "objectives": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "status": {
+      "enum": [
+        "proposed",
+        "screened",
+        "bounded",
+        "validated",
+        "proved",
+        "refuted",
+        "inconclusive",
+        "archived"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "forge_problem",
+    "components",
+    "objectives",
+    "descriptors",
+    "status",
+    "evidence"
+  ],
+  "title": "Synthesis Candidate",
+  "type": "object"
+}

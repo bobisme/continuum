@@ -1,0 +1,573 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schemas/cir.schema.json",
+  "title": "Continuum Causal Intermediate Representation",
+  "type": "object",
+  "required": [
+    "format",
+    "encoding_version",
+    "semantics_version",
+    "events",
+    "roots"
+  ],
+  "properties": {
+    "format": {
+      "const": "continuum-cir"
+    },
+    "encoding_version": {
+      "type": "string",
+      "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+    },
+    "semantics_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_hash": {
+      "$ref": "#/$defs/hash"
+    },
+    "environment_hash": {
+      "$ref": "#/$defs/hash"
+    },
+    "roots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/eventId"
+      },
+      "uniqueItems": true
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "configurations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/configuration"
+      }
+    },
+    "observers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observer"
+      },
+      "default": []
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assumption"
+      },
+      "default": []
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^(blake3|sha256):[0-9a-f]{64}$"
+    },
+    "eventId": {
+      "type": "string",
+      "pattern": "^e:[A-Za-z0-9._:-]+$"
+    },
+    "ownerId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "nat",
+                "int",
+                "bitvec",
+                "bytes",
+                "tuple",
+                "record",
+                "variant",
+                "set",
+                "map",
+                "seq",
+                "multiset",
+                "symbol",
+                "opaque"
+              ]
+            },
+            "type_id": {
+              "type": "string"
+            },
+            "value": {}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "origin": {
+      "type": "object",
+      "required": [
+        "kind",
+        "stable_id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "model",
+            "rust",
+            "foreign",
+            "production",
+            "generated"
+          ]
+        },
+        "stable_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "column": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "symbol": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "access": {
+      "type": "object",
+      "required": [
+        "resource",
+        "mode"
+      ],
+      "properties": {
+        "resource": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "observe",
+            "read",
+            "write",
+            "consume",
+            "produce",
+            "reserve",
+            "commit",
+            "abort",
+            "synchronize"
+          ]
+        },
+        "range": {
+          "$ref": "#/$defs/value"
+        },
+        "observer": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "effect": {
+      "type": "object",
+      "required": [
+        "family",
+        "operation",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/value"
+        },
+        "profile": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "obligationDelta": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/obligation"
+          },
+          "default": []
+        },
+        "transfer": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "from",
+              "to"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "from": {
+                "$ref": "#/$defs/ownerId"
+              },
+              "to": {
+                "$ref": "#/$defs/ownerId"
+              }
+            },
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "discharge": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "obligation": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "owner"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "$ref": "#/$defs/ownerId"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "timeConstraint": {
+      "type": "object",
+      "properties": {
+        "clock": {
+          "type": "string"
+        },
+        "earliest_ns": {
+          "type": "integer"
+        },
+        "latest_ns": {
+          "type": "integer"
+        },
+        "duration_min_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_max_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "observer",
+        "kind"
+      ],
+      "properties": {
+        "observer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "$ref": "#/$defs/value"
+        },
+        "completeness": {
+          "enum": [
+            "complete",
+            "loss-bounded",
+            "sampled",
+            "best-effort",
+            "opaque"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "fault": {
+      "type": "object",
+      "required": [
+        "family",
+        "kind"
+      ],
+      "properties": {
+        "family": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "id",
+        "origin",
+        "owner",
+        "epoch",
+        "causes",
+        "label",
+        "footprint"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/eventId"
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "owner": {
+          "$ref": "#/$defs/ownerId"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "causes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/eventId"
+          },
+          "uniqueItems": true
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/eventId"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "label": {
+          "type": "object",
+          "required": [
+            "family",
+            "operation"
+          ],
+          "properties": {
+            "family": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/value"
+            }
+          },
+          "additionalProperties": false
+        },
+        "footprint": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/access"
+          }
+        },
+        "effect": {
+          "$ref": "#/$defs/effect"
+        },
+        "obligations": {
+          "$ref": "#/$defs/obligationDelta"
+        },
+        "time": {
+          "$ref": "#/$defs/timeConstraint"
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observation"
+          },
+          "default": []
+        },
+        "fault": {
+          "$ref": "#/$defs/fault"
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "source_hash": {
+              "$ref": "#/$defs/hash"
+            },
+            "adapter": {
+              "type": "string"
+            },
+            "adapter_version": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "configuration": {
+      "type": "object",
+      "required": [
+        "id",
+        "events"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/eventId"
+          },
+          "uniqueItems": true
+        },
+        "canonical_hash": {
+          "$ref": "#/$defs/hash"
+        }
+      },
+      "additionalProperties": false
+    },
+    "observer": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "assumption": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "fairness",
+            "fault",
+            "time",
+            "environment",
+            "telemetry",
+            "solver"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "formal": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

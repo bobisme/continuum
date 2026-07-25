@@ -1,0 +1,78 @@
+{
+  "format": "continuum-domain-pack",
+  "version": "0.1.0",
+  "pack": {
+    "name": "storage-append-log",
+    "semantic_version": "storage-append-log-v0",
+    "implementation_version": "0.1.0",
+    "description": "Abstract append log with submitted and stable prefixes.",
+    "license": "MIT"
+  },
+  "resources": [
+    {
+      "kind": "log",
+      "path_schema": "storage/{node}/log/{index}",
+      "ownership": "shared",
+      "range_semantics": "exact-index"
+    }
+  ],
+  "operations": [
+    {
+      "name": "append",
+      "command_type": "Entry",
+      "response_type": "StableEntry",
+      "effect_phases": [
+        "Requested",
+        "Reserved",
+        "Submitted",
+        "Stable",
+        "Acknowledged",
+        "Aborted"
+      ],
+      "footprint_rule": "append touches one node log suffix",
+      "cancellation_points": [
+        "before-reserve",
+        "after-reserve",
+        "after-submit"
+      ],
+      "observer_events": [
+        "StorageSubmitted",
+        "StorageStable"
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "id": "storage/append-log-v0",
+      "class": "adversarial-envelope",
+      "assumptions": [
+        "sync promotes a prefix to stable"
+      ],
+      "faults": [
+        "crash",
+        "volatile-suffix-loss",
+        "torn-last-record"
+      ],
+      "qualifications": [],
+      "refines": []
+    }
+  ],
+  "independence": {
+    "default": "footprint",
+    "evidence": [
+      "tiny-exhaustive-differential-v0"
+    ]
+  },
+  "adapters": [
+    {
+      "kind": "lab",
+      "crate": "continuum-pack-storage",
+      "version": "0.1.0"
+    },
+    {
+      "kind": "abstract",
+      "crate": "continuum-pack-storage",
+      "version": "0.1.0"
+    }
+  ]
+}

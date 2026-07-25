@@ -1,0 +1,337 @@
+{
+  "$id": "https://continuum.dev/schema/intent-contract.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assumptions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "enum": [
+              "environment",
+              "scheduler",
+              "timing",
+              "storage",
+              "network",
+              "trust"
+            ]
+          },
+          "expression": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "expression"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "assurance": {
+      "additionalProperties": false,
+      "properties": {
+        "clean_recompute": {
+          "type": "boolean"
+        },
+        "independent_checker": {
+          "type": "boolean"
+        },
+        "minimum": {
+          "enum": [
+            "observed",
+            "sampled",
+            "bounded",
+            "validated",
+            "proved"
+          ]
+        }
+      },
+      "required": [
+        "minimum"
+      ],
+      "type": "object"
+    },
+    "bounds": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "faults": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nodes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "values": {
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "claims": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "expression": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "safety",
+              "liveness",
+              "refinement",
+              "hyperproperty",
+              "security",
+              "performance"
+            ]
+          },
+          "observer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "expression"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "fairness": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "condition": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "weak",
+              "strong"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "action"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "fault_model": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "profiles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "intent_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "observers": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "type": "string"
+          },
+          "state_projection": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "events"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "optimization": {
+      "additionalProperties": false,
+      "properties": {
+        "hard": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "non_vacuity": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "soft": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
+    },
+    "policy": {
+      "additionalProperties": false,
+      "properties": {
+        "assumptions": {
+          "enum": [
+            "unlocked",
+            "proposal-only",
+            "review",
+            "locked",
+            "no-decrease",
+            "no-removal",
+            "no-downgrade"
+          ]
+        },
+        "assurance": {
+          "enum": [
+            "unlocked",
+            "proposal-only",
+            "review",
+            "locked",
+            "no-decrease",
+            "no-removal",
+            "no-downgrade"
+          ]
+        },
+        "bounds": {
+          "enum": [
+            "unlocked",
+            "proposal-only",
+            "review",
+            "locked",
+            "no-decrease",
+            "no-removal",
+            "no-downgrade"
+          ]
+        },
+        "faults": {
+          "enum": [
+            "unlocked",
+            "proposal-only",
+            "review",
+            "locked",
+            "no-decrease",
+            "no-removal",
+            "no-downgrade"
+          ]
+        },
+        "observers": {
+          "enum": [
+            "unlocked",
+            "proposal-only",
+            "review",
+            "locked",
+            "no-decrease",
+            "no-removal",
+            "no-downgrade"
+          ]
+        },
+        "properties": {
+          "enum": [
+            "unlocked",
+            "proposal-only",
+            "review",
+            "locked",
+            "no-decrease",
+            "no-removal",
+            "no-downgrade"
+          ]
+        }
+      },
+      "required": [
+        "properties",
+        "assumptions",
+        "bounds",
+        "observers",
+        "faults",
+        "assurance"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1.0"
+    }
+  },
+  "required": [
+    "schema_version",
+    "intent_id",
+    "claims",
+    "assumptions",
+    "observers",
+    "bounds",
+    "fault_model",
+    "fairness",
+    "assurance",
+    "policy"
+  ],
+  "title": "Intent Contract",
+  "type": "object"
+}

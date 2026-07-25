@@ -1,0 +1,28 @@
+{
+  "budget": {
+    "tokens": 20000,
+    "wall_ms": 120000
+  },
+  "capabilities": [
+    "read",
+    "propose_patch",
+    "verify",
+    "expand_context"
+  ],
+  "grading": {
+    "hidden_variants": true,
+    "intent_integrity": true,
+    "minimum_assurance": "bounded",
+    "resource_normalized": true
+  },
+  "intent": "in_ack_v1",
+  "public_description": "repair acknowledgement-before-durability without changing intent",
+  "required_artifacts": [
+    "repair_transaction",
+    "promotion_receipt"
+  ],
+  "schema_version": "1.0",
+  "task_id": "cb-repair-ack-001",
+  "track": "repair",
+  "workspace": "ws_demo1"
+}

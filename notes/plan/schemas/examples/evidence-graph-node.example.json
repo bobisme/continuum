@@ -1,0 +1,20 @@
+{
+  "artifact": "cp_demo1",
+  "kind": "counterexample",
+  "labels": [
+    "durability",
+    "cancellation"
+  ],
+  "node_id": "ev_failure1",
+  "provenance": {
+    "actor": "service:explicit",
+    "created_at": "2026-07-24T20:00:00Z",
+    "inputs": [
+      "ws_demo1",
+      "in_ack_v1"
+    ],
+    "tool": "continuum-engine-reference"
+  },
+  "schema_version": "1.0",
+  "status": "refuted"
+}

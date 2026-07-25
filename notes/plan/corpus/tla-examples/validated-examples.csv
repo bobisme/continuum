@@ -1,0 +1,81 @@
+id,title,source_path,source_commit,beginner,tlaps_proof,pluscal,tlc_model,apalache,category,porting_wave,runtime_refinement_target,required_parity
+TV-001,Teaching Concurrency,specifications/TeachingConcurrency,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,full,True,False,shared-memory/concurrency,0,selected,P4
+TV-002,Loop Invariance,specifications/LoopInvariance,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,full,True,False,proof/program-logic,0,none,P4
+TV-003,Learn TLA+ Proofs,specifications/LearnProofs,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,full,True,False,proof/tutorial,0,none,P4
+TV-004,Boyer-Moore Majority Vote,specifications/Majority,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,none,True,False,sequential-algorithm,0,none,P4
+TV-005,Proof x+x is Even,specifications/sums_even,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,none,True,False,mathematics,0,none,P4
+TV-006,The N-Queens Puzzle,specifications/N-Queens,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,full,True,False,finite-puzzle,0,none,P2
+TV-007,The Dining Philosophers Problem,specifications/DiningPhilosophers,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,full,True,True,shared-memory/concurrency,0,selected,P3
+TV-008,The Car Talk Puzzle,specifications/CarTalkPuzzle,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,none,True,False,finite-puzzle,0,none,P2
+TV-009,The Die Hard Problem,specifications/DieHard,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,none,True,True,finite-puzzle,0,none,P4
+TV-010,The Prisoners & Switches Puzzle,specifications/Prisoners,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,none,True,False,finite-puzzle,0,none,P2
+TV-011,The Prisoners & Switch Puzzle (single switch),specifications/Prisoners_Single_Switch,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,none,True,False,finite-puzzle,0,none,P2
+TV-012,Specs from Specifying Systems,specifications/SpecifyingSystems,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,none,True,True,language/corpus,0,none,P4
+TV-013,The Tower of Hanoi Puzzle,specifications/tower_of_hanoi,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,none,True,False,finite-puzzle,0,none,P2
+TV-014,Missionaries and Cannibals,specifications/MissionariesAndCannibals,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,none,True,True,finite-puzzle,0,none,P4
+TV-015,Stone Scale Puzzle,specifications/Stones,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,none,True,False,finite-puzzle,0,none,P2
+TV-016,The Coffee Can Bean Problem,specifications/CoffeeCan,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,none,True,True,finite-puzzle,0,none,P4
+TV-017,EWD687a: Detecting Termination in Distributed Computations,specifications/ewd687a,91c22ea537853196ed1e03e9ad91693ec37642de,True,full,partial,True,False,distributed/termination,2,selected,P4
+TV-018,The Moving Cat Puzzle,specifications/Moving_Cat_Puzzle,91c22ea537853196ed1e03e9ad91693ec37642de,True,none,none,True,True,finite-puzzle,0,none,P2
+TV-019,The Boulangerie Algorithm,specifications/Bakery-Boulangerie,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,full,True,False,shared-memory/mutual-exclusion,1,selected,P4
+TV-020,Misra Reachability Algorithm,specifications/MisraReachability,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,full,True,True,distributed/reachability,2,selected,P4
+TV-021,Byzantizing Paxos by Refinement,specifications/byzpaxos,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,full,True,False,refinement/byzantine-consensus,3,selected,P4
+TV-022,Barrier Synchronization,specifications/barriers,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,full,True,True,shared-memory/concurrency,1,selected,P4
+TV-023,Peterson Lock Refinement With Auxiliary Variables,specifications/locks_auxiliary_vars,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,full,True,False,refinement/shared-memory,1,selected,P4
+TV-024,EWD840: Termination Detection in a Ring,specifications/ewd840,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,distributed/termination,2,selected,P4
+TV-025,EWD998: Termination Detection with Asynchronous Delivery,specifications/ewd998,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,partial,True,False,distributed/termination,2,selected,P4
+TV-026,The Paxos Protocol,specifications/Paxos,91c22ea537853196ed1e03e9ad91693ec37642de,False,partial,none,True,False,distributed/consensus,3,selected,P4
+TV-027,Asynchronous Reliable Broadcast,specifications/bcastByz,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,False,distributed/byzantine-broadcast,3,selected,P4
+TV-028,Distributed Mutual Exclusion,specifications/lamport_mutex,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,distributed/mutual-exclusion,2,selected,P4
+TV-029,Two-Phase Handshaking,specifications/TwoPhase,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,False,distributed/handshake,2,selected,P4
+TV-030,Paxos (How to Win a Turing Award),specifications/PaxosHowToWinATuringAward,91c22ea537853196ed1e03e9ad91693ec37642de,False,partial,none,True,False,distributed/consensus,3,selected,P4
+TV-031,Finitizing Monotonic Systems,specifications/FiniteMonotonic,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,abstraction/parameterization,4,selected,P4
+TV-032,Dijkstra's Mutual Exclusion Algorithm,specifications/dijkstra-mutex,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,False,shared-memory/mutual-exclusion,1,selected,P2
+TV-033,The Echo Algorithm,specifications/echo,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,False,distributed/graph,2,selected,P3
+TV-034,The TLC Safety Checking Algorithm,specifications/TLC,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,False,meta/model-checking,5,none,P2
+TV-035,Transaction Commit Models,specifications/transaction_commit,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,full,True,True,distributed/transactions,3,selected,P4
+TV-036,The Slush Protocol,specifications/SlushProtocol,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,False,distributed/probabilistic-consensus,4,selected,P3
+TV-037,Minimal Circular Substring,specifications/LeastCircularSubstring,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,False,sequential-algorithm,1,none,P2
+TV-038,Snapshot Key-Value Store,specifications/KeyValueStore,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,full,True,False,storage/transactions,4,selected,P4
+TV-039,Chang-Roberts Leader Election,specifications/chang_roberts,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,True,distributed/leader-election,2,selected,P3
+TV-040,MultiPaxos in SMR-Style,specifications/MultiPaxos-SMR,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,False,distributed/consensus,3,selected,P3
+TV-041,Einstein's Riddle,specifications/EinsteinRiddle,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,False,True,symbolic/puzzle,4,none,P2
+TV-042,Resource Allocator,specifications/allocator,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,False,distributed/resource-allocation,2,selected,P4
+TV-043,Transitive Closure,specifications/TransitiveClosure,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,mathematics/relations,0,none,P2
+TV-044,Atomic Commitment Protocol,specifications/acp,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,distributed/transactions,3,selected,P3
+TV-045,SWMR Shared Memory Disk Paxos,specifications/diskpaxos,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,storage/consensus,4,selected,P3
+TV-046,Span Tree Exercise,specifications/SpanningTree,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,distributed/graph,2,selected,P4
+TV-047,The Knuth-Yao Method,specifications/KnuthYao,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,probability/randomness,4,none,P2
+TV-048,Huang's Algorithm,specifications/Huang,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/termination,2,selected,P3
+TV-049,EWD 426: Token Stabilization,specifications/ewd426,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,distributed/self-stabilization,3,selected,P3
+TV-050,Sliding Block Puzzle,specifications/SlidingPuzzles,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,finite-puzzle,0,none,P2
+TV-051,Single-Lane Bridge Problem,specifications/SingleLaneBridge,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,concurrency/scheduling,1,selected,P3
+TV-052,Software-Defined Perimeter,specifications/SDP_Verification,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,security/protocol,4,selected,P2
+TV-053,Simplified Fast Paxos,specifications/SimplifiedFastPaxos,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/consensus,3,selected,P3
+TV-054,Checkpoint Coordination,specifications/CheckpointCoordination,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/checkpointing,3,selected,P3
+TV-055,Multi-Car Elevator System,specifications/MultiCarElevator,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,False,cyber-physical/scheduling,4,none,P4
+TV-056,Nano Blockchain Protocol,specifications/NanoBlockchain,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/blockchain,4,selected,P3
+TV-057,The Readers-Writers Problem,specifications/ReadersWriters,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,shared-memory/concurrency,1,selected,P4
+TV-058,Asynchronous Byzantine Consensus,specifications/aba-asyn-byz,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/byzantine-consensus,3,selected,P3
+TV-059,Folklore Reliable Broadcast,specifications/bcastFolklore,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,distributed/byzantine-broadcast,3,selected,P3
+TV-060,The Bosco Byzantine Consensus Algorithm,specifications/bosco,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,distributed/byzantine-consensus,3,selected,P3
+TV-061,Consensus in One Communication Step,specifications/c1cs,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,distributed/byzantine-consensus,3,selected,P3
+TV-062,One-Step Consensus with Zero-Degradation,specifications/cf1s-folklore,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/byzantine-consensus,3,selected,P3
+TV-063,Failure Detector,specifications/detector_chan96,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/failure-detector,3,selected,P3
+TV-064,Asynchronous Non-Blocking Atomic Commit,specifications/nbacc_ray97,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/transactions,3,selected,P3
+TV-065,NBAC with Failure Detectors,specifications/nbacg_guer01,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,distributed/transactions,3,selected,P3
+TV-066,Spanning Tree Broadcast Algorithm,specifications/spanning,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,distributed/graph,2,selected,P4
+TV-067,The Cigarette Smokers Problem,specifications/CigaretteSmokers,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,shared-memory/concurrency,1,selected,P4
+TV-068,Conway's Game of Life,specifications/GameOfLife,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,cellular-automata,1,none,P2
+TV-069,"Chameneos, a Concurrency Game",specifications/Chameneos,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,shared-memory/concurrency,1,selected,P3
+TV-070,PCR Testing for Snippets of DNA,specifications/glowingRaccoon,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,refinement/composition,4,none,P4
+TV-071,RFC 3506: Voucher Transaction System,specifications/byihive,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,False,distributed/transactions,4,selected,P4
+TV-072,Yo-Yo Leader Election,specifications/YoYo,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,distributed/leader-election,2,selected,P3
+TV-073,TCP as defined in RFC 9293,specifications/tcp,91c22ea537853196ed1e03e9ad91693ec37642de,False,full,none,True,True,network/protocol,5,selected,P4
+TV-074,B-trees,specifications/btree,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,storage/data-structure,4,selected,P2
+TV-075,TLA+ Level Checking,specifications/LevelChecking,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,False,False,language/semantics,5,none,P2
+TV-076,Condition-Based Consensus,specifications/cbc_max,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,False,False,distributed/consensus,3,selected,P3
+TV-077,Buffered Random Access File,specifications/braf,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,False,storage/filesystem,4,selected,P2
+TV-078,Disruptor,specifications/Disruptor,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,shared-memory/lock-free,4,selected,P2
+TV-079,DAG-based Consensus,specifications/dag-consensus,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,full,True,False,distributed/dag-consensus,4,selected,P3
+TV-080,German Cache-Coherence Protocol,specifications/GermanProtocol,91c22ea537853196ed1e03e9ad91693ec37642de,False,none,none,True,True,hardware/cache-coherence,5,selected,P2

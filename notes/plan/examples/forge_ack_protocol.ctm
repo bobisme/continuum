@@ -1,0 +1,41 @@
+// Illustrative Continuum Model sketch; syntax is not yet frozen.
+model AckProtocol {
+  state {
+    reserved: Bool,
+    synced: Bool,
+    acknowledged: Bool,
+  }
+
+  init {
+    !reserved && !synced && !acknowledged
+  }
+
+  action Reserve {
+    require !reserved;
+    next reserved = true;
+  }
+
+  action Sync {
+    require reserved && !synced;
+    next synced = true;
+  }
+
+  action Ack {
+    require ??ack_guard(reserved, synced);
+    next acknowledged = true;
+  }
+
+  invariant AckImpliesSynced {
+    acknowledged => synced
+  }
+
+  progress FailureFreeProgress {
+    assuming weak_fair(Ack), reserved && synced ~> acknowledged
+  }
+
+  forge {
+    hole ack_guard: Predicate<Bool, Bool>;
+    non_vacuity "a reserved synced request can acknowledge";
+    minimize ast_nodes(ack_guard);
+  }
+}

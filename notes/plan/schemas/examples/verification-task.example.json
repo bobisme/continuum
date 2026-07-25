@@ -1,0 +1,27 @@
+{
+  "budget": {
+    "memory_bytes": 1073741824,
+    "states": 100000,
+    "tokens": 6000,
+    "wall_ms": 30000
+  },
+  "continuation": "cont_demo1",
+  "epochs": {
+    "engine": "explicit-0.1",
+    "semantic": "sem-3"
+  },
+  "evidence": [
+    "ev_partial1"
+  ],
+  "idempotency_key": "idem-1",
+  "intent": "in_ack_v1",
+  "operation": "verification.start",
+  "schema_version": "1.0",
+  "status": "suspended",
+  "target": {
+    "id": "AckImpliesDurable",
+    "kind": "property"
+  },
+  "task_id": "task_demo1",
+  "workspace": "ws_demo1"
+}

@@ -1,0 +1,63 @@
+module ReplicatedRegister
+
+type Node
+type Value
+
+const Nodes: Set[Node]
+const Quorum: Set[Set[Node]]
+
+state {
+  chosen: Map[Nat, Value]
+  stable: Map[Node, Map[Nat, Value]]
+  alive: Set[Node]
+}
+
+init {
+  chosen = {}
+  stable = { n -> {} | n in Nodes }
+  alive = Nodes
+}
+
+action Stabilize(n: Node, epoch: Nat, value: Value) {
+  require n in alive
+  require stable[n].get(epoch) in {None, Some(value)}
+  next stable = stable[n := stable[n].put(epoch, value)]
+  unchanged chosen, alive
+}
+
+action Choose(epoch: Nat, value: Value, q: Set[Node]) {
+  require q in Quorum
+  require forall n in q: stable[n].get(epoch) == Some(value)
+  require chosen.get(epoch) in {None, Some(value)}
+  next chosen = chosen.put(epoch, value)
+  unchanged stable, alive
+}
+
+action Crash(n: Node) {
+  require n in alive
+  next alive = alive \ {n}
+  unchanged chosen, stable
+}
+
+action Recover(n: Node) {
+  require n notin alive
+  next alive = alive union {n}
+  unchanged chosen, stable
+}
+
+invariant Agreement {
+  forall epoch, v1, v2:
+    chosen.get(epoch) == Some(v1) &&
+    chosen.get(epoch) == Some(v2)
+    => v1 == v2
+}
+
+invariant StableWitness {
+  forall epoch, value:
+    chosen.get(epoch) == Some(value)
+    => exists q in Quorum:
+         forall n in q:
+           stable[n].get(epoch) == Some(value)
+}
+
+fairness weak Recover

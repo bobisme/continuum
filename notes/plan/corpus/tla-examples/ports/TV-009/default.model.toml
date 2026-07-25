@@ -1,0 +1,9 @@
+model = "DieHard"
+behavior = "Spec"
+invariants = ["TypeOK", "NotSolved"]
+deadlock = "allow"
+search = "breadth-first-exact"
+expected = "safety-failure:NotSolved"
+expected_reachable_states = 16
+expected_labeled_transitions = 96
+expected_shortest_failure_depth = 6

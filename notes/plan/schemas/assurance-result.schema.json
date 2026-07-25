@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schemas/assurance-result.schema.json",
+  "title": "Continuum Assurance Result",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "claim",
+    "verdict",
+    "scope",
+    "evidence",
+    "trusted_components",
+    "limitations"
+  ],
+  "properties": {
+    "format": {
+      "const": "continuum-assurance-result"
+    },
+    "version": {
+      "type": "string"
+    },
+    "claim": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "predicate_hash",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "safety",
+            "liveness",
+            "refinement",
+            "conformance",
+            "hyperproperty",
+            "timed",
+            "probabilistic",
+            "well-formedness"
+          ]
+        },
+        "predicate_hash": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "verdict": {
+      "enum": [
+        "established",
+        "refuted",
+        "inconclusive",
+        "unsupported",
+        "resource-exhausted",
+        "engine-error"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "required": [
+        "semantics_version",
+        "subject_hash"
+      ],
+      "properties": {
+        "semantics_version": {
+          "type": "string"
+        },
+        "subject_hash": {
+          "type": "string"
+        },
+        "bounds": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "pack_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "observers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "instrumentation_profile": {
+          "type": "string"
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "formal_hash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "engine",
+          "artifact_hash"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "example",
+              "sampled",
+              "bounded-schedules",
+              "dpor-complete",
+              "finite-exact",
+              "symbolic-bounded",
+              "inductive",
+              "parameterized",
+              "liveness-proof",
+              "refinement-proof",
+              "production-observation",
+              "differential",
+              "certificate"
+            ]
+          },
+          "engine": {
+            "type": "string"
+          },
+          "engine_version": {
+            "type": "string"
+          },
+          "artifact_hash": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "complete": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "trusted_components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "role"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "independently_checked": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "text"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "bound",
+              "assumption",
+              "unsupported",
+              "telemetry",
+              "solver-trust",
+              "abstraction",
+              "resource",
+              "known-unsound"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "reproducer": {
+      "type": "string"
+    },
+    "certificate": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

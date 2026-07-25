@@ -1,0 +1,146 @@
+{
+  "$id": "https://continuum.dev/schema/repair-transaction.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "base_intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "base_workspace": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "candidate_workspace": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "changes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "rust",
+              "model",
+              "proof",
+              "correspondence",
+              "domain",
+              "intent"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "digest"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "failure": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "gates": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "pass",
+              "fail",
+              "inconclusive",
+              "not_applicable"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "hypothesis": {
+      "type": "string"
+    },
+    "receipt": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "repair_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "semantic_diff": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "applied",
+        "evaluating",
+        "ready",
+        "blocked",
+        "inconclusive",
+        "promoted",
+        "rejected",
+        "superseded"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "repair_id",
+    "base_workspace",
+    "base_intent",
+    "failure",
+    "hypothesis",
+    "candidate_workspace",
+    "status",
+    "gates"
+  ],
+  "title": "Repair Transaction",
+  "type": "object"
+}

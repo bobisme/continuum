@@ -1,0 +1,46 @@
+{
+  "format": "continuum-proof-receipt",
+  "version": "0.1.0",
+  "receipt_id": "proof:diehard-typeok-placeholder",
+  "claim": {
+    "kind": "safety",
+    "text": "Every reachable DieHard state satisfies the jug bounds.",
+    "property_hash": "blake3:property-placeholder",
+    "verdict": "established"
+  },
+  "closure": {
+    "model_hash": "blake3:model-placeholder",
+    "assumptions_hash": "blake3:empty-assumptions-placeholder",
+    "observers_hash": "blake3:state-observer-placeholder",
+    "domain_pack_hashes": []
+  },
+  "epochs": {
+    "semantic": "continuum-semantics-1",
+    "proof": "lean-v4.32.1-seed",
+    "corpus": "tlaplus-examples-91c22ea5"
+  },
+  "transformations": [],
+  "certificate": {
+    "kind": "closed-set",
+    "hash": "blake3:certificate-placeholder",
+    "path": "closed-set.cert"
+  },
+  "checker": {
+    "name": "continuum-closure-checker",
+    "version": "0.1.0",
+    "source_hash": "blake3:checker-source-placeholder",
+    "binary_hash": "blake3:checker-binary-placeholder",
+    "independent": true
+  },
+  "lean": {
+    "version": "v4.32.1",
+    "theorems": ["Continuum.ClosureCertificate.provesSafety"],
+    "imports": ["Continuum.Certificate"],
+    "axioms": [],
+    "environment_hash": "blake3:olean-environment-placeholder"
+  },
+  "reproduce": [
+    "continuum proof check finite-closure.proof-receipt.json",
+    "lake build"
+  ]
+}

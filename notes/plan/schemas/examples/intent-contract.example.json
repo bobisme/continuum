@@ -1,0 +1,77 @@
+{
+  "assumptions": [
+    {
+      "classification": "storage",
+      "expression": "SyncCompleted implies stable recovery",
+      "id": "A-storage"
+    }
+  ],
+  "assurance": {
+    "clean_recompute": true,
+    "independent_checker": true,
+    "minimum": "bounded"
+  },
+  "bounds": {
+    "depth": 20,
+    "faults": 1,
+    "nodes": 2,
+    "values": 2
+  },
+  "claims": [
+    {
+      "expression": "acknowledged[e] => durable[e]",
+      "id": "AckImpliesDurable",
+      "kind": "safety",
+      "observer": "client"
+    }
+  ],
+  "fairness": [
+    {
+      "action": "SyncCompleted",
+      "condition": "node_running",
+      "kind": "weak"
+    }
+  ],
+  "fault_model": {
+    "enabled": [
+      "cancel",
+      "crash"
+    ],
+    "profiles": [
+      "storage-posix-v1"
+    ]
+  },
+  "intent_id": "in_ack_v1",
+  "name": "durable acknowledgements",
+  "observers": [
+    {
+      "events": [
+        "ReplyPublished"
+      ],
+      "id": "client",
+      "state_projection": [
+        "acknowledged"
+      ]
+    }
+  ],
+  "optimization": {
+    "hard": [
+      "progress"
+    ],
+    "non_vacuity": [
+      "synced request eventually acknowledged"
+    ],
+    "soft": [
+      "stable_writes"
+    ]
+  },
+  "policy": {
+    "assumptions": "review",
+    "assurance": "no-downgrade",
+    "bounds": "no-decrease",
+    "faults": "no-removal",
+    "observers": "review",
+    "properties": "locked"
+  },
+  "schema_version": "1.0"
+}

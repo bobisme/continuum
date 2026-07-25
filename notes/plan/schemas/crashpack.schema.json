@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schemas/crashpack.schema.json",
+  "title": "Continuum Crashpack Manifest",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "id",
+    "created_at",
+    "claim",
+    "artifacts",
+    "replay"
+  ],
+  "properties": {
+    "format": {
+      "const": "continuum-crashpack"
+    },
+    "version": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^cp:[A-Za-z0-9._:-]+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "claim": {
+      "type": "string",
+      "description": "Path or content hash of assurance claim"
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "cir",
+        "property",
+        "assumptions"
+      ],
+      "properties": {
+        "cir": {
+          "type": "string"
+        },
+        "minimal_cir": {
+          "type": "string"
+        },
+        "linear_replay": {
+          "type": "string"
+        },
+        "property": {
+          "type": "string"
+        },
+        "assumptions": {
+          "type": "string"
+        },
+        "state_diff": {
+          "type": "string"
+        },
+        "obligation_flow": {
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "solver_query": {
+          "type": "string"
+        },
+        "certificate": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "semantic_envelope": {
+      "type": "object",
+      "required": [
+        "cir_semantics",
+        "model_hash",
+        "environment_hash"
+      ],
+      "properties": {
+        "cir_semantics": {
+          "type": "string"
+        },
+        "model_hash": {
+          "type": "string"
+        },
+        "environment_hash": {
+          "type": "string"
+        },
+        "pack_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "toolchain": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "replay": {
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "working_directory": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "choice_log": {
+          "type": "string"
+        },
+        "expected_verdict": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "minimization": {
+      "type": "object",
+      "properties": {
+        "objective": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "original_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minimal_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "locally_minimal": {
+          "type": "boolean"
+        },
+        "proof": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

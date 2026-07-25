@@ -1,0 +1,49 @@
+{
+  "format": "continuum-crashpack",
+  "version": "0.1.0",
+  "id": "cp:example-m01",
+  "created_at": "2026-07-24T12:00:00Z",
+  "source": {
+    "repository": "example/continuum",
+    "commit": "deadbeef",
+    "dirty": false
+  },
+  "claim": "claim.json",
+  "artifacts": {
+    "cir": "causal-trace.cir.json",
+    "minimal_cir": "minimal-core.cir.json",
+    "property": "property.json",
+    "assumptions": "assumptions.json",
+    "explanation": "explanation.md"
+  },
+  "semantic_envelope": {
+    "cir_semantics": "cir-0.1",
+    "model_hash": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+    "environment_hash": "blake3:1111111111111111111111111111111111111111111111111111111111111111",
+    "pack_profiles": [
+      "storage/append-log-v0"
+    ],
+    "toolchain": {
+      "continuum": "0.1.0"
+    }
+  },
+  "replay": {
+    "command": [
+      "continuum",
+      "replay",
+      "counterexample.crashpack.json"
+    ],
+    "expected_verdict": "refuted"
+  },
+  "minimization": {
+    "objective": [
+      "events",
+      "faults",
+      "owners"
+    ],
+    "original_events": 42,
+    "minimal_events": 9,
+    "locally_minimal": true
+  },
+  "redactions": []
+}

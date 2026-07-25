@@ -1,0 +1,95 @@
+{
+  "$id": "https://continuum.dev/schema/evidence-graph-node.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "intent_claim",
+        "assumption",
+        "property",
+        "model",
+        "program",
+        "proof_goal",
+        "candidate",
+        "counterexample",
+        "explanation",
+        "patch",
+        "run",
+        "certificate",
+        "receipt",
+        "conflict",
+        "decision"
+      ]
+    },
+    "labels": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "node_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "created_at",
+        "inputs"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "status": {
+      "enum": [
+        "proposed",
+        "observed",
+        "sampled",
+        "bounded",
+        "validated",
+        "proved",
+        "refuted",
+        "inconclusive",
+        "superseded"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "node_id",
+    "kind",
+    "artifact",
+    "status",
+    "provenance"
+  ],
+  "title": "Evidence Graph Node",
+  "type": "object"
+}

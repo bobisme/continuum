@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schemas/domain-pack.schema.json",
+  "title": "Continuum Domain Pack Manifest",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "pack",
+    "operations",
+    "profiles",
+    "resources"
+  ],
+  "properties": {
+    "format": {
+      "const": "continuum-domain-pack"
+    },
+    "version": {
+      "type": "string"
+    },
+    "pack": {
+      "type": "object",
+      "required": [
+        "name",
+        "semantic_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "semantic_version": {
+          "type": "string"
+        },
+        "implementation_version": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "path_schema"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "path_schema": {
+            "type": "string"
+          },
+          "ownership": {
+            "enum": [
+              "linear",
+              "affine",
+              "shared",
+              "external"
+            ]
+          },
+          "range_semantics": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "command_type",
+          "response_type",
+          "effect_phases"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "command_type": {
+            "type": "string"
+          },
+          "response_type": {
+            "type": "string"
+          },
+          "effect_phases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "footprint_rule": {
+            "type": "string"
+          },
+          "cancellation_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observer_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "class",
+          "assumptions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "class": {
+            "enum": [
+              "ideal",
+              "contractual",
+              "platform-qualified",
+              "adversarial-envelope"
+            ]
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "faults": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "qualifications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "refines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "independence": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "enum": [
+            "conservative-dependent",
+            "footprint",
+            "semantic-oracle"
+          ]
+        },
+        "oracle": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "adapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "crate"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "production",
+              "lab",
+              "abstract",
+              "trace",
+              "foreign"
+            ]
+          },
+          "crate": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

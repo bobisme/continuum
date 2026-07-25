@@ -1,0 +1,29 @@
+{
+  "candidate_id": "cand_demo1",
+  "components": {
+    "abstraction": null,
+    "algorithm": "model_ack_synced",
+    "implementation": null,
+    "invariant": "inv_ack_durable",
+    "ranking": "rank_progress"
+  },
+  "counterexamples": [
+    "cp_reject_true"
+  ],
+  "descriptors": {
+    "ack_guard": "synced",
+    "rounds": 1
+  },
+  "evidence": [
+    "ev_safety1",
+    "ev_progress1"
+  ],
+  "forge_problem": "forge_ack1",
+  "intent": "in_ack_v1",
+  "objectives": {
+    "latency": 1,
+    "stable_writes": 1
+  },
+  "schema_version": "1.0",
+  "status": "validated"
+}

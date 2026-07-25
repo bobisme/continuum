@@ -1,0 +1,38 @@
+[scenario]
+name = "cancel-after-submit-before-sync"
+seed = 104729
+semantic_version = "cir-0.1"
+
+[domains]
+nodes = 3
+values = 2
+epochs = 2
+
+[network]
+profile = "network/adversarial-v0"
+max_in_flight = 16
+allow_loss = true
+allow_duplication = true
+allow_reordering = true
+
+[storage]
+profile = "storage/append-log-v0"
+allow_volatile_suffix_loss = true
+allow_torn_last_record = true
+
+[faults]
+max_crashes = 2
+max_cancellations = 3
+max_partitions = 1
+
+[targets]
+inject_cancellation_after = "storage.append:Submitted"
+crash_after = "client.reply:Committed"
+
+[properties]
+check = [
+  "abstract_register::Agreement",
+  "RuntimeToAbstract",
+  "asupersync::Quiescence",
+  "asupersync::ObligationConservation",
+]

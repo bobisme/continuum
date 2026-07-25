@@ -1,0 +1,192 @@
+{
+  "$id": "https://continuum.dev/schema/context-pack.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assurance": {
+      "additionalProperties": true,
+      "properties": {
+        "class": {
+          "enum": [
+            "observed",
+            "sampled",
+            "bounded",
+            "validated",
+            "proved"
+          ]
+        },
+        "envelope": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "class"
+      ],
+      "type": "object"
+    },
+    "content_budget": {
+      "type": "object"
+    },
+    "context_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "expansions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "type": "string"
+          },
+          "estimated_items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "relation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation",
+          "anchor"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "guarantees": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "omissions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expandable": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "count",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "question": {
+      "type": "string"
+    },
+    "replay": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "selected": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "event",
+              "state_delta",
+              "source",
+              "model",
+              "proof",
+              "assumption",
+              "counterfactual",
+              "unknown"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "verdict": {
+      "enum": [
+        "satisfied",
+        "refuted",
+        "deadlock",
+        "inconclusive",
+        "unsupported",
+        "engine_error"
+      ]
+    },
+    "workspace": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "context_id",
+    "workspace",
+    "intent",
+    "question",
+    "verdict",
+    "assurance",
+    "selected",
+    "omissions",
+    "expansions",
+    "evidence"
+  ],
+  "title": "Context Pack",
+  "type": "object"
+}

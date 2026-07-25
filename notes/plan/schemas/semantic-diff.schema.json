@@ -1,0 +1,168 @@
+{
+  "$id": "https://continuum.dev/schema/semantic-diff.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "after_intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "after_workspace": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "before_intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "before_workspace": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "diff_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "impact": {
+      "additionalProperties": false,
+      "properties": {
+        "invalidated": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reused": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unknown": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "invalidated",
+        "reused"
+      ],
+      "type": "object"
+    },
+    "intent_changes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "field": {
+            "type": "string"
+          },
+          "protected": {
+            "type": "boolean"
+          },
+          "relation": {
+            "enum": [
+              "unchanged",
+              "strengthened",
+              "weakened",
+              "expanded",
+              "contracted",
+              "incomparable",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "field",
+          "relation",
+          "protected"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "policy": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "enum": [
+            "allow",
+            "review",
+            "block",
+            "unknown"
+          ]
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "decision",
+        "reasons"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "semantic_changes": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "diff_id",
+    "before_workspace",
+    "after_workspace",
+    "before_intent",
+    "after_intent",
+    "intent_changes",
+    "semantic_changes",
+    "impact",
+    "policy"
+  ],
+  "title": "Semantic Diff",
+  "type": "object"
+}

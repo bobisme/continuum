@@ -1,0 +1,55 @@
+{
+  "assurance": {
+    "class": "bounded",
+    "envelope": {
+      "faults": 1,
+      "nodes": 2
+    }
+  },
+  "content_budget": {
+    "tokens": 6000
+  },
+  "context_id": "ctx_demo1",
+  "evidence": [
+    "ev_failure1"
+  ],
+  "expansions": [
+    {
+      "anchor": "e_ack",
+      "estimated_items": 3,
+      "relation": "causal_predecessors"
+    }
+  ],
+  "guarantees": [
+    "ReplayPreserving",
+    "PropertyPreserving"
+  ],
+  "intent": "in_ack_v1",
+  "omissions": [
+    {
+      "count": 196,
+      "expandable": true,
+      "kind": "independent_event",
+      "reason": "observer-independent noise"
+    }
+  ],
+  "question": "why did AckImpliesDurable fail?",
+  "replay": "cp_demo1",
+  "schema_version": "1.0",
+  "selected": [
+    {
+      "artifact": "ev_ack1",
+      "id": "e_ack",
+      "kind": "event",
+      "summary": "reply published before stable write"
+    },
+    {
+      "artifact": null,
+      "id": "d_abs",
+      "kind": "state_delta",
+      "summary": "acknowledged true; durable false"
+    }
+  ],
+  "verdict": "refuted",
+  "workspace": "ws_demo1"
+}

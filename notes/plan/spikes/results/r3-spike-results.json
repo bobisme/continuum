@@ -1,0 +1,564 @@
+{
+  "agent_protocol": {
+    "continuation": "cont_b677f0681737b34448c5",
+    "idempotency_mismatch_rejected": true,
+    "idempotent": true,
+    "resume_valid": true,
+    "snapshot_1": "ws_bad5a5dfe9c0729e5787",
+    "snapshot_2": "ws_bbaa4d7b6ca051d0c959",
+    "stale_snapshot_rejected": true,
+    "task": "task_4aded52292daa09c4639"
+  },
+  "causal_debugger": {
+    "abstract_difference": {
+      "failing": "acked && !durable",
+      "safe": "acked && durable"
+    },
+    "enabled_frontier": [
+      "SyncCompleted",
+      "CancelRequested"
+    ],
+    "failing_branch": {
+      "events": [
+        "CancelRequested",
+        "FinalizerPublishes"
+      ],
+      "final": {
+        "acked": true,
+        "cancelled": true,
+        "reserved": true,
+        "submitted": true,
+        "synced": false
+      },
+      "violation": true
+    },
+    "first_conflict": {
+      "failing": "CancelRequested",
+      "safe": "SyncCompleted"
+    },
+    "reverse_causal_choices_at_failure": [
+      "FinalizerPublishes"
+    ],
+    "root": {
+      "acked": false,
+      "cancelled": false,
+      "reserved": true,
+      "submitted": true,
+      "synced": false
+    },
+    "safe_branch": {
+      "events": [
+        "SyncCompleted",
+        "NormalPublishes"
+      ],
+      "final": {
+        "acked": true,
+        "cancelled": false,
+        "reserved": true,
+        "submitted": true,
+        "synced": true
+      },
+      "violation": false
+    },
+    "why_enabled": {
+      "CancelRequested": [
+        "reply reserved",
+        "not cancelled",
+        "not acknowledged"
+      ],
+      "SyncCompleted": [
+        "submitted",
+        "not synced",
+        "not cancelled"
+      ]
+    }
+  },
+  "context_pack": {
+    "compression_ratio": 23.62,
+    "context_pack_bytes": 747,
+    "core_event_count": 4,
+    "core_ids": [
+      "e_submit",
+      "e_reserve",
+      "e_cancel",
+      "e_publish"
+    ],
+    "core_state": {
+      "acked": true,
+      "cancelled": true,
+      "durable": false,
+      "reserved": true,
+      "submitted": true
+    },
+    "omitted_event_count": 196,
+    "one_minimal": true,
+    "raw_event_count": 200,
+    "raw_json_bytes": 17645,
+    "raw_state": {
+      "acked": true,
+      "cancelled": true,
+      "durable": false,
+      "reserved": true,
+      "submitted": true
+    },
+    "replay_preserving": true
+  },
+  "evidence_graph": {
+    "accepted_after_complete_fresh_envelope": true,
+    "accepted_supports": [
+      "clean_parity",
+      "exact_replay",
+      "mutation_challenge",
+      "neighborhood"
+    ],
+    "conflict_count": 1,
+    "conflicts_surfaced": true,
+    "duplicate_proposal_deduplicated": true,
+    "edge_count": 7,
+    "intent_gaming_blocked": true,
+    "intent_gaming_reasons": [
+      "missing evidence: clean_parity, exact_replay, mutation_challenge, neighborhood",
+      "protected intent changed"
+    ],
+    "node_count": 10,
+    "stale_evidence_rejected": true,
+    "unauthorized_promotion_rejected": true
+  },
+  "forge_cegis": {
+    "all_valid_candidates": [
+      "reserved_and_synced",
+      "synced"
+    ],
+    "counterexamples": [
+      {
+        "kind": "progress",
+        "state": {
+          "reserved": true,
+          "synced": true
+        }
+      },
+      {
+        "kind": "safety",
+        "state": {
+          "reserved": true,
+          "synced": false
+        }
+      }
+    ],
+    "finite_grammar_exhausted_for_invalids": true,
+    "iterations": [
+      {
+        "chosen": "false",
+        "remaining": 7,
+        "violation": {
+          "kind": "progress",
+          "state": {
+            "reserved": true,
+            "synced": true
+          }
+        }
+      },
+      {
+        "chosen": "reserved",
+        "remaining": 4,
+        "violation": {
+          "kind": "safety",
+          "state": {
+            "reserved": true,
+            "synced": false
+          }
+        }
+      },
+      {
+        "chosen": "synced",
+        "remaining": 2,
+        "violation": null
+      }
+    ],
+    "progress_nonvacuity": true,
+    "safety": true,
+    "solution": "synced",
+    "solution_ast_size": 1
+  },
+  "incremental": {
+    "all_clean_parity": true,
+    "cases": {
+      "domain_profile": {
+        "changed": [
+          "domain_profile"
+        ],
+        "invalidated": [
+          "check_refinement",
+          "context_pack",
+          "correspondence",
+          "elaborate_model",
+          "explore_model",
+          "extract_program",
+          "proof_receipt"
+        ],
+        "parity": true,
+        "reused": [
+          "parse_model",
+          "parse_source",
+          "property"
+        ]
+      },
+      "model_edit": {
+        "changed": [
+          "model_file"
+        ],
+        "invalidated": [
+          "check_refinement",
+          "context_pack",
+          "correspondence",
+          "elaborate_model",
+          "explore_model",
+          "parse_model",
+          "proof_receipt"
+        ],
+        "parity": true,
+        "reused": [
+          "extract_program",
+          "parse_source",
+          "property"
+        ]
+      },
+      "proof_only": {
+        "changed": [
+          "proof_file"
+        ],
+        "invalidated": [
+          "proof_receipt"
+        ],
+        "parity": true,
+        "reused": [
+          "check_refinement",
+          "context_pack",
+          "correspondence",
+          "elaborate_model",
+          "explore_model",
+          "extract_program",
+          "parse_model",
+          "parse_source",
+          "property"
+        ]
+      },
+      "property_edit": {
+        "changed": [
+          "intent_property"
+        ],
+        "invalidated": [
+          "check_refinement",
+          "context_pack",
+          "explore_model",
+          "proof_receipt",
+          "property"
+        ],
+        "parity": true,
+        "reused": [
+          "correspondence",
+          "elaborate_model",
+          "extract_program",
+          "parse_model",
+          "parse_source"
+        ]
+      },
+      "source_edit": {
+        "changed": [
+          "source_file"
+        ],
+        "invalidated": [
+          "check_refinement",
+          "context_pack",
+          "correspondence",
+          "extract_program",
+          "parse_source",
+          "proof_receipt"
+        ],
+        "parity": true,
+        "reused": [
+          "elaborate_model",
+          "explore_model",
+          "parse_model",
+          "property"
+        ]
+      }
+    },
+    "query_count": 10
+  },
+  "proof_lens": {
+    "ambiguous_durable": {
+      "abstract_field": "durable",
+      "edit_alternatives": [
+        "set stable",
+        "obtain quorum ack"
+      ],
+      "kind": "AmbiguousCorrespondence",
+      "projection_alternatives": [
+        "stable_is_durable",
+        "quorum_is_durable"
+      ],
+      "required_obligation": "select authoritative durability semantics in Intent/domain profile"
+    },
+    "candidate_count": 2,
+    "silent_choice_made": false,
+    "unambiguous_ack_roundtrip": true
+  },
+  "semantic_diff": {
+    "all_detected": true,
+    "base": {
+      "assumptions": [
+        "SyncImpliesStable"
+      ],
+      "assurance": "validated",
+      "faults": [
+        "cancel",
+        "crash"
+      ],
+      "nodes": 5,
+      "observer_events": [
+        "ReplyPublished",
+        "SyncCompleted"
+      ],
+      "property_terms": [
+        "Ack",
+        "Durable"
+      ]
+    },
+    "cases": {
+      "assumption_strengthened": [
+        {
+          "field": "property",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assumptions",
+          "protected": true,
+          "relation": "strengthened"
+        },
+        {
+          "field": "bounds.nodes",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "observer",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "faults",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assurance",
+          "protected": false,
+          "relation": "unchanged"
+        }
+      ],
+      "assurance_downgraded": [
+        {
+          "field": "property",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assumptions",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "bounds.nodes",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "observer",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "faults",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assurance",
+          "protected": true,
+          "relation": "downgraded"
+        }
+      ],
+      "bound_reduced": [
+        {
+          "field": "property",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assumptions",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "bounds.nodes",
+          "protected": true,
+          "relation": "contracted"
+        },
+        {
+          "field": "observer",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "faults",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assurance",
+          "protected": false,
+          "relation": "unchanged"
+        }
+      ],
+      "fault_removed": [
+        {
+          "field": "property",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assumptions",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "bounds.nodes",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "observer",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "faults",
+          "protected": true,
+          "relation": "contracted"
+        },
+        {
+          "field": "assurance",
+          "protected": false,
+          "relation": "unchanged"
+        }
+      ],
+      "observer_hidden": [
+        {
+          "field": "property",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assumptions",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "bounds.nodes",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "observer",
+          "protected": true,
+          "relation": "coarsened"
+        },
+        {
+          "field": "faults",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assurance",
+          "protected": false,
+          "relation": "unchanged"
+        }
+      ],
+      "property_weakened": [
+        {
+          "field": "property",
+          "protected": true,
+          "relation": "weakened"
+        },
+        {
+          "field": "assumptions",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "bounds.nodes",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "observer",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "faults",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assurance",
+          "protected": false,
+          "relation": "unchanged"
+        }
+      ],
+      "source_guard_repair": [
+        {
+          "field": "property",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assumptions",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "bounds.nodes",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "observer",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "faults",
+          "protected": false,
+          "relation": "unchanged"
+        },
+        {
+          "field": "assurance",
+          "protected": false,
+          "relation": "unchanged"
+        }
+      ]
+    },
+    "checks": {
+      "assumption_strengthened": true,
+      "assurance_downgraded": true,
+      "bound_reduced": true,
+      "fault_removed": true,
+      "observer_hidden": true,
+      "property_weakened": true,
+      "source_guard_repair": true
+    }
+  }
+}

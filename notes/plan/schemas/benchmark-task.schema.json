@@ -1,0 +1,97 @@
+{
+  "$id": "https://continuum.dev/schema/continuumbench-task.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "budget": {
+      "additionalProperties": {
+        "type": [
+          "integer",
+          "number",
+          "string",
+          "boolean"
+        ]
+      },
+      "type": "object"
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "grading": {
+      "additionalProperties": false,
+      "properties": {
+        "hidden_variants": {
+          "type": "boolean"
+        },
+        "intent_integrity": {
+          "type": "boolean"
+        },
+        "minimum_assurance": {
+          "type": "string"
+        },
+        "resource_normalized": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "intent_integrity",
+        "hidden_variants",
+        "resource_normalized"
+      ],
+      "type": "object"
+    },
+    "intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "public_description": {
+      "type": "string"
+    },
+    "required_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "track": {
+      "enum": [
+        "model",
+        "diagnose",
+        "repair",
+        "prove",
+        "refine",
+        "synthesize",
+        "governance",
+        "security"
+      ]
+    },
+    "workspace": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "task_id",
+    "track",
+    "workspace",
+    "intent",
+    "capabilities",
+    "budget",
+    "required_artifacts",
+    "grading"
+  ],
+  "title": "ContinuumBench Task",
+  "type": "object"
+}

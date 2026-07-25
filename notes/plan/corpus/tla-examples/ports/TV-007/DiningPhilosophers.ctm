@@ -1,0 +1,24 @@
+// Revision-2 CML design fixture; not yet parsed.
+model DiningPhilosophers<const N: Nat where N >= 2> {
+  enum Phase { Thinking, Wants, HasLeft, Eating }
+  state {
+    phase: Map<Node<N>, Phase>
+    fork_owner: Map<Fork<N>, Option<Node<N>>>
+  }
+
+  init Init {
+    forall p in Node<N>: phase[p] == Thinking
+    forall f in Fork<N>: fork_owner[f] == None
+  }
+
+  process Philosopher(p in Node<N>) fair weak {
+    Thinking: phase[p] = Wants; goto Wants
+    Wants: await free(left(p)); take(left(p)); phase[p] = HasLeft; goto HasLeft
+    HasLeft: await free(right(p)); take(right(p)); phase[p] = Eating; goto Eating
+    Eating: release(left(p)); release(right(p)); phase[p] = Thinking; goto Thinking
+  }
+
+  invariant ForkOwnership { ownership_is_consistent(phase, fork_owner) }
+  check deadlock
+  symmetry rotate(Node<N>)
+}

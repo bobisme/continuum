@@ -1,0 +1,122 @@
+{
+  "$id": "https://continuum.dev/schema/verification-task.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "budget": {
+      "additionalProperties": false,
+      "properties": {
+        "memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "states": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "epochs": {
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "type": "string"
+        },
+        "semantic": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "semantic",
+        "engine"
+      ],
+      "type": "object"
+    },
+    "evidence": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "intent": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "operation": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "status": {
+      "enum": [
+        "created",
+        "running",
+        "suspended",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "target": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "type": "object"
+    },
+    "task_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "workspace": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "task_id",
+    "operation",
+    "workspace",
+    "intent",
+    "status",
+    "budget",
+    "epochs"
+  ],
+  "title": "Verification Task",
+  "type": "object"
+}

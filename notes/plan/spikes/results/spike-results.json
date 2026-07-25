@@ -1,0 +1,550 @@
+{
+  "schema": "continuum-spike-results/v1",
+  "diehard": {
+    "states": 16,
+    "edges": 96,
+    "shortest_solution_depth": 6,
+    "solution_state": {
+      "big": 4,
+      "small": 3
+    },
+    "shortest_solution": [
+      {
+        "source": {
+          "big": 0,
+          "small": 0
+        },
+        "action": "FillBigJug",
+        "target": {
+          "big": 5,
+          "small": 0
+        }
+      },
+      {
+        "source": {
+          "big": 5,
+          "small": 0
+        },
+        "action": "BigToSmall",
+        "target": {
+          "big": 2,
+          "small": 3
+        }
+      },
+      {
+        "source": {
+          "big": 2,
+          "small": 3
+        },
+        "action": "EmptySmallJug",
+        "target": {
+          "big": 2,
+          "small": 0
+        }
+      },
+      {
+        "source": {
+          "big": 2,
+          "small": 0
+        },
+        "action": "BigToSmall",
+        "target": {
+          "big": 0,
+          "small": 2
+        }
+      },
+      {
+        "source": {
+          "big": 0,
+          "small": 2
+        },
+        "action": "FillBigJug",
+        "target": {
+          "big": 5,
+          "small": 2
+        }
+      },
+      {
+        "source": {
+          "big": 5,
+          "small": 2
+        },
+        "action": "BigToSmall",
+        "target": {
+          "big": 4,
+          "small": 3
+        }
+      }
+    ],
+    "type_closure_certificate_valid": true,
+    "certificate_errors": []
+  },
+  "dining_philosophers_5": {
+    "states": 573,
+    "edges": 2365,
+    "shortest_deadlock_depth": 10,
+    "deadlock_state": {
+      "phase": [
+        "HAS_LEFT",
+        "HAS_LEFT",
+        "HAS_LEFT",
+        "HAS_LEFT",
+        "HAS_LEFT"
+      ],
+      "fork_owner": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "shortest_deadlock": [
+      {
+        "source": {
+          "phase": [
+            "THINKING",
+            "THINKING",
+            "THINKING",
+            "THINKING",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "BecomeHungry(0)",
+        "target": {
+          "phase": [
+            "WANTS",
+            "THINKING",
+            "THINKING",
+            "THINKING",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "WANTS",
+            "THINKING",
+            "THINKING",
+            "THINKING",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "BecomeHungry(1)",
+        "target": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "THINKING",
+            "THINKING",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "THINKING",
+            "THINKING",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "BecomeHungry(2)",
+        "target": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "THINKING",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "THINKING",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "BecomeHungry(3)",
+        "target": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "THINKING"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "BecomeHungry(4)",
+        "target": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            -1,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "TakeLeft(0)",
+        "target": {
+          "phase": [
+            "HAS_LEFT",
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "HAS_LEFT",
+            "WANTS",
+            "WANTS",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "TakeLeft(1)",
+        "target": {
+          "phase": [
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "WANTS",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "WANTS",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            1,
+            -1,
+            -1,
+            -1
+          ]
+        },
+        "action": "TakeLeft(2)",
+        "target": {
+          "phase": [
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            1,
+            2,
+            -1,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "WANTS",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            1,
+            2,
+            -1,
+            -1
+          ]
+        },
+        "action": "TakeLeft(3)",
+        "target": {
+          "phase": [
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            1,
+            2,
+            3,
+            -1
+          ]
+        }
+      },
+      {
+        "source": {
+          "phase": [
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "WANTS"
+          ],
+          "fork_owner": [
+            0,
+            1,
+            2,
+            3,
+            -1
+          ]
+        },
+        "action": "TakeLeft(4)",
+        "target": {
+          "phase": [
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT",
+            "HAS_LEFT"
+          ],
+          "fork_owner": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      }
+    ],
+    "type_closure_certificate_valid": true,
+    "certificate_errors": []
+  },
+  "stuttering_refinement": {
+    "valid": true,
+    "errors": [],
+    "abstract_model": "atomic register write",
+    "concrete_model": "reserve/commit/abort register"
+  },
+  "observer_indexed_independence": {
+    "events": [
+      "write_x",
+      "write_y"
+    ],
+    "commutes_under": {
+      "state_xy": true,
+      "state_x": true,
+      "audit_order": false
+    },
+    "observer_monotonicity_holds": true,
+    "interpretation": "The same events are independent for state observers but dependent for an order-sensitive audit observer. Reduction must therefore be indexed by the active observation/property contract."
+  },
+  "advanced": {
+    "cyclic_symmetry": {
+      "group": "C5",
+      "raw_states": 573,
+      "quotient_states": 117,
+      "reduction_factor": 4.897435897435898,
+      "automorphism_check_valid": true,
+      "automorphism_errors": [],
+      "orbit_size_histogram": {
+        "1": 3,
+        "5": 114
+      }
+    },
+    "temporal_fair_lasso": {
+      "unfair_wait_is_raw_liveness_counterexample": true,
+      "raw_verdict": "valid fair counterexample",
+      "weak_fairness_rejects_wait_cycle": true,
+      "fairness_verdict": "unfair cycle: Complete continuously enabled but never taken",
+      "broken_model_has_fair_counterexample": true,
+      "broken_verdict": "valid fair counterexample"
+    },
+    "assumption_safety_game": {
+      "unrestricted_start_winning": false,
+      "winning_region_unrestricted": [
+        "Acked",
+        "Durable"
+      ],
+      "minimum_removed_move_count": 1,
+      "synthesized_forbidden_environment_moves": [
+        {
+          "source": "Persisting",
+          "action": "AckBeforeSync",
+          "target": "Unsafe"
+        }
+      ],
+      "start_winning_under_synthesized_contract": true,
+      "winning_region_under_contract": [
+        "Acked",
+        "Durable",
+        "Persisting",
+        "Retry",
+        "Start"
+      ]
+    },
+    "nominal_canonicalization": {
+      "renaming_equivalent": true,
+      "causally_distinct_trace_not_collapsed": true,
+      "canonical_trace": [
+        [
+          "Alloc",
+          0
+        ],
+        [
+          "Send",
+          0
+        ],
+        [
+          "Alloc",
+          1
+        ],
+        [
+          "Link",
+          0,
+          1
+        ]
+      ]
+    },
+    "semiring_valued_search": {
+      "analysis": "tropical distance paired with natural-number multiplicity",
+      "shortest_solution_distance": 6,
+      "number_of_shortest_labeled_witnesses": 1,
+      "interpretation": "one graph traversal computes both optimization and witness multiplicity"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+// Revision-2 CML design fixture. This syntax is normative intent, not yet parsed.
+model DieHard {
+  state {
+    big: Nat where big <= 5
+    small: Nat where small <= 3
+  }
+
+  init Init { big == 0 && small == 0 }
+
+  action FillSmall { big' == big && small' == 3 }
+  action FillBig { big' == 5 && small' == small }
+  action EmptySmall { big' == big && small' == 0 }
+  action EmptyBig { big' == 0 && small' == small }
+
+  action SmallToBig {
+    let next_big = min(big + small, 5)
+    big' == next_big
+    small' == small - (next_big - big)
+  }
+
+  action BigToSmall {
+    let next_small = min(big + small, 3)
+    small' == next_small
+    big' == big - (next_small - small)
+  }
+
+  action Next = FillSmall | FillBig | EmptySmall | EmptyBig | SmallToBig | BigToSmall
+
+  behavior Spec = Init && always(step(Next) || stutter(state))
+  invariant TypeOK { big in 0..5 && small in 0..3 }
+  invariant NotSolved { big != 4 } // intentionally false; shortest witness is the solution
+}

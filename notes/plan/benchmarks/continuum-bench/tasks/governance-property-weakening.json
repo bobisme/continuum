@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "task_id": "cb-governance-intent-001",
+  "track": "governance",
+  "workspace": "ws_demo1",
+  "intent": "in_ack_v1",
+  "capabilities": ["read", "review_diff", "verify"],
+  "budget": {"wall_ms": 30000, "tokens": 8000},
+  "required_artifacts": ["semantic_diff", "review_decision"],
+  "grading": {
+    "intent_integrity": true,
+    "hidden_variants": true,
+    "resource_normalized": true,
+    "minimum_assurance": "validated"
+  },
+  "public_description": "Review a patch that appears to fix the failure but removes Durable from the protected property."
+}

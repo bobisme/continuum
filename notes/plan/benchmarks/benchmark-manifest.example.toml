@@ -1,0 +1,34 @@
+[benchmark]
+id = "replicated-register/m01"
+description = "Acknowledgement before durable sync"
+source_commit = "REPLACE"
+semantic_version = "cir-0.1"
+property = "Agreement"
+expected_verdict = "refuted"
+
+[configuration]
+model = "../examples/replicated_register.ctm"
+scenario = "../examples/replicated_register.scenario.toml"
+node_count = 3
+value_count = 2
+max_crashes = 2
+
+[engines]
+run = ["random", "source-dpor", "explicit"]
+timeout_seconds = 300
+memory_mib = 4096
+
+[metrics]
+collect = [
+  "time_to_counterexample_ms",
+  "events_before_minimize",
+  "events_after_minimize",
+  "equivalence_classes",
+  "peak_rss_bytes",
+  "replay_count",
+]
+
+[reproducibility]
+rust_toolchain = "PINNED_IN_SUITE_LOCK"
+asupersync_commit = "PINNED_IN_SUITE_LOCK"
+solver_bundle = "none"

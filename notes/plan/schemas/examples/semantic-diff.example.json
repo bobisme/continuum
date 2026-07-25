@@ -1,0 +1,40 @@
+{
+  "after_intent": "in_ack_v1",
+  "after_workspace": "ws_demo2",
+  "before_intent": "in_ack_v1",
+  "before_workspace": "ws_demo1",
+  "diff_id": "diff_demo1",
+  "impact": {
+    "invalidated": [
+      "ev_failure1"
+    ],
+    "reused": [
+      "proof_model1"
+    ],
+    "unknown": []
+  },
+  "intent_changes": [
+    {
+      "evidence": null,
+      "field": "properties",
+      "protected": true,
+      "relation": "unchanged"
+    }
+  ],
+  "policy": {
+    "decision": "allow",
+    "reasons": [
+      "protected intent unchanged"
+    ]
+  },
+  "schema_version": "1.0",
+  "semantic_changes": [
+    {
+      "kind": "durability_order",
+      "locations": [
+        "src/lib.rs:42"
+      ],
+      "summary": "ReplyPublished now follows SyncCompleted"
+    }
+  ]
+}

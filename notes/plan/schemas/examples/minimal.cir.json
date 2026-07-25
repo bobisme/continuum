@@ -1,0 +1,50 @@
+{
+  "format": "continuum-cir",
+  "encoding_version": "0.1.0",
+  "semantics_version": "cir-0.1",
+  "model_hash": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
+  "environment_hash": "blake3:1111111111111111111111111111111111111111111111111111111111111111",
+  "roots": [
+    "e:init"
+  ],
+  "events": [
+    {
+      "id": "e:init",
+      "origin": {
+        "kind": "model",
+        "stable_id": "ReplicatedRegister.Init"
+      },
+      "owner": "model",
+      "epoch": 0,
+      "causes": [],
+      "label": {
+        "family": "model",
+        "operation": "Init",
+        "payload": null
+      },
+      "footprint": [
+        {
+          "resource": "model/state",
+          "mode": "produce"
+        }
+      ],
+      "observations": []
+    }
+  ],
+  "configurations": [
+    {
+      "id": "c:init",
+      "events": [
+        "e:init"
+      ],
+      "canonical_hash": "blake3:2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "observers": [
+    {
+      "id": "client",
+      "description": "Client-visible actions"
+    }
+  ],
+  "assumptions": []
+}

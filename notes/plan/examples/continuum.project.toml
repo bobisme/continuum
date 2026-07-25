@@ -1,0 +1,23 @@
+[continuum]
+semantic_epoch = "3"
+intent = "intent/ack-durable.json"
+
+[workspace]
+rust_entry = "crate::protocol"
+model_entry = "models/ack_protocol.ctm"
+
+[profiles.dev]
+portfolio = "interactive"
+wall_ms = 30000
+states = 100000
+
+[profiles.promotion]
+portfolio = "promotion"
+clean_recompute = true
+independent_checker = true
+
+[adapters]
+lsp = true
+dap = true
+mcp = true
+sarif = true
