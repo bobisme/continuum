@@ -1,4 +1,4 @@
-![A vast engraved architecture of branching causal paths converging on a luminous vault](assets/continuum-hero.png)
+![A vast engraved architecture of branching causal paths converging on a luminous vault](assets/continuum-hero.webp)
 
 # Continuum
 
