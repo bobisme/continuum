@@ -20,6 +20,8 @@ The registry is the plan §10.2 list; each entry carries a minimum authority lev
 | `workspace` | create / fork / diff / seal | propose |
 | `intent` | get / diff | read |
 | `intent` | propose_revision | revise-intent |
+| `intent` | accept / reject | revise-intent |
+| `intent` | lock | revise-intent |
 | `verification` | start / result / await | execute |
 | `model` | check / explore / compare | execute |
 | `program` | extract / run / replay | execute |
@@ -38,7 +40,7 @@ The registry is the plan §10.2 list; each entry carries a minimum authority lev
 
 ## Authority levels and capabilities
 
-Five levels — `read < propose < execute < revise-intent < promote` — map onto the plan §18.2 capability set. A `cap_*` capability names its actor, level, resource scope (snapshots/intents/artifact classes), expiry, and delegation allowance. Agent-facing installations MUST omit `promote` and `revise-intent` by default; promotion is a service decision gated by RFC 0032, never an agent assertion (INV-015, B12). Calls above the capability's level fail with `CapabilityDenied` before any semantic work runs.
+Five levels — `read < propose < execute < revise-intent < promote` — map onto the plan §18.2 capability set. A `cap_*` capability names its actor, level, resource scope (snapshots/intents/artifact classes), expiry, and delegation allowance. Agent-facing installations MUST omit `promote` and `revise-intent` by default; `intent.accept` is the only transition from `Proposed` to protected status and, with `intent.lock`, is audit-recorded and never present in default agent capability profiles (plan §5.4); promotion is a service decision gated by RFC 0032, never an agent assertion (INV-015, B12). Calls above the capability's level fail with `CapabilityDenied` before any semantic work runs.
 
 ## Context policy
 

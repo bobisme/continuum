@@ -61,7 +61,7 @@ Multiple transactions MAY share a base. Promotion is serialized per base lineage
 
 ## Receipt
 
-Composed at `receipt_generation`: intent identity; before/after snapshots; semantic and intent diffs; replay, neighborhood, mutation, refinement, certificate, and parity results with coverage; unknowns; policy decision; gate profile. Receipts are canonically encoded and checkable by reference (`evidence.verify` re-fetches and verifies every referenced artifact and accepts no client-declared status). **Signing:** the daemon's receipt service holds the signing keys; agents never do (INV-015). Signatures bind identity and authorship; they never substitute for proof checking (ADR-0035).
+Composed at `receipt_generation`: intent identity; before/after snapshots; semantic and intent diffs (the intent diff travels as the `intent_changes` set inside the semantic-diff artifact, RFC 0031 — one artifact, referenced as `semantic_diff` in the schema); replay, neighborhood, mutation, refinement, certificate, and parity results with coverage; cumulative cost ledger (plan §8.6); unknowns; policy decision; gate profile. Receipts are canonically encoded and checkable by reference (`evidence.verify` re-fetches and verifies every referenced artifact and accepts no client-declared status). **Signing:** the daemon's receipt service holds the signing keys; agents never do (INV-015). Signatures bind identity and authorship; they never substitute for proof checking (ADR-0035).
 
 ## Rejected alternatives
 
@@ -76,4 +76,4 @@ Composed at `receipt_generation`: intent identity; before/after snapshots; seman
 
 ## Acceptance
 
-The six failure modes each map to a failing gate on the mutation corpus: exact-overfit → `neighborhood`; intent gaming → `intent_integrity`; verifier/instrumentation gaming → `property_mutation`/`defect_mutants`; stale proof → `certificate_rebuild`; availability collapse → non-vacuity within `property_mutation`; opaque escape → `intent_integrity` (trust-boundary expansion). A hard-coded exact-trace repair fails; the semantic guard repair promotes (PR 21's exit); forged or agent-signed receipts are rejected by `evidence.verify` (PR 22's exit).
+The seven failure modes (docs/41) each map to a failing gate on the mutation corpus: exact-overfit → `neighborhood`; intent gaming → `intent_integrity`; verifier/instrumentation gaming → `property_mutation`/`defect_mutants`; stale proof → `certificate_rebuild`; availability collapse → non-vacuity within `property_mutation`; opaque escape → `intent_integrity` (trust-boundary expansion); abstraction gaming (concrete bad states merged) → `intent_integrity` (RFC 0031 classifies the abstraction map `merged`). A hard-coded exact-trace repair fails; the semantic guard repair promotes (PR 21's exit); forged or agent-signed receipts are rejected by `evidence.verify` (PR 22's exit).

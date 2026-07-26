@@ -36,6 +36,7 @@ The contract consists of these field groups (types in the schema):
 | `nondeterminism` | typed choice classes per site (`demonic, angelic, scheduler, probabilistic, timed, epistemic`) | probabilistic/timed/epistemic declarative until ADR-0016 |
 | `assurance` | minimum evidence class + checker requirements | total order: `observed < sampled < bounded < validated < proved` |
 | `optimization` | hard constraints, soft objectives, non-vacuity behaviors | INV-012 |
+| `security_policy` | data classification, redaction classes, capability requirements | first-class per plan §0.1/§5.2; weakening is a protected change |
 | `policy` | per-field change verb | see below |
 
 ## Canonical identity
@@ -60,7 +61,7 @@ Each protected field carries one verb:
 | `no-downgrade` | assurance downgrades are blocked |
 | `no-expansion` | growth of the set (opaque boundaries) is blocked |
 
-- The protected set is: properties, assumptions, observers, bounds, faults, **fairness**, **trust boundaries**, **non-vacuity**, **completion policy**, assurance (ADR-0039; all ten MUST be lockable — plan §5.4).
+- The protected set is: properties, assumptions, observers, bounds, faults, **fairness**, **trust boundaries**, **non-vacuity**, **completion policy**, assurance, **security policy**, and **optimization** (ADR-0039; all twelve MUST be lockable — plan §5.4).
 - Directional verbs (`no-decrease`, `no-downgrade`, `no-expansion`) are only enforceable where RFC 0031 defines the order for that field. Where the order is undefined or the change is outside declared fragments, the change classifies `Unknown` and MUST be treated as blocked pending review (fail closed, plan §5.3).
 - The default agent repair capability profile MUST deny every protected change; a change slipped into a repair reclassifies the transaction as an intent revision (RFC 0032, INV-011).
 
@@ -85,11 +86,14 @@ Each protected field carries one verb:
 ## Open questions
 
 - Property-AST normalization rules per fragment beyond Finite (owned jointly with RFC 0031).
-- Whether `security_policy` becomes a first-class field group or remains under `assumptions(trust)` + `trust_boundaries` (plan §0.1 lists it; the schema currently does not carry it separately).
+
+(Resolved: `security_policy` is a first-class field group, carried by the
+schema, lockable per plan §5.4, and diffed per RFC 0031's security-policy
+order.)
 
 ## Acceptance
 
 - Round-trip schema validation; deterministic identity across platforms (golden vectors).
 - All G0-DX-02 gaming mutations classify as protected changes; a source-only guard repair does not.
-- Policy-verb enforcement tests for all ten protected fields, including `Unknown`-fails-closed.
+- Policy-verb enforcement tests for all twelve protected fields, including `Unknown`-fails-closed.
 - Adversarial suite: renaming, formatting, comment, and label changes MUST NOT change identity; semantic changes MUST.

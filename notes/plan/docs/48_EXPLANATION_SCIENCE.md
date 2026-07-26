@@ -80,6 +80,14 @@ The proposed experiment and its assumptions are explicit.
 
 ## Human study
 
+This is the preregistered G8 study (plan §21.1): it covers the four
+docs/34 acceptance workflows and two cohorts — Rust newcomers completing
+the deterministic/causal workflow, and distributed-systems experts
+diagnosing real failures — against a raw-trace baseline comparator.
+Cohort sizes, instruments, and pass thresholds are fixed in a
+preregistration expansion of this document, authored in Phase E and
+published before the study runs in Phase F (docs/52 G8).
+
 Questions:
 
 - Does causal/state-delta presentation improve diagnosis over raw trace?

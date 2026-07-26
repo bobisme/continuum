@@ -352,29 +352,46 @@ def check_gate_scheme_correspondence() -> dict[str, Any]:
     assert set(plan_gates) == expected, f"plan.md section 22 gates: {sorted(plan_gates)}"
     assert set(docs_gates) == expected, f"docs/52 gates: {sorted(docs_gates)}"
 
-    unmatched: list[str] = []
-    compared = 0
-    for gate in sorted(plan_gates):
-        doc_token_sets = [_normalize_tokens(b) for b in docs_gates[gate]]
-        for plan_bullet in plan_gates[gate]:
-            compared += 1
-            plan_tokens = _normalize_tokens(plan_bullet)
-            best = max(
-                (
-                    len(plan_tokens & doc_tokens) / len(plan_tokens | doc_tokens)
-                    for doc_tokens in doc_token_sets
-                    if plan_tokens | doc_tokens
-                ),
-                default=0.0,
-            )
-            if best < 0.6:
-                unmatched.append(
-                    f"G{gate}: no docs/52 bullet with >=0.6 overlap (best {best:.2f}) "
-                    f"for plan bullet: {plan_bullet}"
+    def _orphans(
+        source_gates: dict[int, list[str]],
+        target_gates: dict[int, list[str]],
+        source_name: str,
+        target_name: str,
+    ) -> tuple[list[str], int]:
+        unmatched: list[str] = []
+        compared = 0
+        for gate in sorted(source_gates):
+            target_token_sets = [_normalize_tokens(b) for b in target_gates[gate]]
+            for bullet in source_gates[gate]:
+                compared += 1
+                tokens = _normalize_tokens(bullet)
+                best = max(
+                    (
+                        len(tokens & target_tokens) / len(tokens | target_tokens)
+                        for target_tokens in target_token_sets
+                        if tokens | target_tokens
+                    ),
+                    default=0.0,
                 )
+                if best < 0.6:
+                    unmatched.append(
+                        f"G{gate}: no {target_name} bullet with >=0.6 overlap "
+                        f"(best {best:.2f}) for {source_name} bullet: {bullet}"
+                    )
+        return unmatched, compared
+
+    # Bidirectional: a bullet dropped from either document is a failure
+    # (plan section 22 claims "no docs/52 criterion is dropped here").
+    plan_orphans, plan_compared = _orphans(plan_gates, docs_gates, "plan", "docs/52")
+    docs_orphans, docs_compared = _orphans(docs_gates, plan_gates, "docs/52", "plan")
+    unmatched = plan_orphans + docs_orphans
     if unmatched:
         raise AssertionError("plan section 22 <-> docs/52 mismatch:\n" + "\n".join(unmatched))
-    return {"gates": len(expected), "plan_bullets": compared}
+    return {
+        "gates": len(expected),
+        "plan_bullets": plan_compared,
+        "docs_bullets": docs_compared,
+    }
 
 
 def _numbered_markdown(directory: str, low: int, high: int) -> list[Path]:
@@ -387,10 +404,13 @@ def _numbered_markdown(directory: str, low: int, high: int) -> list[Path]:
 
 
 def check_gate_citation_hygiene() -> dict[str, Any]:
+    # All non-archived numbered documents: Rev-2 files may describe the
+    # Rev-2 scheme (docs/26) but may not carry the retired suffixed gate
+    # names anywhere (plan §22 translation sweep).
     paths = (
-        _numbered_markdown("docs", 33, 55)
-        + _numbered_markdown("adr", 36, 52)
-        + _numbered_markdown("rfcs", 26, 40)
+        _numbered_markdown("docs", 0, 999)
+        + _numbered_markdown("adr", 0, 999)
+        + _numbered_markdown("rfcs", 0, 999)
     )
     violations: list[str] = []
     for path in paths:

@@ -14,7 +14,7 @@ A Context Pack is a bounded, typed, property-directed compilation of the evidenc
 
 ## Artifact
 
-Per the schema: target question, snapshot + intent identities, typed verdict, assurance envelope (every B11 dimension present or typed `Unsupported`), selected items (events, state deltas, source/model/proof references, assumptions, counterfactuals), per-pack guarantee set, omission manifest, expansion queries, evidence references, replay handle (`crash_*`), and content budget. Packs are immutable; `context.expand` creates a child pack referencing its parent.
+Per the schema: target question, snapshot + intent identities, pinned semantic epoch, typed verdict, assurance envelope (every B11 dimension present or typed `Unsupported`), selected items (events, state deltas, obligation/resource flow, order constraints, source/model/proof references, assumptions, counterfactuals, heuristic repair surfaces), per-pack guarantee set, omission manifest, expansion queries, evidence references, replay handle (`crash_*`) and optional debugger handle (`dbg_*`), canonical content hash (ADR-0013), and content budget. The semantic-epoch field is what `ReplayPreserving` is pinned to; a pack without it cannot claim that guarantee. Packs are immutable; `context.expand` creates a child pack referencing its parent.
 
 ## Guarantee classes
 
@@ -34,7 +34,7 @@ The pack MUST record which minimality class was achieved rather than implying th
 
 ## Compiler pipeline
 
-Nine stages (plan §6.3), each producing an auditable intermediate:
+Ten stages (plan §6.3 plus root selection), each producing an auditable intermediate:
 
 1. root selection from property/evidence handles;
 2. backward causal slicing (downward closure over the CIR);
@@ -42,11 +42,12 @@ Nine stages (plan §6.3), each producing an auditable intermediate:
 4. static/dynamic dependence join for source spans;
 5. proof-dependency slicing for obligations;
 6. observer projection;
-7. minimal unsatisfied core / correction-set analysis where a solver artifact exists;
-8. heuristic ranking of optional context (information-gain or configured ranker) — outputs are `HeuristicRelevant` only;
-9. budget packing.
+7. abstraction/refinement correspondence mapping (selected concrete items link to their abstract counterparts);
+8. minimal unsatisfied core / correction-set analysis where a solver artifact exists;
+9. heuristic ranking of optional context (information-gain or configured ranker) — outputs are `HeuristicRelevant` only;
+10. budget packing.
 
-Stages 1–7 produce guarantee-bearing content; stage 8 never upgrades an item's guarantee. Redaction policy (plan §18.4) is applied **before** slicing; redactions appear in the omission manifest, and a redacted pack cannot support claims requiring hidden data.
+Stages 1–8 produce guarantee-bearing content; stage 9 never upgrades an item's guarantee. Redaction policy (plan §18.4) is applied **before** slicing; redactions appear in the omission manifest, and a redacted pack cannot support claims requiring hidden data.
 
 ## Budget packing
 
@@ -54,7 +55,7 @@ The enforced budget is bytes (tokens are advisory, recorded with tokenizer id). 
 
 ## Omission manifest
 
-Counts omitted items by kind and relation, with reason (`budget`, `redaction`, `unsupported`, `heuristic-cutoff`), expandability, and the expansion query that retrieves them. An empty manifest asserts completeness and is checkable.
+Counts omitted items by kind and relation, with reason (`budget`, `redaction`, `unsupported`, `heuristic-cutoff`, `slice-irrelevant` — the last for items provably outside the property-directed slice), expandability, and the expansion query that retrieves them. An empty manifest asserts completeness and is checkable.
 
 ## Validation
 

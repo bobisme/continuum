@@ -106,9 +106,24 @@
       },
       "type": "object"
     },
+    "content_hash": {
+      "description": "Canonical content identity of the pack (ADR-0013).",
+      "type": "string"
+    },
     "context_id": {
       "pattern": "^ctx_[A-Za-z0-9_-]+$",
       "type": "string"
+    },
+    "debugger": {
+      "anyOf": [
+        {
+          "pattern": "^dbg_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "evidence": {
       "items": {
@@ -176,11 +191,34 @@
           "expandable": {
             "type": "boolean"
           },
+          "expansion": {
+            "additionalProperties": false,
+            "description": "Expansion query retrieving the omitted items (RFC 0028).",
+            "properties": {
+              "anchor": {
+                "type": "string"
+              },
+              "relation": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "relation",
+              "anchor"
+            ],
+            "type": "object"
+          },
           "kind": {
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "enum": [
+              "budget",
+              "redaction",
+              "unsupported",
+              "heuristic-cutoff",
+              "slice-irrelevant"
+            ]
           }
         },
         "required": [
@@ -209,6 +247,10 @@
     "schema_version": {
       "const": "1.0"
     },
+    "semantic_epoch": {
+      "description": "Pinned semantic epoch; ReplayPreserving is defined relative to it (RFC 0028).",
+      "type": "string"
+    },
     "selected": {
       "items": {
         "additionalProperties": false,
@@ -236,6 +278,9 @@
               "proof",
               "assumption",
               "counterfactual",
+              "obligation_flow",
+              "order_constraint",
+              "repair_surface",
               "unknown"
             ]
           },
@@ -278,7 +323,9 @@
     "selected",
     "omissions",
     "expansions",
-    "evidence"
+    "evidence",
+    "semantic_epoch",
+    "content_hash"
   ],
   "title": "Context Pack",
   "type": "object"

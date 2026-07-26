@@ -38,6 +38,7 @@ Directional relations are defined per field by these orders:
 - **Observers:** `refined` iff the new observer distinguishes at least the old projections/events; dropping an event family or coarsening a projection is `coarsened`.
 - **Assumptions/faults/fairness/non-vacuity:** set membership per classified item (`added`/`removed`), with `strengthened`/`weakened` for edits to an item's expression evaluated in its fragment. Adding an assumption or fairness constraint is environment-strengthening and therefore protected; removing a fault or a non-vacuity behavior is protected.
 - **Trust boundaries:** growth of the opaque set is `expanded` and is what `no-expansion` blocks.
+- **Security policy:** weakening a data classification, removing a redaction class, or relaxing a capability requirement is `weakened` and protected; the reverse direction is `strengthened`.
 - **Completion policy / nondeterminism classes:** any change is a semantic change; cross-policy relations are `incomparable` (there is no soundness order among completion policies).
 
 ## Fail-closed rule

@@ -336,7 +336,13 @@
         "observers": {
           "$ref": "#/$defs/policy_verb"
         },
+        "optimization": {
+          "$ref": "#/$defs/policy_verb"
+        },
         "properties": {
+          "$ref": "#/$defs/policy_verb"
+        },
+        "security_policy": {
           "$ref": "#/$defs/policy_verb"
         },
         "trust_boundaries": {
@@ -353,7 +359,9 @@
         "trust_boundaries",
         "non_vacuity",
         "completion_policy",
-        "assurance"
+        "assurance",
+        "security_policy",
+        "optimization"
       ],
       "type": "object"
     },
@@ -467,7 +475,9 @@
     "fairness",
     "completion_policy",
     "assurance",
-    "policy"
+    "policy",
+    "optimization",
+    "security_policy"
   ],
   "title": "Intent Contract",
   "type": "object"

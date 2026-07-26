@@ -39,10 +39,14 @@ The Rust and Lean semantics must not be maintained as informal twins. Serializat
 3. **Make Lean the implementation language.** Conflicts with the Rust-native runtime/performance/product goal.
 4. **Defer formalization until after 1.0.** Allows architecture to ossify around unprovable interfaces.
 
-## Gates
+## Milestones
 
-- G0: core transition/refinement/certificate theorems build with no `sorry`.
-- G1: one Rust closure certificate is imported and checked in Lean.
-- G2: observer-indexed reduction theorem covers the baseline DPOR fragment.
-- G3: fairness/lasso certificate theorem supports corpus liveness cases.
-- G4: asupersync cancellation primitives have formal contracts linked to emitted events.
+(Renamed from an internal G0–G4 ladder: gate numbering is reserved for
+the docs/52 release gates, per plan §22. The T0/T1 theorem ladder is
+defined in RFC 0012; axiom manifests in ADR-0035.)
+
+- L0: core transition/refinement/certificate theorems build with no `sorry`.
+- L1: one Rust closure certificate is imported and checked in Lean.
+- L2: observer-indexed reduction theorem covers the baseline DPOR fragment.
+- L3: fairness/lasso certificate theorem supports corpus liveness cases.
+- L4: asupersync cancellation primitives have formal contracts linked to emitted events.

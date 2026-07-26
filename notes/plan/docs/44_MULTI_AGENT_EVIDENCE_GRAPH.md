@@ -39,12 +39,14 @@ A chat transcript obscures this structure.
 
 | Status transition | Authority |
 |---|---|
-| draft → proposed | any authorized human/agent |
+| (creation) → proposed | any authorized human/agent — there is no `draft` status (plan §11.4) |
 | proposed → observed | execution service |
+| proposed → sampled | execution/verification service |
 | proposed → bounded | verification service |
 | proposed/bounded → validated | independent checker |
 | proposed → proved | Lean proof service |
 | any → refuted | valid counterexample/checker |
+| any → inconclusive | producing service, with a typed INV-008 reason |
 | any → superseded | policy/owner with explicit edge |
 
 ## Conflict handling

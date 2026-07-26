@@ -78,7 +78,10 @@ Tool descriptions distinguish read, propose, execute, and promote authority. Pos
 
 ## Latency targets
 
-These are product targets, not initial guarantees:
+This table is gate-normative for G5 (plan §21 Phase C exit): at G5 the
+targets are enforced on the reference workload, measured with a
+saturating background swarm present (plan §4.1). Before Phase C they
+are design targets.
 
 | Interaction | p50 target | p95 target |
 |---|---:|---:|
@@ -86,8 +89,11 @@ These are product targets, not initial guarantees:
 | semantic hover/correspondence | 50 ms | 150 ms |
 | cached bounded check | 100 ms | 500 ms |
 | local incremental exploration feedback | 250 ms | 2 s |
+| explain: failure → rendered causal explanation | 200 ms | 1 s |
 | Context Pack compilation from existing evidence | 100 ms | 1 s |
 | replay/minimized branch load | 250 ms | 1 s |
+| debugger reverse-step (checkpoint re-execution) | 100 ms | 500 ms |
+| debugger branch fork at a frontier | 250 ms | 1 s |
 | task cancellation acknowledgment | 50 ms | 200 ms |
 
 Long tasks stream monotonic progress and return continuations.

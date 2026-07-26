@@ -1,7 +1,7 @@
 # RFC 0019: Corpus Port Manifest and Evidence Schema
 
 **Status:** Proposed  
-**Target gate:** G0-Corpus
+**Target gate:** G9 (corpus interaction parity; translated from the Revision 2 corpus entry gate per docs/26 — suffixed names retired by plan §22)
 
 ## Purpose
 

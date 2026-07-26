@@ -58,7 +58,7 @@ Idempotency: a mutation replayed with the same `idempotency_key` and byte-identi
 
 `Created → Running → Suspended | Completed | Failed | Cancelled` (plan §4.1).
 
-- `task.start` is idempotent; `task.status` is monotonic; `task.cancel` triggers request→drain→finalize and MUST leave either committed partial evidence plus a valid continuation, or nothing published (INV-009, B19).
+- Task-starting operations (`verification.start`, `model.check`, `forge.create`, and peers — there is no generic `task.start`) are idempotent under idempotency keys; `task.status` is monotonic; `task.cancel` triggers request→drain→finalize and MUST leave either committed partial evidence plus a valid continuation, or nothing published (INV-009, B19).
 - `task.resume` validates continuation identity, snapshot, and epochs; stale inputs are rejected (`StaleSnapshot`, `ContinuationEpochMismatch`). Resume MAY add evidence; it MUST NOT replace prior artifacts under the same identity.
 - `task.subscribe` streams progress events over the same connection; events are hints — committed artifacts and `task.status` are authoritative.
 

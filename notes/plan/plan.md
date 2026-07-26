@@ -399,6 +399,14 @@ only on explicit acceptance. Continuum never silently promotes an inferred
 intent to protected status, and never claims a generated model is the
 intended abstraction.
 
+First-run contract: while every governing intent is `Proposed`,
+`cargo continuum check` runs the drafts and reports each verdict as
+`Hypothesis(unaccepted-intent)` — structurally distinct from FAILURE
+and PASS in every surface — alongside intent-free findings that need no
+contract at all: effect footprint, uncontrolled-nondeterminism sites
+(INV-005), and unmapped opaque effects. This output is the specified
+zero-configuration value of the tool, not a degraded mode.
+
 The first result is concise:
 
 ```text
@@ -505,6 +513,14 @@ Created → Running → Suspended | Completed | Failed | Cancelled
                        └── continuation + committed partial evidence
 ```
 
+The scheduler defines priority classes — interactive > CI >
+background/swarm — with preemption of suspendable tasks (safe under B18
+continuations). Every capability grant carries concurrency and resource
+quotas. The daemon operates under a declared memory budget with
+class-aware eviction across the incremental cache, overlay snapshots,
+and materialized debugger branches. G5 latency compliance is measured
+with a saturating background swarm present, not on an idle daemon.
+
 ### 4.2 Workspace snapshots
 
 A workspace snapshot contains content identities for:
@@ -529,6 +545,23 @@ intent binding by identity; rebinding a snapshot lineage to a different
 intent is a privileged operation that produces a semantic intent diff and
 invalidates dependent evidence (INV-001).
 
+#### 4.2.1 Intent distribution and convergence
+
+Registries converge through signed, content-addressed **intent bundles**
+(`inb_*`): an export of one or more contracts with their acceptance
+records and policy tables. Bundles may be vendored in the repository or
+fetched by identity; import is idempotent and never changes protection
+status — an imported `Proposed` contract stays `Proposed`, and an
+imported acceptance is honored only if its signature chain satisfies the
+local policy. Divergent branches are reconciled by semantic three-way
+merge: each head's §5.3 diff against the common ancestor; two revisions
+merge automatically only when both diffs are classified independent
+within supported fragments — otherwise the merge is a `Conflict` node
+requiring the `revise-intent` capability. CI fails closed when the
+bundle referenced by the workspace configuration is absent or its
+acceptance chain does not verify, and §17.6's intent diff ships with a
+PR-reviewable projection (SARIF note plus rendered semantic diff).
+
 ### 4.3 Native protocol
 
 The native protocol uses strongly typed request/response definitions over local IPC or authenticated HTTP/QUIC. Requirements:
@@ -545,6 +578,11 @@ The native protocol uses strongly typed request/response definitions over local 
 - OpenTelemetry context;
 - protocol and semantic version separation.
 
+The daemon serves protocol majors N and N−1. Evidence and receipt
+schemas are readable by every future verifier for their declared schema
+epoch: artifact readability is decoupled from protocol majors and
+covered by the kernel crates' reproducible-build covenant (§20).
+
 MCP, LSP, DAP, and SARIF translate to this protocol. None define core semantics.
 
 ### 4.4 Content-addressed artifacts
@@ -554,6 +592,7 @@ Artifact classes include:
 ```text
 ws_* workspace snapshot
 in_* intent contract
+inb_* signed intent bundle
 model_* elaborated model
 cir_* causal execution graph
 crash_* crashpack
@@ -561,7 +600,7 @@ ctx_* Context Pack
 proof_* proof artifact
 ps_* proof state
 task_* task
-ev_* evidence node
+ev_* evidence node or edge
 dbg_* debugger branch
 receipt_* signed/checked receipt
 rt_* repair transaction
@@ -569,6 +608,7 @@ forge_* synthesis archive
 cont_* resumable task continuation
 cap_* capability
 diff_* semantic/intent diff
+defect_* engine-defect report
 ```
 
 Handles carry a kind prefix but are otherwise structureless and
@@ -590,6 +630,14 @@ specified, verified, and gated (G1), not left to implementation:
   from named roots, receipts, and retention policy. The daemon reports
   storage attribution by artifact class. Disk exhaustion during
   publication aborts atomically (INV-017); it never truncates.
+  Campaign-class evidence (neighborhood, mutation) is summarizable:
+  after promotion, raw per-class results may be rolled up into a
+  coverage certificate attested by a kernel-covenant checker; the
+  receipt references the summary, raw classes become GC-eligible under
+  retention policy, and later access yields
+  `Redacted(summarized, commitment)` with the standard §18.4 downgrade.
+  Summarization is the default after promotion and opt-out per
+  retention policy.
 - **Purge without breaking receipts.** Sensitive artifact classes are
   encrypted at rest per artifact; purge shreds the key and replaces
   content with a typed `Redacted(reason, commitment)` stub. Receipts
@@ -623,6 +671,17 @@ artifacts (ADR-0018):
 - re-derived artifacts receive new identities linked to their
   predecessors by `SUPERSEDES` edges; nothing is rewritten in place.
 
+### 4.7 Engine-defect lifecycle
+
+Engine defects are first-class evidence. Any `ReplayDiverged`, parity
+mismatch, engine crash, or explanation-validation failure emits a
+`defect_*` artifact: all inputs pinned by content identity, semantic and
+checker epochs, engine identity, and an automatically minimized
+reproduction, governed by the same redaction policy as Context Packs
+(§18.4). `continuum doctor` assembles a shareable defect bundle. Daemon
+health and performance export as OpenTelemetry alongside — never inside
+— semantic evidence.
+
 ---
 
 ## 5. Intent Contract
@@ -650,14 +709,18 @@ An Intent Contract contains:
 claims
   property AST + stable semantic name
 assumptions
-  environment, fairness, timing, failure, trust
+  environment, scheduler, timing, storage, network, trust
   domain-pack fidelity profile per effect family
     (ideal | contractual | platform-qualified | adversarial-envelope)
-  behavior completion policy
-    (stutter-forever | deadlock-violation | finite-trace-only | closed)
-  nondeterminism classes per choice site
-    (demonic | angelic | scheduler | probabilistic† | timed† | epistemic†)
-    († declarative until ADR-0016 lanes ship — see B11)
+fault model
+  crash, recovery, partition, loss/duplication/delay envelopes
+fairness
+  weak/strong fairness declarations per action family
+completion policy
+  (stutter-forever | deadlock-violation | finite-trace-only | closed)
+nondeterminism classes per choice site
+  (demonic | angelic | scheduler | probabilistic† | timed† | epistemic†)
+  († declarative until ADR-0016 lanes ship — see B11)
 observers
   state/event/knowledge/security projections
 scope
@@ -722,6 +785,8 @@ bounds = "no-decrease"
 faults = "no-removal"
 assurance = "no-downgrade"
 observers = "proof-required"
+security_policy = "maintainer-review"
+optimization = "maintainer-review"
 ```
 
 Agent repair capabilities exclude intent mutation unless a task explicitly asks for redesign.
@@ -819,6 +884,13 @@ obligation/region tree
 fault and time state
 unexplored alternatives
 ```
+
+State materialization is deterministic re-execution from periodic
+committed checkpoints; the checkpoint interval is budget-tunable.
+Reverse-step and branch-fork carry docs/34 latency rows. Concurrently
+materialized branches per session are capped with LRU spill to the CAS.
+Branch comparison operates on projected observer state unless full
+concrete state is explicitly expanded.
 
 ### 7.2 Operations
 
@@ -951,6 +1023,20 @@ Unresolved: production storage profile remains assumed
 
 The exact artifacts are one click/handle away.
 
+### 8.6 Cost governance
+
+Every repair transaction carries a cumulative cost ledger (CPU, wall,
+solver, memory, token) across all its versions; the promotion receipt
+includes it. Gate 5–7 evaluations are incremental by default:
+neighborhood classes and mutants whose causal footprint is disjoint from
+the patch delta (a Conservative-class §9 dependency query) reuse prior
+results as `Validated` edges; anything else re-runs. The §9.5 sampling
+rate derives from a declared statistical confidence target for mismatch
+detection per reuse class, reviewed at G5. The daemon enforces
+per-principal and per-transaction cost ceilings; exceeding one yields
+`BudgetExhausted` with a continuation — never a silently smaller
+campaign (the cost-domain form of INV-007).
+
 ---
 
 ## 9. Incremental semantic database
@@ -958,6 +1044,12 @@ The exact artifacts are one click/handle away.
 ### 9.1 Need
 
 Impeccable DX requires subsecond feedback for local edits and resumable deeper searches. Re-running every model, extraction, exploration, proof, and explanation from scratch would make Continuum irrelevant in normal development.
+
+The engine itself is engineering risk, not settled design: whether it is
+derived from an existing memoization framework or built custom is decided
+by a Phase B ADR with spike evidence (§21), and the decision is carried
+as a docs/08 risk with the mitigation "edge classes collapse to
+Conservative" named as the failure mode that destroys interactivity.
 
 ### 9.2 Query model
 
@@ -1015,7 +1107,26 @@ CI and sampled local runs compare incremental and clean artifacts:
 - semantic diff;
 - proof axiom manifest.
 
-Any disagreement quarantines the relevant reuse class and emits a minimal invalidation counterexample.
+Queries carry an auditability class, declared on the query definition:
+
+- **Equality-auditable** — deterministic under the docs/19 matrix;
+  compared bit-for-bit. Any disagreement quarantines the reuse class and
+  emits a minimal invalidation counterexample.
+- **Certificate-auditable** — solver-backed; the audit compares checked
+  certificates and claim envelopes, never raw solver behavior. A
+  certificate-level disagreement quarantines; a solver-outcome
+  difference with agreeing certificates does not.
+- **Budget-sensitive** — anytime results; the audit checks only that the
+  incremental result's evidence labels are no stronger than a clean
+  run's under equal budget (monotone-honesty), and records divergence as
+  drift telemetry without quarantine.
+
+Divergence attributable solely to budget or portfolio nondeterminism
+never quarantines a reuse class; divergence in an equality- or
+certificate-auditable query always does. INV-010's exactness claim
+applies per auditability class. The class is declared on the query
+definition, not the run, so a mismatch cannot be reclassified away
+after the fact.
 
 ### 9.6 Long-task continuations
 
@@ -1667,9 +1778,24 @@ They do not receive evidence-signing, intent-policy mutation, arbitrary network,
 
 Foreign solvers, Lean workers, generated code, corpus oracles, and agent code run in isolated, resource-bounded environments with pinned images/toolchains and read-only inputs. Output is parsed as untrusted data.
 
+Domain packs are content-addressed, signed, and pinned in the workspace
+snapshot; the Intent Contract's fidelity profile binds the exact pack
+identity, so pack substitution is a privileged intent diff (G3), not an
+environment change. Third-party packs default to `adversarial-envelope`
+fidelity until they pass docs/17 conformance qualification, and receipts
+render pack provenance (first-party | qualified | unqualified)
+distinctly.
+
 ### 18.4 Context privacy
 
 Context compilation enforces source/trace field policy before slicing. Redaction is represented in the omission manifest. A redacted pack cannot support claims requiring hidden data unless a trusted checker provides a separate receipt.
+
+Capture-time contract for production traces: payloads are recorded as
+salted commitments by default; raw payload capture is per-field opt-in,
+tagged with a data classification at ingestion, encrypted per artifact
+on entry (enabling §4.5 purge), and subject to a declared retention
+clock. Remote workers receive only post-redaction minimized artifacts;
+residency constraints are a capability property of the worker pool.
 
 ### 18.5 Audit
 
@@ -1864,7 +1990,7 @@ Deliver:
 - Lean environment pinned and seed modules kernel-checked; T0/T1 theorems
   (transition-system safety, stuttering simulation, finite-closure
   certificate soundness) compile with no `sorry` and empty axiom manifests,
-  per ADR-0022.
+  per the RFC 0012 theorem ladder and ADR-0035 axiom manifests.
 
 Exit: Die Hard and Dining Philosophers can be checked through native API,
 CLI, and an agent client with identical artifacts; the ACI ablation shows
@@ -1877,9 +2003,12 @@ validates epochs and inputs (G1).
 
 Deliver:
 
-- asupersync semantic adapter (one adapter crate, exact version pin,
-  explicit semantic-hook contract, adapter conformance corpus; the model
-  core never depends on asupersync);
+- asupersync semantic adapter (one adapter crate; supported upstream
+  window of versions N and N−1, each covered by the adapter conformance
+  corpus in CI against upstream pre-releases — an upstream breaking
+  release opens a scheduled adapter epoch (§4.6), visible in envelopes;
+  explicit semantic-hook contract; the model core never depends on
+  asupersync);
 - CML core-fragment parser and elaborator (Finite fragment; enough for the
   replicated register and Wave 0 ports; the programmatic model API remains
   supported);
@@ -1888,7 +2017,12 @@ Deliver:
 - causal minimizer;
 - debugger v0;
 - repair transactions;
-- exact and neighboring replay.
+- exact and neighboring replay;
+- an ADR resolving build-vs-adopt for the §9 incremental engine
+  (salsa-derived vs custom), backed by a spike implementing the four
+  reuse-edge classes and `query.explain_invalidation` over
+  parse/elaborate/explore with a measured invalidation-precision
+  baseline; Phase C is `BLOCKED` until this ADR exists.
 
 Exit: an agent fixes ack-before-durable without changing intent and
 produces a promotion receipt under the Phase B gate profile.
@@ -1908,6 +2042,11 @@ Deliver:
 - LSP/DAP/SARIF;
 - Incremental Parity Audit (§9.5);
 - proof Context Packs;
+- read-only tokio observation lane: journal observable lifecycle,
+  channel, and time events; opaque-effect inventory; envelopes capped at
+  `Observed` status with every claim dimension `Unsupported` — the
+  adoption top-of-funnel for the Phase F instrumentation lane, making
+  no controlled-semantics claim;
 - Wave 0/1 corpus interaction tasks (29 families, pinned to
   `tlaplus/Examples@91c22ea…`) at their required parity per
   `corpus/tla-examples/PARITY_LEVELS.md`, capped at P2 (bounded semantic
@@ -1920,9 +2059,8 @@ Deliver:
 
 Exit: the edit/check/explain loop meets the docs/34 latency table (p50/p95
 per interaction) on the reference workload — the table is gate-normative
-for G5, superseding docs/34's "product targets, not initial guarantees"
-caveat, and gains an explain-interaction row (failure → rendered causal
-explanation) before Phase C begins; incremental results are
+for G5 and carries an explain-interaction row (failure → rendered causal
+explanation), both marked in docs/34 itself; incremental results are
 trustworthy under differential audit; reduction engines show zero
 reachability mismatch against the unreduced reference on the no-reduction
 corpus, and certified claims fall back to the unreduced baseline until the
@@ -1974,10 +2112,10 @@ unrealizability as distinct from unknown.
 Deliver:
 
 - production partial-order evidence;
-- foreign-runtime instrumentation lane (tokio): journal observable
-  lifecycle/channel/time events, mark uncontrolled effects opaque, and emit
-  correspondingly bounded assurance envelopes — an adoption bridge, not a
-  claim of controlled semantics;
+- foreign-runtime instrumentation lane (tokio), upgrading the Phase C
+  read-only lane: instrumentation synthesis, fault-window replay where
+  monitorable, and correspondingly bounded assurance envelopes — an
+  adoption bridge, not a claim of controlled semantics;
 - instrumentation synthesis;
 - remote proof/verification workers;
 - all 80 corpus families at declared parity;
@@ -1990,6 +2128,13 @@ least two materially different real systems. (This is deliberately
 stricter than docs/52 G10's "at least one stops requiring a separate
 TLA+ workflow"; docs/52 is updated to match, per §22's reconciliation
 rule.)
+
+Scope note: 1.0 verifies systems whose controlled participants live in
+one workspace snapshot. Cross-repository federation — one intent
+governing independently deployed participants with a version-skew
+envelope — is an explicit 1.0 non-goal, recorded here so Phase F
+migrations are recruited within scope. A design note registers the
+federation-manifest (`fed_*`) direction for post-1.0.
 
 ---
 
@@ -2042,6 +2187,7 @@ asserted beside it.
 
 - snapshots, intent contracts, handles, and artifacts are immutable and
   content-addressed;
+- explicit handles across the native API;
 - requests are idempotent under idempotency keys;
 - continuation resume validates epochs and inputs before any reuse;
 - cancellation closes obligations and publishes no partial finality;
@@ -2079,6 +2225,9 @@ asserted beside it.
   and repaired end-to-end, alongside multiple known mutants;
 - causal explanation with a replay-preserving core;
 - partial-order debugger including alternate-branch exploration;
+- exact and neighboring replay;
+- mutation challenge;
+- promotion receipt;
 - human review view over the repair transaction;
 - repair transaction closes exact, neighborhood, and mutation gates under
   the Phase B gate profile (§21).
@@ -2091,6 +2240,8 @@ asserted beside it.
   Experimental) and mismatches are minimized and quarantine the class;
 - proof and certificate freshness is tracked;
 - interactive latency targets (docs/34) hold on the reference workload;
+- evidence queries and context compilation meet the docs/34 targets at
+  ≥10^7 evidence nodes on the reference workload;
 - cache and publication are crash-safe.
 
 ### G6 — Proof service
@@ -2105,18 +2256,22 @@ asserted beside it.
 
 ### G7 — Forge
 
+- typed holes and finite CEGIS;
 - safety and non-vacuity;
 - hidden variant generalization;
 - independent candidate verification;
 - diversity archive has semantic, not merely syntactic, spread;
-- unrealizability produces reusable evidence where supported.
+- explicit unrealizability/unknown distinction;
+- unrealizability produces reusable evidence where supported;
+- materialized model/Rust/proof obligations.
 
 ### G8 — Human usability
 
 - the preregistered study (§21.1) covers both cohorts — Rust newcomers
   completing the deterministic/causal workflow, and distributed-systems
-  experts diagnosing real failures — and shows explanation beats the
-  raw-trace baseline on diagnosis accuracy and time;
+  experts diagnosing real failures;
+- explanation beats the raw-trace baseline on diagnosis accuracy and
+  time;
 - assurance confidence is calibrated, not merely no worse than baseline;
 - progressive disclosure reaches exact artifacts;
 - accessibility: no critical workflow requires color or a rendered graph;
@@ -2135,6 +2290,8 @@ asserted beside it.
 ### G10 — Continuum 1.0
 
 - two real project migrations;
+- two materially different real projects remove bespoke DST
+  infrastructure;
 - at least one migrated project stops requiring a separate TLA+ workflow
   for normal development;
 - production evidence returns valid pass/fail/inconclusive
@@ -2240,12 +2397,13 @@ section may claim a lane's output without its status.
 |---|---|---|---|
 | General context compilation (§6) | research/25, /32 | pack-ablated agent benchmark win; kill if packs induce wrong repairs | plain causal slice + expansion |
 | Exploration reduction (§9, INV-013) | research/01; docs/31 | ≥10× (order of magnitude) reduction in explored classes on a non-artificial corpus subset **without regression on dependent workloads** (research/01); observer-indexed: median ≥5× on the observer-sensitive class, certificate overhead <20%, zero mutation loss (docs/31) | conservative unreduced exploration |
+| Liveness-preserving reduction (§7.2, Phase D) | research/04, /13 — lane to be opened | fair-cycle-preserving reduction ≥3× on the liveness corpus subset with zero missed accepting cycles vs unreduced SCC baseline | unreduced liveness with explicit cost banner; batch expectations stated in the Phase D exit |
 | Causal minimization (§6, §12) | research/26 | replay-preserving core ≤10% of trace length on real (non-synthetic) failures — draft, pending ratification; kill if minimization cost dominates verification | 1-minimal delta debugging only |
 | Sub-file incremental trust (§9) | research/27 | clean-parity at sampled rate; kill if capture untrustworthy below module granularity | module-granularity invalidation |
 | Forge co-synthesis + QD (§14) | research/29, /30 | rediscovery suite; kill if joint search loses to staged | staged synthesis; Pareto archive only |
 | Production conformance (Phase F) | research/05 | monitorability-gated; draft pending ratification: faithful Lab reproduction of ≥70% of curated known incidents under injected telemetry loss; always-on overhead ≤1%; kill if most target properties are monitorable only as `Inconclusive` on two real systems | Lab-replay evidence only |
 | Cancellation calculus (§0, B19) | research/09 | draft pending ratification: 10/10 mutation-corpus mutants detected with zero false alarms on the correct implementation; machine-checked drain ranking for the replicated register | runtime checking only |
-| Bidirectional lenses (§16) | research/31 | ambiguity rate := fraction of abstract edits on the drift corpus yielding multiple or no concrete candidates (metric and corpus to be added to research/31); kill if most real mappings are too ambiguous, or users mistake candidate synchronization for verified preservation | get-only projection + drift detection |
+| Bidirectional lenses (§16) | research/31 | ambiguity rate := fraction of abstract edits on the drift corpus yielding multiple or no concrete candidates (metric defined in research/31; the drift corpus remains the lane deliverable); kill if most real mappings are too ambiguous, or users mistake candidate synchronization for verified preservation | get-only projection + drift detection |
 | Proof repair (§15.4) | research/28 | vs source/LSP loop baseline; kill if repair proposes weakening | context packs + human proof work |
 | Certificate overhead | docs/31 | checking ≤10% of search time, or acceptable asynchronous CI latency (docs/31's full rule) | reduce certified-lane scope |
 | Weak-memory lane (B11) | ADR-0032 — lane to be opened | reproduces the standard litmus corpus under the declared model before any envelope upgrade; until then every memory dimension reads `Unsupported(sequential-consistency-only)` | SC-only, declared as a 1.0 non-goal |
@@ -2264,33 +2422,40 @@ corrected and cited.
 
 ## 25. Immediate execution
 
-The exact first 30 pull requests are in [`notes/START_HERE_IMPLEMENTATION.md`](notes/START_HERE_IMPLEMENTATION.md).
+The ordered initial PR sequence (PR 0–PR 30, with inserts 4a/15a/25a) is
+in [`notes/START_HERE_IMPLEMENTATION.md`](notes/START_HERE_IMPLEMENTATION.md).
 
-Before PR 5 (native protocol kernel) freezes any interface, the seven
-load-bearing Revision 3 RFCs — 0026, 0027, 0028, 0030, 0031, 0032, 0037 —
-are expanded from summaries to specifications: field types, enums,
-classification lattices, IDL, versioning, and RFC-2119 language, each
-reconciled one-to-one with this plan's corresponding section. Where plan
-prose and RFC disagree, the RFC is corrected and becomes normative. The
-plan is a map, not the spec.
+The seven load-bearing Revision 3 RFCs (0026, 0027, 0028, 0030, 0031,
+0032, 0037) are expanded to specification form — field types, enums,
+classification lattices, versioning, RFC-2119 language — and the
+execution layer is reconciled: START_HERE carries PR 0, the Phase A
+Lean band (PR 4a; the proof *service* remains PR 28), the four
+`continuum-kernel-*` crates at PR 9, the CML parser (15a) and SARIF
+(25a) PRs, and per-PR gate annotations; the G0 matrix carries
+Status/Evidence/Decision columns, the DX-09 preregistration
+requirement, and the §22 re-homing decisions; the dossier validator
+enforces gate-citation hygiene, bidirectional plan↔docs/52 bullet
+correspondence, and START_HERE gate annotations. Where plan prose and
+RFC disagree, the RFC is corrected and becomes normative. The plan is a
+map, not the spec.
 
-The execution layer is reconciled in the same pass; both files predate
-this revision. `notes/START_HERE_IMPLEMENTATION.md`: add PR 0 (the RFC
-expansion above plus the §21.1 license and corpus-redistribution
-decisions), move Lean pinning and the T0/T1 seed theorems into the
-Phase A band (the proof *service* remains PR 28), rewrite PR 9 for the
-four `continuum-kernel-*` crates with wire-form checking and the size
-covenant, align PR 2 with ADR-0013's canonical-identity rule, add a
-Phase B CML core-fragment parser PR and a Phase C SARIF PR, align PR 5
-operation names and PR 13 commands with §10.2/§13.4 (including
-`explain`, `debug`, and `repair`), give PR 22 receipts the gate-profile
-and `NotYetEnforced` fields, remove the unregistered `continuum-protocol`
-crate, and annotate every PR with the gate(s) it advances.
-`notes/G0_SPIKE_MATRIX.md`: add Status / Evidence / Decision columns
-(the home of §0.3's counts), the DX-09 preregistration requirement, and
-the G0 re-homing decisions of §22. `tools/validate_dossier.py` gains
-checks for gate-citation translation, plan↔docs/52 bullet
-correspondence, and START_HERE gate annotations.
+The following specification debt remains open and is paid before PR 5
+(native protocol kernel) freezes any interface; each item names its
+target file so closure is checkable:
+
+- RFC 0026: the normative IDL file (currently referenced, not present);
+- RFC 0037: the intent-bundle distribution and convergence section
+  (§4.2.1);
+- `schemas/intent-contract.schema.json`: a structured property-AST
+  expression form with canonical normalization, replacing the bare
+  `expression` string;
+- docs/35, RFC 0026, ADR-0018, and docs/42: absorb the §4.5/§4.6/§4.7
+  operational contract (purge and `Redacted(reason, commitment)`,
+  backup and verified restore, the cross-user dedup existence-oracle
+  rule, two-epoch migration, `Preserved | Revalidate | Incompatible`
+  compatibility statements, engine-defect artifacts);
+- docs/41: regenerate around the 12-gate, phase-profile repair design
+  (RFC 0032 is normative in the interim).
 
 The first demonstration should be brutally concrete:
 

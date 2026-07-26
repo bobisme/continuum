@@ -122,7 +122,7 @@ REFINES
 - fuzzed against malformed/adversarial input;
 - specified separately from the emitter.
 
-Suggested initial code-size covenant: fewer than 15,000 non-test lines across decoder, semantics, and certificate checks. The number is a forcing function, not a proof of trustworthiness.
+Code-size covenant (binding — plan §20 and START_HERE PR 9 adopt it as the kernel-crate rule): fewer than 15,000 non-test lines across decoder, semantics, and certificate checks. The number is a forcing function, not a proof of trustworthiness.
 
 ## 6. Certificate formats
 

@@ -1,7 +1,7 @@
 # RFC 0012: Lean Metatheory and Reflective Certificates
 
 **Status:** Proposed  
-**Target gates:** G0-Proof, G2, G3, G4
+**Target gates:** G6 (proof service; translated from the Revision 2 proof and verification gates per docs/26 — suffixes retired by plan §22)
 
 ## Goals
 

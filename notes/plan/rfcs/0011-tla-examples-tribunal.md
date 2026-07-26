@@ -1,7 +1,7 @@
 # RFC 0011: TLA+ Examples Compatibility Tribunal
 
 **Status:** Proposed  
-**Target gates:** G0-Corpus through G6-Corpus  
+**Target gates:** G9 (corpus interaction parity; translated from the Revision 2 corpus gate ladder, docs/26)  
 **Normative corpus:** `corpus/tla-examples/validated-examples.csv`
 
 ## Summary

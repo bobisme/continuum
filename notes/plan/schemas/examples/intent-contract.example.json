@@ -82,7 +82,9 @@
     "faults": "no-removal",
     "non_vacuity": "no-removal",
     "observers": "review",
+    "optimization": "review",
     "properties": "locked",
+    "security_policy": "review",
     "trust_boundaries": "no-expansion"
   },
   "schema_version": "1.0",
@@ -93,6 +95,15 @@
     ],
     "fragments": [
       "Finite"
+    ]
+  },
+  "security_policy": {
+    "capability_requirements": [
+      "revise-intent"
+    ],
+    "data_classification": "internal",
+    "redaction_classes": [
+      "production-trace-payload"
     ]
   },
   "trust_boundaries": {

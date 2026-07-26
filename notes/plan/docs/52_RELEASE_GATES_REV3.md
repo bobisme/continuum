@@ -65,6 +65,8 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 - reuse edges carry their class (Exact/Validated/Conservative/Experimental) and mismatches are minimized and quarantine the class;
 - proof and certificate freshness is tracked;
 - crash-safe cache/publication;
+- evidence queries and context compilation meet the docs/34 targets at
+  ≥10^7 evidence nodes on the reference workload;
 - interactive latency targets (docs/34) hold on reference workloads.
 
 ## G6 — Proof service

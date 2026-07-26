@@ -41,8 +41,8 @@
     {
       "count": 196,
       "expandable": true,
-      "kind": "independent_event",
-      "reason": "observer-independent noise"
+      "kind": "observer-independent noise event",
+      "reason": "slice-irrelevant"
     }
   ],
   "question": "why did AckImpliesDurable fail?",
@@ -63,5 +63,7 @@
     }
   ],
   "verdict": "refuted",
-  "snapshot": "ws_demo1"
+  "snapshot": "ws_demo1",
+  "semantic_epoch": "sem3-r3-demo",
+  "content_hash": "blake3:2f7c1d9ce55a4f0b8d3e6a17c4b9028d"
 }

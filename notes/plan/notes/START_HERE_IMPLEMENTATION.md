@@ -122,7 +122,7 @@ Implement:
 - kernel-check the existing seed modules under `lean/Continuum/`;
 - T0/T1 theorems: transition-system safety, stuttering simulation, finite-closure certificate soundness.
 
-**Exit:** T0/T1 compile with no `sorry` and empty axiom manifests (ADR-0022). The proof *service* remains PR 28.
+**Exit:** T0/T1 compile with no `sorry` and empty axiom manifests (RFC 0012 theorem ladder; axiom manifests per ADR-0035). The proof *service* remains PR 28.
 
 ### PR 5 — Native protocol kernel [G1, G2]
 

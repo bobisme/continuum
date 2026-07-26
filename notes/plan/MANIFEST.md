@@ -6,9 +6,9 @@
 
 ## Summary
 
-- Inventoried files, excluding this manifest and checksums: **300**
-- Bytes, excluding this manifest and checksums: **1,282,498**
-- Approximate Markdown words: **125,626**
+- Inventoried files, excluding this manifest and checksums: **301**
+- Bytes, excluding this manifest and checksums: **1,370,579**
+- Approximate Markdown words: **137,265**
 - ADRs: **52**
 - RFCs: **40**
 - Research programs: **36**
@@ -22,7 +22,7 @@
 | `.ctm` | 4 |
 | `.json` | 40 |
 | `.lean` | 17 |
-| `.md` | 212 |
+| `.md` | 213 |
 | `.py` | 18 |
 | `.rs` | 1 |
 | `.toml` | 5 |
@@ -32,7 +32,7 @@
 
 | Area | Files |
 |---|---:|
-| `.` | 7 |
+| `.` | 8 |
 | `adr` | 53 |
 | `archive` | 3 |
 | `benchmarks` | 6 |
@@ -54,9 +54,10 @@
 - `README.md` — 6,514 bytes — Continuum Project Dossier — Revision 3
 - `REVISION_3_CHANGELOG.md` — 3,101 bytes — Revision 3 Changelog
 - `VALIDATION_REPORT.md` — 4,736 bytes — Dossier Validation Report — Revision 3
-- `plan.md` — 83,619 bytes — Continuum: Revision 3 Master Implementation Plan
+- `plan.md` — 92,705 bytes — Continuum: Revision 3 Master Implementation Plan
 - `plan.review.1.md` — 73,838 bytes — Review of `plan.md` (Revision 3 Master Implementation Plan) and the accompanying dossier
 - `plan.review.2.md` — 58,320 bytes — Review of `plan.md` (Revision 3 Master Implementation Plan) — second pass
+- `plan.review.3.md` — 71,313 bytes — Review of `plan.md` (Revision 3 Master Implementation Plan) — third pass
 - `validation-results.json` — 947 bytes
 ### `adr`
 
@@ -81,7 +82,7 @@
 - `adr/0019-adapter-isolation.md` — 984 bytes — ADR-0019: Isolate runtime/compiler/foreign-tool adapters from semantic core
 - `adr/0020-experimental-mathematics-governance.md` — 1,085 bytes — ADR-0020: Gate speculative mathematics behind falsifiable research programs
 - `adr/0021-tla-examples-corpus-contract.md` — 2,666 bytes — ADR-0021: Make the TLA+ Examples corpus a release contract
-- `adr/0022-lean4-metatheory-and-certificate-authority.md` — 2,970 bytes — ADR-0022: Use Lean 4 as metatheory and certificate authority
+- `adr/0022-lean4-metatheory-and-certificate-authority.md` — 3,170 bytes — ADR-0022: Use Lean 4 as metatheory and certificate authority
 - `adr/0023-semantic-triptych-and-independent-paths.md` — 2,204 bytes — ADR-0023: Maintain a semantic triptych with independent paths
 - `adr/0024-observer-indexed-independence.md` — 2,105 bytes — ADR-0024: Index independence by observation and property contracts
 - `adr/0025-stratified-model-language-fragments.md` — 1,944 bytes — ADR-0025: Stratify the model language into declared semantic fragments
@@ -149,7 +150,7 @@
 - `docs/00_EXECUTIVE_SPEC.md` — 6,112 bytes — Continuum Executive Specification — Revision 2
 - `docs/01_ARCHITECTURE.md` — 6,635 bytes — Continuum Architecture — Revision 2
 - `docs/02_SEMANTICS.md` — 7,464 bytes — Semantic Contract
-- `docs/03_ASSURANCE_AND_TCB.md` — 7,928 bytes — Assurance Model and Trusted Computing Base
+- `docs/03_ASSURANCE_AND_TCB.md` — 7,988 bytes — Assurance Model and Trusted Computing Base
 - `docs/04_IMPLEMENTATION_ROADMAP.md` — 4,201 bytes — Implementation Roadmap — Revision 2
 - `docs/05_RESEARCH_LANDSCAPE.md` — 12,556 bytes — Research Landscape and Gap Analysis
 - `docs/06_RESEARCH_AGENDA.md` — 13,666 bytes — Frontier Research Agenda
@@ -180,7 +181,7 @@
 - `docs/31_FALSIFICATION_AND_KILL_CRITERIA.md` — 3,346 bytes — Falsification and Kill Criteria
 - `docs/32_CORPUS_PORTING_PLAYBOOK.md` — 2,435 bytes — Corpus Porting Playbook
 - `docs/33_REVISION_3_ARCHITECTURE.md` — 6,221 bytes — Revision 3 Architecture: Intent, Evidence, and Workbench
-- `docs/34_DEVELOPER_EXPERIENCE_PRODUCT_CONTRACT.md` — 4,820 bytes — Developer Experience Product Contract
+- `docs/34_DEVELOPER_EXPERIENCE_PRODUCT_CONTRACT.md` — 5,187 bytes — Developer Experience Product Contract
 - `docs/35_CONTINUUMD_WORKBENCH_DAEMON.md` — 4,687 bytes — `continuumd`: Authoritative Workbench Daemon
 - `docs/36_AGENT_PROTOCOL_AND_TOOL_CONTRACTS.md` — 4,562 bytes — Agent Protocol and Tool Contracts
 - `docs/37_HUMAN_WORKFLOWS.md` — 3,544 bytes — Human Workflows
@@ -190,15 +191,15 @@
 - `docs/41_REPAIR_TRANSACTIONS.md` — 3,522 bytes — Repair Transactions
 - `docs/42_INCREMENTAL_VERIFICATION.md` — 3,255 bytes — Incremental Verification
 - `docs/43_CONTINUUM_FORGE.md` — 4,848 bytes — Continuum Forge: Verified Algorithm Invention
-- `docs/44_MULTI_AGENT_EVIDENCE_GRAPH.md` — 3,323 bytes — Multi-Agent Evidence Graph
+- `docs/44_MULTI_AGENT_EVIDENCE_GRAPH.md` — 3,505 bytes — Multi-Agent Evidence Graph
 - `docs/45_CONTINUUMBENCH.md` — 4,204 bytes — ContinuumBench
 - `docs/46_IDE_CLI_DAP_MCP_AND_SARIF.md` — 2,869 bytes — IDE, CLI, DAP, MCP, and SARIF Integration
 - `docs/47_ONBOARDING_AND_PROGRESSIVE_DISCLOSURE.md` — 3,121 bytes — Onboarding and Progressive Disclosure
-- `docs/48_EXPLANATION_SCIENCE.md` — 2,970 bytes — Explanation Science Program
+- `docs/48_EXPLANATION_SCIENCE.md` — 3,439 bytes — Explanation Science Program
 - `docs/49_SECURITY_FOR_AUTONOMOUS_AGENTS.md` — 3,309 bytes — Security for Autonomous Agents
 - `docs/50_AGENT_EVALUATION_AND_REWARD_HACKING.md` — 2,887 bytes — Agent Evaluation and Reward Hacking
 - `docs/51_PRODUCT_WALKTHROUGHS.md` — 3,802 bytes — Product Walkthroughs
-- `docs/52_RELEASE_GATES_REV3.md` — 6,954 bytes — Revision 3 Release Gates
+- `docs/52_RELEASE_GATES_REV3.md` — 7,077 bytes — Revision 3 Release Gates
 - `docs/53_SPIKE_FINDINGS_REV3.md` — 5,952 bytes — Revision 3 Executable Spike Report
 - `docs/54_THEORY_OF_AGENTIC_ACCELERATION.md` — 3,759 bytes — Theory of Agentic Acceleration
 - `docs/55_AGENT_API_REFERENCE_SKETCH.md` — 8,623 bytes — Agent API Reference Sketch
@@ -236,7 +237,7 @@
 ### `notes`
 
 - `notes/G0_SPIKE_MATRIX.md` — 6,361 bytes — G0 Falsification Matrix — Revision 3
-- `notes/START_HERE_IMPLEMENTATION.md` — 15,699 bytes — Start Here: Revision 3 Implementation Sequence
+- `notes/START_HERE_IMPLEMENTATION.md` — 15,744 bytes — Start Here: Revision 3 Implementation Sequence
 ### `research`
 
 - `research/01-true-concurrency.md` — 6,640 bytes — Research Note 01: True Concurrency as the Native Verification Object
@@ -288,34 +289,34 @@
 - `rfcs/0008-liveness-fairness-and-progress.md` — 3,743 bytes — RFC 0008: Liveness, Fairness, and Progress
 - `rfcs/0009-views-and-refinement.md` — 4,085 bytes — RFC 0009: Zoomable Views and Refinement
 - `rfcs/0010-assurance-results-and-claims.md` — 3,184 bytes — RFC 0010: Assurance Results and Claims
-- `rfcs/0011-tla-examples-tribunal.md` — 4,674 bytes — RFC 0011: TLA+ Examples Compatibility Tribunal
-- `rfcs/0012-lean-metatheory-and-reflective-certificates.md` — 4,889 bytes — RFC 0012: Lean Metatheory and Reflective Certificates
+- `rfcs/0011-tla-examples-tribunal.md` — 4,737 bytes — RFC 0011: TLA+ Examples Compatibility Tribunal
+- `rfcs/0012-lean-metatheory-and-reflective-certificates.md` — 4,994 bytes — RFC 0012: Lean Metatheory and Reflective Certificates
 - `rfcs/0013-semantic-triptych.md` — 2,916 bytes — RFC 0013: Semantic Triptych and Cross-Path Validation
 - `rfcs/0014-observer-indexed-dpor.md` — 3,537 bytes — RFC 0014: Observer-Indexed DPOR and Causal Reduction
 - `rfcs/0015-temporal-fairness-and-hyperproperties.md` — 3,073 bytes — RFC 0015: Temporal, Fairness, and Hyperproperty Semantics
 - `rfcs/0016-parameterized-and-nominal-verification.md` — 2,565 bytes — RFC 0016: Parameterized, Symmetric, and Nominal Verification
 - `rfcs/0017-assumption-and-protocol-synthesis-games.md` — 2,466 bytes — RFC 0017: Assumption and Protocol Synthesis as Games
 - `rfcs/0018-agent-native-proof-and-repair-loop.md` — 2,341 bytes — RFC 0018: Agent-Native Proof and Repair Loop
-- `rfcs/0019-corpus-port-manifest.md` — 1,880 bytes — RFC 0019: Corpus Port Manifest and Evidence Schema
+- `rfcs/0019-corpus-port-manifest.md` — 2,003 bytes — RFC 0019: Corpus Port Manifest and Evidence Schema
 - `rfcs/0020-proof-producing-transformations.md` — 2,355 bytes — RFC 0020: Proof-Producing Transformations and Optimization Pipeline
 - `rfcs/0021-corpus-oracle-protocol.md` — 921 bytes — RFC 0021: Corpus Oracle Protocol
 - `rfcs/0022-weak-memory-local-refinement.md` — 749 bytes — RFC 0022: Weak-Memory Local Refinement
 - `rfcs/0023-checked-choreographic-projection.md` — 703 bytes — RFC 0023: Checked Choreographic Projection
 - `rfcs/0024-proof-receipt-format.md` — 695 bytes — RFC 0024: Proof Receipt Format
 - `rfcs/0025-property-directed-abstraction-loop.md` — 694 bytes — RFC 0025: Property-Directed Abstraction Loop
-- `rfcs/0026-continuumd-native-protocol.md` — 6,771 bytes — RFC 0026: `continuumd` Native Protocol
-- `rfcs/0027-agent-tool-protocol.md` — 4,920 bytes — RFC 0027: Agent Tool Protocol
-- `rfcs/0028-context-pack-format.md` — 5,207 bytes — RFC 0028: Context Pack Format and Compiler
+- `rfcs/0026-continuumd-native-protocol.md` — 6,909 bytes — RFC 0026: `continuumd` Native Protocol
+- `rfcs/0027-agent-tool-protocol.md` — 5,190 bytes — RFC 0027: Agent Tool Protocol
+- `rfcs/0028-context-pack-format.md` — 5,709 bytes — RFC 0028: Context Pack Format and Compiler
 - `rfcs/0029-causal-verification-debugger.md` — 808 bytes — RFC 0029: Causal Verification Debugger
 - `rfcs/0030-incremental-semantic-query-engine.md` — 5,661 bytes — RFC 0030: Incremental Semantic Query Engine
-- `rfcs/0031-semantic-and-intent-diff.md` — 5,716 bytes — RFC 0031: Semantic and Intent Diff
-- `rfcs/0032-repair-transaction-protocol.md` — 6,178 bytes — RFC 0032: Repair Transaction Protocol
+- `rfcs/0031-semantic-and-intent-diff.md` — 5,907 bytes — RFC 0031: Semantic and Intent Diff
+- `rfcs/0032-repair-transaction-protocol.md` — 6,510 bytes — RFC 0032: Repair Transaction Protocol
 - `rfcs/0033-continuum-forge.md` — 985 bytes — RFC 0033: Continuum Forge
 - `rfcs/0034-continuum-bench.md` — 811 bytes — RFC 0034: ContinuumBench Task and Grader Contract
 - `rfcs/0035-isolated-lean-proof-service.md` — 812 bytes — RFC 0035: Isolated Lean Proof Service
 - `rfcs/0036-proof-oriented-correspondence.md` — 772 bytes — RFC 0036: Proof-Oriented Model/Program Correspondence
-- `rfcs/0037-intent-contract.md` — 7,136 bytes — RFC 0037: Intent Contract Schema and Policy
-- `rfcs/0038-multi-agent-evidence-graph.md` — 1,173 bytes — RFC 0038: Multi-Agent Evidence Graph
+- `rfcs/0037-intent-contract.md` — 7,304 bytes — RFC 0037: Intent Contract Schema and Policy
+- `rfcs/0038-multi-agent-evidence-graph.md` — 2,299 bytes — RFC 0038: Multi-Agent Evidence Graph
 - `rfcs/0039-explanation-engine.md` — 663 bytes — RFC 0039: Explanation Engine
 - `rfcs/0040-protocol-adapters.md` — 713 bytes — RFC 0040: LSP, DAP, MCP, SARIF, and CLI Adapters
 - `rfcs/README.md` — 3,519 bytes — Requests for Comments
@@ -324,21 +325,21 @@
 - `schemas/assurance-result.schema.json` — 5,339 bytes
 - `schemas/benchmark-task.schema.json` — 1,936 bytes
 - `schemas/cir.schema.json` — 11,792 bytes
-- `schemas/context-pack.schema.json` — 6,222 bytes
+- `schemas/context-pack.schema.json` — 7,471 bytes
 - `schemas/corpus-port.schema.json` — 4,098 bytes
-- `schemas/crashpack.schema.json` — 3,851 bytes
+- `schemas/crashpack.schema.json` — 3,850 bytes
 - `schemas/domain-pack.schema.json` — 4,674 bytes
 - `schemas/evidence-graph-edge.schema.json` — 1,948 bytes
 - `schemas/evidence-graph-node.schema.json` — 3,578 bytes
 - `schemas/examples/benchmark-task.example.json` — 611 bytes
-- `schemas/examples/context-pack.example.json` — 1,424 bytes
+- `schemas/examples/context-pack.example.json` — 1,526 bytes
 - `schemas/examples/counterexample.crashpack.json` — 1,181 bytes
 - `schemas/examples/diehard.corpus-port.json` — 1,760 bytes
 - `schemas/examples/evidence-graph-edge.example.json` — 415 bytes
 - `schemas/examples/evidence-graph-node.example.json` — 392 bytes
 - `schemas/examples/finite-closure.proof-receipt.json` — 1,365 bytes
 - `schemas/examples/finite-proof.assurance.json` — 1,681 bytes
-- `schemas/examples/intent-contract.example.json` — 1,997 bytes
+- `schemas/examples/intent-contract.example.json` — 2,255 bytes
 - `schemas/examples/minimal.cir.json` — 1,102 bytes
 - `schemas/examples/repair-transaction.example.json` — 896 bytes
 - `schemas/examples/semantic-diff.example.json` — 752 bytes
@@ -346,10 +347,10 @@
 - `schemas/examples/synthesis-candidate.example.json` — 563 bytes
 - `schemas/examples/verification-task.example.json` — 532 bytes
 - `schemas/examples/workspace-snapshot.example.json` — 521 bytes
-- `schemas/intent-contract.schema.json` — 10,746 bytes
+- `schemas/intent-contract.schema.json` — 10,997 bytes
 - `schemas/proof-receipt.schema.json` — 3,943 bytes
 - `schemas/repair-transaction.schema.json` — 4,876 bytes
-- `schemas/semantic-diff.schema.json` — 3,876 bytes
+- `schemas/semantic-diff.schema.json` — 4,302 bytes
 - `schemas/synthesis-candidate.schema.json` — 2,761 bytes
 - `schemas/verification-task.schema.json` — 2,956 bytes
 - `schemas/workspace-snapshot.schema.json` — 2,301 bytes
@@ -376,4 +377,4 @@
 ### `tools`
 
 - `tools/generate_manifest.py` — 3,785 bytes
-- `tools/validate_dossier.py` — 21,471 bytes
+- `tools/validate_dossier.py` — 22,404 bytes

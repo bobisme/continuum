@@ -50,7 +50,8 @@
       },
       "required": [
         "invalidated",
-        "reused"
+        "reused",
+        "unknown"
       ],
       "type": "object"
     },
@@ -70,7 +71,22 @@
             ]
           },
           "field": {
-            "type": "string"
+            "enum": [
+              "properties",
+              "assumptions",
+              "observers",
+              "scope",
+              "trust_boundaries",
+              "bounds",
+              "faults",
+              "fairness",
+              "completion_policy",
+              "nondeterminism",
+              "assurance",
+              "optimization",
+              "non_vacuity",
+              "security_policy"
+            ]
           },
           "protected": {
             "type": "boolean"
