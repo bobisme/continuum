@@ -81,6 +81,38 @@ A complement stores why the current correspondence was chosen, source spans, gen
 - abstract requirement change with many implementation options;
 - generated Rust skeleton round trip.
 
+## Ambiguity metric
+
+Plan §24.5's lenses row keys on a quantity this note must define:
+
+```text
+ambiguity rate :=
+  fraction of abstract edits in the drift corpus for which
+  put? yields multiple concrete candidate edits, or none
+```
+
+The denominator is a **drift corpus**: each experiment scenario above
+(field rename/refactor, action split/merge, internal buffering, new
+observer publication, asynchronous effect/cancellation, abstract
+requirement change, generated-skeleton round trip) is instantiated as
+concrete abstract-edit instances over real model/program pairs, with a
+recorded ground-truth set of acceptable concrete edits. Building this
+corpus is a lane deliverable; the metric is undefined — and the lane
+cannot promote — without it.
+
+Promotion and kill are keyed to this rate together with the existing
+kill criteria below:
+
+- **promotion** requires a measured ambiguity rate on the drift corpus
+  low enough that candidate-plus-obligation proposals are useful on the
+  majority of corpus edits (numeric target fixed at ratification per
+  plan §24.5 — draft, pending lane-owner ratification; an unratified
+  threshold may not survive Phase A);
+- **kill** if the rate shows most real mappings are too ambiguous for
+  useful proposals, or if users mistake candidate synchronization for
+  verified preservation — both restated from the kill criteria below,
+  the first now measurable as this rate.
+
 ## Lean program
 
 Formalize a finite pure core:

@@ -34,10 +34,24 @@ SCHEMA_PAIRS = {
     "schemas/synthesis-candidate.schema.json": "schemas/examples/synthesis-candidate.example.json",
     "schemas/benchmark-task.schema.json": "schemas/examples/benchmark-task.example.json",
     "schemas/evidence-graph-node.schema.json": "schemas/examples/evidence-graph-node.example.json",
+    "schemas/evidence-graph-edge.schema.json": "schemas/examples/evidence-graph-edge.example.json",
 }
 
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 BIB_ID_RE = re.compile(r"^### \[(S[^\]]+)\]", re.MULTILINE)
+
+# Retired terminology (plan §25 / review-2 Appendix A). The optional
+# "differential" captures the pre-rename long form of the same retired gate name.
+RETIRED_NAME_RES = [
+    re.compile(r"clean[-\s]build\s+(?:differential\s+)?tribunal", re.IGNORECASE),
+    re.compile(r"clean\s+recomputation\s+(?:differential\s+)?tribunal", re.IGNORECASE),
+]
+CP_HANDLE_RE = re.compile(r"[\"'`]cp_[A-Za-z0-9]")
+GATE_HEADING_RE = re.compile(r"^#{2,3}\s+G(\d+)\s*[—–-]", re.MULTILINE)
+GATE_SUFFIX_RE = re.compile(r"\bG\d+-(?:Corpus|Proof)\b")
+PR_HEADING_RE = re.compile(r"^### PR (\d+)\b.*$", re.MULTILINE)
+PR_GATE_ANNOTATION_RE = re.compile(r"\[G[0-9]")
+PREFIX_LINE_RE = re.compile(r"^([a-z]+)_\*", re.MULTILINE)
 
 
 def run(cmd: list[str], cwd: Path = ROOT) -> str:
@@ -233,6 +247,223 @@ def check_csv() -> dict[str, Any]:
     return result
 
 
+def _is_excluded_from_retired_scan(path: Path) -> bool:
+    rel = path.relative_to(ROOT)
+    if "archive" in rel.parts or "__pycache__" in rel.parts or ".git" in rel.parts:
+        return True
+    if rel.name.startswith("plan.review.") and rel.suffix == ".md":
+        return True
+    if rel.as_posix() == "docs/26_RELEASE_GATES_REV2.md":
+        return True
+    # The validator defines the retired phrases; generated reports may quote them.
+    if rel.as_posix() in ("tools/validate_dossier.py", "validation-results.json"):
+        return True
+    return False
+
+
+def check_retired_names() -> dict[str, Any]:
+    phrase_hits: list[str] = []
+    handle_hits: list[str] = []
+    scanned = 0
+    for path in sorted(ROOT.rglob("*")):
+        if not path.is_file() or _is_excluded_from_retired_scan(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        scanned += 1
+        rel = path.relative_to(ROOT)
+        for number, line in enumerate(text.splitlines(), start=1):
+            for pattern in RETIRED_NAME_RES:
+                match = pattern.search(line)
+                if not match:
+                    continue
+                # Historical mentions documenting the rename itself are allowed:
+                # e.g. (Renamed from "clean-build Tribunal"; ...) or
+                # 'formerly called the "clean-build Tribunal"'.
+                if re.search(r"renamed from|formerly called", line[: match.start()], re.IGNORECASE):
+                    continue
+                phrase_hits.append(f"{rel}:{number}: retired Tribunal name: {line.strip()}")
+                break
+        # cp_ crashpack handles (retired in favor of crash_*): docs/, examples/,
+        # schemas/, notes/ only; the synthesis-candidate example legitimately
+        # uses cp_reject_true-style counterexample labels.
+        if rel.parts[0] in ("docs", "examples", "schemas", "notes") and rel.as_posix() != (
+            "schemas/examples/synthesis-candidate.example.json"
+        ):
+            for number, line in enumerate(text.splitlines(), start=1):
+                if CP_HANDLE_RE.search(line):
+                    handle_hits.append(f"{rel}:{number}: retired cp_ handle: {line.strip()}")
+    if phrase_hits or handle_hits:
+        raise AssertionError("retired names present:\n" + "\n".join(phrase_hits + handle_hits))
+    return {"files_scanned": scanned}
+
+
+def _normalize_tokens(text: str) -> frozenset[str]:
+    return frozenset(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
+def _parse_gate_sections(text: str) -> dict[int, list[str]]:
+    """Map gate number -> list of bullet texts (wrapped bullets joined)."""
+    gates: dict[int, list[str]] = {}
+    current: int | None = None
+    bullet: list[str] = []
+
+    def flush() -> None:
+        if current is not None and bullet:
+            gates[current].append(" ".join(bullet))
+        bullet.clear()
+
+    for line in text.splitlines():
+        heading = GATE_HEADING_RE.match(line)
+        if heading:
+            flush()
+            current = int(heading.group(1))
+            gates.setdefault(current, [])
+            continue
+        if line.startswith("#"):
+            flush()
+            current = None
+            continue
+        if current is None:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            flush()
+            bullet.append(stripped[2:].strip())
+        elif bullet and stripped and line[:1].isspace():
+            bullet.append(stripped)
+        elif not stripped:
+            flush()
+    flush()
+    return gates
+
+
+def check_gate_scheme_correspondence() -> dict[str, Any]:
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    match = re.search(r"^## 22\..*?(?=^## \d)", plan_text, re.MULTILINE | re.DOTALL)
+    assert match, "plan.md section 22 not found"
+    plan_gates = _parse_gate_sections(match.group(0))
+    docs_gates = _parse_gate_sections(
+        (ROOT / "docs/52_RELEASE_GATES_REV3.md").read_text(encoding="utf-8")
+    )
+    expected = set(range(11))
+    assert set(plan_gates) == expected, f"plan.md section 22 gates: {sorted(plan_gates)}"
+    assert set(docs_gates) == expected, f"docs/52 gates: {sorted(docs_gates)}"
+
+    unmatched: list[str] = []
+    compared = 0
+    for gate in sorted(plan_gates):
+        doc_token_sets = [_normalize_tokens(b) for b in docs_gates[gate]]
+        for plan_bullet in plan_gates[gate]:
+            compared += 1
+            plan_tokens = _normalize_tokens(plan_bullet)
+            best = max(
+                (
+                    len(plan_tokens & doc_tokens) / len(plan_tokens | doc_tokens)
+                    for doc_tokens in doc_token_sets
+                    if plan_tokens | doc_tokens
+                ),
+                default=0.0,
+            )
+            if best < 0.6:
+                unmatched.append(
+                    f"G{gate}: no docs/52 bullet with >=0.6 overlap (best {best:.2f}) "
+                    f"for plan bullet: {plan_bullet}"
+                )
+    if unmatched:
+        raise AssertionError("plan section 22 <-> docs/52 mismatch:\n" + "\n".join(unmatched))
+    return {"gates": len(expected), "plan_bullets": compared}
+
+
+def _numbered_markdown(directory: str, low: int, high: int) -> list[Path]:
+    paths = []
+    for path in sorted((ROOT / directory).glob("*.md")):
+        match = re.match(r"(\d+)[_-]", path.name)
+        if match and low <= int(match.group(1)) <= high:
+            paths.append(path)
+    return paths
+
+
+def check_gate_citation_hygiene() -> dict[str, Any]:
+    paths = (
+        _numbered_markdown("docs", 33, 55)
+        + _numbered_markdown("adr", 36, 52)
+        + _numbered_markdown("rfcs", 26, 40)
+    )
+    violations: list[str] = []
+    for path in paths:
+        rel = path.relative_to(ROOT)
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for token in GATE_SUFFIX_RE.findall(line):
+                violations.append(f"{rel}:{number}: retired gate citation {token}: {line.strip()}")
+    if violations:
+        raise AssertionError("suffixed gate citations:\n" + "\n".join(violations))
+    return {"files": len(paths)}
+
+
+def check_start_here_gate_annotations() -> dict[str, Any]:
+    text = (ROOT / "notes/START_HERE_IMPLEMENTATION.md").read_text(encoding="utf-8")
+    headings = PR_HEADING_RE.findall(text)
+    missing = [
+        f"PR {match.group(1)}: {match.group(0).strip()}"
+        for match in PR_HEADING_RE.finditer(text)
+        if not PR_GATE_ANNOTATION_RE.search(match.group(0))
+    ]
+    assert headings, "no '### PR <n>' headings found in notes/START_HERE_IMPLEMENTATION.md"
+    if missing:
+        raise AssertionError("PR headings missing [G<n>] gate annotation:\n" + "\n".join(missing))
+    return {"pr_headings": len(headings)}
+
+
+def _collect_pattern_values(node: Any) -> list[str]:
+    patterns: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "pattern" and isinstance(value, str):
+                patterns.append(value)
+            else:
+                patterns.extend(_collect_pattern_values(value))
+    elif isinstance(node, list):
+        for item in node:
+            patterns.extend(_collect_pattern_values(item))
+    return patterns
+
+
+def check_handle_prefix_registry() -> dict[str, Any]:
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    section = re.search(r"^### 4\.4 .*?(?=^### )", plan_text, re.MULTILINE | re.DOTALL)
+    assert section, "plan.md section 4.4 not found"
+    fence = re.search(r"```text\n(.*?)```", section.group(0), re.DOTALL)
+    assert fence, "plan.md section 4.4 prefix code block not found"
+    registry = set(PREFIX_LINE_RE.findall(fence.group(1)))
+    assert registry, "no prefixes parsed from plan.md section 4.4"
+    for required in ("cap", "diff"):
+        assert required in registry, f"section 4.4 registry missing {required}_*: {sorted(registry)}"
+
+    unknown: list[str] = []
+    anchored = 0
+    for path in sorted((ROOT / "schemas").glob("*.schema.json")):
+        schema = json.loads(path.read_text(encoding="utf-8"))
+        for pattern in _collect_pattern_values(schema):
+            group = re.match(r"\^\((\w+(?:\|\w+)+)\)_", pattern)
+            single = re.match(r"\^([A-Za-z][A-Za-z0-9]*)_", pattern)
+            prefixes = group.group(1).split("|") if group else (
+                [single.group(1)] if single else []
+            )
+            for prefix in prefixes:
+                anchored += 1
+                if prefix not in registry:
+                    unknown.append(
+                        f"{path.relative_to(ROOT)}: pattern {pattern!r} uses "
+                        f"prefix {prefix!r} not in plan section 4.4 registry"
+                    )
+    if unknown:
+        raise AssertionError("unregistered handle prefixes:\n" + "\n".join(unknown))
+    return {"registry_prefixes": len(registry), "anchored_patterns": anchored}
+
+
 def main() -> None:
     checks = [
         ("json", check_json),
@@ -248,11 +479,24 @@ def main() -> None:
         ("numbering", check_numbering),
         ("lean_source", check_lean_source),
         ("csv", check_csv),
+        ("retired_names", check_retired_names),
+        ("gate_scheme_correspondence", check_gate_scheme_correspondence),
+        ("gate_citation_hygiene", check_gate_citation_hygiene),
+        ("start_here_gate_annotations", check_start_here_gate_annotations),
+        ("handle_prefix_registry", check_handle_prefix_registry),
     ]
     report: dict[str, Any] = {"status": "pass", "checks": {}}
+    failed: list[str] = []
     for name, fn in checks:
-        report["checks"][name] = fn()
+        try:
+            report["checks"][name] = fn()
+        except Exception as exc:  # noqa: BLE001 — report every check, then fail
+            report["status"] = "fail"
+            report["checks"][name] = {"error": f"{type(exc).__name__}: {exc}"}
+            failed.append(name)
     print(json.dumps(report, indent=2, sort_keys=True))
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

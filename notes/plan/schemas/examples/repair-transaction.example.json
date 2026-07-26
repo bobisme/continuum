@@ -1,7 +1,7 @@
 {
   "base_intent": "in_ack_v1",
-  "base_workspace": "ws_demo1",
-  "candidate_workspace": "ws_demo2",
+  "base_snapshot": "ws_demo1",
+  "candidate_snapshot": "ws_demo2",
   "changes": [
     {
       "digest": "sha256:patch",

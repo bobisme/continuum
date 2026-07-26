@@ -252,6 +252,20 @@
           "id": {
             "type": "string"
           },
+          "knowledge_projection": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "security_projection": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
           "state_projection": {
             "items": {
               "type": "string"
@@ -345,6 +359,37 @@
     },
     "schema_version": {
       "const": "1.0"
+    },
+    "security_policy": {
+      "additionalProperties": false,
+      "description": "First-class security policy group (plan §5.2): data classification, redaction classes, and capability requirements.",
+      "properties": {
+        "capability_requirements": {
+          "description": "Capabilities required to exercise the operations this intent governs (e.g. revise-intent).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "data_classification": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ]
+        },
+        "redaction_classes": {
+          "description": "Artifact classes subject to redaction/purge semantics (plan §4.5).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
     },
     "scope": {
       "additionalProperties": false,

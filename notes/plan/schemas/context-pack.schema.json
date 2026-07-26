@@ -262,7 +262,7 @@
         "engine_error"
       ]
     },
-    "workspace": {
+    "snapshot": {
       "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     }
@@ -270,7 +270,7 @@
   "required": [
     "schema_version",
     "context_id",
-    "workspace",
+    "snapshot",
     "intent",
     "question",
     "verdict",

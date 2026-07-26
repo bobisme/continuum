@@ -1,0 +1,20 @@
+{
+  "checker": "continuum-engine-reference",
+  "edge_id": "ev_edge1",
+  "evidence": [
+    "crash_demo1"
+  ],
+  "from": "ev_failure1",
+  "kind": "COUNTEREXAMPLE_TO",
+  "provenance": {
+    "actor": "service:explicit",
+    "created_at": "2026-07-24T20:05:00Z",
+    "inputs": [
+      "ev_failure1",
+      "ev_claim1"
+    ],
+    "tool": "continuum-engine-reference"
+  },
+  "schema_version": "1.0",
+  "to": "ev_claim1"
+}

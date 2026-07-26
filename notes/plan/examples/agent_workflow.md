@@ -27,7 +27,7 @@ Result:
 {
   "verdict":"refuted",
   "task":"task_82",
-  "artifacts":[{"kind":"crashpack","handle":"cp_7m"},{"kind":"context_pack","handle":"ctx_2a"}]
+  "artifacts":[{"kind":"crashpack","handle":"crash_7m"},{"kind":"context_pack","handle":"ctx_2a"}]
 }
 ```
 

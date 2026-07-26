@@ -1,4 +1,6 @@
-# ADR 0044: Incremental Semantic Database with Clean Tribunal
+# ADR 0044: Incremental Semantic Database with Incremental Parity Audit
+
+(The audit was formerly called the clean-build Tribunal; "Tribunal" now refers exclusively to the ADR-0021 corpus oracle harness.)
 
 ## Status
 Accepted.

@@ -18,7 +18,7 @@ protected intent
   → promotion receipt
 ```
 
-Do not begin with a polished web UI, a general LLM coordinator, distributed search, or a complete CML parser. The first users are the implementation team and coding agents driving the first vertical slice.
+Do not begin with a polished web UI, a general LLM coordinator, distributed search, or the full CML surface language (the Finite core fragment lands at PR 15a). The first users are the implementation team and coding agents driving the first vertical slice.
 
 ## Dependency islands
 
@@ -26,7 +26,7 @@ Do not begin with a polished web UI, a general LLM coordinator, distributed sear
 continuum-workspace / continuum-intent
           │
           ▼
-continuum-task / continuum-evidence / continuum-protocol
+continuum-task / continuum-evidence / continuumd (native protocol)
           │
     ┌─────┼─────────┐
     ▼     ▼         ▼
@@ -40,11 +40,27 @@ context / debugger / diff / repair
        Forge
 ```
 
+There is no `continuum-protocol` crate; the native protocol lives in `continuumd`. The full Revision 3 crate list is plan §20.
+
 The certificate checker may not depend on search. The model core may not depend on asupersync. Adapters may not own semantic state. Forge may not be imported by the verifier.
 
-## First 30 pull requests
+## First pull requests (PR 0 – PR 30)
 
-### PR 1 — Revision 3 constitution and epochs
+PR numbers 1–30 are stable; inserted work carries PR 0 or a lettered suffix (4a, 15a, 25a). Each heading names the release gate(s) the PR advances, per plan §22's Phase↔Gate table and the G0 staging rule.
+
+### PR 0 — Specification pass and program decisions [G1, G2]
+
+Implement (documentation, not code):
+
+- expand RFCs 0026, 0027, 0028, 0030, 0031, 0032, 0037 from summaries to full specifications: field types, enums, classification lattices, IDL, versioning, RFC-2119 language;
+- reconcile each RFC one-to-one with its plan section; where they disagree, correct the RFC and make it normative;
+- product license decision (permissive, compatible with asupersync and solver adapters, §21.1);
+- corpus per-family redistribution audit before any public benchmark release (§21.1);
+- ADR-0029 rule: foreign oracle tooling (TLC, Apalache, solvers) never ships in release binaries.
+
+**Exit:** the seven RFCs are normative specifications; PR 5 may not merge before PR 0 closes.
+
+### PR 1 — Revision 3 constitution and epochs [G1]
 
 Implement:
 
@@ -57,20 +73,20 @@ Implement:
 
 **Exit:** an unsupported empty task returns a valid machine result naming every epoch and no misleading success flag.
 
-### PR 2 — Canonical values and CAS primitives
+### PR 2 — Canonical values and CAS primitives [G1]
 
 Implement:
 
 - exact finite values from Revision 2;
 - canonical encoding and total order;
-- cryptographic content identity;
+- content identity per ADR-0013: in certified lanes, canonical content identity is primary and hash collisions are resolved by canonical comparison; 256-bit-hash identity only in explicitly labeled non-certified modes;
 - collision-injection tests;
 - atomic artifact publication;
 - authorization separate from handle possession.
 
-**Exit:** concurrent publication of identical artifacts yields one identity; artificial hash collisions are detected/resolved.
+**Exit:** concurrent publication of identical artifacts yields one identity; artificial hash collisions are detected and resolved by canonical comparison in certified lanes.
 
-### PR 3 — Workspace snapshots
+### PR 3 — Workspace snapshots [G1]
 
 Implement:
 
@@ -82,7 +98,7 @@ Implement:
 
 **Exit:** two clients can fork and analyze independently; an old snapshot remains reproducible after the working tree changes.
 
-### PR 4 — Intent Contract v0
+### PR 4 — Intent Contract v0 [G1, G3]
 
 Implement schema/types for:
 
@@ -98,20 +114,30 @@ Implement schema/types for:
 
 **Exit:** Die Hard and replicated-register intents serialize canonically; ordinary operations cannot mutate them.
 
-### PR 5 — Native protocol kernel
+### PR 4a — Lean environment and seed theorems [G6; Phase A band]
 
-Implement request/response types and local transport for:
+Implement:
 
-- workspace create/get/fork;
-- intent get;
-- task start/status/cancel/resume;
-- artifact get;
+- pinned Lean toolchain (`leanprover/lean4:v4.32.1`);
+- kernel-check the existing seed modules under `lean/Continuum/`;
+- T0/T1 theorems: transition-system safety, stuttering simulation, finite-closure certificate soundness.
+
+**Exit:** T0/T1 compile with no `sorry` and empty axiom manifests (ADR-0022). The proof *service* remains PR 28.
+
+### PR 5 — Native protocol kernel [G1, G2]
+
+Implement request/response types and local transport for the plan §10.2 operation names:
+
+- workspace.create / fork / diff / seal;
+- intent.get / diff / propose_revision / accept / reject / lock;
+- verification.start; task.status / cancel / resume / subscribe;
+- evidence.get / query / verify;
 - capability negotiation;
 - typed errors and idempotency keys.
 
-**Exit:** replaying an idempotent request returns the same task/artifact identity.
+**Exit:** replaying an idempotent request returns the same task/artifact identity. May not merge before PR 0 closes.
 
-### PR 6 — Cancel-correct task service
+### PR 6 — Cancel-correct task service [G1]
 
 Use asupersync regions for daemon work:
 
@@ -124,7 +150,7 @@ Use asupersync regions for daemon work:
 
 **Exit:** cancellation at every instrumented phase leaves either a valid continuation or no published partial artifact.
 
-### PR 7 — Evidence Graph v0
+### PR 7 — Evidence Graph v0 [G1]
 
 Implement node/edge/status types, immutable versions, and queries:
 
@@ -135,7 +161,7 @@ Implement node/edge/status types, immutable versions, and queries:
 
 **Exit:** an untrusted client cannot promote a proposal to validated/proved.
 
-### PR 8 — Exact finite model service
+### PR 8 — Exact finite model service [G1, G2]
 
 Wrap Revision 2 reference semantics behind native protocol:
 
@@ -147,18 +173,20 @@ Wrap Revision 2 reference semantics behind native protocol:
 
 **Exit:** Die Hard returns 16 states and depth-6 solution through the daemon API.
 
-### PR 9 — Independent certificate service
+### PR 9 — Trusted kernel crates [G1, G6]
 
-Separate process/crate for:
+Implement the trusted checking base as four crates — `continuum-kernel-core`, `continuum-kernel-sat`, `continuum-kernel-smt`, `continuum-kernel-temporal` (plan §20):
 
 - finite closure/type certificate checking;
-- receipt generation;
-- mutation tests;
-- checker epoch and input hashes.
+- no shared evaluator code with any engine; no async, no unsafe, no plugins or dynamic loading;
+- <15,000 non-test-line covenant across the four crates (docs/03);
+- serialization boundary: certificates are checked from wire form, never from shared memory;
+- receipt generation with checker epoch, build digest, and input hashes;
+- mutation tests.
 
-**Exit:** every single-field certificate mutation in the test suite is rejected.
+**Exit:** every single-field certificate mutation in the test suite is rejected, checking wire-form input only.
 
-### PR 10 — Agent client and ACI benchmark harness
+### PR 10 — Agent client and ACI benchmark harness [G0 (DX-10), G2]
 
 Implement a minimal client exposing only typed operations. Compare against a shell-scraping baseline on Die Hard and Dining Philosophers tasks.
 
@@ -172,7 +200,7 @@ Measure:
 
 **Exit:** native ACI is measurably more effective or the protocol is redesigned before freeze.
 
-### PR 11 — Context Pack schema and compiler v0
+### PR 11 — Context Pack schema and compiler v0 [G2]
 
 Implement:
 
@@ -187,7 +215,7 @@ Start with graph reachability and invariant failures.
 
 **Exit:** the synthetic 200-event durability case compiles to a replay-preserving core with substantial reduction.
 
-### PR 12 — Intent semantic diff v0
+### PR 12 — Intent semantic diff v0 [G3]
 
 Classify supported changes:
 
@@ -202,13 +230,16 @@ Add solver-based implication only where sound and bounded.
 
 **Exit:** all G0 intent-gaming patches are privileged changes; a source-only guard repair is not.
 
-### PR 13 — Human CLI v0
+### PR 13 — Human CLI v0 [G1]
 
-Implement stable commands and output:
+Implement stable commands and output, aligned with plan §13.4/§3.1:
 
 ```text
 continuum snapshot
 continuum check
+continuum explain
+continuum debug
+continuum repair
 continuum evidence show
 continuum context expand
 continuum task status/resume/cancel
@@ -218,7 +249,7 @@ Support `--json`; prose is a projection.
 
 **Exit:** golden tests pin JSON, exit codes, and concise terminal output.
 
-### PR 14 — Asupersync semantic journal
+### PR 14 — Asupersync semantic journal [G4]
 
 Instrument narrow primitives:
 
@@ -231,7 +262,7 @@ Instrument narrow primitives:
 
 **Exit:** identical controlled choice logs produce canonical identical semantic events.
 
-### PR 15 — Network/process/storage packs
+### PR 15 — Network/process/storage packs [G4]
 
 Implement only the profiles needed for replicated register:
 
@@ -242,7 +273,17 @@ Implement only the profiles needed for replicated register:
 
 **Exit:** crash windows and cancellation points replay exactly.
 
-### PR 16 — Replicated-register model and implementation
+### PR 15a — CML core-fragment parser and elaborator [G4]
+
+Implement `continuum-cml-syntax` and `continuum-cml-elab`:
+
+- the Finite fragment only;
+- enough surface for the replicated register and the Wave 0 corpus ports;
+- the programmatic model API remains supported — CML is a second front end, not a replacement.
+
+**Exit:** the replicated-register model written in CML elaborates to the same semantic model identity as its programmatic equivalent.
+
+### PR 16 — Replicated-register model and implementation [G4]
 
 Create:
 
@@ -254,7 +295,7 @@ Create:
 
 **Exit:** each mutant has an expected intent/property and deterministic campaign.
 
-### PR 17 — CIR and concrete/abstract correspondence
+### PR 17 — CIR and concrete/abstract correspondence [G4]
 
 Implement:
 
@@ -266,13 +307,13 @@ Implement:
 
 **Exit:** correct implementation satisfies bounded refinement; mutants fail at mapped transitions.
 
-### PR 18 — Causal minimization
+### PR 18 — Causal minimization [G4]
 
 Implement deletion, causal-closure, owner/fault/value reduction, and replay validation.
 
 **Exit:** ack-before-sync failure reduces to a compact core and does not delete the actual causal mechanism.
 
-### PR 19 — Verification debugger core
+### PR 19 — Verification debugger core [G4]
 
 Implement:
 
@@ -285,7 +326,7 @@ Implement:
 
 **Exit:** branch before `Sync`/`Ack` shows safe and failing successors from one handle.
 
-### PR 20 — Repair Transaction v0
+### PR 20 — Repair Transaction v0 [G3, G4]
 
 Implement begin/apply/evaluate/promote with:
 
@@ -298,13 +339,13 @@ Implement begin/apply/evaluate/promote with:
 
 **Exit:** moving ack after sync is evaluable; a property-weakening patch is reclassified and blocked.
 
-### PR 21 — Neighboring exploration and mutation challenge
+### PR 21 — Neighboring exploration and mutation challenge [G4; closes re-homed G0-DX-06]
 
 Generate semantic neighbors around the causal core and run known property/model mutants.
 
 **Exit:** a hard-coded exact-trace repair fails; the semantic guard repair passes the bounded envelope.
 
-### PR 22 — Promotion receipts
+### PR 22 — Promotion receipts [G3, G4]
 
 Compose:
 
@@ -314,53 +355,69 @@ Compose:
 - replay/neighborhood/mutation results;
 - refinement/certificate status;
 - unknowns;
+- `gate_profile` (the phase-staged profile the receipt was evaluated under, plan §21);
+- `NotYetEnforced` list — gates not yet in the profile, never rendered as passed;
 - policy decision.
 
 **Exit:** receipt independently verifies references and cannot be forged by the agent client.
 
-### PR 23 — Incremental query database v0
+### PR 23 — Incremental query database v0 [G5]
 
 Implement content-addressed queries for parsing, model construction, property automata, exploration, context, and diff. Classify edges as exact/validated/conservative/experimental.
 
 **Exit:** property-only edit does not rebuild unrelated extraction; model action edit invalidates reachable graph and dependent context.
 
-### PR 24 — Clean-build differential Tribunal
+### PR 24 — Incremental Parity Audit [G5]
+
+(Renamed from "clean-build differential Tribunal"; **Tribunal** refers exclusively to the TLA+ corpus oracle harness, plan §9.5.)
 
 Randomly and deterministically compare incremental and clean results. Minimize invalidation mismatches.
 
 **Exit:** intentionally broken dependency edge is caught and quarantined.
 
-### PR 25 — LSP authoring adapter
+### PR 25 — LSP authoring adapter [G5]
 
 Implement CML/source diagnostics, semantic hover, go-to correspondence, code lenses, and intent-change preview over snapshots.
 
 **Exit:** unsaved buffer overlays create explicit snapshots and never mutate daemon state implicitly.
 
-### PR 26 — DAP adapter
+### PR 25a — SARIF exporter [G5]
+
+Implement `continuum-sarif` per plan §17.3:
+
+- source-located, deduplicated diagnostics with artifact URIs;
+- stable rule IDs and severity;
+- code flows;
+- evidence handles;
+- SARIF is a report projection, not a proof format.
+
+**Exit:** the replicated-register failure exports schema-valid SARIF with stable rule IDs across reruns; every result carries an evidence handle.
+
+### PR 26 — DAP adapter [G5]
 
 Map Continuum debugger state to DAP threads, frames, scopes, variables, breakpoints, and stepping; expose custom causal operations.
 
 **Exit:** VS Code-compatible client can inspect and branch the replicated-register failure.
 
-### PR 27 — MCP adapter
+### PR 27 — MCP adapter [G2]
 
 Expose curated native operations with explicit handles, deterministic schemas/order, result bounds, and capability checks.
 
 **Exit:** two subagents share one workspace/intent but use isolated debugger/proof handles without session coupling.
 
-### PR 28 — Lean proof worker and Context Pack
+### PR 28 — Lean proof service and Context Pack [G6; closes re-homed G0-DX-11]
 
-Pin Lean environment; implement isolated checking, goals, diagnostics, axiom manifests, and relevant-context extraction.
+Implement the proof *service* over the environment pinned in PR 4a: per-request isolation and cancellation, goals, diagnostics, receipts with theorem/axiom manifests, and relevant-context extraction. (Lean pinning and the foundational T0/T1 theorems are PR 4a, not here.)
 
-**Exit:** foundational finite closure/refinement theorems compile and receipts include zero unapproved axioms.
+**Exit:** concurrent requests across Lean epochs are isolated and cancellable with deterministic results; every proof receipt carries theorem and axiom manifests with zero unapproved axioms.
 
-### PR 29 — Forge finite CEGIS v0
+### PR 29 — Forge finite CEGIS v0 [G7]
 
 Implement typed holes, finite grammar enumeration, exact counterexample feedback, safety plus progress/non-vacuity, and candidate archive.
 
 **Exit:** acknowledgement guard task synthesizes `synced`, rejects never-ack, and independently verifies the result.
 
-### PR 30 — End-to-end agent benchmark
+### PR 30 — End-to-end agent benchmark [G2, G4]
 
 Give an advanced coding agent only:
 
@@ -382,10 +439,13 @@ Until PR 30 closes, defer:
 - cloud control plane;
 - polished web product;
 - generalized weak-memory engine;
+- CML surface syntax beyond the Finite core fragment (the fragment itself ships in PR 15a);
 - all 80 corpus ports;
 - unrestricted synthesis grammars;
 - learned search in the trusted loop;
 - automatic production deployment;
 - broad foreign-runtime support.
+
+Not deferred: the CML core fragment (PR 15a) and SARIF export (PR 25a) are scheduled above.
 
 These are multipliers. They must not precede the trustworthy loop they multiply.

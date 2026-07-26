@@ -135,6 +135,35 @@ Global cancellation across task trees becomes a choreography. Projection can gen
 - external call never returns;
 - cancellation reason overwritten.
 
+## Promotion and kill criteria (draft, pending ratification)
+
+Per the research README contract, this lane declares its soundness
+boundary, baseline, measurable promotion criterion, and kill condition.
+
+**Soundness boundary.** No universal cancellation guarantee is inferred:
+foreign/blocking calls follow one of the declared non-cooperative paths
+above, and claims hold only for code using the modeled asupersync
+primitives.
+
+**Baseline.** Runtime checking only (the initial implementation path
+above: events inferred from asupersync primitives, checked at runtime,
+with no static obligation calculus).
+
+**Promotion criterion (draft).**
+
+- all 10 mutants of the mutation corpus above (10/10) detected, with
+  zero false alarms on the correct implementation;
+- a machine-checked drain-ranking certificate for the replicated
+  register.
+
+**Kill condition.** Invariant annotations become pervasive in real code
+(the static surface is too invasive to adopt), or the calculus cannot
+express asupersync's actual cancellation semantics.
+
+These thresholds are drafts registered in plan §24.5 ("pending
+lane-owner ratification"). An unratified threshold may not survive
+Phase A; until ratified or revised it blocks this lane's promotion.
+
 ## Deliverables
 
 1. Formal small-step calculus.

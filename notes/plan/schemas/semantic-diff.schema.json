@@ -7,7 +7,7 @@
       "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
-    "after_workspace": {
+    "after_snapshot": {
       "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     },
@@ -15,12 +15,12 @@
       "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
-    "before_workspace": {
+    "before_snapshot": {
       "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "diff_id": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^diff_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "impact": {
@@ -163,8 +163,8 @@
   "required": [
     "schema_version",
     "diff_id",
-    "before_workspace",
-    "after_workspace",
+    "before_snapshot",
+    "after_snapshot",
     "before_intent",
     "after_intent",
     "intent_changes",

@@ -102,6 +102,20 @@ Compare raw trace, minimized trace, causal core, state delta, and contrastive ex
 - small Context Packs without omitting mechanism;
 - explanations stable under irrelevant commuting events.
 
+### Promotion threshold (draft, pending ratification)
+
+Registered in plan §24.5: a replay-preserving causal core ≤10% of trace
+length on real (non-synthetic) failures. The registered kill condition
+is the existing one below: minimization cost dominates verification.
+This is a draft pending lane-owner ratification; an unratified
+threshold may not survive Phase A.
+
+The neighboring exploration-reduction threshold (research/01: ≥10×
+reduction in explored classes, without regression on dependent
+workloads) governs a different lane — DPOR-style exploration reduction,
+not causal minimization — and must not be conflated with this one; plan
+§24.5 now carries them as separate register rows.
+
 ## Kill criteria
 
 - causal claims too sensitive to arbitrary modeling choices;

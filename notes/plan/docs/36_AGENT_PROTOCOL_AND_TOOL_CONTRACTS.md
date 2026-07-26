@@ -1,5 +1,10 @@
 # Agent Protocol and Tool Contracts
 
+> **Non-normative projection.** This document is a projection of RFC 0026
+> (`continuumd` native protocol), RFC 0027 (agent tool protocol), and plan
+> §10.2, and is regenerated from them. On any divergence, the RFCs and the
+> plan win.
+
 ## Objective
 
 Give agents the equivalent of a purpose-built verification IDE: compact operations, semantic handles, explicit state, exact feedback, and safe authority boundaries.
@@ -35,7 +40,9 @@ Give agents the equivalent of a purpose-built verification IDE: compact operatio
   "continuation": null,
   "omissions": [],
   "warnings": [],
-  "epochs": {}
+  "cost": {"states": 48211, "wall_ms": 9120},
+  "epochs": {},
+  "next_operations": ["context.expand", "failure.explain", "repair.begin"]
 }
 ```
 
@@ -57,13 +64,23 @@ Give agents the equivalent of a purpose-built verification IDE: compact operatio
 ```text
 workspace.create → ws_1
 verification.start(ws_1, in_1, property) → task_1
-verification.await(task_1) → cp_1 + ctx_1
+verification.await(task_1) → crash_1 + ctx_1
 context.expand(ctx_1, relation="source") → ctx_2
-repair.begin(cp_1) → rt_1
+repair.begin(crash_1) → rt_1
 repair.apply(rt_1, patch, hypothesis) → rt_2
 repair.evaluate(rt_2) → rt_3
 repair.promote(rt_3) → receipt_1 or PolicyGateFailed
 ```
+
+## Error taxonomy
+
+Errors use the 15 stable typed codes of plan §10.3: twelve semantic codes
+(`StaleSnapshot` … `PolicyGateFailed`) plus three protocol-level codes from
+RFC 0026 (`ProtocolVersionUnsupported`, `IdempotencyKeyReused`,
+`MalformedRequest`). Each error may carry `recovery` as a list of allowed
+operations with pre-filled arguments — never free-form commands.
+`BudgetExhausted` is never a semantic verdict; it carries the continuation
+when one exists.
 
 ## Context expansion
 
@@ -96,10 +113,10 @@ Useful relations include:
 Proof state handles are explicit. Agents operate on goals rather than cursor positions:
 
 ```text
-proof.open(goal) → proof_state
-proof.apply(state, tactic/term) → child states + diagnostics
-proof.search(state, strategy, budget) → candidates
+proof.goal(obligation) → exact goal + proof Context Pack + proof_state
+proof.attempt(state, tactic/term) → child states + diagnostics
 proof.check(candidate) → kernel receipt
+proof.slice(goal) → proof dependency slice (curated declarations)
 ```
 
 ## Repair authority

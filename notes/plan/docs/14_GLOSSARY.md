@@ -36,6 +36,8 @@
 
 **Hyperproperty** — property of sets/tuples of traces, not individual traces.
 
+**Incremental Parity Audit** — differential audit that continuously checks incremental query results against clean recomputation, minimizing and quarantining mismatches (plan §9.5); formerly called the "clean-build Tribunal".
+
 **Inductive invariant** — predicate true initially, preserved by every step, and implying a safety property.
 
 **Interval pomset** — partially ordered multiset of events with interval-order structure.
@@ -66,7 +68,7 @@
 
 **Strong observational refinement** — refinement strong enough to preserve selected hyperproperties/scheduler-sensitive behavior.
 
-**Tribunal** — differential, mutation, benchmark, and certificate infrastructure used to substantiate claims.
+**Tribunal** — the TLA+ corpus oracle harness (ADR-0021) that differentially validates Continuum verdicts against the validated examples corpus. This term refers exclusively to the corpus-oracle harness; the incremental-vs-clean audit formerly called the "clean-build Tribunal" is the **Incremental Parity Audit**.
 
 **True concurrency** — semantics representing concurrent events without choosing arbitrary interleavings.
 

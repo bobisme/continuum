@@ -1,0 +1,90 @@
+{
+  "$id": "https://continuum.dev/schema/evidence-graph-edge.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checker": {
+      "description": "Trusted checker/service the edge names when applicable (plan §11.3).",
+      "minLength": 1,
+      "type": "string"
+    },
+    "edge_id": {
+      "pattern": "^ev_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "from": {
+      "pattern": "^ev_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "kind": {
+      "description": "The 13 edge types of plan §11.3.",
+      "enum": [
+        "SUPPORTS",
+        "REFUTES",
+        "DEPENDS_ON",
+        "REFINES",
+        "EXPLAINS",
+        "REPAIRS",
+        "INVALIDATES",
+        "GENERALIZES",
+        "COUNTEREXAMPLE_TO",
+        "CHECKED_BY",
+        "DERIVED_FROM",
+        "CONFLICTS_WITH",
+        "SUPERSEDES"
+      ]
+    },
+    "provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "created_at",
+        "inputs"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "to": {
+      "pattern": "^ev_[A-Za-z0-9_-]+$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "edge_id",
+    "kind",
+    "from",
+    "to",
+    "provenance"
+  ],
+  "title": "Evidence Graph Edge",
+  "type": "object"
+}

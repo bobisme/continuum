@@ -7,7 +7,19 @@
       "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
       "type": "string"
     },
+    "inconclusive_reason": {
+      "description": "Typed reason required by INV-008 when status is inconclusive (plan §11.4). Budget exhaustion is never a verdict.",
+      "enum": [
+        "Unsupported",
+        "ResourceExhausted",
+        "EngineError",
+        "InsufficientTelemetry",
+        "AbstractionAmbiguity",
+        "IncompleteProofSearch"
+      ]
+    },
     "kind": {
+      "description": "Node kinds mirror plan §11.2's 20 node types; `candidate` corresponds to §11.2 `SynthesisCandidate` (see synthesis-candidate.schema.json).",
       "enum": [
         "intent_claim",
         "assumption",
@@ -41,6 +53,32 @@
     "node_id": {
       "pattern": "^ev_[A-Za-z0-9_-]+$",
       "type": "string"
+    },
+    "parameterization": {
+      "additionalProperties": false,
+      "description": "Parameterized results are structurally distinct (plan §11.4): checked(N=k), cutoff_checked(N≤k), proved(∀N).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "checked",
+            "cutoff_checked",
+            "proved_universal"
+          ]
+        },
+        "n": {
+          "description": "The instance bound k for checked/cutoff_checked; null for proved_universal.",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "n"
+      ],
+      "type": "object"
     },
     "provenance": {
       "additionalProperties": false,
@@ -84,6 +122,13 @@
         "refuted",
         "inconclusive",
         "superseded"
+      ]
+    },
+    "validation_basis": {
+      "description": "For status=validated: whether solver evidence is a checked certificate or a trusted solver verdict (plan §11.4 CHECKED_CERTIFICATE/TRUSTED_SOLVER). The two never render identically.",
+      "enum": [
+        "checked-certificate",
+        "trusted-solver"
       ]
     }
   },

@@ -76,7 +76,7 @@
         "security"
       ]
     },
-    "workspace": {
+    "snapshot": {
       "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
       "type": "string"
     }
@@ -85,7 +85,7 @@
     "schema_version",
     "task_id",
     "track",
-    "workspace",
+    "snapshot",
     "intent",
     "capabilities",
     "budget",

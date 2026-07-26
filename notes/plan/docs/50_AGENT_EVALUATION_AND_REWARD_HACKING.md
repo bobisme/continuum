@@ -53,7 +53,7 @@ An agent optimized for “make verification pass” may discover shortcuts that 
 - hidden variants and mutations;
 - neighborhood exploration;
 - non-vacuity/positive scenarios;
-- clean-build Tribunal;
+- Incremental Parity Audit;
 - capability security;
 - resource-normalized evaluation;
 - independent graders/checkers;

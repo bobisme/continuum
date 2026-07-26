@@ -1,10 +1,10 @@
 # RFC 0038: Multi-Agent Evidence Graph
 
 ## Status
-Draft.
+Draft for implementation.
 
 ## Nodes/edges
-Typed immutable candidates, claims, failures, proofs, patches, runs, receipts, conflicts, and decisions with support/refute/depend/refine/repair/check relations.
+Typed immutable candidates, claims, failures, proofs, patches, runs, receipts, conflicts, and decisions, connected by the 13 plan §11.3 edge types: `SUPPORTS`, `REFUTES`, `DEPENDS_ON`, `REFINES`, `EXPLAINS`, `REPAIRS`, `INVALIDATES`, `GENERALIZES`, `COUNTEREXAMPLE_TO`, `CHECKED_BY`, `DERIVED_FROM`, `CONFLICTS_WITH`, `SUPERSEDES`. Edges name checker/evidence when applicable; the machine encoding is [`schemas/evidence-graph-edge.schema.json`](../schemas/evidence-graph-edge.schema.json) (nodes: [`schemas/evidence-graph-node.schema.json`](../schemas/evidence-graph-node.schema.json)).
 
 ## Authority
 Actor capabilities control node creation; status promotion is service-restricted. Confidence is metadata.

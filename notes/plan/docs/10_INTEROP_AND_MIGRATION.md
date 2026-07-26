@@ -42,7 +42,7 @@ Useful exports:
 
 Export is not claimed to preserve every source-level construct.
 
-### Differential Tribunal
+### Corpus Differential Tribunal
 
 For compatible corpus:
 

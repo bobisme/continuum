@@ -77,8 +77,10 @@ Required evidence:
 
 - **0.1:** ten P2 examples spanning values, actions, stuttering, deadlock, and shortest counterexamples.
 - **0.2:** twenty-five P2 examples, five P3 examples, three P4 theorems.
-- **0.5:** all Wave 0–2 examples at required level; at least five P5 exemplars.
+- **0.5:** all Wave 0–2 examples at required level; at least five P5 exemplars — the designated 0.5 exemplar set is the five families marked `p5_exemplar = yes` in `validated-examples.csv`: TV-023 (Peterson Lock Refinement With Auxiliary Variables), TV-025 (EWD998: Termination Detection with Asynchronous Delivery), TV-028 (Distributed Mutual Exclusion), TV-029 (Two-Phase Handshaking), TV-039 (Chang-Roberts Leader Election).
 - **1.0:** all 80 CI-validated examples at their `required_parity` level in `validated-examples.csv`.
 - **1.x:** all accessible in-tree additional examples, followed by curated external cases.
+
+The `p5_exemplar` column designates the 0.5 exemplar set only; 1.0's authority remains the `required_parity` column. Per plan §21, these release checkpoints map to plan phases: 0.2 closes in Phase D, 0.5 in Phase E, and 1.0 in Phase F with gate G9.
 
 A release may declare a precisely scoped unsupported feature, but may not count that example as passing.

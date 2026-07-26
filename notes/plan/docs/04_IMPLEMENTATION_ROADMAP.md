@@ -1,5 +1,7 @@
 # Implementation Roadmap — Revision 2
 
+> **REVISION 2 — SUPERSEDED.** This roadmap and its gate graph (G0A–G0D, G1–G6) predate Revision 3 and match neither `docs/26` nor the normative `docs/52`. For current phases and gates see `plan.md` §21–§22; for the Rev-2 gate scheme see `docs/26`. Do not cite gate numbers from this file without translation.
+
 ## Principle
 
 Sequence by **risk retirement and evidence closure**, not by subsystem prestige. The implementation order is gate-driven; it is not a delivery-time promise.

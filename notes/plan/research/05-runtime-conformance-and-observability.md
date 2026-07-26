@@ -125,3 +125,33 @@ The conformance engine handles sensitive operational data. Requirements:
 - overhead and ambiguity reduction;
 - quality of synthesized instrumentation;
 - success rate producing faithful Lab reproductions.
+
+## Promotion and kill criteria (draft, pending ratification)
+
+Per the research README contract, this lane declares its soundness
+boundary, baseline, measurable promotion criterion, and kill condition.
+
+**Soundness boundary.** Verdicts are sound only relative to the declared
+observation and failure model; the monitorability analysis above is run
+first, and properties classified as only-`Inconclusive` are reported as
+such, never as passes or violations.
+
+**Baseline.** The lane's own comparators from the evaluation plan:
+timestamp sorting, trace-to-TLA validation, and direct replay.
+
+**Promotion criterion (draft).**
+
+- faithful Lab reproduction of ≥70% of the curated known-incident
+  corpus under injected telemetry loss and clock uncertainty;
+- always-on (tier-1) instrumentation overhead ≤1%;
+- measurable ambiguity reduction per synthesized probe set: ≥2×
+  reduction in surviving symmetry orbits, measured with the Causal
+  Information Budget measures above.
+
+**Kill condition.** The majority of target properties on two real
+systems are monitorable only as `Inconclusive`, or the overhead budgets
+cannot be met.
+
+These thresholds are drafts registered in plan §24.5 ("pending
+lane-owner ratification"). An unratified threshold may not survive
+Phase A; until ratified or revised it blocks this lane's promotion.

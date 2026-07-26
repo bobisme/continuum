@@ -6,6 +6,11 @@
     "budget": {
       "additionalProperties": false,
       "properties": {
+        "bytes": {
+          "description": "Byte budget for returned context; byte budgets are the enforced context contract (RFC 0027).",
+          "minimum": 0,
+          "type": "integer"
+        },
         "candidates": {
           "minimum": 0,
           "type": "integer"

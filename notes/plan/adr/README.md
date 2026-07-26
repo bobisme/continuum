@@ -52,7 +52,7 @@ ADRs are normative unless superseded.
 | [0041](0041-verification-debugger-and-dap.md) | Verification Debugger with DAP Projection |
 | [0042](0042-mcp-adapter-not-authority.md) | MCP Is an Adapter, Not Authority |
 | [0043](0043-repair-transactions.md) | Repair Transactions |
-| [0044](0044-incremental-semantic-database.md) | Incremental Semantic Database with Clean Tribunal |
+| [0044](0044-incremental-semantic-database.md) | Incremental Semantic Database with Incremental Parity Audit |
 | [0045](0045-progressive-disclosure-with-lossless-expansion.md) | Progressive Disclosure with Lossless Expansion |
 | [0046](0046-semantic-diff-gates.md) | Semantic and Intent Diff Gates |
 | [0047](0047-forge-sandbox-and-nonvacuity.md) | Forge Sandboxing and Non-Vacuity |

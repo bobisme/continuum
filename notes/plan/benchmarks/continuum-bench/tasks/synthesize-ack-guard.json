@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "task_id": "cb-synthesize-ack-001",
   "track": "synthesize",
-  "workspace": "ws_demo1",
+  "snapshot": "ws_demo1",
   "intent": "in_ack_v1",
   "capabilities": ["read", "forge", "verify", "prove"],
   "budget": {"wall_ms": 60000, "tokens": 12000, "candidates": 1000},

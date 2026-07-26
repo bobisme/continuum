@@ -92,7 +92,7 @@ The following separations are mandatory:
 | Rust extractor | translation validation/refinement checker |
 | Forge/LLM candidate generator | verifier and proof pipeline |
 | proof agent | Lean kernel |
-| incremental query engine | clean recomputation Tribunal |
+| incremental query engine | Incremental Parity Audit |
 | Context compiler | replay/property preservation checks |
 | semantic synchronizer | correspondence-law checker |
 

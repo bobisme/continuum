@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "task_id": "cb-repair-ack-001",
   "track": "repair",
-  "workspace": "ws_demo1",
+  "snapshot": "ws_demo1",
   "intent": "in_ack_v1",
   "capabilities": ["read", "propose_patch", "verify", "expand_context", "debug"],
   "budget": {"wall_ms": 120000, "tokens": 20000, "states": 100000},

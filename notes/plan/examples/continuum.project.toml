@@ -1,23 +1,15 @@
-[continuum]
+# Standalone `continuum.toml` for a model-only project.
+#
+# This is the single configuration surface (plan §3.1): the same schema as
+# `[package.metadata.continuum]` in a Rust project's Cargo.toml, in
+# standalone form. Intent is referenced by registry identity (`in_*`),
+# never by a workspace file path (plan §4.2).
+#
+# Profile definitions (portfolios, budgets, checker policy) are not part
+# of this schema; profiles are named here and resolved by the daemon's
+# profile registry.
+
+entry = "models/ack_protocol.ctm"
+profile = "dev"
 semantic_epoch = "3"
-intent = "intent/ack-durable.json"
-
-[workspace]
-rust_entry = "crate::protocol"
-model_entry = "models/ack_protocol.ctm"
-
-[profiles.dev]
-portfolio = "interactive"
-wall_ms = 30000
-states = 100000
-
-[profiles.promotion]
-portfolio = "promotion"
-clean_recompute = true
-independent_checker = true
-
-[adapters]
-lsp = true
-dap = true
-mcp = true
-sarif = true
+intent = "in_7c2f91"

@@ -9,7 +9,7 @@ unit properties
 → metamorphic tests
 → mutation campaigns
 → retained crashpack replay
-→ cross-engine Tribunal
+→ cross-engine differential harness
 → performance/evidence gates
 ```
 

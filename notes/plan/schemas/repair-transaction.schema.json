@@ -77,11 +77,11 @@
       "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
-    "base_workspace": {
+    "base_snapshot": {
       "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     },
-    "candidate_workspace": {
+    "candidate_snapshot": {
       "anyOf": [
         {
           "pattern": "^ws_[A-Za-z0-9_-]+$",
@@ -219,11 +219,11 @@
   "required": [
     "schema_version",
     "repair_id",
-    "base_workspace",
+    "base_snapshot",
     "base_intent",
     "failure",
     "hypothesis",
-    "candidate_workspace",
+    "candidate_snapshot",
     "status",
     "gate_profile",
     "gates"
