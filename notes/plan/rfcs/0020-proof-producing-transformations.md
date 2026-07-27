@@ -1,7 +1,7 @@
 # RFC 0020: Proof-Producing Transformations and Optimization Pipeline
 
 **Status:** Proposed  
-**Target gates:** G2–G6
+**Target gates:** G2–G6 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Motivation
 

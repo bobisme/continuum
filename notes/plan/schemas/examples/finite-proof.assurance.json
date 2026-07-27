@@ -8,6 +8,43 @@
     "text": "Agreement holds for the configured finite domain."
   },
   "verdict": "established",
+  "envelope": {
+    "bounds": {
+      "engine": "continuum-explicit",
+      "summary": "finite domain: nodes=3, values=2, max_crashes=2"
+    },
+    "faults": {
+      "engine": "continuum-explicit",
+      "summary": "crash/recovery faults exhaustively injected up to bound 2"
+    },
+    "fairness": {
+      "engine": "continuum-explicit",
+      "summary": "safety claim; no fairness assumptions required"
+    },
+    "values": {
+      "engine": "continuum-explicit",
+      "summary": "exact enumeration over the two-value domain"
+    },
+    "schedules": {
+      "engine": "continuum-explicit",
+      "summary": "exhaustive interleavings within the declared bounds"
+    },
+    "memory_model": {
+      "unsupported": "sequential-consistency-only"
+    },
+    "observer": {
+      "engine": "continuum-explicit",
+      "summary": "client observer projection"
+    },
+    "proof_status": {
+      "engine": "continuum-kernel",
+      "summary": "closed-set certificate independently checked"
+    },
+    "unknowns": {
+      "engine": "continuum-explicit",
+      "summary": "production storage profile assumed (contractual)"
+    }
+  },
   "scope": {
     "semantics_version": "cir-0.1",
     "subject_hash": "blake3:0000000000000000000000000000000000000000000000000000000000000000",

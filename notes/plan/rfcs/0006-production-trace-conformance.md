@@ -1,7 +1,7 @@
 # RFC 0006: Production Partial-Order Conformance
 
 **Status:** Proposed  
-**Target gate:** G5
+**Target gate:** G5 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Summary
 

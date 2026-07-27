@@ -10,7 +10,7 @@ Revision 3 keeps Revision 2's semantic and proof foundations while redesigning C
 4. **Context Packs replace terminal scraping.** Agents receive property-directed, bounded causal/proof slices with omission manifests and expansion links.
 5. **Repairs become transactions.** A patch cannot be promoted without exact replay, semantic/intent diff, neighboring exploration, mutation challenge, proof impact, and a promotion receipt.
 6. **Verification debugging becomes first-class.** Continuum exposes partial-order frontiers, abstract/concrete state, obligations, alternate schedules, and causal reverse stepping through a DAP adapter.
-7. **Incrementality receives a trust model.** Reuse is classified as exact, validated, conservative, or experimental; clean-build differential checks continuously audit invalidation.
+7. **Incrementality receives a trust model.** Reuse is classified as exact, validated, conservative, or experimental; the Incremental Parity Audit (plan §9.5) continuously audits invalidation.
 8. **Continuum Forge is added.** Protocol code, invariants, abstractions, rankings, auxiliary state, and assumptions may be co-synthesized under fixed intent and independently checked evidence.
 9. **Multi-agent work uses an Evidence Graph.** Chat may coordinate, but claims, counterexamples, patches, proof obligations, and receipts are typed graph artifacts.
 10. **ContinuumBench becomes a release contract.** It measures modeling, diagnosis, repair, proof, refinement, synthesis, intent integrity, security, cost, and generalization.
@@ -21,7 +21,7 @@ Revision 3 keeps Revision 2's semantic and proof foundations while redesigning C
 - Intent-gaming semantic diff classification.
 - Explicit snapshot/continuation protocol and stale-handle rejection.
 - Finite CEGIS synthesis of the minimal safe and live acknowledgement guard.
-- Incremental query invalidation and clean-build parity.
+- Incremental query invalidation and Incremental Parity Audit coverage.
 - Partial-order causal debugger branching.
 - Proof-oriented model/program synchronization that reports ambiguity rather than inventing edits.
 

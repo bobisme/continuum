@@ -1,6 +1,36 @@
 {
   "$id": "https://continuum.dev/schema/context-pack.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "redacted": {
+      "additionalProperties": false,
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "properties": {
+        "commitment": {
+          "type": "string"
+        },
+        "original_class": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "redacted": {
+          "const": true
+        }
+      },
+      "required": [
+        "redacted",
+        "reason",
+        "commitment"
+      ],
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "assurance": {
@@ -226,12 +256,34 @@
           "count",
           "reason"
         ],
+        "if": {
+          "properties": {
+            "expandable": {
+              "const": true
+            }
+          },
+          "required": [
+            "expandable"
+          ]
+        },
+        "then": {
+          "required": [
+            "expansion"
+          ]
+        },
         "type": "object"
       },
       "type": "array"
     },
     "question": {
       "type": "string"
+    },
+    "redactions": {
+      "description": "Redacted values referenced by this pack (plan §4.5, §18.4).",
+      "items": {
+        "$ref": "#/$defs/redacted"
+      },
+      "type": "array"
     },
     "replay": {
       "anyOf": [
@@ -324,6 +376,8 @@
     "omissions",
     "expansions",
     "evidence",
+    "replay",
+    "guarantees",
     "semantic_epoch",
     "content_hash"
   ],

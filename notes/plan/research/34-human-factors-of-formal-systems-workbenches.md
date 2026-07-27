@@ -1,5 +1,7 @@
 # Human Factors of Formal-Systems Workbenches
 
+**Claim class:** evaluation methodology
+
 ## Premise
 
 Formal correctness evidence is useful only when engineers understand what it establishes and act correctly on failures.

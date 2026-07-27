@@ -44,9 +44,22 @@ There is no `continuum-protocol` crate; the native protocol lives in `continuumd
 
 The certificate checker may not depend on search. The model core may not depend on asupersync. Adapters may not own semantic state. Forge may not be imported by the verifier.
 
+## Resourcing (plan §21.1)
+
+| Phase | Owner | Minimum viable team | Status |
+|---|---|---|---|
+| A | unassigned | unassigned | `BLOCKED` |
+| B | unassigned | unassigned | `BLOCKED` |
+| C | unassigned | unassigned | `BLOCKED` |
+| D | unassigned | unassigned | `BLOCKED` |
+| E | unassigned | unassigned | `BLOCKED` |
+| F | unassigned | unassigned | `BLOCKED` |
+
+Filling a phase's row is a merge requirement of that phase's opening PR (plan §21.1); an unfilled row records the phase as `BLOCKED`, not in progress.
+
 ## First pull requests (PR 0 – PR 30)
 
-PR numbers 1–30 are stable; inserted work carries PR 0 or a lettered suffix (4a, 15a, 25a). Each heading names the release gate(s) the PR advances, per plan §22's Phase↔Gate table and the G0 staging rule.
+PR numbers 1–30 are stable; inserted work carries PR 0 or a lettered suffix (4a, 15a, 25a). Each heading names the release gate(s) the PR advances, per plan §21's phase deliverables and the G0 staging rule; some PRs carry gates from later phases where §21 explicitly pulls work forward (e.g. PR 4a [G6; Phase A band]).
 
 ### PR 0 — Specification pass and program decisions [G1, G2]
 
@@ -369,7 +382,7 @@ Implement content-addressed queries for parsing, model construction, property au
 
 ### PR 24 — Incremental Parity Audit [G5]
 
-(Renamed from "clean-build differential Tribunal"; **Tribunal** refers exclusively to the TLA+ corpus oracle harness, plan §9.5.)
+(Renamed from "clean-build Tribunal"; **Tribunal** refers exclusively to the TLA+ corpus oracle harness, plan §9.5.)
 
 Randomly and deterministically compare incremental and clean results. Minimize invalidation mismatches.
 

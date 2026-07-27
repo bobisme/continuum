@@ -2,6 +2,26 @@
   "$id": "https://continuum.dev/schema/verification-task.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "Never a silent Failed (plan §4.5): a failed task carries a typed reason.",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "failed_reason"
+        ]
+      }
+    }
+  ],
   "properties": {
     "budget": {
       "additionalProperties": false,
@@ -79,6 +99,23 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "failed_reason": {
+      "description": "Typed failure reason drawn from the plan §10.3 error taxonomy (daemon-level codes; protocol-level codes are RFC 0026's concern). Required when status is failed.",
+      "enum": [
+        "StaleSnapshot",
+        "UnsupportedSemanticFeature",
+        "IntentMutationDenied",
+        "InsufficientEvidence",
+        "BudgetExhausted",
+        "ContinuationEpochMismatch",
+        "AmbiguousCorrespondence",
+        "UntrustedDomainBoundary",
+        "CertificateRejected",
+        "ReplayDiverged",
+        "CapabilityDenied",
+        "PolicyGateFailed"
+      ]
     },
     "idempotency_key": {
       "minLength": 1,

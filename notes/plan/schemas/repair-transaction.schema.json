@@ -35,7 +35,6 @@
       "then": {
         "properties": {
           "gates": {
-            "minItems": 12,
             "not": {
               "contains": {
                 "properties": {
@@ -66,6 +65,77 @@
           "receipt",
           "semantic_diff"
         ]
+      }
+    },
+    {
+      "description": "Profile → permissible not_yet_enforced set: under phase-b only certificate_rebuild (gate 9) and incremental_parity (gate 10) may be not_yet_enforced.",
+      "if": {
+        "properties": {
+          "gate_profile": {
+            "const": "phase-b"
+          }
+        },
+        "required": [
+          "gate_profile"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gates": {
+            "not": {
+              "contains": {
+                "properties": {
+                  "name": {
+                    "not": {
+                      "enum": [
+                        "certificate_rebuild",
+                        "incremental_parity"
+                      ]
+                    }
+                  },
+                  "status": {
+                    "const": "not_yet_enforced"
+                  }
+                },
+                "required": [
+                  "name",
+                  "status"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The default profile enforces all twelve gates: no gate may be listed not_yet_enforced.",
+      "if": {
+        "properties": {
+          "gate_profile": {
+            "const": "default"
+          }
+        },
+        "required": [
+          "gate_profile"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gates": {
+            "not": {
+              "contains": {
+                "properties": {
+                  "status": {
+                    "const": "not_yet_enforced"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        }
       }
     }
   ],
@@ -118,6 +188,40 @@
       },
       "type": "array"
     },
+    "cost_ledger": {
+      "additionalProperties": false,
+      "description": "Cumulative cost ledger across all versions of this transaction (plan §8.6); the promotion receipt includes it.",
+      "properties": {
+        "cpu_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "solver_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpu_ms",
+        "wall_ms",
+        "solver_ms",
+        "memory_bytes",
+        "tokens"
+      ],
+      "type": "object"
+    },
     "evaluation_policy": {
       "type": [
         "string",
@@ -138,6 +242,8 @@
       ]
     },
     "gates": {
+      "description": "All twelve §8.2 gates are listed at every status; gates not yet evaluated carry status pending, gates outside the phase profile carry not_yet_enforced — never omitted.",
+      "minItems": 12,
       "items": {
         "additionalProperties": false,
         "properties": {
@@ -214,11 +320,22 @@
         "rejected",
         "superseded"
       ]
+    },
+    "supersedes": {
+      "description": "Prior version of this transaction in its lineage (RFC 0032: every operation returns a new immutable version).",
+      "pattern": "^rt_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "version": {
+      "description": "Monotonic version within the transaction lineage (RFC 0032).",
+      "minimum": 1,
+      "type": "integer"
     }
   },
   "required": [
     "schema_version",
     "repair_id",
+    "version",
     "base_snapshot",
     "base_intent",
     "failure",
@@ -226,7 +343,8 @@
     "candidate_snapshot",
     "status",
     "gate_profile",
-    "gates"
+    "gates",
+    "cost_ledger"
   ],
   "title": "Repair Transaction",
   "type": "object"

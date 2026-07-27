@@ -1,5 +1,7 @@
 # Active Diagnosis and Experiment Design
 
+**Claim class:** research hypothesis
+
 ## Motivation
 
 A failure may support several hypotheses. More passive logs may not distinguish them. Continuum can deliberately choose the next schedule, fault, observation, or proof query to maximize diagnostic value.

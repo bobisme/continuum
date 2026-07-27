@@ -1,7 +1,7 @@
 # RFC 0017: Assumption and Protocol Synthesis as Games
 
 **Status:** Proposed research lane  
-**Target gate:** G6
+**Target gate:** G6 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## System/environment partition
 

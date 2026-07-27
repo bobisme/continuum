@@ -90,11 +90,15 @@ are design targets.
 | cached bounded check | 100 ms | 500 ms |
 | local incremental exploration feedback | 250 ms | 2 s |
 | explain: failure → rendered causal explanation | 200 ms | 1 s |
-| Context Pack compilation from existing evidence | 100 ms | 1 s |
+| Context Pack compilation from existing evidence (at ≥10^7 evidence nodes) | 100 ms | 1 s |
+| evidence query over the evidence graph at ≥10^7 nodes | 100 ms | 500 ms |
 | replay/minimized branch load | 250 ms | 1 s |
 | debugger reverse-step (checkpoint re-execution) | 100 ms | 500 ms |
 | debugger branch fork at a frontier | 250 ms | 1 s |
 | task cancellation acknowledgment | 50 ms | 200 ms |
+
+The ≥10^7-node scale qualifier on the evidence-query and Context Pack
+rows is gate-normative for G5's evidence-query bullet (plan §22 G5).
 
 Long tasks stream monotonic progress and return continuations.
 
@@ -127,6 +131,12 @@ Long tasks stream monotonic progress and return continuations.
 - no duplicate payload when a reference suffices.
 
 ## Workflow acceptance tests
+
+These four workflows are the referent of the preregistered G8 study
+(plan §21.1): the three human-executed workflows (new model; existing
+Rust system; review) are covered by the two-cohort human study; the
+agent-repair workflow is covered by the G2 ACI ablation and
+ContinuumBench, not the human study.
 
 ### New model
 

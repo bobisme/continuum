@@ -1,7 +1,7 @@
 # RFC 0008: Liveness, Fairness, and Progress
 
 **Status:** Proposed  
-**Target gate:** G4
+**Target gate:** G4 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Summary
 

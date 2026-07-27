@@ -1,5 +1,7 @@
 # Quality-Diversity for Verified Algorithm Discovery
 
+**Claim class:** research hypothesis
+
 ## Problem
 
 Optimization usually returns one best candidate under a scalar objective. For algorithm invention, this destroys structural diversity and may hide qualitatively different solutions.

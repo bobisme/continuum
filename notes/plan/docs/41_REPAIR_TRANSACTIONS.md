@@ -1,5 +1,7 @@
 # Repair Transactions
 
+> **Status:** This document predates the 12-gate, phase-profile repair design and is scheduled for regeneration (plan §25). **RFC 0032 and `schemas/repair-transaction.schema.json` are normative**; where this document's 9-step pipeline disagrees with RFC 0032's twelve gates (including `incremental_parity` as a gate, `gate_profile`, and `not_yet_enforced` statuses), the RFC governs.
+
 ## Purpose
 
 Make autonomous repair safe, reproducible, and reviewable by treating repair as an evidence-bearing transaction rather than an edit followed by tests.

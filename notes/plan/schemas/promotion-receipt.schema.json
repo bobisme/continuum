@@ -1,0 +1,160 @@
+{
+  "$id": "https://continuum.dev/schema/promotion-receipt.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "gate_name": {
+      "description": "The twelve §8.2 promotion gates; mirrors repair-transaction.schema.json's gate_name.",
+      "enum": [
+        "base_replay",
+        "patch_application",
+        "intent_integrity",
+        "exact_regression",
+        "neighborhood",
+        "property_mutation",
+        "defect_mutants",
+        "refinement_coverage",
+        "certificate_rebuild",
+        "incremental_parity",
+        "code_and_security",
+        "receipt_generation"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "description": "The §8.2 gate-12 promotion receipt: every gate accounted for, the §8.6 cumulative cost ledger, and the checker identity (INV-014).",
+  "properties": {
+    "checker": {
+      "additionalProperties": false,
+      "properties": {
+        "build_digest": {
+          "type": "string"
+        },
+        "toolchain": {
+          "description": "Toolchain identity of the checker build (INV-014).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "build_digest",
+        "toolchain"
+      ],
+      "type": "object"
+    },
+    "cost_ledger": {
+      "additionalProperties": false,
+      "description": "Cumulative cost ledger across all transaction versions (plan §8.6).",
+      "properties": {
+        "cpu_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "solver_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_ms": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpu_ms",
+        "wall_ms",
+        "solver_ms",
+        "memory_bytes",
+        "tokens"
+      ],
+      "type": "object"
+    },
+    "gate_profile": {
+      "description": "Phase-staged promotion profile (plan §21). Gates outside the profile are listed with status not_yet_enforced, never omitted.",
+      "enum": [
+        "phase-b",
+        "phase-c",
+        "phase-d",
+        "default"
+      ]
+    },
+    "gates": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "gate": {
+            "$ref": "#/$defs/gate_name"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "not_yet_enforced"
+            ]
+          }
+        },
+        "required": [
+          "gate",
+          "status"
+        ],
+        "type": "object"
+      },
+      "minItems": 12,
+      "type": "array"
+    },
+    "intent": {
+      "pattern": "^in_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "intent_diff": {
+      "pattern": "^diff_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "receipt_id": {
+      "pattern": "^receipt_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "repair_transaction": {
+      "pattern": "^rt_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "semantic_diff": {
+      "pattern": "^diff_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "semantic_epoch": {
+      "type": "string"
+    },
+    "signature": {
+      "type": "string"
+    },
+    "snapshot": {
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "repair_transaction",
+    "snapshot",
+    "intent",
+    "gate_profile",
+    "gates",
+    "cost_ledger",
+    "semantic_diff",
+    "intent_diff",
+    "checker",
+    "semantic_epoch",
+    "signature"
+  ],
+  "title": "Promotion Receipt",
+  "type": "object"
+}

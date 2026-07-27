@@ -10,7 +10,7 @@ Derived computations are pure or explicitly effectful queries over immutable art
 
 ```text
 Parse(file)
-Elaborate(module, imports)
+Elaborate(module, imports, semantic_epoch)
 InferFragment(model)
 ExtractRust(crate, annotations)
 BuildCorrespondence(model, program)
@@ -21,6 +21,8 @@ CheckCertificate(certificate)
 CompileContext(evidence, question, budget)
 SemanticDiff(before, after, intent)
 ```
+
+A query key includes semantic configuration; a source hash alone is insufficient (plan §9.2).
 
 ## Granularity
 
@@ -66,19 +68,31 @@ Track assumption frames, formula identities, proof artifacts, and solver epoch. 
 
 Lean declaration hashes and dependency closure allow exact theorem reuse. Changed elaboration environment invalidates even text-identical proof terms where semantics differ.
 
-## Dirty/clean dual lane
+## Dirty/clean dual lane and the Incremental Parity Audit
+
+The clean/dirty comparison mechanism is the **Incremental Parity Audit** (plan §9.5). It is on by default, not opt-in.
 
 Interactive lane:
 
 - maximizes reuse;
 - returns provisional/exact classifications quickly;
-- can schedule background clean validation only when explicitly requested by client policy (not hidden future work).
+- a configurable fraction of interactive queries — default 1 in 64, selected uniformly by query key hash, per RFC 0030 — is recomputed clean and compared.
 
 Promotion lane:
 
-- executes required clean or independently validated computations now;
+- every promotion-relevant query is recomputed clean or independently validated at promotion time;
 - compares canonical outputs;
 - emits receipt.
+
+Deployments may adjust the sampling rate by policy; an opt-out is recorded in assurance envelopes (INV-010).
+
+### Auditability classes
+
+Queries carry an auditability class, declared on the query definition (plan §9.5):
+
+- **Equality-auditable** — deterministic under the docs/19 matrix; compared bit-for-bit. Any disagreement quarantines the reuse class and emits a minimal invalidation counterexample.
+- **Certificate-auditable** — solver-backed; the audit compares checked certificates and claim envelopes, never raw solver behavior. A certificate-level disagreement quarantines; a solver-outcome difference with agreeing certificates does not.
+- **Budget-sensitive** — anytime results; the audit checks only that the incremental result's evidence labels are no stronger than a clean run's under equal budget (monotone-honesty), and records divergence as drift telemetry without quarantine.
 
 ## Invalidation debugging
 

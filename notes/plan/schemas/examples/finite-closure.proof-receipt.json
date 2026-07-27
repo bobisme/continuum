@@ -30,17 +30,10 @@
     "version": "0.1.0",
     "source_hash": "blake3:checker-source-placeholder",
     "binary_hash": "blake3:checker-binary-placeholder",
+    "toolchain": "rustc 1.85.0 (reproducible-build covenant, plan §20)",
     "independent": true
   },
-  "lean": {
-    "version": "v4.32.1",
-    "theorems": ["Continuum.ClosureCertificate.provesSafety"],
-    "imports": ["Continuum.Certificate"],
-    "axioms": [],
-    "environment_hash": "blake3:olean-environment-placeholder"
-  },
   "reproduce": [
-    "continuum proof check finite-closure.proof-receipt.json",
-    "lake build"
+    "continuum proof check finite-closure.proof-receipt.json"
   ]
 }

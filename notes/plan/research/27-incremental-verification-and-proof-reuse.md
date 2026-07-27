@@ -1,5 +1,7 @@
 # Incremental Verification and Proof Reuse
 
+**Claim class:** research and implementation program
+
 ## Question
 
 How can Continuum provide interactive feedback while preventing unsound cache reuse from becoming a false proof?

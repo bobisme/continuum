@@ -1,6 +1,6 @@
 # Dossier Validation Report — Revision 3
 
-**Validation date:** 2026-07-24  
+**Validation date:** 2026-07-26  
 **Validator:** `tools/validate_dossier.py`  
 **Overall result:** **PASS within the boundaries stated below**
 
@@ -8,20 +8,30 @@
 
 | Check | Result |
 |---|---:|
-| JSON parse | PASS — 38 files |
-| Draft 2020-12 JSON Schema validation | PASS — 15 schema/example pairs |
+| JSON parse | PASS — 46 files |
+| Draft 2020-12 JSON Schema validation | PASS — 19 schema/example pairs |
 | ContinuumBench task validation | PASS — 3 seed tasks |
 | TOML parse | PASS — 5 files |
 | Python syntax parse | PASS — 18 files |
-| Executable spike assertions | PASS — 30 assertions across Revision 2 and Revision 3 |
+| Executable spike assertions | PASS — 30 assertions (count derived from source) across Revision 2 and Revision 3 |
 | Corpus inventory consistency | PASS — 80 validated + 39 extended rows |
-| Relative Markdown links | PASS — 169 checked |
-| Markdown code-fence parity | PASS — 211 files |
-| Empty-file scan | PASS |
+| Relative Markdown links | PASS — 183 checked |
+| Markdown code-fence parity | PASS — 216 files |
+| Empty-file scan | PASS — 311 files scanned, 0 empty |
 | ADR numbering uniqueness | PASS — 52 ADRs |
 | RFC numbering uniqueness | PASS — 40 RFCs |
 | Bibliography identifier uniqueness | PASS — 159 entries |
 | Lean source placeholder/declaration scan | PASS — 17 `.lean` files; no `sorry`, `admit`, or top-level `axiom` declarations |
+| Retired-name scan (Tribunal rename, `cp_` handles) | PASS — 301 files scanned |
+| Plan §22 ↔ docs/52 gate correspondence (bidirectional) | PASS — 11 gates, 65 bullets each way |
+| Phase↔gate tables (plan §22 vs docs/52, structural) | PASS — 6 phases |
+| G0 matrix count derivation (plan §0.3 vs matrix) | PASS — 8 evidence, 3 open freeze-blocking, 4 re-homed |
+| G10 two-system criterion (plan §21/§22 and docs/52) | PASS |
+| Gate-citation hygiene (retired suffixed names) | PASS — 148 files |
+| Rev-2 `Target gate` scheme qualifiers (RFCs 0001–0025) | PASS — 20 metadata lines |
+| START_HERE PR gate annotations (incl. 4a/15a/25a) | PASS — 34 PR headings |
+| §24.5 register row integrity (lane refs resolve; kill/defer/draft present) | PASS — 17 rows |
+| Handle-prefix registry (schema patterns ⊆ plan §4.4) | PASS — 19 prefixes, 40 anchored patterns |
 
 The machine-readable result is in `validation-results.json`.
 
@@ -34,10 +44,13 @@ In addition to the Revision 2 semantic and certificate formats, the validator ch
 - resumable verification tasks;
 - replay-preserving Context Packs;
 - semantic and intent diffs;
-- repair transactions;
+- repair transactions (with cost ledgers and full 12-gate lists);
 - synthesis candidates;
 - ContinuumBench tasks;
-- Evidence Graph nodes.
+- Evidence Graph nodes and edges;
+- intent-registry records (`Proposed`/accepted status and acceptance chains);
+- `Redacted(reason, commitment)` stubs (plan §4.5);
+- promotion receipts (gate profile, §8.6 cost ledger, INV-014 checker identity).
 
 ## Executed Revision 3 experiments
 

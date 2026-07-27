@@ -378,6 +378,8 @@ continuum = "..."
 [package.metadata.continuum]
 entry = "crate::protocol"
 profile = "dev"
+intent = "in_7c2f91"          # registry identity, never a file path
+intent_bundle = "inb_09aa41"  # §4.2.1: CI fails closed without it
 ```
 
 Then:
@@ -433,11 +435,14 @@ An agent does not invoke arbitrary shell text. It calls:
 ```json
 {
   "operation": "verification.start",
+  "idempotency_key": "b1946ac9…",
   "snapshot": "ws_4f...",
   "intent": "in_91...",
-  "target": "property:AckImpliesDurable",
   "budget": {"states": 100000, "wall_ms": 30000},
-  "output": {"context_pack": true, "max_tokens": 6000}
+  "arguments": {
+    "target": {"kind": "property", "id": "AckImpliesDurable"}
+  },
+  "output_policy": {"context_pack": true, "max_tokens": 6000}
 }
 ```
 
@@ -611,9 +616,12 @@ diff_* semantic/intent diff
 defect_* engine-defect report
 ```
 
-Handles carry a kind prefix but are otherwise structureless and
-unforgeable; clients cannot derive one handle from another. Authorization
-is checked independently of handle possession.
+Handles carry a kind prefix but are otherwise structureless. Content-
+addressed identities are derivable by anyone holding the content — the
+§4.5 existence-oracle rule exists because of this — so handles are
+identifiers, not secrets, and confer no authority. Capability tokens
+(`cap_*`) are minted randomly and do confer authority. Authorization is
+always checked independently of handle possession.
 
 ### 4.5 Operational contract of `continuumd`
 
@@ -723,6 +731,9 @@ nondeterminism classes per choice site
   († declarative until ADR-0016 lanes ship — see B11)
 observers
   state/event/knowledge/security projections
+abstraction maps
+  content identities of the §16 correspondence/abstraction maps the
+  claims are stated against; merge/split changes are privileged (§5.3)
 scope
   model/program components, abstraction level, and semantic fragment
   declarations (ADR-0025)
@@ -757,17 +768,22 @@ A semantic diff is not text diff. It classifies:
 - unchanged intent.
 
 Where implication is decidable or solver-checkable, Continuum proves the
-direction. Otherwise it emits a proof obligation or `Unknown` rather than
-guessing. `Unknown` fails closed: an intent change classified `Unknown`
-blocks ordinary promotion exactly as a confirmed privileged change does,
-pending review.
+direction. Otherwise it emits a proof obligation, `unknown`
+(undecidable or unattempted), or `unsupported` (outside declared
+fragments) rather than guessing — the two are distinct per INV-008.
+All non-affirmative classifications fail closed: an intent change
+classified `unknown`, `unsupported`, or `incomparable` on a protected
+field blocks ordinary promotion exactly as a confirmed privileged
+change does, pending review. The semantic-diff schema enforces this
+structurally, not only in prose.
 
 Each intent field declares its semantic fragment (ADR-0025:
 `Finite / Symbolic / Temporal / Probabilistic / Theorem / Runtime`), so
 "supported" is a checkable predicate. The diff guarantee is: within
 declared supported fragments, every property weakening, assumption
-strengthening, bound decrease, observer coarsening, fault removal, and
-assurance downgrade is classified as privileged; outside them, `Unknown`.
+strengthening, bound decrease, observer coarsening, fault removal,
+fairness addition or removal, and assurance downgrade is classified as
+privileged — the seven G3 dimensions; outside them, `unsupported`.
 
 ### 5.4 Intent locks
 
@@ -775,19 +791,27 @@ CI policy can lock fields:
 
 ```toml
 [intent.policy]
-properties = "maintainer-review"
-assumptions = "maintainer-review"
-fairness = "maintainer-review"
+properties = "review"
+assumptions = "review"
+fairness = "review"
 trust_boundaries = "no-expansion"
 non_vacuity = "no-removal"
-completion_policy = "maintainer-review"
+completion_policy = "review"
 bounds = "no-decrease"
 faults = "no-removal"
 assurance = "no-downgrade"
-observers = "proof-required"
-security_policy = "maintainer-review"
-optimization = "maintainer-review"
+observers = "review"   # a proof-gated verb requires an RFC 0037 revision
+security_policy = "review"
+optimization = "review"
+scope = "review"
+nondeterminism = "review"
+abstraction_maps = "review"
 ```
+
+Verbs are drawn from RFC 0037's closed set; free-form policy strings are
+rejected. `scope`, `nondeterminism`, and `abstraction_maps` are
+protected: RFC 0031 classifies any change to them as a semantic change,
+so each must be lockable.
 
 Agent repair capabilities exclude intent mutation unless a task explicitly asks for redesign.
 
@@ -1048,7 +1072,7 @@ Impeccable DX requires subsecond feedback for local edits and resumable deeper s
 The engine itself is engineering risk, not settled design: whether it is
 derived from an existing memoization framework or built custom is decided
 by a Phase B ADR with spike evidence (§21), and the decision is carried
-as a docs/08 risk with the mitigation "edge classes collapse to
+as docs/08 risk R21, with the mitigation "edge classes collapse to
 Conservative" named as the failure mode that destroys interactivity.
 
 ### 9.2 Query model
@@ -1163,11 +1187,13 @@ model.check / explore / compare
 program.extract / run / replay
 refinement.check / explain
 proof.goal / attempt / check / slice
+correspondence.bind / status / drift
 debug.open / state / enabled / step_event / step_abstract / reverse_causal /
   branch / compare / why_enabled / why_blocked / export
 context.compile / expand
 failure.explain / minimize / branch
 repair.begin / apply / attach / evaluate / resume / review / promote / reject
+observe.ingest / classify / result
 forge.create / step / archive / materialize
 benchmark.run
 task.status / cancel / resume / subscribe
@@ -1332,6 +1358,17 @@ Recommended role decomposition:
 - evidence integrator.
 
 Roles are capabilities and task views, not separate truth domains.
+
+### 11.7 Write model
+
+The evidence graph is append-only. Publication is per-artifact atomic
+(INV-017) and linearized per claim identity; status promotion is a
+compare-and-set against the claim's current status, so racing
+promotions cannot regress the lattice. Concurrent contradictory claims
+materialize a `Conflict` node rather than resolving by write order.
+Idempotency keys make agent retries safe. The concurrency section of
+RFC 0038 is specification debt (§25); the evidence-graph spike
+validated the authority table, not concurrent enforcement (§25).
 
 ---
 
@@ -1801,6 +1838,18 @@ residency constraints are a capability property of the worker pool.
 
 Every privileged operation records actor, capability, inputs, policy decision, outputs, and evidence identity. Audit logs are append-only and separate from semantic events.
 
+### 18.6 Signing identities
+
+Receipts, intent bundles, and domain packs are signed. The signing
+lifecycle is specified in docs/09: identities are minted through audited
+daemon operations (the solo-developer default is a local keypair minted
+on first use and recorded in the audit log); organizational deployments
+pin an allowed-signers set distributed inside the intent bundle;
+rotation and revocation are audited operations; a signature that cannot
+be verified downgrades the artifact to typed unverified provenance
+rather than failing open — except the §4.2.1 CI acceptance check, which
+fails closed by policy.
+
 ---
 
 ## 19. ContinuumBench
@@ -1962,18 +2011,24 @@ Dependency rules:
 
 Phases are gate-driven, not time-driven. Each phase names an owner and a
 minimum viable team; a phase without both is `BLOCKED`, not in progress.
+The owner/team table lives in `notes/START_HERE_IMPLEMENTATION.md`;
+filling a phase's row is a merge requirement of that phase's opening PR,
+and an unfilled row records the phase as `BLOCKED`.
 Phase A additionally resolves: the product license (permissive, compatible
 with asupersync and solver adapters); a per-family redistribution audit for
 the corpus before any public benchmark release; and the rule that foreign
 oracle tooling (TLC, Apalache, solvers) never ships in release binaries
 (ADR-0029). The G8 usability gate is defined against a preregistered
-minimal study: the four docs/34 acceptance workflows, two cohorts (Rust
-newcomers completing the deterministic/causal workflow; distributed-
-systems experts diagnosing real failures), a raw-trace baseline
+minimal study: the three human-executed docs/34 acceptance workflows
+(new model; existing Rust system; review), two cohorts (Rust newcomers
+completing the deterministic/causal workflow; distributed-systems
+experts diagnosing real failures), a raw-trace baseline
 comparator, and cohort sizes, instruments, and pass thresholds fixed in
 a preregistration document — an expanded docs/48 — published before the
-study runs. Authoring that document is a Phase E deliverable; the study
-itself runs in Phase F.
+study runs. The fourth docs/34 workflow (agent repair) is covered by the
+G2 ACI ablation and ContinuumBench, not the human study. Authoring the
+preregistration is a Phase E deliverable; the study itself runs in
+Phase F.
 
 ### Phase A — Trust spine and ACI kernel
 
@@ -2055,7 +2110,11 @@ Deliver:
   family at min(required, P2);
 - CML language stability: normalized semantic AST frozen before surface
   syntax; formatter and migration tool ship before syntax stability
-  (docs/11 §14).
+  (docs/11 §14);
+- formative usability sessions (think-aloud, ~5 participants per §13.1
+  persona) on the edit/check/explain loop, repeated each phase from C
+  onward and feeding docs/34 — distinct from and non-binding on the
+  preregistered summative G8 study (§21.1).
 
 Exit: the edit/check/explain loop meets the docs/34 latency table (p50/p95
 per interaction) on the reference workload — the table is gate-normative
@@ -2077,6 +2136,11 @@ Deliver:
 - invariant/ranking synthesis;
 - proof repair service;
 - refinement receipts;
+- self-application: a CML model of `continuumd`'s task/continuation
+  lifecycle and INV-017 publication protocol, bound to the daemon
+  implementation via the §16 correspondence machinery and checked in CI
+  from Phase D onward; a daemon concurrency defect found this way is
+  recorded as G4-class evidence of product value;
 - Wave 0/1 families raised from the Phase C P2 cap to their full
   required parity (P3/P4);
 - corpus Waves 2–3 at required parity;
@@ -2124,10 +2188,9 @@ Deliver:
 - multi-agent workbench.
 
 Exit: Continuum replaces bespoke DST plus separate TLA+ workflow in at
-least two materially different real systems. (This is deliberately
-stricter than docs/52 G10's "at least one stops requiring a separate
-TLA+ workflow"; docs/52 is updated to match, per §22's reconciliation
-rule.)
+least two materially different real systems. (§22 G10 and docs/52 G10
+carry this same two-system criterion; all three statements are
+reconciled in one commit per §22's reconciliation rule.)
 
 Scope note: 1.0 verifies systems whose controlled participants live in
 one workspace snapshot. Cross-repository federation — one intent
@@ -2270,6 +2333,8 @@ asserted beside it.
 - the preregistered study (§21.1) covers both cohorts — Rust newcomers
   completing the deterministic/causal workflow, and distributed-systems
   experts diagnosing real failures;
+- the preregistration (expanded docs/48) is published before the study
+  runs; results are graded only against its fixed thresholds;
 - explanation beats the raw-trace baseline on diagnosis accuracy and
   time;
 - assurance confidence is calibrated, not merely no worse than baseline;
@@ -2292,8 +2357,8 @@ asserted beside it.
 - two real project migrations;
 - two materially different real projects remove bespoke DST
   infrastructure;
-- at least one migrated project stops requiring a separate TLA+ workflow
-  for normal development;
+- at least two migrated projects stop requiring a separate TLA+
+  workflow for normal development;
 - production evidence returns valid pass/fail/inconclusive
   classifications (INV-008);
 - public ContinuumBench;
@@ -2310,7 +2375,8 @@ unauthorized evidence promotion is a release blocker at every gate. A
 confirmed false-positive success verdict triggers the soundness incident
 policy in `docs/09`: block release, revoke affected claim IDs, publish
 affected semantic epochs, ship an artifact scanner, add a permanent
-regression.
+regression, and reevaluate whether the producing engine remains eligible
+for certified mode.
 
 ---
 
@@ -2393,26 +2459,36 @@ with a baseline, a quantitative promotion threshold, a kill criterion, and
 a named fallback. The register is authoritative for lane status; no plan
 section may claim a lane's output without its status.
 
+A lane is **ratified** when its owner fixes the numeric threshold in the
+research note and this register quotes it verbatim; the dossier validator
+checks register↔note quote identity. Until then a row is **draft** and
+blocks its lane's promotion.
+
 | Capability | Lane | Threshold / kill | Fallback |
 |---|---|---|---|
-| General context compilation (§6) | research/25, /32 | pack-ablated agent benchmark win; kill if packs induce wrong repairs | plain causal slice + expansion |
-| Exploration reduction (§9, INV-013) | research/01; docs/31 | ≥10× (order of magnitude) reduction in explored classes on a non-artificial corpus subset **without regression on dependent workloads** (research/01); observer-indexed: median ≥5× on the observer-sensitive class, certificate overhead <20%, zero mutation loss (docs/31) | conservative unreduced exploration |
-| Liveness-preserving reduction (§7.2, Phase D) | research/04, /13 — lane to be opened | fair-cycle-preserving reduction ≥3× on the liveness corpus subset with zero missed accepting cycles vs unreduced SCC baseline | unreduced liveness with explicit cost banner; batch expectations stated in the Phase D exit |
+| General context compilation (§6) | research/25, research/32, research/33 | ablation design per research/25 (raw trace vs pack on the agent benchmark); win margin fixed at ratification — draft; kill (research/32): compact packs repeatedly induce incorrect repairs despite preservation checks | plain causal slice + expansion |
+| Exploration reduction (§9, INV-013) | research/01; docs/31 | research/01 (stated there as a kill): ≥10× reduction in explored classes on a non-artificial corpus subset without a *serious* regression on dependent workloads; observer-indexed (docs/31): median ≥5× on the observer-sensitive class, *checker* overhead <20% (distinct from the certificate-overhead row), zero mutation loss | conservative unreduced exploration |
+| Liveness-preserving reduction (§7.2, Phase D) | research/04, research/13 — lane to be opened | soundness gate per research/04: property-directed reduction is proven fair-cycle-preserving or disabled; speedup target and liveness corpus subset fixed at lane opening — draft | unreduced liveness with explicit cost banner; batch expectations stated in the Phase D exit |
 | Causal minimization (§6, §12) | research/26 | replay-preserving core ≤10% of trace length on real (non-synthetic) failures — draft, pending ratification; kill if minimization cost dominates verification | 1-minimal delta debugging only |
-| Sub-file incremental trust (§9) | research/27 | clean-parity at sampled rate; kill if capture untrustworthy below module granularity | module-granularity invalidation |
-| Forge co-synthesis + QD (§14) | research/29, /30 | rediscovery suite; kill if joint search loses to staged | staged synthesis; Pareto archive only |
-| Production conformance (Phase F) | research/05 | monitorability-gated; draft pending ratification: faithful Lab reproduction of ≥70% of curated known incidents under injected telemetry loss; always-on overhead ≤1%; kill if most target properties are monitorable only as `Inconclusive` on two real systems | Lab-replay evidence only |
-| Cancellation calculus (§0, B19) | research/09 | draft pending ratification: 10/10 mutation-corpus mutants detected with zero false alarms on the correct implementation; machine-checked drain ranking for the replicated register | runtime checking only |
-| Bidirectional lenses (§16) | research/31 | ambiguity rate := fraction of abstract edits on the drift corpus yielding multiple or no concrete candidates (metric defined in research/31; the drift corpus remains the lane deliverable); kill if most real mappings are too ambiguous, or users mistake candidate synchronization for verified preservation | get-only projection + drift detection |
-| Proof repair (§15.4) | research/28 | vs source/LSP loop baseline; kill if repair proposes weakening | context packs + human proof work |
-| Certificate overhead | docs/31 | checking ≤10% of search time, or acceptable asynchronous CI latency (docs/31's full rule) | reduce certified-lane scope |
-| Weak-memory lane (B11) | ADR-0032 — lane to be opened | reproduces the standard litmus corpus under the declared model before any envelope upgrade; until then every memory dimension reads `Unsupported(sequential-consistency-only)` | SC-only, declared as a 1.0 non-goal |
-| Timed/probabilistic semantics | ADR-0016 — lane to be opened | per-ADR staging; until shipped, timing fields in Intent Contracts remain declarative assumptions (B11) | declarative assumptions only |
+| Neighborhood adequacy (§8.3) | research/33 — lane to be opened | hidden-variant catch rate of the §8.3 neighborhood on the docs/50 gaming corpus; target fixed at lane opening — draft; kill (research/33): hidden variants are too easy to leak or too hard to grade independently | fixed strategy-list neighborhood with per-receipt coverage disclosure and no adequacy claim |
+| Sub-file incremental trust (§9) | research/27 | clean-mismatch rate at the §9.5 sampled audit rate (rate derives from §8.6's confidence target) — draft; kill if dependency capture cannot be made trustworthy below file/module granularity | module-granularity invalidation |
+| Forge co-synthesis + QD (§14) | research/29, research/30 | rediscovery suite (named algorithms and count fixed at ratification — draft); kills (research/29): joint space overwhelms coupled-feedback gains; proof-complexity objective biases toward trivial designs; abstractions overfit finite bounds; agent proposals cannot be reproduced by structured search | staged synthesis; Pareto archive only |
+| Production conformance (Phase F) | research/05, research/36 | draft pending ratification: faithful Lab reproduction of ≥70% of curated known incidents under injected telemetry loss and clock uncertainty; always-on overhead ≤1%; ≥2× reduction in surviving symmetry orbits per synthesized probe set; kill if most target properties are monitorable only as `Inconclusive` on two real systems, or the overhead budgets cannot be met | Lab-replay evidence only |
+| Cancellation calculus (§0, B19) | research/09 | draft pending ratification: 10/10 mutation-corpus mutants detected with zero false alarms on the correct implementation; machine-checked drain ranking for the replicated register; kill (research/09): invariant annotations become pervasive in real code, or the calculus cannot express asupersync's actual cancellation semantics | runtime checking only |
+| Bidirectional lenses (§16) | research/31 | ambiguity rate := fraction of abstract edits on the drift corpus yielding multiple or no concrete candidates (metric per research/31; the drift corpus is the lane deliverable; the numeric target is fixed in the note at ratification and quoted here) — draft; kill if most real mappings are too ambiguous, or users mistake candidate synchronization for verified preservation (measured under the G8 instruments) | get-only projection + drift detection |
+| Proof repair (§15.4) | research/28 | vs source/LSP loop baseline (qualitative; margin fixed at ratification — draft); kill if repair proposes weakening | context packs + human proof work |
+| Certificate overhead | docs/31 | checking ≤10% of search time, or acceptable asynchronous CI latency (docs/31's full rule); on failure the fallback is applied per lane | reduce certified-lane scope |
+| Nominal / orbit-finite verification | research/14; docs/31 | docs/31's stated promote/kill pair (unbounded session/request protocol with tractable orbit growth and Lean-proved equivariance) | finite-bounds checking only |
+| Sheaf-based composition | research/03; docs/31 | docs/31's stated promote/kill pair | monolithic composition proofs |
+| Full TLA+ source importer | docs/31; ADR-0029 | docs/31's stated promote/defer pair; not a 1.0 goal (ADR-0029) | manual semantic porting per docs/32 |
+| Weak-memory lane (B11) | ADR-0032 — lane to be opened | reproduces the standard litmus corpus under the declared model before any envelope upgrade; until then every memory dimension reads `Unsupported(sequential-consistency-only)`; defer: SC-only is a declared 1.0 non-goal | SC-only, declared as a 1.0 non-goal |
+| Timed/probabilistic semantics | ADR-0016 — lane to be opened | per-ADR staging; until shipped, timing fields in Intent Contracts remain declarative assumptions (B11); defer: post-1.0 | declarative assumptions only |
 
 A register row may not carry an unratified or `TBD` threshold past
 Phase A; such a row blocks its lane's promotion. docs/31's remaining
 quantitative thresholds (cubical reduction ≥3× on ≥2 real protocol
-classes; semiring within 15% of specialized analyses; assumption
+classes with a preservation theorem; semiring within 15% of specialized
+analyses with three production analyses sharing code; assumption
 synthesis on ≥5 liveness cases; abstraction discovery) are merged into
 this register during the §25 pass so the program has exactly one lane
 authority; where docs/31 and a research note disagree, the note is
@@ -2439,11 +2515,41 @@ correspondence, and START_HERE gate annotations. Where plan prose and
 RFC disagree, the RFC is corrected and becomes normative. The plan is a
 map, not the spec.
 
+The validator itself is brought up to these claims and its outputs
+regenerated in the same pass: lettered PR headings (4a/15a/25a) are
+matched; G0's freeze-blocking subset and the phase↔gate tables are
+compared structurally, not as empty bullet lists; bare Rev-2 gate
+citations (including `Target gate:` metadata in RFCs 0001–0025) require
+a scheme qualifier or banner; §0.3's G0 counts and §24.5's register
+rows are derived checks; and `VALIDATION_REPORT.md` /
+`validation-results.json` are regenerated so every advertised check has
+a recorded result.
+
 The following specification debt remains open and is paid before PR 5
 (native protocol kernel) freezes any interface; each item names its
 target file so closure is checkable:
 
 - RFC 0026: the normative IDL file (currently referenced, not present);
+- RFC 0026: absorb the §4.3 requirements it currently omits — the N and
+  N−1 protocol-major window, the evidence/receipt readability decoupling,
+  mid-flight budget updates, and evidence subscriptions;
+- RFC 0032: absorb §8.6 — the incremental gate 5–7 reuse rule, cost
+  ceilings, and `BudgetExhausted`-with-continuation;
+- RFC 0037: the `intent.accept` / `intent.lock` operations and
+  `revise-intent` capability (currently only in RFC 0027), and the
+  knowledge/security observer projections dropped from §5.2's four;
+- RFC 0038: the evidence-graph write/concurrency model (§11.7);
+- schemas: an intent-registry record schema carrying `Proposed`/accepted
+  status and §4.2.1 acceptance chains; a shared `Redacted(reason,
+  commitment)` `$defs` used by every artifact class (§4.5, §18.4); a
+  promotion-receipt schema carrying the §8.6 cost ledger and gate
+  profile; a B11-complete assurance envelope (all nine dimensions, each
+  naming its producing engine or a typed `Unsupported(reason)`), with the
+  `resource-exhausted` verdict removed (§11.4: budget exhaustion is never
+  a verdict); conditional enforcement for INV-008 reasons,
+  `validation_basis`, and fail-closed diffs; typed `Failed` reasons on
+  tasks (§4.5); one `$id`/versioning convention with a schema-epoch field
+  (§4.3);
 - RFC 0037: the intent-bundle distribution and convergence section
   (§4.2.1);
 - `schemas/intent-contract.schema.json`: a structured property-AST
@@ -2455,7 +2561,15 @@ target file so closure is checkable:
   rule, two-epoch migration, `Preserved | Revalidate | Incompatible`
   compatibility statements, engine-defect artifacts);
 - docs/41: regenerate around the 12-gate, phase-profile repair design
-  (RFC 0032 is normative in the interim).
+  (RFC 0032 is normative in the interim);
+- derived-doc contradictions corrected in the same pass (each currently
+  states the opposite of the plan or its normative RFC): docs/42's
+  opt-in parity audit (§9.5 and RFC 0030 make sampling default-on) and
+  its `Elaborate` query key missing `semantic_epoch` (§9.2); docs/40's
+  missing fail-closed rule and unbound `incomparable` (§5.3); docs/41's
+  missing RFC 0032 banner (added immediately, ahead of regeneration);
+  docs/35's cross-user sharing default (§4.5); docs/45's grading order
+  (security is second per §19.3/RFC 0034).
 
 The first demonstration should be brutally concrete:
 

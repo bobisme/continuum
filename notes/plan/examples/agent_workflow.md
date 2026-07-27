@@ -7,13 +7,14 @@ This walkthrough shows the intended API shape. Handles are illustrative.
 ```
 
 ```json
-{"workspace":"ws_4f","intent":"in_91"}
+{"snapshot":"ws_4f","intent":"in_91"}
 ```
 
 ```json
 {
   "operation":"verification.start",
-  "workspace":"ws_4f",
+  "idempotency_key":"b1946ac9",
+  "snapshot":"ws_4f",
   "intent":"in_91",
   "arguments":{"target":{"kind":"property","id":"AckImpliesDurable"}},
   "budget":{"states":100000,"wall_ms":30000},
@@ -26,7 +27,7 @@ Result:
 ```json
 {
   "verdict":"refuted",
-  "task":"task_82",
+  "task_id":"task_82",
   "artifacts":[{"kind":"crashpack","handle":"crash_7m"},{"kind":"context_pack","handle":"ctx_2a"}]
 }
 ```

@@ -80,10 +80,13 @@ The proposed experiment and its assumptions are explicit.
 
 ## Human study
 
-This is the preregistered G8 study (plan §21.1): it covers the four
-docs/34 acceptance workflows and two cohorts — Rust newcomers completing
+This is the preregistered G8 study (plan §21.1): it covers the three
+human-executed docs/34 acceptance workflows (new model; existing Rust
+system; review) and two cohorts — Rust newcomers completing
 the deterministic/causal workflow, and distributed-systems experts
 diagnosing real failures — against a raw-trace baseline comparator.
+The fourth docs/34 workflow (agent repair) is covered by the G2 ACI
+ablation and ContinuumBench, not the human study.
 Cohort sizes, instruments, and pass thresholds are fixed in a
 preregistration expansion of this document, authored in Phase E and
 published before the study runs in Phase F (docs/52 G8).

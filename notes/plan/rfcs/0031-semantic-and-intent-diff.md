@@ -10,7 +10,7 @@ Draft for implementation.
 
 ## Summary
 
-The diff engine is the anti-reward-hacking core (plan B1, INV-001, INV-011, G0-DX-02). Given two snapshots and two intent versions, it classifies every change, computes the evidence impact set, and produces the policy verdict that gates ordinary versus privileged promotion.
+The diff engine is the anti-reward-hacking core (plan B1, INV-001, INV-011, G0-DX-02). Given two snapshots and two intent versions, it classifies every change, computes the evidence impact set, and produces the policy verdict that gates ordinary versus privileged promotion. The diff artifact this RFC defines carries the `diff_*` handle prefix (plan §4.4 registers it); the normative schema pattern-enforces `^diff_` identities.
 
 ## Inputs
 
@@ -36,16 +36,24 @@ Directional relations are defined per field by these orders:
 - **Bounds:** componentwise partial order on `(values, nodes, faults, depth)`; a decrease in any component with no increase elsewhere is `contracted`; mixed changes are `incomparable`. `no-decrease` blocks `contracted` and blocks `incomparable` pending review.
 - **Assurance:** total order `observed < sampled < bounded < validated < proved`; movement down is `downgraded` and is what `no-downgrade` blocks. Checker requirements (`independent_checker`, `clean_recompute`) turning off is also `downgraded`.
 - **Observers:** `refined` iff the new observer distinguishes at least the old projections/events; dropping an event family or coarsening a projection is `coarsened`.
+- **Abstraction maps:** the intent's `abstraction_maps` group binds content identities of the §16 correspondence/abstraction maps the claims are stated against; mapping distinct concrete values to one abstract value is `merged`, the reverse is `split`, and both directions are privileged.
+- **Scope:** no directional order is defined; any `scope` change (components, abstraction level, declared fragments) on a protected contract is a semantic change and blocks ordinary promotion pending review.
 - **Assumptions/faults/fairness/non-vacuity:** set membership per classified item (`added`/`removed`), with `strengthened`/`weakened` for edits to an item's expression evaluated in its fragment. Adding an assumption or fairness constraint is environment-strengthening and therefore protected; removing a fault or a non-vacuity behavior is protected.
 - **Trust boundaries:** growth of the opaque set is `expanded` and is what `no-expansion` blocks.
 - **Security policy:** weakening a data classification, removing a redaction class, or relaxing a capability requirement is `weakened` and protected; the reverse direction is `strengthened`.
 - **Completion policy / nondeterminism classes:** any change is a semantic change; cross-policy relations are `incomparable` (there is no soundness order among completion policies).
 
+Naming note: plan §5.3's prose speaks of "bound increase/decrease" and "fault envelope expansion/contraction"; this RFC's relation assignments are normative — bounds classify as `expanded`/`contracted`, faults as `added`/`removed` per classified item. The prose phrases are informal aliases for these relations.
+
+## Completeness guarantee
+
+This RFC is the normative home of the plan §5.3 diff guarantee. Within the intent's declared supported fragments, every property weakening, assumption strengthening, bound decrease, observer coarsening, fault removal, fairness addition or removal, and assurance downgrade MUST be classified as a privileged intent change — the seven G3 dimensions. Outside declared fragments the classification is `unsupported`, never a guessed direction.
+
 ## Fail-closed rule
 
 - Where implication is decidable or solver-checkable in the declared fragments, Continuum MUST prove the direction and attach the witness/obligation to the change record.
 - Otherwise the relation is `unknown` (undecidable/unattempted) or `unsupported` (outside declared fragments) — these are distinct (INV-008).
-- `unknown` and `unsupported` on a protected field MUST be treated exactly as a confirmed protected change: ordinary promotion is blocked pending review (plan §5.3). The diff never guesses an ordering.
+- `unknown`, `unsupported`, and `incomparable` on a protected field MUST be treated exactly as a confirmed protected change: ordinary promotion is blocked pending review (plan §5.3) — the `incomparable` rule stated for bounds above holds for every protected field. The diff never guesses an ordering.
 
 ## Program semantic diff
 
@@ -74,5 +82,5 @@ The verdict (`allow | review | block | unknown`) is computed from the per-field 
 
 - Mutation corpus with known strengthened/weakened/incomparable/unknown relations per field, including renames and formula rewrites that MUST NOT classify `unchanged`.
 - All G0-DX-02 gaming patches classify as protected; a source-only guard repair classifies as program change only.
-- Fail-closed tests: protected-field `unknown`/`unsupported` blocks ordinary promotion.
+- Fail-closed tests: protected-field `unknown`/`unsupported`/`incomparable` blocks ordinary promotion.
 - Impact-set soundness: no invalidated-in-truth evidence lands in `reused` on the acceptance corpus.

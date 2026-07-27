@@ -84,7 +84,7 @@ All surfaces are adapters over one native protocol. MCP is important interoperab
 - Counterexamples are causal explanations, not log dumps.
 - Every context pack has an omission manifest and expansion handles.
 - Every repair is a transaction with replay, neighborhood search, mutation challenge, and proof impact.
-- Incremental results are provenance-bearing and differentially checked against clean builds.
+- Incremental results are provenance-bearing and audited against clean builds by the Incremental Parity Audit.
 - Forge optimizes only inside a fixed intent and assurance envelope.
 - Humans can progressively disclose complexity without losing access to exact evidence.
 - Lean remains the authority for theorems and certificate soundness; search engines remain untrusted.

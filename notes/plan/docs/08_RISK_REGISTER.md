@@ -1,5 +1,9 @@
 # Risk Register and Kill Criteria
 
+> **Note:** This file's internal gate citations (e.g. "before G2") use the
+> Revision 2 gate scheme of `docs/26_RELEASE_GATES_REV2.md` and may not be
+> cited without translation per plan §22 (Rev-2 G2 ≈ Rev-3 G4).
+
 ## Risk scale
 
 - Probability: low / medium / high.
@@ -301,6 +305,20 @@ Controls:
 - stable CLI;
 - compatibility with Quint/TLA+;
 - avoid requiring users to understand every engine.
+
+## R21 — Incremental engine substrate cannot support precise invalidation
+
+**Probability:** medium  
+**Impact:** severe
+
+Failure mode: the chosen memoization substrate (salsa-derived or custom; the build-vs-adopt decision is a Phase B ADR per plan §9.1) cannot support the four reuse-edge classes (Exact/Validated/Conservative/Experimental) with precise invalidation; edge classes collapse to Conservative, destroying interactivity (G5).
+
+Controls:
+
+- Phase B build-vs-adopt ADR backed by a spike implementing the four reuse-edge classes and `query.explain_invalidation`, with a measured invalidation-precision baseline;
+- Incremental Parity Audit (plan §9.5).
+
+Kill signal: Conservative-collapse on the reference workload.
 
 ## Project-level kill questions
 

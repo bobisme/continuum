@@ -1,5 +1,7 @@
 # Agent–Computer Interfaces for Formal Systems
 
+**Claim class:** design hypothesis
+
 ## Question
 
 What interface lets a coding/proof agent use a verification environment reliably and efficiently without granting it authority over truth?

@@ -1,7 +1,7 @@
 # RFC 0005: Certificates and the Independent Kernel
 
 **Status:** Proposed  
-**Target gates:** G2/G3
+**Target gates:** G2/G3 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Summary
 

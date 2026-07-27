@@ -1,17 +1,73 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schemas/assurance-result.schema.json",
+  "$id": "https://continuum.dev/schema/assurance-result.json",
   "title": "Continuum Assurance Result",
   "type": "object",
+  "$defs": {
+    "envelope_dimension": {
+      "description": "B11 envelope dimension: names its producing engine or carries a typed Unsupported(reason). A dimension is never silently omitted.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "engine",
+            "summary"
+          ],
+          "properties": {
+            "engine": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "unsupported"
+          ],
+          "properties": {
+            "unsupported": {
+              "description": "Typed Unsupported reason, e.g. sequential-consistency-only (plan B11).",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
   "required": [
     "format",
     "version",
     "claim",
     "verdict",
     "scope",
+    "envelope",
     "evidence",
     "trusted_components",
     "limitations"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "required": [
+          "inconclusive_reason"
+        ]
+      }
+    }
   ],
   "properties": {
     "format": {
@@ -54,14 +110,70 @@
       "additionalProperties": false
     },
     "verdict": {
+      "description": "Budget exhaustion is never a verdict (plan §11.4); it is the BudgetExhausted error with a continuation.",
       "enum": [
         "established",
         "refuted",
         "inconclusive",
         "unsupported",
-        "resource-exhausted",
         "engine-error"
       ]
+    },
+    "inconclusive_reason": {
+      "description": "Typed reason required by INV-008 when verdict is inconclusive (plan §11.4).",
+      "enum": [
+        "Unsupported",
+        "ResourceExhausted",
+        "EngineError",
+        "InsufficientTelemetry",
+        "AbstractionAmbiguity",
+        "IncompleteProofSearch"
+      ]
+    },
+    "envelope": {
+      "description": "B11 assurance envelope: all nine dimensions required; each names its producing engine or carries a typed Unsupported(reason). Until the weak-memory lane ships (ADR-0032), memory_model reads Unsupported(sequential-consistency-only).",
+      "type": "object",
+      "required": [
+        "bounds",
+        "faults",
+        "fairness",
+        "values",
+        "schedules",
+        "memory_model",
+        "observer",
+        "proof_status",
+        "unknowns"
+      ],
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "faults": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "fairness": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "values": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "schedules": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "memory_model": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "observer": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "proof_status": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "unknowns": {
+          "$ref": "#/$defs/envelope_dimension"
+        }
+      },
+      "additionalProperties": false
     },
     "scope": {
       "type": "object",

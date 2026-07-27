@@ -1,5 +1,14 @@
 # Agent Benchmarks and Formal Reward Hacking
 
+**Claim class:** evaluation methodology
+
+## Lane status (plan §24.5)
+
+This note owns two register rows:
+
+1. **Neighborhood adequacy (§8.3)** — lane to be opened. Threshold: hidden-variant catch rate of the §8.3 repair neighborhood on the docs/50 gaming corpus; the numeric target is fixed at lane opening — draft. The kill clause is the first kill criterion below (hidden variants too easy to leak or too hard to grade independently).
+2. **Co-ownership of the context-compilation ablation benchmark** (general context compilation, §6) with research/25 and research/32: this note supplies the anti-gaming grading discipline for that lane's agent benchmark.
+
 ## Problem
 
 Standard coding benchmarks often grade final tests. Formal-systems agents can exploit the specification, environment, bounds, observer, verifier, or grader itself.

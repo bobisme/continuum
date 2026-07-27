@@ -2,6 +2,44 @@
   "$id": "https://continuum.dev/schema/evidence-graph-node.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "INV-008: inconclusive is never untyped (plan §11.4).",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "inconclusive_reason"
+        ]
+      }
+    },
+    {
+      "description": "Validated records whether solver evidence is a checked certificate or a trusted solver; the two never render identically (plan §11.4).",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "validated"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "validation_basis"
+        ]
+      }
+    }
+  ],
   "properties": {
     "artifact": {
       "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",

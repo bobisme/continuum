@@ -1,5 +1,7 @@
 # Causal and Contrastive Counterexample Explanations
 
+**Claim class:** research hypothesis
+
 ## Problem
 
 Model checkers produce witnesses, but a witness is not automatically an explanation. The counterexample-explanation literature reports heavy use of traces, minimization, visualization, localization, and logic-specific techniques, while industrial studies show raw verification output remains difficult to interpret.

@@ -12,36 +12,72 @@
       "corpus/tla-examples/validated-examples.csv": 80
     },
     "empty_files": {
-      "files": 298
+      "empty_files": 0,
+      "scanned_files": 311
+    },
+    "g0_matrix_counts": {
+      "evidence": 8,
+      "open_freeze_blocking": 3,
+      "rehomed": 4
+    },
+    "g10_two_system": {
+      "criterion": "two-system"
+    },
+    "gate_citation_hygiene": {
+      "files": 148
+    },
+    "gate_scheme_correspondence": {
+      "docs_bullets": 65,
+      "gates": 11,
+      "plan_bullets": 65
+    },
+    "handle_prefix_registry": {
+      "anchored_patterns": 40,
+      "registry_prefixes": 19
     },
     "json": {
-      "files": 38
+      "files": 46
     },
     "lean_source": {
       "files": 17,
       "kernel_checked": false
     },
     "markdown_fences": {
-      "files": 211
+      "files": 216
     },
     "markdown_links": {
-      "links": 169
+      "links": 183
     },
     "numbering": {
       "adr": 52,
       "bibliography_entries": 159,
       "rfcs": 40
     },
+    "phase_gate_tables": {
+      "phases": 6
+    },
     "python": {
       "files": 18
     },
+    "register_rows": {
+      "rows": 17
+    },
+    "retired_names": {
+      "files_scanned": 301
+    },
+    "rev2_target_gate_qualifiers": {
+      "target_gate_lines": 20
+    },
     "schemas": {
-      "pairs": 15
+      "pairs": 19
     },
     "spikes": {
       "assertions": 30,
       "revision_2_runner": "",
       "revision_3_runner": "wrote spikes/results/r3-spike-results.json; 8 spike groups passed"
+    },
+    "start_here_gate_annotations": {
+      "pr_headings": 34
     },
     "toml": {
       "files": 5

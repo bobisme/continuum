@@ -1,5 +1,7 @@
 # Security of Agentic Verification Workbenches
 
+**Claim class:** research hypothesis
+
 ## Research question
 
 How does a verifier remain trustworthy when untrusted agents control queries, patches, generated models/proofs, and large compute budgets?

@@ -2,7 +2,7 @@
 
 **Status:** Proposed  
 **Owners:** semantics, runtime, verification  
-**Target gate:** G0  
+**Target gate:** G0   (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 **Normative vocabulary:** MUST, SHOULD, MAY are interpreted as in RFC 2119.
 
 ## Summary

@@ -8,9 +8,30 @@
       "kind": "rust"
     }
   ],
+  "cost_ledger": {
+    "cpu_ms": 184000,
+    "memory_bytes": 2147483648,
+    "solver_ms": 42000,
+    "tokens": 18500,
+    "wall_ms": 96000
+  },
   "failure": "crash_demo1",
   "gate_profile": "phase-b",
   "gates": [
+    {
+      "evidence": [
+        "ev_replay1"
+      ],
+      "name": "base_replay",
+      "status": "pass"
+    },
+    {
+      "evidence": [
+        "ev_apply1"
+      ],
+      "name": "patch_application",
+      "status": "pass"
+    },
     {
       "evidence": [
         "diff_demo1"
@@ -26,14 +47,54 @@
       "status": "pass"
     },
     {
-      "evidence": [],
-      "name": "incremental_parity",
-      "status": "not_yet_enforced"
+      "evidence": [
+        "ev_neighborhood1"
+      ],
+      "name": "neighborhood",
+      "status": "pass"
+    },
+    {
+      "evidence": [
+        "ev_mutation1"
+      ],
+      "name": "property_mutation",
+      "status": "pass"
+    },
+    {
+      "evidence": [
+        "ev_mutants1"
+      ],
+      "name": "defect_mutants",
+      "status": "pass"
+    },
+    {
+      "evidence": [
+        "ev_refinement1"
+      ],
+      "name": "refinement_coverage",
+      "status": "pass"
     },
     {
       "evidence": [],
       "name": "certificate_rebuild",
       "status": "not_yet_enforced"
+    },
+    {
+      "evidence": [],
+      "name": "incremental_parity",
+      "status": "not_yet_enforced"
+    },
+    {
+      "evidence": [
+        "ev_security1"
+      ],
+      "name": "code_and_security",
+      "status": "pass"
+    },
+    {
+      "evidence": [],
+      "name": "receipt_generation",
+      "status": "pending"
     }
   ],
   "hypothesis": "publish reply only after storage sync",
@@ -41,5 +102,6 @@
   "repair_id": "rt_demo1",
   "schema_version": "1.0",
   "semantic_diff": "diff_demo1",
-  "status": "ready"
+  "status": "ready",
+  "version": 1
 }

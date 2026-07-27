@@ -13,3 +13,4 @@ entry = "models/ack_protocol.ctm"
 profile = "dev"
 semantic_epoch = "3"
 intent = "in_7c2f91"
+intent_bundle = "inb_09aa41"  # §4.2.1: CI fails closed without it

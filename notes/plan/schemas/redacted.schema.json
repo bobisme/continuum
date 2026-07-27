@@ -1,0 +1,33 @@
+{
+  "$id": "https://continuum.dev/schema/redacted.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Shared definition of the plan §4.5 Redacted(reason, commitment) value: purge shreds the key and replaces content with this typed stub; receipts referencing purged content remain structurally verifiable and report the redaction, downgrading per §18.4. Consumers (proof-receipt, context-pack, crashpack) inline an identical $defs named `redacted` mirroring this schema so each file stays self-contained.",
+  "properties": {
+    "commitment": {
+      "description": "Content commitment (hash) of the redacted original.",
+      "type": "string"
+    },
+    "original_class": {
+      "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+      "type": "string"
+    },
+    "reason": {
+      "enum": [
+        "summarized",
+        "lost",
+        "purged"
+      ]
+    },
+    "redacted": {
+      "const": true
+    }
+  },
+  "required": [
+    "redacted",
+    "reason",
+    "commitment"
+  ],
+  "title": "Redacted Value",
+  "type": "object"
+}

@@ -1,7 +1,7 @@
 # RFC 0009: Zoomable Views and Refinement
 
 **Status:** Proposed  
-**Target gates:** G2/G5
+**Target gates:** G2/G5 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Summary
 

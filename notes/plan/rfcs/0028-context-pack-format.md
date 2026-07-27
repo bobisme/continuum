@@ -14,7 +14,7 @@ A Context Pack is a bounded, typed, property-directed compilation of the evidenc
 
 ## Artifact
 
-Per the schema: target question, snapshot + intent identities, pinned semantic epoch, typed verdict, assurance envelope (every B11 dimension present or typed `Unsupported`), selected items (events, state deltas, obligation/resource flow, order constraints, source/model/proof references, assumptions, counterfactuals, heuristic repair surfaces), per-pack guarantee set, omission manifest, expansion queries, evidence references, replay handle (`crash_*`) and optional debugger handle (`dbg_*`), canonical content hash (ADR-0013), and content budget. The semantic-epoch field is what `ReplayPreserving` is pinned to; a pack without it cannot claim that guarantee. Packs are immutable; `context.expand` creates a child pack referencing its parent.
+Per the schema: pack identity (`ctx_*`, the plan §4.4 handle prefix), `schema_version`, target question, snapshot + intent identities, pinned semantic epoch, typed verdict, assurance envelope (every B11 dimension present or typed `Unsupported`), selected items (events, state deltas, obligation/resource flow, order constraints, source/model/proof references, assumptions, counterfactuals, heuristic repair surfaces), per-pack guarantee set, omission manifest, expansion queries, evidence references, replay handle (`crash_*`) and optional debugger handle (`dbg_*`), canonical content hash (ADR-0013), and content budget. The semantic-epoch field is what `ReplayPreserving` is pinned to; a pack without it cannot claim that guarantee. Packs are immutable; `context.expand` creates a child pack referencing its parent.
 
 ## Guarantee classes
 

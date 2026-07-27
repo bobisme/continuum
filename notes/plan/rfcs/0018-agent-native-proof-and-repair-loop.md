@@ -1,7 +1,7 @@
 # RFC 0018: Agent-Native Proof and Repair Loop
 
 **Status:** Proposed  
-**Target gates:** G2 onward
+**Target gates:** G2 onward (Revision 2 scheme, docs/26; Rev-2 G2 ≈ Rev-3 G4 per plan §24 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Principle
 

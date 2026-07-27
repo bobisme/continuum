@@ -1,7 +1,7 @@
 # RFC 0003: Continuum Model Language
 
 **Status:** Proposed  
-**Target gate:** G2  
+**Target gate:** G2   (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 **Working extension:** `.ctm`
 
 ## Summary

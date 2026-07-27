@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import os
 import csv
 import json
@@ -35,6 +36,9 @@ SCHEMA_PAIRS = {
     "schemas/benchmark-task.schema.json": "schemas/examples/benchmark-task.example.json",
     "schemas/evidence-graph-node.schema.json": "schemas/examples/evidence-graph-node.example.json",
     "schemas/evidence-graph-edge.schema.json": "schemas/examples/evidence-graph-edge.example.json",
+    "schemas/intent-registry-record.schema.json": "schemas/examples/intent-registry-record.example.json",
+    "schemas/redacted.schema.json": "schemas/examples/redacted.example.json",
+    "schemas/promotion-receipt.schema.json": "schemas/examples/promotion-receipt.example.json",
 }
 
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
@@ -49,8 +53,13 @@ RETIRED_NAME_RES = [
 CP_HANDLE_RE = re.compile(r"[\"'`]cp_[A-Za-z0-9]")
 GATE_HEADING_RE = re.compile(r"^#{2,3}\s+G(\d+)\s*[—–-]", re.MULTILINE)
 GATE_SUFFIX_RE = re.compile(r"\bG\d+-(?:Corpus|Proof)\b")
-PR_HEADING_RE = re.compile(r"^### PR (\d+)\b.*$", re.MULTILINE)
+# \d+[a-z]? — lettered insert PRs (4a/15a/25a) must be matched, not skipped.
+PR_HEADING_RE = re.compile(r"^### PR (\d+[a-z]?)\b.*$", re.MULTILINE)
 PR_GATE_ANNOTATION_RE = re.compile(r"\[G[0-9]")
+TARGET_GATE_RE = re.compile(r"^\*\*Target gate")
+GATE_SCHEME_QUALIFIER_RE = re.compile(
+    r"Rev(?:ision)?[\s-]?[23]\b|docs/26|docs/52|translat", re.IGNORECASE
+)
 PREFIX_LINE_RE = re.compile(r"^([a-z]+)_\*", re.MULTILINE)
 
 
@@ -131,10 +140,15 @@ def check_spikes() -> dict[str, Any]:
     assert r3["evidence_graph"]["intent_gaming_blocked"] is True
     assert r3["evidence_graph"]["conflicts_surfaced"] is True
 
+    assertion_count = sum(
+        1
+        for line in inspect.getsource(check_spikes).splitlines()
+        if line.strip().startswith("assert ")
+    )
     return {
         "revision_2_runner": output_r2.strip().splitlines()[-1] if output_r2.strip() else "",
         "revision_3_runner": output_r3.strip().splitlines()[-1] if output_r3.strip() else "",
-        "assertions": 30,
+        "assertions": assertion_count,
     }
 
 
@@ -204,9 +218,10 @@ def check_empty() -> dict[str, Any]:
     ]
     if empty:
         raise AssertionError(f"empty files: {empty}")
-    return {"files": sum(
+    # Key name is deliberate: this is the number of files *scanned*, not empty.
+    return {"scanned_files": sum(
         1 for p in ROOT.rglob("*") if p.is_file() and "__pycache__" not in p.parts
-    )}
+    ), "empty_files": 0}
 
 
 def check_numbering() -> dict[str, Any]:
@@ -426,15 +441,171 @@ def check_gate_citation_hygiene() -> dict[str, Any]:
 def check_start_here_gate_annotations() -> dict[str, Any]:
     text = (ROOT / "notes/START_HERE_IMPLEMENTATION.md").read_text(encoding="utf-8")
     headings = PR_HEADING_RE.findall(text)
-    missing = [
-        f"PR {match.group(1)}: {match.group(0).strip()}"
-        for match in PR_HEADING_RE.finditer(text)
-        if not PR_GATE_ANNOTATION_RE.search(match.group(0))
-    ]
+    missing: list[str] = []
+    invalid: list[str] = []
+    for match in PR_HEADING_RE.finditer(text):
+        heading = match.group(0)
+        if not PR_GATE_ANNOTATION_RE.search(heading):
+            missing.append(f"PR {match.group(1)}: {heading.strip()}")
+            continue
+        bracket = re.search(r"\[(G[^\]]*)\]", heading)
+        gates = re.findall(r"G(\d+)", bracket.group(1)) if bracket else []
+        if not gates or any(int(g) > 10 for g in gates):
+            invalid.append(f"PR {match.group(1)}: gate numbers out of range G0-G10: {heading.strip()}")
     assert headings, "no '### PR <n>' headings found in notes/START_HERE_IMPLEMENTATION.md"
-    if missing:
-        raise AssertionError("PR headings missing [G<n>] gate annotation:\n" + "\n".join(missing))
+    for expected in ("4a", "15a", "25a"):
+        assert expected in headings, f"lettered PR heading {expected} not matched"
+    if missing or invalid:
+        raise AssertionError(
+            "PR heading gate-annotation violations:\n" + "\n".join(missing + invalid)
+        )
     return {"pr_headings": len(headings)}
+
+
+def check_g0_matrix_counts() -> dict[str, Any]:
+    """Plan section 0.3's G0 counts must derive from the matrix, not sit beside it."""
+    matrix_text = (ROOT / "notes/G0_SPIKE_MATRIX.md").read_text(encoding="utf-8")
+    statuses: dict[str, str] = {}
+    for line in matrix_text.splitlines():
+        match = re.match(r"^\|\s*G0-(DX-\d+)\s*\|", line)
+        if not match:
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        # Columns: '' ID Question Experiment Pass Failure Status Evidence Decision ''
+        assert len(cells) >= 9, f"matrix row has too few cells: {line.strip()}"
+        statuses[match.group(1)] = cells[6]
+    assert len(statuses) == 15, f"expected 15 matrix rows, found {len(statuses)}"
+    evidence = {d for d, s in statuses.items() if s.startswith("Evidence")}
+    open_blocking = {d for d, s in statuses.items() if s.startswith("Open")}
+    rehomed = {d for d, s in statuses.items() if s.startswith("Re-homed")}
+    assert evidence | open_blocking | rehomed == set(statuses), (
+        f"unclassified statuses: { {d: s for d, s in statuses.items() if d not in evidence | open_blocking | rehomed} }"
+    )
+
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    section = re.search(r"^## 0\.3 .*?(?=^## |\Z)", plan_text, re.MULTILINE | re.DOTALL)
+    assert section, "plan.md section 0.3 not found"
+    norm = re.sub(r"\s+", " ", section.group(0))
+    count_match = re.search(r"(\d+) of 15 G0 items have spike evidence", norm)
+    assert count_match, "plan section 0.3 spike-evidence count sentence not found"
+    assert int(count_match.group(1)) == len(evidence), (
+        f"plan says {count_match.group(1)} evidence items; matrix has {len(evidence)}"
+    )
+    open_match = re.search(r"spike evidence\. (.*?) are open and freeze-blocking", norm)
+    assert open_match, "plan section 0.3 open/freeze-blocking sentence not found"
+    plan_open = set(re.findall(r"DX-\d+", open_match.group(1)))
+    assert plan_open == open_blocking, f"plan open set {sorted(plan_open)} != matrix {sorted(open_blocking)}"
+    rehomed_match = re.search(r"freeze-blocking \(Phase A\)\. (.*?) are re-homed", norm)
+    assert rehomed_match, "plan section 0.3 re-homed sentence not found"
+    plan_rehomed = set(re.findall(r"DX-\d+", rehomed_match.group(1)))
+    assert plan_rehomed == rehomed, f"plan re-homed set {sorted(plan_rehomed)} != matrix {sorted(rehomed)}"
+
+    # The freeze-blocking subset line must be identical across the three sources.
+    subset = "DX-01–05, 07, 08, 10, 12, 13, 14"
+    for rel in ("plan.md", "docs/52_RELEASE_GATES_REV3.md", "notes/G0_SPIKE_MATRIX.md"):
+        assert subset in (ROOT / rel).read_text(encoding="utf-8"), (
+            f"freeze-blocking subset string missing from {rel}"
+        )
+    return {
+        "evidence": len(evidence),
+        "open_freeze_blocking": len(open_blocking),
+        "rehomed": len(rehomed),
+    }
+
+
+def _phase_gate_table(text: str) -> dict[str, frozenset[str]]:
+    rows: dict[str, frozenset[str]] = {}
+    for line in text.splitlines():
+        match = re.match(r"^\|\s*(?:Phase\s+)?([A-F])\s*\|(.+)\|\s*$", line)
+        if match:
+            gates = frozenset(re.findall(r"G\d+", match.group(2)))
+            if gates:
+                rows[match.group(1)] = gates
+    return rows
+
+
+def check_phase_gate_tables() -> dict[str, Any]:
+    """The phase-to-gate tables in plan section 22 and docs/52 must agree."""
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    match = re.search(r"^## 22\..*?(?=^## \d)", plan_text, re.MULTILINE | re.DOTALL)
+    assert match, "plan.md section 22 not found"
+    plan_table = _phase_gate_table(match.group(0))
+    docs_table = _phase_gate_table(
+        (ROOT / "docs/52_RELEASE_GATES_REV3.md").read_text(encoding="utf-8")
+    )
+    assert set(plan_table) == set("ABCDEF"), f"plan phase table rows: {sorted(plan_table)}"
+    assert set(docs_table) == set("ABCDEF"), f"docs/52 phase table rows: {sorted(docs_table)}"
+    mismatches = [
+        f"phase {phase}: plan {sorted(plan_table[phase])} != docs/52 {sorted(docs_table[phase])}"
+        for phase in sorted(plan_table)
+        if plan_table[phase] != docs_table[phase]
+    ]
+    if mismatches:
+        raise AssertionError("phase/gate table mismatch:\n" + "\n".join(mismatches))
+    return {"phases": len(plan_table)}
+
+
+def check_g10_two_system() -> dict[str, Any]:
+    """Plan section 21, section 22, and docs/52 must agree on the G10 criterion."""
+    needle = "at least two migrated projects stop requiring a separate TLA+ workflow"
+    legacy = "at least one migrated project stops requiring"
+    for rel in ("plan.md", "docs/52_RELEASE_GATES_REV3.md"):
+        norm = re.sub(r"\s+", " ", (ROOT / rel).read_text(encoding="utf-8"))
+        assert needle in norm, f"{rel}: two-system G10 criterion missing"
+        assert legacy not in norm, f"{rel}: superseded one-system G10 criterion still present"
+    return {"criterion": "two-system"}
+
+
+def check_rev2_target_gate_qualifiers() -> dict[str, Any]:
+    """Rev-2 RFC 'Target gate' metadata must carry a gate-scheme qualifier."""
+    violations: list[str] = []
+    checked = 0
+    for path in _numbered_markdown("rfcs", 1, 25):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            if not TARGET_GATE_RE.match(line):
+                continue
+            checked += 1
+            window = " ".join(lines[index : index + 4])
+            if not GATE_SCHEME_QUALIFIER_RE.search(window):
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{index + 1}: bare gate citation without "
+                    f"scheme qualifier: {line.strip()}"
+                )
+    if violations:
+        raise AssertionError("untranslated Rev-2 gate metadata:\n" + "\n".join(violations))
+    return {"target_gate_lines": checked}
+
+
+def check_register_rows() -> dict[str, Any]:
+    """Every section 24.5 register row names a resolvable lane and a kill/defer/draft."""
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    section = re.search(r"^## 24\.5 .*?(?=^## |\Z)", plan_text, re.MULTILINE | re.DOTALL)
+    assert section, "plan.md section 24.5 not found"
+    rows = 0
+    problems: list[str] = []
+    for line in section.group(0).splitlines():
+        if not line.startswith("| ") or line.startswith("| Capability") or line.startswith("|--"):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) < 6:
+            continue
+        rows += 1
+        capability, lane, threshold = cells[1], cells[2], cells[3]
+        if not any(k in threshold.lower() for k in ("kill", "defer", "draft", "fallback")):
+            problems.append(f"{capability}: threshold cell has no kill/defer/draft marker")
+        for number in re.findall(r"research/(\d+)", lane):
+            if not list((ROOT / "research").glob(f"{int(number):02d}-*.md")):
+                problems.append(f"{capability}: research/{number} does not resolve")
+        for adr in re.findall(r"ADR-(\d{4})", lane):
+            if not list((ROOT / "adr").glob(f"{adr}-*.md")):
+                problems.append(f"{capability}: ADR-{adr} does not resolve")
+        if "docs/31" in lane and not list((ROOT / "docs").glob("31_*.md")):
+            problems.append(f"{capability}: docs/31 does not resolve")
+    assert rows >= 13, f"expected at least 13 register rows, found {rows}"
+    if problems:
+        raise AssertionError("register row violations:\n" + "\n".join(problems))
+    return {"rows": rows}
 
 
 def _collect_pattern_values(node: Any) -> list[str]:
@@ -504,6 +675,11 @@ def main() -> None:
         ("gate_citation_hygiene", check_gate_citation_hygiene),
         ("start_here_gate_annotations", check_start_here_gate_annotations),
         ("handle_prefix_registry", check_handle_prefix_registry),
+        ("g0_matrix_counts", check_g0_matrix_counts),
+        ("phase_gate_tables", check_phase_gate_tables),
+        ("g10_two_system", check_g10_two_system),
+        ("rev2_target_gate_qualifiers", check_rev2_target_gate_qualifiers),
+        ("register_rows", check_register_rows),
     ]
     report: dict[str, Any] = {"status": "pass", "checks": {}}
     failed: list[str] = []

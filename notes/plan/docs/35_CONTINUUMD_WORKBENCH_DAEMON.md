@@ -1,5 +1,7 @@
 # `continuumd`: Authoritative Workbench Daemon
 
+> **Status:** This document predates plan §4.5–§4.7 (the daemon's operational contract: purge and `Redacted` stubs, backup and verified restore, index fsck, two-epoch migration, compatibility statements, engine-defect artifacts, priority classes and memory budget) and has not yet absorbed those sections; that absorption is open specification debt per plan §25. Plan §4.5–§4.7 governs in the interim.
+
 ## Responsibility
 
 `continuumd` is the sole authority for mutable workbench coordination. Semantic artifacts themselves are immutable.
@@ -69,7 +71,7 @@ normalized parameters
 strategy class
 ```
 
-Budget may be excluded from semantic identity when continuation semantics are monotonic; it remains in execution identity. Two clients requesting an identical task may share computation if authorization and privacy policy permit.
+Budget may be excluded from semantic identity when continuation semantics are monotonic; it remains in execution identity. Two clients of the same principal requesting an identical task share computation freely. Cross-user computation sharing is off by default: content-addressed dedup across principals is an existence oracle and requires an explicit sharing policy (plan §4.5).
 
 ## Idempotency
 
@@ -134,7 +136,7 @@ A process-local or Unix-domain-socket daemon for `cargo continuum`; no external 
 
 ### Shared workstation
 
-Multiple IDEs/agents share immutable artifacts and computations under per-user auth.
+Multiple IDEs/agents run under per-user auth; each principal's sessions share immutable artifacts and computations freely among themselves. Artifacts and computations are shared across principals only under an explicit sharing policy (plan §4.5) — cross-principal sharing is not a default of this mode.
 
 ### Remote organization
 

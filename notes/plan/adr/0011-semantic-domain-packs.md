@@ -25,3 +25,5 @@ Substantial reuse and explicit assurance become possible. Pack development is ex
 ## Validation and rollback
 
 G1 proves the contract by replacing one real DST. A second project must use packs without engine modifications.
+
+(G1 here refers to the Revision 2 gate scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22.)

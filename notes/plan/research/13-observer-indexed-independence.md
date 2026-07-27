@@ -93,6 +93,14 @@ Start conservative:
 4. only then temporal/fairness-aware independence;
 5. hyperproperty reductions remain separate until proved.
 
+## Kill criteria
+
+- local commutation (view-equality diamonds) proves insufficient to certify reduction for the observer-sensitive class on real protocols, leaving only continuation-equivalence checks that are as hard as verification itself;
+- certificate/checker overhead makes observer-indexed reduction slower than conservative unreduced exploration on the target corpus (the docs/31 bar: median ≥5× on the observer-sensitive class, checker overhead <20%, zero mutation loss);
+- observer or property changes invalidate cached independence so frequently that reuse never pays for its witness cost.
+
+Fairness/liveness-aware independence is explicitly out of scope for this lane: it is deferred to the liveness-preserving reduction lane (plan §24.5; research/04), and negative liveness results do not kill this lane.
+
 ## Executable spike
 
 `spikes/observer_independence.py` demonstrates the core phenomenon: independent final-state writes become dependent under an audit-order observer.

@@ -1,5 +1,7 @@
 # Semantic Context Compilation and Information Theory
 
+**Claim class:** research hypothesis
+
 ## Goal
 
 Select the smallest faithful context that enables a human or agent to choose the correct next action.

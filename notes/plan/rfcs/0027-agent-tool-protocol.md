@@ -27,16 +27,22 @@ The registry is the plan §10.2 list; each entry carries a minimum authority lev
 | `program` | extract / run / replay | execute |
 | `refinement` | check / explain | execute |
 | `proof` | goal / attempt / check / slice | execute |
+| `correspondence` | bind | propose |
+| `correspondence` | status / drift | read |
 | `debug` | open / state / enabled / step_event / step_abstract / reverse_causal / branch / compare / why_enabled / why_blocked / export | execute |
 | `context` | compile / expand | read |
 | `failure` | explain / minimize / branch | execute |
 | `repair` | begin / apply / attach / evaluate / resume / review | propose/execute |
 | `repair` | promote / reject | promote |
+| `observe` | ingest | execute |
+| `observe` | classify / result | read |
 | `forge` | create / step / archive / materialize | execute |
 | `task` | status / cancel / resume / subscribe | read/execute |
 | `evidence` | get / query / verify | read |
 | `query` | explain_reuse / explain_invalidation / clean_compare | read |
 | `benchmark` | run | execute |
+
+`correspondence.bind` creates or updates a §16 correspondence link at patch-proposal authority; `correspondence.status` and `correspondence.drift` are read-only inspections. `observe.ingest` additionally requires the production-trace capability (plan §18.2; capture-time contract in plan §18.4); `observe.classify` and `observe.result` are read-only. Both families are registered ahead of their producing subsystems (the Phase C read-only observation lane and Phase F production partial-order evidence); until those ship, calls MAY fail with the typed `UnsupportedSemanticFeature` error.
 
 ## Authority levels and capabilities
 

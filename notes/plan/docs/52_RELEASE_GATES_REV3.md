@@ -92,6 +92,8 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 ## G8 — Human usability
 
 - the preregistered study (plan §21.1) covers both cohorts — Rust newcomers completing the deterministic/causal workflow, and distributed-systems experts correctly diagnosing real failures;
+- the preregistration (expanded docs/48) is published before the study
+  runs; results are graded only against its fixed thresholds;
 - explanation beats raw trace baseline on diagnosis accuracy and time;
 - assurance confidence is calibrated, not merely no worse than baseline;
 - progressive disclosure reaches exact artifacts;
@@ -107,7 +109,8 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 
 - two real project migrations;
 - two materially different real projects remove bespoke DST infrastructure;
-- at least one migrated project stops requiring a separate TLA+ workflow for normal development;
+- at least two migrated projects stop requiring a separate TLA+
+  workflow for normal development;
 - agent-driven repair is used on real changes under review;
 - production evidence returns valid pass/fail/inconclusive classifications (INV-008);
 - public ContinuumBench;
@@ -115,11 +118,8 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 - operating cost is acceptable;
 - zero known paths for an unprivileged agent to promote false evidence.
 
-The Phase F exit in plan §21 is deliberately stricter than the second
-bullet: it requires two systems to drop the separate TLA+ workflow.
-
 ## Release blocker doctrine
 
 A missing feature can be documented as unsupported. A misleading assurance result, replay failure, stale receipt, hidden intent change, or unauthorized promotion is a release blocker at every gate.
 
-A confirmed false-positive success verdict triggers the soundness incident policy in `docs/09`: block release, revoke affected claim IDs, publish affected semantic epochs, ship an artifact scanner, add a permanent regression.
+A confirmed false-positive success verdict triggers the soundness incident policy in `docs/09`: block release, revoke affected claim IDs, publish affected semantic epochs, ship an artifact scanner, add a permanent regression, and reevaluate whether the producing engine remains eligible for certified mode.

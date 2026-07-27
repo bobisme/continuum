@@ -1,11 +1,40 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schemas/proof-receipt.schema.json",
+  "$id": "https://continuum.dev/schema/proof-receipt.json",
   "title": "Continuum Proof Receipt",
   "type": "object",
+  "$defs": {
+    "redacted": {
+      "type": "object",
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "required": ["redacted", "reason", "commitment"],
+      "properties": {
+        "redacted": { "const": true },
+        "reason": { "enum": ["summarized", "lost", "purged"] },
+        "commitment": { "type": "string" },
+        "original_class": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
   "required": [
     "format", "version", "receipt_id", "claim", "closure", "epochs",
-    "transformations", "certificate", "checker", "lean", "reproduce"
+    "transformations", "certificate", "checker", "reproduce"
+  ],
+  "allOf": [
+    {
+      "description": "The lean block is required only for Lean-flavored certificates; kernel-checked SAT/closed-set certificates are Lean-free (plan §20).",
+      "if": {
+        "properties": {
+          "certificate": {
+            "properties": { "kind": { "const": "lean-theorem" } },
+            "required": ["kind"]
+          }
+        },
+        "required": ["certificate"]
+      },
+      "then": { "required": ["lean"] }
+    }
   ],
   "properties": {
     "format": { "const": "continuum-proof-receipt" },
@@ -82,12 +111,16 @@
     },
     "checker": {
       "type": "object",
-      "required": ["name", "version", "source_hash", "binary_hash"],
+      "required": ["name", "version", "source_hash", "binary_hash", "toolchain"],
       "properties": {
         "name": { "type": "string" },
         "version": { "type": "string" },
         "source_hash": { "type": "string" },
         "binary_hash": { "type": "string" },
+        "toolchain": {
+          "description": "Toolchain identity that produced the checker build (INV-014: build digest and toolchain identity).",
+          "type": "string"
+        },
         "independent": { "type": "boolean" }
       },
       "additionalProperties": false
@@ -104,6 +137,21 @@
         "independent_checker": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "axiom_manifest": {
+      "type": "object",
+      "description": "Structured axiom manifest referenced alongside lean.axioms.",
+      "required": ["hash", "axioms"],
+      "properties": {
+        "hash": { "type": "string" },
+        "axioms": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "redactions": {
+      "description": "Redacted values referenced by this receipt (plan §4.5, §18.4).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/redacted" }
     },
     "reproduce": {
       "type": "array", "minItems": 1, "items": { "type": "string" }

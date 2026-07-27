@@ -1,5 +1,7 @@
 # Protocol, Invariant, Ranking, and Abstraction Co-Synthesis
 
+**Claim class:** research hypothesis
+
 ## Motivation
 
 Synthesizing a protocol alone often produces candidates that are hard to prove. Synthesizing an invariant for a fixed bad protocol is futile. Liveness may require ranking functions or fairness structure; implementation refinement may require auxiliary state or a better abstraction.

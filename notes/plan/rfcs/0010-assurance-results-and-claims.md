@@ -1,7 +1,7 @@
 # RFC 0010: Assurance Results and Claims
 
 **Status:** Proposed  
-**Target gate:** G0
+**Target gate:** G0 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Summary
 

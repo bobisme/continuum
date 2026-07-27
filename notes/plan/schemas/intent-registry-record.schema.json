@@ -1,0 +1,109 @@
+{
+  "$id": "https://continuum.dev/schema/intent-registry-record.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "intent.accept is the only transition to protected status (plan §5.4); an accepted record must carry its acceptance record.",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "accepted"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "acceptance"
+        ]
+      }
+    }
+  ],
+  "description": "Registry status of an Intent Contract: Proposed vs accepted, the acceptance audit record, and the §4.2.1 signature chain honored on bundle import.",
+  "properties": {
+    "acceptance": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted_by": {
+          "type": "string"
+        },
+        "audit_record": {
+          "description": "Audit-log record produced by intent.accept (plan §5.4).",
+          "type": "string"
+        },
+        "capability": {
+          "const": "revise-intent"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_by",
+        "capability",
+        "signature",
+        "audit_record",
+        "timestamp"
+      ],
+      "type": "object"
+    },
+    "chain": {
+      "description": "Signature chain for §4.2.1 intent-bundle import; an imported acceptance is honored only if this chain satisfies the local policy.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "signer": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "signer",
+          "signature",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "intent": {
+      "pattern": "^in_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "record_id": {
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "status": {
+      "description": "Import never changes protection status: an imported Proposed contract stays proposed (plan §4.2.1).",
+      "enum": [
+        "proposed",
+        "accepted",
+        "superseded"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_id",
+    "intent",
+    "status"
+  ],
+  "title": "Intent Registry Record",
+  "type": "object"
+}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schemas/corpus-port.schema.json",
+  "$id": "https://continuum.dev/schema/corpus-port.json",
   "title": "Continuum Corpus Port Manifest",
   "type": "object",
   "required": [

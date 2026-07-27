@@ -17,6 +17,27 @@
   },
   "additionalProperties": false,
   "properties": {
+    "abstraction_maps": {
+      "description": "Content identities of the §16 correspondence/abstraction maps the claims are stated against; merged/split changes are privileged (plan §5.2, §5.3).",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "map_id": {
+            "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "map_id",
+          "role"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "assumptions": {
       "items": {
         "additionalProperties": false,
@@ -312,6 +333,9 @@
     "policy": {
       "additionalProperties": false,
       "properties": {
+        "abstraction_maps": {
+          "$ref": "#/$defs/policy_verb"
+        },
         "assumptions": {
           "$ref": "#/$defs/policy_verb"
         },
@@ -333,6 +357,9 @@
         "non_vacuity": {
           "$ref": "#/$defs/policy_verb"
         },
+        "nondeterminism": {
+          "$ref": "#/$defs/policy_verb"
+        },
         "observers": {
           "$ref": "#/$defs/policy_verb"
         },
@@ -340,6 +367,9 @@
           "$ref": "#/$defs/policy_verb"
         },
         "properties": {
+          "$ref": "#/$defs/policy_verb"
+        },
+        "scope": {
           "$ref": "#/$defs/policy_verb"
         },
         "security_policy": {
@@ -361,7 +391,10 @@
         "completion_policy",
         "assurance",
         "security_policy",
-        "optimization"
+        "optimization",
+        "scope",
+        "nondeterminism",
+        "abstraction_maps"
       ],
       "type": "object"
     },

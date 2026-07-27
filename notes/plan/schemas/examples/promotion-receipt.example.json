@@ -1,0 +1,73 @@
+{
+  "checker": {
+    "build_digest": "blake3:receipt-checker-build-placeholder",
+    "toolchain": "rustc 1.85.0 (reproducible-build covenant, plan §20)"
+  },
+  "cost_ledger": {
+    "cpu_ms": 184000,
+    "memory_bytes": 2147483648,
+    "solver_ms": 42000,
+    "tokens": 18500,
+    "wall_ms": 96000
+  },
+  "gate_profile": "phase-b",
+  "gates": [
+    {
+      "gate": "base_replay",
+      "status": "passed"
+    },
+    {
+      "gate": "patch_application",
+      "status": "passed"
+    },
+    {
+      "gate": "intent_integrity",
+      "status": "passed"
+    },
+    {
+      "gate": "exact_regression",
+      "status": "passed"
+    },
+    {
+      "gate": "neighborhood",
+      "status": "passed"
+    },
+    {
+      "gate": "property_mutation",
+      "status": "passed"
+    },
+    {
+      "gate": "defect_mutants",
+      "status": "passed"
+    },
+    {
+      "gate": "refinement_coverage",
+      "status": "passed"
+    },
+    {
+      "gate": "certificate_rebuild",
+      "status": "not_yet_enforced"
+    },
+    {
+      "gate": "incremental_parity",
+      "status": "not_yet_enforced"
+    },
+    {
+      "gate": "code_and_security",
+      "status": "passed"
+    },
+    {
+      "gate": "receipt_generation",
+      "status": "passed"
+    }
+  ],
+  "intent": "in_ack_v1",
+  "intent_diff": "diff_intent_demo1",
+  "receipt_id": "receipt_demo1",
+  "repair_transaction": "rt_demo1",
+  "schema_version": "1.0",
+  "semantic_diff": "diff_demo1",
+  "semantic_epoch": "sem-3",
+  "signature": "ssh-ed25519:promotion-signature-placeholder",
+  "snapshot": "ws_demo2"
+}

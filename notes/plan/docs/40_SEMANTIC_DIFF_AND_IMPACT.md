@@ -35,6 +35,8 @@ A change may be textually large and semantically null, or one token may weaken a
 - no protected change;
 - unknown, proof required.
 
+`incomparable` on a protected field has the same blocking status as a confirmed privileged change (see Soundness policy).
+
 ## Model diff
 
 Compare elaborated relations, not source text alone:
@@ -118,7 +120,9 @@ Evidence
 
 ## Soundness policy
 
-A claim such as “property strengthened” requires implication evidence in the supported fragment. Otherwise output `Incomparable` or `Unknown`. Text heuristics may prioritize review but cannot authorize promotion.
+A claim such as “property strengthened” requires implication evidence in the supported fragment. Otherwise output `unknown` (undecidable or unattempted), `unsupported` (outside declared fragments), or `incomparable` — `unknown` and `unsupported` are distinct classifications per INV-008.
+
+All non-affirmative classifications fail closed: any intent change classified `unknown`, `unsupported`, or `incomparable` on a protected field blocks ordinary promotion exactly as a confirmed privileged change does, pending review (plan §5.3, RFC 0031). Text heuristics may prioritize review but cannot authorize promotion.
 
 ## Use in Forge
 

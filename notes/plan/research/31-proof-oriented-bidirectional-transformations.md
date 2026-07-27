@@ -1,5 +1,7 @@
 # Proof-Oriented Bidirectional Transformations
 
+**Claim class:** research hypothesis
+
 ## Question
 
 Can Continuum reduce model/program drift without silently inventing incorrect synchronization?
@@ -105,8 +107,9 @@ kill criteria below:
 
 - **promotion** requires a measured ambiguity rate on the drift corpus
   low enough that candidate-plus-obligation proposals are useful on the
-  majority of corpus edits (numeric target fixed at ratification per
-  plan §24.5 — draft, pending lane-owner ratification; an unratified
+  majority of corpus edits (this note is the authority for the number:
+  the numeric target is fixed here at ratification, and plan §24.5
+  quotes it — draft, pending lane-owner ratification; an unratified
   threshold may not survive Phase A);
 - **kill** if the rate shows most real mappings are too ambiguous for
   useful proposals, or if users mistake candidate synchronization for

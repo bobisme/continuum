@@ -1,7 +1,7 @@
 # RFC 0015: Temporal, Fairness, and Hyperproperty Semantics
 
 **Status:** Proposed  
-**Target gates:** G3–G4
+**Target gates:** G3–G4 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Core behavior model
 

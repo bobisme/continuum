@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schemas/cir.schema.json",
+  "$id": "https://continuum.dev/schema/cir.json",
   "title": "Continuum Causal Intermediate Representation",
   "type": "object",
   "required": [

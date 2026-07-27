@@ -41,6 +41,10 @@
     {
       "count": 196,
       "expandable": true,
+      "expansion": {
+        "anchor": "e_ack",
+        "relation": "omitted_noise_events"
+      },
       "kind": "observer-independent noise event",
       "reason": "slice-irrelevant"
     }

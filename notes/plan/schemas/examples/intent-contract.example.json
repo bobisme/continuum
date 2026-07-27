@@ -1,4 +1,10 @@
 {
+  "abstraction_maps": [
+    {
+      "map_id": "map_register_abs_v1",
+      "role": "register value abstraction for AckImpliesDurable"
+    }
+  ],
   "assumptions": [
     {
       "classification": "storage",
@@ -74,6 +80,7 @@
     ]
   },
   "policy": {
+    "abstraction_maps": "review",
     "assumptions": "review",
     "assurance": "no-downgrade",
     "bounds": "no-decrease",
@@ -81,9 +88,11 @@
     "fairness": "review",
     "faults": "no-removal",
     "non_vacuity": "no-removal",
+    "nondeterminism": "review",
     "observers": "review",
     "optimization": "review",
     "properties": "locked",
+    "scope": "review",
     "security_policy": "review",
     "trust_boundaries": "no-expansion"
   },

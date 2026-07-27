@@ -1,7 +1,7 @@
 # RFC 0004: Exploration, DPOR, and Unfoldings
 
 **Status:** Proposed  
-**Target gates:** G1/G2/G6
+**Target gates:** G1/G2/G6 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Summary
 

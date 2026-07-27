@@ -1,7 +1,7 @@
 # RFC 0014: Observer-Indexed DPOR and Causal Reduction
 
 **Status:** Proposed  
-**Target gates:** G2 and G6
+**Target gates:** G2 and G6 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
 
 ## Objective
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date
 from pathlib import Path
 import hashlib
 import re
@@ -41,7 +42,7 @@ def main() -> None:
     out = [
         "# Dossier Manifest — Revision 3",
         "",
-        "**Generated:** 2026-07-24  ",
+        f"**Generated:** {date.today().isoformat()}  ",
         "**Root archive name:** `continuum-project-dossier-revision-3/`  ",
         "**Integrity file:** `SHA256SUMS.txt`",
         "",

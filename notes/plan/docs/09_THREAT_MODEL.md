@@ -284,3 +284,13 @@ Any confirmed false-positive success verdict:
 6. reevaluates whether the optimizing engine remains eligible for certified mode.
 
 Soundness incidents are treated more seriously than crashes or performance regressions.
+
+## 10. Signing identities
+
+Receipts, intent bundles, and domain packs are signed; plan §18.6 delegates the signing-identity lifecycle here.
+
+- **Minting.** Identities are minted through audited daemon operations. The solo-developer default is a local keypair minted on first use and recorded in the audit log.
+- **Trust-root distribution.** Organizational deployments pin an allowed-signers set distributed inside the intent bundle (plan §4.2.1).
+- **Rotation and revocation.** Both are audited daemon operations.
+- **Loss recovery.** A lost key is not recovered; recovery re-mints under a new identity with an audit-linked supersession record.
+- **Verification failure.** A signature that cannot be verified downgrades the artifact to typed unverified provenance rather than failing open — except the plan §4.2.1 CI acceptance check, which fails closed by policy.

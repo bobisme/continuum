@@ -2,6 +2,52 @@
   "$id": "https://continuum.dev/schema/semantic-diff.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "Fail-closed rule (plan §5.3): a protected intent change classified unknown, unsupported, or incomparable blocks ordinary promotion pending review — the policy decision must be block or review.",
+      "if": {
+        "properties": {
+          "intent_changes": {
+            "contains": {
+              "properties": {
+                "protected": {
+                  "const": true
+                },
+                "relation": {
+                  "enum": [
+                    "unknown",
+                    "unsupported",
+                    "incomparable"
+                  ]
+                }
+              },
+              "required": [
+                "protected",
+                "relation"
+              ]
+            }
+          }
+        },
+        "required": [
+          "intent_changes"
+        ]
+      },
+      "then": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "block",
+                  "review"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "after_intent": {
       "pattern": "^in_[A-Za-z0-9_-]+$",
@@ -75,6 +121,7 @@
               "properties",
               "assumptions",
               "observers",
+              "abstraction_maps",
               "scope",
               "trust_boundaries",
               "bounds",

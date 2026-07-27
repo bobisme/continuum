@@ -1,8 +1,38 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schemas/crashpack.schema.json",
+  "$id": "https://continuum.dev/schema/crashpack.json",
   "title": "Continuum Crashpack Manifest",
   "type": "object",
+  "$defs": {
+    "redacted": {
+      "type": "object",
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "required": [
+        "redacted",
+        "reason",
+        "commitment"
+      ],
+      "properties": {
+        "redacted": {
+          "const": true
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "commitment": {
+          "type": "string"
+        },
+        "original_class": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
   "required": [
     "format",
     "version",
@@ -177,9 +207,10 @@
       "additionalProperties": false
     },
     "redactions": {
+      "description": "Redacted values in this crashpack (plan §4.5, §18.4).",
       "type": "array",
       "items": {
-        "type": "string"
+        "$ref": "#/$defs/redacted"
       }
     }
   },

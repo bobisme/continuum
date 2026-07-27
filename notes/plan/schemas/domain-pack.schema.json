@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schemas/domain-pack.schema.json",
+  "$id": "https://continuum.dev/schema/domain-pack.json",
   "title": "Continuum Domain Pack Manifest",
   "type": "object",
   "required": [

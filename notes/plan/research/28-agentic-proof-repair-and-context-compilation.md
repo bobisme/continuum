@@ -1,5 +1,7 @@
 # Agentic Proof Repair and Context Compilation
 
+**Claim class:** research hypothesis
+
 ## State of the art
 
 Pantograph exposes machine-oriented Lean proof states. AXLE targets scalable isolated Lean utilities. OProver and LAMP report gains from compiler feedback, retrieved verified proofs, explicit domain context, and multi-agent decomposition. APOLLO and related proof-repair systems explore iterative repair after library/source evolution.

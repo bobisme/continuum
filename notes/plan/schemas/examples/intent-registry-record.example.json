@@ -1,0 +1,20 @@
+{
+  "acceptance": {
+    "accepted_by": "user:maintainer-1",
+    "audit_record": "audit_accept_in_ack_v1",
+    "capability": "revise-intent",
+    "signature": "ssh-ed25519:acceptance-signature-placeholder",
+    "timestamp": "2026-07-24T21:00:00Z"
+  },
+  "chain": [
+    {
+      "scope": "bundle:inb_demo1",
+      "signature": "ssh-ed25519:bundle-signature-placeholder",
+      "signer": "user:maintainer-1"
+    }
+  ],
+  "intent": "in_ack_v1",
+  "record_id": "reg_in_ack_v1",
+  "schema_version": "1.0",
+  "status": "accepted"
+}
