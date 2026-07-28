@@ -3,18 +3,42 @@
     "class": "bounded",
     "envelope": {
       "bounds": {
-        "faults": 1,
-        "nodes": 2
+        "engine": "continuum-explicit",
+        "summary": "faults=1, nodes=2"
       },
-      "fairness": "weak(SyncCompleted)",
-      "memory_model": "sequential-consistency",
-      "observer": "client",
-      "proof_status": "finite-closure-certificate",
-      "schedules": "exhaustive",
-      "values": "exact",
-      "unknowns": [
-        "production storage profile assumed (contractual)"
-      ]
+      "faults": {
+        "engine": "continuum-explicit",
+        "summary": "crash and cancellation faults injected up to bound 1"
+      },
+      "fairness": {
+        "engine": "continuum-explicit",
+        "summary": "weak(SyncCompleted)"
+      },
+      "memory_model": {
+        "unsupported": {
+          "reason": "sequential-consistency-only"
+        }
+      },
+      "observer": {
+        "engine": "continuum-explicit",
+        "summary": "client observer projection"
+      },
+      "proof_status": {
+        "engine": "continuum-kernel",
+        "summary": "finite-closure-certificate"
+      },
+      "schedules": {
+        "engine": "continuum-explicit",
+        "summary": "exhaustive interleavings within the declared bounds"
+      },
+      "values": {
+        "engine": "continuum-explicit",
+        "summary": "exact enumeration"
+      },
+      "unknowns": {
+        "engine": "continuum-explicit",
+        "summary": "production storage profile assumed (contractual)"
+      }
     }
   },
   "content_budget": {

@@ -13,26 +13,26 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 311
+      "scanned_files": 314
     },
     "g0_matrix_counts": {
-      "evidence": 8,
+      "evidence": 4,
       "open_freeze_blocking": 3,
-      "rehomed": 4
+      "rehomed": 8
     },
     "g10_two_system": {
       "criterion": "two-system"
     },
     "gate_citation_hygiene": {
-      "files": 148
+      "files": 147
     },
     "gate_scheme_correspondence": {
-      "docs_bullets": 65,
+      "docs_bullets": 68,
       "gates": 11,
-      "plan_bullets": 65
+      "plan_bullets": 68
     },
     "handle_prefix_registry": {
-      "anchored_patterns": 40,
+      "anchored_patterns": 47,
       "registry_prefixes": 19
     },
     "json": {
@@ -43,10 +43,10 @@
       "kernel_checked": false
     },
     "markdown_fences": {
-      "files": 216
+      "files": 217
     },
     "markdown_links": {
-      "links": 183
+      "links": 188
     },
     "numbering": {
       "adr": 52,
@@ -56,14 +56,26 @@
     "phase_gate_tables": {
       "phases": 6
     },
+    "program_status": {
+      "blocked_phases": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F"
+      ],
+      "program_status": "blocked"
+    },
     "python": {
       "files": 18
     },
     "register_rows": {
-      "rows": 17
+      "ratified_quotes_checked": 0,
+      "rows": 21
     },
     "retired_names": {
-      "files_scanned": 301
+      "files_scanned": 300
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20
@@ -71,17 +83,38 @@
     "schemas": {
       "pairs": 19
     },
+    "spec_debt": {
+      "open": [
+        "SD-01",
+        "SD-07",
+        "SD-08",
+        "SD-09",
+        "SD-10"
+      ],
+      "paid": [
+        "SD-02",
+        "SD-03",
+        "SD-04",
+        "SD-05",
+        "SD-06",
+        "SD-11",
+        "SD-12",
+        "SD-13",
+        "SD-14"
+      ]
+    },
     "spikes": {
       "assertions": 30,
       "revision_2_runner": "",
       "revision_3_runner": "wrote spikes/results/r3-spike-results.json; 8 spike groups passed"
     },
     "start_here_gate_annotations": {
-      "pr_headings": 34
+      "pr_headings": 39
     },
     "toml": {
       "files": 5
     }
   },
+  "program_status": "blocked",
   "status": "pass"
 }

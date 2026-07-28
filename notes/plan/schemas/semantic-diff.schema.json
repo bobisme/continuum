@@ -135,8 +135,20 @@
               "security_policy"
             ]
           },
+          "fragment": {
+            "description": "Declared semantic fragment (ADR-0025) the change's relation was classified in; outside declared fragments the relation is unsupported (RFC 0031).",
+            "enum": [
+              "Finite",
+              "Symbolic",
+              "Temporal",
+              "Probabilistic",
+              "Theorem",
+              "Runtime"
+            ]
+          },
           "protected": {
-            "type": "boolean"
+            "$comment": "Fail-closed (review 5, A1): protection derives from the field enum — every member of `field` is in the RFC 0037 protected set, so a listed intent change is always protected. The constant keeps the wire shape while making an unprotected classification unrepresentable.",
+            "const": true
           },
           "relation": {
             "enum": [
@@ -172,11 +184,11 @@
       "additionalProperties": false,
       "properties": {
         "decision": {
+          "$comment": "No `unknown` decision (review 5, A1): an unknown classification cannot be expressed as a structurally blocking decision in this artifact, so it fails closed to block or review at classification time.",
           "enum": [
             "allow",
             "review",
-            "block",
-            "unknown"
+            "block"
           ]
         },
         "reasons": {
@@ -193,6 +205,10 @@
       ],
       "type": "object"
     },
+    "requested_assurance": {
+      "description": "Requested assurance for the classification itself — the RFC 0031 diff input.",
+      "type": "string"
+    },
     "schema_version": {
       "const": "1.0"
     },
@@ -200,8 +216,28 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "fragment": {
+            "description": "Declared semantic fragment (ADR-0025) the change was classified in (RFC 0031).",
+            "enum": [
+              "Finite",
+              "Symbolic",
+              "Temporal",
+              "Probabilistic",
+              "Theorem",
+              "Runtime"
+            ]
+          },
           "kind": {
-            "type": "string"
+            "description": "RFC 0031 semantic-change axis.",
+            "enum": [
+              "effects",
+              "atomicity",
+              "task_ownership",
+              "cancellation_structure",
+              "durability_ordering",
+              "observer_publication",
+              "correspondence"
+            ]
           },
           "locations": {
             "items": {

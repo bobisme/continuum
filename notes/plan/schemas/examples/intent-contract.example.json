@@ -42,8 +42,8 @@
   ],
   "fault_model": {
     "enabled": [
-      "cancel",
-      "crash"
+      "crash",
+      "recovery"
     ],
     "profiles": [
       "storage-posix-v1"

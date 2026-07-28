@@ -79,6 +79,28 @@
     "assurance": {
       "additionalProperties": false,
       "properties": {
+        "accepted_evidence_classes": {
+          "description": "Evidence kinds accepted toward the assurance minimum; vocabulary mirrors assurance-result.schema.json's evidence kind enum.",
+          "items": {
+            "enum": [
+              "example",
+              "sampled",
+              "bounded-schedules",
+              "dpor-complete",
+              "finite-exact",
+              "symbolic-bounded",
+              "inductive",
+              "parameterized",
+              "liveness-proof",
+              "refinement-proof",
+              "production-observation",
+              "differential",
+              "certificate"
+            ]
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "clean_recompute": {
           "type": "boolean"
         },
@@ -206,8 +228,16 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "description": "Enabled fault classes, closed to the plan §5.2 fault vocabulary.",
           "items": {
-            "type": "string"
+            "enum": [
+              "crash",
+              "recovery",
+              "partition",
+              "loss",
+              "duplication",
+              "delay"
+            ]
           },
           "type": "array",
           "uniqueItems": true
@@ -330,6 +360,17 @@
       },
       "type": "object"
     },
+    "policy_reviewers": {
+      "$comment": "The `review` policy verb binds to this map: a policy field set to review names its reviewer principals here (review 5, A13).",
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "description": "Map from policy field name to the principals whose review satisfies the review verb for that field.",
+      "type": "object"
+    },
     "policy": {
       "additionalProperties": false,
       "properties": {
@@ -430,6 +471,9 @@
           "uniqueItems": true
         }
       },
+      "required": [
+        "data_classification"
+      ],
       "type": "object"
     },
     "scope": {
@@ -510,8 +554,28 @@
     "assurance",
     "policy",
     "optimization",
-    "security_policy"
+    "security_policy",
+    "nondeterminism",
+    "abstraction_maps"
   ],
   "title": "Intent Contract",
-  "type": "object"
+  "type": "object",
+  "x-policy-field-map": {
+    "$comment": "Normative map from policy keys to the contract field groups they govern (review 5, A13): policy vocabulary, field vocabulary, and semantic-diff field vocabulary are unified through this table.",
+    "abstraction_maps": "abstraction_maps",
+    "assumptions": "assumptions",
+    "assurance": "assurance",
+    "bounds": "bounds",
+    "completion_policy": "completion_policy",
+    "fairness": "fairness",
+    "faults": "fault_model",
+    "non_vacuity": "optimization.non_vacuity",
+    "nondeterminism": "nondeterminism",
+    "observers": "observers",
+    "optimization": "optimization",
+    "properties": "claims",
+    "scope": "scope",
+    "security_policy": "security_policy",
+    "trust_boundaries": "trust_boundaries"
+  }
 }

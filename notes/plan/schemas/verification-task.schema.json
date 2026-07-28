@@ -1,6 +1,40 @@
 {
   "$id": "https://continuum.dev/schema/verification-task.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
+      "additionalProperties": false,
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "properties": {
+        "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
+          "type": "string"
+        },
+        "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "redacted": {
+          "const": true
+        }
+      },
+      "required": [
+        "redacted",
+        "reason",
+        "commitment",
+        "original_class"
+      ],
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "allOf": [
     {
@@ -18,6 +52,63 @@
       "then": {
         "required": [
           "failed_reason"
+        ]
+      }
+    },
+    {
+      "description": "A suspended task is resumable by definition: it carries a non-null continuation (plan §11.4).",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "suspended"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "continuation": {
+            "pattern": "^cont_[A-Za-z0-9_-]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "continuation"
+        ]
+      }
+    },
+    {
+      "description": "Budget exhaustion is never a silent dead end (plan §11.4): a BudgetExhausted failure carries a non-null continuation or a typed non_resumable_reason.",
+      "if": {
+        "properties": {
+          "failed_reason": {
+            "const": "BudgetExhausted"
+          }
+        },
+        "required": [
+          "failed_reason"
+        ]
+      },
+      "then": {
+        "anyOf": [
+          {
+            "properties": {
+              "continuation": {
+                "pattern": "^cont_[A-Za-z0-9_-]+$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "continuation"
+            ]
+          },
+          {
+            "required": [
+              "non_resumable_reason"
+            ]
+          }
         ]
       }
     }
@@ -83,6 +174,9 @@
         "engine": {
           "type": "string"
         },
+        "proof": {
+          "type": "string"
+        },
         "semantic": {
           "type": "string"
         }
@@ -125,9 +219,33 @@
       "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
+    "non_resumable_reason": {
+      "description": "Typed reason a BudgetExhausted task carries no continuation (e.g. the engine cannot checkpoint this operation).",
+      "minLength": 1,
+      "type": "string"
+    },
     "operation": {
       "pattern": "^[a-z]+\\.[a-z_]+$",
       "type": "string"
+    },
+    "priority_class": {
+      "description": "Scheduling priority class for the task (plan §10 / RFC 0026 quotas).",
+      "enum": [
+        "interactive",
+        "ci",
+        "background"
+      ]
+    },
+    "quota": {
+      "description": "Reference to the quota this task's budget draws from (RFC 0026).",
+      "type": "string"
+    },
+    "redacted_references": {
+      "description": "Redacted values referenced by this artifact (plan §4.5, §18.4).",
+      "items": {
+        "$ref": "#/$defs/redacted"
+      },
+      "type": "array"
     },
     "schema_version": {
       "const": "1.0"

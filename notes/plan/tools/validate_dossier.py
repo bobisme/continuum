@@ -273,6 +273,11 @@ def _is_excluded_from_retired_scan(path: Path) -> bool:
     # The validator defines the retired phrases; generated reports may quote them.
     if rel.as_posix() in ("tools/validate_dossier.py", "validation-results.json"):
         return True
+    # Generated renders (e.g. Typst output of the markdown sources) re-wrap
+    # lines, which can strip the same-line "renamed from" allowance; the
+    # markdown sources themselves are scanned.
+    if rel.suffix == ".typ":
+        return True
     return False
 
 
@@ -443,8 +448,10 @@ def check_start_here_gate_annotations() -> dict[str, Any]:
     headings = PR_HEADING_RE.findall(text)
     missing: list[str] = []
     invalid: list[str] = []
+    heading_by_pr: dict[str, str] = {}
     for match in PR_HEADING_RE.finditer(text):
         heading = match.group(0)
+        heading_by_pr[match.group(1)] = heading
         if not PR_GATE_ANNOTATION_RE.search(heading):
             missing.append(f"PR {match.group(1)}: {heading.strip()}")
             continue
@@ -453,13 +460,268 @@ def check_start_here_gate_annotations() -> dict[str, Any]:
         if not gates or any(int(g) > 10 for g in gates):
             invalid.append(f"PR {match.group(1)}: gate numbers out of range G0-G10: {heading.strip()}")
     assert headings, "no '### PR <n>' headings found in notes/START_HERE_IMPLEMENTATION.md"
-    for expected in ("4a", "15a", "25a"):
+    for expected in ("4a", "15a", "25a", "15b", "22a", "26a", "27a", "27b"):
         assert expected in headings, f"lettered PR heading {expected} not matched"
+    # Every open G0 item whose Decision names a closing PR must have that PR
+    # annotated [G0 ...] so the freeze-blocking linkage is visible in the plan.
+    matrix_text = (ROOT / "notes/G0_SPIKE_MATRIX.md").read_text(encoding="utf-8")
+    for line in matrix_text.splitlines():
+        row = re.match(r"^\|\s*G0-(DX-\d+)\s*\|", line)
+        if not row:
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        status, decision = cells[6], cells[8]
+        if not status.startswith("Open"):
+            continue
+        pr_ref = re.search(r"pending PR (\d+[a-z]?)", decision)
+        if not pr_ref:
+            continue
+        heading = heading_by_pr.get(pr_ref.group(1), "")
+        if "G0" not in heading:
+            invalid.append(
+                f"{row.group(1)}: closing PR {pr_ref.group(1)} heading lacks a G0 "
+                f"annotation: {heading.strip() or '(missing heading)'}"
+            )
     if missing or invalid:
         raise AssertionError(
             "PR heading gate-annotation violations:\n" + "\n".join(missing + invalid)
         )
     return {"pr_headings": len(headings)}
+
+
+def check_program_status() -> dict[str, Any]:
+    """Derive the section 21.1 owner-rule program status from START_HERE's table."""
+    text = (ROOT / "notes/START_HERE_IMPLEMENTATION.md").read_text(encoding="utf-8")
+    blocked: list[str] = []
+    phases_seen: set[str] = set()
+    for line in text.splitlines():
+        match = re.match(r"^\|\s*(?:Phase\s+)?([A-F])\s*\|(.+)\|\s*$", line)
+        if not match:
+            continue
+        rest = match.group(2)
+        # Owner/team rows carry BLOCKED/unassigned markers; skip gate-table rows.
+        if "unassigned" not in rest and "BLOCKED" not in rest:
+            continue
+        phases_seen.add(match.group(1))
+        blocked.append(match.group(1))
+    assert phases_seen, "owner/team table rows not found in START_HERE"
+    status = "blocked" if blocked else "unblocked"
+    # Plan section 0.3 must state the same status (its Program status bullet).
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    section = re.search(r"^## 0\.3 .*?(?=^## |\Z)", plan_text, re.MULTILINE | re.DOTALL)
+    assert section, "plan.md section 0.3 not found"
+    norm = re.sub(r"\s+", " ", section.group(0))
+    assert "Program status:" in norm, "plan section 0.3 lacks a Program status bullet"
+    if status == "blocked":
+        assert "`BLOCKED`" in section.group(0), (
+            "owner table has blocked phases but plan section 0.3 does not say BLOCKED"
+        )
+    return {"program_status": status, "blocked_phases": sorted(set(blocked))}
+
+
+def _deep_get(node: Any, *path: str) -> Any:
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node
+
+
+def _schema_defs_named(schema: dict[str, Any], needle: str) -> list[Any]:
+    defs = schema.get("$defs", {}) or {}
+    return [value for key, value in defs.items() if needle in key.lower()]
+
+
+def _strip_comments(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {k: _strip_comments(v) for k, v in node.items() if k != "$comment"}
+    if isinstance(node, list):
+        return [_strip_comments(v) for v in node]
+    return node
+
+
+def check_spec_debt() -> dict[str, Any]:
+    """Derive the section 25 specification-debt ledger; plan text must agree."""
+
+    def text_of(rel: str) -> str:
+        return (ROOT / rel).read_text(encoding="utf-8")
+
+    def schema_of(rel: str) -> dict[str, Any]:
+        return json.loads(text_of(rel))
+
+    def sd01() -> bool:
+        return bool(
+            list((ROOT / "rfcs").glob("*idl*")) + list((ROOT / "schemas").glob("*idl*"))
+        )
+
+    def sd02() -> bool:
+        t = text_of("rfcs/0026-continuumd-native-protocol.md")
+        return (
+            re.search(r"N[−-]1", t) is not None
+            and "task.update_budget" in t
+            and "evidence.subscribe" in t
+            and re.search(r"readab", t, re.IGNORECASE) is not None
+        )
+
+    def sd03() -> bool:
+        t = text_of("rfcs/0030-incremental-semantic-query-engine.md")
+        return re.search(r"auditab", t, re.IGNORECASE) is not None and "bootstrap" in t.lower()
+
+    def sd04() -> bool:
+        t = text_of("rfcs/0032-repair-transaction-protocol.md")
+        return "BudgetExhausted" in t and "ceiling" in t.lower()
+
+    def sd05() -> bool:
+        t = text_of("rfcs/0037-intent-contract.md")
+        return "inb_" in t and "three-way" in t.lower()
+
+    def sd06() -> bool:
+        t = text_of("rfcs/0038-multi-agent-evidence-graph.md")
+        return "append-only" in t.lower() and "compare-and-set" in t.lower()
+
+    def sd07() -> bool:
+        schema = schema_of("schemas/intent-contract.schema.json")
+        expr = _deep_get(
+            schema, "properties", "claims", "items", "properties", "expression"
+        )
+        if expr is None:
+            expr = _deep_get(
+                schema, "properties", "properties", "items", "properties", "expression"
+            )
+        return isinstance(expr, dict) and expr.get("type") not in (None, "string")
+
+    def sd08() -> bool:
+        return all(
+            "schema_epoch" in path.read_text(encoding="utf-8")
+            for path in sorted((ROOT / "schemas").glob("*.schema.json"))
+        )
+
+    def sd09() -> bool:
+        return "has not yet absorbed" not in text_of(
+            "docs/35_CONTINUUMD_WORKBENCH_DAEMON.md"
+        )
+
+    def sd10() -> bool:
+        return "<!-- regenerated: rfc-0032 -->" in text_of(
+            "docs/41_REPAIR_TRANSACTIONS.md"
+        )
+
+    def _find_key(node: Any, key: str) -> list[Any]:
+        found: list[Any] = []
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == key:
+                    found.append(v)
+                found.extend(_find_key(v, key))
+        elif isinstance(node, list):
+            for item in node:
+                found.extend(_find_key(item, key))
+        return found
+
+    def sd11() -> bool:
+        rt_text = text_of("schemas/repair-transaction.schema.json")
+        pr_text = text_of("schemas/promotion-receipt.schema.json")
+        node_text = text_of("schemas/evidence-graph-node.schema.json")
+        edge_text = text_of("schemas/evidence-graph-edge.schema.json")
+        protected_defs = [
+            v
+            for props in _find_key(schema_of("schemas/semantic-diff.schema.json"), "properties")
+            if isinstance(props, dict)
+            for k, v in props.items()
+            if k == "protected" and isinstance(v, dict)
+        ]
+        return (
+            any(v.get("const") is True for v in protected_defs)
+            and "not_applicable" not in rt_text
+            and '"phase-c"' in rt_text
+            and "uniqueItems" in rt_text
+            and "uniqueItems" in pr_text
+            and "service_identity" in node_text
+            and "CHECKED_BY" in edge_text
+            and '"checker"' in edge_text
+        )
+
+    def sd12() -> bool:
+        cp_text = text_of("schemas/context-pack.schema.json")
+        dims = (
+            "bounds", "faults", "fairness", "values", "schedules",
+            "memory_model", "observer", "proof_status", "unknowns",
+        )
+        return all(f'"{d}"' in cp_text for d in dims) and "engine_error" not in cp_text
+
+    def sd13() -> bool:
+        vt_text = text_of("schemas/verification-task.schema.json")
+        ws = schema_of("schemas/workspace-snapshot.schema.json")
+        epochs = _deep_get(ws, "properties", "epochs", "properties") or {}
+        return (
+            "non_resumable_reason" in vt_text
+            and "proof_environment" in json.dumps(ws)
+            and "protocol" not in epochs
+        )
+
+    def _stub_core(node: Any) -> Any:
+        """Comparable core of a Redacted stub: its properties and required set."""
+        if not isinstance(node, dict):
+            return None
+        core = {
+            "properties": _strip_comments(node.get("properties")),
+            "required": sorted(node.get("required", [])),
+        }
+        return core if core["properties"] else None
+
+    def sd14() -> bool:
+        canonical_schema = schema_of("schemas/redacted.schema.json")
+        canonical = _schema_defs_named(canonical_schema, "redact") or [canonical_schema]
+        want = _stub_core(canonical[0])
+        if want is None:
+            return False
+        targets = (
+            "schemas/context-pack.schema.json",
+            "schemas/crashpack.schema.json",
+            "schemas/proof-receipt.schema.json",
+            "schemas/promotion-receipt.schema.json",
+            "schemas/repair-transaction.schema.json",
+            "schemas/assurance-result.schema.json",
+            "schemas/evidence-graph-node.schema.json",
+            "schemas/verification-task.schema.json",
+            "schemas/cir.schema.json",
+        )
+        for rel in targets:
+            copies = _schema_defs_named(schema_of(rel), "redact")
+            if not copies or _stub_core(copies[0]) != want:
+                return False
+        return True
+
+    predicates = {
+        "SD-01": sd01, "SD-02": sd02, "SD-03": sd03, "SD-04": sd04,
+        "SD-05": sd05, "SD-06": sd06, "SD-07": sd07, "SD-08": sd08,
+        "SD-09": sd09, "SD-10": sd10, "SD-11": sd11, "SD-12": sd12,
+        "SD-13": sd13, "SD-14": sd14,
+    }
+    paid: list[str] = []
+    open_items: list[str] = []
+    for item, predicate in predicates.items():
+        try:
+            (paid if predicate() else open_items).append(item)
+        except Exception:  # noqa: BLE001 — an unevaluable predicate is open debt
+            open_items.append(item)
+
+    # The section 25 ledger must agree with the derived status.
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    section = re.search(r"^## 25\..*?(?=^## |\Z)", plan_text, re.MULTILINE | re.DOTALL)
+    assert section, "plan.md section 25 not found"
+    mismatches: list[str] = []
+    for item_id, state in re.findall(r"(SD-\d+) \((open|paid)", section.group(0)):
+        derived = "paid" if item_id in paid else "open"
+        if state != derived:
+            mismatches.append(f"{item_id}: plan says {state}, validator derives {derived}")
+    listed = set(re.findall(r"SD-\d+", section.group(0)))
+    for item_id in predicates:
+        if item_id not in listed:
+            mismatches.append(f"{item_id}: has a predicate but is not listed in section 25")
+    if mismatches:
+        raise AssertionError("spec-debt ledger mismatch:\n" + "\n".join(mismatches))
+    return {"open": sorted(open_items), "paid": sorted(paid)}
 
 
 def check_g0_matrix_counts() -> dict[str, Any]:
@@ -486,12 +748,13 @@ def check_g0_matrix_counts() -> dict[str, Any]:
     section = re.search(r"^## 0\.3 .*?(?=^## |\Z)", plan_text, re.MULTILINE | re.DOTALL)
     assert section, "plan.md section 0.3 not found"
     norm = re.sub(r"\s+", " ", section.group(0))
-    count_match = re.search(r"(\d+) of 15 G0 items have spike evidence", norm)
-    assert count_match, "plan section 0.3 spike-evidence count sentence not found"
-    assert int(count_match.group(1)) == len(evidence), (
-        f"plan says {count_match.group(1)} evidence items; matrix has {len(evidence)}"
+    evidence_match = re.search(r"G0 status: (.*?) carry spike evidence", norm)
+    assert evidence_match, "plan section 0.3 spike-evidence sentence not found"
+    plan_evidence = set(re.findall(r"DX-\d+", evidence_match.group(1)))
+    assert plan_evidence == evidence, (
+        f"plan evidence set {sorted(plan_evidence)} != matrix {sorted(evidence)}"
     )
-    open_match = re.search(r"spike evidence\. (.*?) are open and freeze-blocking", norm)
+    open_match = re.search(r"carry spike evidence\. (.*?) are open and freeze-blocking", norm)
     assert open_match, "plan section 0.3 open/freeze-blocking sentence not found"
     plan_open = set(re.findall(r"DX-\d+", open_match.group(1)))
     assert plan_open == open_blocking, f"plan open set {sorted(plan_open)} != matrix {sorted(open_blocking)}"
@@ -501,7 +764,7 @@ def check_g0_matrix_counts() -> dict[str, Any]:
     assert plan_rehomed == rehomed, f"plan re-homed set {sorted(plan_rehomed)} != matrix {sorted(rehomed)}"
 
     # The freeze-blocking subset line must be identical across the three sources.
-    subset = "DX-01–05, 07, 08, 10, 12, 13, 14"
+    subset = "DX-01–03, 10, 12, 13, 14"
     for rel in ("plan.md", "docs/52_RELEASE_GATES_REV3.md", "notes/G0_SPIKE_MATRIX.md"):
         assert subset in (ROOT / rel).read_text(encoding="utf-8"), (
             f"freeze-blocking subset string missing from {rel}"
@@ -578,7 +841,11 @@ def check_rev2_target_gate_qualifiers() -> dict[str, Any]:
 
 
 def check_register_rows() -> dict[str, Any]:
-    """Every section 24.5 register row names a resolvable lane and a kill/defer/draft."""
+    """Every section 24.5 register row names a resolvable lane and a kill/defer/draft.
+
+    Ratified rows carry `quote-id=<slug>` markers in both the register cell and
+    the owning research note; marked quotes are compared for identity.
+    """
     plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
     section = re.search(r"^## 24\.5 .*?(?=^## |\Z)", plan_text, re.MULTILINE | re.DOTALL)
     assert section, "plan.md section 24.5 not found"
@@ -603,9 +870,23 @@ def check_register_rows() -> dict[str, Any]:
         if "docs/31" in lane and not list((ROOT / "docs").glob("31_*.md")):
             problems.append(f"{capability}: docs/31 does not resolve")
     assert rows >= 13, f"expected at least 13 register rows, found {rows}"
+
+    # Marked-quote identity: quote-id=<slug> "<text>" must match between the
+    # register and exactly one research note. Zero markers = nothing ratified.
+    marker_re = re.compile(r'quote-id=([\w-]+)\s+"([^"]+)"')
+    register_quotes = dict(marker_re.findall(section.group(0)))
+    note_quotes: dict[str, str] = {}
+    for path in sorted((ROOT / "research").glob("*.md")):
+        for slug, quote in marker_re.findall(path.read_text(encoding="utf-8")):
+            note_quotes[slug] = quote
+    for slug, quote in register_quotes.items():
+        if slug not in note_quotes:
+            problems.append(f"quote-id={slug}: marked in the register, absent from research/")
+        elif re.sub(r"\s+", " ", note_quotes[slug]) != re.sub(r"\s+", " ", quote):
+            problems.append(f"quote-id={slug}: register and note quotes differ")
     if problems:
         raise AssertionError("register row violations:\n" + "\n".join(problems))
-    return {"rows": rows}
+    return {"rows": rows, "ratified_quotes_checked": len(register_quotes)}
 
 
 def _collect_pattern_values(node: Any) -> list[str]:
@@ -680,6 +961,8 @@ def main() -> None:
         ("g10_two_system", check_g10_two_system),
         ("rev2_target_gate_qualifiers", check_rev2_target_gate_qualifiers),
         ("register_rows", check_register_rows),
+        ("program_status", check_program_status),
+        ("spec_debt", check_spec_debt),
     ]
     report: dict[str, Any] = {"status": "pass", "checks": {}}
     failed: list[str] = []
@@ -690,6 +973,8 @@ def main() -> None:
             report["status"] = "fail"
             report["checks"][name] = {"error": f"{type(exc).__name__}: {exc}"}
             failed.append(name)
+    status_check = report["checks"].get("program_status", {})
+    report["program_status"] = status_check.get("program_status", "unknown")
     print(json.dumps(report, indent=2, sort_keys=True))
     if failed:
         sys.exit(1)

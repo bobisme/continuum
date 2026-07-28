@@ -13,7 +13,7 @@ The typed operation surface agents use, layered over RFC 0026. No agent workflow
 
 ## Operation registry
 
-The registry is the plan §10.2 list; each entry carries a minimum authority level. Signatures live in the RFC 0026 IDL.
+The registry is the plan §10.2 list; each entry carries exactly one minimum authority level, so `CapabilityDenied` is decidable from the table for every operation. Signatures live in the RFC 0026 IDL.
 
 | Namespace | Operations | Min authority |
 |---|---|---|
@@ -32,17 +32,20 @@ The registry is the plan §10.2 list; each entry carries a minimum authority lev
 | `debug` | open / state / enabled / step_event / step_abstract / reverse_causal / branch / compare / why_enabled / why_blocked / export | execute |
 | `context` | compile / expand | read |
 | `failure` | explain / minimize / branch | execute |
-| `repair` | begin / apply / attach / evaluate / resume / review | propose/execute |
+| `repair` | begin / apply / attach | propose |
+| `repair` | evaluate / resume | execute |
+| `repair` | review | read |
 | `repair` | promote / reject | promote |
 | `observe` | ingest | execute |
 | `observe` | classify / result | read |
 | `forge` | create / step / archive / materialize | execute |
-| `task` | status / cancel / resume / subscribe | read/execute |
-| `evidence` | get / query / verify | read |
+| `task` | status / subscribe | read |
+| `task` | cancel / resume / update_budget | execute |
+| `evidence` | get / query / verify / subscribe | read |
 | `query` | explain_reuse / explain_invalidation / clean_compare | read |
 | `benchmark` | run | execute |
 
-`correspondence.bind` creates or updates a §16 correspondence link at patch-proposal authority; `correspondence.status` and `correspondence.drift` are read-only inspections. `observe.ingest` additionally requires the production-trace capability (plan §18.2; capture-time contract in plan §18.4); `observe.classify` and `observe.result` are read-only. Both families are registered ahead of their producing subsystems (the Phase C read-only observation lane and Phase F production partial-order evidence); until those ship, calls MAY fail with the typed `UnsupportedSemanticFeature` error.
+`task.update_budget` and `evidence.subscribe` carry the plan §4.3 budget-update and evidence-subscription requirements; their semantics (suspension-with-continuation on lowering, typed evidence-graph deltas) are defined in RFC 0026. `repair.review` resolves to `read`: it produces the reviewer projection; the review decision it records enters the evidence graph as an audit-recorded append attributed to the named reviewer (RFC 0032), not through agent evidence-write authority. `correspondence.bind` creates or updates a §16 correspondence link at patch-proposal authority; `correspondence.status` and `correspondence.drift` are read-only inspections. `observe.ingest` additionally requires the production-trace capability (plan §18.2; capture-time contract in plan §18.4); `observe.classify` and `observe.result` are read-only. Both families are registered ahead of their producing subsystems (the Phase C read-only observation lane and Phase F production partial-order evidence); until those ship, calls MAY fail with the typed `UnsupportedSemanticFeature` error.
 
 ## Authority levels and capabilities
 

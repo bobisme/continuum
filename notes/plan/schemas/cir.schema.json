@@ -11,6 +11,11 @@
     "roots"
   ],
   "properties": {
+    "cir_id": {
+      "description": "Content-addressed handle of this causal execution graph (plan §4.4 cir_ prefix).",
+      "type": "string",
+      "pattern": "^cir_[A-Za-z0-9_-]+$"
+    },
     "format": {
       "const": "continuum-cir"
     },
@@ -64,10 +69,49 @@
     "extensions": {
       "type": "object",
       "additionalProperties": true
+    },
+    "redacted_references": {
+      "description": "Redacted values referenced by this artifact (plan §4.5, §18.4).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/redacted"
+      }
     }
   },
   "additionalProperties": false,
   "$defs": {
+    "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
+      "type": "object",
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "required": [
+        "redacted",
+        "reason",
+        "commitment",
+        "original_class"
+      ],
+      "properties": {
+        "redacted": {
+          "const": true
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
+          "type": "string"
+        },
+        "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "hash": {
       "type": "string",
       "pattern": "^(blake3|sha256):[0-9a-f]{64}$"

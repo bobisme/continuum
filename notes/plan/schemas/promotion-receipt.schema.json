@@ -18,11 +18,48 @@
         "code_and_security",
         "receipt_generation"
       ]
+    },
+    "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
+      "additionalProperties": false,
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "properties": {
+        "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
+          "type": "string"
+        },
+        "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "redacted": {
+          "const": true
+        }
+      },
+      "required": [
+        "redacted",
+        "reason",
+        "commitment",
+        "original_class"
+      ],
+      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "The §8.2 gate-12 promotion receipt: every gate accounted for, the §8.6 cumulative cost ledger, and the checker identity (INV-014).",
+  "description": "The §8.2 gate-12 promotion receipt: every gate accounted for, before/after snapshots, the §8.6 cumulative cost ledger, unknowns, the policy decision, and the checker identity (INV-014) — the RFC 0032 receipt composition list.",
   "properties": {
+    "base_snapshot": {
+      "description": "Before snapshot of the promoted transaction (RFC 0032 receipt composition).",
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
     "checker": {
       "additionalProperties": false,
       "properties": {
@@ -42,8 +79,16 @@
     },
     "cost_ledger": {
       "additionalProperties": false,
-      "description": "Cumulative cost ledger across all transaction versions (plan §8.6).",
+      "description": "Cumulative cost ledger across all transaction versions (plan §8.6). Dimension keys mirror verification-task.schema.json's budget dimensions.",
       "properties": {
+        "bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "candidates": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "cpu_ms": {
           "minimum": 0,
           "type": "integer"
@@ -52,7 +97,15 @@
           "minimum": 0,
           "type": "integer"
         },
+        "proof_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "solver_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "states": {
           "minimum": 0,
           "type": "integer"
         },
@@ -74,6 +127,31 @@
       ],
       "type": "object"
     },
+    "coverage": {
+      "additionalProperties": true,
+      "description": "Coverage of the replay, neighborhood, mutation, refinement, certificate, and parity results (RFC 0032 receipt composition); silent caps are prohibited.",
+      "type": "object"
+    },
+    "epochs": {
+      "additionalProperties": false,
+      "description": "Epoch pins for the receipt; mirrors proof-receipt.schema.json's epochs shape.",
+      "properties": {
+        "corpus": {
+          "type": "string"
+        },
+        "proof": {
+          "type": "string"
+        },
+        "semantic": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "semantic",
+        "proof"
+      ],
+      "type": "object"
+    },
     "gate_profile": {
       "description": "Phase-staged promotion profile (plan §21). Gates outside the profile are listed with status not_yet_enforced, never omitted.",
       "enum": [
@@ -84,6 +162,153 @@
       ]
     },
     "gates": {
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "base_replay"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "patch_application"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "intent_integrity"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "exact_regression"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "neighborhood"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "property_mutation"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "defect_mutants"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "refinement_coverage"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "certificate_rebuild"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "incremental_parity"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "code_and_security"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "gate": {
+                "const": "receipt_generation"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          }
+        }
+      ],
+      "description": "Gate identity, not count, is enforced: exactly twelve unique entries, one contains clause per §8.2 gate. Gate statuses use the canonical gate-status spelling shared with repair-transaction.schema.json; only passed and not_yet_enforced can appear on a promotion receipt.",
       "items": {
         "additionalProperties": false,
         "properties": {
@@ -103,8 +328,10 @@
         ],
         "type": "object"
       },
+      "maxItems": 12,
       "minItems": 12,
-      "type": "array"
+      "type": "array",
+      "uniqueItems": true
     },
     "intent": {
       "pattern": "^in_[A-Za-z0-9_-]+$",
@@ -114,12 +341,32 @@
       "pattern": "^diff_[A-Za-z0-9_-]+$",
       "type": "string"
     },
+    "policy_decision": {
+      "description": "Promotion policy decision recorded in the receipt (RFC 0032 receipt composition); recomputed server-side at promotion time.",
+      "enum": [
+        "allow",
+        "review",
+        "block"
+      ]
+    },
     "receipt_id": {
       "pattern": "^receipt_[A-Za-z0-9_-]+$",
       "type": "string"
     },
+    "redacted_references": {
+      "description": "Redacted values referenced by this artifact (plan §4.5, §18.4).",
+      "items": {
+        "$ref": "#/$defs/redacted"
+      },
+      "type": "array"
+    },
     "repair_transaction": {
       "pattern": "^rt_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "result_snapshot": {
+      "description": "After snapshot the promotion produced (RFC 0032 receipt composition).",
+      "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "schema_version": {
@@ -135,16 +382,20 @@
     "signature": {
       "type": "string"
     },
-    "snapshot": {
-      "pattern": "^ws_[A-Za-z0-9_-]+$",
-      "type": "string"
+    "unknowns": {
+      "description": "Unknowns carried into the promotion (RFC 0032 receipt composition).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
     "schema_version",
     "receipt_id",
     "repair_transaction",
-    "snapshot",
+    "base_snapshot",
+    "result_snapshot",
     "intent",
     "gate_profile",
     "gates",
@@ -153,6 +404,7 @@
     "intent_diff",
     "checker",
     "semantic_epoch",
+    "epochs",
     "signature"
   ],
   "title": "Promotion Receipt",

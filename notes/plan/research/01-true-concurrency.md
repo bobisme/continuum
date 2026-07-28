@@ -100,6 +100,13 @@ Compare against source-DPOR, optimal DPOR, parsimonious ODPOR, and unfolding pre
 
 Kill the lane unless it yields at least an order-of-magnitude reduction on a non-artificial subset without a serious regression on dependent workloads.
 
+### Ratification note (draft)
+
+The plan §24.5 register proposes "explored maximal-execution classes" as
+the reduction denominator for this criterion. That denominator is fixed
+here at ratification, and the register quotes this note verbatim once it
+is fixed; until then the criterion reads as stated above.
+
 ## Novel proposal: Observer-Sensitive Independence
 
 Traditional dependence asks whether transitions commute in full concrete state. Continuum properties often observe only a projection. Define independence relative to:

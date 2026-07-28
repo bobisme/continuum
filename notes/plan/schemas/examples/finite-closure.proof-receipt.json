@@ -1,7 +1,7 @@
 {
   "format": "continuum-proof-receipt",
   "version": "0.1.0",
-  "receipt_id": "proof:diehard-typeok-placeholder",
+  "receipt_id": "receipt_diehard-typeok-placeholder",
   "claim": {
     "kind": "safety",
     "text": "Every reachable DieHard state satisfies the jug bounds.",

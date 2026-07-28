@@ -112,9 +112,9 @@ is the existing one below: minimization cost dominates verification.
 This is a draft pending lane-owner ratification; an unratified
 threshold may not survive Phase A.
 
-The neighboring exploration-reduction threshold (research/01: ≥10×
-reduction in explored classes, without regression on dependent
-workloads) governs a different lane — DPOR-style exploration reduction,
+The neighboring exploration-reduction threshold (research/01: at least
+an order-of-magnitude reduction on a non-artificial subset without a
+serious regression on dependent workloads) governs a different lane — DPOR-style exploration reduction,
 not causal minimization — and must not be conflated with this one; plan
 §24.5 now carries them as separate register rows.
 

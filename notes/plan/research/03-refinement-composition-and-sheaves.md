@@ -139,3 +139,23 @@ Only claims whose semantic cone changed are invalidated. This mirrors proof/buil
 5. Tiny sheaf-gluing prototype on sharded examples.
 6. Cross-validation with a direct SAT encoding.
 7. Strong-refinement research prototype for one concurrent object.
+
+## Promotion and kill criteria (draft)
+
+Draft pending lane-owner ratification. The quantitative promote/kill
+pair for the sheaf lane lives in
+[docs/31_FALSIFICATION_AND_KILL_CRITERIA.md](../docs/31_FALSIFICATION_AND_KILL_CRITERIA.md)
+("Sheaf gluing").
+
+- **Baseline:** direct CSP/SAT constraint formulations of the same
+  composition problems, plus pairwise assume-guarantee checks and
+  standard minimal unsat cores for diagnostics (deliverable 6 above).
+- **Promotion criterion:** per docs/31 — the sheaf machinery proves or
+  diagnoses a multi-component case that pairwise checks cannot, with
+  understandable output; concretely, the four conditions in "Boundary
+  between theorem and metaphor" above are all met on a real sharded or
+  multi-pack example.
+- **Kill condition:** per docs/31 — it restates constraint solving less
+  efficiently, or explanations require specialists; the engineering
+  refinement ladder (stuttering/trace refinement, multi-grain CEGAR)
+  survives independently of the sheaf lane's fate.

@@ -23,56 +23,56 @@
         "ev_replay1"
       ],
       "name": "base_replay",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [
         "ev_apply1"
       ],
       "name": "patch_application",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [
         "diff_demo1"
       ],
       "name": "intent_integrity",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [
         "ev_replay2"
       ],
       "name": "exact_regression",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [
         "ev_neighborhood1"
       ],
       "name": "neighborhood",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [
         "ev_mutation1"
       ],
       "name": "property_mutation",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [
         "ev_mutants1"
       ],
       "name": "defect_mutants",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [
         "ev_refinement1"
       ],
       "name": "refinement_coverage",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [],
@@ -89,7 +89,7 @@
         "ev_security1"
       ],
       "name": "code_and_security",
-      "status": "pass"
+      "status": "passed"
     },
     {
       "evidence": [],

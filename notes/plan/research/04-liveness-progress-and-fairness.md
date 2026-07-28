@@ -123,3 +123,26 @@ Liveness is credible only when:
 - cancellation progress is covered;
 - property-directed POR is proven preserving or disabled;
 - time and probability claims cannot be confused with qualitative liveness.
+
+## Promotion and kill criteria (draft)
+
+Draft pending lane-owner ratification; qualitative where quantitative
+thresholds are not yet registered. Quantitative promote/kill pairs for
+adjacent lanes live in
+[docs/31_FALSIFICATION_AND_KILL_CRITERIA.md](../docs/31_FALSIFICATION_AND_KILL_CRITERIA.md)
+(assumption-synthesis games; observer-indexed independence).
+
+- **Baseline:** TLC and other temporal model checkers on the
+  differential mutation corpus above; ordinary lexicographic counting
+  rankings as the baseline against which Obligation-Flow Ordinals are
+  judged.
+- **Promotion criterion:** the exit criteria above hold — assumptions
+  explicit in source and results, fair-cycle witnesses replay, rankings
+  independently checked, cancellation progress covered — and the
+  liveness engine catches every mutation class listed with no
+  divergence from the differential baseline left unexplained.
+- **Kill condition:** Obligation-Flow Ordinals are killed if ordinary
+  lexicographic counts suffice with equal automation and clarity (as
+  stated above). Any property-directed reduction applied under liveness
+  obligations must be proven preserving for the full property class it
+  is applied to — fair cycles included — or disabled.

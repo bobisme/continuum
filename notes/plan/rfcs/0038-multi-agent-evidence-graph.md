@@ -14,6 +14,9 @@ Typed immutable candidates, claims, failures, proofs, patches, runs, receipts, c
 ## Authority
 Actor capabilities control node creation; status promotion is service-restricted. Confidence is metadata. The status lattice is exactly plan §11.4 (`Proposed, Observed, Sampled, Bounded, Validated, Proved, Refuted, Inconclusive, Superseded` — there is no `draft` status). Only trusted services promote into `Validated` or `Proved`; `Sampled` and `Bounded` promotions name the producing engine's service identity; every `Inconclusive` carries a typed INV-008 reason. Agent votes or confidence never change status.
 
+## Write and concurrency model
+Absorbed from plan §11.7 (SD-06). The graph is append-only; nothing is edited in place. Publication is per-artifact atomic (INV-017). Status promotion is linearized per claim identity as a compare-and-set against the claim's current status: racing promotions cannot regress the lattice, and a lost CAS returns the typed `StatusConflict` error (plan §10.3) — the caller re-reads and retries against the current status. Concurrent contradictory claims materialize a `Conflict` node rather than resolving by write order. Idempotency keys (RFC 0026) make agent retries safe: a replayed write returns the original node identity. The node schema MUST carry `claim_id`, `idempotency_key`, and `service_identity` for this purpose.
+
 ## Queries
 Missing obligations, conflicting candidates, proof frontier, repair frontier, semantic duplicates, provenance, and task generation.
 

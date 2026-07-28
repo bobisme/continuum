@@ -1,4 +1,5 @@
 {
+  "base_snapshot": "ws_demo1",
   "checker": {
     "build_digest": "blake3:receipt-checker-build-placeholder",
     "toolchain": "rustc 1.85.0 (reproducible-build covenant, plan §20)"
@@ -9,6 +10,10 @@
     "solver_ms": 42000,
     "tokens": 18500,
     "wall_ms": 96000
+  },
+  "epochs": {
+    "proof": "lean-4.32.1",
+    "semantic": "sem-3"
   },
   "gate_profile": "phase-b",
   "gates": [
@@ -63,11 +68,15 @@
   ],
   "intent": "in_ack_v1",
   "intent_diff": "diff_intent_demo1",
+  "policy_decision": "allow",
   "receipt_id": "receipt_demo1",
   "repair_transaction": "rt_demo1",
+  "result_snapshot": "ws_demo2",
   "schema_version": "1.0",
   "semantic_diff": "diff_demo1",
   "semantic_epoch": "sem-3",
   "signature": "ssh-ed25519:promotion-signature-placeholder",
-  "snapshot": "ws_demo2"
+  "unknowns": [
+    "production storage profile assumed (contractual)"
+  ]
 }

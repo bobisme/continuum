@@ -17,7 +17,7 @@
 
 All load-bearing experiments in [`../notes/G0_SPIKE_MATRIX.md`](../notes/G0_SPIKE_MATRIX.md) have evidence or an explicit redesign decision, recorded in the matrix itself. A failed or unexecuted freeze-blocking item blocks interface freeze.
 
-Staging rule: G0 closes in Phase A for every item whose required experiment runs against Phase A machinery — the freeze-blocking subset DX-01–05, 07, 08, 10, 12, 13, 14. An unexecuted or failed item in this subset blocks interface freeze. Items whose experiments require later subsystems are re-homed to the gates that own them — DX-06 (neighborhood/mutation campaign) → G4, DX-11 (proof-service isolation) → G6, DX-09 (human diagnosis study) → G8, DX-15 (benchmark leakage) → G9 — and each re-homing is recorded in the matrix as that item's explicit decision. The matrix carries Status, Evidence, and Decision columns; plan §0.3's counts are derived from it, not asserted beside it.
+Staging rule: G0 closes in Phase A for every item whose required experiment runs against Phase A machinery — the freeze-blocking subset DX-01–03, 10, 12, 13, 14. An unexecuted or failed item in this subset blocks interface freeze. Items whose experiments require later subsystems are re-homed to the gates that own them — DX-04 (causal debugger) → G4, DX-05 (incrementality) → G5, DX-06 (neighborhood/mutation campaign) → G4, DX-07 (Forge non-vacuity) → G7, DX-08 (lens ambiguity) → G6, DX-09 (human diagnosis study) → G8, DX-11 (proof-service isolation) → G6, DX-15 (benchmark leakage) → G9 — with the Phase A spike results for DX-04, 05, 07, and 08 recorded as artifact-shape evidence only, and each re-homing recorded in the matrix as that item's explicit decision. The Phase A benchmark subset used for DX-10 and the G2 Context Pack ablation must itself pass the plan §19.4 family/source-hash separation check before either result is accepted; full leakage validation remains DX-15 at G9. The matrix carries Status, Evidence, and Decision columns; plan §0.3's counts are derived from it, not asserted beside it.
 
 ## G1 — Workbench identity and lifecycle
 
@@ -42,7 +42,7 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 
 ## G3 — Intent integrity
 
-- every gaming mutation in the hidden (held-out) suite that falls in a supported fragment is classified as a privileged intent change, across all seven diff dimensions (property/assumption/bound/observer/fault/fairness/assurance);
+- every gaming mutation in the development gaming suite (plan §19.4) that falls in a supported fragment is classified as a privileged intent change, across all seven diff dimensions (property/assumption/bound/observer/fault/fairness/assurance); the held-out gaming suite is evaluated once, at G9;
 - mutations outside supported fragments classify as `Unknown` and block ordinary promotion rather than passing silently;
 - intent policy locks are enforced; evidence is invalidated on intent
   revision;
@@ -67,7 +67,9 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 - crash-safe cache/publication;
 - evidence queries and context compilation meet the docs/34 targets at
   ≥10^7 evidence nodes on the reference workload;
-- interactive latency targets (docs/34) hold on reference workloads.
+- reduction engines show zero reachability mismatch against the unreduced reference on the no-reduction corpus, and certified claims fall back to the unreduced baseline until the reduction certificate lane matures (docs/08 R04);
+- semantic artifacts are byte-identical across the docs/19 determinism matrix;
+- interactive latency targets (docs/34) hold on the reference workload, measured with a saturating background swarm present (plan §4.1, docs/34).
 
 ## G6 — Proof service
 
@@ -76,7 +78,8 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 - every proof receipt carries theorem and axiom manifests;
 - agent proof repair accepted only by kernel;
 - certificate mutations are rejected;
-- proof Context Packs improve proof-worker success/cost.
+- proof Context Packs improve proof-worker success/cost;
+- one nontrivial corpus protocol carries safety and liveness evidence plus real-code refinement produced by this service (Phase D exit).
 
 ## G7 — Forge
 

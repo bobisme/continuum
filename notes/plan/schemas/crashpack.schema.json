@@ -5,12 +5,14 @@
   "type": "object",
   "$defs": {
     "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
       "type": "object",
       "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
       "required": [
         "redacted",
         "reason",
-        "commitment"
+        "commitment",
+        "original_class"
       ],
       "properties": {
         "redacted": {
@@ -24,9 +26,11 @@
           ]
         },
         "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
           "type": "string"
         },
         "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
           "type": "string"
         }
       },

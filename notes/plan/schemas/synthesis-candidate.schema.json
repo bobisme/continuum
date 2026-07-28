@@ -83,11 +83,11 @@
       "type": "array"
     },
     "forge_problem": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^forge_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "intent": {
-      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "objectives": {

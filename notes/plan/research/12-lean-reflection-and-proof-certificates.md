@@ -114,3 +114,21 @@ axioms report
 ```
 
 This is a durable, composable proof provenance object rather than a console message.
+
+## Promotion and kill criteria (draft)
+
+Draft pending lane-owner ratification. This lane adopts as its draft
+criteria the certificate-overhead pair registered in
+[docs/31_FALSIFICATION_AND_KILL_CRITERIA.md](../docs/31_FALSIFICATION_AND_KILL_CRITERIA.md)
+("Lean proof import on every strong result").
+
+- **Baseline:** the Rust native small checker on the routine workflow
+  (untrusted search → certificate → native checker), measured against
+  raw search time on the same corpus.
+- **Promotion criterion:** per docs/31 — Lean reflective certificate
+  checking is ≤10% of search time for large finite proofs, or provides
+  acceptable asynchronous CI latency.
+- **Kill/adjust condition:** per docs/31 — if Lean import is too
+  expensive, the lane is adjusted rather than deleted: the verified
+  native checker remains the routine path, and Lean validates the
+  checker itself plus sampled or full release artifacts.

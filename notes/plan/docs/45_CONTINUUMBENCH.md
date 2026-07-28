@@ -40,7 +40,7 @@ The grader is isolated from the agent and workbench clients.
 - liveness/fairness cycle;
 - cancellation/obligation leak;
 - durability/recovery;
-- weak-memory ordering;
+- weak-memory ordering (blocked on ADR-0032 lane: not gradeable until the ADR-0032 weak-memory lane ships — plan §24.5 declares every memory dimension Unsupported(sequential-consistency-only) until then);
 - refinement mismatch;
 - insufficient production telemetry.
 

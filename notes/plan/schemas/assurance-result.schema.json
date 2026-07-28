@@ -30,13 +30,100 @@
           ],
           "properties": {
             "unsupported": {
-              "description": "Typed Unsupported reason, e.g. sequential-consistency-only (plan B11).",
-              "type": "string"
+              "description": "Typed Unsupported(reason) object (plan B11).",
+              "type": "object",
+              "required": [
+                "reason"
+              ],
+              "properties": {
+                "reason": {
+                  "description": "Typed Unsupported reason, e.g. sequential-consistency-only (plan B11).",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
         }
       ]
+    },
+    "assurance_envelope": {
+      "description": "B11 assurance envelope: all nine dimensions required; each names its producing engine or carries a typed Unsupported(reason). Until the weak-memory lane ships (ADR-0032), memory_model reads Unsupported(sequential-consistency-only).",
+      "type": "object",
+      "required": [
+        "bounds",
+        "faults",
+        "fairness",
+        "values",
+        "schedules",
+        "memory_model",
+        "observer",
+        "proof_status",
+        "unknowns"
+      ],
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "faults": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "fairness": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "values": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "schedules": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "memory_model": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "observer": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "proof_status": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "unknowns": {
+          "$ref": "#/$defs/envelope_dimension"
+        }
+      },
+      "additionalProperties": false
+    },
+    "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
+      "additionalProperties": false,
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "properties": {
+        "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
+          "type": "string"
+        },
+        "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "redacted": {
+          "const": true
+        }
+      },
+      "required": [
+        "redacted",
+        "reason",
+        "commitment",
+        "original_class"
+      ],
+      "type": "object"
     }
   },
   "required": [
@@ -110,13 +197,11 @@
       "additionalProperties": false
     },
     "verdict": {
-      "description": "Budget exhaustion is never a verdict (plan §11.4); it is the BudgetExhausted error with a continuation.",
+      "description": "Budget exhaustion is never a verdict (plan §11.4); it is the BudgetExhausted error with a continuation. Unsupported and engine-error outcomes are not verdicts either: they are inconclusive with inconclusive_reason Unsupported/EngineError (INV-008).",
       "enum": [
         "established",
         "refuted",
-        "inconclusive",
-        "unsupported",
-        "engine-error"
+        "inconclusive"
       ]
     },
     "inconclusive_reason": {
@@ -131,49 +216,7 @@
       ]
     },
     "envelope": {
-      "description": "B11 assurance envelope: all nine dimensions required; each names its producing engine or carries a typed Unsupported(reason). Until the weak-memory lane ships (ADR-0032), memory_model reads Unsupported(sequential-consistency-only).",
-      "type": "object",
-      "required": [
-        "bounds",
-        "faults",
-        "fairness",
-        "values",
-        "schedules",
-        "memory_model",
-        "observer",
-        "proof_status",
-        "unknowns"
-      ],
-      "properties": {
-        "bounds": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "faults": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "fairness": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "values": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "schedules": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "memory_model": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "observer": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "proof_status": {
-          "$ref": "#/$defs/envelope_dimension"
-        },
-        "unknowns": {
-          "$ref": "#/$defs/envelope_dimension"
-        }
-      },
-      "additionalProperties": false
+      "$ref": "#/$defs/assurance_envelope"
     },
     "scope": {
       "type": "object",
@@ -344,6 +387,13 @@
           }
         },
         "additionalProperties": false
+      }
+    },
+    "redacted_references": {
+      "description": "Redacted values referenced by this artifact (plan §4.5, §18.4).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/redacted"
       }
     },
     "reproducer": {

@@ -5,14 +5,21 @@
   "type": "object",
   "$defs": {
     "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
       "type": "object",
       "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
-      "required": ["redacted", "reason", "commitment"],
+      "required": ["redacted", "reason", "commitment", "original_class"],
       "properties": {
         "redacted": { "const": true },
         "reason": { "enum": ["summarized", "lost", "purged"] },
-        "commitment": { "type": "string" },
-        "original_class": { "type": "string" }
+        "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
+          "type": "string"
+        },
+        "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+          "type": "string"
+        }
       },
       "additionalProperties": false
     }
@@ -39,7 +46,7 @@
   "properties": {
     "format": { "const": "continuum-proof-receipt" },
     "version": { "type": "string" },
-    "receipt_id": { "type": "string" },
+    "receipt_id": { "type": "string", "pattern": "^receipt_[A-Za-z0-9_-]+$" },
     "claim": {
       "type": "object",
       "required": ["kind", "text", "property_hash", "verdict"],

@@ -100,6 +100,8 @@ are design targets.
 The ≥10^7-node scale qualifier on the evidence-query and Context Pack
 rows is gate-normative for G5's evidence-query bullet (plan §22 G5).
 
+The explain-interaction row (failure → rendered causal explanation, p50 200 ms / p95 1 s) is gate-normative for G5.
+
 Long tasks stream monotonic progress and return continuations.
 
 ## Output principles

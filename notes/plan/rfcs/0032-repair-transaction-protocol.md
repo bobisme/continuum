@@ -45,11 +45,21 @@ The twelve gates (plan §8.2), by schema id:
 | 11 | `code_and_security` | tests, static verification, security gates pass |
 | 12 | `receipt_generation` | promotion receipt composed and verified |
 
-**Gate profiles** are phase-staged (plan §21): `phase-b` enforces 1–8, 11–12; `phase-c` adds 10; `phase-d`/`default` enforce all twelve. Gates outside the active profile MUST appear with status `not_yet_enforced` — present and visibly unenforced, never omitted or passed. A promoted transaction MUST list all twelve gates with no `pending`/`fail`/`inconclusive` (schema-enforced).
+Gate status is exactly one of `passed / failed / pending / inconclusive / not_yet_enforced` — this enum is closed and `not_applicable` does not exist.
+
+**Gate profiles** are phase-staged (plan §21): `phase-b` enforces 1–8, 11–12; `phase-c` adds 10; `phase-d`/`default` enforce all twelve. Gates outside the active profile MUST appear with status `not_yet_enforced` — present and visibly unenforced, never omitted or passed. A promoted transaction's receipt MUST list all twelve gates by identity (the gate ids above, not a count), with no `pending`/`failed`/`inconclusive` (schema-enforced).
 
 ## Neighborhood construction
 
 Property-directed and budgeted, drawn from the eight strategies of plan §8.3: alternate enabled events at causal decisions; fault insertion/removal around the repaired window; cancellation at adjacent checkpoints; value/name permutations; message duplication/loss/delay changes; schedule perturbations within the trace-class boundary; abstraction-map generated variants; hidden corpus-style mutations. The receipt records which strategies ran and their coverage counts — silent caps are prohibited.
+
+## Cost governance
+
+Absorbed from plan §8.6 (SD-04):
+
+- **Cumulative ledger.** Every transaction carries a cumulative cost ledger (CPU, wall, solver, memory, token) across all its versions; the promotion receipt includes it (see Receipt).
+- **Incremental gate campaigns.** Gate 5–7 evaluations (`neighborhood`, `property_mutation`, `defect_mutants`) are incremental by default: neighborhood classes and mutants whose causal footprint is disjoint from the patch delta — a `Conservative`-class §9 dependency query (RFC 0030) — reuse prior results as `Validated` edges; anything else re-runs.
+- **Ceilings.** The daemon enforces per-principal and per-transaction cost ceilings. Exceeding a ceiling MUST yield `BudgetExhausted` with a continuation (`repair.resume` continues the campaign monotonically) — never a silently smaller campaign (the cost-domain form of INV-007).
 
 ## Reclassification as intent revision
 

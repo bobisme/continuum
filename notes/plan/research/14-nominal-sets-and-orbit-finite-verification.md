@@ -85,3 +85,21 @@ Compare:
 3. nominal orbit exploration.
 
 Promote only if nominal exploration changes the practical scaling frontier.
+
+## Promotion and kill criteria (draft)
+
+Draft pending lane-owner ratification. The quantitative promote/kill
+pair for this lane lives in
+[docs/31_FALSIFICATION_AND_KILL_CRITERIA.md](../docs/31_FALSIFICATION_AND_KILL_CRITERIA.md)
+("Nominal/orbit-finite lane").
+
+- **Baseline:** concrete bounded IDs and finite permutation symmetry on
+  the idempotent-request-service experiment above (comparisons 1 and 2).
+- **Promotion criterion:** per docs/31 — a real session/request
+  protocol scales unboundedly with tractable orbit growth and
+  Lean-proved equivariance; i.e., nominal exploration changes the
+  practical scaling frontier rather than matching bounded runs.
+- **Kill condition:** per docs/31 — models routinely violate the
+  equivariance obligation (hashing raw IDs, allocation-order
+  comparisons, arithmetic on names), or orbit explosion matches
+  concrete bounding.

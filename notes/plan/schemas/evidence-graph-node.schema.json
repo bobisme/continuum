@@ -1,6 +1,40 @@
 {
   "$id": "https://continuum.dev/schema/evidence-graph-node.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
+      "additionalProperties": false,
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "properties": {
+        "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
+          "type": "string"
+        },
+        "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "redacted": {
+          "const": true
+        }
+      },
+      "required": [
+        "redacted",
+        "reason",
+        "commitment",
+        "original_class"
+      ],
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "allOf": [
     {
@@ -38,11 +72,43 @@
           "validation_basis"
         ]
       }
+    },
+    {
+      "description": "Assurance-bearing status promotion is service-attributed: sampled, bounded, validated, and proved statuses name the daemon service identity that performed the promotion (plan §11.7 write model).",
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "sampled",
+              "bounded",
+              "validated",
+              "proved"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "service_identity"
+        ]
+      }
     }
   ],
   "properties": {
     "artifact": {
       "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "claim_id": {
+      "description": "Claim identity this node's status promotion is linearized against (plan §11.7 write model).",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "description": "Idempotency key making agent retries safe (plan §11.7 write model).",
+      "minLength": 1,
       "type": "string"
     },
     "inconclusive_reason": {
@@ -94,6 +160,51 @@
     },
     "parameterization": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "description": "Fail-closed (plan §11.4): proved_universal carries no instance bound — n must be null.",
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "proved_universal"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "n": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "description": "Fail-closed (plan §11.4): checked and cutoff_checked carry a concrete integer instance bound.",
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "checked",
+                  "cutoff_checked"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "n": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      ],
       "description": "Parameterized results are structurally distinct (plan §11.4): checked(N=k), cutoff_checked(N≤k), proved(∀N).",
       "properties": {
         "kind": {
@@ -146,8 +257,20 @@
       ],
       "type": "object"
     },
+    "redacted_references": {
+      "description": "Redacted values referenced by this artifact (plan §4.5, §18.4).",
+      "items": {
+        "$ref": "#/$defs/redacted"
+      },
+      "type": "array"
+    },
     "schema_version": {
       "const": "1.0"
+    },
+    "service_identity": {
+      "description": "Daemon service identity that performed the assurance-bearing status promotion (plan §11.7); required for sampled/bounded/validated/proved.",
+      "minLength": 1,
+      "type": "string"
     },
     "status": {
       "enum": [

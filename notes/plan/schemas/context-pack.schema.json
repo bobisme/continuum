@@ -2,14 +2,108 @@
   "$id": "https://continuum.dev/schema/context-pack.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
+    "envelope_dimension": {
+      "$comment": "mirrored from assurance-result.schema.json; identity-checked by the validator",
+      "description": "B11 envelope dimension: names its producing engine or carries a typed Unsupported(reason). A dimension is never silently omitted.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "engine",
+            "summary"
+          ],
+          "properties": {
+            "engine": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "unsupported"
+          ],
+          "properties": {
+            "unsupported": {
+              "description": "Typed Unsupported(reason) object (plan B11).",
+              "type": "object",
+              "required": [
+                "reason"
+              ],
+              "properties": {
+                "reason": {
+                  "description": "Typed Unsupported reason, e.g. sequential-consistency-only (plan B11).",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "assurance_envelope": {
+      "$comment": "mirrored from assurance-result.schema.json; identity-checked by the validator",
+      "description": "B11 assurance envelope: all nine dimensions required; each names its producing engine or carries a typed Unsupported(reason). Until the weak-memory lane ships (ADR-0032), memory_model reads Unsupported(sequential-consistency-only).",
+      "type": "object",
+      "required": [
+        "bounds",
+        "faults",
+        "fairness",
+        "values",
+        "schedules",
+        "memory_model",
+        "observer",
+        "proof_status",
+        "unknowns"
+      ],
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "faults": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "fairness": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "values": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "schedules": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "memory_model": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "observer": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "proof_status": {
+          "$ref": "#/$defs/envelope_dimension"
+        },
+        "unknowns": {
+          "$ref": "#/$defs/envelope_dimension"
+        }
+      },
+      "additionalProperties": false
+    },
     "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
       "additionalProperties": false,
       "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
       "properties": {
         "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
           "type": "string"
         },
         "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
           "type": "string"
         },
         "reason": {
@@ -26,12 +120,33 @@
       "required": [
         "redacted",
         "reason",
-        "commitment"
+        "commitment",
+        "original_class"
       ],
       "type": "object"
     }
   },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "INV-008: inconclusive is never untyped (plan §11.4).",
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "inconclusive"
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "required": [
+          "inconclusive_reason"
+        ]
+      }
+    }
+  ],
   "properties": {
     "assurance": {
       "additionalProperties": false,
@@ -46,70 +161,7 @@
           ]
         },
         "envelope": {
-          "additionalProperties": false,
-          "description": "Every dimension names its producer or reads a typed unsupported value; dimensions are never silently omitted (plan B11).",
-          "properties": {
-            "bounds": {
-              "type": "object"
-            },
-            "fairness": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "memory_model": {
-              "enum": [
-                "sequential-consistency",
-                "c11-fragment",
-                "unsupported"
-              ]
-            },
-            "observer": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "proof_status": {
-              "enum": [
-                "none",
-                "finite-closure-certificate",
-                "checked-certificate",
-                "trusted-solver",
-                "kernel-checked",
-                "unsupported"
-              ]
-            },
-            "schedules": {
-              "enum": [
-                "exhaustive",
-                "reduced",
-                "sampled",
-                "unsupported"
-              ]
-            },
-            "values": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "unknowns": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "bounds",
-            "schedules",
-            "memory_model",
-            "proof_status",
-            "unknowns"
-          ],
-          "type": "object"
+          "$ref": "#/$defs/assurance_envelope"
         }
       },
       "required": [
@@ -144,7 +196,7 @@
       "pattern": "^ctx_[A-Za-z0-9_-]+$",
       "type": "string"
     },
-    "debugger": {
+    "debugger_branch": {
       "anyOf": [
         {
           "pattern": "^dbg_[A-Za-z0-9_-]+$",
@@ -153,7 +205,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "Debugger branch the pack was assembled on, when any (plan §4.4 dbg_ handle)."
     },
     "evidence": {
       "items": {
@@ -205,6 +258,17 @@
       },
       "type": "array",
       "uniqueItems": true
+    },
+    "inconclusive_reason": {
+      "description": "Typed reason required by INV-008 when verdict is inconclusive (plan §11.4); vocabulary mirrors assurance-result.schema.json. Unsupported and engine-error outcomes are inconclusive with reason Unsupported/EngineError, never verdicts.",
+      "enum": [
+        "Unsupported",
+        "ResourceExhausted",
+        "EngineError",
+        "InsufficientTelemetry",
+        "AbstractionAmbiguity",
+        "IncompleteProofSearch"
+      ]
     },
     "intent": {
       "pattern": "^in_[A-Za-z0-9_-]+$",
@@ -350,13 +414,12 @@
       "type": "array"
     },
     "verdict": {
+      "description": "Verdict vocabulary aligned with assurance-result.schema.json: unsupported and engine-error outcomes are inconclusive with a typed reason (INV-008), never top-level verdicts.",
       "enum": [
         "satisfied",
         "refuted",
         "deadlock",
-        "inconclusive",
-        "unsupported",
-        "engine_error"
+        "inconclusive"
       ]
     },
     "snapshot": {

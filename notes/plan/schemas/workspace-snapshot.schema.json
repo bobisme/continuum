@@ -1,8 +1,42 @@
 {
   "$id": "https://continuum.dev/schema/workspace-snapshot.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "named_digest_list": {
+      "description": "Content identities of one snapshot component (plan §4.2); mirrors the dependencies shape.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "digest"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
   "additionalProperties": false,
   "properties": {
+    "cml_modules": {
+      "$ref": "#/$defs/named_digest_list",
+      "description": "Content identities of CML modules (plan §4.2)."
+    },
+    "configuration": {
+      "$ref": "#/$defs/named_digest_list",
+      "description": "Content identities of configuration (plan §4.2)."
+    },
+    "correspondence": {
+      "$ref": "#/$defs/named_digest_list",
+      "description": "Content identities of generated correspondence (plan §4.2, §16)."
+    },
     "dependencies": {
       "items": {
         "additionalProperties": false,
@@ -22,13 +56,15 @@
       },
       "type": "array"
     },
+    "domain_packs": {
+      "$ref": "#/$defs/named_digest_list",
+      "description": "Content identities of domain-pack manifests (plan §4.2)."
+    },
     "epochs": {
       "additionalProperties": false,
+      "description": "Snapshot identity epochs (plan §4.2): toolchain and semantic epochs plus the proof epoch. The protocol epoch is a connection property (RFC 0026), not snapshot identity.",
       "properties": {
         "proof": {
-          "type": "string"
-        },
-        "protocol": {
           "type": "string"
         },
         "semantic": {
@@ -40,7 +76,6 @@
       },
       "required": [
         "semantic",
-        "protocol",
         "proof"
       ],
       "type": "object"
@@ -83,8 +118,16 @@
         }
       ]
     },
+    "proof_environment": {
+      "$ref": "#/$defs/named_digest_list",
+      "description": "Content identities of the proof environment (plan §4.2)."
+    },
     "root_digest": {
       "type": "string"
+    },
+    "rust_extraction": {
+      "$ref": "#/$defs/named_digest_list",
+      "description": "Content identities of the Rust semantic extraction (plan §4.2)."
     },
     "schema_version": {
       "const": "1.0"

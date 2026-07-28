@@ -33,15 +33,27 @@ Every recorded dependency carries one of the nine typed reasons (plan §9.4): `r
 
 Independence between an edit and a query is a tri-state (`DefinitelyIndependent(witness)`, `DefinitelyDependent(reason)`, `Unknown`), and **`Unknown` is dependent** (RFC 0004's rule generalized). Heuristic independence is permitted only on `Experimental` edges.
 
+## Auditability classes
+
+Absorbed from plan §9.5 (SD-03). Every query definition declares exactly one auditability class. The class lives on the query definition, never on the run: it MUST NOT be reclassified per-run, so a mismatch cannot be reclassified away after the fact.
+
+| Class | Meaning | Audit comparison |
+|---|---|---|
+| `equality-auditable` | deterministic under the docs/19 matrix | compared bit-for-bit |
+| `certificate-auditable` | solver-backed | checked certificates and claim envelopes are compared — never raw solver behavior |
+| `budget-sensitive` | anytime results | monotone-honesty only: the incremental result's evidence labels MUST be no stronger than a clean run's under equal budget |
+
+The quarantine rule is scoped by class: divergence in an equality- or certificate-auditable query always quarantines the reuse class; divergence attributable solely to budget or portfolio nondeterminism never does — it is recorded as drift telemetry, not quarantine. A solver-outcome difference with agreeing certificates does not quarantine. INV-010's exactness claim applies per auditability class.
+
 ## Persistence and crash safety
 
 CAS stores outputs; the query index maps keys to content. Transactions MUST commit output before index; a crash leaves unreachable content eligible for GC, never a stale index entry (this is the operational content of INV-017; see plan §4.5). The index format is versioned; an index verifier (fsck) ships with the daemon and runs on recovery.
 
 ## Incremental Parity Audit
 
-- **Sampling policy:** a configurable fraction of interactive queries (default 1 in 64, uniformly by key hash) plus every promotion-relevant query at promotion time is recomputed clean; CI additionally runs deterministic full-clean sweeps nightly.
+- **Sampling policy:** a configurable fraction of interactive queries plus every promotion-relevant query at promotion time is recomputed clean; CI additionally runs deterministic full-clean sweeps nightly. The sampling rate MUST derive from a declared statistical confidence target for mismatch detection per reuse class (plan §8.6), reviewed at G5; "1 in 64, uniformly by key hash" remains only as the labeled bootstrap default until that derivation ships.
 - **Compared artifacts:** verdict, canonical state-graph digest, counterexample class, certificate result, context-slice soundness, semantic diff, proof axiom manifest (plan §9.5).
-- **On mismatch:** publish a mismatch evidence node; quarantine the implicated edge class + query implementation version (its reuse drops to `Experimental` until cleared); run the invalidation minimizer to produce the smallest input delta reproducing the divergence; surface per the release-blocker doctrine — a stale green result is a blocker, not a bug ticket (docs/42).
+- **On mismatch:** publish a mismatch evidence node; apply the class-scoped quarantine rule of "Auditability classes" above — an equality- or certificate-auditable mismatch quarantines the implicated edge class + query implementation version (its reuse drops to `Experimental` until cleared), while divergence attributable solely to budget or portfolio nondeterminism is recorded as drift telemetry without quarantine; run the invalidation minimizer to produce the smallest input delta reproducing the divergence; surface per the release-blocker doctrine — a stale green result is a blocker, not a bug ticket (docs/42).
 - The audit's own overhead is measured; the Phase C exit budget for it is part of the docs/34 latency accounting.
 
 ## Explain API

@@ -18,6 +18,16 @@ The Intent Contract is the protected statement of what a system must mean. It is
 - A workspace snapshot carries the intent's content identity (`in_*`) as a reference. `workspace.fork` MUST preserve the binding by identity.
 - Rebinding a snapshot lineage to a different intent is a privileged operation that MUST produce an intent diff (RFC 0031) and MUST invalidate dependent evidence.
 
+## Intent bundles and convergence
+
+Absorbed from plan §4.2.1 (SD-05). Registries converge through signed, content-addressed **intent bundles** (`inb_*`):
+
+- A bundle exports one or more contracts with their acceptance records and policy tables. Bundles MAY be vendored in the repository or fetched by identity.
+- Import is idempotent and MUST NOT change protection status: an imported `Proposed` contract stays `Proposed`. An imported acceptance is honored only if its signature chain satisfies the local policy.
+- Divergent branches are reconciled by semantic three-way merge: each head's §5.3 diff (RFC 0031) is taken against the common ancestor; two revisions merge automatically only when both diffs are classified independent within supported fragments. Otherwise the merge is a `Conflict` node whose resolution requires the `revise-intent` capability — never an automatic pick by write order or timestamp.
+- CI MUST fail closed (`AcceptanceChainInvalid`) when the bundle referenced by the workspace configuration is absent or its acceptance chain does not verify.
+- The intent diff ships with a PR-reviewable projection: a SARIF note plus a rendered semantic diff (plan §17.6).
+
 ## Fields
 
 The contract consists of these field groups (types in the schema):

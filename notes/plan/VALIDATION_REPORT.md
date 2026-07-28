@@ -1,8 +1,12 @@
 # Dossier Validation Report — Revision 3
 
-**Validation date:** 2026-07-26  
+**Validation date:** 2026-07-28  
 **Validator:** `tools/validate_dossier.py`  
-**Overall result:** **PASS within the boundaries stated below**
+**Overall result:** **PASS within the boundaries stated below**  
+**Program status (derived):** **BLOCKED** — every §21.1 owner/team row is
+unfilled (`notes/START_HERE_IMPLEMENTATION.md`); by plan §21.1's rule all
+six phases are `BLOCKED` until their rows are filled. This is a program
+governance state, not a mechanical-validation failure.
 
 ## Mechanical checks
 
@@ -15,23 +19,25 @@
 | Python syntax parse | PASS — 18 files |
 | Executable spike assertions | PASS — 30 assertions (count derived from source) across Revision 2 and Revision 3 |
 | Corpus inventory consistency | PASS — 80 validated + 39 extended rows |
-| Relative Markdown links | PASS — 183 checked |
-| Markdown code-fence parity | PASS — 216 files |
-| Empty-file scan | PASS — 311 files scanned, 0 empty |
+| Relative Markdown links | PASS — 188 checked |
+| Markdown code-fence parity | PASS — 217 files |
+| Empty-file scan | PASS — 314 files scanned, 0 empty |
 | ADR numbering uniqueness | PASS — 52 ADRs |
 | RFC numbering uniqueness | PASS — 40 RFCs |
 | Bibliography identifier uniqueness | PASS — 159 entries |
 | Lean source placeholder/declaration scan | PASS — 17 `.lean` files; no `sorry`, `admit`, or top-level `axiom` declarations |
-| Retired-name scan (Tribunal rename, `cp_` handles) | PASS — 301 files scanned |
-| Plan §22 ↔ docs/52 gate correspondence (bidirectional) | PASS — 11 gates, 65 bullets each way |
+| Retired-name scan (Tribunal rename, `cp_` handles) | PASS — 300 files scanned (generated `.typ` renders excluded) |
+| Plan §22 ↔ docs/52 gate correspondence (bidirectional) | PASS — 11 gates, 68 bullets each way |
 | Phase↔gate tables (plan §22 vs docs/52, structural) | PASS — 6 phases |
-| G0 matrix count derivation (plan §0.3 vs matrix) | PASS — 8 evidence, 3 open freeze-blocking, 4 re-homed |
+| G0 matrix count derivation (plan §0.3 vs matrix) | PASS — 4 evidence, 3 open freeze-blocking, 8 re-homed (DX-04/05/07/08 re-homed with artifact-shape spike evidence per review 5) |
 | G10 two-system criterion (plan §21/§22 and docs/52) | PASS |
-| Gate-citation hygiene (retired suffixed names) | PASS — 148 files |
+| Gate-citation hygiene (retired suffixed names) | PASS — 147 files |
 | Rev-2 `Target gate` scheme qualifiers (RFCs 0001–0025) | PASS — 20 metadata lines |
-| START_HERE PR gate annotations (incl. 4a/15a/25a) | PASS — 34 PR headings |
-| §24.5 register row integrity (lane refs resolve; kill/defer/draft present) | PASS — 17 rows |
-| Handle-prefix registry (schema patterns ⊆ plan §4.4) | PASS — 19 prefixes, 40 anchored patterns |
+| START_HERE PR gate annotations (incl. 4a/15a/15b/22a/25a/26a/27a/27b; open-G0 closing PRs must carry G0) | PASS — 39 PR headings |
+| §24.5 register row integrity (lane refs resolve; kill/defer/draft present; marked-quote identity) | PASS — 21 rows, 0 ratified quotes yet |
+| Handle-prefix registry (schema patterns ⊆ plan §4.4) | PASS — 19 prefixes, 47 anchored patterns |
+| Program status (owner rule, plan §21.1 vs START_HERE table) | DERIVED — blocked, phases A–F |
+| Specification-debt ledger (plan §25 vs `check_spec_debt` predicates) | PASS — open: SD-01, SD-07, SD-08, SD-09, SD-10; paid: SD-02–06, SD-11–14 |
 
 The machine-readable result is in `validation-results.json`.
 

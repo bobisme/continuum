@@ -2,6 +2,26 @@
   "$id": "https://continuum.dev/schema/evidence-graph-edge.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "A CHECKED_BY edge names the trusted checker/service that performed the check (plan §11.3).",
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "CHECKED_BY"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "checker"
+        ]
+      }
+    }
+  ],
   "properties": {
     "checker": {
       "description": "Trusted checker/service the edge names when applicable (plan §11.3).",

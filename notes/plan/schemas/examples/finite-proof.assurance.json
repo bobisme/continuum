@@ -30,7 +30,9 @@
       "summary": "exhaustive interleavings within the declared bounds"
     },
     "memory_model": {
-      "unsupported": "sequential-consistency-only"
+      "unsupported": {
+        "reason": "sequential-consistency-only"
+      }
     },
     "observer": {
       "engine": "continuum-explicit",

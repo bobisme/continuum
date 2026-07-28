@@ -8,6 +8,7 @@
   "continuation": "cont_demo1",
   "epochs": {
     "engine": "explicit-0.1",
+    "proof": "lean-4.32.1",
     "semantic": "sem-3"
   },
   "evidence": [
@@ -16,6 +17,7 @@
   "idempotency_key": "idem-1",
   "intent": "in_ack_v1",
   "operation": "verification.start",
+  "priority_class": "interactive",
   "schema_version": "1.0",
   "snapshot": "ws_demo1",
   "status": "suspended",

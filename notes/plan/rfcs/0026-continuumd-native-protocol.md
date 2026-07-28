@@ -31,7 +31,7 @@ The single authoritative request/result protocol. CLI, Cargo, LSP, DAP, MCP, SAR
 | `snapshot` | `ws_*` or null | yes | explicit null when unused; the field name is `snapshot` everywhere (schemas included) |
 | `intent` | `in_*` or null | yes | explicit null when unused |
 | `arguments` | object | yes | per-operation schema from the IDL |
-| `budget` | object | for long ops | wall/cpu/memory/states/solver/proof/tokens/candidates |
+| `budget` | object | for long ops | `wall_ms / cpu_ms / memory_bytes / states / solver_ms / proof_ms / tokens / candidates / bytes` (the budget keys of `schemas/verification-task.schema.json`) |
 | `output_policy` | object | optional | max bytes/tokens/nodes, audience |
 | `trace` | object | optional | W3C/OTel context propagation |
 
@@ -62,6 +62,15 @@ Idempotency: a mutation replayed with the same `idempotency_key` and byte-identi
 - `task.resume` validates continuation identity, snapshot, and epochs; stale inputs are rejected (`StaleSnapshot`, `ContinuationEpochMismatch`). Resume MAY add evidence; it MUST NOT replace prior artifacts under the same identity.
 - `task.subscribe` streams progress events over the same connection; events are hints — committed artifacts and `task.status` are authoritative.
 
+## Version window, budget updates, and evidence subscriptions
+
+Absorbed from plan §4.3 (SD-02):
+
+- **Protocol-major window.** The daemon MUST serve protocol majors N and N−1 concurrently; a client on the previous major is rejected only when it falls outside this window (`ProtocolVersionUnsupported`).
+- **Artifact readability is decoupled from protocol majors.** Evidence and receipt schemas MUST remain readable by every future verifier for their declared schema epoch, regardless of which protocol majors the daemon still serves; this readability is covered by the kernel crates' reproducible-build covenant (plan §20). Retiring a protocol major never orphans an artifact.
+- **Mid-flight budget updates.** `task.update_budget(task_*, budget)` adjusts the budget of a running task. Raising a dimension extends the current run. Lowering below committed spend triggers suspension-with-continuation semantics (B18): the task transitions to `Suspended` with committed partial evidence plus a valid continuation — never silent truncation of the campaign (INV-009).
+- **Evidence subscriptions.** `evidence.subscribe` streams typed evidence-graph deltas (node/edge publication and status transitions) for a declared scope. It is distinct from `task.subscribe`: progress events are hints, while evidence deltas reference committed artifacts; the graph itself remains authoritative on reconnect (INV-002 — a dropped subscription changes nothing).
+
 ## Pagination
 
 List-returning operations accept `page_size` and an opaque `page_token`, and return `next_page_token`. Ordering MUST be deterministic (content identity or explicitly declared sort key); two identical requests against the same snapshot return identical pages.
@@ -74,7 +83,15 @@ List-returning operations accept `page_size` and an opaque `page_token`, and ret
 
 ## Error taxonomy
 
-Stable codes (plan §10.3): `StaleSnapshot`, `UnsupportedSemanticFeature`, `IntentMutationDenied`, `InsufficientEvidence`, `BudgetExhausted`, `ContinuationEpochMismatch`, `AmbiguousCorrespondence`, `UntrustedDomainBoundary`, `CertificateRejected`, `ReplayDiverged`, `CapabilityDenied`, `PolicyGateFailed`; plus protocol-level `ProtocolVersionUnsupported`, `IdempotencyKeyReused`, `MalformedRequest`. `BudgetExhausted` is never a semantic verdict (docs/49); it carries the continuation when one exists.
+Stable codes (plan §10.3): `StaleSnapshot`, `UnsupportedSemanticFeature`, `IntentMutationDenied`, `InsufficientEvidence`, `BudgetExhausted`, `ContinuationEpochMismatch`, `AmbiguousCorrespondence`, `UntrustedDomainBoundary`, `CertificateRejected`, `ReplayDiverged`, `CapabilityDenied`, `PolicyGateFailed`, `AcceptanceChainInvalid`, `StatusConflict`, `QuotaExhausted`, `EpochUnsupported`, `PublicationAborted`; plus protocol-level `ProtocolVersionUnsupported`, `IdempotencyKeyReused`, `MalformedRequest`. `BudgetExhausted` is never a semantic verdict (docs/49); it carries the continuation when one exists.
+
+The five codes added in review 5:
+
+- `AcceptanceChainInvalid` — an intent bundle's acceptance signature chain fails verification, or the referenced bundle is absent; CI fails closed on this code (plan §4.2.1, RFC 0037).
+- `StatusConflict` — an evidence-graph status promotion lost its compare-and-set against the claim's current status (plan §11.7, RFC 0038); re-read and retry, the lattice never regresses.
+- `QuotaExhausted` — a capability's concurrency or resource quota is exhausted (plan §4.5); distinct from `BudgetExhausted`, which is task-budget spend and carries a continuation.
+- `EpochUnsupported` — an artifact or continuation declares a schema/semantic epoch unknown or incompatible with this daemon on resume or read; typed rejection, never best-effort decoding (docs/09 T13).
+- `PublicationAborted` — an atomic publication aborted (e.g. disk exhaustion, plan §4.5); nothing was published and nothing truncated (INV-017).
 
 ## Rejected alternatives
 

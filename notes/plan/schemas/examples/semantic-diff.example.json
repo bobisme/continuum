@@ -30,7 +30,8 @@
   "schema_version": "1.0",
   "semantic_changes": [
     {
-      "kind": "durability_order",
+      "fragment": "Finite",
+      "kind": "durability_ordering",
       "locations": [
         "src/lib.rs:42"
       ],

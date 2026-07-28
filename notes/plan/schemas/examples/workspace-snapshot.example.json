@@ -5,10 +5,16 @@
       "name": "asupersync"
     }
   ],
+  "domain_packs": [
+    {
+      "digest": "sha256:dp1",
+      "name": "storage-posix-v1"
+    }
+  ],
   "epochs": {
     "proof": "lean-4.32.1",
-    "protocol": "3.0",
-    "semantic": "sem-3"
+    "semantic": "sem-3",
+    "toolchain": "rustc-1.85.0"
   },
   "files": [
     {

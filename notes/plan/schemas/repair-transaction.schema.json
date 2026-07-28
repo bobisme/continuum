@@ -17,11 +17,44 @@
         "code_and_security",
         "receipt_generation"
       ]
+    },
+    "redacted": {
+      "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
+      "additionalProperties": false,
+      "description": "Typed Redacted(reason, commitment) stub (plan §4.5). Mirrors redacted.schema.json; inlined to keep this file self-contained.",
+      "properties": {
+        "commitment": {
+          "description": "Content commitment (hash) of the redacted original.",
+          "type": "string"
+        },
+        "original_class": {
+          "description": "Artifact class of the redacted original (plan §4.4 prefix, e.g. crash, ctx, proof).",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "summarized",
+            "lost",
+            "purged"
+          ]
+        },
+        "redacted": {
+          "const": true
+        }
+      },
+      "required": [
+        "redacted",
+        "reason",
+        "commitment",
+        "original_class"
+      ],
+      "type": "object"
     }
   },
   "additionalProperties": false,
   "allOf": [
     {
+      "description": "A promoted transaction lists no pending/failed/inconclusive gate; not_yet_enforced beyond the active profile is forbidden by the profile conditionals below, which apply at every status including promoted (RFC 0032 gate profiles).",
       "if": {
         "properties": {
           "status": {
@@ -41,7 +74,7 @@
                   "status": {
                     "enum": [
                       "pending",
-                      "fail",
+                      "failed",
                       "inconclusive"
                     ]
                   }
@@ -68,7 +101,7 @@
       }
     },
     {
-      "description": "Profile → permissible not_yet_enforced set: under phase-b only certificate_rebuild (gate 9) and incremental_parity (gate 10) may be not_yet_enforced.",
+      "description": "Profile → permissible not_yet_enforced set (rfcs/0032 gate profiles): phase-b enforces gates 1–8, 11–12, so only certificate_rebuild (gate 9) and incremental_parity (gate 10) may be not_yet_enforced.",
       "if": {
         "properties": {
           "gate_profile": {
@@ -99,6 +132,76 @@
                 },
                 "required": [
                   "name",
+                  "status"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Profile → permissible not_yet_enforced set (rfcs/0032 gate profiles): phase-c adds gate 10 (incremental_parity), so only certificate_rebuild (gate 9) may be not_yet_enforced.",
+      "if": {
+        "properties": {
+          "gate_profile": {
+            "const": "phase-c"
+          }
+        },
+        "required": [
+          "gate_profile"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gates": {
+            "not": {
+              "contains": {
+                "properties": {
+                  "name": {
+                    "not": {
+                      "enum": [
+                        "certificate_rebuild"
+                      ]
+                    }
+                  },
+                  "status": {
+                    "const": "not_yet_enforced"
+                  }
+                },
+                "required": [
+                  "name",
+                  "status"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "phase-d enforces all twelve gates (rfcs/0032 gate profiles): no gate may be listed not_yet_enforced.",
+      "if": {
+        "properties": {
+          "gate_profile": {
+            "const": "phase-d"
+          }
+        },
+        "required": [
+          "gate_profile"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gates": {
+            "not": {
+              "contains": {
+                "properties": {
+                  "status": {
+                    "const": "not_yet_enforced"
+                  }
+                },
+                "required": [
                   "status"
                 ]
               }
@@ -190,8 +293,16 @@
     },
     "cost_ledger": {
       "additionalProperties": false,
-      "description": "Cumulative cost ledger across all versions of this transaction (plan §8.6); the promotion receipt includes it.",
+      "description": "Cumulative cost ledger across all versions of this transaction (plan §8.6); the promotion receipt includes it. Dimension keys mirror verification-task.schema.json's budget dimensions.",
       "properties": {
+        "bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "candidates": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "cpu_ms": {
           "minimum": 0,
           "type": "integer"
@@ -200,7 +311,15 @@
           "minimum": 0,
           "type": "integer"
         },
+        "proof_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "solver_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "states": {
           "minimum": 0,
           "type": "integer"
         },
@@ -242,8 +361,153 @@
       ]
     },
     "gates": {
-      "description": "All twelve §8.2 gates are listed at every status; gates not yet evaluated carry status pending, gates outside the phase profile carry not_yet_enforced — never omitted.",
-      "minItems": 12,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "base_replay"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "patch_application"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "intent_integrity"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "exact_regression"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "neighborhood"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "property_mutation"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "defect_mutants"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "refinement_coverage"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "certificate_rebuild"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "incremental_parity"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "code_and_security"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "receipt_generation"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      ],
+      "description": "All twelve §8.2 gates are listed at every status; gate identity, not count, is enforced (uniqueItems, exactly twelve, one contains clause per gate). Gates not yet evaluated carry status pending, gates outside the phase profile carry not_yet_enforced — never omitted.",
       "items": {
         "additionalProperties": false,
         "properties": {
@@ -259,11 +523,10 @@
           },
           "status": {
             "enum": [
+              "passed",
+              "failed",
               "pending",
-              "pass",
-              "fail",
               "inconclusive",
-              "not_applicable",
               "not_yet_enforced"
             ]
           }
@@ -274,10 +537,28 @@
         ],
         "type": "object"
       },
-      "type": "array"
+      "maxItems": 12,
+      "minItems": 12,
+      "type": "array",
+      "uniqueItems": true
     },
     "hypothesis": {
       "type": "string"
+    },
+    "performance_impact": {
+      "description": "Performance impact of the change (plan §8.1 transaction contents).",
+      "type": [
+        "object",
+        "string"
+      ]
+    },
+    "policy_verdict": {
+      "description": "Promotion policy verdict (plan §8.1); recomputed server-side at promotion time, never trusted from the client (RFC 0032).",
+      "enum": [
+        "allow",
+        "review",
+        "block"
+      ]
     },
     "receipt": {
       "anyOf": [
@@ -290,12 +571,26 @@
         }
       ]
     },
+    "redacted_references": {
+      "description": "Redacted values referenced by this artifact (plan §4.5, §18.4).",
+      "items": {
+        "$ref": "#/$defs/redacted"
+      },
+      "type": "array"
+    },
     "repair_id": {
       "pattern": "^rt_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "schema_version": {
       "const": "1.0"
+    },
+    "security_review": {
+      "description": "Security review result for the change (plan §8.1 transaction contents).",
+      "type": [
+        "object",
+        "string"
+      ]
     },
     "semantic_diff": {
       "anyOf": [

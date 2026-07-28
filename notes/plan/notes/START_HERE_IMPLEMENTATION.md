@@ -46,20 +46,22 @@ The certificate checker may not depend on search. The model core may not depend 
 
 ## Resourcing (plan §21.1)
 
-| Phase | Owner | Minimum viable team | Status |
-|---|---|---|---|
-| A | unassigned | unassigned | `BLOCKED` |
-| B | unassigned | unassigned | `BLOCKED` |
-| C | unassigned | unassigned | `BLOCKED` |
-| D | unassigned | unassigned | `BLOCKED` |
-| E | unassigned | unassigned | `BLOCKED` |
-| F | unassigned | unassigned | `BLOCKED` |
+| Phase | Owner | Minimum viable team | Opening PR | Status |
+|---|---|---|---|---|
+| A | unassigned | unassigned | PR 0 | `BLOCKED` |
+| B | unassigned | unassigned | PR 14 | `BLOCKED` |
+| C | unassigned | unassigned | PR 23 | `BLOCKED` |
+| D | unassigned | unassigned | PR 28 | `BLOCKED` |
+| E | unassigned | unassigned | PR 29 | `BLOCKED` |
+| F | unassigned | unassigned | first post-PR-30 PR (unsequenced) | `BLOCKED` |
 
 Filling a phase's row is a merge requirement of that phase's opening PR (plan §21.1); an unfilled row records the phase as `BLOCKED`, not in progress.
 
+Opening-PR designations follow plan §21's phase deliverables (the PR sequence below interleaves phases by design and is not grouped by phase): PR 0 is Phase A's opening PR per §21.1; PR 14 (asupersync semantic journal) opens Phase B; PR 23 (incremental query database) opens Phase C — PR 22a precedes it but delivers the Phase B ADR that unblocks Phase C; PR 28 (Lean proof service) opens Phase D; PR 29 (Forge finite CEGIS) opens Phase E. Every Phase F deliverable is in the deliberately deferred set below, so Phase F's opening PR is the first PR sequenced after PR 30 closes; it must be designated here before Phase F work begins.
+
 ## First pull requests (PR 0 – PR 30)
 
-PR numbers 1–30 are stable; inserted work carries PR 0 or a lettered suffix (4a, 15a, 25a). Each heading names the release gate(s) the PR advances, per plan §21's phase deliverables and the G0 staging rule; some PRs carry gates from later phases where §21 explicitly pulls work forward (e.g. PR 4a [G6; Phase A band]).
+PR numbers 1–30 are stable; inserted work carries PR 0 or a lettered suffix (4a, 15a, 15b, 22a, 25a, 26a, 27a, 27b). Each heading names the release gate(s) the PR advances, per plan §21's phase deliverables and the G0 staging rule; some PRs carry gates from later phases where §21 explicitly pulls work forward (e.g. PR 4a [G6; Phase A band]).
 
 ### PR 0 — Specification pass and program decisions [G1, G2]
 
@@ -71,7 +73,7 @@ Implement (documentation, not code):
 - corpus per-family redistribution audit before any public benchmark release (§21.1);
 - ADR-0029 rule: foreign oracle tooling (TLC, Apalache, solvers) never ships in release binaries.
 
-**Exit:** the seven RFCs are normative specifications; PR 5 may not merge before PR 0 closes.
+**Exit:** the seven RFCs are normative specifications, and the pre-freeze open-debt set (plan §25, validator `check_spec_debt`) reads empty — not only the seven RFC expansions; PR 5 may not merge before PR 0 closes. PR 0 is Phase A's designated opening PR: its merge requirement includes filling Phase A's owner/team row in the resourcing table above (plan §21.1).
 
 ### PR 1 — Revision 3 constitution and epochs [G1]
 
@@ -86,7 +88,7 @@ Implement:
 
 **Exit:** an unsupported empty task returns a valid machine result naming every epoch and no misleading success flag.
 
-### PR 2 — Canonical values and CAS primitives [G1]
+### PR 2 — Canonical values and CAS primitives [G0 (DX-13), G1]
 
 Implement:
 
@@ -150,7 +152,7 @@ Implement request/response types and local transport for the plan §10.2 operati
 
 **Exit:** replaying an idempotent request returns the same task/artifact identity. May not merge before PR 0 closes.
 
-### PR 6 — Cancel-correct task service [G1]
+### PR 6 — Cancel-correct task service [G0 (DX-14), G1]
 
 Use asupersync regions for daemon work:
 
@@ -296,6 +298,16 @@ Implement `continuum-cml-syntax` and `continuum-cml-elab`:
 
 **Exit:** the replicated-register model written in CML elaborates to the same semantic model identity as its programmatic equivalent.
 
+### PR 15b — CML formatter and migration tool [G5]
+
+Implement:
+
+- deterministic CML formatter defined over the normalized semantic AST (the AST is frozen before surface syntax, docs/11 §14);
+- migration tool rewriting existing CML sources across surface-syntax revisions;
+- ships before CML syntax stability is declared (plan §21 Phase C).
+
+**Exit:** formatting is idempotent and semantics-preserving — a formatted or migrated source elaborates to the same semantic model identity — across the replicated-register model and the Wave 0 CML ports.
+
 ### PR 16 — Replicated-register model and implementation [G4]
 
 Create:
@@ -374,6 +386,16 @@ Compose:
 
 **Exit:** receipt independently verifies references and cannot be forged by the agent client.
 
+### PR 22a — Incremental-engine ADR and reuse-edge spike [G5]
+
+Implement:
+
+- the ADR resolving build-vs-adopt for the incremental engine (salsa-derived vs custom); Phase C is `BLOCKED` until this ADR exists (plan §21, docs/08 R21);
+- spike implementing the four reuse-edge classes and `query.explain_invalidation` over parse/elaborate/explore;
+- a measured invalidation-precision baseline recorded in the ADR.
+
+**Exit:** the ADR is merged with spike evidence and the invalidation-precision baseline; PR 23 may not merge before it.
+
 ### PR 23 — Incremental query database v0 [G5]
 
 Implement content-addressed queries for parsing, model construction, property automata, exploration, context, and diff. Classify edges as exact/validated/conservative/experimental.
@@ -412,11 +434,40 @@ Map Continuum debugger state to DAP threads, frames, scopes, variables, breakpoi
 
 **Exit:** VS Code-compatible client can inspect and branch the replicated-register failure.
 
+### PR 26a — Read-only tokio observation lane [G5]
+
+Implement (Phase C adoption top-of-funnel, plan §21):
+
+- journal observable lifecycle, channel, and time events from an unmodified tokio program;
+- opaque-effect inventory for everything not observable;
+- assurance envelopes capped at `Observed` status with every claim dimension `Unsupported` — no controlled-semantics claim.
+
+**Exit:** a tokio example produces a semantic journal and an envelope capped at `Observed`; no claim dimension can exceed `Unsupported` through this lane.
+
 ### PR 27 — MCP adapter [G2]
 
 Expose curated native operations with explicit handles, deterministic schemas/order, result bounds, and capability checks.
 
 **Exit:** two subagents share one workspace/intent but use isolated debugger/proof handles without session coupling.
+
+### PR 27a — Wave 0/1 corpus at min(required, P2) [G9]
+
+Implement:
+
+- the 29 Wave 0/1 corpus families, pinned to `tlaplus/Examples@91c22ea…` (plan §21 Phase C);
+- each family at min(required, P2) parity per `corpus/tla-examples/PARITY_LEVELS.md`;
+- the P3/P4 raises for the 17 families requiring proof/liveness machinery are deferred to Phase D.
+
+**Exit:** all 29 families check deterministically in CI at min(required, P2).
+
+### PR 27b — G8 preregistration and formative-session instruments [G8]
+
+Implement:
+
+- formative think-aloud session instruments (~5 participants per persona) for the edit/check/explain loop, run each phase from Phase C onward and feeding docs/34 — non-binding on the summative G8 study;
+- authoring of the expanded docs/48 preregistration (workflows, cohorts, baseline comparator, instruments, pass thresholds) — a Phase E deliverable; the summative study itself runs in Phase F (plan §21.1).
+
+**Exit:** formative instruments are in use from Phase C; the preregistration document is published before the summative G8 study runs.
 
 ### PR 28 — Lean proof service and Context Pack [G6; closes re-homed G0-DX-11]
 
