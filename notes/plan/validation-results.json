@@ -13,7 +13,7 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 314
+      "scanned_files": 321
     },
     "g0_matrix_counts": {
       "evidence": 4,
@@ -36,17 +36,17 @@
       "registry_prefixes": 19
     },
     "json": {
-      "files": 46
+      "files": 47
     },
     "lean_source": {
       "files": 17,
       "kernel_checked": false
     },
     "markdown_fences": {
-      "files": 217
+      "files": 219
     },
     "markdown_links": {
-      "links": 188
+      "links": 191
     },
     "numbering": {
       "adr": 52,
@@ -56,8 +56,18 @@
     "phase_gate_tables": {
       "phases": 6
     },
+    "plan_bones_traceability": {
+      "active_bones": 904,
+      "active_edges": 2089,
+      "active_requirements": 827,
+      "coverage": "complete",
+      "dependency_layers": 14,
+      "leaf_bones": 796,
+      "requirements": 846
+    },
     "program_status": {
-      "blocked_phases": [
+      "execution_model": "autonomous-agent-swarm",
+      "mapped_phases": [
         "A",
         "B",
         "C",
@@ -65,17 +75,17 @@
         "E",
         "F"
       ],
-      "program_status": "blocked"
+      "program_status": "ready"
     },
     "python": {
-      "files": 18
+      "files": 22
     },
     "register_rows": {
       "ratified_quotes_checked": 0,
       "rows": 21
     },
     "retired_names": {
-      "files_scanned": 300
+      "files_scanned": 307
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20
@@ -115,6 +125,6 @@
       "files": 5
     }
   },
-  "program_status": "blocked",
+  "program_status": "ready",
   "status": "pass"
 }

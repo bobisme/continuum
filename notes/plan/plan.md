@@ -177,13 +177,15 @@ The following are explicitly weaker:
   results (DX-04, 05, 07, 08) carry them as artifact-shape evidence
   only. Statuses live in `notes/G0_SPIKE_MATRIX.md`, from which these
   counts derive.
-- Program status: by the §21.1 owner rule, every phase whose owner/team
-  row in `notes/START_HERE_IMPLEMENTATION.md` is unfilled is `BLOCKED`.
-  As of this revision all six rows are unfilled; the program is
-  `BLOCKED`, and the dossier validator surfaces this state in
-  `validation-results.json` (`program_status`) beside the mechanical
-  pass/fail. Phase A unblocks by filling its row in PR 0, its
-  designated opening PR.
+- Program status: `READY` for autonomous-agent dispatch. Section §21.1
+  defines an elastic swarm execution model with no named-owner or
+  headcount prerequisite. `notes/START_HERE_IMPLEMENTATION.md` maps
+  phase-opening PRs and dispatch conditions; the Bones dependency graph,
+  explicit authority boundaries, and retained acceptance evidence decide
+  what can run and what can close. `validation-results.json`
+  (`program_status`) validates this execution posture beside the
+  mechanical pass/fail. `READY` is not a claim that implementation or
+  any release gate is complete.
 
 ---
 
@@ -2036,14 +2038,24 @@ Dependency rules:
 
 ## 21. Implementation program
 
-### 21.1 Resourcing, licensing, and study posture
+### 21.1 Swarm execution, licensing, and study posture
 
-Phases are gate-driven, not time-driven. Each phase names an owner and a
-minimum viable team; a phase without both is `BLOCKED`, not in progress.
-The owner/team table lives in `notes/START_HERE_IMPLEMENTATION.md`;
-filling a phase's row is a merge requirement of that phase's opening PR
-(designated per phase in that file; Phase A's is PR 0), and an unfilled
-row records the phase as `BLOCKED`.
+Phases are gate-driven, not time-driven. Implementation is performed by
+an elastic swarm of autonomous agents; no named owner or minimum human
+team is a prerequisite for starting a phase or merging its opening PR.
+The Bones dependency graph is the scheduling control plane: an agent may
+claim dependency-ready work, independent ready bones may execute in
+parallel, and conflicting changes serialize at integration. Completion
+still requires the bone's specified evidence, independent checking where
+required, and explicit exercise of any privileged authority. Swarm scale
+never weakens an intent, assurance, security, or release gate.
+
+The phase execution map lives in
+`notes/START_HERE_IMPLEMENTATION.md`. It records each opening PR and
+dispatch condition, not staffing. A phase opens when its predecessor
+exit decision and its explicit Bones prerequisites hold; its opening-PR
+designation is an ordering marker rather than a resourcing merge
+requirement.
 The PR sequence in START_HERE interleaves phases by design: a phase
 closes when its assigned gates close, regardless of PR ordinal, and a
 PR advancing an earlier phase's gate after that gate has closed is

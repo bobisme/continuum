@@ -1,32 +1,34 @@
 # Dossier Validation Report — Revision 3
 
-**Validation date:** 2026-07-28  
+**Validation date:** 2026-07-29
 **Validator:** `tools/validate_dossier.py`  
 **Overall result:** **PASS within the boundaries stated below**  
-**Program status (derived):** **BLOCKED** — every §21.1 owner/team row is
-unfilled (`notes/START_HERE_IMPLEMENTATION.md`); by plan §21.1's rule all
-six phases are `BLOCKED` until their rows are filled. This is a program
-governance state, not a mechanical-validation failure.
+**Program status (derived):** **READY FOR SWARM DISPATCH** — plan §21.1
+and `notes/START_HERE_IMPLEMENTATION.md` define an autonomous-agent swarm
+with no owner or headcount prerequisite. Individual work remains
+fail-closed on Bones dependencies, authority boundaries, phase exits, and
+retained acceptance evidence. `READY` is an execution-posture result, not
+a claim that implementation or any release gate is complete.
 
 ## Mechanical checks
 
 | Check | Result |
 |---|---:|
-| JSON parse | PASS — 46 files |
+| JSON parse | PASS — 47 files |
 | Draft 2020-12 JSON Schema validation | PASS — 19 schema/example pairs |
 | ContinuumBench task validation | PASS — 3 seed tasks |
 | TOML parse | PASS — 5 files |
-| Python syntax parse | PASS — 18 files |
+| Python syntax parse | PASS — 22 files |
 | Executable spike assertions | PASS — 30 assertions (count derived from source) across Revision 2 and Revision 3 |
 | Corpus inventory consistency | PASS — 80 validated + 39 extended rows |
-| Relative Markdown links | PASS — 188 checked |
-| Markdown code-fence parity | PASS — 217 files |
-| Empty-file scan | PASS — 314 files scanned, 0 empty |
+| Relative Markdown links | PASS — 191 checked |
+| Markdown code-fence parity | PASS — 219 files |
+| Empty-file scan | PASS — 321 files scanned, 0 empty |
 | ADR numbering uniqueness | PASS — 52 ADRs |
 | RFC numbering uniqueness | PASS — 40 RFCs |
 | Bibliography identifier uniqueness | PASS — 159 entries |
 | Lean source placeholder/declaration scan | PASS — 17 `.lean` files; no `sorry`, `admit`, or top-level `axiom` declarations |
-| Retired-name scan (Tribunal rename, `cp_` handles) | PASS — 300 files scanned (generated `.typ` renders excluded) |
+| Retired-name scan (Tribunal rename, `cp_` handles) | PASS — 307 files scanned (generated `.typ` renders excluded) |
 | Plan §22 ↔ docs/52 gate correspondence (bidirectional) | PASS — 11 gates, 68 bullets each way |
 | Phase↔gate tables (plan §22 vs docs/52, structural) | PASS — 6 phases |
 | G0 matrix count derivation (plan §0.3 vs matrix) | PASS — 4 evidence, 3 open freeze-blocking, 8 re-homed (DX-04/05/07/08 re-homed with artifact-shape spike evidence per review 5) |
@@ -36,10 +38,42 @@ governance state, not a mechanical-validation failure.
 | START_HERE PR gate annotations (incl. 4a/15a/15b/22a/25a/26a/27a/27b; open-G0 closing PRs must carry G0) | PASS — 39 PR headings |
 | §24.5 register row integrity (lane refs resolve; kill/defer/draft present; marked-quote identity) | PASS — 21 rows, 0 ratified quotes yet |
 | Handle-prefix registry (schema patterns ⊆ plan §4.4) | PASS — 19 prefixes, 47 anchored patterns |
-| Program status (owner rule, plan §21.1 vs START_HERE table) | DERIVED — blocked, phases A–F |
+| Program status (swarm rule, plan §21.1 vs START_HERE map) | DERIVED — ready, autonomous-agent-swarm, phases A–F |
 | Specification-debt ledger (plan §25 vs `check_spec_debt` predicates) | PASS — open: SD-01, SD-07, SD-08, SD-09, SD-10; paid: SD-02–06, SD-11–14 |
+| Executable plan↔Bones traceability | PASS — 846 registered requirements, 827 active and covered; 904 active Bones, 796 leaves, 2,089 active blocking edges, 14 layers, 0 cycles |
 
 The machine-readable result is in `validation-results.json`.
+
+## Executable implementation-graph boundary
+
+`notes/PLAN_REQUIREMENTS.json` is generated from the implementation
+program, PR sequence, gates, G0 experiments, invariants, proof
+obligations, claims, threats, risks, research register, specification
+debt, corpus inventory, test strategy, governance rules, metrics, and kill
+criteria. Every active requirement has an active leaf-Bone execution home,
+and every active Bone traces back through a `req:<ID>` label.
+
+The graph contract additionally verifies:
+
+- no unknown or duplicated generated requirement mappings;
+- no untraced, empty, L/XL leaf, or over-bundled work items;
+- 37 dispatch-ready leaves, counted with the same blocked/punted-ancestor
+  propagation used by `bn next`;
+- one `goal:manual` phase goal and one `goal:manual` exit goal for each
+  Phase A–F;
+- explicit predecessor-phase barriers on every Phase B–F leaf;
+- one dependency-closed exit-evidence task per PR;
+- integrated phase evidence before each release-gate criterion;
+- risk and kill-signal assays assigned to their earliest evidence-complete
+  phase and wired into that phase's integrated exit package;
+- one leaf ratification task per active frontier lane, staged in the phase
+  before its deadline and connected to a consuming Bone;
+- separate native-port and interaction-artifact work for every corpus family;
+- zero active dependency cycles.
+
+Coverage proves that every registered executable obligation has a graph
+home. It does not claim that any open Bone, proof obligation, release gate,
+or implementation is complete.
 
 ## Revision 3 schema pairs validated
 
@@ -102,6 +136,7 @@ No Rust toolchain was present. Rust API sketches and proposed CML fixtures were 
 From the dossier root with Python 3.11+ and `jsonschema` installed:
 
 ```bash
+python3 tools/generate_traceability.py
 python3 tools/validate_dossier.py
 python3 tools/generate_manifest.py
 ```

@@ -44,20 +44,38 @@ There is no `continuum-protocol` crate; the native protocol lives in `continuumd
 
 The certificate checker may not depend on search. The model core may not depend on asupersync. Adapters may not own semantic state. Forge may not be imported by the verifier.
 
-## Resourcing (plan §21.1)
+## Swarm execution map (plan §21.1)
 
-| Phase | Owner | Minimum viable team | Opening PR | Status |
-|---|---|---|---|---|
-| A | unassigned | unassigned | PR 0 | `BLOCKED` |
-| B | unassigned | unassigned | PR 14 | `BLOCKED` |
-| C | unassigned | unassigned | PR 23 | `BLOCKED` |
-| D | unassigned | unassigned | PR 28 | `BLOCKED` |
-| E | unassigned | unassigned | PR 29 | `BLOCKED` |
-| F | unassigned | unassigned | first post-PR-30 PR (unsequenced) | `BLOCKED` |
+Continuum is implemented by an elastic swarm of autonomous agents. Bones
+is the scheduling control plane: agents claim dependency-ready work,
+independent bones may run in parallel, and completion requires the
+specified verification and integration evidence. No phase waits for a
+named owner or minimum human team.
 
-Filling a phase's row is a merge requirement of that phase's opening PR (plan §21.1); an unfilled row records the phase as `BLOCKED`, not in progress.
+| Phase | Opening PR | Dispatch condition |
+|---|---|---|
+| A | PR 0 | The bone is dependency-ready |
+| B | PR 14 | Phase A exit accepted and the bone is dependency-ready |
+| C | PR 23 | Phase B exit accepted and the bone is dependency-ready |
+| D | PR 28 | Phase C exit accepted and the bone is dependency-ready |
+| E | PR 29 | Phase D exit accepted and the bone is dependency-ready |
+| F | first post-PR-30 PR (unsequenced) | Phase E exit accepted and the bone is dependency-ready |
+
+The map is an ordering and dispatch aid, not a staffing gate. Evidence,
+authority, and phase-exit requirements remain fail-closed; a producing
+agent may not self-attest evidence that requires independent checking.
 
 Opening-PR designations follow plan §21's phase deliverables (the PR sequence below interleaves phases by design and is not grouped by phase): PR 0 is Phase A's opening PR per §21.1; PR 14 (asupersync semantic journal) opens Phase B; PR 23 (incremental query database) opens Phase C — PR 22a precedes it but delivers the Phase B ADR that unblocks Phase C; PR 28 (Lean proof service) opens Phase D; PR 29 (Forge finite CEGIS) opens Phase E. Every Phase F deliverable is in the deliberately deferred set below, so Phase F's opening PR is the first PR sequenced after PR 30 closes; it must be designated here before Phase F work begins.
+
+Cross-cutting dispatch follows two additional rules. Each active §24.5
+frontier lane has its own ratification leaf; Phase C and later deadlines become
+dispatchable during the immediately preceding phase and block their first
+consumer. Each docs/08 risk or §24 kill-signal assay is assigned to the earliest
+phase where its evidence can be complete and blocks that phase's integrated exit
+package. Agents prepare those packages, but continue/narrow/defer/kill decisions
+and every `goal:manual` phase exit remain privileged human actions. The generated
+`notes/PLAN_BONE_TRACEABILITY.md` report applies Bones' blocked-goal ancestor
+propagation when reporting the live `bn next` dispatch frontier.
 
 ## First pull requests (PR 0 – PR 30)
 
@@ -73,7 +91,7 @@ Implement (documentation, not code):
 - corpus per-family redistribution audit before any public benchmark release (§21.1);
 - ADR-0029 rule: foreign oracle tooling (TLC, Apalache, solvers) never ships in release binaries.
 
-**Exit:** the seven RFCs are normative specifications, and the pre-freeze open-debt set (plan §25, validator `check_spec_debt`) reads empty — not only the seven RFC expansions; PR 5 may not merge before PR 0 closes. PR 0 is Phase A's designated opening PR: its merge requirement includes filling Phase A's owner/team row in the resourcing table above (plan §21.1).
+**Exit:** the seven RFCs are normative specifications, and the pre-freeze open-debt set (plan §25, validator `check_spec_debt`) reads empty — not only the seven RFC expansions; PR 5 may not merge before PR 0 closes. PR 0 is Phase A's designated opening PR; it has no staffing merge requirement (plan §21.1).
 
 ### PR 1 — Revision 3 constitution and epochs [G1]
 

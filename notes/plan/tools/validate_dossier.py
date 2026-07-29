@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
+from traceability import validate_checked_traceability
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -490,33 +491,47 @@ def check_start_here_gate_annotations() -> dict[str, Any]:
 
 
 def check_program_status() -> dict[str, Any]:
-    """Derive the section 21.1 owner-rule program status from START_HERE's table."""
+    """Validate the section 21.1 swarm-execution posture and phase map."""
     text = (ROOT / "notes/START_HERE_IMPLEMENTATION.md").read_text(encoding="utf-8")
-    blocked: list[str] = []
+    execution = re.search(
+        r"^## Swarm execution map .*?(?=^## |\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert execution, "START_HERE lacks the section 21.1 swarm execution map"
+    execution_text = execution.group(0)
+    assert "autonomous agents" in execution_text
+    assert "Bones" in execution_text
+    assert "named owner" in execution_text
+    for retired in ("Minimum viable team", "unassigned", "owner/team row"):
+        assert retired not in execution_text, (
+            f"retired staffing gate remains in swarm execution map: {retired}"
+        )
+
     phases_seen: set[str] = set()
-    for line in text.splitlines():
+    for line in execution_text.splitlines():
         match = re.match(r"^\|\s*(?:Phase\s+)?([A-F])\s*\|(.+)\|\s*$", line)
         if not match:
             continue
-        rest = match.group(2)
-        # Owner/team rows carry BLOCKED/unassigned markers; skip gate-table rows.
-        if "unassigned" not in rest and "BLOCKED" not in rest:
-            continue
         phases_seen.add(match.group(1))
-        blocked.append(match.group(1))
-    assert phases_seen, "owner/team table rows not found in START_HERE"
-    status = "blocked" if blocked else "unblocked"
+    assert phases_seen == set("ABCDEF"), (
+        f"swarm execution map must cover phases A-F, found {sorted(phases_seen)}"
+    )
+
     # Plan section 0.3 must state the same status (its Program status bullet).
     plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
     section = re.search(r"^## 0\.3 .*?(?=^## |\Z)", plan_text, re.MULTILINE | re.DOTALL)
     assert section, "plan.md section 0.3 not found"
     norm = re.sub(r"\s+", " ", section.group(0))
     assert "Program status:" in norm, "plan section 0.3 lacks a Program status bullet"
-    if status == "blocked":
-        assert "`BLOCKED`" in section.group(0), (
-            "owner table has blocked phases but plan section 0.3 does not say BLOCKED"
-        )
-    return {"program_status": status, "blocked_phases": sorted(set(blocked))}
+    assert "`READY`" in section.group(0), (
+        "swarm execution map exists but plan section 0.3 does not say READY"
+    )
+    return {
+        "program_status": "ready",
+        "execution_model": "autonomous-agent-swarm",
+        "mapped_phases": sorted(phases_seen),
+    }
 
 
 def _deep_get(node: Any, *path: str) -> Any:
@@ -963,6 +978,7 @@ def main() -> None:
         ("register_rows", check_register_rows),
         ("program_status", check_program_status),
         ("spec_debt", check_spec_debt),
+        ("plan_bones_traceability", validate_checked_traceability),
     ]
     report: dict[str, Any] = {"status": "pass", "checks": {}}
     failed: list[str] = []

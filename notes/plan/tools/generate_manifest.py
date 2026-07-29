@@ -42,8 +42,8 @@ def main() -> None:
     out = [
         "# Dossier Manifest — Revision 3",
         "",
-        f"**Generated:** {date.today().isoformat()}  ",
-        "**Root archive name:** `continuum-project-dossier-revision-3/`  ",
+        f"**Generated:** {date.today().isoformat()}",
+        "**Root archive name:** `continuum-project-dossier-revision-3/`",
         "**Integrity file:** `SHA256SUMS.txt`",
         "",
         "## Summary",

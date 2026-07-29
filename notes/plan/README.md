@@ -48,6 +48,11 @@ Intent is immutable by default. A patch that weakens a property, strengthens an 
 8. [`notes/START_HERE_IMPLEMENTATION.md`](notes/START_HERE_IMPLEMENTATION.md) — first 30 pull requests.
 9. [`notes/G0_SPIKE_MATRIX.md`](notes/G0_SPIKE_MATRIX.md) — falsification gates.
 10. [`docs/45_CONTINUUMBENCH.md`](docs/45_CONTINUUMBENCH.md) — benchmark and anti-gaming program.
+11. [`notes/TRACEABILITY_POLICY.md`](notes/TRACEABILITY_POLICY.md) and
+    [`notes/PLAN_BONE_TRACEABILITY.md`](notes/PLAN_BONE_TRACEABILITY.md) —
+    executable-plan coverage contract and generated graph audit.
+12. [`notes/PLAN_REQUIREMENTS.json`](notes/PLAN_REQUIREMENTS.json) —
+    generated stable requirement registry used by the dossier validator.
 
 ## The interaction theorem
 
