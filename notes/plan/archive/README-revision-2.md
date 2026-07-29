@@ -108,4 +108,6 @@ Documents use:
 
 No novel mathematical lane becomes a product guarantee without a preservation theorem, baseline, benchmark win, and certificate story.
 
-See [`MANIFEST.md`](../MANIFEST.md) for the inventory and `SHA256SUMS.txt` for package integrity.
+See [`VALIDATION_REPORT.md`](../VALIDATION_REPORT.md) for the mechanical checks,
+their boundaries, and reproduction instructions. Git history is the archived
+dossier's package provenance.

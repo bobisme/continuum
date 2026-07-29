@@ -13,7 +13,7 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 321
+      "scanned_files": 319
     },
     "g0_matrix_counts": {
       "evidence": 4,
@@ -43,10 +43,10 @@
       "kernel_checked": false
     },
     "markdown_fences": {
-      "files": 219
+      "files": 218
     },
     "markdown_links": {
-      "links": 191
+      "links": 190
     },
     "numbering": {
       "adr": 52,
@@ -58,7 +58,7 @@
     },
     "plan_bones_traceability": {
       "active_bones": 904,
-      "active_edges": 2089,
+      "active_edges": 2119,
       "active_requirements": 827,
       "coverage": "complete",
       "dependency_layers": 14,
@@ -85,7 +85,7 @@
       "rows": 21
     },
     "retired_names": {
-      "files_scanned": 307
+      "files_scanned": 305
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20

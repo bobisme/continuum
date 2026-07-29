@@ -121,4 +121,6 @@ plan.md
 - `BLOCKED` — prerequisite unavailable.
 - `FALSIFIED` — tested and rejected.
 
-See [`MANIFEST.md`](MANIFEST.md), [`VALIDATION_REPORT.md`](VALIDATION_REPORT.md), and `SHA256SUMS.txt` for package integrity.
+See [`VALIDATION_REPORT.md`](VALIDATION_REPORT.md) for the mechanical checks,
+their boundaries, and reproduction instructions. Git history is the dossier's
+package provenance.

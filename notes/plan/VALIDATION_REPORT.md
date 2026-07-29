@@ -21,14 +21,14 @@ a claim that implementation or any release gate is complete.
 | Python syntax parse | PASS — 22 files |
 | Executable spike assertions | PASS — 30 assertions (count derived from source) across Revision 2 and Revision 3 |
 | Corpus inventory consistency | PASS — 80 validated + 39 extended rows |
-| Relative Markdown links | PASS — 191 checked |
-| Markdown code-fence parity | PASS — 219 files |
-| Empty-file scan | PASS — 321 files scanned, 0 empty |
+| Relative Markdown links | PASS — 190 checked |
+| Markdown code-fence parity | PASS — 218 files |
+| Empty-file scan | PASS — 319 files scanned, 0 empty |
 | ADR numbering uniqueness | PASS — 52 ADRs |
 | RFC numbering uniqueness | PASS — 40 RFCs |
 | Bibliography identifier uniqueness | PASS — 159 entries |
 | Lean source placeholder/declaration scan | PASS — 17 `.lean` files; no `sorry`, `admit`, or top-level `axiom` declarations |
-| Retired-name scan (Tribunal rename, `cp_` handles) | PASS — 307 files scanned (generated `.typ` renders excluded) |
+| Retired-name scan (Tribunal rename, `cp_` handles) | PASS — 305 files scanned (generated `.typ` renders excluded) |
 | Plan §22 ↔ docs/52 gate correspondence (bidirectional) | PASS — 11 gates, 68 bullets each way |
 | Phase↔gate tables (plan §22 vs docs/52, structural) | PASS — 6 phases |
 | G0 matrix count derivation (plan §0.3 vs matrix) | PASS — 4 evidence, 3 open freeze-blocking, 8 re-homed (DX-04/05/07/08 re-homed with artifact-shape spike evidence per review 5) |
@@ -40,7 +40,7 @@ a claim that implementation or any release gate is complete.
 | Handle-prefix registry (schema patterns ⊆ plan §4.4) | PASS — 19 prefixes, 47 anchored patterns |
 | Program status (swarm rule, plan §21.1 vs START_HERE map) | DERIVED — ready, autonomous-agent-swarm, phases A–F |
 | Specification-debt ledger (plan §25 vs `check_spec_debt` predicates) | PASS — open: SD-01, SD-07, SD-08, SD-09, SD-10; paid: SD-02–06, SD-11–14 |
-| Executable plan↔Bones traceability | PASS — 846 registered requirements, 827 active and covered; 904 active Bones, 796 leaves, 2,089 active blocking edges, 14 layers, 0 cycles |
+| Executable plan↔Bones traceability | PASS — 846 registered requirements, 827 active and covered; 904 active Bones, 796 leaves, 2,119 active blocking edges, 14 layers, 0 cycles |
 
 The machine-readable result is in `validation-results.json`.
 
@@ -57,8 +57,10 @@ The graph contract additionally verifies:
 
 - no unknown or duplicated generated requirement mappings;
 - no untraced, empty, L/XL leaf, or over-bundled work items;
-- 37 dispatch-ready leaves, counted with the same blocked/punted-ancestor
+- 13 dispatch-ready leaves, counted with the same blocked/punted-ancestor
   propagation used by `bn next`;
+- zero initial dispatch-readiness failures;
+- zero missing, ambiguous, or under-classified risk routes;
 - one `goal:manual` phase goal and one `goal:manual` exit goal for each
   Phase A–F;
 - explicit predecessor-phase barriers on every Phase B–F leaf;

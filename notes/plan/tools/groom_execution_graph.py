@@ -16,7 +16,14 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from traceability import PROJECT_ROOT, ROOT, build_registry, project_bones, traceability_state
+from traceability import (
+    INITIAL_READINESS_EDGES,
+    PROJECT_ROOT,
+    ROOT,
+    build_registry,
+    project_bones,
+    traceability_state,
+)
 
 AGENT = "continuum-planner"
 STOP_WORDS = {
@@ -225,6 +232,11 @@ class Editor:
         if self.bones[item_id].get("size") != size:
             _run(["update", item_id, "--size", size])
             self.bones[item_id]["size"] = size
+
+    def description(self, item_id: str, description: str) -> None:
+        if self.bones[item_id].get("description") != description:
+            _run(["update", item_id, "--description", description])
+            self.bones[item_id]["description"] = description
 
     def ensure(
         self,
@@ -802,14 +814,20 @@ def _atomic_category_tasks(
             goals[phase] = _category_goal(
                 editor, f"{category}:phase-{phase}", title, parent, phase
             )
+        description = _requirement_description(requirement, purpose)
         task = editor.task(
             f"{category}:{requirement['id']}",
             f"{requirement['id']} — {_short(requirement['summary'])}",
             goals[phase],
             {f"req:{requirement['id']}", f"req:PHASE-{phase}", category, "quality"},
-            _requirement_description(requirement, purpose),
+            description,
             size="s",
         )
+        # The former heading parser allowed the final invariant and threat to
+        # absorb all later document bullets. Refresh only those known generated
+        # descriptions; preserve every other existing/human-edited description.
+        if requirement["id"] in {"INV-018", "T15"}:
+            editor.description(task, description)
         created.append(task)
     return created
 
@@ -1237,6 +1255,30 @@ def _phase_sequence_dependencies(
             editor.dep(blocker, leaf)
 
 
+def _initial_dispatch_dependencies(editor: Editor) -> None:
+    """Keep the live dispatch frontier executable, not merely traceable."""
+    active = editor.active()
+    missing = sorted(
+        {
+            item_id
+            for edge in INITIAL_READINESS_EDGES
+            for item_id in edge
+            if item_id not in active
+        }
+    )
+    if missing:
+        raise AssertionError(f"initial dispatch dependency endpoint drift: {missing}")
+    for blocker, blocked in INITIAL_READINESS_EDGES:
+        editor.dep(blocker, blocked)
+
+
+def _normalize_risk_routing(editor: Editor) -> None:
+    """Route trust-boundary work through Edict's high-risk review path."""
+    for item_id, item in editor.active().items():
+        if {"security", "threat", "invariant"} & item["labels"]:
+            editor.tag(item_id, "risk:high")
+
+
 def _repair_traceability(
     editor: Editor,
     registry: dict[str, Any],
@@ -1337,6 +1379,8 @@ def main() -> None:
     _close_pr_dependencies(editor, pr_parents, pr_exits)
     _gate_tasks(editor, registry, phases, risk_tasks)
     _phase_sequence_dependencies(editor, phases)
+    _initial_dispatch_dependencies(editor)
+    _normalize_risk_routing(editor)
     _repair_traceability(editor, registry, phases, root)
 
     state = traceability_state(registry, editor.bones)

@@ -21,6 +21,51 @@ REGISTRY_PATH = ROOT / "notes/PLAN_REQUIREMENTS.json"
 REPORT_PATH = ROOT / "notes/PLAN_BONE_TRACEABILITY.md"
 ACTIVE = "active"
 
+# These edges are the semantic prerequisites for the initial dispatch frontier.
+# Requirement coverage proves that work exists; this contract additionally
+# proves that the work is executable in the order it is offered to agents.
+INITIAL_READINESS_EDGES: tuple[tuple[str, str], ...] = (
+    # PR 1: establish the workspace/crate skeleton before adding its policies
+    # and shared semantic types.
+    ("bn-147t", "bn-11se"),
+    ("bn-147t", "bn-17cw"),
+    ("bn-147t", "bn-2b8w"),
+    ("bn-147t", "bn-2es0"),
+    # PR 4a: pin the Lean environment, check the seed, then extend the theorem
+    # ladder.
+    ("bn-31mq", "bn-fak5"),
+    ("bn-fak5", "bn-3qsa"),
+    # Phase A constitutional regressions must wait for the implementation they
+    # exercise.
+    ("bn-1r9", "bn-34je"),
+    ("bn-yx2", "bn-1aqq"),
+    ("bn-yx2", "bn-1eqt"),
+    ("bn-6tv", "bn-11yx"),
+    ("bn-3af", "bn-11yx"),
+    ("bn-19u", "bn-jme9"),
+    ("bn-2ge", "bn-2eeg"),
+    ("bn-8mx", "bn-kh8b"),
+    ("bn-yx2", "bn-n9a1"),
+    ("bn-19u", "bn-2lq8"),
+    ("bn-20s", "bn-2lq8"),
+    ("bn-37d", "bn-2z0b"),
+    ("bn-6tv", "bn-dw81"),
+    ("bn-3af", "bn-dw81"),
+    ("bn-20s", "bn-3mjd"),
+    ("bn-yx2", "bn-1604"),
+    # Phase A abuse cases likewise need their real parser, CAS, evidence, and
+    # kernel boundaries before their hostile fixtures can be meaningful.
+    ("bn-yx2", "bn-3nfy"),
+    ("bn-6tv", "bn-3nfy"),
+    ("bn-2y0", "bn-2res"),
+    ("bn-2y0", "bn-1ptb"),
+    ("bn-20s", "bn-1ptb"),
+    ("bn-djj", "bn-nio3"),
+    ("bn-6tv", "bn-nio3"),
+    # The ACI-vs-CLI kill assay consumes PR 10's benchmark harness.
+    ("bn-38i", "bn-3ety"),
+)
+
 
 def _text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
@@ -259,9 +304,18 @@ def _extract_headings(
 ) -> None:
     text = _text(path)
     matches = list(re.finditer(pattern, text, re.MULTILINE))
-    for index, match in enumerate(matches):
+    for match in matches:
         req_id, summary = match.groups()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        heading = re.match(r"^(#{1,6})\s", match.group(0))
+        if not heading:
+            raise AssertionError(f"{path}: requirement pattern must match a Markdown heading")
+        level = len(heading.group(1))
+        boundary = re.search(
+            rf"^#{{1,{level}}}\s",
+            text[match.end() :],
+            re.MULTILINE,
+        )
+        end = match.end() + boundary.start() if boundary else len(text)
         body = text[match.end() : end]
         paragraphs = [
             _clean(paragraph)
@@ -520,6 +574,29 @@ def build_registry() -> dict[str, Any]:
     )
     _extract_metrics_and_kills(requirements)
 
+    invariant_spill = [
+        item["id"]
+        for item in requirements
+        if item["category"] == "invariant"
+        and item.get("metadata", {}).get("controls")
+    ]
+    if invariant_spill:
+        raise AssertionError(
+            "invariant extraction crossed its heading boundary: "
+            f"{invariant_spill}"
+        )
+    threat_control_failures = [
+        (item["id"], len(item.get("metadata", {}).get("controls", [])))
+        for item in requirements
+        if item["category"] == "threat"
+        and not 1 <= len(item.get("metadata", {}).get("controls", [])) <= 8
+    ]
+    if threat_control_failures:
+        raise AssertionError(
+            "threat control extraction crossed its heading boundary: "
+            f"{threat_control_failures}"
+        )
+
     identifiers = [item["id"] for item in requirements]
     duplicates = sorted(key for key, count in Counter(identifiers).items() if count > 1)
     if duplicates:
@@ -575,6 +652,11 @@ def project_bones() -> dict[str, dict[str, Any]]:
                         bone["labels"].discard(value["label"])
                 elif field in {"title", "description", "kind", "parent", "size", "state"}:
                     bone[field] = value
+            elif event_type == "item.move":
+                if "state" in data:
+                    bone["state"] = data["state"]
+                if "parent" in data:
+                    bone["parent"] = data["parent"]
             elif event_type == "item.delete":
                 bone["deleted"] = True
             elif event_type in {"item.close", "item.done"}:
@@ -707,6 +789,35 @@ def graph_contract_state(
     for item in bones.values():
         if item["parent"] in bones:
             children[item["parent"]].add(item["id"])
+
+    dispatch_readiness_failures: list[str] = []
+    for blocker, blocked in INITIAL_READINESS_EDGES:
+        missing = [item_id for item_id in (blocker, blocked) if item_id not in bones]
+        if missing:
+            dispatch_readiness_failures.append(
+                f"{blocker} -> {blocked}: inactive or missing endpoint(s) {missing}"
+            )
+        elif (blocker, blocked) not in links:
+            dispatch_readiness_failures.append(
+                f"{blocker} does not block {blocked}"
+            )
+
+    risk_routing_failures: list[str] = []
+    for item_id, item in bones.items():
+        risk_labels = sorted(
+            label for label in item["labels"] if label.startswith("risk:")
+        )
+        if len(risk_labels) > 1:
+            risk_routing_failures.append(
+                f"{item_id}: multiple risk labels {risk_labels}"
+            )
+        if (
+            {"security", "threat", "invariant"} & item["labels"]
+            and not {"risk:high", "risk:critical"} & item["labels"]
+        ):
+            risk_routing_failures.append(
+                f"{item_id}: security-sensitive work lacks risk:high routing"
+            )
 
     # Directed cycle and layer audit.
     indegree = {item_id: 0 for item_id in bones}
@@ -1056,6 +1167,8 @@ def graph_contract_state(
         "empty_goals": empty_goals,
         "large_leaf_tasks": large_leaf_tasks,
         "undersized_goals": undersized_goals,
+        "dispatch_readiness_failures": dispatch_readiness_failures,
+        "risk_routing_failures": risk_routing_failures,
         "phase_failures": phase_failures,
         "phase_barrier_failures": phase_barrier_failures,
         "phase_exit_failures": phase_exit_failures,
@@ -1130,6 +1243,9 @@ def render_report(
             f"- Empty goals: **{len(graph['empty_goals'])}**.",
             f"- L/XL leaf tasks: **{len(graph['large_leaf_tasks'])}**.",
             f"- Undersized goals: **{len(graph['undersized_goals'])}**.",
+            f"- Initial dispatch-readiness failures: "
+            f"**{len(graph['dispatch_readiness_failures'])}**.",
+            f"- Risk-routing failures: **{len(graph['risk_routing_failures'])}**.",
             f"- Missing phase barriers: **{len(graph['phase_barrier_failures'])}**.",
             f"- Phase exit-goal failures: **{len(graph['phase_exit_failures'])}**.",
             f"- PR exit wiring failures: **{len(graph['pr_exit_failures'])}**.",
@@ -1215,6 +1331,8 @@ def validate_checked_traceability() -> dict[str, Any]:
         "empty_goals",
         "large_leaf_tasks",
         "undersized_goals",
+        "dispatch_readiness_failures",
+        "risk_routing_failures",
         "phase_failures",
         "phase_barrier_failures",
         "phase_exit_failures",

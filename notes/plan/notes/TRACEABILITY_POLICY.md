@@ -23,6 +23,13 @@ blocked or punted goal's status to its descendants for `bn next`; leaf-specific
 dependencies remain explicit edges. The generated graph report applies the same
 ancestor-propagation rule when counting dispatch-ready leaves.
 
+Traceability alone does not make a Bone dispatch-ready. The graph contract also
+pins semantic prerequisites on the initial frontier: workspace and toolchain
+scaffolds precede their consumers, and invariant, threat, and kill assays wait
+for the implementation or harness they exercise. Work labeled `security`,
+`threat`, or `invariant` carries `risk:high` (or a stricter risk label) so Edict
+routes it through security review and the failure-mode checklist.
+
 Each risk and kill-signal assay is assigned to the earliest phase where its
 evidence can be complete. It inherits the predecessor-phase barrier and blocks
 that phase's integrated exit package. Agents prepare the evidence; the

@@ -35,15 +35,17 @@ Graph: **904** active Bones; **796** active leaves; **0** untraced Bones.
 
 ## Graph contract
 
-- Active blocking edges: **2089**.
+- Active blocking edges: **2119**.
 - Dependency layers: **14**.
-- Dispatch-ready leaves: **37**; dependency-suppressed Bones: **858**.
+- Dispatch-ready leaves: **13**; dependency-suppressed Bones: **882**.
 - Dependency cycles: **0**.
 - Dependencies incident to deleted Bones: **0**.
 - Duplicate generated plan keys: **0**.
 - Empty goals: **0**.
 - L/XL leaf tasks: **0**.
 - Undersized goals: **0**.
+- Initial dispatch-readiness failures: **0**.
+- Risk-routing failures: **0**.
 - Missing phase barriers: **0**.
 - Phase exit-goal failures: **0**.
 - PR exit wiring failures: **0**.
