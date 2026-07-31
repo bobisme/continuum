@@ -6827,7 +6827,7 @@
       "metadata": {
         "fallback": "plain causal slice + expansion",
         "lane": "research/25, research/32, research/33",
-        "threshold": "ablation design per research/25 (raw trace vs pack on the agent benchmark); win margin fixed at ratification \u2014 draft; kill (research/32): compact packs repeatedly induce incorrect repairs despite preservation checks"
+        "threshold": "ablation design per research/25 (raw trace vs pack on the agent benchmark); ratified win margin, quote-id=context-compilation-win-margin \"The Context Pack condition wins the general context-compilation ablation only if, on the held-out ContinuumBench diagnosis-and-repair split graded by the independent grader of research/33 with model, scaffold, and token budget held equal, it beats the raw-trace baseline by at least 10 percentage points of absolute task success with a 95 percent bootstrap confidence interval on the paired difference excluding zero, while delivering at least a 10x median per-task reduction in context bytes counting every expansion and staying within 2 percentage points of the raw-trace baseline on hidden-variant generalization.\"; kill (research/32): compact packs repeatedly induce incorrect repairs despite preservation checks"
       },
       "source": {
         "line": 2564,
