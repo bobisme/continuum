@@ -1,5 +1,6 @@
 {
-  "schema_version": "1.0",
+  "schema_id": "https://continuum.dev/schema/benchmark-task.json",
+  "schema_epoch": 1,
   "task_id": "cb-synthesize-ack-001",
   "track": "synthesize",
   "snapshot": "ws_demo1",

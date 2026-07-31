@@ -1,5 +1,7 @@
 {
-  "$id": "https://continuum.dev/schema/evidence-graph-node.json",
+  "$id": "https://continuum.dev/schema/v1/evidence-graph-node.json",
+  "schema_epoch": 1,
+  "schema_kind": "artifact",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "redacted": {
@@ -264,8 +266,13 @@
       },
       "type": "array"
     },
-    "schema_version": {
-      "const": "1.0"
+    "schema_id": {
+      "const": "https://continuum.dev/schema/evidence-graph-node.json",
+      "description": "Artifact-class identity of the governing schema: its `$id` with the `v<schema_epoch>/` segment removed (schemas/README.md). Stable across schema epochs."
+    },
+    "schema_epoch": {
+      "const": 1,
+      "description": "Schema epoch this instance was written against (schemas/README.md). It advances only on a breaking change to this artifact class, is not one of the six independently versioned epochs (RFC 0026 `rule versioning.epoch_independence`), and pins no semantics."
     },
     "service_identity": {
       "description": "Daemon service identity that performed the assurance-bearing status promotion (plan §11.7); required for sampled/bounded/validated/proved.",
@@ -294,7 +301,8 @@
     }
   },
   "required": [
-    "schema_version",
+    "schema_id",
+    "schema_epoch",
     "node_id",
     "kind",
     "artifact",

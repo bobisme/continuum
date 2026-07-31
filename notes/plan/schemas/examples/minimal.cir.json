@@ -1,6 +1,6 @@
 {
-  "format": "continuum-cir",
-  "encoding_version": "0.1.0",
+  "schema_id": "https://continuum.dev/schema/cir.json",
+  "schema_epoch": 1,
   "semantics_version": "cir-0.1",
   "model_hash": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
   "environment_hash": "blake3:1111111111111111111111111111111111111111111111111111111111111111",

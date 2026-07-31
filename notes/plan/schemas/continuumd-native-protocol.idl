@@ -266,9 +266,21 @@ scalar DurationMs;
 scalar ByteCount;
 
 /// A structured value whose shape is defined by a named schema in
-/// `schemas/`, carried inline. The carrying field's doc comment names the
-/// schema file; the value MUST validate against it. `Opaque` never means
-/// "free-form": there is no untyped payload anywhere in this protocol.
+/// `schemas/` or by a struct declared in this file, carried inline. The
+/// carrying field's doc comment names it; the value MUST validate against
+/// it. `Opaque` never means "free-form": there is no untyped payload
+/// anywhere in this protocol.
+///
+/// An `Opaque` value governed by a schema in `schemas/` carries its own
+/// identity: since SD-08 every artifact instance declares the class
+/// identity `https://continuum.dev/schema/<name>.json` in `schema_id` and
+/// the epoch of the document it was written against in `schema_epoch`
+/// (`schemas/README.md`). A receiver resolves the governing document —
+/// `https://continuum.dev/schema/v<schema_epoch>/<name>.json` — from the
+/// payload alone, and MUST reject a payload whose `schema_epoch` it does
+/// not implement rather than best-effort decoding it (plan §4.6, docs/09
+/// T13). Declaring those identities in the IDL instead of in prose is
+/// open item 3.
 scalar Opaque;
 
 
@@ -2886,8 +2898,20 @@ rule conformance.generated_artifacts {
 //   2. Delegation depth and expiry defaults for multi-agent handoff
 //      (RFC 0026 and RFC 0027 open questions). `delegation_depth` and
 //      `expires_at` are declared; their defaults are not.
-//   3. `Opaque` fields name their governing schema in prose. Once the
-//      schemas carry the SD-08 `$id`/schema-epoch convention uniformly,
-//      those references SHOULD become machine-checkable schema
-//      identities rather than doc-comment citations.
+//   3. `Opaque` fields name their governing schema in prose. The SD-08
+//      `$id`/schema-epoch convention is now paid (`schemas/README.md`):
+//      every artifact instance carries a `schema_id`/`schema_epoch`
+//      header, and every class identity a doc comment cites is a
+//      resolvable URI. What remains is declaring the reference here
+//      rather than in prose — an `@schema("<class identity>")`
+//      annotation on the carrying field, checkable against `schemas/` by
+//      the generator. Three groups must be separated first: fields whose
+//      payload is a schema in `schemas/` (`changes`, `summary`,
+//      `contract`, `record`, `pack`, `node`, `edge`, the receipts) take
+//      the annotation as written; fields whose payload is a struct
+//      declared in this file (`arguments`, `payload`, `data`) name that
+//      struct, not a URI, and SHOULD stop being `Opaque` once the
+//      generator can express it; and fields that name neither today
+//      (`frontier`, `delta`, `state`, `classification`) have no declared
+//      shape at all, which is the gap this item is really tracking.
 // ---------------------------------------------------------------------

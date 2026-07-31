@@ -1,5 +1,7 @@
 {
-  "$id": "https://continuum.dev/schema/redacted.json",
+  "$id": "https://continuum.dev/schema/v1/redacted.json",
+  "schema_epoch": 1,
+  "schema_kind": "value",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Shared definition of the plan §4.5 Redacted(reason, commitment) value: purge shreds the key and replaces content with this typed stub; receipts referencing purged content remain structurally verifiable and report the redaction, downgrading per §18.4. Consumer schemas inline a structurally identical $defs named `redacted` (marked with a mirrored $comment) so each file stays self-contained; the copies are identity-checked by the validator.",

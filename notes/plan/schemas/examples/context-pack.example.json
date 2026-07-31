@@ -75,7 +75,8 @@
   ],
   "question": "why did AckImpliesDurable fail?",
   "replay": "crash_demo1",
-  "schema_version": "1.0",
+  "schema_id": "https://continuum.dev/schema/context-pack.json",
+  "schema_epoch": 1,
   "selected": [
     {
       "artifact": "ev_ack1",

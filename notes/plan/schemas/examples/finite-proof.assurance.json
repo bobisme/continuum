@@ -1,6 +1,6 @@
 {
-  "format": "continuum-assurance-result",
-  "version": "0.1.0",
+  "schema_id": "https://continuum.dev/schema/assurance-result.json",
+  "schema_epoch": 1,
   "claim": {
     "id": "C007",
     "kind": "safety",

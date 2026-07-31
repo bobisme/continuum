@@ -18,7 +18,8 @@
   "intent": "in_ack_v1",
   "operation": "verification.start",
   "priority_class": "interactive",
-  "schema_version": "1.0",
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/verification-task.json",
   "snapshot": "ws_demo1",
   "status": "suspended",
   "target": {

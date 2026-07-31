@@ -7189,14 +7189,14 @@
       "coverage": "leaf",
       "id": "SD-08",
       "metadata": {
-        "ledger_status": "open"
+        "ledger_status": "paid, PR 0"
       },
       "source": {
         "line": 2668,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "one $id/versioning convention with a schema-epoch field across all schemas (\u00a74.3) \u2014 three rival conventions today, zero schema-epoch fields"
+      "status": "satisfied",
+      "summary": "one $id/versioning convention with a schema-epoch field across all schemas (\u00a74.3) \u2014 every schema document is identified by https://continuum.dev/schema/v<epoch>/<name>.json and declares schemaepoch and schemakind; every artifact instance declares the epoch-free class identity schemaid and the schemaepoch it was written against; the rival format/version, schemaversion, and encodingversion forms are retired; the convention, including what advances an epoch and why it is not a seventh epoch, is normative in schemas/README.md"
     },
     {
       "category": "spec-debt",
@@ -7206,7 +7206,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2671,
+        "line": 2677,
         "path": "plan.md"
       },
       "status": "active",
@@ -7220,7 +7220,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2677,
+        "line": 2683,
         "path": "plan.md"
       },
       "status": "active",
@@ -7234,7 +7234,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2679,
+        "line": 2685,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7248,7 +7248,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2684,
+        "line": 2690,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7262,7 +7262,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2688,
+        "line": 2694,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7276,7 +7276,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2691,
+        "line": 2697,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7290,7 +7290,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2693,
+        "line": 2699,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7304,7 +7304,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2695,
+        "line": 2701,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7318,7 +7318,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2704,
+        "line": 2710,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7332,7 +7332,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2711,
+        "line": 2717,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7346,7 +7346,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2717,
+        "line": 2723,
         "path": "plan.md"
       },
       "status": "satisfied",

@@ -1,11 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schema/cir.json",
+  "$id": "https://continuum.dev/schema/v1/cir.json",
+  "schema_epoch": 1,
+  "schema_kind": "artifact",
   "title": "Continuum Causal Intermediate Representation",
   "type": "object",
   "required": [
-    "format",
-    "encoding_version",
+    "schema_id",
+    "schema_epoch",
     "semantics_version",
     "events",
     "roots"
@@ -16,14 +18,16 @@
       "type": "string",
       "pattern": "^cir_[A-Za-z0-9_-]+$"
     },
-    "format": {
-      "const": "continuum-cir"
+    "schema_id": {
+      "const": "https://continuum.dev/schema/cir.json",
+      "description": "Artifact-class identity of the governing schema: its `$id` with the `v<schema_epoch>/` segment removed (schemas/README.md). Stable across schema epochs."
     },
-    "encoding_version": {
-      "type": "string",
-      "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+    "schema_epoch": {
+      "const": 1,
+      "description": "Schema epoch this instance was written against (schemas/README.md). It advances only on a breaking change to this artifact class, is not one of the six independently versioned epochs (RFC 0026 `rule versioning.epoch_independence`), and pins no semantics."
     },
     "semantics_version": {
+      "description": "Semantic epoch under which these events are interpreted (plan §4.6). One of the six independently versioned epochs; independent of `schema_epoch`, which versions this encoding only.",
       "type": "string",
       "minLength": 1
     },

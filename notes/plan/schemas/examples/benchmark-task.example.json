@@ -21,7 +21,8 @@
     "repair_transaction",
     "promotion_receipt"
   ],
-  "schema_version": "1.0",
+  "schema_id": "https://continuum.dev/schema/benchmark-task.json",
+  "schema_epoch": 1,
   "task_id": "cb-repair-ack-001",
   "track": "repair",
   "snapshot": "ws_demo1"

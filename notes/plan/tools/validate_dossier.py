@@ -606,10 +606,45 @@ def check_spec_debt() -> dict[str, Any]:
         return isinstance(expr, dict) and expr.get("type") not in (None, "string")
 
     def sd08() -> bool:
-        return all(
-            "schema_epoch" in path.read_text(encoding="utf-8")
-            for path in sorted((ROOT / "schemas").glob("*.schema.json"))
-        )
+        """One identity/versioning convention across every schema (schemas/README.md).
+
+        Derived, never asserted: each document's `$id` is recomputed from its file
+        name and declared `schema_epoch`, every artifact schema must require the
+        `schema_id`/`schema_epoch` instance header with the consts the identity
+        rules imply, and no retired version field may survive.
+        """
+        retired = ("format", "version", "schema_version", "encoding_version")
+        for path in sorted((ROOT / "schemas").glob("*.schema.json")):
+            schema = schema_of(f"schemas/{path.name}")
+            name = path.name[: -len(".schema.json")]
+            epoch = schema.get("schema_epoch")
+            kind = schema.get("schema_kind")
+            if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1:
+                return False
+            if kind not in ("artifact", "value"):
+                return False
+            if schema.get("$id") != f"https://continuum.dev/schema/v{epoch}/{name}.json":
+                return False
+            properties = schema.get("properties") or {}
+            required = set(schema.get("required") or [])
+            for field in retired:
+                # `repair-transaction.version` is transaction lineage (RFC 0032),
+                # not schema identity; every other retired spelling is gone.
+                if field in properties and (name, field) != ("repair-transaction", "version"):
+                    return False
+            if kind == "value":
+                # Embedded values inherit their enclosing artifact's header.
+                if {"schema_id", "schema_epoch"} & (set(properties) | required):
+                    return False
+                continue
+            class_id = f"https://continuum.dev/schema/{name}.json"
+            if properties.get("schema_id", {}).get("const") != class_id:
+                return False
+            if properties.get("schema_epoch", {}).get("const") != epoch:
+                return False
+            if not {"schema_id", "schema_epoch"} <= required:
+                return False
+        return True
 
     def sd09() -> bool:
         return "has not yet absorbed" not in text_of(

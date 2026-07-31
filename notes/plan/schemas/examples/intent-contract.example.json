@@ -156,7 +156,8 @@
     "security_policy": "review",
     "trust_boundaries": "no-expansion"
   },
-  "schema_version": "1.0",
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/intent-contract.json",
   "scope": {
     "abstraction_level": "protocol",
     "components": [

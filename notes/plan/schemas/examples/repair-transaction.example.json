@@ -100,7 +100,8 @@
   "hypothesis": "publish reply only after storage sync",
   "receipt": null,
   "repair_id": "rt_demo1",
-  "schema_version": "1.0",
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/repair-transaction.json",
   "semantic_diff": "diff_demo1",
   "status": "ready",
   "version": 1

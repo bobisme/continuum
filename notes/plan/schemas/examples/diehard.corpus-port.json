@@ -1,6 +1,6 @@
 {
-  "format": "continuum-corpus-port",
-  "version": "0.1.0",
+  "schema_id": "https://continuum.dev/schema/corpus-port.json",
+  "schema_epoch": 1,
   "port_id": "TV-009",
   "corpus": {
     "name": "tlaplus/Examples",

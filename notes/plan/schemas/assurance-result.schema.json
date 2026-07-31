@@ -1,6 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schema/assurance-result.json",
+  "$id": "https://continuum.dev/schema/v1/assurance-result.json",
+  "schema_epoch": 1,
+  "schema_kind": "artifact",
   "title": "Continuum Assurance Result",
   "type": "object",
   "$defs": {
@@ -127,8 +129,8 @@
     }
   },
   "required": [
-    "format",
-    "version",
+    "schema_id",
+    "schema_epoch",
     "claim",
     "verdict",
     "scope",
@@ -157,11 +159,13 @@
     }
   ],
   "properties": {
-    "format": {
-      "const": "continuum-assurance-result"
+    "schema_id": {
+      "const": "https://continuum.dev/schema/assurance-result.json",
+      "description": "Artifact-class identity of the governing schema: its `$id` with the `v<schema_epoch>/` segment removed (schemas/README.md). Stable across schema epochs."
     },
-    "version": {
-      "type": "string"
+    "schema_epoch": {
+      "const": 1,
+      "description": "Schema epoch this instance was written against (schemas/README.md). It advances only on a breaking change to this artifact class, is not one of the six independently versioned epochs (RFC 0026 `rule versioning.epoch_independence`), and pins no semantics."
     },
     "claim": {
       "type": "object",

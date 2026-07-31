@@ -1,6 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://continuum.dev/schema/proof-receipt.json",
+  "$id": "https://continuum.dev/schema/v1/proof-receipt.json",
+  "schema_epoch": 1,
+  "schema_kind": "artifact",
   "title": "Continuum Proof Receipt",
   "type": "object",
   "$defs": {
@@ -25,7 +27,7 @@
     }
   },
   "required": [
-    "format", "version", "receipt_id", "claim", "closure", "epochs",
+    "schema_id", "schema_epoch", "receipt_id", "claim", "closure", "epochs",
     "transformations", "certificate", "checker", "reproduce"
   ],
   "allOf": [
@@ -44,8 +46,14 @@
     }
   ],
   "properties": {
-    "format": { "const": "continuum-proof-receipt" },
-    "version": { "type": "string" },
+    "schema_id": {
+      "const": "https://continuum.dev/schema/proof-receipt.json",
+      "description": "Artifact-class identity of the governing schema: its `$id` with the `v<schema_epoch>/` segment removed (schemas/README.md). Stable across schema epochs."
+    },
+    "schema_epoch": {
+      "const": 1,
+      "description": "Schema epoch this instance was written against (schemas/README.md). It advances only on a breaking change to this artifact class, is not one of the six independently versioned epochs (RFC 0026 `rule versioning.epoch_independence`), and pins no semantics."
+    },
     "receipt_id": { "type": "string", "pattern": "^receipt_[A-Za-z0-9_-]+$" },
     "claim": {
       "type": "object",

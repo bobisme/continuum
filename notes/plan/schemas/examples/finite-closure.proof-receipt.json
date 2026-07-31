@@ -1,6 +1,6 @@
 {
-  "format": "continuum-proof-receipt",
-  "version": "0.1.0",
+  "schema_id": "https://continuum.dev/schema/proof-receipt.json",
+  "schema_epoch": 1,
   "receipt_id": "receipt_diehard-typeok-placeholder",
   "claim": {
     "kind": "safety",

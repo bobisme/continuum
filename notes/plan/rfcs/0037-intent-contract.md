@@ -114,7 +114,7 @@ Term nodes: `var` (`name`), `literal` (`value`), `constant` (`name`), `state` (`
 - The retired bare string form is no longer accepted by the schema. Migration MUST parse each string into an AST within the declared fragment and MUST retain the original text in `expression.source`.
 - `source` is display-only. It MUST NOT contribute to the `in_*` identity or to any RFC 0031 classification; where `source` and `ast` disagree, `ast` is authoritative and tools SHOULD regenerate `source` from the normalized AST.
 - A string that cannot be parsed into the fragment MUST fail closed: the contract is rejected, never stored with a guessed or partial AST.
-- Migrating a stored contract changes its canonical encoding and therefore its `in_*` identity. A migrated contract MUST be re-accepted through `intent.accept` and MUST NOT be treated as an ordinary edit. The cross-schema `$id`/schema-epoch convention that would carry such a migration uniformly is separate specification debt (plan §25, SD-08) and is not settled here.
+- Migrating a stored contract changes its canonical encoding and therefore its `in_*` identity. A migrated contract MUST be re-accepted through `intent.accept` and MUST NOT be treated as an ordinary edit. The cross-schema `$id`/schema-epoch convention that carries such a migration uniformly is settled in [`schemas/README.md`](../schemas/README.md) (plan §25, SD-08): a contract declares the `schema_id`/`schema_epoch` header it was written against, and the epoch advance that obsoletes it MUST publish the typed `Preserved | Revalidate | Incompatible` statement for the intent-contract class before it is applied.
 
 ### Worked example
 

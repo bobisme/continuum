@@ -2665,9 +2665,15 @@ projections, and the docs/35/40/41/42/45 corrections) are recorded in
 - SD-07 (paid, PR 0): `schemas/intent-contract.schema.json` — a
   structured property-AST expression form with canonical
   normalization, replacing the bare `expression` string;
-- SD-08 (open): one `$id`/versioning convention with a schema-epoch
-  field across all schemas (§4.3) — three rival conventions today,
-  zero schema-epoch fields;
+- SD-08 (paid, PR 0): one `$id`/versioning convention with a
+  schema-epoch field across all schemas (§4.3) — every schema document
+  is identified by `https://continuum.dev/schema/v<epoch>/<name>.json`
+  and declares `schema_epoch` and `schema_kind`; every artifact
+  instance declares the epoch-free class identity `schema_id` and the
+  `schema_epoch` it was written against; the rival `format`/`version`,
+  `schema_version`, and `encoding_version` forms are retired; the
+  convention, including what advances an epoch and why it is not a
+  seventh epoch, is normative in `schemas/README.md`;
 - SD-09 (open): docs/35, RFC 0026, ADR-0018, and docs/42 absorb the
   §4.5/§4.6/§4.7 operational contract (purge and `Redacted(reason,
   commitment)`, backup and verified restore, the cross-user dedup

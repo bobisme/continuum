@@ -1,6 +1,6 @@
 {
-  "format": "continuum-domain-pack",
-  "version": "0.1.0",
+  "schema_id": "https://continuum.dev/schema/domain-pack.json",
+  "schema_epoch": 1,
   "pack": {
     "name": "storage-append-log",
     "semantic_version": "storage-append-log-v0",

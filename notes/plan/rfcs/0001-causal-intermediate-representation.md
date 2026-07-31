@@ -180,7 +180,7 @@ CIR SHALL have:
 - a canonical binary encoding for hashing, storage, and replay;
 - a readable JSON encoding for tooling;
 - a deterministic text form for diffs;
-- explicit semantic and encoding version numbers;
+- an explicit semantic epoch (`semantics_version`) and an explicit encoding epoch, the latter carried by the `schema_id`/`schema_epoch` header every artifact declares (`schemas/README.md`);
 - unknown-field preservation in forward-compatible readers;
 - a schema fingerprint embedded in every crashpack.
 

@@ -10,7 +10,8 @@ Make every semantic-equivalence claim inspectable, reproducible, and machine-che
 ## Manifest shape
 
 ```toml
-schema = "continuum-corpus-port/v1"
+schema_id = "https://continuum.dev/schema/corpus-port.json"
+schema_epoch = 1
 id = "TV-009"
 title = "The Die Hard Problem"
 source_epoch = "tla-examples@91c22ea..."
