@@ -26,6 +26,8 @@ This gives the project two benefits without circularity:
 
 A port records the original authors, source path, license, and transformation notes. Original TLA+ source is not copied into a generated artifact unless its license permits redistribution. External examples remain links plus independently authored native models when necessary.
 
+Per-family license verdicts for the pinned commit are in [`REDISTRIBUTION_AUDIT.md`](REDISTRIBUTION_AUDIT.md), which is re-run on every corpus epoch: a pin change can change the answer.
+
 ## Oracle disagreement
 
 Disagreement is classified before any side is called wrong:

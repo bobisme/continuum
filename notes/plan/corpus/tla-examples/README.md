@@ -17,6 +17,7 @@ The upstream repository explicitly describes itself both as an example library a
 - `PARITY_LEVELS.md` — what “equivalent” means.
 - `PORTING_WAVES.md` — dependency-driven migration order.
 - `CORPUS_POLICY.md` — pinning, provenance, licensing, and regression policy.
+- `REDISTRIBUTION_AUDIT.md` — per-family license and redistribution verdicts at the pinned commit.
 - `FEATURE_CENSUS.md` — semantic capabilities forced by the corpus.
 - `ports/` — executable/design fixtures for ports already started.
 
