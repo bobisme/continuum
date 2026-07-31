@@ -205,9 +205,8 @@ def _extract_prs(requirements: list[dict[str, Any]]) -> None:
         raw_id, title = match.groups()
         pr_id = _normalize_pr_id(raw_id)
         line = _line_number(text, match.start())
-        requirements.append(
-            _requirement(pr_id, "pr", title, path, line, coverage="any")
-        )
+        pr_requirement = _requirement(pr_id, "pr", title, path, line, coverage="any")
+        requirements.append(pr_requirement)
         before_exit, marker, after_exit = body.partition("**Exit:**")
         for ordinal, summary in enumerate(_top_level_bullets(before_exit), 1):
             requirements.append(
@@ -239,6 +238,10 @@ def _extract_prs(requirements: list[dict[str, Any]]) -> None:
                     status="satisfied" if "(delivered:" in exit_summary else ACTIVE,
                 )
             )
+            if "(delivered:" in exit_summary:
+                # A delivered exit completes the PR itself: the exit criterion
+                # is the PR's definition of done.
+                pr_requirement["status"] = "satisfied"
 
 
 def _extract_gates(requirements: list[dict[str, Any]]) -> None:
@@ -947,6 +950,9 @@ def graph_contract_state(
     pr_exit_failures: list[str] = []
     for requirement in registry["requirements"]:
         if requirement["category"] != "pr":
+            continue
+        if requirement["status"] != ACTIVE:
+            # A completed PR's goal bone is closed; its exit wiring is history.
             continue
         pr_id = requirement["id"]
         parent_matches = [
