@@ -2,3 +2,13 @@
 /.maw/
 /.manifold/
 /repo.git/
+
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Python tooling byproducts (notes/plan/tools, tools/)
+__pycache__/
+*.py[cod]
+.venv/

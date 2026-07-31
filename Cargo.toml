@@ -1,0 +1,31 @@
+# Continuum Cargo workspace.
+#
+# The member list is plan §20 ("Crate and service architecture"), expanded
+# exactly: `continuum-effects-{network,storage,time,process}` is four crates.
+# There is deliberately no `continuum-protocol` crate — the native protocol
+# lives in `continuumd` (notes/plan/notes/START_HERE_IMPLEMENTATION.md,
+# "Dependency islands").
+#
+# Dependency edges are declared only where the plan states them outright. A
+# missing edge is cheap to add later; a wrong edge is architectural debt.
+# `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically
+# and is wired into `just check`.
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+# Matches the `edition = "2024"` floor. Deterministic toolchain pinning is
+# PR-1 / IMPL-05's deliverable, not this scaffold's.
+rust-version = "1.85"
+# No `license` field yet: the product license decision is PR 0 (plan §21.1).
+# Every crate sets `publish = false` until it is made.
+
+# Workspace-wide lint defaults. Each crate opts in with `[lints] workspace =
+# true`, so this table is the single place to add project-wide policy —
+# including the `#![forbid(unsafe_code)]` rollout owned by PR-1 / IMPL-04.
+[workspace.lints.rust]
+missing_docs = "warn"

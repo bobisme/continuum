@@ -1,0 +1,12 @@
+[package]
+name = "continuum-cml-elab"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+continuum-cml-syntax = { path = "../continuum-cml-syntax" }
+
+[lints]
+workspace = true
