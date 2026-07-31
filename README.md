@@ -163,6 +163,30 @@ python3 tools/validate_dossier.py
 
 The validator requires Python 3.11+ and `jsonschema`.
 
+### Deterministic builds
+
+A build that cannot be repeated cannot support a receipt. Plan §20 requires that
+"kernel crates build reproducibly from pinned sources" so the "build digest and
+toolchain identity" a receipt records (INV-014) stay independently re-derivable,
+and `docs/12` §1 makes "Rust edition/toolchain pinned" repository policy. Three
+mechanisms carry that in this repository:
+
+- `rust-toolchain.toml` pins the exact patch release, with `rustfmt` and `clippy`
+  in the pinned set so a formatting or lint verdict is part of the same identity;
+- `Cargo.lock` is committed and every `just` gate runs `--locked`, so a gate can
+  never silently re-resolve dependencies (`docs/12` §5, plan §4.2);
+- the release profile turns `overflow-checks` on, so the `debug`/`release`
+  dimension of the `docs/19` §7 determinism matrix cannot silently change an
+  arithmetic result.
+
+Bit-identical binaries are not claimed yet: Cargo's `trim-paths` is still unstable
+on the pinned toolchain, so absolute build paths can reach object code. Closing
+that gap belongs to the kernel reproducible-build covenant (plan §20, PR 9).
+
+```bash
+just check   # fmt, clippy, tests, crate boundaries, dossier validation
+```
+
 ## Roadmap
 
 | Phase | Outcome |

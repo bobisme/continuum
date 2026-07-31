@@ -20,16 +20,23 @@ fmt:
     cargo fmt --all
 
 # Clippy over every target, warnings are errors.
+#
+# `--locked` (here and below) is the mechanical half of docs/12 §5, which lists
+# "locked dependencies" among the reproducibility assets, and of plan §4.2, where a
+# workspace snapshot pins "dependency lockfiles". Without it a gate silently resolves
+# and rewrites `Cargo.lock`, so the run that passed is not the run anyone can repeat.
+# Adding a dependency is therefore an explicit two-step: change `Cargo.toml`, run
+# `cargo check` (unlocked) to refresh `Cargo.lock`, and commit both.
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --locked -- -D warnings
 
 # Workspace test suite.
 test:
-    cargo test --workspace
+    cargo test --workspace --locked
 
 # Build the workspace.
 build:
-    cargo build --workspace
+    cargo build --workspace --locked
 
 # Enforce the plan §20 crate list and the forbidden dependency edges.
 # The self-test runs first so the check cannot pass vacuously.

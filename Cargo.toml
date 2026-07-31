@@ -18,8 +18,10 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
-# Matches the `edition = "2024"` floor. Deterministic toolchain pinning is
-# PR-1 / IMPL-05's deliverable, not this scaffold's.
+# Matches the `edition = "2024"` floor. This is a *minimum* compatibility
+# statement, not a pin: the exact toolchain identity lives in
+# `rust-toolchain.toml` (PR-1 / IMPL-05, plan §20's reproducible-build
+# covenant and INV-014).
 rust-version = "1.85"
 # No `license` field yet: the product license decision is PR 0 (plan §21.1).
 # Every crate sets `publish = false` until it is made.
@@ -43,3 +45,39 @@ rust-version = "1.85"
 [workspace.lints.rust]
 missing_docs = "warn"
 unsafe_code = "forbid"
+
+# --- Determinism-relevant profile settings (PR-1 / IMPL-05) ---------------
+#
+# Only settings the dossier actually requires appear here. Nothing below is a
+# performance knob, and no flag is set without a citation.
+#
+# `overflow-checks`: docs/19_TEST_STRATEGY.md §7 ("Determinism matrix") makes
+# `debug/release` one of the dimensions every retained scenario is tested over,
+# and requires that "Semantic artifacts must be identical or differences must
+# be explicitly non-semantic and normalized away". Cargo's default release
+# profile breaks that: integer overflow panics in `dev` and wraps silently in
+# `release`, so the same scenario can produce two different semantic artifacts
+# and the release one looks successful. docs/12 §11 classes "semantic digest
+# nondeterminism" as a release blocker, and docs/12 §4 requires "no unchecked
+# optimization" of kernel changes. Turning the checks on in release makes the
+# arithmetic agree across the matrix dimension.
+#
+# `debug-assertions` is deliberately left at its default. A `debug_assert!`
+# that fires is a *detected* divergence — a panic naming its own cause — while
+# a silently wrapped integer is an undetected wrong answer. Only the second
+# kind produces a misleading artifact, so only the second kind is corrected
+# here.
+#
+# Path trimming is NOT set here, and the omission is deliberate. Plan §20
+# requires that "kernel crates build reproducibly from pinned sources" so the
+# "build digest and toolchain identity" a receipt records (INV-014) stay
+# "independently re-derivable", and absolute build-directory paths embedded in
+# object code defeat that by making the digest a function of *where* the build
+# ran. The Cargo setting that fixes it — `profile.release.trim-paths` — is
+# still unstable in the pinned toolchain (Cargo 1.97.0: "the package requires
+# the Cargo feature called `trim-paths`, but that feature is not stabilized"),
+# and a nightly-gated flag is not a build policy. Bit-identical kernel builds
+# are PR 9's covenant tooling, not this scaffold's claim; when `trim-paths`
+# stabilizes, or PR 9 needs it sooner, it belongs here with that citation.
+[profile.release]
+overflow-checks = true

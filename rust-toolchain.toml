@@ -1,0 +1,51 @@
+# Deterministic toolchain pin (PR-1 / IMPL-05, START_HERE_IMPLEMENTATION.md PR 1:
+# "deterministic build and artifact paths").
+#
+# Why a pin exists at all
+# -----------------------
+#
+#   Rust edition/toolchain pinned.
+#     — notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md §1, "Code policy"
+#
+#   kernel crates build reproducibly from pinned sources; every receipt records the
+#   checker's build digest and toolchain identity (INV-014), so checker identity is
+#   independently re-derivable.
+#     — notes/plan/plan.md §20, "Dependency rules"
+#
+# INV-014 ("Version-explicit proof") makes checker identity part of what a receipt
+# asserts. A receipt that records a toolchain identity nobody can reproduce records
+# nothing, so the toolchain has to be a committed, exact fact about this repository
+# rather than whatever `rustup` happens to resolve `stable` to on a given day. A
+# workspace snapshot pins "toolchain and semantic epochs" (plan §4.2) — this file is
+# where the Rust half of that pin is written down.
+#
+# Why the exact patch version
+# ---------------------------
+#
+# `1.97.0`, not `1.97` and not `stable`. A two-component `1.97` resolves to whatever
+# patch release is current when a machine first installs it, which makes the toolchain
+# identity a function of install date. That is precisely the ambient nondeterminism
+# INV-005 forbids from the semantic path, and docs/12 §11 classes "semantic digest
+# nondeterminism" and "benchmark artifact unreproducible" as release blockers.
+#
+# `1.97.0` is the toolchain the workspace was scaffolded and verified against
+# (`rustc 1.97.0 (2d8144b78 2026-07-07)`). Raising it is a deliberate change: bump this
+# file, re-run `just check`, and treat the result as a new toolchain identity for
+# anything that has already recorded the old one.
+#
+# The `edition = "2024"` / `rust-version = "1.85"` floor in Cargo.toml is a *minimum*
+# compatibility statement for consumers. It is not a pin and does not replace this file.
+#
+# Components
+# ----------
+#
+# `just check` runs `cargo fmt` and `cargo clippy`, so rustfmt and clippy are part of
+# the pinned toolchain identity: a formatting or lint verdict that varies with the
+# locally installed component set is not a gate. `profile = "minimal"` keeps a fresh
+# install to exactly what the gate needs; it applies at install time only and does not
+# remove components a developer has already added.
+
+[toolchain]
+channel = "1.97.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
