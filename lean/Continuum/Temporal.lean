@@ -23,6 +23,6 @@ def ContinuouslyEnabled {State : Type u}
 def StuttersAt {State : Type u} (b : Behavior State) (n : Nat) : Prop :=
   b n = b (n + 1)
 
-/-- The first Lean milestone formalizes safety and stuttering here. Fairness,
+/-! The first Lean milestone formalizes safety and stuttering here. Fairness,
 Büchi/Streett acceptance, and lasso certificates are added under RFC 0015. -/
 end Continuum

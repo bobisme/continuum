@@ -18,7 +18,7 @@ def solution : List State := [
 ]
 
 theorem solution_ends_with_four_gallons :
-    solution.get? 6 = Some ⟨⟨4, by decide⟩, ⟨3, by decide⟩⟩ := by
+    solution[6]? = some ⟨⟨4, by decide⟩, ⟨3, by decide⟩⟩ := by
   decide
 
 end Continuum.Examples.DieHard

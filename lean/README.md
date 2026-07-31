@@ -1,7 +1,7 @@
 # Continuum Lean Metatheory
 
 **Pinned toolchain:** `leanprover/lean4:v4.32.1`  
-**Status:** source-level seed, scaffolded from the planning dossier at `notes/plan/lean/` (PR-4A / IMPL-01). Kernel-checking the modules under `Continuum/` and clearing any errors they contain is out of scope here and is tracked by the sibling PR-4A / IMPL-02 bone; the T0/T1 theorems (transition-system safety, stuttering simulation, finite-closure certificate soundness) are tracked by PR-4A / IMPL-03.
+**Status:** kernel-checked seed. All 16 modules build under the pinned toolchain with `lake build` (PR-4A / IMPL-02); the tree contains no `sorry` and declares no `axiom`. The T0/T1 theorems (transition-system safety, stuttering simulation, finite-closure certificate soundness) are still tracked by PR-4A / IMPL-03. Wiring `lake build` into `just check` is a separate follow-up and has not been done yet — run it manually for now.
 
 ## Purpose
 
@@ -44,7 +44,7 @@ CI must additionally capture `#print axioms` for all public theorems and run an 
 7. solver encoding and reflective certificate import;
 8. corpus theorem libraries.
 
-The source files intentionally avoid `sorry`. Absence of `sorry` does not imply they compile; the validation report distinguishes source inspection from kernel checking.
+The source files intentionally avoid `sorry`. As of PR-4A / IMPL-02 they also compile: all 24 public theorems are kernel-checked, and `#print axioms` reports no axioms for 22 of them. The remaining two — `Continuum.cancel_step_decreases_rank` (proved by `simp`) and `Continuum.Examples.DieHard.solution_ends_with_four_gallons` (proved by `decide`) — depend on `propext` alone.
 
 ## Revision 3 interaction metatheory seeds
 
@@ -54,4 +54,4 @@ The source files intentionally avoid `sorry`. Absence of `sorry` does not imply 
 - `Interaction/Incremental.lean` — clean/incremental parity contract;
 - `Interaction/Synthesis.lean` — safety plus non-vacuity obligations for synthesis.
 
-These files state the intended proof boundary for agent-facing operations. They are source-level seeds until the pinned Lean toolchain compiles them and CI records public-theorem axiom manifests.
+These files state the intended proof boundary for agent-facing operations. They compile under the pinned toolchain; their theorems are shallow projections out of the acceptance predicates and are not yet backed by CI-recorded axiom manifests.

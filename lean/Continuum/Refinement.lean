@@ -59,7 +59,7 @@ theorem compose
   · intro c c' hstep
     rcases lower.step _ _ hstep with hlower | hmiddle
     · left
-      simpa [hlower]
+      exact congrArg toAbstract hlower
     · rcases upper.step _ _ hmiddle with hupper | habstract
       · left
         exact hupper

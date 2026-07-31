@@ -11,7 +11,7 @@ theorem exactReuse_sound {Input : Type u} {Output : Type v}
     (query : Input → Output) {before after : Input}
     (witness : ExactReuseWitness before after) :
     query before = query after := by
-  simpa [witness.inputsEqual]
+  exact congrArg query witness.inputsEqual
 
 /-- Conservative invalidation may include extra changed inputs but must include
 all truly changed dependencies. -/
