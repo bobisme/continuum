@@ -13,7 +13,7 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 319
+      "scanned_files": 320
     },
     "g0_matrix_counts": {
       "evidence": 4,
@@ -46,7 +46,7 @@
       "files": 218
     },
     "markdown_links": {
-      "links": 192
+      "links": 194
     },
     "numbering": {
       "adr": 52,
@@ -58,8 +58,8 @@
     },
     "plan_bones_traceability": {
       "active_bones": 893,
-      "active_edges": 2086,
-      "active_requirements": 812,
+      "active_edges": 2082,
+      "active_requirements": 811,
       "coverage": "complete",
       "dependency_layers": 14,
       "leaf_bones": 785,
@@ -85,7 +85,7 @@
       "rows": 21
     },
     "retired_names": {
-      "files_scanned": 305
+      "files_scanned": 306
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20
@@ -95,12 +95,12 @@
     },
     "spec_debt": {
       "open": [
-        "SD-01",
         "SD-08",
         "SD-09",
         "SD-10"
       ],
       "paid": [
+        "SD-01",
         "SD-02",
         "SD-03",
         "SD-04",
