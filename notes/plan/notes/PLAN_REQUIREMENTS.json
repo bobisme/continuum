@@ -6875,7 +6875,7 @@
       "metadata": {
         "fallback": "1-minimal delta debugging only",
         "lane": "research/26",
-        "threshold": "replay-preserving core \u226410% of trace length on real (non-synthetic) failures \u2014 draft, pending ratification; kill if minimization cost dominates verification"
+        "threshold": "ratified (research/26) quote-id=causal-minimization-core-ratio \"On the research/26 experiment corpus of real failures \u2014 traces produced by an actual defect, excluding any trace padded with semantically inert events (plan \u00a725) \u2014 the replay-preserving causal core must be \u226410% of trace length at the corpus median.\"; kill if minimization cost dominates verification"
       },
       "source": {
         "line": 2567,

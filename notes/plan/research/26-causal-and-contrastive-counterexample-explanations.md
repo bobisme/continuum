@@ -104,13 +104,33 @@ Compare raw trace, minimized trace, causal core, state delta, and contrastive ex
 - small Context Packs without omitting mechanism;
 - explanations stable under irrelevant commuting events.
 
-### Promotion threshold (draft, pending ratification)
+### Ratified threshold (frontier register FR: causal minimization)
 
-Registered in plan §24.5: a replay-preserving causal core ≤10% of trace
-length on real (non-synthetic) failures. The registered kill condition
-is the existing one below: minimization cost dominates verification.
-This is a draft pending lane-owner ratification; an unratified
-threshold may not survive Phase A.
+quote-id=causal-minimization-core-ratio "On the research/26 experiment corpus of real failures — traces produced by an actual defect, excluding any trace padded with semantically inert events (plan §25) — the replay-preserving causal core must be ≤10% of trace length at the corpus median."
+
+The corpus is the Experiments list above (durability/cancellation,
+deadlock, fair/unfair liveness cycle, refinement mismatch, weak-memory
+litmus test, insufficient production telemetry), restricted to the
+classes in scope when the measurement is taken; each trace enters as the
+checker produced it, with no seeded padding. Plan §24.5 quotes this
+sentence verbatim under the same `quote-id`; the registered kill
+condition is the existing one below — minimization cost dominates
+verification.
+
+Rationale: 10% is retained from the draft because the only executed
+evidence — the G0-DX-01 spike's 200→4 event reduction (≈2%) — is bounded
+by plan §25 to a synthetic trace whose 196 noise events are semantically
+inert, so it validates the Context Pack artifact shape, not the context
+compiler, and cannot license a tighter number on real failures. Ten
+percent is also the weakest ratio at which a causal core is still an
+order of magnitude cheaper to read than the trace it replaces, which is
+what §12's causal-core level claims. The corpus median rather than a
+per-trace bound is used because the experiment classes above differ
+widely in trace length and one pathological class must not veto the
+lane. If the threshold is missed the registered kill applies —
+minimization cost dominates verification — and the lane falls back to
+1-minimal delta debugging only, with no causal-core adequacy claim in
+the Context Pack.
 
 The neighboring exploration-reduction threshold (research/01: at least
 an order-of-magnitude reduction on a non-artificial subset without a
