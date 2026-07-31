@@ -6830,7 +6830,7 @@
         "threshold": "ablation design per research/25 (raw trace vs pack on the agent benchmark); ratified win margin, quote-id=context-compilation-win-margin \"The Context Pack condition wins the general context-compilation ablation only if, on the held-out ContinuumBench diagnosis-and-repair split graded by the independent grader of research/33 with model, scaffold, and token budget held equal, it beats the raw-trace baseline by at least 10 percentage points of absolute task success with a 95 percent bootstrap confidence interval on the paired difference excluding zero, while delivering at least a 10x median per-task reduction in context bytes counting every expansion and staying within 2 percentage points of the raw-trace baseline on hidden-variant generalization.\"; kill (research/32): compact packs repeatedly induce incorrect repairs despite preservation checks"
       },
       "source": {
-        "line": 2565,
+        "line": 2564,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -6846,7 +6846,7 @@
         "threshold": "research/01 (stated there as a kill): at least an order-of-magnitude reduction on a non-artificial subset without a serious regression on dependent workloads (the \"explored classes\" denominator is a proposed ratification, to be fixed in research/01 before this row leaves draft); observer-indexed (docs/31): median \u22655\u00d7 on the observer-sensitive class, *checker* overhead <20% (distinct from the certificate-overhead row), zero mutation loss; kill (docs/31, research/13): witness cost dominates, or observer/property changes invalidate cached independence so often that reuse never pays for its witness cost \u2014 draft"
       },
       "source": {
-        "line": 2566,
+        "line": 2565,
         "path": "plan.md"
       },
       "status": "active",
@@ -6862,7 +6862,7 @@
         "threshold": "soundness gate per research/04: property-directed reduction is proven preserving (for the full property class it is applied to, fair cycles included) or disabled; speedup target and liveness corpus subset fixed at lane opening \u2014 draft"
       },
       "source": {
-        "line": 2567,
+        "line": 2566,
         "path": "plan.md"
       },
       "status": "active",
@@ -6878,7 +6878,7 @@
         "threshold": "ratified (research/26) quote-id=causal-minimization-core-ratio \"On the research/26 experiment corpus of real failures \u2014 traces produced by an actual defect, excluding any trace padded with semantically inert events (plan \u00a725) \u2014 the replay-preserving causal core must be \u226410% of trace length at the corpus median.\"; kill if minimization cost dominates verification"
       },
       "source": {
-        "line": 2568,
+        "line": 2567,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -6894,7 +6894,7 @@
         "threshold": "hidden-variant catch rate of the \u00a78.3 neighborhood on the docs/50-classified gaming corpus (the corpus itself is a Phase B G3 deliverable \u2014 \u2265N mutations per docs/50 attack class, N fixed at lane opening; no such corpus exists today); target fixed at lane opening \u2014 draft; kill (research/33): hidden variants are too easy to leak or too hard to grade independently"
       },
       "source": {
-        "line": 2569,
+        "line": 2568,
         "path": "plan.md"
       },
       "status": "active",
@@ -6910,7 +6910,7 @@
         "threshold": "clean-mismatch rate at the \u00a79.5 sampled audit rate (rate derives from \u00a78.6's confidence target) \u2014 draft; kill if dependency capture cannot be made trustworthy below file/module granularity"
       },
       "source": {
-        "line": 2570,
+        "line": 2569,
         "path": "plan.md"
       },
       "status": "active",
@@ -6926,7 +6926,7 @@
         "threshold": "rediscovery suite (named algorithms and count fixed at ratification \u2014 draft); kills (research/29): joint space overwhelms coupled-feedback gains; proof-complexity objective biases toward trivial designs; abstractions overfit finite bounds; agent proposals dominate and cannot be reproduced by structured search; kill (research/30): QD discovers nothing beyond multi-objective Pareto search on known benchmarks"
       },
       "source": {
-        "line": 2571,
+        "line": 2570,
         "path": "plan.md"
       },
       "status": "active",
@@ -6942,7 +6942,7 @@
         "threshold": "draft pending ratification: faithful Lab reproduction of \u226570% of curated known incidents under injected telemetry loss and clock uncertainty; always-on overhead \u22641%; \u22652\u00d7 reduction in surviving symmetry orbits per synthesized probe set; kill if most target properties are monitorable only as `Inconclusive` on two real systems, or the overhead budgets cannot be met"
       },
       "source": {
-        "line": 2572,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -6958,7 +6958,7 @@
         "threshold": "draft pending ratification: 10/10 mutation-corpus mutants detected with zero false alarms on the correct implementation; machine-checked drain ranking for the replicated register; kill (research/09): invariant annotations become pervasive in real code, or the calculus cannot express asupersync's actual cancellation semantics"
       },
       "source": {
-        "line": 2573,
+        "line": 2572,
         "path": "plan.md"
       },
       "status": "active",
@@ -6974,7 +6974,7 @@
         "threshold": "ambiguity rate := fraction of abstract edits on the drift corpus yielding multiple or no concrete candidates (metric per research/31; the drift corpus is the lane deliverable; the numeric target is fixed in the note at ratification and quoted here) \u2014 draft; kill if most real mappings are too ambiguous, or users mistake candidate synchronization for verified preservation (measured under the G8 instruments)"
       },
       "source": {
-        "line": 2574,
+        "line": 2573,
         "path": "plan.md"
       },
       "status": "active",
@@ -6990,7 +6990,7 @@
         "threshold": "vs source/LSP loop baseline (qualitative; margin fixed at ratification \u2014 draft); kill if repair proposes weakening"
       },
       "source": {
-        "line": 2575,
+        "line": 2574,
         "path": "plan.md"
       },
       "status": "active",
@@ -7006,7 +7006,7 @@
         "threshold": "checking \u226410% of search time for large finite proofs, or acceptable asynchronous CI latency (docs/31); research/12 must gain a criteria section before this row leaves draft \u2014 draft"
       },
       "source": {
-        "line": 2576,
+        "line": 2575,
         "path": "plan.md"
       },
       "status": "active",
@@ -7022,7 +7022,7 @@
         "threshold": "docs/31's stated promote/kill pair (unbounded session/request protocol with tractable orbit growth and Lean-proved equivariance)"
       },
       "source": {
-        "line": 2577,
+        "line": 2576,
         "path": "plan.md"
       },
       "status": "active",
@@ -7038,7 +7038,7 @@
         "threshold": "docs/31's stated promote/kill pair"
       },
       "source": {
-        "line": 2578,
+        "line": 2577,
         "path": "plan.md"
       },
       "status": "active",
@@ -7054,7 +7054,7 @@
         "threshold": "docs/31's stated promote/defer pair; not a 1.0 goal (ADR-0029)"
       },
       "source": {
-        "line": 2579,
+        "line": 2578,
         "path": "plan.md"
       },
       "status": "deferred",
@@ -7070,7 +7070,7 @@
         "threshold": "reproduces the standard litmus corpus under the declared model before any envelope upgrade; until then every memory dimension reads `Unsupported(sequential-consistency-only)`; defer: SC-only is a declared 1.0 non-goal"
       },
       "source": {
-        "line": 2580,
+        "line": 2579,
         "path": "plan.md"
       },
       "status": "deferred",
@@ -7086,7 +7086,7 @@
         "threshold": "per-ADR staging; until shipped, timing fields in Intent Contracts remain declarative assumptions (B11); defer: post-1.0"
       },
       "source": {
-        "line": 2581,
+        "line": 2580,
         "path": "plan.md"
       },
       "status": "deferred",
@@ -7102,7 +7102,7 @@
         "threshold": "native ACI vs a disciplined-shell baseline (harness per research/25) on the agent benchmark: success-rate, cost, and invalid-action margins ratified \u2014 quote-id=aci-benchmark-margins \"On the agent benchmark, with an identical base model, task set, and per-task budget, native ACI must beat the disciplined-shell baseline by at least 10 percentage points of absolute task success, at least 30% fewer interface bytes per solved task (bytes, not tokens, are the graded cost denominator per RFC 0027), and at least a 50% relative reduction in invalid-action rate, with every metric paired per task over at least 3 seeds and the success margin's one-sided 95% lower bound above zero; missing any one of the three margins fails G0-DX-10 and forces protocol redesign before freeze.\"; kills (research/25): typed surface loses to disciplined shell; schema churn dominates agent cost; handles do not reduce invalid-action rate"
       },
       "source": {
-        "line": 2582,
+        "line": 2581,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7118,7 +7118,7 @@
         "threshold": "diagnosis accuracy/time vs raw-trace baseline under the G8 instruments and Phase C formative sessions; thresholds fixed in the docs/48 preregistration \u2014 draft; kills (research/34): experts prefer raw output and newcomers gain no accuracy; assistance raises confidence faster than correctness"
       },
       "source": {
-        "line": 2583,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -7134,7 +7134,7 @@
         "threshold": "promotion gate per research/35: autonomous promotion remains disabled until no known unprivileged path can alter intent/evidence status or escape isolation; red-team corpus per research/35 \u2014 draft"
       },
       "source": {
-        "line": 2584,
+        "line": 2583,
         "path": "plan.md"
       },
       "status": "active",
@@ -7150,7 +7150,7 @@
         "threshold": "concurrent authority enforcement validated beyond the finite spike (docs/53: \"authority table only, not enforcement\"): linearized promotion, CAS status, conflict materialization under concurrent writers \u2014 draft"
       },
       "source": {
-        "line": 2585,
+        "line": 2584,
         "path": "plan.md"
       },
       "status": "active",
@@ -7164,7 +7164,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2664,
+        "line": 2663,
         "path": "plan.md"
       },
       "status": "active",
@@ -7178,7 +7178,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2666,
+        "line": 2665,
         "path": "plan.md"
       },
       "status": "active",
@@ -7192,7 +7192,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2669,
+        "line": 2668,
         "path": "plan.md"
       },
       "status": "active",
@@ -7206,7 +7206,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2672,
+        "line": 2671,
         "path": "plan.md"
       },
       "status": "active",
@@ -7220,7 +7220,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2678,
+        "line": 2677,
         "path": "plan.md"
       },
       "status": "active",
@@ -7234,7 +7234,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2680,
+        "line": 2679,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7248,7 +7248,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2685,
+        "line": 2684,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7262,7 +7262,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2689,
+        "line": 2688,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7276,7 +7276,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2692,
+        "line": 2691,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7290,7 +7290,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2694,
+        "line": 2693,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7304,7 +7304,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2696,
+        "line": 2695,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7318,7 +7318,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2705,
+        "line": 2704,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7332,7 +7332,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2712,
+        "line": 2711,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7346,7 +7346,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2718,
+        "line": 2717,
         "path": "plan.md"
       },
       "status": "satisfied",
