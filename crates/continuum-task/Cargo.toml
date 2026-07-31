@@ -5,5 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+# Two workspace edges, both stated in `src/lib.rs`'s dependency-boundary contract:
+# `continuum-value` holds the epoch and assurance vocabularies (the only declared leaf
+# crate), and `continuum-evidence` holds the plan §11.4 claim-status lattice, whose
+# `schema_obligations` seam names the PR-1 exit as the place its typed payloads are
+# joined. Both are repeated under [dev-dependencies] because integration tests in
+# `tests/` are separate crates and do not inherit the library's dependencies.
+[dependencies]
+continuum-evidence = { path = "../continuum-evidence" }
+continuum-value = { path = "../continuum-value" }
+
+[dev-dependencies]
+continuum-evidence = { path = "../continuum-evidence" }
+continuum-value = { path = "../continuum-value" }
+
 [lints]
 workspace = true

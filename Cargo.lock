@@ -160,6 +160,10 @@ version = "0.0.0"
 [[package]]
 name = "continuum-task"
 version = "0.0.0"
+dependencies = [
+ "continuum-evidence",
+ "continuum-value",
+]
 
 [[package]]
 name = "continuum-value"
