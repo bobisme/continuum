@@ -1,0 +1,3 @@
+# Lake build outputs
+/.lake/
+build/

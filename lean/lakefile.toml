@@ -1,0 +1,6 @@
+name = "continuum-metatheory"
+version = "0.1.0"
+defaultTargets = ["Continuum"]
+
+[[lean_lib]]
+name = "Continuum"
