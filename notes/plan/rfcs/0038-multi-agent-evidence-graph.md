@@ -17,6 +17,8 @@ Actor capabilities control node creation; status promotion is service-restricted
 ## Write and concurrency model
 Absorbed from plan §11.7 (SD-06). The graph is append-only; nothing is edited in place. Publication is per-artifact atomic (INV-017). Status promotion is linearized per claim identity as a compare-and-set against the claim's current status: racing promotions cannot regress the lattice, and a lost CAS returns the typed `StatusConflict` error (plan §10.3) — the caller re-reads and retries against the current status. Concurrent contradictory claims materialize a `Conflict` node rather than resolving by write order. Idempotency keys (RFC 0026) make agent retries safe: a replayed write returns the original node identity. The node schema MUST carry `claim_id`, `idempotency_key`, and `service_identity` for this purpose.
 
+Enforcement of this model is a frontier lane: the ratified validation criteria for the plan §24.5 row (writer counts, zero-tolerance bounds, and deterministic conflict artifacts) live in [`research/08`](../research/08-agentic-verification.md), which the register quotes verbatim.
+
 ## Queries
 Missing obligations, conflicting candidates, proof frontier, repair frontier, semantic duplicates, provenance, and task generation.
 

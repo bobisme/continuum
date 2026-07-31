@@ -7146,14 +7146,14 @@
       "id": "FR-21",
       "metadata": {
         "fallback": "single-writer evidence graph; agents coordinate through one integrator role",
-        "lane": "RFC 0038 (\u00a725 debt); docs/53 boundary",
-        "threshold": "concurrent authority enforcement validated beyond the finite spike (docs/53: \"authority table only, not enforcement\"): linearized promotion, CAS status, conflict materialization under concurrent writers \u2014 draft"
+        "lane": "RFC 0038 (\u00a725 debt); research/08; docs/53 boundary",
+        "threshold": "concurrent authority enforcement validated beyond the finite spike (docs/53: \"authority table only, not enforcement\") \u2014 ratified (research/08) quote-id=evidence-graph-enforcement \"Multi-agent evidence-graph enforcement is validated only when four \u00a711.7 properties \u2014 promotion restricted to trusted service identities, per-claim linearized compare-and-set with no lattice regression and no lost promotion, deterministic conflict materialization, and idempotent retry \u2014 hold with zero counterexamples under both exhaustive exploration of a bounded model of the \u00a711.7 write protocol at 3 concurrent writers over 2 claim identities and an adversarial campaign against a persistent continuumd of at least 1,000 distinct seeded schedules per configuration across the docs/19 \u00a77 determinism matrix (writer counts 1, 2, 8, and 32 contending on a single claim identity, debug and release, with process restarts), in which every losing promotion returns the typed StatusConflict of plan \u00a710.3 rather than a generic error, every replayed idempotency key returns the original node identity, every injected contradictory claim pair materializes exactly one Conflict node whose content identity is byte-identical across all schedules, seeds, worker counts, and restarts, and every recorded per-claim promotion history is accepted by an independent linearizability checker against the \u00a711.4 lattice, one violation in one trial failing the lane.\"; kill (research/08): the four properties hold only by serializing every writer behind one global lock, or conflict artifacts cannot be made deterministic; fallback below applies if enforcement cannot be validated"
       },
       "source": {
         "line": 2584,
         "path": "plan.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Multi-agent evidence graph enforcement (\u00a711.7)"
     },
     {
