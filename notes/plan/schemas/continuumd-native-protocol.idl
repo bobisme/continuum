@@ -1,0 +1,2893 @@
+// =====================================================================
+// continuumd native protocol — normative interface definition
+//
+//   file:      schemas/continuumd-native-protocol.idl
+//   owner RFC: rfcs/0026-continuumd-native-protocol.md
+//   status:    normative (RFC 0026, "IDL and versioning")
+//
+// This file is the single machine-readable definition of the continuumd
+// native protocol. Generated Rust/TypeScript clients and generated JSON
+// Schema derive from it. RFC 0026's prose summarizes this file; where the
+// prose and this file disagree, this file decides and the RFC is corrected
+// (plan §25, "where plan prose and RFC disagree, the RFC is corrected and
+// becomes normative" — the same rule applies one level down, between the
+// RFC and its normative IDL).
+//
+// Every adapter (CLI, Cargo, LSP, DAP, MCP, SARIF, TUI, web) is a
+// projection of this file and MUST NOT define semantics of its own
+// (ADR-0036/0038/0042, RFC 0026 Summary).
+//
+// Normative language: the key words MUST, MUST NOT, REQUIRED, SHALL,
+// SHALL NOT, SHOULD, SHOULD NOT, RECOMMENDED, MAY, and OPTIONAL in doc
+// comments and `rule` bodies are to be interpreted as described in
+// RFC 2119.
+// =====================================================================
+
+
+// ---------------------------------------------------------------------
+// 1. Notation
+//
+// The IDL is a purpose-built declaration language. The technology choice
+// RFC 0026 left open is decided here: a custom textual IDL rather than an
+// existing schema language, because the protocol's wire-visible contracts
+// -- three-valued field presence (`required` / `optional` / `nullable`),
+// per-operation authority levels, task-starting and idempotency
+// annotations, closed error sets per operation, and citable normative
+// rules -- have no faithful encoding in JSON Schema, OpenAPI, or
+// Protobuf, and an unfaithful encoding is exactly the drift this file
+// exists to prevent. JSON Schema is a *generated* artifact of this file,
+// not its source.
+//
+// Lexical rules:
+//   - UTF-8, LF line endings.
+//   - `//` starts a comment to end of line. `///` starts a doc comment,
+//     which attaches to the next declaration, field, enum member, or
+//     union variant and is part of the definition (generators emit it).
+//   - Identifiers match `[A-Za-z_][A-Za-z0-9_]*`. Operation names are
+//     `namespace.verb`; rule names are dotted identifiers.
+//   - String literals are double-quoted; `"""` opens and closes a
+//     multi-line string. Integers are decimal. Version literals are
+//     strings of the form `"MAJOR.MINOR"`.
+//   - Field, setting, and clause declarations end with `;`. Enum members
+//     and union variants end with `,`, including the last one.
+//
+// Grammar (EBNF; `ident`, `string`, `integer`, `text` are lexical):
+//
+//   document      = { decl } ;
+//   decl          = protocol | scalar | handle | alias | enum | struct
+//                 | union | operation | rule ;
+//   doc           = { "///" , text } ;
+//   annotation    = "@" , ident , [ "(" , [ arg , { "," , arg } ] , ")" ] ;
+//   arg           = string | integer | ident | ident , "=" , string ;
+//   type          = ident
+//                 | "list" , "<" , type , ">"
+//                 | "map" , "<" , ident , "," , type , ">" ;
+//   presence      = "required" | "optional" | "nullable" ;
+//   field         = doc , ident , ":" , type , presence ,
+//                   { annotation } , ";" ;
+//   protocol      = doc , "protocol" , ident , "{" , { setting } , "}" ;
+//   setting       = ident , "=" , ( string | integer
+//                                 | "[" , [ literal_list ] , "]" ) , ";" ;
+//   scalar        = doc , "scalar" , ident , ";" ;
+//   handle        = doc , "handle" , ident , "=" , string , ";" ;
+//   alias         = doc , "alias" , ident , "=" , type ,
+//                   { annotation } , ";" ;
+//   enum          = doc , { annotation } , "enum" , ident , "{" ,
+//                   { enum_member } , "}" ;
+//   enum_member   = doc , ident , [ "=" , string ] ,
+//                   { annotation } , "," ;
+//   struct        = doc , { annotation } , "struct" , ident , "{" ,
+//                   { field } , "}" ;
+//   union         = doc , { annotation } , "union" , ident , "{" ,
+//                   { variant } , "}" ;
+//   variant       = doc , ident , [ "(" , type , ")" ] , "," ;
+//   operation     = doc , { annotation } , "operation" , op_name , "{" ,
+//                   { clause } , "}" ;
+//   op_name       = ident , "." , ident ;
+//   clause        = "authority" , ident , ";"
+//                 | "request" , body , ";"
+//                 | "response" , body , ";"
+//                 | "events" , body , ";"
+//                 | "verdict" , ident , ";"
+//                 | "errors" , "[" , [ ident , { "," , ident } ] ,
+//                   "]" , ";" ;
+//   body          = ident | "{" , { field } , "}" ;
+//   rule          = doc , "rule" , dotted_ident , "{" , '"""' , text ,
+//                   '"""' , "}" ;
+//
+// An anonymous `request`/`response`/`events` body is a struct whose
+// generated name is the operation name in PascalCase with the suffix
+// `Request`, `Response`, or `Event` (e.g. `workspace.create` request =>
+// `WorkspaceCreateRequest`).
+//
+// Field presence is three-valued and wire-visible:
+//   `required`  the field MUST be present and MUST NOT be null;
+//   `nullable`  the field MUST be present and MAY be null — a named
+//               absence, never an omission (plan INV-007);
+//   `optional`  the field MAY be absent; absent and null are distinct
+//               and MUST NOT be conflated.
+//
+// Annotations used in this file:
+//   @readonly        performs no state change; needs no idempotency key.
+//   @mutation        changes daemon state, including publishing a new
+//                    immutable artifact; the request MUST carry
+//                    `idempotency_key`. Orthogonal to `authority`: an
+//                    operation can publish an artifact at `read`
+//                    authority (e.g. `context.compile`) when the
+//                    publication is the daemon's own record of a read.
+//   @task_starting   MAY return `status = task_started` with a task
+//                    handle instead of a completed result.
+//   @privileged      privileged operation; audit-recorded (plan §18.5).
+//   @audit_recorded  every call is written to the audit log.
+//   @paginated       request accepts `page`, response returns
+//                    `next_page_token`.
+//   @streaming       long-lived; delivers `events` frames on the same
+//                    connection.
+//   @since("X.Y")    first protocol version defining the item. Omitted
+//                    means the version in `protocol.version`.
+//   @deprecated("X.Y")  deprecated as of that version; still served.
+//   @open            enum MAY gain members within a major version (see
+//                    `rule versioning.enums`).
+//   @pattern("re")   wire-format constraint on a string alias.
+// ---------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------
+// 2. Protocol identity and versioning
+// ---------------------------------------------------------------------
+
+/// Identity and version metadata of this definition.
+///
+/// `version` is the wire value of the `protocol_version` envelope field
+/// and the `"3.0"`-style spelling of RFC 0026: exactly one `.`, decimal
+/// digits, no leading zeros, so parse and render round-trip
+/// (`crates/continuum-value/src/epoch.rs`, `ProtocolEpoch`).
+///
+/// `majors_served` is the N and N−1 service window of RFC 0026: a daemon
+/// implementing this file MUST accept connections on both majors and
+/// MUST reject anything outside the window with
+/// `ProtocolVersionUnsupported`.
+protocol continuum.native {
+  /// Version of this IDL document. Bumped on every change to the file,
+  /// independently of the protocol version it defines.
+  idl_version = "1.0";
+  /// The protocol version this document defines.
+  version = "3.0";
+  /// Protocol majors a conforming daemon serves concurrently: N, N−1.
+  majors_served = [3, 2];
+  /// Wire encodings; exactly one is negotiated per connection.
+  encodings = ["canonical_json", "canonical_cbor"];
+  /// The owning specification.
+  rfc = "rfcs/0026-continuumd-native-protocol.md";
+  /// The operation registry this document implements in full.
+  operation_registry = "plan.md §10.2";
+  /// The authority table each operation's `authority` clause mirrors.
+  authority_registry = "rfcs/0027-agent-tool-protocol.md";
+}
+
+rule versioning.compatible_change {
+  """
+  Within a protocol major, only compatible changes are permitted, and
+  each MUST raise the minor version: adding an operation; adding an
+  `optional` field; adding an enum member to an `@open` enum; relaxing a
+  server-side constraint; adding an error code (see
+  `rule versioning.error_codes`). Servers MUST ignore unknown optional
+  request fields and MUST NOT emit fields the negotiated version does not
+  define.
+  """
+}
+
+rule versioning.breaking_change {
+  """
+  Removing or renaming any declaration or field; changing a field's type
+  or presence marker; adding a `required` or `nullable` field; adding or
+  removing a member of a closed enum; changing an operation's authority
+  level, verdict type, or the meaning of an existing error code — each is
+  a breaking change and MUST advance the protocol major. A breaking
+  change MUST publish the typed per-artifact-class compatibility
+  statement `Preserved | Revalidate | Incompatible` required by plan
+  §4.6 before it is applied.
+  """
+}
+
+rule versioning.enums {
+  """
+  Enums are closed unless annotated `@open`. A daemon MUST NOT emit a
+  member the negotiated version does not define. A client receiving an
+  unknown member of a closed enum MUST treat the message as malformed. A
+  client receiving an unknown member of an `@open` enum MUST NOT infer
+  semantics from it, MUST NOT crash, and MUST surface it verbatim to its
+  caller as unknown.
+  """
+}
+
+rule versioning.error_codes {
+  """
+  `ErrorCode` is `@open`: adding a code is a minor change, because
+  clients are required to treat an unrecognized code as a non-retryable
+  typed failure and MUST NOT infer semantics from it. Removing a code or
+  changing what an existing code means is a breaking change.
+  """
+}
+
+rule versioning.epoch_independence {
+  """
+  Protocol, semantic, intent, evidence, proof, and corpus epochs are
+  versioned independently (docs/12 §7) and MUST NOT be conflated. A
+  protocol-major bump does not, by itself, invalidate, reinterpret, or
+  orphan any published artifact: evidence and receipt schemas MUST remain
+  readable by every future verifier for their declared evidence epoch,
+  regardless of which protocol majors the daemon still serves (plan §4.3,
+  schemas/README.md). Retiring a protocol major never orphans an
+  artifact.
+  """
+}
+
+rule versioning.handle_stability {
+  """
+  Handles remain valid across daemon upgrades within a protocol major.
+  Continuations additionally pin engine and semantic epochs and MUST be
+  rejected with `ContinuationEpochMismatch` on mismatch — never silently
+  re-run (RFC 0026, plan §9.6).
+  """
+}
+
+
+// ---------------------------------------------------------------------
+// 3. Primitive types
+// ---------------------------------------------------------------------
+
+/// Boolean. JSON `true`/`false`; CBOR major type 7 simple values 20/21.
+scalar Bool;
+
+/// Unsigned 32-bit integer.
+scalar U32;
+
+/// Unsigned 64-bit integer. JSON encodes it as a number only when it is
+/// exactly representable; otherwise as a decimal string. CBOR uses an
+/// unsigned integer.
+scalar U64;
+
+/// UTF-8 string. Canonical form is NFC; a daemon MUST reject
+/// non-canonical spellings of identity-bearing strings (ADR-0013).
+scalar String;
+
+/// Opaque byte string. JSON encodes it base64url without padding; CBOR
+/// uses a byte string.
+scalar Bytes;
+
+/// RFC 3339 timestamp in UTC with millisecond precision.
+scalar Timestamp;
+
+/// Non-negative duration in milliseconds.
+scalar DurationMs;
+
+/// Non-negative byte count.
+scalar ByteCount;
+
+/// A structured value whose shape is defined by a named schema in
+/// `schemas/`, carried inline. The carrying field's doc comment names the
+/// schema file; the value MUST validate against it. `Opaque` never means
+/// "free-form": there is no untyped payload anywhere in this protocol.
+scalar Opaque;
+
+
+// ---------------------------------------------------------------------
+// 4. Handles (plan §4.4 artifact-class registry)
+//
+// A handle is `<prefix><opaque>` where the opaque part matches
+// `[A-Za-z0-9_-]+`. Handles carry a kind prefix and are otherwise
+// structureless. Content-addressed identities are derivable by anyone
+// holding the content, so handles are identifiers, not secrets, and
+// confer no authority; authorization is always checked independently of
+// handle possession (plan §4.4, ADR-0037). Capability tokens (`cap_*`)
+// are the sole exception: they are minted randomly and DO confer
+// authority.
+// ---------------------------------------------------------------------
+
+/// Workspace snapshot (`schemas/workspace-snapshot.schema.json`).
+handle WorkspaceHandle = "ws_";
+/// Intent Contract (`schemas/intent-contract.schema.json`).
+handle IntentHandle = "in_";
+/// Signed, content-addressed intent bundle (plan §4.2.1).
+handle IntentBundleHandle = "inb_";
+/// Elaborated model.
+handle ModelHandle = "model_";
+/// Causal execution graph (`schemas/cir.schema.json`).
+handle CausalGraphHandle = "cir_";
+/// Crashpack (`schemas/crashpack.schema.json`).
+handle CrashpackHandle = "crash_";
+/// Context Pack (`schemas/context-pack.schema.json`).
+handle ContextHandle = "ctx_";
+/// Proof artifact.
+handle ProofArtifactHandle = "proof_";
+/// Proof state.
+handle ProofStateHandle = "ps_";
+/// Task.
+handle TaskHandle = "task_";
+/// Evidence-graph node or edge.
+handle EvidenceHandle = "ev_";
+/// Debugger branch.
+handle DebugHandle = "dbg_";
+/// Signed or checked receipt.
+handle ReceiptHandle = "receipt_";
+/// Repair transaction (`schemas/repair-transaction.schema.json`).
+handle RepairHandle = "rt_";
+/// Forge synthesis archive.
+handle ForgeHandle = "forge_";
+/// Resumable task continuation.
+handle ContinuationHandle = "cont_";
+/// Capability token. Minted randomly; confers authority.
+handle CapabilityHandle = "cap_";
+/// Semantic or intent diff (`schemas/semantic-diff.schema.json`).
+handle DiffHandle = "diff_";
+/// Engine-defect report (plan §4.7).
+handle DefectHandle = "defect_";
+
+/// Any handle of any registered artifact class. Used where an operation
+/// accepts or returns artifacts of several classes; the prefix names the
+/// class.
+alias ArtifactHandle = String @pattern("^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$");
+
+/// Client-unique request identifier, echoed in the result.
+alias RequestId = String @pattern("^req_[A-Za-z0-9_-]+$");
+
+/// Actor identity, e.g. `agent:repairer-1`, `human:bob`, `service:tlc`.
+alias ActorId = String @pattern("^(agent|human|service|ci):[A-Za-z0-9._:-]+$");
+
+/// Protocol version, `MAJOR.MINOR`, no leading zeros.
+alias ProtocolVersion = String @pattern("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$");
+
+/// The content identity of one epoch (plan §4.6). Printable ASCII with
+/// no spaces, e.g. `cml/0.2`, `leanprover/lean4:v4.32.1`,
+/// `tla-examples@91c22ea`. Compared exactly; never ordered.
+alias EpochIdentity = String @pattern("^[!-~]+$");
+
+/// Content commitment (hash) in the dossier's canonical digest form.
+alias Commitment = String;
+
+/// Opaque, deterministic pagination cursor.
+alias PageToken = String;
+
+/// Stable identifier of an operation in the plan §10.2 registry.
+alias OperationName = String @pattern("^[a-z]+\\.[a-z_]+$");
+
+
+// ---------------------------------------------------------------------
+// 5. Common vocabularies
+//
+// Most enums below are the wire form of a vocabulary already fixed by the
+// dossier; the citation in each doc comment is the source of truth for
+// its members. A generator MUST NOT invent members, and a schema
+// generated from this file MUST agree member-for-member with the cited
+// JSON Schema. Where a doc comment carries no citation, the dossier had
+// no vocabulary and this file is the first normative definition:
+// `Encoding`, `Audience`, `DiffLayer`, `TargetKind`,
+// `ExplorationStrategy`, `StructuralOutcome`, `DiagnosticSeverity`,
+// `TaskEventKind`, and `EvidenceEventKind` are registered here.
+// `Portfolio` and `ExplanationLevel` are promoted here from the
+// non-normative sketches that named them (docs/55, RFC 0039).
+// ---------------------------------------------------------------------
+
+/// The five authority levels, ordered `read < propose < execute <
+/// revise-intent < promote` (RFC 0027). Agent-facing installations MUST
+/// omit `promote` and `revise_intent` by default.
+enum AuthorityLevel {
+  read,
+  propose,
+  execute,
+  revise_intent = "revise-intent",
+  promote,
+}
+
+/// Wire encoding of a connection. One encoding per connection,
+/// negotiated at open; canonical field order is identical in both.
+enum Encoding {
+  /// Canonical JSON (ADR-0013 canonical form), for debugging.
+  canonical_json,
+  /// CBOR with the same canonical field order, for performance.
+  canonical_cbor,
+}
+
+/// Result-envelope status (RFC 0026, "Result envelope").
+enum ResultStatus {
+  /// The operation completed; `verdict` carries its typed outcome.
+  ok,
+  /// The operation failed; `error` is present and `verdict` is null.
+  error,
+  /// A long operation was started; `task` is present.
+  task_started,
+  /// A long operation suspended; `task` and `continuation` are present.
+  task_suspended,
+}
+
+/// Task lifecycle states (plan §4.1;
+/// `schemas/verification-task.schema.json`).
+enum TaskStatus {
+  created,
+  running,
+  suspended,
+  completed,
+  failed,
+  cancelled,
+}
+
+/// Claim-level verdict vocabulary
+/// (`schemas/assurance-result.schema.json`). Budget exhaustion is never
+/// a verdict; `Unsupported` and engine errors are not verdicts either —
+/// they are `inconclusive` with a typed reason (INV-008).
+enum SemanticVerdict {
+  established,
+  refuted,
+  inconclusive,
+}
+
+/// Evaluation-outcome vocabulary of a Context Pack
+/// (`schemas/context-pack.schema.json`).
+enum EvaluationVerdict {
+  satisfied,
+  refuted,
+  deadlock,
+  inconclusive,
+}
+
+/// Typed `Inconclusive` reason required by INV-008 wherever a verdict is
+/// `inconclusive` (`schemas/assurance-result.schema.json`).
+enum InconclusiveReason {
+  Unsupported,
+  ResourceExhausted,
+  EngineError,
+  InsufficientTelemetry,
+  AbstractionAmbiguity,
+  IncompleteProofSearch,
+}
+
+/// Evidence-graph status lattice (plan §11.4, RFC 0038). There is no
+/// `draft` status. Promotion into `validated` or `proved` is
+/// service-restricted; agent votes and confidence never change status.
+enum EvidenceStatus {
+  proposed,
+  observed,
+  sampled,
+  bounded,
+  validated,
+  proved,
+  refuted,
+  inconclusive,
+  superseded,
+}
+
+/// Assurance class of a result (`schemas/context-pack.schema.json`).
+enum AssuranceClass {
+  observed,
+  sampled,
+  bounded,
+  validated,
+  proved,
+}
+
+/// Evidence kinds (`schemas/assurance-result.schema.json`).
+enum EvidenceKind {
+  example,
+  sampled,
+  bounded_schedules = "bounded-schedules",
+  dpor_complete = "dpor-complete",
+  finite_exact = "finite-exact",
+  symbolic_bounded = "symbolic-bounded",
+  inductive,
+  parameterized,
+  liveness_proof = "liveness-proof",
+  refinement_proof = "refinement-proof",
+  production_observation = "production-observation",
+  differential,
+  certificate,
+}
+
+/// Evidence-graph node kinds (`schemas/evidence-graph-node.schema.json`).
+enum EvidenceNodeKind {
+  intent_claim,
+  assumption,
+  property,
+  model,
+  program,
+  proof_goal,
+  candidate,
+  invariant_candidate,
+  ranking_candidate,
+  abstraction_map,
+  counterexample,
+  explanation,
+  repair_hypothesis,
+  patch,
+  run,
+  certificate,
+  receipt,
+  benchmark_result,
+  conflict,
+  decision,
+}
+
+/// The 13 evidence-graph edge types (plan §11.3,
+/// `schemas/evidence-graph-edge.schema.json`).
+enum EvidenceEdgeKind {
+  SUPPORTS,
+  REFUTES,
+  DEPENDS_ON,
+  REFINES,
+  EXPLAINS,
+  REPAIRS,
+  INVALIDATES,
+  GENERALIZES,
+  COUNTEREXAMPLE_TO,
+  CHECKED_BY,
+  DERIVED_FROM,
+  CONFLICTS_WITH,
+  SUPERSEDES,
+}
+
+/// Semantic fragment (`schemas/intent-contract.schema.json`).
+enum Fragment {
+  Finite,
+  Symbolic,
+  Temporal,
+  Probabilistic,
+  Theorem,
+  Runtime,
+}
+
+/// Policy decision of a diff or gate evaluation
+/// (`schemas/semantic-diff.schema.json`).
+enum PolicyDecision {
+  allow,
+  review,
+  block,
+}
+
+/// Omission reason (INV-007; `schemas/context-pack.schema.json`).
+enum OmissionReason {
+  budget,
+  redaction,
+  unsupported,
+  heuristic_cutoff = "heuristic-cutoff",
+  slice_irrelevant = "slice-irrelevant",
+}
+
+/// Reason a value was redacted (plan §4.5;
+/// `schemas/redacted.schema.json`).
+enum RedactionReason {
+  summarized,
+  lost,
+  purged,
+}
+
+/// Typed per-artifact-class compatibility statement published by every
+/// epoch advance (plan §4.6).
+enum Compatibility {
+  Preserved,
+  Revalidate,
+  Incompatible,
+}
+
+/// Scheduling priority class of a task
+/// (`schemas/verification-task.schema.json`).
+enum PriorityClass {
+  interactive,
+  ci,
+  background,
+}
+
+/// Intended reader of a result's context payload. Advisory for
+/// selection and rendering; it never changes a verdict, never widens
+/// authority, and never suppresses an omission or an uncertainty
+/// (RFC 0027 Safety).
+enum Audience {
+  agent,
+  human,
+  ci,
+}
+
+/// Verification portfolio profile (docs/55 sketch, normative here).
+enum Portfolio {
+  interactive,
+  promotion,
+  custom,
+}
+
+/// The 12 repair gates, in order
+/// (`schemas/repair-transaction.schema.json`, plan §8.2).
+enum GateName {
+  base_replay,
+  patch_application,
+  intent_integrity,
+  exact_regression,
+  neighborhood,
+  property_mutation,
+  defect_mutants,
+  refinement_coverage,
+  certificate_rebuild,
+  incremental_parity,
+  code_and_security,
+  receipt_generation,
+}
+
+/// Gate outcome (`schemas/repair-transaction.schema.json`).
+enum GateStatus {
+  passed,
+  failed,
+  pending,
+  inconclusive,
+  not_yet_enforced,
+}
+
+/// Expansion relation vocabulary (RFC 0027 "Context policy").
+enum ExpansionRelation {
+  causal_predecessors,
+  causal_successors,
+  conflicts_with,
+  same_owner,
+  property_automaton_step,
+  proof_dependency,
+  source_span,
+  assumption_uses,
+  abstraction_of,
+  refinement_of,
+  alternate_branch,
+}
+
+/// What an operation is aimed at.
+@open
+enum TargetKind {
+  property,
+  claim,
+  obligation,
+  refinement,
+  module,
+  program,
+  benchmark_task,
+  all_claims,
+}
+
+
+// ---------------------------------------------------------------------
+// 6. Envelopes
+// ---------------------------------------------------------------------
+
+/// The budget dimensions of `schemas/verification-task.schema.json`.
+/// The same nine dimensions are used for requested budget, reported
+/// cost, and quota accounting; no other dimension exists (plan §8.6,
+/// SD-12 "one budget/cost dimension list").
+struct Budget {
+  wall_ms: DurationMs optional;
+  cpu_ms: DurationMs optional;
+  memory_bytes: ByteCount optional;
+  states: U64 optional;
+  solver_ms: DurationMs optional;
+  proof_ms: DurationMs optional;
+  /// Advisory and tokenizer-relative; never the enforced contract.
+  tokens: U64 optional;
+  candidates: U64 optional;
+  /// The enforced context contract (RFC 0027).
+  bytes: ByteCount optional;
+}
+
+/// Actual spend, reported in the same nine dimensions as `Budget`.
+/// A dimension the engine does not measure is absent, never zero.
+struct Cost {
+  wall_ms: DurationMs optional;
+  cpu_ms: DurationMs optional;
+  memory_bytes: ByteCount optional;
+  states: U64 optional;
+  solver_ms: DurationMs optional;
+  proof_ms: DurationMs optional;
+  tokens: U64 optional;
+  candidates: U64 optional;
+  bytes: ByteCount optional;
+  /// Tokenizer identity, REQUIRED whenever `tokens` is reported.
+  tokenizer_id: String optional;
+}
+
+/// Bounds on what the daemon returns (RFC 0026 request envelope,
+/// RFC 0027 "Context policy").
+struct OutputPolicy {
+  /// Enforced byte ceiling on the result payload.
+  max_bytes: ByteCount optional;
+  /// Advisory token ceiling; bytes remain the enforced contract.
+  max_tokens: U64 optional;
+  /// Ceiling on returned graph nodes.
+  max_nodes: U64 optional;
+  audience: Audience optional;
+}
+
+/// W3C Trace Context / OpenTelemetry propagation.
+struct TraceContext {
+  traceparent: String required;
+  tracestate: String optional;
+}
+
+/// Page request for a list-returning operation.
+struct Page {
+  page_size: U32 optional;
+  page_token: PageToken optional;
+}
+
+/// The epochs a result, artifact, or continuation is pinned to.
+///
+/// All six independently versioned epochs (docs/12 §7,
+/// `crates/continuum-value/src/epoch.rs`) MUST be named in every result:
+/// an epoch the daemon cannot pin reads `null` — a named absence, never
+/// an omitted field. `engine` is engine identity (plan §4.7
+/// "Engine-defect lifecycle"), not one of the six; it is carried here
+/// because continuations pin it.
+struct EpochSet {
+  /// The negotiated protocol version; never null on a served
+  /// connection.
+  protocol: ProtocolVersion required;
+  semantic: EpochIdentity nullable;
+  intent: EpochIdentity nullable;
+  evidence: EpochIdentity nullable;
+  proof: EpochIdentity nullable;
+  corpus: EpochIdentity nullable;
+  /// Engine identity (plan §4.7), pinned by continuations.
+  engine: EpochIdentity nullable;
+}
+
+/// A typed `Redacted(reason, commitment)` stub (plan §4.5;
+/// `schemas/redacted.schema.json`). A redacted value is reported, never
+/// silently dropped; claims requiring the hidden data downgrade per plan
+/// §18.4.
+struct Redacted {
+  redacted: Bool required;
+  reason: RedactionReason required;
+  commitment: Commitment required;
+  /// Artifact class of the redacted original (plan §4.4 prefix).
+  original_class: String required;
+}
+
+/// One dimension of the nine-dimension assurance envelope (plan B11;
+/// `schemas/assurance-result.schema.json`): it names its producing
+/// engine or carries a typed `Unsupported(reason)`. A dimension is never
+/// silently omitted.
+union EnvelopeDimension {
+  produced(ProducedDimension),
+  unsupported(UnsupportedDimension),
+}
+
+struct ProducedDimension {
+  engine: String required;
+  summary: String required;
+}
+
+struct UnsupportedDimension {
+  /// Typed reason, e.g. `sequential-consistency-only`.
+  reason: String required;
+}
+
+/// The nine-dimension assurance envelope. All nine dimensions are
+/// REQUIRED on every semantic verdict (plan B11); the member list is
+/// identical to `schemas/assurance-result.schema.json` and
+/// `schemas/context-pack.schema.json`, which the validator holds
+/// identical to each other (SD-12).
+struct AssuranceEnvelope {
+  bounds: EnvelopeDimension required;
+  faults: EnvelopeDimension required;
+  fairness: EnvelopeDimension required;
+  values: EnvelopeDimension required;
+  schedules: EnvelopeDimension required;
+  memory_model: EnvelopeDimension required;
+  observer: EnvelopeDimension required;
+  proof_status: EnvelopeDimension required;
+  unknowns: EnvelopeDimension required;
+}
+
+/// A typed artifact reference in a result.
+struct ArtifactRef {
+  /// Artifact class, the plan §4.4 prefix without the underscore.
+  kind: String required;
+  handle: ArtifactHandle required;
+  /// Content commitment, when the artifact is content-addressed.
+  commitment: Commitment optional;
+  /// Present when the referenced content is redacted (plan §4.5).
+  redacted: Redacted optional;
+}
+
+/// Something the result deliberately left out (INV-007).
+struct Omission {
+  reason: OmissionReason required;
+  /// What was omitted, in typed terms — never free-form prose about the
+  /// user's source.
+  subject: String required;
+  /// Handle whose expansion would recover it, when one exists.
+  recoverable_by: ArtifactHandle optional;
+}
+
+/// A typed warning. Warnings never carry interpolated source text
+/// (INV-016).
+struct Warning {
+  code: String required;
+  detail: String required;
+}
+
+/// A typed diagnostic attached to a structural operation.
+struct Diagnostic {
+  severity: DiagnosticSeverity required;
+  code: String required;
+  detail: String required;
+  /// Source correspondence, when the diagnostic has one.
+  span: SourceSpan optional;
+}
+
+enum DiagnosticSeverity {
+  error,
+  warning,
+  note,
+}
+
+struct SourceSpan {
+  file: String required;
+  start_line: U32 required;
+  start_column: U32 required;
+  end_line: U32 required;
+  end_column: U32 required;
+}
+
+/// An allowed next operation with pre-filled arguments. This is the safe
+/// recovery and discovery surface (plan §0.2): a client MAY execute it
+/// as given. It is never a command string, never shell, and never
+/// contains interpolated source, log, or model text (INV-016).
+struct NextOperation {
+  operation: OperationName required;
+  /// Arguments matching that operation's request struct.
+  arguments: Opaque required;
+  /// Why this operation is offered, in typed terms.
+  rationale: String optional;
+}
+
+/// The stable error codes of plan §10.3.
+///
+/// `@open` per `rule versioning.error_codes`: a client MUST treat an
+/// unrecognized code as a non-retryable typed failure.
+@open
+enum ErrorCode {
+  /// The named snapshot is not the current one, or is not sealed where
+  /// sealing is required.
+  StaleSnapshot,
+  /// The request needs a semantic feature this daemon does not
+  /// implement. Registered-but-unshipped operations use this code.
+  UnsupportedSemanticFeature,
+  /// A protected Intent Contract field was mutated without the
+  /// `revise-intent` capability, or against an intent lock (plan §5.4).
+  IntentMutationDenied,
+  /// The evidence present does not meet the required assurance class.
+  InsufficientEvidence,
+  /// Task budget was exhausted. Never a semantic verdict (docs/49); it
+  /// carries the continuation when one exists, or a typed
+  /// `non_resumable_reason`.
+  BudgetExhausted,
+  /// A continuation's pinned engine or semantic epoch does not match the
+  /// daemon's current epochs. The daemon MUST NOT silently re-run.
+  ContinuationEpochMismatch,
+  /// A source construct maps to more than one semantic element and the
+  /// correspondence cannot be decided (plan §16).
+  AmbiguousCorrespondence,
+  /// The request crosses a trust boundary the Intent Contract does not
+  /// authorize (plan §18).
+  UntrustedDomainBoundary,
+  /// An independent checker rejected a certificate or proof artifact.
+  CertificateRejected,
+  /// A replay diverged from the recorded execution.
+  ReplayDiverged,
+  /// The presented capability's level or scope does not permit the
+  /// operation. Checked before any semantic work runs (RFC 0027).
+  CapabilityDenied,
+  /// A promotion gate or intent policy blocked the operation.
+  PolicyGateFailed,
+  /// An intent bundle's acceptance signature chain failed verification,
+  /// or the referenced bundle is absent. CI fails closed on this code
+  /// (plan §4.2.1, RFC 0037).
+  AcceptanceChainInvalid,
+  /// An evidence-graph status promotion lost its compare-and-set against
+  /// the claim's current status (plan §11.7, RFC 0038). Re-read and
+  /// retry; the lattice never regresses.
+  StatusConflict,
+  /// A capability's concurrency or resource quota is exhausted (plan
+  /// §4.5). Distinct from `BudgetExhausted`, which is task-budget spend
+  /// and carries a continuation.
+  QuotaExhausted,
+  /// An artifact or continuation declares a schema or semantic epoch
+  /// unknown or incompatible with this daemon. Typed rejection, never
+  /// best-effort decoding (docs/09 T13).
+  EpochUnsupported,
+  /// An atomic publication aborted (e.g. disk exhaustion, plan §4.5).
+  /// Nothing was published and nothing was truncated (INV-017).
+  PublicationAborted,
+  /// No protocol version is common to client and daemon, or the client's
+  /// major falls outside the N / N−1 window.
+  ProtocolVersionUnsupported,
+  /// The same `idempotency_key` was replayed with a different canonical
+  /// request.
+  IdempotencyKeyReused,
+  /// The request does not parse, does not validate against this file, or
+  /// uses an unknown closed-enum member.
+  MalformedRequest,
+}
+
+/// A typed error. `recovery` is the only recovery channel: a list of
+/// allowed operations with pre-filled arguments, never free-form
+/// commands (RFC 0026 "Rejected alternatives").
+struct Error {
+  code: ErrorCode required;
+  /// Stable, non-interpolated explanation of the code in context.
+  detail: String required;
+  /// Typed, machine-readable specifics of this occurrence; the shape is
+  /// determined by `code`.
+  data: Opaque optional;
+  /// Allowed operations from this state.
+  recovery: list<NextOperation> required;
+  /// Present when the failure is resumable (`BudgetExhausted`).
+  continuation: ContinuationHandle optional;
+  /// Present when `BudgetExhausted` is not resumable: the typed reason
+  /// no continuation exists
+  /// (`schemas/verification-task.schema.json`).
+  non_resumable_reason: String optional;
+  /// Whether an identical retry can succeed without any change by the
+  /// caller.
+  retryable: Bool required;
+}
+
+/// The request envelope of every operation (RFC 0026).
+struct RequestEnvelope {
+  /// The negotiated protocol version. A request naming a different
+  /// version than the connection negotiated MUST be rejected with
+  /// `ProtocolVersionUnsupported`.
+  protocol_version: ProtocolVersion required;
+  request_id: RequestId required;
+  /// REQUIRED for `@mutation` operations, absent for `@readonly` ones.
+  idempotency_key: String optional;
+  actor: ActorId required;
+  /// Checked below the adapter, independently of handle possession.
+  capability: CapabilityHandle required;
+  operation: OperationName required;
+  /// Explicit null when the operation takes no snapshot. The field name
+  /// is `snapshot` everywhere, schemas included.
+  snapshot: WorkspaceHandle nullable;
+  /// Explicit null when the operation takes no intent.
+  intent: IntentHandle nullable;
+  /// The operation's request struct.
+  arguments: Opaque required;
+  /// REQUIRED for `@task_starting` operations.
+  budget: Budget optional;
+  output_policy: OutputPolicy optional;
+  trace: TraceContext optional;
+  /// Page request; REQUIRED to be honored by `@paginated` operations.
+  page: Page optional;
+}
+
+/// The result envelope of every operation (RFC 0026).
+struct ResultEnvelope {
+  request_id: RequestId required;
+  status: ResultStatus required;
+  /// Operation-specific typed verdict, never bare prose. Null when the
+  /// operation declares no `verdict` clause, and on `status = error`.
+  verdict: Verdict nullable;
+  /// Present exactly when `status = error`.
+  error: Error optional;
+  /// REQUIRED on every semantic verdict (plan B11). Every dimension
+  /// names a producer or reads `Unsupported`.
+  assurance: AssuranceEnvelope optional;
+  artifacts: list<ArtifactRef> required;
+  /// Present when `status` is `task_started` or `task_suspended`, and on
+  /// results of task-observing operations.
+  task: TaskHandle optional;
+  /// Present when `status = task_suspended`, and on a resumable failure.
+  continuation: ContinuationHandle optional;
+  /// The INV-007 omission manifest. Empty list means nothing was
+  /// omitted; the field is never absent.
+  omissions: list<Omission> required;
+  warnings: list<Warning> required;
+  /// Actual spend per budget dimension.
+  cost: Cost required;
+  /// All six epochs, each pinned or explicitly null.
+  epochs: EpochSet required;
+  /// Allowed operations from this state — the safe recovery and
+  /// discovery surface (plan §0.2).
+  next_operations: list<NextOperation> required;
+  /// Present on `@paginated` operations; null on the last page.
+  next_page_token: PageToken optional;
+  /// The operation's response struct. Null on `status = error`.
+  payload: Opaque nullable;
+}
+
+/// The typed verdict families. An operation's `verdict` clause names the
+/// variant it returns; an operation without a `verdict` clause returns
+/// `verdict: null`.
+union Verdict {
+  /// Claim-level verdict plus its INV-008 reason when inconclusive.
+  semantic(SemanticVerdictValue),
+  /// Evaluation outcome of a run or check.
+  evaluation(EvaluationVerdictValue),
+  /// Outcome of a policy or gate decision.
+  policy(PolicyVerdictValue),
+  /// Outcome of a structural (non-semantic) operation.
+  structural(StructuralVerdictValue),
+}
+
+struct SemanticVerdictValue {
+  verdict: SemanticVerdict required;
+  /// REQUIRED when `verdict = inconclusive` (INV-008).
+  inconclusive_reason: InconclusiveReason optional;
+  /// The assurance class this verdict is supported at.
+  assurance_class: AssuranceClass required;
+}
+
+struct EvaluationVerdictValue {
+  verdict: EvaluationVerdict required;
+  /// REQUIRED when `verdict = inconclusive` (INV-008).
+  inconclusive_reason: InconclusiveReason optional;
+  assurance_class: AssuranceClass required;
+}
+
+struct PolicyVerdictValue {
+  decision: PolicyDecision required;
+  /// Gates evaluated, with their outcomes.
+  gates: list<GateOutcome> required;
+}
+
+struct StructuralVerdictValue {
+  outcome: StructuralOutcome required;
+}
+
+enum StructuralOutcome {
+  created,
+  updated,
+  sealed,
+  accepted,
+  rejected,
+  locked,
+  cancelled,
+  unchanged,
+  acknowledged,
+}
+
+struct GateOutcome {
+  name: GateName required;
+  status: GateStatus required;
+  evidence: list<EvidenceHandle> required;
+}
+
+rule envelope.no_prose {
+  """
+  Every result field is typed. A daemon MUST NOT return prose in place of
+  a verdict, a status, or a reason, and MUST NOT interpolate source,
+  logs, model text, or production payloads into `detail`, `rationale`,
+  `next_operations`, or any tool description (INV-003, INV-016). Prose
+  renderings are adapter projections of these fields.
+  """
+}
+
+rule envelope.assurance_required {
+  """
+  A result whose `verdict` is `semantic` or `evaluation` MUST carry the
+  nine-dimension `assurance` envelope, and every dimension MUST name a
+  producing engine or carry a typed `Unsupported(reason)` (plan B11).
+  Hiding uncertainty to save tokens is prohibited (RFC 0027 Safety).
+  """
+}
+
+rule envelope.epochs_named {
+  """
+  Every result MUST name all six epochs. An epoch the result cannot pin
+  reads null; it is never an absent field. An unsupported or empty task
+  still returns a valid machine result naming every epoch and carries no
+  success flag.
+  """
+}
+
+rule envelope.unknown_fields {
+  """
+  Within a protocol major, a daemon MUST ignore unknown `optional`
+  request fields and MUST NOT emit fields the negotiated version does not
+  define. A daemon MUST NOT best-effort decode an artifact whose declared
+  epoch it does not know: it returns `EpochUnsupported` (docs/09 T13).
+  """
+}
+
+rule idempotency.replay {
+  """
+  A mutation replayed with the same `idempotency_key` and a
+  byte-identical canonical request MUST return the same task or artifact
+  identity. The same key with a different request MUST be rejected with
+  `IdempotencyKeyReused`. Keys are scoped per actor and MUST be honored
+  for at least the retention window the daemon declares in
+  `ServerLimits.idempotency_retention_ms` (default 24h).
+  """
+}
+
+rule authorization.independent_of_handles {
+  """
+  The `capability` in the request envelope is checked below the adapter,
+  independently of handle possession, before any semantic work runs. A
+  call above the capability's level fails with `CapabilityDenied`.
+  Possession of an artifact handle never implies authorization
+  (ADR-0037). Every `@privileged` call is audit-recorded with actor,
+  capability, inputs, and decision (plan §18.5).
+  """
+}
+
+rule ordering.deterministic {
+  """
+  Every list a result returns MUST be deterministically ordered by
+  content identity or by an explicitly declared sort key. Two identical
+  requests against the same snapshot and epochs MUST return identical
+  bytes under the same encoding.
+  """
+}
+
+rule pagination.deterministic {
+  """
+  `@paginated` operations accept `page_size` and an opaque `page_token`
+  and return `next_page_token`, null on the last page. Paging MUST be
+  stable against the pinned snapshot and epochs: two identical page
+  requests return identical pages. A `page_token` minted under different
+  epochs MUST be rejected with `EpochUnsupported`.
+  """
+}
+
+
+// ---------------------------------------------------------------------
+// 7. Connection handshake and capability negotiation
+//
+// The handshake is connection-level, not an operation: it precedes any
+// request envelope and is therefore not part of the plan §10.2 operation
+// registry. Minting, scoping, delegating, and revoking capabilities is a
+// separate administrative surface (plan §4.5) that is out of scope for
+// this IDL version; see the Open items at the end of this file.
+// ---------------------------------------------------------------------
+
+/// Inclusive range of protocol versions a client accepts.
+struct VersionRange {
+  low: ProtocolVersion required;
+  high: ProtocolVersion required;
+}
+
+/// First frame on a connection, sent by the client.
+struct ClientHello {
+  /// The client's supported range. The daemon selects the highest common
+  /// version.
+  protocol_versions: VersionRange required;
+  /// Encodings the client accepts, most preferred first.
+  encodings: list<Encoding> required;
+  /// Client software identity, for the audit log.
+  client: String required;
+  actor: ActorId required;
+  /// The capability the connection presents. Every request on the
+  /// connection is authorized against a capability; a connection MAY
+  /// present a narrower one per request.
+  capability: CapabilityHandle required;
+  /// Optional feature identifiers the client understands. Unknown
+  /// identifiers MUST be ignored by the daemon.
+  features: list<String> optional;
+}
+
+/// Second frame, sent by the daemon on success.
+struct ServerWelcome {
+  /// The selected version: the highest one common to both sides.
+  protocol_version: ProtocolVersion required;
+  encoding: Encoding required;
+  /// The majors this daemon serves concurrently: N and N−1.
+  majors_served: list<U32> required;
+  /// Daemon software identity, for the audit log and defect reports.
+  server: String required;
+  /// The authority the presented capability actually confers, after
+  /// scoping. A client MUST NOT infer authority from anything else.
+  grant: CapabilityDescriptor required;
+  limits: ServerLimits required;
+  /// Feature identifiers the daemon supports, intersected with the
+  /// client's.
+  features: list<String> required;
+  /// The epochs this daemon is currently serving new work under.
+  epochs: EpochSet required;
+  /// Epoch advances announced but not yet applied. Plan §4.6 requires
+  /// each advance to publish its typed per-artifact-class compatibility
+  /// statement before it is applied; this is where a client reads it.
+  pending_advances: list<EpochAdvanceNotice> required;
+}
+
+/// An announced epoch advance (plan §4.6). Advancing never mutates an
+/// existing artifact: re-derived artifacts receive new identities linked
+/// to their predecessors by `SUPERSEDES` edges. The daemon may hold at
+/// most two epochs concurrently during migration; new work defaults to
+/// the newest, and continuations resume only under their pinned epoch.
+struct EpochAdvanceNotice {
+  /// Which epoch advances: `protocol`, `semantic`, `intent`,
+  /// `evidence`, `proof`, or `corpus`.
+  epoch: String required;
+  from: EpochIdentity required;
+  to: EpochIdentity required;
+  /// Compatibility statement per artifact class, keyed by the plan §4.4
+  /// class prefix.
+  compatibility: map<String, Compatibility> required;
+  /// Estimated invalidation blast radius by artifact class.
+  blast_radius: map<String, U64> required;
+}
+
+/// What a `cap_*` capability confers (RFC 0027 "Authority levels and
+/// capabilities").
+struct CapabilityDescriptor {
+  capability: CapabilityHandle required;
+  actor: ActorId required;
+  level: AuthorityLevel required;
+  /// Snapshots in scope; empty means unrestricted within `level`.
+  snapshots: list<WorkspaceHandle> required;
+  /// Intents in scope; empty means unrestricted within `level`.
+  intents: list<IntentHandle> required;
+  /// Artifact classes in scope, as plan §4.4 prefixes; empty means all.
+  artifact_classes: list<String> required;
+  expires_at: Timestamp nullable;
+  /// Whether the holder may delegate, and how deeply.
+  delegation_depth: U32 required;
+}
+
+/// Server-declared operational limits, negotiated once per connection.
+struct ServerLimits {
+  /// Minimum time idempotency keys are honored. Default 86_400_000 ms.
+  idempotency_retention_ms: DurationMs required;
+  max_page_size: U32 required;
+  max_result_bytes: ByteCount required;
+  /// Concurrency quota this capability draws on; `QuotaExhausted` is
+  /// returned when it is exceeded.
+  max_concurrent_tasks: U32 required;
+}
+
+rule handshake.negotiation {
+  """
+  At connection open the client sends `ClientHello` and the daemon
+  replies with `ServerWelcome` naming the highest version common to the
+  client's range and the daemon's served set, or rejects the connection
+  with `ProtocolVersionUnsupported`. The daemon MUST NOT select a version
+  outside the client's range. The daemon MUST serve majors N and N−1; a
+  client on the previous major is rejected only when it falls outside
+  this window. One encoding is selected for the life of the connection.
+  """
+}
+
+rule handshake.no_session_state {
+  """
+  The handshake establishes version, encoding, and authority only. No
+  semantic state is session-scoped: a dropped connection MUST NOT change
+  the meaning of anything (INV-002). Reconnecting with the same handles
+  and a valid capability continues the work.
+  """
+}
+
+
+// ---------------------------------------------------------------------
+// 8. Tasks, continuations, and streams
+// ---------------------------------------------------------------------
+
+/// A task record, as returned by `task.status`
+/// (`schemas/verification-task.schema.json` is the artifact form).
+struct TaskRecord {
+  task: TaskHandle required;
+  operation: OperationName required;
+  status: TaskStatus required;
+  snapshot: WorkspaceHandle nullable;
+  intent: IntentHandle nullable;
+  /// Typed terminal reason; REQUIRED when `status = failed`. A `Failed`
+  /// task is never silent (plan §4.5).
+  failed_reason: ErrorCode optional;
+  /// REQUIRED when `status = suspended`; a suspended task is resumable
+  /// by definition (plan §11.4).
+  continuation: ContinuationHandle optional;
+  /// REQUIRED when `failed_reason = BudgetExhausted` and no continuation
+  /// exists.
+  non_resumable_reason: String optional;
+  budget: Budget required;
+  cost: Cost required;
+  epochs: EpochSet required;
+  priority_class: PriorityClass required;
+  /// Semantic milestones reached so far, in order.
+  milestones: list<Milestone> required;
+  /// Evidence committed so far. Monotonic: entries are never removed.
+  committed_evidence: list<EvidenceHandle> required;
+}
+
+struct Milestone {
+  name: String required;
+  at: Timestamp required;
+}
+
+/// A progress event on a task subscription. Events are hints; committed
+/// artifacts and `task.status` are authoritative.
+struct TaskEvent {
+  task: TaskHandle required;
+  at: Timestamp required;
+  kind: TaskEventKind required;
+  milestone: Milestone optional;
+  cost: Cost optional;
+  status: TaskStatus optional;
+}
+
+enum TaskEventKind {
+  milestone,
+  progress,
+  status_change,
+  evidence_committed,
+}
+
+/// A committed evidence-graph delta on an evidence subscription. Unlike
+/// task progress events, evidence deltas reference committed artifacts.
+struct EvidenceEvent {
+  at: Timestamp required;
+  kind: EvidenceEventKind required;
+  node: EvidenceHandle optional;
+  edge: EvidenceHandle optional;
+  /// Status after the transition, for `status_transition` events.
+  status: EvidenceStatus optional;
+  /// The claim whose status changed.
+  claim_id: String optional;
+}
+
+enum EvidenceEventKind {
+  node_published,
+  edge_published,
+  status_transition,
+  conflict_materialized,
+}
+
+rule task.no_generic_start {
+  """
+  There is no generic `task.start`. Long operations are started by the
+  `@task_starting` operations declared in this file
+  (`verification.start`, `model.check`, `forge.create`, and peers). Each
+  is idempotent under `idempotency_key`.
+  """
+}
+
+rule task.status_monotonic {
+  """
+  `task.status` is monotonic: reported milestones and committed evidence
+  only grow, and a terminal status never changes. A `Failed` task always
+  carries a typed `failed_reason`; there is no silent failure (plan
+  §4.5).
+  """
+}
+
+rule task.cancel_correct {
+  """
+  `task.cancel` triggers request, drain, finalize. It MUST leave either
+  committed partial evidence plus a valid continuation, or nothing
+  published (INV-009, plan B19). Cancellation MUST NOT truncate a
+  publication in progress (INV-017).
+  """
+}
+
+rule task.resume {
+  """
+  `task.resume` validates continuation identity, snapshot, and epochs.
+  Stale inputs are rejected with `StaleSnapshot`; mismatched epochs with
+  `ContinuationEpochMismatch`; an epoch the daemon no longer holds with
+  `EpochUnsupported`. Resume MAY add evidence; it MUST NOT replace prior
+  artifacts under the same identity.
+  """
+}
+
+rule task.update_budget {
+  """
+  `task.update_budget` adjusts the budget of a running task. Raising a
+  dimension extends the current run. Lowering a dimension below committed
+  spend triggers suspension-with-continuation (plan B18): the task
+  transitions to `Suspended` with committed partial evidence plus a valid
+  continuation. Silent truncation of a campaign is prohibited (INV-009).
+  """
+}
+
+rule subscription.hints_only {
+  """
+  `task.subscribe` streams progress events; they are hints. Committed
+  artifacts and `task.status` are authoritative. `evidence.subscribe`
+  streams typed evidence-graph deltas for a declared scope; the graph
+  itself remains authoritative on reconnect. A dropped subscription
+  changes nothing (INV-002); a client MUST be able to recover the same
+  state by re-reading.
+  """
+}
+
+rule errors.common {
+  """
+  Every operation MAY additionally return `MalformedRequest`,
+  `ProtocolVersionUnsupported`, `CapabilityDenied`, `QuotaExhausted`, and
+  `EpochUnsupported`; every `@mutation` operation MAY additionally return
+  `IdempotencyKeyReused` and `PublicationAborted`; every operation taking
+  a non-null `snapshot` MAY additionally return `StaleSnapshot`. An
+  operation's `errors` clause lists the codes it may return beyond these.
+  A daemon MUST NOT return a code outside that union for the operation.
+  """
+}
+
+rule errors.unsupported_surface {
+  """
+  Operations registered in plan §10.2 ahead of their producing subsystem
+  (the `observe` family, and any operation whose lane has not shipped)
+  MUST fail with the typed `UnsupportedSemanticFeature` rather than
+  degrading, guessing, or returning an empty success.
+  """
+}
+
+
+// ---------------------------------------------------------------------
+// 9. Shared operation types
+// ---------------------------------------------------------------------
+
+/// What an operation is aimed at.
+struct Target {
+  kind: TargetKind required;
+  id: String required;
+}
+
+/// Content identities of the ten plan §4.2 snapshot components
+/// (`schemas/workspace-snapshot.schema.json`).
+struct SnapshotComponents {
+  files: list<Commitment> required;
+  cml_modules: list<Commitment> required;
+  rust_extraction: list<Commitment> required;
+  domain_packs: list<Commitment> required;
+  dependencies: list<Commitment> required;
+  /// Toolchain and semantic epochs of the snapshot. The protocol epoch
+  /// is a connection property and is NOT part of snapshot identity
+  /// (plan §4.6; SD-13).
+  epochs: SnapshotEpochs required;
+  /// Reference to the governing Intent Contract — the identity only,
+  /// never the contract itself (plan §4.2, INV-001).
+  intent: IntentHandle required;
+  correspondence: list<Commitment> required;
+  proof_environment: list<Commitment> required;
+  configuration: list<Commitment> required;
+}
+
+struct SnapshotEpochs {
+  semantic: EpochIdentity required;
+  proof: EpochIdentity required;
+  toolchain: EpochIdentity optional;
+}
+
+/// An in-memory editor buffer overlaid on a snapshot's files.
+struct FileOverlay {
+  path: String required;
+  content: Bytes required;
+}
+
+/// Policy governing whether and how a Context Pack is compiled with a
+/// result (RFC 0027 "Context policy").
+struct ContextPolicy {
+  /// Compile a Context Pack on failure. Default behavior when absent is
+  /// to compile one pack plus `next_operations`.
+  compile_on_failure: Bool required;
+  audience: Audience optional;
+  budget: Budget optional;
+}
+
+/// A change proposed to an Intent Contract.
+struct IntentChangeSet {
+  /// The contract fields being changed, with their proposed values, in
+  /// the form of `schemas/intent-contract.schema.json`.
+  changes: Opaque required;
+  /// Free of untrusted interpolation; typed rationale for reviewers.
+  rationale: String required;
+}
+
+/// A filter over the evidence graph.
+struct EvidenceQuery {
+  node_kinds: list<EvidenceNodeKind> optional;
+  edge_kinds: list<EvidenceEdgeKind> optional;
+  statuses: list<EvidenceStatus> optional;
+  /// Claim identity or property identifier to scope the query to.
+  claim_id: String optional;
+  /// Roots to traverse from; empty means the whole graph in scope.
+  roots: list<EvidenceHandle> optional;
+  max_depth: U32 optional;
+}
+
+
+// =====================================================================
+// 10. Operations
+//
+// The complete plan §10.2 registry: 72 operations in 18 namespaces.
+// Each operation's `authority` clause mirrors RFC 0027's registry table
+// exactly; a generator MUST fail if the two disagree.
+// =====================================================================
+
+// --- workspace -------------------------------------------------------
+
+/// Create an immutable workspace snapshot from content identities, a
+/// working tree, or an overlay (plan §4.2). A tool call never means
+/// "whatever is on disk"; it means a named snapshot.
+@mutation
+operation workspace.create {
+  authority propose;
+  request {
+    components: SnapshotComponents required;
+    /// Editor buffers overlaid on `components`.
+    overlay: list<FileOverlay> optional;
+    /// Seal the snapshot on creation.
+    seal: Bool optional;
+  };
+  response {
+    snapshot: WorkspaceHandle required;
+    sealed: Bool required;
+    diagnostics: list<Diagnostic> required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, AcceptanceChainInvalid];
+}
+
+/// Fork an existing snapshot, optionally applying patches or overlays.
+/// The fork preserves the intent binding by identity; rebinding a
+/// lineage to a different intent is privileged and produces an intent
+/// diff (plan §4.2, INV-001).
+@mutation
+operation workspace.fork {
+  authority propose;
+  request {
+    base: WorkspaceHandle required;
+    overlay: list<FileOverlay> optional;
+    /// Patch content identities to apply to the base.
+    patches: list<Commitment> optional;
+  };
+  response {
+    snapshot: WorkspaceHandle required;
+    /// The preserved intent binding.
+    intent: IntentHandle required;
+    /// Pre-computed diff against the base, when available without
+    /// evaluation.
+    pre_diff: DiffHandle optional;
+    diagnostics: list<Diagnostic> required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Diff two snapshots at the requested layers, producing a
+/// `schemas/semantic-diff.schema.json` artifact (RFC 0031).
+@readonly @task_starting
+operation workspace.diff {
+  authority propose;
+  request {
+    before: WorkspaceHandle required;
+    after: WorkspaceHandle required;
+    /// Layers to compute: textual, structural, semantic, intent.
+    layers: list<DiffLayer> required;
+  };
+  response {
+    diff: DiffHandle required;
+    /// The diff artifact, inline, in the form of
+    /// `schemas/semantic-diff.schema.json`.
+    summary: Opaque required;
+  };
+  verdict PolicyVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted];
+}
+
+enum DiffLayer {
+  textual,
+  structural,
+  semantic,
+  intent,
+}
+
+/// Seal a snapshot as immutable. Sealed snapshots are the only valid
+/// semantic inputs; unsealed snapshots are rejected with
+/// `StaleSnapshot`.
+@mutation
+operation workspace.seal {
+  authority propose;
+  request {
+    snapshot: WorkspaceHandle required;
+  };
+  response {
+    snapshot: WorkspaceHandle required;
+    root_digest: Commitment required;
+  };
+  verdict StructuralVerdictValue;
+  errors [];
+}
+
+// --- intent ----------------------------------------------------------
+
+/// Return the canonical Intent Contract
+/// (`schemas/intent-contract.schema.json`).
+@readonly
+operation intent.get {
+  authority read;
+  request {
+    intent: IntentHandle required;
+  };
+  response {
+    intent: IntentHandle required;
+    contract: Opaque required;
+    /// Registry record, including protection status and acceptance
+    /// chain (`schemas/intent-registry-record.schema.json`).
+    record: Opaque required;
+  };
+  errors [AcceptanceChainInvalid];
+}
+
+/// Classify the changes between two Intent Contracts, with proof
+/// obligations and policy impact (plan §5.3, RFC 0031).
+@readonly
+operation intent.diff {
+  authority read;
+  request {
+    before: IntentHandle required;
+    after: IntentHandle required;
+  };
+  response {
+    diff: DiffHandle required;
+    summary: Opaque required;
+  };
+  verdict PolicyVerdictValue;
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Create a proposal. It cannot mutate existing intent: the result is a
+/// `Proposed` revision that gains INV-001 protection only through
+/// `intent.accept`.
+@mutation
+operation intent.propose_revision {
+  authority revise_intent;
+  request {
+    base: IntentHandle required;
+    changes: IntentChangeSet required;
+  };
+  response {
+    proposal: IntentHandle required;
+    diff: DiffHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [IntentMutationDenied, UnsupportedSemanticFeature];
+}
+
+/// Accept a proposed intent into the registry. The only transition from
+/// `Proposed` to protected status; never performed implicitly by any
+/// other operation (plan §5.4).
+@mutation @privileged @audit_recorded
+operation intent.accept {
+  authority revise_intent;
+  request {
+    proposal: IntentHandle required;
+    /// Acceptance record, including the signature chain to verify
+    /// (plan §4.2.1).
+    acceptance: Opaque required;
+    /// The signed intent bundle the acceptance record came from, when
+    /// the proposal was imported rather than authored locally. CI fails
+    /// closed with `AcceptanceChainInvalid` when the referenced bundle
+    /// is absent or its chain does not verify (plan §4.2.1).
+    bundle: IntentBundleHandle optional;
+  };
+  response {
+    intent: IntentHandle required;
+    record: Opaque required;
+  };
+  verdict StructuralVerdictValue;
+  errors [IntentMutationDenied, AcceptanceChainInvalid, PolicyGateFailed];
+}
+
+/// Reject a proposed intent revision with a typed reason.
+@mutation @privileged @audit_recorded
+operation intent.reject {
+  authority revise_intent;
+  request {
+    proposal: IntentHandle required;
+    reason: String required;
+  };
+  response {
+    proposal: IntentHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [IntentMutationDenied];
+}
+
+/// Edit the plan §5.4 policy table. Verbs are drawn from RFC 0037's
+/// closed set; free-form policy strings are rejected. Subsequent
+/// mutation attempts against a locked field fail with
+/// `IntentMutationDenied`.
+@mutation @privileged @audit_recorded
+operation intent.lock {
+  authority revise_intent;
+  request {
+    intent: IntentHandle required;
+    /// Field-to-verb policy table
+    /// (`schemas/intent-contract.schema.json` `policy_verb`).
+    policy: map<String, String> required;
+  };
+  response {
+    intent: IntentHandle required;
+    policy: map<String, String> required;
+  };
+  verdict StructuralVerdictValue;
+  errors [IntentMutationDenied, MalformedRequest];
+}
+
+// --- verification ----------------------------------------------------
+
+/// Start a verification campaign against a target under an intent and a
+/// budget. Returns a task handle, or a cached result when one exists for
+/// the same snapshot, intent, target, and epochs.
+@mutation @task_starting
+operation verification.start {
+  authority execute;
+  request {
+    target: Target required;
+    portfolio: Portfolio required;
+    context_policy: ContextPolicy optional;
+    priority_class: PriorityClass optional;
+  };
+  response {
+    task: TaskHandle optional;
+    /// Present instead of `task` when a cached result is returned.
+    result: VerificationResult optional;
+  };
+  errors [UnsupportedSemanticFeature, InsufficientEvidence, BudgetExhausted,
+          UntrustedDomainBoundary];
+}
+
+/// Return the typed result of a verification task.
+@readonly
+operation verification.result {
+  authority execute;
+  request {
+    task: TaskHandle required;
+  };
+  response VerificationResult;
+  verdict SemanticVerdictValue;
+  errors [BudgetExhausted, ContinuationEpochMismatch];
+}
+
+/// Block, within the request budget, on a started verification task and
+/// return its result. Returns `status = task_started` unchanged when the
+/// budget elapses first; waiting never changes a verdict.
+@readonly @task_starting
+operation verification.await {
+  authority execute;
+  request {
+    task: TaskHandle required;
+    timeout_ms: DurationMs optional;
+  };
+  response VerificationResult;
+  verdict SemanticVerdictValue;
+  errors [BudgetExhausted, ContinuationEpochMismatch];
+}
+
+struct VerificationResult {
+  task: TaskHandle required;
+  target: Target required;
+  /// The intent-scope fragments this result covers. A fragment the
+  /// campaign did not cover is reported in `omissions`, never implied.
+  fragments: list<Fragment> required;
+  /// Evidence roots this verdict rests on.
+  evidence: list<EvidenceHandle> required;
+  /// Counterexample, when the verdict is `refuted`.
+  crashpack: CrashpackHandle optional;
+  /// Compiled Context Pack, per `ContextPolicy`.
+  context: ContextHandle optional;
+  continuation: ContinuationHandle optional;
+}
+
+// --- model -----------------------------------------------------------
+
+/// Check a model against a property under intent and budget.
+@mutation @task_starting
+operation model.check {
+  authority execute;
+  request {
+    model: ModelHandle required;
+    target: Target required;
+    context_policy: ContextPolicy optional;
+  };
+  response VerificationResult;
+  verdict SemanticVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted, InsufficientEvidence];
+}
+
+/// Explore model behavior under a strategy and budget; returns
+/// explored-region evidence rather than a claim verdict.
+@mutation @task_starting
+operation model.explore {
+  authority execute;
+  request {
+    model: ModelHandle required;
+    strategy: ExplorationStrategy required;
+  };
+  response {
+    task: TaskHandle optional;
+    evidence: list<EvidenceHandle> required;
+    causal_graph: CausalGraphHandle optional;
+  };
+  verdict EvaluationVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted];
+}
+
+@open
+enum ExplorationStrategy {
+  dpor,
+  observer_indexed_dpor,
+  random_schedules,
+  symbolic_bounded,
+  unfolding,
+}
+
+/// Compare two models or configurations; returns a semantic diff
+/// artifact.
+@readonly @task_starting
+operation model.compare {
+  authority execute;
+  request {
+    before: ModelHandle required;
+    after: ModelHandle required;
+    layers: list<DiffLayer> required;
+  };
+  response {
+    diff: DiffHandle required;
+    summary: Opaque required;
+  };
+  verdict PolicyVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted];
+}
+
+// --- program ---------------------------------------------------------
+
+/// Extract the semantic model from a Rust crate snapshot and its
+/// annotations (plan §7).
+@mutation @task_starting
+operation program.extract {
+  authority execute;
+  request {
+    /// Crate roots within the snapshot; empty means the whole snapshot.
+    roots: list<String> required;
+  };
+  response {
+    model: ModelHandle required;
+    /// Generated correspondence between source and model (plan §16).
+    correspondence: list<Commitment> required;
+    diagnostics: list<Diagnostic> required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, AmbiguousCorrespondence, BudgetExhausted];
+}
+
+/// Run the program under controlled semantics; returns execution
+/// artifacts, not console text.
+@mutation @task_starting
+operation program.run {
+  authority execute;
+  request {
+    entry: String required;
+    /// Controlled-effects configuration (RFC 0002 domain packs).
+    configuration: Opaque optional;
+  };
+  response {
+    task: TaskHandle optional;
+    causal_graph: CausalGraphHandle optional;
+    crashpack: CrashpackHandle optional;
+  };
+  verdict EvaluationVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted, UntrustedDomainBoundary];
+}
+
+/// Replay a recorded execution deterministically. Divergence fails with
+/// `ReplayDiverged`; it is never reported as a fresh outcome.
+@mutation @task_starting
+operation program.replay {
+  authority execute;
+  request {
+    recording: ArtifactHandle required;
+  };
+  response {
+    causal_graph: CausalGraphHandle required;
+    divergence: Opaque optional;
+  };
+  verdict EvaluationVerdictValue;
+  errors [ReplayDiverged, BudgetExhausted, EpochUnsupported];
+}
+
+// --- refinement ------------------------------------------------------
+
+/// Check a refinement correspondence between program and model
+/// (plan §9, RFC 0009).
+@mutation @task_starting
+operation refinement.check {
+  authority execute;
+  request {
+    program: ModelHandle required;
+    model: ModelHandle required;
+    /// Observer projection to check under (RFC 0014).
+    observer: String optional;
+  };
+  response VerificationResult;
+  verdict SemanticVerdictValue;
+  errors [UnsupportedSemanticFeature, AmbiguousCorrespondence, BudgetExhausted];
+}
+
+/// Explain a refinement result or failure with a Context Pack.
+@readonly
+operation refinement.explain {
+  authority execute;
+  request {
+    result: EvidenceHandle required;
+    audience: Audience optional;
+  };
+  response {
+    context: ContextHandle required;
+  };
+  errors [UnsupportedSemanticFeature, InsufficientEvidence];
+}
+
+// --- proof -----------------------------------------------------------
+
+/// Return the exact goal, its proof Context Pack, and a proof-state
+/// handle. Agents operate on goals, never on cursor positions.
+@readonly
+operation proof.goal {
+  authority execute;
+  request {
+    obligation: String required;
+  };
+  response {
+    proof_state: ProofStateHandle required;
+    goal: Opaque required;
+    context: ContextHandle required;
+  };
+  errors [UnsupportedSemanticFeature, InsufficientEvidence];
+}
+
+/// Apply a tactic or term to a proof state; returns child states and
+/// typed diagnostics.
+@mutation @task_starting
+operation proof.attempt {
+  authority execute;
+  request {
+    proof_state: ProofStateHandle required;
+    /// Tactic script or term, treated strictly as data.
+    step: String required;
+  };
+  response {
+    children: list<ProofStateHandle> required;
+    diagnostics: list<Diagnostic> required;
+    closed: Bool required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted, CertificateRejected];
+}
+
+/// Strict isolated kernel check of a proof candidate, returning a
+/// receipt (RFC 0024, RFC 0035).
+@mutation @task_starting
+operation proof.check {
+  authority execute;
+  request {
+    candidate: ProofArtifactHandle required;
+  };
+  response {
+    receipt: ReceiptHandle required;
+    /// The proof receipt (`schemas/proof-receipt.schema.json`).
+    proof_receipt: Opaque required;
+  };
+  verdict SemanticVerdictValue;
+  errors [CertificateRejected, BudgetExhausted, EpochUnsupported];
+}
+
+/// Return the proof dependency slice — the curated declarations a goal
+/// depends on.
+@readonly @paginated
+operation proof.slice {
+  authority execute;
+  request {
+    proof_state: ProofStateHandle required;
+  };
+  response {
+    declarations: list<String> required;
+    axioms: list<String> required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+// --- correspondence --------------------------------------------------
+
+/// Create or update a plan §16 correspondence link between source and
+/// semantic elements.
+@mutation
+operation correspondence.bind {
+  authority propose;
+  request {
+    source: SourceSpan required;
+    element: String required;
+  };
+  response {
+    correspondence: Commitment required;
+  };
+  verdict StructuralVerdictValue;
+  errors [AmbiguousCorrespondence, UnsupportedSemanticFeature];
+}
+
+/// Report correspondence coverage and ambiguity for a snapshot.
+@readonly
+operation correspondence.status {
+  authority read;
+  request {
+    element: String optional;
+  };
+  response {
+    bound: U64 required;
+    unbound: U64 required;
+    ambiguous: U64 required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Report correspondence drift between two snapshots.
+@readonly
+operation correspondence.drift {
+  authority read;
+  request {
+    before: WorkspaceHandle required;
+    after: WorkspaceHandle required;
+  };
+  response {
+    drifted: list<String> required;
+    diff: DiffHandle optional;
+  };
+  errors [UnsupportedSemanticFeature, AmbiguousCorrespondence];
+}
+
+// --- debug (RFC 0029) ------------------------------------------------
+
+/// Open a causal debugger branch on a crashpack or execution.
+@mutation
+operation debug.open {
+  authority execute;
+  request {
+    subject: ArtifactHandle required;
+    observer: String optional;
+  };
+  response {
+    branch: DebugHandle required;
+    frontier: Opaque required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, EpochUnsupported];
+}
+
+/// Return the concrete or abstract state view at the branch frontier.
+@readonly
+operation debug.state {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+    observer: String optional;
+  };
+  response {
+    state: Opaque required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Return the events enabled at the current frontier.
+@readonly @paginated
+operation debug.enabled {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+  };
+  response {
+    events: list<String> required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Step one semantic event, returning a new branch handle.
+@mutation
+operation debug.step_event {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+    event: String required;
+  };
+  response {
+    branch: DebugHandle required;
+    delta: Opaque required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Step one abstract transition, returning a new branch handle.
+@mutation
+operation debug.step_abstract {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+  };
+  response {
+    branch: DebugHandle required;
+    delta: Opaque required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Move to the causal predecessor of the current frontier.
+@mutation
+operation debug.reverse_causal {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+  };
+  response {
+    branch: DebugHandle required;
+    delta: Opaque required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Branch on an alternate enabled event or injected fault.
+@mutation
+operation debug.branch {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+    alternate: String required;
+  };
+  response {
+    branch: DebugHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Compare two debugger branches under an observer projection.
+@readonly
+operation debug.compare {
+  authority execute;
+  request {
+    left: DebugHandle required;
+    right: DebugHandle required;
+    observer: String optional;
+  };
+  response {
+    diff: DiffHandle required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Explain why an event is enabled at the frontier.
+@readonly
+operation debug.why_enabled {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+    event: String required;
+  };
+  response {
+    context: ContextHandle required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Explain why an event is blocked at the frontier.
+@readonly
+operation debug.why_blocked {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+    event: String required;
+  };
+  response {
+    context: ContextHandle required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Export a branch as a crashpack or regression scenario.
+@mutation
+operation debug.export {
+  authority execute;
+  request {
+    branch: DebugHandle required;
+    as_regression: Bool optional;
+  };
+  response {
+    crashpack: CrashpackHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, PublicationAborted];
+}
+
+// --- context (RFC 0028) ----------------------------------------------
+
+/// Compile a bounded, typed, property-directed Context Pack from an
+/// evidence root and a question.
+@mutation @task_starting
+operation context.compile {
+  authority read;
+  request {
+    evidence_root: ArtifactHandle required;
+    question: String required;
+    audience: Audience optional;
+    /// Required guarantees; the pack declares which it achieved.
+    guarantees: list<String> optional;
+  };
+  response {
+    context: ContextHandle required;
+    /// The pack (`schemas/context-pack.schema.json`).
+    pack: Opaque required;
+  };
+  verdict EvaluationVerdictValue;
+  errors [UnsupportedSemanticFeature, InsufficientEvidence, BudgetExhausted];
+}
+
+/// Expand a Context Pack along a relation, returning a new immutable
+/// pack that references its parent. Everything beyond the default result
+/// is reachable by expansion, never by dumping (RFC 0027).
+@mutation @task_starting
+operation context.expand {
+  authority read;
+  request {
+    context: ContextHandle required;
+    anchor: String required;
+    relation: ExpansionRelation required;
+    depth: U32 optional;
+  };
+  response {
+    context: ContextHandle required;
+    parent: ContextHandle required;
+    pack: Opaque required;
+  };
+  errors [UnsupportedSemanticFeature, BudgetExhausted];
+}
+
+// --- failure (RFC 0039) ----------------------------------------------
+
+/// Return a causal explanation of a failure at the requested level.
+@readonly @task_starting
+operation failure.explain {
+  authority execute;
+  request {
+    failure: CrashpackHandle required;
+    level: ExplanationLevel required;
+    audience: Audience optional;
+  };
+  response {
+    context: ContextHandle required;
+  };
+  errors [UnsupportedSemanticFeature, InsufficientEvidence, BudgetExhausted];
+}
+
+/// Explanation types of RFC 0039 ("Explanation types"), normative here.
+@open
+enum ExplanationLevel {
+  trace,
+  causal,
+  contrastive,
+  logical,
+  correction,
+  instrumentation,
+  assurance,
+}
+
+/// Return a minimized counterexample that preserves the failure, with
+/// its declared minimality class.
+@mutation @task_starting
+operation failure.minimize {
+  authority execute;
+  request {
+    failure: CrashpackHandle required;
+    /// Minimality class to target
+    /// (`schemas/context-pack.schema.json` guarantees).
+    guarantee: String optional;
+  };
+  response {
+    crashpack: CrashpackHandle required;
+    guarantees: list<String> required;
+  };
+  verdict EvaluationVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted];
+}
+
+/// Explore an alternate branch from a failure's causal frontier.
+@mutation @task_starting
+operation failure.branch {
+  authority execute;
+  request {
+    failure: CrashpackHandle required;
+    alternate: String required;
+  };
+  response {
+    branch: DebugHandle required;
+    context: ContextHandle optional;
+  };
+  verdict EvaluationVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted];
+}
+
+// --- repair (RFC 0032) -----------------------------------------------
+
+/// Open a repair transaction against a failure
+/// (`schemas/repair-transaction.schema.json`).
+@mutation
+operation repair.begin {
+  authority propose;
+  request {
+    failure: CrashpackHandle required;
+    gate_profile: GateProfile required;
+  };
+  response {
+    repair: RepairHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, PolicyGateFailed];
+}
+
+enum GateProfile {
+  phase_b = "phase-b",
+  phase_c = "phase-c",
+  phase_d = "phase-d",
+  default,
+}
+
+/// Apply proposed changes and a hypothesis to a transaction, producing a
+/// new transaction version and a candidate snapshot.
+@mutation
+operation repair.apply {
+  authority propose;
+  request {
+    repair: RepairHandle required;
+    /// Typed changes: rust, model, proof, correspondence, domain,
+    /// intent.
+    changes: Opaque required;
+    hypothesis: String required;
+  };
+  response {
+    repair: RepairHandle required;
+    candidate_snapshot: WorkspaceHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [IntentMutationDenied, UnsupportedSemanticFeature];
+}
+
+/// Attach additional evidence or artifacts — for example from another
+/// agent — producing a new transaction version.
+@mutation
+operation repair.attach {
+  authority propose;
+  request {
+    repair: RepairHandle required;
+    artifacts: list<ArtifactHandle> required;
+  };
+  response {
+    repair: RepairHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [InsufficientEvidence, StatusConflict];
+}
+
+/// Evaluate a transaction against its gate profile under a budget.
+@mutation @task_starting
+operation repair.evaluate {
+  authority execute;
+  request {
+    repair: RepairHandle required;
+  };
+  response {
+    task: TaskHandle optional;
+    repair: RepairHandle required;
+    gates: list<GateOutcome> required;
+    continuation: ContinuationHandle optional;
+  };
+  verdict PolicyVerdictValue;
+  errors [BudgetExhausted, InsufficientEvidence, PolicyGateFailed];
+}
+
+/// Resume a suspended evaluation from its continuation. Inputs and
+/// epochs are validated (`rule task.resume`).
+@mutation @task_starting
+operation repair.resume {
+  authority execute;
+  request {
+    continuation: ContinuationHandle required;
+    budget: Budget optional;
+  };
+  response {
+    task: TaskHandle optional;
+    repair: RepairHandle required;
+    gates: list<GateOutcome> required;
+  };
+  verdict PolicyVerdictValue;
+  errors [ContinuationEpochMismatch, BudgetExhausted, EpochUnsupported];
+}
+
+/// Return the reviewer projection of a transaction: semantic and intent
+/// diff, gate status, evidence. The review decision it records enters
+/// the evidence graph as an audit-recorded append attributed to the
+/// named reviewer (RFC 0027), not through agent evidence-write
+/// authority.
+@readonly
+operation repair.review {
+  authority read;
+  request {
+    repair: RepairHandle required;
+  };
+  response {
+    repair: RepairHandle required;
+    semantic_diff: DiffHandle nullable;
+    gates: list<GateOutcome> required;
+    evidence: list<EvidenceHandle> required;
+  };
+  verdict PolicyVerdictValue;
+  errors [InsufficientEvidence];
+}
+
+/// Promote a transaction. A service decision gated by RFC 0032, never an
+/// agent assertion (INV-015). Returns a receipt or a typed policy
+/// failure.
+@mutation @privileged @audit_recorded
+operation repair.promote {
+  authority promote;
+  request {
+    repair: RepairHandle required;
+  };
+  response {
+    receipt: ReceiptHandle required;
+    /// The promotion receipt
+    /// (`schemas/promotion-receipt.schema.json`).
+    promotion_receipt: Opaque required;
+  };
+  verdict PolicyVerdictValue;
+  errors [PolicyGateFailed, InsufficientEvidence, StatusConflict,
+          PublicationAborted, CertificateRejected];
+}
+
+/// Reject a transaction with a typed reason.
+@mutation @privileged @audit_recorded
+operation repair.reject {
+  authority promote;
+  request {
+    repair: RepairHandle required;
+    reason: String required;
+  };
+  response {
+    repair: RepairHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [StatusConflict];
+}
+
+// --- observe (plan §18.2, §18.4) -------------------------------------
+//
+// Registered ahead of its producing subsystem: until the Phase C
+// read-only observation lane ships, these operations MAY fail with
+// `UnsupportedSemanticFeature` (`rule errors.unsupported_surface`).
+
+/// Ingest a production trace. Additionally requires the production-trace
+/// capability (plan §18.2); capture-time contract in plan §18.4.
+@mutation @task_starting @audit_recorded
+operation observe.ingest {
+  authority execute;
+  request {
+    /// Trace bundle content identity.
+    trace: Commitment required;
+    /// Instrumentation profile the trace was captured under.
+    instrumentation_profile: String required;
+  };
+  response {
+    task: TaskHandle optional;
+    evidence: list<EvidenceHandle> required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, UntrustedDomainBoundary,
+          InsufficientEvidence];
+}
+
+/// Classify an ingested trace against the model's partial order.
+@readonly
+operation observe.classify {
+  authority read;
+  request {
+    evidence: EvidenceHandle required;
+  };
+  response {
+    classification: Opaque required;
+  };
+  errors [UnsupportedSemanticFeature, InsufficientEvidence];
+}
+
+/// Return the conformance result for an ingested trace.
+@readonly
+operation observe.result {
+  authority read;
+  request {
+    evidence: EvidenceHandle required;
+  };
+  response VerificationResult;
+  verdict SemanticVerdictValue;
+  errors [UnsupportedSemanticFeature, InsufficientEvidence];
+}
+
+// --- forge (RFC 0033) ------------------------------------------------
+
+/// Create a synthesis archive from a sketch, holes, objectives,
+/// diversity descriptors, and an assurance target.
+@mutation @task_starting
+operation forge.create {
+  authority execute;
+  request {
+    sketch: Opaque required;
+    objectives: list<String> required;
+    diversity_descriptors: list<String> optional;
+    assurance_target: AssuranceClass required;
+  };
+  response {
+    forge: ForgeHandle required;
+    task: TaskHandle optional;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted];
+}
+
+/// Run one bounded portfolio iteration; returns archive deltas and
+/// counterexamples.
+@mutation @task_starting
+operation forge.step {
+  authority execute;
+  request {
+    forge: ForgeHandle required;
+    iterations: U32 optional;
+  };
+  response {
+    forge: ForgeHandle required;
+    candidates: list<EvidenceHandle> required;
+    counterexamples: list<CrashpackHandle> required;
+  };
+  verdict EvaluationVerdictValue;
+  errors [BudgetExhausted, UnsupportedSemanticFeature];
+}
+
+/// Query the Pareto / quality-diversity archive by objective,
+/// descriptor, or evidence status.
+@readonly @paginated
+operation forge.archive {
+  authority execute;
+  request {
+    forge: ForgeHandle required;
+    statuses: list<EvidenceStatus> optional;
+    descriptors: list<String> optional;
+  };
+  response {
+    candidates: list<EvidenceHandle> required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Materialize a candidate into a design transaction carrying model,
+/// Rust, and proof artifacts.
+@mutation
+operation forge.materialize {
+  authority execute;
+  request {
+    forge: ForgeHandle required;
+    candidate: EvidenceHandle required;
+  };
+  response {
+    repair: RepairHandle required;
+    snapshot: WorkspaceHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [UnsupportedSemanticFeature, InsufficientEvidence];
+}
+
+// --- benchmark (RFC 0034) --------------------------------------------
+
+/// Run a benchmark task under a declared budget and its graders.
+/// Returns evidence; a benchmark never self-scores.
+@mutation @task_starting
+operation benchmark.run {
+  authority execute;
+  request {
+    /// Benchmark task (`schemas/benchmark-task.schema.json`).
+    task_id: String required;
+    /// Grader identities to apply; the daemon MUST reject any grader
+    /// not registered for the task.
+    graders: list<String> required;
+  };
+  response {
+    task: TaskHandle optional;
+    evidence: list<EvidenceHandle> required;
+  };
+  verdict EvaluationVerdictValue;
+  errors [UnsupportedSemanticFeature, BudgetExhausted, PolicyGateFailed];
+}
+
+// --- task ------------------------------------------------------------
+
+/// Return the task record: semantic milestones, resource use, committed
+/// evidence, and terminal reason.
+@readonly
+operation task.status {
+  authority read;
+  request {
+    task: TaskHandle required;
+  };
+  response TaskRecord;
+  errors [];
+}
+
+/// Request cancel-correct shutdown (`rule task.cancel_correct`).
+@mutation
+operation task.cancel {
+  authority execute;
+  request {
+    task: TaskHandle required;
+  };
+  response {
+    task: TaskHandle required;
+    status: TaskStatus required;
+    continuation: ContinuationHandle nullable;
+    committed_evidence: list<EvidenceHandle> required;
+  };
+  verdict StructuralVerdictValue;
+  errors [PublicationAborted];
+}
+
+/// Resume a task from its continuation, optionally with a larger budget
+/// (`rule task.resume`).
+@mutation @task_starting
+operation task.resume {
+  authority execute;
+  request {
+    continuation: ContinuationHandle required;
+    budget: Budget optional;
+  };
+  response {
+    task: TaskHandle required;
+    status: TaskStatus required;
+  };
+  errors [ContinuationEpochMismatch, EpochUnsupported, BudgetExhausted];
+}
+
+/// Stream progress events for a task on this connection. Events are
+/// hints (`rule subscription.hints_only`).
+@readonly @streaming
+operation task.subscribe {
+  authority read;
+  request {
+    task: TaskHandle required;
+  };
+  response {
+    /// Snapshot of the record at subscription time; events follow.
+    record: TaskRecord required;
+  };
+  events TaskEvent;
+  errors [];
+}
+
+/// Adjust the budget of a running task (`rule task.update_budget`).
+@mutation
+operation task.update_budget {
+  authority execute;
+  request {
+    task: TaskHandle required;
+    budget: Budget required;
+  };
+  response {
+    task: TaskHandle required;
+    status: TaskStatus required;
+    budget: Budget required;
+    /// Present when lowering the budget suspended the task.
+    continuation: ContinuationHandle optional;
+  };
+  verdict StructuralVerdictValue;
+  errors [BudgetExhausted, QuotaExhausted];
+}
+
+// --- evidence (RFC 0038) ---------------------------------------------
+
+/// Fetch typed artifact metadata or bounded content. Content the daemon
+/// has redacted is returned as a typed `Redacted` stub, never as a
+/// missing field (plan §4.5).
+@readonly
+operation evidence.get {
+  authority read;
+  request {
+    evidence: EvidenceHandle required;
+    /// Include bounded inline content, subject to `output_policy`.
+    inline: Bool optional;
+  };
+  response {
+    node: Opaque nullable;
+    edge: Opaque nullable;
+    redacted: Redacted optional;
+  };
+  errors [EpochUnsupported];
+}
+
+/// Query the evidence graph by node, edge, status, and property filters.
+@readonly @paginated
+operation evidence.query {
+  authority read;
+  request {
+    query: EvidenceQuery required;
+  };
+  response {
+    nodes: list<EvidenceHandle> required;
+    edges: list<EvidenceHandle> required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Run the relevant independent checker over an evidence node. The
+/// daemon MUST NOT accept a client-declared status: status is what the
+/// checker establishes, and promotion into `validated` or `proved` is
+/// service-restricted (RFC 0038).
+@mutation @task_starting
+operation evidence.verify {
+  authority read;
+  request {
+    evidence: EvidenceHandle required;
+    /// The status the caller expects the claim to currently hold. The
+    /// promotion is a compare-and-set against it; a lost CAS returns
+    /// `StatusConflict`.
+    expected_status: EvidenceStatus optional;
+  };
+  response {
+    evidence: EvidenceHandle required;
+    status: EvidenceStatus required;
+    /// The class of evidence the checker validated.
+    evidence_kind: EvidenceKind required;
+    /// The checker's service identity (INV-004).
+    checker: String required;
+    /// `checked-certificate` or `trusted-solver`.
+    validation_basis: String required;
+  };
+  verdict SemanticVerdictValue;
+  errors [StatusConflict, CertificateRejected, InsufficientEvidence,
+          EpochUnsupported];
+}
+
+/// Stream committed evidence-graph deltas for a declared scope. Distinct
+/// from `task.subscribe`: deltas reference committed artifacts
+/// (`rule subscription.hints_only`).
+@readonly @streaming
+operation evidence.subscribe {
+  authority read;
+  request {
+    scope: EvidenceQuery required;
+  };
+  response {
+    /// The scope's current frontier at subscription time.
+    frontier: list<EvidenceHandle> required;
+  };
+  events EvidenceEvent;
+  errors [UnsupportedSemanticFeature];
+}
+
+// --- query (RFC 0030) ------------------------------------------------
+
+/// Explain which memoized results were reused for a derivation, and why.
+@readonly @paginated
+operation query.explain_reuse {
+  authority read;
+  request {
+    derivation: ArtifactHandle required;
+  };
+  response {
+    reused: list<ArtifactHandle> required;
+    recomputed: list<ArtifactHandle> required;
+    reasons: map<String, String> required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Explain which results a change invalidated, and through which
+/// dependency edges.
+@readonly @paginated
+operation query.explain_invalidation {
+  authority read;
+  request {
+    diff: DiffHandle required;
+  };
+  response {
+    invalidated: list<ArtifactHandle> required;
+    unknown: list<ArtifactHandle> required;
+    edges: list<String> required;
+  };
+  errors [UnsupportedSemanticFeature];
+}
+
+/// Compare incremental results against a clean recompute — the
+/// Incremental Parity Audit (plan §9.5). A mismatch is a defect report,
+/// never a silently preferred result.
+@mutation @task_starting
+operation query.clean_compare {
+  authority read;
+  request {
+    derivation: ArtifactHandle required;
+  };
+  response {
+    parity: Bool required;
+    /// Engine-defect report, present when parity fails (plan §4.7).
+    defect: DefectHandle optional;
+  };
+  verdict EvaluationVerdictValue;
+  errors [BudgetExhausted, UnsupportedSemanticFeature];
+}
+
+
+// ---------------------------------------------------------------------
+// 11. Conformance
+// ---------------------------------------------------------------------
+
+rule conformance.golden_traces {
+  """
+  A conforming implementation MUST ship golden request/result traces
+  pinned per protocol version, in both encodings, covering: every
+  operation declared here; every error code; idempotency replay
+  (identical and conflicting); restart and resume with matching and
+  mismatched epochs; cancellation at every instrumented phase;
+  deterministic pagination across page boundaries; and an unsupported
+  empty task whose result still names every epoch.
+  """
+}
+
+rule conformance.adapter_parity {
+  """
+  The same operation invoked through the CLI, MCP, LSP, DAP, or any other
+  adapter MUST yield identical artifacts and identical typed results.
+  Adapters translate; they do not decide (ADR-0042). An adapter MUST NOT
+  expose an operation this file does not declare.
+  """
+}
+
+rule conformance.registry_agreement {
+  """
+  The operation set declared here MUST equal the plan §10.2 registry
+  exactly, and each operation's `authority` clause MUST equal the RFC
+  0027 registry-table entry for it. A generator or validator MUST fail
+  closed on any disagreement rather than preferring either source.
+  """
+}
+
+rule conformance.generated_artifacts {
+  """
+  Generated Rust and TypeScript clients and generated JSON Schema are
+  derived artifacts of this file and MUST be regenerated, never
+  hand-edited. Where a generated schema and a schema in `schemas/`
+  describe the same artifact class, the two MUST agree member-for-member;
+  disagreement is a defect in this file or in that schema, resolved
+  before release, never by divergence.
+  """
+}
+
+
+// ---------------------------------------------------------------------
+// 12. Open items
+//
+// Recorded here so the gaps are visible in the normative artifact rather
+// than only in review notes. Each MUST be closed before PR 5 freezes the
+// interface.
+//
+//   1. Capability administration. RFC 0026 states that capabilities are
+//      minted, scoped, delegated, and revoked through daemon operations
+//      recorded in the audit log (plan §4.5), but no such operations
+//      exist in the plan §10.2 registry, which this file implements
+//      exactly. The administrative surface is therefore undeclared here.
+//      Closing it requires either registry entries (plan §10.2 and RFC
+//      0027's authority table) or an explicit statement that capability
+//      administration is out-of-band. `CapabilityDescriptor` already
+//      fixes what such operations would manipulate.
+//   2. Delegation depth and expiry defaults for multi-agent handoff
+//      (RFC 0026 and RFC 0027 open questions). `delegation_depth` and
+//      `expires_at` are declared; their defaults are not.
+//   3. `Opaque` fields name their governing schema in prose. Once the
+//      schemas carry the SD-08 `$id`/schema-epoch convention uniformly,
+//      those references SHOULD become machine-checkable schema
+//      identities rather than doc-comment citations.
+// ---------------------------------------------------------------------

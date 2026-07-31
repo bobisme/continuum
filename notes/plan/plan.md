@@ -2660,8 +2660,8 @@ reasons, INV-008/`validation_basis`/fail-closed conditionals, RFC
 projections, and the docs/35/40/41/42/45 corrections) are recorded in
 `plan.review.5.md` Appendix B, not re-listed as debt.
 
-- SD-01 (open): RFC 0026's normative IDL file (referenced, not
-  present);
+- SD-01 (paid, `schemas/continuumd-native-protocol.idl`): RFC 0026's
+  normative IDL file — all 72 §10.2 operations, envelopes, handshake;
 - SD-07 (paid, PR 0): `schemas/intent-contract.schema.json` — a
   structured property-AST expression form with canonical
   normalization, replacing the bare `expression` string;

@@ -7161,14 +7161,14 @@
       "coverage": "leaf",
       "id": "SD-01",
       "metadata": {
-        "ledger_status": "open"
+        "ledger_status": "paid, `schemas/continuumd-native-protocol.idl`"
       },
       "source": {
         "line": 2663,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "RFC 0026's normative IDL file (referenced, not present)"
+      "status": "satisfied",
+      "summary": "RFC 0026's normative IDL file \u2014 all 72 \u00a710.2 operations, envelopes, handshake"
     },
     {
       "category": "spec-debt",

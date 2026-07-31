@@ -6,6 +6,7 @@ Draft for implementation.
 **Target gate:** G1 (workbench identity and lifecycle), G2 (agent-computer interface)
 **Owners:** daemon/protocol leads
 **Normative language:** MUST/SHOULD/MAY per RFC 2119.
+**Normative IDL:** [`../schemas/continuumd-native-protocol.idl`](../schemas/continuumd-native-protocol.idl) carries the normative wire definition — every operation of plan §10.2 with its typed request, response, verdict, authority level, and error set; the request/result envelopes; the handshake; the handle registry; and the closed vocabularies. This RFC summarizes; the IDL decides.
 
 ## Summary
 
@@ -13,7 +14,7 @@ The single authoritative request/result protocol. CLI, Cargo, LSP, DAP, MCP, SAR
 
 ## IDL and versioning
 
-- The protocol is defined in one machine-readable IDL file (checked into the repo; generated Rust/TS/JSON-schema clients derive from it). Prose in this RFC summarizes the IDL; the IDL is normative once it exists.
+- The protocol is defined in one machine-readable IDL file, [`schemas/continuumd-native-protocol.idl`](../schemas/continuumd-native-protocol.idl) (checked into the repo; generated Rust/TS/JSON-schema clients derive from it, and MUST be regenerated rather than hand-edited). Prose in this RFC summarizes the IDL; the IDL is normative, and where this RFC and the IDL disagree the IDL decides and this RFC is corrected. The IDL declares its own version (`idl_version`) independently of the `protocol_version` it defines, and states which changes are compatible (minor) and which are breaking (major).
 - `protocol_version` (e.g. `"3.0"`) is negotiated at connection open: the client sends its supported range; the daemon selects the highest common version or rejects with `ProtocolVersionUnsupported`. Protocol, semantic, intent, evidence, proof, and corpus epochs are versioned independently (docs/12 §7) and MUST NOT be conflated.
 - Within a major protocol version, servers MUST ignore unknown optional request fields and MUST NOT emit fields the negotiated version does not define. Evidence artifacts are never "best-effort decoded" across breaking epochs (docs/09 T13): unknown breaking epoch ⇒ typed rejection.
 - Handles remain valid across daemon upgrades within a major version; continuations additionally pin engine and semantic epochs and MUST be rejected with `ContinuationEpochMismatch` on mismatch (never silently re-run).
@@ -51,7 +52,7 @@ Idempotency: a mutation replayed with the same `idempotency_key` and byte-identi
 | `omissions` | manifest | INV-007 |
 | `warnings` | typed list | |
 | `cost` | object | actual spend per budget dimension |
-| `epochs` | object | semantic/engine/proof epochs the result is pinned to |
+| `epochs` | object | all six independently versioned epochs (protocol, semantic, intent, evidence, proof, corpus) plus engine identity; an epoch the result cannot pin is named and reads null — never omitted |
 | `next_operations` | list | allowed operations from this state — the safe recovery/discovery surface (plan §0.2) |
 
 ## Task lifecycle
@@ -101,7 +102,8 @@ The five codes added in review 5:
 
 ## Open questions
 
-- IDL technology choice (custom vs. an existing schema language) — decide before PR 5 freezes anything.
+- ~~IDL technology choice (custom vs. an existing schema language)~~ — decided: a custom textual IDL, because three-valued field presence, per-operation authority levels, task-starting/idempotency annotations, closed per-operation error sets, and citable normative rules have no faithful encoding in JSON Schema, OpenAPI, or Protobuf; JSON Schema is a generated artifact of the IDL, not its source (see the IDL's "Notation" section).
+- Capability administration (mint/scope/delegate/revoke, plan §4.5) is named in "Transport, encoding, authentication" below but has no entry in the plan §10.2 registry the IDL implements, so the IDL declares only what such operations would manipulate (`CapabilityDescriptor`). Either the registry gains the entries or the surface is declared out-of-band — before PR 5.
 - Capability delegation depth and expiry defaults for multi-agent handoff (with RFC 0027).
 
 ## Acceptance
