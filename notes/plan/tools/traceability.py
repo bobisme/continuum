@@ -218,6 +218,10 @@ def _extract_prs(requirements: list[dict[str, Any]]) -> None:
                     path,
                     line,
                     parent=pr_id,
+                    # A "(delivered: bn-…)" annotation on the bullet is the
+                    # living-document completion record: the deliverable's
+                    # evidence-owning Bone is closed and the label retired.
+                    status="satisfied" if "(delivered:" in summary else ACTIVE,
                 )
             )
         if marker:

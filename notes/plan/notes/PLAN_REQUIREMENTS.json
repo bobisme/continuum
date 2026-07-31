@@ -842,8 +842,8 @@
         "line": 96,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "Rust workspace and crate boundaries"
+      "status": "satisfied",
+      "summary": "Rust workspace and crate boundaries (delivered: bn-147t)"
     },
     {
       "category": "pr-deliverable",
@@ -854,8 +854,8 @@
         "line": 96,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "protocol, semantic, intent, evidence, proof, and corpus epochs"
+      "status": "satisfied",
+      "summary": "protocol, semantic, intent, evidence, proof, and corpus epochs (delivered: bn-3oehf)"
     },
     {
       "category": "pr-deliverable",
@@ -866,8 +866,8 @@
         "line": 96,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "assurance and inconclusive enums"
+      "status": "satisfied",
+      "summary": "assurance and inconclusive enums (delivered: bn-2es0)"
     },
     {
       "category": "pr-deliverable",
@@ -878,8 +878,8 @@
         "line": 96,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "#![forbid(unsafecode)] defaults"
+      "status": "satisfied",
+      "summary": "#![forbid(unsafecode)] defaults (delivered: bn-17cw)"
     },
     {
       "category": "pr-deliverable",
@@ -890,8 +890,8 @@
         "line": 96,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "deterministic build and artifact paths"
+      "status": "satisfied",
+      "summary": "deterministic build and artifact paths (delivered: bn-2b8w)"
     },
     {
       "category": "pr-deliverable",
@@ -902,8 +902,8 @@
         "line": 96,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "claim-status lattice."
+      "status": "satisfied",
+      "summary": "claim-status lattice (delivered: bn-11se)."
     },
     {
       "category": "pr-exit",
@@ -1246,8 +1246,8 @@
         "line": 150,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "pinned Lean toolchain (leanprover/lean4:v4.32.1)"
+      "status": "satisfied",
+      "summary": "pinned Lean toolchain (leanprover/lean4:v4.32.1) (delivered: bn-31mq)"
     },
     {
       "category": "pr-deliverable",
@@ -1258,8 +1258,8 @@
         "line": 150,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "kernel-check the existing seed modules under lean/Continuum/"
+      "status": "satisfied",
+      "summary": "kernel-check the existing seed modules under lean/Continuum/ (delivered: bn-fak5)"
     },
     {
       "category": "pr-deliverable",

@@ -97,12 +97,12 @@ Implement (documentation, not code):
 
 Implement:
 
-- Rust workspace and crate boundaries;
-- protocol, semantic, intent, evidence, proof, and corpus epochs;
-- assurance and inconclusive enums;
-- `#![forbid(unsafe_code)]` defaults;
-- deterministic build and artifact paths;
-- claim-status lattice.
+- Rust workspace and crate boundaries (delivered: bn-147t);
+- protocol, semantic, intent, evidence, proof, and corpus epochs (delivered: bn-3oehf);
+- assurance and inconclusive enums (delivered: bn-2es0);
+- `#![forbid(unsafe_code)]` defaults (delivered: bn-17cw);
+- deterministic build and artifact paths (delivered: bn-2b8w);
+- claim-status lattice (delivered: bn-11se).
 
 **Exit:** an unsupported empty task returns a valid machine result naming every epoch and no misleading success flag.
 
@@ -151,8 +151,8 @@ Implement schema/types for:
 
 Implement:
 
-- pinned Lean toolchain (`leanprover/lean4:v4.32.1`);
-- kernel-check the existing seed modules under `lean/Continuum/`;
+- pinned Lean toolchain (`leanprover/lean4:v4.32.1`) (delivered: bn-31mq);
+- kernel-check the existing seed modules under `lean/Continuum/` (delivered: bn-fak5);
 - T0/T1 theorems: transition-system safety, stuttering simulation, finite-closure certificate soundness.
 
 **Exit:** T0/T1 compile with no `sorry` and empty axiom manifests (RFC 0012 theorem ladder; axiom manifests per ADR-0035). The proof *service* remains PR 28.
