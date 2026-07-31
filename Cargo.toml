@@ -27,5 +27,19 @@ rust-version = "1.85"
 # Workspace-wide lint defaults. Each crate opts in with `[lints] workspace =
 # true`, so this table is the single place to add project-wide policy —
 # including the `#![forbid(unsafe_code)]` rollout owned by PR-1 / IMPL-04.
+#
+# `unsafe_code = "forbid"` applies to every workspace crate with no
+# exceptions. Plan §20's dependency rules only spell out an explicit
+# no-unsafe constraint for the `continuum-kernel-*` trusted checking base;
+# neither §20 nor docs/03_ASSURANCE_AND_TCB.md ("`#![forbid(unsafe_code)]`",
+# the checker-architecture bullet) nor docs/12_GOVERNANCE_AND_ENGINEERING.md
+# ("`unsafe` forbidden by default") reserves unsafe for
+# `continuum-asupersync` or the `continuum-effects-*` boundary crates in
+# Revision 3. (An earlier revision — notes/plan/archive/plan-revision-2.md
+# §16.2 — allowed justified unsafe in "boundary crates"; that carve-out was
+# not carried forward into the Revision 3 plan or START_HERE_IMPLEMENTATION.md
+# and this workspace targets Revision 3.) Until the dossier is amended to
+# name a specific crate, no crate-level override exists.
 [workspace.lints.rust]
 missing_docs = "warn"
+unsafe_code = "forbid"
