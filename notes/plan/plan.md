@@ -2662,9 +2662,9 @@ projections, and the docs/35/40/41/42/45 corrections) are recorded in
 
 - SD-01 (open): RFC 0026's normative IDL file (referenced, not
   present);
-- SD-07 (open): `schemas/intent-contract.schema.json` — a structured
-  property-AST expression form with canonical normalization, replacing
-  the bare `expression` string;
+- SD-07 (paid, PR 0): `schemas/intent-contract.schema.json` — a
+  structured property-AST expression form with canonical
+  normalization, replacing the bare `expression` string;
 - SD-08 (open): one `$id`/versioning convention with a schema-epoch
   field across all schemas (§4.3) — three rival conventions today,
   zero schema-epoch fields;

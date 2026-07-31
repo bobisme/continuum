@@ -37,6 +37,14 @@ A change may be textually large and semantically null, or one token may weaken a
 
 `incomparable` on a protected field has the same blocking status as a confirmed privileged change (see Soundness policy).
 
+## Property normalization
+
+Property, assumption, and fairness-condition expressions are structured ASTs, not strings, and every classification above is computed over their canonical normal form (CPNF-1, specified in RFC 0037; carried by `schemas/intent-contract.schema.json`). This is what separates refactoring from weakening:
+
+- equal CPNF-1 encodings ⇒ `unchanged`, and that is the only admissible ground for `unchanged`. Renaming a bound variable, reordering conjuncts, expanding a `leads_to`, or rewriting through De Morgan all reach the same encoding, so none of them can masquerade as a semantic edit;
+- unequal encodings ⇒ no direction yet. CPNF-1 is sound but not complete, so a difference in normal form is a question, not an answer: the diff must discharge the implication obligation in the declared fragment or emit `unknown` per the Soundness policy below;
+- the display-only `source` rendering of an expression never contributes to identity or classification.
+
 ## Model diff
 
 Compare elaborated relations, not source text alone:

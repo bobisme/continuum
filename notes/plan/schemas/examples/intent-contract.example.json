@@ -8,7 +8,25 @@
   "assumptions": [
     {
       "classification": "storage",
-      "expression": "SyncCompleted implies stable recovery",
+      "expression": {
+        "ast": {
+          "kind": "always",
+          "operand": {
+            "antecedent": {
+              "kind": "action",
+              "modality": "occurs",
+              "name": "SyncCompleted"
+            },
+            "consequent": {
+              "kind": "predicate",
+              "name": "stable_recovery"
+            },
+            "kind": "implies"
+          }
+        },
+        "fragment": "Finite",
+        "source": "always (SyncCompleted implies stable_recovery)"
+      },
       "fidelity_profile": "contractual",
       "id": "A-storage"
     }
@@ -26,7 +44,46 @@
   },
   "claims": [
     {
-      "expression": "acknowledged[e] => durable[e]",
+      "expression": {
+        "ast": {
+          "kind": "always",
+          "operand": {
+            "binder": {
+              "domain": {
+                "kind": "constant",
+                "name": "Events"
+              },
+              "variable": "e"
+            },
+            "body": {
+              "antecedent": {
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "e"
+                  }
+                ],
+                "kind": "predicate",
+                "name": "acknowledged"
+              },
+              "consequent": {
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "e"
+                  }
+                ],
+                "kind": "predicate",
+                "name": "durable"
+              },
+              "kind": "implies"
+            },
+            "kind": "forall"
+          }
+        },
+        "fragment": "Finite",
+        "source": "always (forall e in Events: acknowledged[e] => durable[e])"
+      },
       "id": "AckImpliesDurable",
       "kind": "safety",
       "observer": "client"
@@ -36,7 +93,10 @@
   "fairness": [
     {
       "action": "SyncCompleted",
-      "condition": "node_running",
+      "condition": {
+        "kind": "predicate",
+        "name": "node_running"
+      },
       "kind": "weak"
     }
   ],

@@ -7175,13 +7175,13 @@
       "coverage": "leaf",
       "id": "SD-07",
       "metadata": {
-        "ledger_status": "open"
+        "ledger_status": "paid, PR 0"
       },
       "source": {
         "line": 2665,
         "path": "plan.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "schemas/intent-contract.schema.json \u2014 a structured property-AST expression form with canonical normalization, replacing the bare expression string"
     },
     {

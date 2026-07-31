@@ -2,6 +2,319 @@
   "$id": "https://continuum.dev/schema/intent-contract.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
+    "binder": {
+      "additionalProperties": false,
+      "description": "Quantifier binder: one variable ranging over a finite domain term. CPNF-1 alpha-renames bound variables, so binder names never contribute to identity (RFC 0037).",
+      "properties": {
+        "domain": {
+          "$ref": "#/$defs/term",
+          "description": "Finite domain the variable ranges over, normally a declared model constant."
+        },
+        "variable": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "required": [
+        "variable",
+        "domain"
+      ],
+      "type": "object"
+    },
+    "comparison_operator": {
+      "$comment": "CPNF-1 rewrites `gt`/`ge` away by swapping operands, so only `eq`, `ne`, `lt`, `le`, `member`, and `subset` survive normalization (RFC 0037 N6).",
+      "enum": [
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "member",
+        "subset"
+      ]
+    },
+    "formula": {
+      "$comment": "Closed node set. `next` is deliberately absent: the theorem-preserving temporal core is LTL without `next` (RFC 0015), which keeps every property stuttering-invariant.",
+      "description": "Property-AST formula node over the Finite-core property fragment (RFC 0037). Exactly one node kind matches.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/formula_boolean"
+        },
+        {
+          "$ref": "#/$defs/formula_predicate"
+        },
+        {
+          "$ref": "#/$defs/formula_action"
+        },
+        {
+          "$ref": "#/$defs/formula_comparison"
+        },
+        {
+          "$ref": "#/$defs/formula_negation"
+        },
+        {
+          "$ref": "#/$defs/formula_junction"
+        },
+        {
+          "$ref": "#/$defs/formula_implication"
+        },
+        {
+          "$ref": "#/$defs/formula_equivalence"
+        },
+        {
+          "$ref": "#/$defs/formula_temporal"
+        },
+        {
+          "$ref": "#/$defs/formula_response"
+        },
+        {
+          "$ref": "#/$defs/formula_quantification"
+        }
+      ],
+      "type": "object"
+    },
+    "formula_action": {
+      "additionalProperties": false,
+      "description": "Action atom: occurrence or enabledness of a named action schema (RFC 0015).",
+      "properties": {
+        "kind": {
+          "const": "action"
+        },
+        "modality": {
+          "enum": [
+            "occurs",
+            "enabled"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "modality"
+      ],
+      "type": "object"
+    },
+    "formula_boolean": {
+      "additionalProperties": false,
+      "description": "Boolean constant.",
+      "properties": {
+        "kind": {
+          "const": "boolean"
+        },
+        "value": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "formula_comparison": {
+      "additionalProperties": false,
+      "description": "Comparison atom between two terms.",
+      "properties": {
+        "kind": {
+          "const": "compare"
+        },
+        "left": {
+          "$ref": "#/$defs/term"
+        },
+        "op": {
+          "$ref": "#/$defs/comparison_operator"
+        },
+        "right": {
+          "$ref": "#/$defs/term"
+        }
+      },
+      "required": [
+        "kind",
+        "op",
+        "left",
+        "right"
+      ],
+      "type": "object"
+    },
+    "formula_equivalence": {
+      "additionalProperties": false,
+      "description": "Bi-implication. CPNF-1 eliminates it in favour of conjoined disjunctions (RFC 0037 N1).",
+      "properties": {
+        "kind": {
+          "const": "iff"
+        },
+        "left": {
+          "$ref": "#/$defs/formula"
+        },
+        "right": {
+          "$ref": "#/$defs/formula"
+        }
+      },
+      "required": [
+        "kind",
+        "left",
+        "right"
+      ],
+      "type": "object"
+    },
+    "formula_implication": {
+      "additionalProperties": false,
+      "description": "Material implication. CPNF-1 eliminates it in favour of `or`/`not` (RFC 0037 N1).",
+      "properties": {
+        "antecedent": {
+          "$ref": "#/$defs/formula"
+        },
+        "consequent": {
+          "$ref": "#/$defs/formula"
+        },
+        "kind": {
+          "const": "implies"
+        }
+      },
+      "required": [
+        "kind",
+        "antecedent",
+        "consequent"
+      ],
+      "type": "object"
+    },
+    "formula_junction": {
+      "additionalProperties": false,
+      "description": "N-ary conjunction or disjunction. The n-ary shape is what makes associativity flattening and commutative ordering expressible (RFC 0037 N3, N4).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "and",
+            "or"
+          ]
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/formula"
+          },
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "operands"
+      ],
+      "type": "object"
+    },
+    "formula_negation": {
+      "additionalProperties": false,
+      "description": "Negation. After CPNF-1 negation-normal form it stands only directly above an atom (RFC 0037 N2).",
+      "properties": {
+        "kind": {
+          "const": "not"
+        },
+        "operand": {
+          "$ref": "#/$defs/formula"
+        }
+      },
+      "required": [
+        "kind",
+        "operand"
+      ],
+      "type": "object"
+    },
+    "formula_predicate": {
+      "additionalProperties": false,
+      "description": "State atom: a boolean-valued state predicate or indexed boolean state variable applied to zero or more terms.",
+      "properties": {
+        "args": {
+          "items": {
+            "$ref": "#/$defs/term"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "predicate"
+        },
+        "name": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "formula_quantification": {
+      "additionalProperties": false,
+      "description": "Quantification over a finite domain. One binder per node; nested nodes express quantifier blocks.",
+      "properties": {
+        "binder": {
+          "$ref": "#/$defs/binder"
+        },
+        "body": {
+          "$ref": "#/$defs/formula"
+        },
+        "kind": {
+          "enum": [
+            "forall",
+            "exists"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "binder",
+        "body"
+      ],
+      "type": "object"
+    },
+    "formula_response": {
+      "additionalProperties": false,
+      "description": "Leads-to (response). CPNF-1 expands it to `always(or(not antecedent, eventually consequent))` so that a rewritten response and an equivalent hand-written formula normalize identically (RFC 0037 N1).",
+      "properties": {
+        "antecedent": {
+          "$ref": "#/$defs/formula"
+        },
+        "consequent": {
+          "$ref": "#/$defs/formula"
+        },
+        "kind": {
+          "const": "leads_to"
+        }
+      },
+      "required": [
+        "kind",
+        "antecedent",
+        "consequent"
+      ],
+      "type": "object"
+    },
+    "formula_temporal": {
+      "additionalProperties": false,
+      "description": "Unary temporal operator. Recurrence and persistence are spelled as `always(eventually ...)` and `eventually(always ...)`; there are no separate node kinds for them.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "always",
+            "eventually"
+          ]
+        },
+        "operand": {
+          "$ref": "#/$defs/formula"
+        }
+      },
+      "required": [
+        "kind",
+        "operand"
+      ],
+      "type": "object"
+    },
+    "identifier": {
+      "description": "Model-level name: state variable, predicate, action schema, constant, operator, or bound variable.",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$",
+      "type": "string"
+    },
     "policy_verb": {
       "enum": [
         "unlocked",
@@ -13,6 +326,214 @@
         "no-downgrade",
         "no-expansion"
       ]
+    },
+    "property_expression": {
+      "$comment": "SD-07: replaces the bare `expression` string. This schema carries the structure; RFC 0037's 'Property AST and canonical normal form' section carries the normative semantics and the CPNF-1 rules.",
+      "additionalProperties": false,
+      "description": "Structured property expression: an AST over the Finite-core property fragment plus display-only metadata. The `in_*` identity and every RFC 0031 property classification are computed over the CPNF-1 normal form of `ast`; `source` never contributes.",
+      "properties": {
+        "ast": {
+          "$ref": "#/$defs/formula"
+        },
+        "fragment": {
+          "description": "Semantic fragment this expression is stated in (ADR-0025). When absent the intent's `scope.fragments` apply. An expression outside a declared fragment classifies `unsupported` and fails closed (RFC 0031).",
+          "enum": [
+            "Finite",
+            "Symbolic",
+            "Temporal",
+            "Probabilistic",
+            "Theorem",
+            "Runtime"
+          ]
+        },
+        "normal_form": {
+          "const": "cpnf-1",
+          "description": "Asserts `ast` is already in CPNF-1. Checkers MUST verify by re-normalizing (normalization is idempotent) and MUST reject a false assertion. Absent means the AST is in authoring form and is normalized before any comparison."
+        },
+        "source": {
+          "description": "Display-only surface rendering, retained for migration from the retired bare `expression` string. It MUST NOT contribute to the `in_*` identity or to any RFC 0031 classification; where it disagrees with `ast`, `ast` is authoritative.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ast"
+      ],
+      "type": "object"
+    },
+    "state_formula": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/formula"
+        },
+        {
+          "$ref": "#/$defs/temporal_free"
+        }
+      ],
+      "description": "A formula with no temporal operator at any depth: a predicate over a single state.",
+      "type": "object"
+    },
+    "temporal_free": {
+      "$comment": "Structural exclusion of `always`, `eventually`, and `leads_to` at every depth. Applied to a term node it is vacuously satisfied, since no term kind is a temporal operator.",
+      "properties": {
+        "antecedent": {
+          "$ref": "#/$defs/temporal_free"
+        },
+        "body": {
+          "$ref": "#/$defs/temporal_free"
+        },
+        "consequent": {
+          "$ref": "#/$defs/temporal_free"
+        },
+        "kind": {
+          "not": {
+            "enum": [
+              "always",
+              "eventually",
+              "leads_to"
+            ]
+          }
+        },
+        "left": {
+          "$ref": "#/$defs/temporal_free"
+        },
+        "operand": {
+          "$ref": "#/$defs/temporal_free"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/temporal_free"
+          }
+        },
+        "right": {
+          "$ref": "#/$defs/temporal_free"
+        }
+      },
+      "type": "object"
+    },
+    "term": {
+      "description": "Property-AST term node. The v1 term sort is deliberately small; a richer term algebra is a schema revision, not an escape hatch.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/term_var"
+        },
+        {
+          "$ref": "#/$defs/term_literal"
+        },
+        {
+          "$ref": "#/$defs/term_constant"
+        },
+        {
+          "$ref": "#/$defs/term_state"
+        },
+        {
+          "$ref": "#/$defs/term_apply"
+        }
+      ],
+      "type": "object"
+    },
+    "term_apply": {
+      "additionalProperties": false,
+      "description": "Application of a declared model operator. CPNF-1 never reorders `args`: no algebraic law is assumed for an operator whose laws are not declared.",
+      "properties": {
+        "args": {
+          "items": {
+            "$ref": "#/$defs/term"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "kind": {
+          "const": "apply"
+        },
+        "operator": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "operator",
+        "args"
+      ],
+      "type": "object"
+    },
+    "term_constant": {
+      "additionalProperties": false,
+      "description": "Reference to a declared model constant (a domain, a fixed set, a named value).",
+      "properties": {
+        "kind": {
+          "const": "constant"
+        },
+        "name": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "term_literal": {
+      "additionalProperties": false,
+      "description": "Scalar literal. Floating-point literals are excluded from v1 so that the canonical encoding stays byte-deterministic.",
+      "properties": {
+        "kind": {
+          "const": "literal"
+        },
+        "value": {
+          "type": [
+            "boolean",
+            "integer",
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "term_state": {
+      "additionalProperties": false,
+      "description": "Reference to a state variable, optionally indexed.",
+      "properties": {
+        "indices": {
+          "items": {
+            "$ref": "#/$defs/term"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "state"
+        },
+        "name": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "term_var": {
+      "additionalProperties": false,
+      "description": "Reference to a variable bound by an enclosing quantifier.",
+      "properties": {
+        "kind": {
+          "const": "var"
+        },
+        "name": {
+          "$ref": "#/$defs/identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -53,7 +574,9 @@
             ]
           },
           "expression": {
-            "type": "string"
+            "$ref": "#/$defs/property_expression",
+            "description": "Structured property AST (SD-07). RFC 0031 classifies an edit to this expression `strengthened`/`weakened` in its fragment, which a string comparison cannot do soundly.",
+            "type": "object"
           },
           "fidelity_profile": {
             "description": "Declared domain-pack fidelity this assumption relies on (RFC 0002). Profiles are not automatically ordered.",
@@ -155,7 +678,9 @@
         "additionalProperties": false,
         "properties": {
           "expression": {
-            "type": "string"
+            "$ref": "#/$defs/property_expression",
+            "description": "Structured property AST (SD-07). The retired bare string survives as `source` and is display-only; identity and the RFC 0031 property classification read the CPNF-1 normal form of `ast`.",
+            "type": "object"
           },
           "id": {
             "type": "string"
@@ -204,9 +729,14 @@
             "type": "string"
           },
           "condition": {
-            "type": [
-              "string",
-              "null"
+            "description": "Enabling state predicate, as a temporal-operator-free property AST (SD-07); `null` when the fairness constraint is unconditional. Fairness strengthening is the canonical gaming vector (docs/50), so the condition is compared structurally, not textually.",
+            "oneOf": [
+              {
+                "$ref": "#/$defs/state_formula"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "kind": {
