@@ -19,8 +19,19 @@
 //! of them importing another's semantics, and without pulling anything new into the
 //! certificate/kernel dependency closure.
 //!
+//! The assurance vocabulary lives here for the same reason, in [`assurance`]
+//! (PR-1 / IMPL-03). RFC 0026 makes the assurance envelope "required on every semantic
+//! verdict", so the daemon, the CLI, the evidence graph, the context packs, the
+//! certificates and the corpus receipts all render the same nine dimensions, the same
+//! assurance ladder, and the same typed INV-008 inconclusive reasons. Plan §20 names no
+//! assurance crate; putting the vocabulary anywhere else would make the trusted checking
+//! base depend on a consumer of its own results, which is the edge §20's dependency rules
+//! exist to prevent. In the only declared leaf crate it costs no dependency edge at all.
+//!
 //! Owning the *types* is not owning the *policy*: when and how each epoch advances stays
-//! with the crate that owns the artifact class it versions.
+//! with the crate that owns the artifact class it versions, and which assurance level a
+//! task needs, which engine produced a dimension, and when a claim may be promoted stay
+//! with the crates that own those decisions.
 //!
 //! # Dependency-boundary contract
 //!
@@ -30,7 +41,8 @@
 //!
 //! PR-1 / IMPL-01 scaffold: this crate declares its responsibility and its dependency
 //! boundary. The exact finite values and their canonical encoding land in PR 2;
-//! [`epoch`] landed with PR-1 / IMPL-02.
+//! [`epoch`] landed with PR-1 / IMPL-02 and [`assurance`] with PR-1 / IMPL-03.
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
+pub mod assurance;
 pub mod epoch;
