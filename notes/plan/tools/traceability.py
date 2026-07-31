@@ -234,6 +234,9 @@ def _extract_prs(requirements: list[dict[str, Any]]) -> None:
                     path,
                     line,
                     parent=pr_id,
+                    # Same living-document completion record as deliverable
+                    # bullets: "(delivered: bn-…)" on the Exit line.
+                    status="satisfied" if "(delivered:" in exit_summary else ACTIVE,
                 )
             )
 

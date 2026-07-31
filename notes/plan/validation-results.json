@@ -57,13 +57,7 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 893,
-      "active_edges": 2082,
-      "active_requirements": 811,
-      "coverage": "complete",
-      "dependency_layers": 14,
-      "leaf_bones": 785,
-      "requirements": 846
+      "error": "AssertionError: plan/Bones traceability incomplete: uncovered=1, pr_exit_failures=1"
     },
     "program_status": {
       "execution_model": "autonomous-agent-swarm",
@@ -126,5 +120,5 @@
     }
   },
   "program_status": "ready",
-  "status": "pass"
+  "status": "fail"
 }

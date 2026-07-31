@@ -104,7 +104,7 @@ Implement:
 - deterministic build and artifact paths (delivered: bn-2b8w);
 - claim-status lattice (delivered: bn-11se).
 
-**Exit:** an unsupported empty task returns a valid machine result naming every epoch and no misleading success flag.
+**Exit:** an unsupported empty task returns a valid machine result naming every epoch and no misleading success flag (delivered: bn-1w1y).
 
 ### PR 2 — Canonical values and CAS primitives [G0 (DX-13), G1]
 
