@@ -46,7 +46,7 @@
       "files": 218
     },
     "markdown_links": {
-      "links": 190
+      "links": 191
     },
     "numbering": {
       "adr": 52,
@@ -57,12 +57,12 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 901,
-      "active_edges": 2108,
-      "active_requirements": 824,
+      "active_bones": 896,
+      "active_edges": 2097,
+      "active_requirements": 821,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 793,
+      "leaf_bones": 788,
       "requirements": 846
     },
     "program_status": {
@@ -81,7 +81,7 @@
       "files": 22
     },
     "register_rows": {
-      "ratified_quotes_checked": 3,
+      "ratified_quotes_checked": 6,
       "rows": 21
     },
     "retired_names": {
