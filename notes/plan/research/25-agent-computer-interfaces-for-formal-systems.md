@@ -101,3 +101,28 @@ Metrics: success, tokens, calls, invalid operations, stale-state errors, time, e
 - handle threading produces more failures than session-based state under realistic clients.
 
 The result may still justify a thinner API, but “agent-native” cannot remain a slogan.
+
+## Ratified margins (frontier register: ACI)
+
+The Agent–computer interface (B2, §10) row of plan §24.5 is ratified with these margins:
+quote-id=aci-benchmark-margins "On the agent benchmark, with an identical base model, task set, and per-task budget, native ACI must beat the disciplined-shell baseline by at least 10 percentage points of absolute task success, at least 30% fewer interface bytes per solved task (bytes, not tokens, are the graded cost denominator per RFC 0027), and at least a 50% relative reduction in invalid-action rate, with every metric paired per task over at least 3 seeds and the success margin's one-sided 95% lower bound above zero; missing any one of the three margins fails G0-DX-10 and forces protocol redesign before freeze."
+
+Rationale. This note proposes no numbers, so the three margins are derived conservatively from
+its own experiment list and metrics (experiment 1, native handles vs shell/CLI on an identical
+agent/model; metrics: success, tokens, calls, invalid operations) and from the harness the lane
+already commits to. Ten percentage points of absolute success is the smallest margin that
+survives seed noise on a corpus of PR 10's planned size while staying demanding against a
+*disciplined* shell baseline, which already reads the same typed artifacts through the CLI;
+anything smaller would let the typed surface be declared a winner on noise, which is the kill
+that the typed surface loses to disciplined shell use. Cost is graded in interface bytes rather
+than tokens because RFC 0027 rejects token-denominated enforcement as model-relative, and the
+denominator is *per solved task* so a surface cannot win by failing early and cheaply; 30% is
+the floor at which the saving exceeds prompt/format variation and therefore pays for the schema
+overhead named in the kill that schema churn dominates agent cost. The 50% relative reduction in
+invalid-action rate tests the validity criterion and the semantic action grammar directly: if
+explicit preconditions and pre-call plan validation do not remove half of the invalid
+operations, the grammar is not doing the work claimed for it, which is the kill that handles do
+not reduce invalid-action rate. Pairing per task over at least 3 seeds with a one-sided 95%
+lower bound above zero on the success margin follows the identical-model/identical-budget
+baseline ladder in RFC 0027 and research/33's resource-normalized reporting; all three margins
+must hold, so a miss on any one is a fail rather than an average.

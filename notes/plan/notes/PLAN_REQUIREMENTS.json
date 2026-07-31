@@ -7099,7 +7099,7 @@
       "metadata": {
         "fallback": "protocol redesign before freeze (G0-DX-10); MCP-only surface",
         "lane": "research/25",
-        "threshold": "native ACI vs a disciplined-shell baseline (harness per research/25) on the agent benchmark: success-rate and cost margins fixed at ratification \u2014 draft; kills (research/25): typed surface loses to disciplined shell; schema churn dominates agent cost; handles do not reduce invalid-action rate"
+        "threshold": "native ACI vs a disciplined-shell baseline (harness per research/25) on the agent benchmark: success-rate, cost, and invalid-action margins ratified \u2014 quote-id=aci-benchmark-margins \"On the agent benchmark, with an identical base model, task set, and per-task budget, native ACI must beat the disciplined-shell baseline by at least 10 percentage points of absolute task success, at least 30% fewer interface bytes per solved task (bytes, not tokens, are the graded cost denominator per RFC 0027), and at least a 50% relative reduction in invalid-action rate, with every metric paired per task over at least 3 seeds and the success margin's one-sided 95% lower bound above zero; missing any one of the three margins fails G0-DX-10 and forces protocol redesign before freeze.\"; kills (research/25): typed surface loses to disciplined shell; schema churn dominates agent cost; handles do not reduce invalid-action rate"
       },
       "source": {
         "line": 2581,
