@@ -6890,14 +6890,14 @@
       "id": "FR-05",
       "metadata": {
         "fallback": "fixed strategy-list neighborhood with per-receipt coverage disclosure and no adequacy claim",
-        "lane": "research/33 \u2014 lane to be opened",
-        "threshold": "hidden-variant catch rate of the \u00a78.3 neighborhood on the docs/50-classified gaming corpus (the corpus itself is a Phase B G3 deliverable \u2014 \u2265N mutations per docs/50 attack class, N fixed at lane opening; no such corpus exists today); target fixed at lane opening \u2014 draft; kill (research/33): hidden variants are too easy to leak or too hard to grade independently"
+        "lane": "research/33",
+        "threshold": "ratified (research/33) quote-id=neighborhood-adequacy-catch-rate \"On the docs/50-classified gaming corpus \u2014 at least 20 hidden mutations for each of the five docs/50 attack classes (intent, instrumentation, evidence, overfitting, resource), so at least 100 mutations in total \u2014 the \u00a78.3 neighborhood is adequate only if it catches at least 90 percent of the mutations overall with the one-sided 95 percent exact binomial lower bound on that rate above 80 percent and no single attack class below 75 percent, counting a mutation as caught only when property-directed neighboring exploration surfaces a neighbor on which the gaming patch fails and the receipt discloses that neighbor, with every mutation drawn from a family-level held-out split and graded by the independent grader of research/33.\"; the corpus is a Phase B G3 deliverable and does not exist today, so the ratified threshold binds when it lands; kill (research/33): hidden variants are too easy to leak or too hard to grade independently"
       },
       "source": {
         "line": 2568,
         "path": "plan.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Neighborhood adequacy (\u00a78.3)"
     },
     {
