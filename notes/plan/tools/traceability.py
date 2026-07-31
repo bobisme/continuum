@@ -391,11 +391,16 @@ def _extract_frontier(requirements: list[dict[str, Any]]) -> None:
             continue
         ordinal += 1
         capability, lane, threshold, fallback = cells
-        status = (
-            "deferred"
-            if capability.startswith(("Full TLA+", "Weak-memory", "Timed/probabilistic"))
-            else ACTIVE
-        )
+        if capability.startswith(("Full TLA+", "Weak-memory", "Timed/probabilistic")):
+            status = "deferred"
+        elif "quote-id=" in threshold:
+            # A marked quote means the row is ratified. The FR requirement —
+            # fix the threshold before the consuming phase opens — is
+            # discharged; the lane's promote/kill decision is owned by its
+            # gate, not by this register row.
+            status = "satisfied"
+        else:
+            status = ACTIVE
         requirements.append(
             _requirement(
                 f"FR-{ordinal:02d}",
@@ -791,7 +796,16 @@ def graph_contract_state(
             children[item["parent"]].add(item["id"])
 
     dispatch_readiness_failures: list[str] = []
+    completed = {
+        item_id
+        for item_id, item in project_bones().items()
+        if not item["deleted"] and item["state"] in {"done", "closed", "archived"}
+    }
     for blocker, blocked in INITIAL_READINESS_EDGES:
+        if completed & {blocker, blocked}:
+            # A completed endpoint has discharged the ordering constraint;
+            # these edges only guard the initial dispatch window.
+            continue
         missing = [item_id for item_id in (blocker, blocked) if item_id not in bones]
         if missing:
             dispatch_readiness_failures.append(
@@ -1066,13 +1080,24 @@ def graph_contract_state(
             match = re.fullmatch(r"plan-key:frontier-(fr-\d+)", label)
             if match:
                 frontier_tasks[match.group(1).upper()].append(item_id)
-    if set(frontier_tasks) != active_frontiers:
+    satisfied_frontiers = {
+        item["id"]
+        for item in registry["requirements"]
+        if item["category"] == "frontier" and item["status"] == "satisfied"
+    }
+    missing_frontiers = active_frontiers - set(frontier_tasks)
+    stray_frontiers = set(frontier_tasks) - active_frontiers - satisfied_frontiers
+    if missing_frontiers or stray_frontiers:
         frontier_wiring_failures.append(
             "frontier task keys drift: "
-            f"missing={sorted(active_frontiers - set(frontier_tasks))}, "
-            f"extra={sorted(set(frontier_tasks) - active_frontiers)}"
+            f"missing={sorted(missing_frontiers)}, "
+            f"extra={sorted(stray_frontiers)}"
         )
     for req_id, matches in sorted(frontier_tasks.items()):
+        if req_id not in active_frontiers:
+            # A ratified (satisfied) lane's task may still be open; its wiring
+            # obligations ended with ratification.
+            continue
         if len(matches) != 1:
             frontier_wiring_failures.append(
                 f"{req_id}: expected one frontier task, found {matches}"

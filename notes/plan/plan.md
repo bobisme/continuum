@@ -2554,8 +2554,9 @@ section may claim a lane's output without its status.
 A lane is **ratified** when its owner fixes the numeric threshold in the
 research note and this register quotes it verbatim; ratified quotes
 carry a `quote-id` marker in both files and the dossier validator
-compares the marked quotes for identity (no row is marked yet — every
-row below is draft or defer). A row that delegates to a document
+compares the marked quotes for identity (marked rows: general context
+compilation, causal minimization, and the agent–computer interface;
+every unmarked row is draft or defer). A row that delegates to a document
 ("docs/31's stated pair") without quoting is draft by definition.
 Until ratified, a row is **draft** and blocks its lane's promotion.
 
