@@ -39,10 +39,11 @@
 //!   search, no adapter, and no Forge dependency.
 //! - Leaf crate — it may not import any other Continuum crate.
 //!
-//! PR-1 / IMPL-01 scaffold: this crate declares its responsibility and its dependency
-//! boundary. The exact finite values and their canonical encoding land in PR 2;
-//! [`epoch`] landed with PR-1 / IMPL-02 and [`assurance`] with PR-1 / IMPL-03.
-//! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
+//! The exact finite values, their canonical encoding, and their total order live in
+//! [`value`] (PR 2); [`epoch`] landed with PR-1 / IMPL-02 and [`assurance`] with
+//! PR-1 / IMPL-03. `tools/check_crate_boundaries.py` enforces the forbidden edges
+//! mechanically.
 
 pub mod assurance;
 pub mod epoch;
+pub mod value;
