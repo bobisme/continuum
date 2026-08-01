@@ -318,6 +318,7 @@
       "type": "string"
     },
     "policy_verb": {
+      "description": "The closed eight-member policy-verb set (RFC 0037, plan §5.4). The five restrictions below are its W6 applicability matrix; a field's verb is drawn from its restriction, never from this set directly.",
       "enum": [
         "unlocked",
         "proposal-only",
@@ -326,6 +327,60 @@
         "no-decrease",
         "no-removal",
         "no-downgrade",
+        "no-expansion"
+      ]
+    },
+    "policy_verb_assurance": {
+      "$ref": "#/$defs/policy_verb",
+      "description": "W6 restriction for `assurance`: the four non-directional verbs plus `no-downgrade`. `assurance` is the only field that emits `downgraded`, so `no-downgrade` is ill-formed anywhere else.",
+      "enum": [
+        "unlocked",
+        "proposal-only",
+        "review",
+        "locked",
+        "no-downgrade"
+      ]
+    },
+    "policy_verb_base": {
+      "$ref": "#/$defs/policy_verb",
+      "description": "W6 restriction for `properties`, `assumptions`, `observers`, `abstraction_maps`, `scope`, `fairness`, `completion_policy`, and `nondeterminism`: the four non-directional verbs only. These fields' gaming directions — property `weakened`, observer `coarsened`, assumption `added` — are protected through `review` or `locked`, because the closed verb set contains no verb that blocks `added`.",
+      "enum": [
+        "unlocked",
+        "proposal-only",
+        "review",
+        "locked"
+      ]
+    },
+    "policy_verb_bounds": {
+      "$ref": "#/$defs/policy_verb",
+      "description": "W6 restriction for `bounds`: the four non-directional verbs plus `no-decrease`.",
+      "enum": [
+        "unlocked",
+        "proposal-only",
+        "review",
+        "locked",
+        "no-decrease"
+      ]
+    },
+    "policy_verb_removal": {
+      "$ref": "#/$defs/policy_verb",
+      "description": "W6 restriction for `faults`, `non_vacuity`, `optimization`, and `security_policy`: the four non-directional verbs plus `no-removal`.",
+      "enum": [
+        "unlocked",
+        "proposal-only",
+        "review",
+        "locked",
+        "no-removal"
+      ]
+    },
+    "policy_verb_trust_boundaries": {
+      "$ref": "#/$defs/policy_verb",
+      "description": "W6 restriction for `trust_boundaries`: the four non-directional verbs plus `no-expansion`. `no-decrease` would block the safe direction — shrinking the opaque and trusted sets — and is ill-formed here.",
+      "enum": [
+        "unlocked",
+        "proposal-only",
+        "review",
+        "locked",
         "no-expansion"
       ]
     },
@@ -893,63 +948,86 @@
       "type": "object"
     },
     "policy_reviewers": {
-      "$comment": "The `review` policy verb binds to this map: a policy field set to review names its reviewer principals here (review 5, A13).",
+      "$comment": "The `review` policy verb binds to this map: a policy field set to review names its reviewer principals here (review 5, A13). RFC 0037 F3 is paid in part here: W7's first half — every key is one of the fifteen policy keys — is now structural, and a named-but-empty principal list is rejected. W7's second half, that every field whose verb is `review` carries a non-empty list, stays a checker rule: JSON Schema cannot quantify a relation between the keys of one object and the values of another, so expressing it needs fifteen hand-written conditionals, which is more machinery than the rule is worth while `policy` and `policy_reviewers` are both in the identity preimage and checked together at acceptance.",
       "additionalProperties": {
+        "description": "Principals whose review satisfies the `review` verb for this field. A `review` verb naming no reviewer is an unenforceable block (W7), so an empty list is rejected.",
         "items": {
           "type": "string"
         },
+        "minItems": 1,
         "type": "array"
       },
-      "description": "Map from policy field name to the principals whose review satisfies the review verb for that field.",
+      "description": "Map from policy field name to the principals whose review satisfies the review verb for that field. Keys are the fifteen policy keys and nothing else (W7); the map is inside the `in_*` identity preimage (ID2), so changing a reviewer list mints a new contract.",
+      "propertyNames": {
+        "enum": [
+          "abstraction_maps",
+          "assumptions",
+          "assurance",
+          "bounds",
+          "completion_policy",
+          "fairness",
+          "faults",
+          "non_vacuity",
+          "nondeterminism",
+          "observers",
+          "optimization",
+          "properties",
+          "scope",
+          "security_policy",
+          "trust_boundaries"
+        ]
+      },
       "type": "object"
     },
     "policy": {
+      "$comment": "RFC 0037 F4, paid here. One enum applied to all fifteen keys let any verb validate on any field, so the W6 applicability matrix was prose: `no-decrease` on `properties` or `no-downgrade` outside `assurance` were schema-valid and had to be rejected by a checker. The per-field restrictions make an inapplicable verb unrepresentable, which is what W6 asks for — an inapplicable verb is rejected, never silently read as `unlocked`.",
       "additionalProperties": false,
+      "description": "The fifteen protected-field policy verbs (plan §5.4). Each key carries the verbs the RFC 0037 W6 matrix declares admissible for it: a directional verb is well-formed only where the relation it denies is admissible for that field and denying it is the protective direction.",
       "properties": {
         "abstraction_maps": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "assumptions": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "assurance": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_assurance"
         },
         "bounds": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_bounds"
         },
         "completion_policy": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "fairness": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "faults": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_removal"
         },
         "non_vacuity": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_removal"
         },
         "nondeterminism": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "observers": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "optimization": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_removal"
         },
         "properties": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "scope": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_base"
         },
         "security_policy": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_removal"
         },
         "trust_boundaries": {
-          "$ref": "#/$defs/policy_verb"
+          "$ref": "#/$defs/policy_verb_trust_boundaries"
         }
       },
       "required": [
@@ -1030,7 +1108,8 @@
           "uniqueItems": true
         },
         "fragments": {
-          "description": "Declared semantic fragments (ADR-0025). Intent-diff guarantees apply within declared fragments; outside them classification is Unknown and fails closed (plan §5.3).",
+          "$comment": "RFC 0037 F5 and F11, paid here. Without `minItems` an empty declaration made every unit `unsupported` and every promotion blocked — fail-closed, but silently — where W3 requires `scope.fragments` to be non-empty; and the description wrote the wire literal in prose case, where RFC 0031's relation token is lowercase `unknown` (RFC 0037 correction 1).",
+          "description": "Declared semantic fragments (ADR-0025); non-empty per W3. Intent-diff guarantees apply within declared fragments; a unit outside them classifies `unsupported`, and a relation the classifier cannot establish classifies `unknown` — both fail closed (plan §5.3, RFC 0031). Narrowing this set cannot convert a blocked change into an allowed one: it forces re-classification of every unit stated in a removed fragment, and those units then classify `unsupported`.",
           "items": {
             "enum": [
               "Finite",
@@ -1041,6 +1120,7 @@
               "Runtime"
             ]
           },
+          "minItems": 1,
           "type": "array",
           "uniqueItems": true
         }

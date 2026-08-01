@@ -22,6 +22,29 @@
           "acceptance"
         ]
       }
+    },
+    {
+      "description": "A superseded record names its successor (RFC 0037 R6, ID3): supersession is what moves a record out of head position, and a record that records the status without the edge leaves the lineage unwalkable from itself.",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "superseded"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "superseded_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "superseded_by"
+        ]
+      }
     }
   ],
   "description": "Registry status of an Intent Contract: Proposed vs accepted, the acceptance audit record, and the §4.2.1 signature chain honored on bundle import.",
@@ -103,6 +126,31 @@
         "accepted",
         "superseded"
       ]
+    },
+    "supersedes": {
+      "$comment": "RFC 0037 F10, paid here. The record carried no predecessor or successor pointer, so the common ancestor the three-way merge requires (M1 — the nearest contract reachable from both heads through registry lineage) was not recoverable from the record alone. Optional at schema_epoch 1: a lineage root has no predecessor, and records written before this field existed stay valid.",
+      "anyOf": [
+        {
+          "pattern": "^in_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The contract this one supersedes — the registry lineage edge (`SUPERSEDES`) M1 walks to find a common ancestor. Null for a lineage root. `intent.lock` and `intent.accept` both mint a successor identity, so a revision always has one (RFC 0037 ID3, R6)."
+    },
+    "superseded_by": {
+      "anyOf": [
+        {
+          "pattern": "^in_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The contract that superseded this one; null while this record is the lineage head. Required when `status` is `superseded`. Acceptance and supersession are not in the `in_*` identity preimage (RFC 0037 ID4), so recording them here changes no contract identity."
     }
   },
   "required": [

@@ -95,6 +95,23 @@
       },
       "additionalProperties": false
     },
+    "expansion_relation": {
+      "$comment": "RFC 0028 F5/correction 2: `relation` was a free string in this schema while `ExpansionRelation` in continuumd-native-protocol.idl is a closed eleven-member enum and `context.expand` accepts nothing else. The IDL decides the wire vocabulary, so the schema is corrected to it; an unrecognized member is rejected (MalformedRequest), never read as absent.",
+      "description": "Closed expansion-relation vocabulary (RFC 0028; the IDL's ExpansionRelation). It is the only expansion vocabulary: every relation token in `expansions[]` and in `omissions[].expansion` is a member.",
+      "enum": [
+        "causal_predecessors",
+        "causal_successors",
+        "conflicts_with",
+        "same_owner",
+        "property_automaton_step",
+        "proof_dependency",
+        "source_span",
+        "assumption_uses",
+        "abstraction_of",
+        "refinement_of",
+        "alternate_branch"
+      ]
+    },
     "redacted": {
       "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
       "additionalProperties": false,
@@ -172,22 +189,74 @@
       ],
       "type": "object"
     },
+    "compiler": {
+      "$comment": "RFC 0028 F3 (mirrors RFC 0031's F3): the compiler version, the ranker identity, and the ranker configuration are part of the compile's query key under RFC 0030 `strategy_config`, and the ranker is the object of research/32's kill criterion. Until this was recorded in the artifact a pack could not be reused across a compiler or ranker change even though its bytes were unchanged.",
+      "additionalProperties": false,
+      "description": "Compiler and ranker identity of the compile that produced this pack (RFC 0028, \"Versioning and revision\"; RFC 0030 query key). A pack MUST NOT be reused across a change to any recorded component.",
+      "properties": {
+        "compiler_version": {
+          "description": "Version of the Context Pack compiler. Not a release counter: it advances whenever the compiled output could change for any input.",
+          "type": "string"
+        },
+        "ranker_config": {
+          "description": "Canonical digest of the stage-9 ranker's configuration; absent when no ranker ran.",
+          "type": "string"
+        },
+        "ranker_id": {
+          "description": "Identity of the stage-9 heuristic ranker, or null when stage 9 is disabled — the register row's named fallback configuration, plain causal slice plus expansion (RFC 0028, \"Compiler pipeline\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "compiler_version"
+      ],
+      "type": "object"
+    },
     "content_budget": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "description": "RFC 0028 F4: a token count is reported only with the tokenizer identity the IDL's Cost.tokenizer_id requires wherever a token count is reported. Tokens are advisory; bytes are the enforced contract (RFC 0027).",
+          "if": {
+            "required": [
+              "tokens"
+            ]
+          },
+          "then": {
+            "required": [
+              "tokenizer_id"
+            ]
+          }
+        }
+      ],
+      "description": "Budget accounting for the pack. Bytes are the enforced contract and are always present; tokens are advisory and model-relative (RFC 0027, RFC 0028 \"Budgets and packing\"). The ratified FR-01 metric sums `bytes` over a whole pack family, so a family is summable only when every member records it (see `parent`).",
       "properties": {
         "bytes": {
+          "description": "Byte budget of the pack — the enforced contract and the graded cost denominator of the ratified FR-01 sentence.",
           "minimum": 0,
           "type": "integer"
         },
         "nodes": {
+          "description": "Graph-node ceiling of the IDL's OutputPolicy.max_nodes.",
           "minimum": 0,
           "type": "integer"
         },
+        "tokenizer_id": {
+          "description": "Identity of the tokenizer `tokens` was counted under (the IDL's Cost.tokenizer_id). Required whenever `tokens` is present; a token count with no tokenizer is not a measurement.",
+          "type": "string"
+        },
         "tokens": {
+          "description": "Advisory token count; never the enforced budget.",
           "minimum": 0,
           "type": "integer"
         }
       },
+      "required": [
+        "bytes"
+      ],
       "type": "object"
     },
     "content_hash": {
@@ -218,6 +287,7 @@
       "type": "array"
     },
     "expansions": {
+      "description": "Expansion queries reachable from this pack. `anchor` resolves in this pack: it is a `selected[].id` or an anchor this pack itself names here or in `omissions[].expansion` (RFC 0028, \"Expansion protocol\").",
       "items": {
         "additionalProperties": false,
         "properties": {
@@ -225,11 +295,12 @@
             "type": "string"
           },
           "estimated_items": {
+            "description": "The only estimate in the artifact; it MUST NOT be used to reconcile the omission manifest, whose counts are exact (RFC 0028, \"Omission manifest\").",
             "minimum": 0,
             "type": "integer"
           },
           "relation": {
-            "type": "string"
+            "$ref": "#/$defs/expansion_relation"
           }
         },
         "required": [
@@ -277,14 +348,60 @@
       "type": "string"
     },
     "omissions": {
+      "description": "The omission manifest (INV-007). Counts are exact, never estimates, samples, or buckets: the candidate set equals the selection plus the sum of the manifest counts, partitioned exactly by kind and reason. An empty manifest is an assertion that the selection is the whole candidate set (RFC 0028, \"Omission manifest\").",
       "items": {
         "additionalProperties": false,
+        "allOf": [
+          {
+            "description": "INV-007: an expandable omission names the query that retrieves it.",
+            "if": {
+              "properties": {
+                "expandable": {
+                  "const": true
+                }
+              },
+              "required": [
+                "expandable"
+              ]
+            },
+            "then": {
+              "required": [
+                "expansion"
+              ]
+            }
+          },
+          {
+            "description": "RFC 0028: when `expandable` is false the reason MUST be one that explains irretrievability. `budget`, `heuristic-cutoff`, and `slice-irrelevant` omissions are expandable by construction, so they cannot be declared irretrievable.",
+            "if": {
+              "properties": {
+                "expandable": {
+                  "const": false
+                }
+              },
+              "required": [
+                "expandable"
+              ]
+            },
+            "then": {
+              "properties": {
+                "reason": {
+                  "enum": [
+                    "redaction",
+                    "unsupported"
+                  ]
+                }
+              }
+            }
+          }
+        ],
         "properties": {
           "count": {
+            "description": "Exact count of omitted items of this kind and reason; never an estimate (RFC 0028, \"Omission manifest\").",
             "minimum": 0,
             "type": "integer"
           },
           "expandable": {
+            "$comment": "RFC 0028 F12: `expandable` was optional, so a record could satisfy half of INV-007 — naming what was dropped without saying whether it is retrievable. It is required here.",
             "type": "boolean"
           },
           "expansion": {
@@ -295,7 +412,7 @@
                 "type": "string"
               },
               "relation": {
-                "type": "string"
+                "$ref": "#/$defs/expansion_relation"
               }
             },
             "required": [
@@ -308,6 +425,7 @@
             "type": "string"
           },
           "reason": {
+            "description": "Closed omission-reason set (the IDL's OmissionReason). `slice-irrelevant` is reserved for items provably outside the property-directed slice; an item dropped because the compiler could not decide is `heuristic-cutoff`.",
             "enum": [
               "budget",
               "redaction",
@@ -320,28 +438,28 @@
         "required": [
           "kind",
           "count",
-          "reason"
+          "reason",
+          "expandable"
         ],
-        "if": {
-          "properties": {
-            "expandable": {
-              "const": true
-            }
-          },
-          "required": [
-            "expandable"
-          ]
-        },
-        "then": {
-          "required": [
-            "expansion"
-          ]
-        },
         "type": "object"
       },
       "type": "array"
     },
+    "parent": {
+      "$comment": "RFC 0028 F1, paid here. `context.expand` returns the child `ctx_*` and its parent on the wire, but the artifact carried no lineage field, so a pack family was not reconstructible from artifacts and the ratified FR-01 metric — which grades context bytes \"counting every expansion\" — was uncomputable from packs alone. Optional at schema_epoch 1 because requiring it would invalidate packs written before this field existed; RFC 0028's interim obligation on the daemon (publish the parent-to-child relation into the evidence graph) therefore stands until the field is required by a schema_epoch advance, since an absent `parent` is still indistinguishable from an unrecorded one.",
+      "anyOf": [
+        {
+          "pattern": "^ctx_[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Lineage: the pack this one was expanded from, or null for a root compile (RFC 0028, \"Pack identity, lineage, and determinism\"). Recording it makes a pack family reconstructible from artifacts alone, which is what makes the ratified FR-01 per-task byte cost — summed over the whole family, counting every expansion — computable. A child inherits `snapshot`, `intent`, and `semantic_epoch` from its parent but never its guarantees (RFC 0028 C5)."
+    },
     "question": {
+      "description": "Canonical rendering of the compiled query and part of the pack's identity: the caller's question for `context.compile`, and the canonical encoding of the triple (relation, anchor, depth) for `context.expand` (RFC 0028).",
       "type": "string"
     },
     "redactions": {
@@ -450,7 +568,8 @@
     "replay",
     "guarantees",
     "semantic_epoch",
-    "content_hash"
+    "content_hash",
+    "content_budget"
   ],
   "title": "Context Pack",
   "type": "object"

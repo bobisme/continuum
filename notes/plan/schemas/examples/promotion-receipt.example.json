@@ -11,6 +11,63 @@
     "tokens": 18500,
     "wall_ms": 96000
   },
+  "coverage": {
+    "defect_mutants": {
+      "corpus": "defect-mutants-held-out-demo",
+      "detected": 24,
+      "not_run": 0,
+      "undetected": 0,
+      "undetected_mutants": []
+    },
+    "neighborhood": {
+      "failing_neighbors": [],
+      "strategies": [
+        {
+          "explored": 412,
+          "failing": 0,
+          "strategy": "alternate-enabled-events",
+          "truncated": false
+        },
+        {
+          "explored": 96,
+          "failing": 0,
+          "reuse": {
+            "class": "Conservative",
+            "function_id": "neighborhood.fault_window",
+            "function_version": "3",
+            "reused_units": 96
+          },
+          "reused": 96,
+          "strategy": "fault-window",
+          "truncated": false
+        },
+        {
+          "explored": 58,
+          "failing": 0,
+          "strategy": "cancellation-checkpoints",
+          "truncated": false
+        }
+      ]
+    },
+    "property_mutation": {
+      "corpus": "property-mutants-held-out-demo",
+      "detected": 11,
+      "not_run": 0,
+      "undetected": 0,
+      "vacuity_mutants": 3
+    },
+    "refinement_coverage": {
+      "after": 0.91,
+      "before": 0.91,
+      "declared_decrease": false,
+      "delta": 0
+    },
+    "replay": {
+      "base_reproduced": true,
+      "candidate_clear": true,
+      "runs": 2
+    }
+  },
   "epochs": {
     "proof": "lean-4.32.1",
     "semantic": "sem-3"
@@ -67,7 +124,7 @@
     }
   ],
   "intent": "in_ack_v1",
-  "intent_diff": "diff_intent_demo1",
+  "intent_diff": "diff_demo1",
   "policy_decision": "allow",
   "receipt_id": "receipt_demo1",
   "repair_transaction": "rt_demo1",

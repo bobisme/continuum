@@ -476,28 +476,34 @@ renders it (correction 13).
 
 ## Known gaps this guide does not paper over
 
-RFC 0032 raises flags against artifacts it does not own. The ones that most change how
-this document should be read:
+RFC 0032 raises flags against artifacts it does not own. Two of them have since been paid
+by the schema sweep and are recorded here only so that older citations stay readable:
+**F8** (coverage had no machine shape) and **F9** (reuse was invisible in the receipt).
+`promotion-receipt.schema.json` now types `coverage` as a closed six-group object, with
+per-strategy `explored`/`failing`/`truncated` counts over the eight §8.3 strategies, a
+committed frontier required whenever a strategy is truncated, and the `failing_neighbors`
+array the FR-05 counting rule is stated over — each entry naming the neighbor, its
+strategy class, and a handle to its run. Reuse of a gate 5–7 result now carries its
+reuse-edge class and the `function_id`/`function_version` it was served under, so a
+`Conservative` reuse and a `Validated` one are told apart by a reader rather than by
+trust.
 
-- **coverage has no machine shape** (F8) — the receipt's `coverage` is an untyped object,
-  so the per-strategy counts, the truncation disclosures, and the failing-neighbor
-  disclosure the FR-05 counting rule depends on have no field to live in yet. An adequacy
-  measurement cannot be graded mechanically against an unstructured blob;
-- **reuse is invisible in the receipt** (F9) — nothing records the reuse-edge class or the
-  function identity behind a reused gate 5–7 result, so `Conservative` and `Validated`
-  reuse cannot be told apart by a reader;
+The ones still open, and that most change how this document should be read:
+
 - **gate evidence is structurally unconstrained** (F4) — the evidence floor above is
   prose, not schema, and `passed` with an empty evidence array is schema-valid;
 - **`policy_verdict` is optional at every status** (F6), and the receipt's
   `policy_decision`, `coverage`, and `unknowns` are optional in the schema while RFC 0032
-  requires all three (correction 11).
+  requires all three (correction 11). The sweep deferred this half deliberately: the
+  receipt-side and transaction-side requiredness are one change and should land together.
 
-One more, observed while regenerating this document and reported rather than fixed here:
-the shipped promotion-receipt example names two different diff identities in
+One more was observed while regenerating this document and reported rather than fixed
+here: the shipped promotion-receipt example named two different diff identities in
 `semantic_diff` and `intent_diff`, while correction 10 requires both fields to name the
-same `diff_*` artifact. The worked example above therefore does not quote those two
-fields. Direction: the schema and its example are swept together; this guide fixes
-nothing.
+same `diff_*` artifact. The schema sweep landed that fix — the example now names one
+identity, and both fields' descriptions carry the rule. The agreement itself stays
+unenforceable in the schema (draft 2020-12 cannot compare two sibling values), which is
+the surviving half of F7.
 
 ## Superseded nine-step pipeline (historical)
 

@@ -13,12 +13,17 @@
     ],
     "unknown": []
   },
+  "classifier": {
+    "classifier_version": "intent-diff-0.1.0-demo",
+    "cpnf_version": "cpnf-1"
+  },
   "intent_changes": [
     {
       "evidence": null,
       "field": "properties",
       "protected": true,
-      "relation": "unchanged"
+      "relation": "unchanged",
+      "unit": "AckImpliesDurable"
     }
   ],
   "policy": {

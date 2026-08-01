@@ -21,6 +21,130 @@
         "receipt_generation"
       ]
     },
+    "handle": {
+      "description": "Any plan §4.4 content-addressed handle.",
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "mutation_campaign": {
+      "additionalProperties": false,
+      "description": "Gate 6/7 campaign coverage: mutant-by-mutant detection results (RFC 0032 gate table). A mutant the campaign never ran is evidence of nothing and is counted under `not_run`, never under `detected`.",
+      "properties": {
+        "corpus": {
+          "description": "Identity of the held-out mutant corpus the mutants were drawn from.",
+          "type": "string"
+        },
+        "detected": {
+          "description": "Mutants the campaign ran and detected.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "excluded": {
+          "description": "Mutants excluded because their identity leaked into the candidate snapshot; the exclusion is disclosed, never silent (RFC 0032, \"Mutation challenge\").",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "mutant": {
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "identity-leaked",
+                  "unsupported",
+                  "budget"
+                ]
+              }
+            },
+            "required": [
+              "mutant",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "not_run": {
+          "description": "Mutants the campaign did not run. A non-zero count leaves the gate pending; it is never coverage.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reuse": {
+          "$ref": "#/$defs/reuse_provenance"
+        },
+        "undetected": {
+          "description": "Mutants the campaign ran and did not detect; each is named in `undetected_mutants`.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "undetected_mutants": {
+          "description": "The specific mutants that were no longer detected (RFC 0032: the gate names the specific mutant).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "vacuity_mutants": {
+          "description": "Non-vacuity mutants run within gate 6; availability collapse surfaces here (INV-012).",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "detected",
+        "undetected",
+        "not_run"
+      ],
+      "type": "object"
+    },
+    "neighborhood_strategy": {
+      "description": "The eight closed plan §8.3 neighborhood strategies (RFC 0032, \"Neighborhood construction\"). The token is also the neighbor's class: a failing neighbor is disclosed with the strategy that generated it.",
+      "enum": [
+        "alternate-enabled-events",
+        "fault-window",
+        "cancellation-checkpoints",
+        "value-name-permutation",
+        "message-duplication-loss-delay",
+        "schedule-perturbation",
+        "abstraction-map-variants",
+        "hidden-corpus-mutations"
+      ]
+    },
+    "reuse_provenance": {
+      "$comment": "RFC 0032 F9, paid here. No field recorded the reuse-edge class, function_id, or function_version of a gate 5–7 result served from cache, so a reader could not distinguish a re-run campaign from a reused one, nor a Conservative reuse from a Validated one — leaving correction 1's distinction unauditable from a receipt.",
+      "additionalProperties": false,
+      "description": "Provenance of a gate 5–7 result served from the incremental cache rather than re-run (RFC 0032, \"Cost governance\"; RFC 0030). Absent means the campaign was re-run. The triple (class, function_id, function_version) is the quarantine unit: a quarantined triple drops to Experimental and cannot support promotion.",
+      "properties": {
+        "class": {
+          "$comment": "RFC 0030's closed reuse-edge class set has four members; `Experimental` is omitted here for the same reason `gates[].status` lists two of the five gate statuses. An Experimental edge MUST NOT support promotion, and by the meet rule one such edge anywhere in a derivation makes the whole derivation Experimental, so a gate resting on one cannot pass — and only passed gates reach a promotion receipt. Omitting the token makes an unpromotable reuse unrepresentable rather than merely prohibited by prose.",
+          "description": "Reuse-edge class licensing this reuse (RFC 0030). A conservative disjointness judgement licenses `Conservative`; `Validated` requires a witness an independent checker accepts for this input digest, and MUST NOT be recorded for an over-approximation (RFC 0032 correction 1); an `Unknown` disjointness is dependent and re-runs, so it never appears here.",
+          "enum": [
+            "Exact",
+            "Validated",
+            "Conservative"
+          ]
+        },
+        "function_id": {
+          "description": "Registry name of the query definition the result was served under (RFC 0030).",
+          "type": "string"
+        },
+        "function_version": {
+          "description": "Implementation version of that query definition (RFC 0030). It is not a release counter and MUST NOT be derived from the daemon version or from engine identity.",
+          "type": "string"
+        },
+        "reused_units": {
+          "description": "How many neighborhood classes or mutants were served from cache rather than re-run.",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "class",
+        "function_id",
+        "function_version"
+      ],
+      "type": "object"
+    },
     "redacted": {
       "$comment": "mirrored from redacted.schema.json; identity-checked by the validator",
       "additionalProperties": false,
@@ -55,6 +179,55 @@
     }
   },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "RFC 0032 gate 5: a strategy truncated by budget leaves neighborhood pending with a continuation, so a receipt listing neighborhood passed cannot disclose a truncated strategy. Stated over the gate list rather than hardcoded, so the rule stays derived from what the receipt says it did.",
+      "if": {
+        "properties": {
+          "gates": {
+            "contains": {
+              "properties": {
+                "gate": {
+                  "const": "neighborhood"
+                },
+                "status": {
+                  "const": "passed"
+                }
+              },
+              "required": [
+                "gate",
+                "status"
+              ]
+            }
+          }
+        },
+        "required": [
+          "gates"
+        ]
+      },
+      "then": {
+        "properties": {
+          "coverage": {
+            "properties": {
+              "neighborhood": {
+                "properties": {
+                  "strategies": {
+                    "items": {
+                      "properties": {
+                        "truncated": {
+                          "const": false
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "description": "The §8.2 gate-12 promotion receipt: every gate accounted for, before/after snapshots, the §8.6 cumulative cost ledger, unknowns, the policy decision, and the checker identity (INV-014) — the RFC 0032 receipt composition list.",
   "properties": {
     "base_snapshot": {
@@ -130,8 +303,261 @@
       "type": "object"
     },
     "coverage": {
-      "additionalProperties": true,
-      "description": "Coverage of the replay, neighborhood, mutation, refinement, certificate, and parity results (RFC 0032 receipt composition); silent caps are prohibited.",
+      "$comment": "RFC 0032 F8, paid here. `coverage` was an untyped object with `additionalProperties: true`, so the per-strategy counts, the truncation disclosures, and — decisively — the failing-neighbor disclosure the ratified FR-05 counting rule depends on had no field to live in, and an adequacy measurement could not be graded mechanically against an unstructured blob. Each group is optional because a `not_yet_enforced` gate has no coverage to report; a gate listed `passed` whose group is absent is a disclosure failure this schema cannot yet detect (see the neighborhood conditional below for the case it can).",
+      "additionalProperties": false,
+      "description": "Coverage of the replay, neighborhood, mutation, refinement, certificate, and parity results (RFC 0032 receipt composition). Silent caps are prohibited: a truncated campaign is disclosed with its frontier and leaves its gate pending, and a receipt MUST NOT render coverage as adequacy — no adequacy claim exists until the docs/50-classified gaming corpus lands and is graded.",
+      "properties": {
+        "certificate_rebuild": {
+          "additionalProperties": false,
+          "description": "Gate 9 coverage: invalidated certificates and proofs rebuilt with fresh checker identity and epochs (RFC 0032 gate table; RFC 0030's freshness predicate).",
+          "properties": {
+            "invalidated": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rebuilt": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "receipts": {
+              "description": "The rebuilt receipts this gate references.",
+              "items": {
+                "$ref": "#/$defs/handle"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "stale": {
+              "description": "Artifacts still failing the freshness predicate. A non-zero count cannot support an Exact or Validated reuse edge.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "invalidated",
+            "rebuilt",
+            "stale"
+          ],
+          "type": "object"
+        },
+        "defect_mutants": {
+          "$ref": "#/$defs/mutation_campaign",
+          "description": "Gate 7 coverage: the known-defect mutant-corpus result set. An undetected defect mutant is instrumentation gaming."
+        },
+        "incremental_parity": {
+          "additionalProperties": false,
+          "description": "Gate 10 coverage: the Incremental Parity Audit promotion-lane comparison (RFC 0030). Sampling governs the interactive lane only, so a sampled comparison MUST NOT be presented here.",
+          "properties": {
+            "compared": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "lane": {
+              "$comment": "The gate-10 rule is that only the promotion lane counts; the enum makes an interactive-lane comparison structurally distinguishable rather than indistinguishable.",
+              "enum": [
+                "promotion",
+                "interactive"
+              ]
+            },
+            "mismatches": {
+              "description": "Comparisons that disagreed. A mismatch quarantines the implicated (class, function_id, function_version) triple.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "compared",
+            "mismatches",
+            "lane"
+          ],
+          "type": "object"
+        },
+        "neighborhood": {
+          "additionalProperties": false,
+          "description": "Gate 5 coverage: per-strategy exploration counts plus every failing neighbor found. A single aggregate count is a rendering, not the record (RFC 0032 correction 13).",
+          "properties": {
+            "failing_neighbors": {
+              "$comment": "The ratified FR-05 counting rule (plan §24.5 quote-id=neighborhood-adequacy-catch-rate) counts a mutation as caught only when exploration surfaces a neighbor on which the patch fails AND the receipt discloses that neighbor. An undisclosed catch is not a catch, so this array is what the independent grader of research/33 grades; a run that finds a failing neighbor and omits it here has failed gate 5, not passed it. Post-promotion summarization MUST preserve this array.",
+              "description": "Every neighbor on which the candidate fails, with its class and a handle to its run (RFC 0032, \"Failing neighbors are disclosed\").",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "neighbor": {
+                    "description": "Identity of the failing neighbor within its strategy's enumeration.",
+                    "type": "string"
+                  },
+                  "run": {
+                    "$ref": "#/$defs/handle",
+                    "description": "Handle to the run that exhibited the failure, so the disclosure is auditable rather than asserted."
+                  },
+                  "strategy": {
+                    "$ref": "#/$defs/neighborhood_strategy"
+                  },
+                  "summary": {
+                    "description": "Rendering only; never the sole home of a machine-consumable fact (INV-003).",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "strategy",
+                  "neighbor",
+                  "run"
+                ],
+                "type": "object"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "strategies": {
+              "description": "One record per plan §8.3 strategy the campaign ran. A strategy the campaign did not run is omitted, and its absence is what distinguishes a broad campaign from one strategy run eight times.",
+              "items": {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "description": "Silent caps are prohibited (INV-007): a strategy truncated by budget discloses the committed frontier it was truncated at.",
+                    "if": {
+                      "properties": {
+                        "truncated": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "truncated"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "frontier"
+                      ]
+                    }
+                  },
+                  {
+                    "description": "RFC 0032 F9: a strategy whose neighbors were served from cache discloses the reuse-edge class and the (function_id, function_version) it was served under, so a reused campaign is never rendered as a fresh one.",
+                    "if": {
+                      "properties": {
+                        "reused": {
+                          "minimum": 1
+                        }
+                      },
+                      "required": [
+                        "reused"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "reuse"
+                      ]
+                    }
+                  }
+                ],
+                "properties": {
+                  "explored": {
+                    "description": "Neighbors explored under this strategy, re-run and reused together.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "failing": {
+                    "description": "How many of the explored neighbors failed. It MUST equal the number of `failing_neighbors` entries carrying this strategy; the array, not this count, is the disclosure.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "frontier": {
+                    "description": "Committed frontier a truncated strategy stopped at, from which `repair.resume` continues monotonically.",
+                    "type": "string"
+                  },
+                  "reuse": {
+                    "$ref": "#/$defs/reuse_provenance"
+                  },
+                  "reused": {
+                    "description": "How many of the explored neighbors were served from the incremental cache rather than re-run.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "strategy": {
+                    "$ref": "#/$defs/neighborhood_strategy"
+                  },
+                  "truncated": {
+                    "description": "Whether budget truncated this strategy. A truncated strategy leaves gate 5 pending with a continuation, never passed.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "strategy",
+                  "explored",
+                  "failing",
+                  "truncated"
+                ],
+                "type": "object"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "strategies",
+            "failing_neighbors"
+          ],
+          "type": "object"
+        },
+        "property_mutation": {
+          "$ref": "#/$defs/mutation_campaign",
+          "description": "Gate 6 coverage: mutant-by-mutant detection results, including non-vacuity (RFC 0032 gate table)."
+        },
+        "refinement_coverage": {
+          "additionalProperties": false,
+          "description": "Gate 8 coverage: the computed delta against the base (RFC 0032 correction 7). The gate passes iff coverage does not decrease, or the decrease is declared and permitted with the delta disclosed here; an uncomputable delta is inconclusive, never a passed gate.",
+          "properties": {
+            "after": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "before": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "declared_decrease": {
+              "description": "Whether a decrease was declared in the transaction and permitted by the evaluation policy. An undeclared decrease is a failed gate.",
+              "type": "boolean"
+            },
+            "delta": {
+              "description": "after − before. A negative delta requires `declared_decrease` true.",
+              "type": "number"
+            }
+          },
+          "required": [
+            "before",
+            "after",
+            "delta",
+            "declared_decrease"
+          ],
+          "type": "object"
+        },
+        "replay": {
+          "additionalProperties": false,
+          "description": "Gate 1 and gate 4 replay coverage: the base failure reproduced, and the exact failure no longer occurring on the candidate.",
+          "properties": {
+            "base_reproduced": {
+              "description": "Whether the original failure replayed on the base snapshot (gate 1). False is a failed gate; an engine divergence is inconclusive with a defect_* handle, not false.",
+              "type": "boolean"
+            },
+            "candidate_clear": {
+              "description": "Whether the exact failure no longer occurs on the candidate under the original choices (gate 4).",
+              "type": "boolean"
+            },
+            "runs": {
+              "description": "Replay runs this coverage is computed over.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "base_reproduced",
+            "candidate_clear",
+            "runs"
+          ],
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "epochs": {
@@ -340,6 +766,8 @@
       "type": "string"
     },
     "intent_diff": {
+      "$comment": "RFC 0032 F7 stays open and is deferred, not paid: the agreement rule below is a relation between two sibling values, and JSON Schema draft 2020-12 has no comparison keyword — the same reason `semantic_epoch` and `epochs.semantic` cannot be forced to agree here. Collapsing the two fields into one would pay F7 properly but is a breaking change to a field RFC 0032's receipt-composition table names, so it belongs to an RFC 0032 revision rather than to a schema sweep. Until then the rule is stated here and checked by `evidence.verify`; the shipped example was corrected to satisfy it.",
+      "description": "The intent diff. There is one diff artifact shape and the intent diff travels as the `intent_changes` set inside it (RFC 0031), so for a transaction with one classification this MUST name the same `diff_*` identity as `semantic_diff`. A receipt naming two different diff artifacts is malformed (RFC 0032 correction 10).",
       "pattern": "^diff_[A-Za-z0-9_-]+$",
       "type": "string"
     },
@@ -380,10 +808,12 @@
       "description": "Schema epoch this instance was written against (schemas/README.md). It advances only on a breaking change to this artifact class, is not one of the six independently versioned epochs (RFC 0026 `rule versioning.epoch_independence`), and pins no semantics."
     },
     "semantic_diff": {
+      "description": "The RFC 0031 classification this promotion was decided against. MUST name the same `diff_*` identity as `intent_diff` (RFC 0032 correction 10).",
       "pattern": "^diff_[A-Za-z0-9_-]+$",
       "type": "string"
     },
     "semantic_epoch": {
+      "description": "Semantic epoch the receipt is verifiable under. MUST agree with `epochs.semantic`; two spellings of one fact can disagree, and the schema cannot force their agreement (RFC 0032 F7).",
       "type": "string"
     },
     "signature": {

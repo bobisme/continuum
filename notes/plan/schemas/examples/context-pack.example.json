@@ -41,7 +41,14 @@
       }
     }
   },
+  "compiler": {
+    "compiler_version": "context-compiler-0.1.0-demo",
+    "ranker_config": "blake3:ranker-config-placeholder",
+    "ranker_id": "information-gain-demo"
+  },
   "content_budget": {
+    "bytes": 16384,
+    "tokenizer_id": "tokenizer:demo-placeholder",
     "tokens": 6000
   },
   "context_id": "ctx_demo1",
@@ -51,7 +58,7 @@
   "expansions": [
     {
       "anchor": "e_ack",
-      "estimated_items": 3,
+      "estimated_items": 196,
       "relation": "causal_predecessors"
     }
   ],
@@ -67,12 +74,13 @@
       "expandable": true,
       "expansion": {
         "anchor": "e_ack",
-        "relation": "omitted_noise_events"
+        "relation": "causal_predecessors"
       },
-      "kind": "observer-independent noise event",
+      "kind": "observer-independent causal predecessor",
       "reason": "slice-irrelevant"
     }
   ],
+  "parent": null,
   "question": "why did AckImpliesDurable fail?",
   "replay": "crash_demo1",
   "schema_id": "https://continuum.dev/schema/context-pack.json",

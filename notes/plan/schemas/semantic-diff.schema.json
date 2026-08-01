@@ -55,6 +55,26 @@
       "pattern": "^in_[A-Za-z0-9_-]+$",
       "type": "string"
     },
+    "classifier": {
+      "$comment": "RFC 0031 F3, paid here. The artifact recorded neither the classifier version nor the normal-form version, though both are part of the classification's identity under RFC 0030's query key — so a diff could be silently reused across a change that could have re-classified it. Mirrors RFC 0028's F3 on the context-pack side.",
+      "additionalProperties": false,
+      "description": "Identity of the classifier that produced this artifact (RFC 0031, \"Inputs, preconditions, and determinism\"). A diff MUST NOT be reused across an advance of any recorded component; a relation recorded as `unknown` under one classifier version may be recomputed by a later one, but the later result is a new `diff_*`, never an edit of this artifact (INV-009).",
+      "properties": {
+        "classifier_version": {
+          "description": "Version of the semantic/intent-diff classifier. It advances whenever a classification could change for any input.",
+          "type": "string"
+        },
+        "cpnf_version": {
+          "description": "Canonical property normal form the expression comparisons were computed under — `cpnf-1` for the form RFC 0037 fixes. A new normal form does not silently re-classify history.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "classifier_version",
+        "cpnf_version"
+      ],
+      "type": "object"
+    },
     "after_snapshot": {
       "pattern": "^ws_[A-Za-z0-9_-]+$",
       "type": "string"
@@ -104,8 +124,42 @@
       "type": "object"
     },
     "intent_changes": {
+      "description": "One record per classified unit that is not `unchanged` (RFC 0031). Two units with different relations MUST NOT be collapsed into one record, which is what makes the per-unit locator below load-bearing rather than decorative.",
       "items": {
         "additionalProperties": false,
+        "allOf": [
+          {
+            "$comment": "RFC 0031 F1, paid here. The record shape could not say *which* claim was weakened, and the classifier carried the unit identity only in `policy.reasons` prose — a machine-consumable fact living in a prose field is the INV-003 failure. The eleven fields listed here are exactly those whose RFC 0031 unit-of-classification table declares a per-unit key; the four omitted fields (`bounds`, `trust_boundaries`, `completion_policy`, `assurance`) are classified as a whole and have no sub-unit to name.",
+            "description": "A field classified per unit names the unit it classified.",
+            "if": {
+              "properties": {
+                "field": {
+                  "enum": [
+                    "properties",
+                    "assumptions",
+                    "observers",
+                    "abstraction_maps",
+                    "scope",
+                    "faults",
+                    "fairness",
+                    "nondeterminism",
+                    "optimization",
+                    "non_vacuity",
+                    "security_policy"
+                  ]
+                }
+              },
+              "required": [
+                "field"
+              ]
+            },
+            "then": {
+              "required": [
+                "unit"
+              ]
+            }
+          }
+        ],
         "properties": {
           "evidence": {
             "anyOf": [
@@ -171,6 +225,11 @@
               "unsupported",
               "unknown"
             ]
+          },
+          "unit": {
+            "description": "Per-unit locator: the key of the classified unit within the record's `field`, per RFC 0031's unit-of-classification table. Claims, assumptions, and observers are keyed by `id`; abstraction maps by `role`; nondeterminism entries by `site`; fairness constraints by the (`kind`, `action`) pair, rendered `kind:action`; `scope` by the sub-field (`components`, `fragments`, `abstraction_level`); `faults` by the member of `enabled` or `profiles`; `optimization` and `non_vacuity` by the constraint, objective, or behavior; `security_policy` by `data_classification`, the redaction class, or the capability requirement. The contract path the key resolves against is the one `x-policy-field-map` relates the diff field to (intent-contract.schema.json).",
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
@@ -194,6 +253,8 @@
           ]
         },
         "reasons": {
+          "$comment": "RFC 0031 F4 remains open and is deferred, not paid: typing these reasons requires a closed per-field reason vocabulary, and RFC 0031 mints none — inventing one here would make this schema the source of a vocabulary the RFC does not define, which is the inverse of INV-003. It is an RFC 0031 revision, not a schema sweep. The half of F4 that was schema-side is paid instead by `intent_changes[].unit`: the unit identity these strings used to carry as prose now has a typed home, so a reason string is no longer the only place a machine-consumable fact appears.",
+          "description": "Human-readable justifications for the decision. Rendering only: every fact a consumer acts on MUST also appear in a typed field (INV-003).",
           "items": {
             "type": "string"
           },
@@ -208,8 +269,15 @@
       "type": "object"
     },
     "requested_assurance": {
-      "description": "Requested assurance for the classification itself — the RFC 0031 diff input.",
-      "type": "string"
+      "$comment": "RFC 0031 F2, paid here. The field was an unconstrained string while RFC 0031 requires one of the five AssuranceLevel tokens. The enum is token-for-token the `assurance.minimum` enum of intent-contract.schema.json and `AssuranceLevel` in crates/continuum-value/src/assurance.rs; reordering or renaming a member is a coordinated breaking change across RFC 0031, RFC 0037, that schema, and that crate.",
+      "description": "Requested assurance for the classification itself — the RFC 0031 diff input. It bounds the evidence the classifier may rely on to claim a direction: `observed` and `sampled` admit none, so every expression-level direction classifies `unknown`; a direction the classifier can support only with weaker evidence than requested MUST be reported as `unknown`, never as the direction. Relations decidable by canonical encoding alone do not consume this budget.",
+      "enum": [
+        "observed",
+        "sampled",
+        "bounded",
+        "validated",
+        "proved"
+      ]
     },
     "schema_id": {
       "const": "https://continuum.dev/schema/semantic-diff.json",
