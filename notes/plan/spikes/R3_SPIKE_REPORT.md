@@ -6,6 +6,8 @@
 
 All eight Revision 3 spike groups passed their internal assertions.
 
+Section 9 is a later addition and is not one of those eight: it is a Rust falsification campaign against a landed reference implementation, executed by `cargo test` rather than by the Python runner above, and it records a failure.
+
 ## 1. Context Pack causal slicing
 
 The synthetic durability trace contained **200 events**: four causal events and 196 observer-independent noise events.
@@ -139,6 +141,58 @@ The immutable graph spike coordinated two independent patch proposals and verifi
 - contradictory claims about the same subject and predicate become an explicit conflict rather than last-writer-wins state.
 
 The run produced ten immutable nodes, seven typed edges, one surfaced claim conflict, and one accepted repair envelope. This validates authority separation and coordination semantics, not distributed storage or Byzantine agent resistance.
+
+## 9. G0-DX-13 falsification campaign
+
+**Executed with:** `cargo test --workspace --locked` (`just check`)  
+**Sources:** `crates/continuum-workspace/tests/dx13_falsification.rs`, `crates/continuum-workspace/tests/dx13_mutation_campaign.rs`
+
+Sections 1–8 validate artifact shapes with finite Python spikes. This one is a different kind of evidence and is reported separately for that reason: an adversarial campaign against the *landed reference implementation* of atomic publication (`crates/continuum-workspace/src/publication.rs`), written to make the G0-DX-13 pass condition — "one semantic identity; no lost receipts; deterministic result" — false rather than to confirm it. No `src/` file was modified by the campaign, and every assertion is on an outcome; interleavings are forced through the `StorageFaults` seam where a specific one is wanted, and never asserted.
+
+### Attacks the property survived
+
+| Attack | Scale | Outcome |
+|---|---|---|
+| identical publication under contention | 32 publishers × 12 rounds | one identity, 32 distinct receipts, schedule-independent store |
+| identical and distinct payloads in one store at once | 48 publishers, 6 payloads, 6 rounds | 6 identities, 8 receipts each, content stored once per identity |
+| identical bytes across three artifact classes | 24 publishers | 3 identities; per-class attribution intact |
+| abandoned stagings interleaved with commits | 48 threads, 4 rounds | 24 receipts, 24 staging/abandoned aborts, no residue |
+| crash between the commits, concurrent with success | 48 threads, 4 rounds | residue absorbed by convergence; `fsck` clean; no receipt for a crashed publisher |
+| refusal injected at every publication phase | 24 publishers × 3 phases × 3 rounds | 12 successes and 12 aborts per phase; nothing half-published |
+| universal refusal at the index commit | 24 publishers | nothing visible; residue classified unreachable content and reclaimed |
+| colliding distinct values, four collision families | 32 publishers × 8 rounds | no conflation; losers refused `IdentityCollision`; no receipt names another publisher's bytes |
+| total hash collision | 32 publishers × 6 rounds | exactly one artifact; receipts only for the winner's bytes |
+| readers and `fsck` against a publishing store | 16 + 8 + 4 threads, 200 probes each | no missing referent, no identity mismatch, no partial read |
+| idempotent replay under contention | 16 publishers × 8 replays | 128 receipts, one identity, one stored copy, one reported cost |
+| capability mint/revoke racing publication | 24 publishers × 4 rounds | consistent store; a denial is never recorded as an abort |
+
+### The property broke: garbage collection racing an in-flight publication
+
+`ReferenceStore::collect_garbage` derives its root set from the index alone. A publication that has completed its content commit and not yet its index commit is unreachable by that definition, so the collector reclaims content a live publisher has already been told is durable. Three failing tests are retained (marked `#[ignore]` so `just check` stays green; run with `-- --ignored`):
+
+- `a_receipt_must_name_a_readable_artifact_when_gc_runs_concurrently` — the publisher receives a receipt, the artifact becomes visible, and reading it returns `CapabilityDenied`. `fsck` reports a **missing referent**, the defect class the module documents as never producible by this store's own ordering;
+- `concurrent_gc_must_not_let_a_receipt_name_another_publishers_bytes` — deleting the in-flight content also deletes the value ADR-0013's exact comparison was about to compare against, so under a colliding identifier a second publisher's byte-different value is stored at the first publisher's identity and the first publisher's receipt names bytes it never published;
+- `unassisted_concurrent_gc_and_publication_lose_committed_content` — the same defect from ordinary threads with no fault seam. Corroboration only: it passes vacuously when the scheduler serializes the publications.
+
+Three documented claims are false as a result: INV-017's "visible only after content is durably committed" is violated in the inverted direction (visible, with no content); `collect_garbage`'s "collecting it cannot make a published artifact unavailable"; and docs/35's root set — "named roots, live tasks, receipts, and retention policy" — which is implemented as index entries alone and omits both receipts and in-flight publications. The pass condition's third clause fails outright: the same inputs produce different stores. Diagnosis and repair belong to a follow-up item; the campaign did not patch `src/`.
+
+### Adversarial mutations
+
+The promotion rule's third requirement, and the reason the twelve passes above are worth reading. Three plausible bugs were introduced into a *separate* re-implementation of the publication core and graded by the same three checks as the real store:
+
+| Store under test | convergence and receipts | atomic abort | exact comparison |
+|---|---|---|---|
+| reference implementation | pass | pass | pass |
+| faithful re-implementation (control) | pass | pass | pass |
+| index entry written before content | pass | **caught** | pass |
+| last-writer-wins receipt ledger | **caught** | pass | **caught** |
+| colliding content overwrites instead of aborting | pass | pass | **caught** |
+
+Each catch asserts *which* complaint the check produced, so a coincidental catch cannot be mistaken for a targeted one, and the control shows the checks reject incorrectness rather than unfamiliarity.
+
+### Limits
+
+One process, one mutex, no disk. The campaign says nothing about daemon-scale linearizability, real crash recovery, restore, or a durable store; that evidence is `continuumd`'s, PR 6+ (docs/35). The garbage-collection defect is a finding against the in-memory reference — whether a durable implementation inherits it is a design question the follow-up owns, not one this campaign answered. The three retained failures are excluded from `just check` by `#[ignore]`, which keeps the gate honest about what is green but means the defect will not re-announce itself; it is recorded here and in the G0 matrix instead.
 
 ## What the spikes changed
 
