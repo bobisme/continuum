@@ -46,7 +46,7 @@
       "files": 221
     },
     "markdown_links": {
-      "links": 362
+      "links": 376
     },
     "numbering": {
       "adr": 53,
@@ -57,12 +57,12 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 878,
-      "active_edges": 2035,
-      "active_requirements": 794,
+      "active_bones": 877,
+      "active_edges": 2033,
+      "active_requirements": 793,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 772,
+      "leaf_bones": 771,
       "requirements": 846
     },
     "program_status": {
@@ -94,9 +94,7 @@
       "pairs": 19
     },
     "spec_debt": {
-      "open": [
-        "SD-10"
-      ],
+      "open": [],
       "paid": [
         "SD-01",
         "SD-02",
@@ -107,6 +105,7 @@
         "SD-07",
         "SD-08",
         "SD-09",
+        "SD-10",
         "SD-11",
         "SD-12",
         "SD-13",
