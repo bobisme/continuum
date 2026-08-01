@@ -57,13 +57,7 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 867,
-      "active_edges": 1999,
-      "active_requirements": 754,
-      "coverage": "complete",
-      "dependency_layers": 14,
-      "leaf_bones": 764,
-      "requirements": 846
+      "error": "AssertionError: PLAN_BONE_TRACEABILITY.md is stale; run tools/generate_traceability.py"
     },
     "program_status": {
       "execution_model": "autonomous-agent-swarm",
@@ -125,5 +119,5 @@
     }
   },
   "program_status": "ready",
-  "status": "pass"
+  "status": "fail"
 }

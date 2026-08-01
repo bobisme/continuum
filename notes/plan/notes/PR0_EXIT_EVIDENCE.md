@@ -172,3 +172,18 @@ tooling task, recorded on top of a specification already normative.
   restatement of facts already recorded in the seven RFCs, `plan.md` §25,
   and the validator's own output — assembled in one place for the human
   reviewer, asserting nothing beyond what those sources already state.
+
+## 6. Ratification record
+
+Both pending decisions above were taken by the human lead on 2026-07-31,
+after this document was assembled:
+
+- **PR 0 closure: ratified.** The goal bone `bn-2hm`'s completion (recorded
+  mechanically when `bn-39d3` closed) stands as the exit of record. PR 5's
+  "may not merge before PR 0 closes" precondition is therefore discharged;
+  PR 5 remains gated by its own dependencies.
+- **Protocol-minor bump: deferred and bundled, not skipped.** `version`
+  stays `"3.0"` with the IDL's in-file note until `bn-3ayom` (RFC 0027
+  F1–F8 disposition) lands its wire changes; that bone then takes one
+  minor bump (3.0 → 3.1) covering IDL 1.1's compatible fixes and the
+  sweep's additions together. Recorded on `bn-2hm` and `bn-3ayom`.
