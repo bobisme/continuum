@@ -91,7 +91,7 @@ Implement (documentation, not code):
 - corpus per-family redistribution audit before any public benchmark release (§21.1) (delivered: bn-2br);
 - ADR-0029 rule: foreign oracle tooling (TLC, Apalache, solvers) never ships in release binaries (delivered: bn-2br).
 
-**Exit:** the seven RFCs are normative specifications, and the pre-freeze open-debt set (plan §25, validator `check_spec_debt`) reads empty — not only the seven RFC expansions; PR 5 may not merge before PR 0 closes. PR 0 is Phase A's designated opening PR; it has no staffing merge requirement (plan §21.1).
+**Exit:** the seven RFCs are normative specifications, and the pre-freeze open-debt set (plan §25, validator `check_spec_debt`) reads empty — not only the seven RFC expansions; PR 5 may not merge before PR 0 closes. PR 0 is Phase A's designated opening PR; it has no staffing merge requirement (plan §21.1). (delivered: bn-39d3)
 
 ### PR 1 — Revision 3 constitution and epochs [G1]
 

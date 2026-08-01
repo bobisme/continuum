@@ -747,7 +747,7 @@
         "line": 84,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Specification pass and program decisions [G1, G2]"
     },
     {
@@ -819,8 +819,8 @@
         "line": 84,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "the seven RFCs are normative specifications, and the pre-freeze open-debt set (plan \u00a725, validator checkspecdebt) reads empty \u2014 not only the seven RFC expansions; PR 5 may not merge before PR 0 closes. PR 0 is Phase A's designated opening PR; it has no staffing merge requirement (plan \u00a721.1)."
+      "status": "satisfied",
+      "summary": "the seven RFCs are normative specifications, and the pre-freeze open-debt set (plan \u00a725, validator checkspecdebt) reads empty \u2014 not only the seven RFC expansions; PR 5 may not merge before PR 0 closes. PR 0 is Phase A's designated opening PR; it has no staffing merge requirement (plan \u00a721.1). (delivered: bn-39d3)"
     },
     {
       "category": "pr",
