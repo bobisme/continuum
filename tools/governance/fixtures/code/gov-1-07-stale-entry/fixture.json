@@ -1,0 +1,10 @@
+{
+  "check": "no-stale-entries",
+  "description": "The manifest records a dependency nobody declares, so the classification no longer describes the workspace.",
+  "id": "gov-1-07-stale-entry",
+  "overlay": {
+    "tools/governance/dependency-rationale.toml": "dependency-rationale.toml.fixture"
+  },
+  "requirement": "GOV-1-07",
+  "rule": "dependency-rationale"
+}

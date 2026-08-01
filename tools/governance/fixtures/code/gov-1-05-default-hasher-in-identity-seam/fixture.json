@@ -1,0 +1,15 @@
+{
+  "check": "platform-hashing",
+  "description": "The identity module imports `DefaultHasher`, whose output is unstable across releases and process starts \u2014 content identity would stop being content identity.",
+  "id": "gov-1-05-default-hasher-in-identity-seam",
+  "requirement": "GOV-1-05",
+  "rule": "no-platform-hashing",
+  "substitute": {
+    "crates/continuum-value/src/identity.rs": [
+      {
+        "find": "use std::collections::BTreeMap;",
+        "replace": "use std::collections::BTreeMap;\nuse std::collections::hash_map::DefaultHasher;"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-certificate` — certificate formats.
+
+use std::net::TcpStream;
+
+/// Fetch a certificate from a peer.
+#[must_use]
+pub fn fetch(peer: &str) -> Option<TcpStream> {
+    TcpStream::connect(peer).ok()
+}

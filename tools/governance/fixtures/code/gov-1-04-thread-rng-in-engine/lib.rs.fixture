@@ -1,0 +1,10 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-engine-dpor` — partial-order reduction.
+//!
+//! Results reach the trust base only as certificates checked from wire form.
+
+/// Pick the next interleaving to explore.
+#[must_use]
+pub fn next_choice(bound: usize) -> usize {
+    rand::thread_rng().gen_range(0..bound)
+}

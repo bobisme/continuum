@@ -1,0 +1,10 @@
+{
+  "check": "semantic-code-cites-a-decision-record",
+  "description": "A semantic-core crate grows behavior citing no ADR and no RFC.",
+  "id": "gov-1-08-semantic-code-without-a-decision-record",
+  "overlay": {
+    "crates/continuum-refinement/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr"
+}

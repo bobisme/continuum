@@ -1,0 +1,15 @@
+{
+  "check": "workspace-lint-forbids-unsafe",
+  "description": "The workspace lint is lowered from `forbid` to `deny`, which a crate or module can then re-allow locally.",
+  "id": "gov-1-02-workspace-lint-relaxed",
+  "requirement": "GOV-1-02",
+  "rule": "unsafe-forbidden",
+  "substitute": {
+    "Cargo.toml": [
+      {
+        "find": "[workspace.lints.rust]\nmissing_docs = \"warn\"\nunsafe_code = \"forbid\"",
+        "replace": "[workspace.lints.rust]\nmissing_docs = \"warn\"\nunsafe_code = \"deny\""
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "check": "no-unsafe-in-sources",
+  "description": "A kernel source contains an `unsafe` block.",
+  "id": "gov-1-02-unsafe-item-in-source",
+  "overlay": {
+    "crates/continuum-kernel-smt/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-02",
+  "rule": "unsafe-forbidden"
+}

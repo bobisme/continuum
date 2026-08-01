@@ -1,0 +1,15 @@
+{
+  "check": "verdict-vocabulary-is-closed",
+  "description": "`unsupported` is admitted as a verdict. INV-008 makes it a reason *inside* `inconclusive`; promoting it to a verdict is exactly the ambiguity the rule forbids.",
+  "id": "gov-1-12-verdict-vocabulary-opened",
+  "requirement": "GOV-1-12",
+  "rule": "ambiguity-is-an-error",
+  "substitute": {
+    "notes/plan/schemas/assurance-result.schema.json": [
+      {
+        "find": "\"established\",\n        \"refuted\",\n        \"inconclusive\"",
+        "replace": "\"established\",\n        \"refuted\",\n        \"inconclusive\",\n        \"unsupported\""
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "check": "no-platform-hash-dependency",
+  "description": "A certificate crate depends on `ahash`, a hasher whose output is a function of the host and the build.",
+  "id": "gov-1-05-platform-hash-dependency",
+  "overlay": {
+    "crates/continuum-certificate/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-05",
+  "rule": "no-platform-hashing"
+}

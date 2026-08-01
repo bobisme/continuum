@@ -1,0 +1,10 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-kernel-temporal` — trusted checking base.
+
+use std::collections::HashSet;
+
+/// Obligations this checker has discharged.
+#[derive(Debug, Default)]
+pub struct Discharged {
+    seen: HashSet<String>,
+}

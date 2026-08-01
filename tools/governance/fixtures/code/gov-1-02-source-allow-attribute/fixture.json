@@ -1,0 +1,10 @@
+{
+  "check": "no-source-level-override",
+  "description": "A crate root relaxes the `unsafe_code` lint by attribute.",
+  "id": "gov-1-02-source-allow-attribute",
+  "overlay": {
+    "crates/continuum-kernel-sat/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-02",
+  "rule": "unsafe-forbidden"
+}

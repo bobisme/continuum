@@ -1,0 +1,13 @@
+[package]
+name = "continuum-kernel-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+continuum-cml-syntax = { path = "../continuum-cml-syntax" }
+
+[lints]
+workspace = true

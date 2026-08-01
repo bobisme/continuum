@@ -1,0 +1,15 @@
+{
+  "check": "reference-engine-is-declared-the-oracle",
+  "description": "The reference engine stops declaring itself the differential oracle every optimized path is measured against.",
+  "id": "gov-1-11-reference-no-longer-the-oracle",
+  "requirement": "GOV-1-11",
+  "rule": "reference-precedes-optimization",
+  "substitute": {
+    "crates/continuum-engine-reference/src/lib.rs": [
+      {
+        "find": "differential oracle",
+        "replace": "fast path"
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "check": "checker-dependencies-are-tcb",
+  "description": "A kernel crate links a dependency classified `engine`. Anything the certificate checker links is in the trusted checking base whether or not it was classified that way.",
+  "id": "gov-1-07-checker-dependency-not-tcb",
+  "overlay": {
+    "crates/continuum-kernel-core/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-07",
+  "rule": "dependency-rationale"
+}

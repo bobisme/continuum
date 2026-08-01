@@ -1,0 +1,15 @@
+{
+  "check": "schema-id-and-epoch-agree",
+  "description": "A schema's `$id` advances to v2 while its `schema_epoch` stays 1, so the document and the header no longer determine each other.",
+  "id": "gov-1-09-id-and-epoch-disagree",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline",
+  "substitute": {
+    "notes/plan/schemas/domain-pack.schema.json": [
+      {
+        "find": "\"$id\": \"https://continuum.dev/schema/v1/domain-pack.json\"",
+        "replace": "\"$id\": \"https://continuum.dev/schema/v2/domain-pack.json\""
+      }
+    ]
+  }
+}

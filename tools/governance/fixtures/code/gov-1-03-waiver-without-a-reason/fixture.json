@@ -1,0 +1,10 @@
+{
+  "check": "deterministic-collections",
+  "description": "An inline waiver is used to silence the check without stating a reason. A waiver with no usable reason is reported rather than honoured.",
+  "id": "gov-1-03-waiver-without-a-reason",
+  "overlay": {
+    "crates/continuum-context/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-03",
+  "rule": "deterministic-collections"
+}

@@ -1,0 +1,10 @@
+{
+  "check": "no-ambient-dependency",
+  "description": "A semantic-core crate declares a dependency on `rand`.",
+  "id": "gov-1-04-ambient-dependency",
+  "overlay": {
+    "crates/continuum-value/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-04",
+  "rule": "no-ambient-time-rng"
+}

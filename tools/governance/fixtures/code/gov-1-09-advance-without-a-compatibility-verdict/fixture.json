@@ -1,0 +1,15 @@
+{
+  "check": "advance-carries-a-compatibility-verdict",
+  "description": "The `Compatibility` verdict disappears, so an epoch could advance without publishing the per-artifact-class blast radius plan \u00a74.6 requires.",
+  "id": "gov-1-09-advance-without-a-compatibility-verdict",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline",
+  "substitute": {
+    "crates/continuum-value/src/epoch.rs": [
+      {
+        "find": "pub enum Compatibility {",
+        "replace": "pub enum AdvanceNote {"
+      }
+    ]
+  }
+}

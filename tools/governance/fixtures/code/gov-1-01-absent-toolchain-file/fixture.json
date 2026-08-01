@@ -1,0 +1,10 @@
+{
+  "check": "toolchain-file-present",
+  "description": "No rust-toolchain.toml at all: the build uses whatever `rustup` resolves on the day.",
+  "id": "gov-1-01-absent-toolchain-file",
+  "remove": [
+    "rust-toolchain.toml"
+  ],
+  "requirement": "GOV-1-01",
+  "rule": "toolchain-pinned"
+}

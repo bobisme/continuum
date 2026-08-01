@@ -1,0 +1,10 @@
+{
+  "check": "no-nondeterministic-collection-crates",
+  "description": "A semantic-core crate depends on `dashmap`.",
+  "id": "gov-1-03-nondeterministic-collection-dependency",
+  "overlay": {
+    "crates/continuum-evidence/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-03",
+  "rule": "deterministic-collections"
+}

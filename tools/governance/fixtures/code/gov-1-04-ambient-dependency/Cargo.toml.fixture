@@ -1,0 +1,13 @@
+[package]
+name = "continuum-value"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rand = "0.8"
+
+[lints]
+workspace = true

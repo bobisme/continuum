@@ -1,0 +1,10 @@
+{
+  "check": "ambient-environment",
+  "description": "A semantic-core crate branches on the process environment \u2014 ambient nondeterminism by ADR-0003's definition, even though it is neither a clock nor an RNG.",
+  "id": "gov-1-04-environment-read-in-core",
+  "overlay": {
+    "crates/continuum-cir/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-04",
+  "rule": "no-ambient-time-rng"
+}

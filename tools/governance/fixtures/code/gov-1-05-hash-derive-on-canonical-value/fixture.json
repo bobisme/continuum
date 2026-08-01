@@ -1,0 +1,15 @@
+{
+  "check": "canonical-value-is-not-hashable",
+  "description": "The canonical `Value` derives `Hash`, restoring exactly the affordance that lets a caller index states by fingerprint and never compare canonically (ADR-0013).",
+  "id": "gov-1-05-hash-derive-on-canonical-value",
+  "requirement": "GOV-1-05",
+  "rule": "no-platform-hashing",
+  "substitute": {
+    "crates/continuum-value/src/value.rs": [
+      {
+        "find": "/// documentation.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub enum Value {",
+        "replace": "/// documentation.\n#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub enum Value {"
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+# ADR-0099: An unindexed decision
+
+**Status:** Accepted
+
+## Context
+
+Violating fixture. This record exists on disk but `notes/plan/adr/README.md` does not
+index it.
+
+## Decision
+
+Nothing. This file is inert fixture data.

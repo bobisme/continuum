@@ -1,0 +1,15 @@
+{
+  "check": "citations-resolve",
+  "description": "Semantic code cites an ADR that does not exist; a citation nobody can follow is not a decision record.",
+  "id": "gov-1-08-dangling-adr-citation",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr",
+  "substitute": {
+    "crates/continuum-value/src/lib.rs": [
+      {
+        "find": "//! Content identity per ADR-0013:",
+        "replace": "//! Content identity per ADR-9999:"
+      }
+    ]
+  }
+}

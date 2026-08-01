@@ -1,0 +1,15 @@
+{
+  "check": "adr-declares-a-status",
+  "description": "An ADR stops declaring a status, so nothing says whether it is normative, proposed, or already superseded (docs/12 \u00a72).",
+  "id": "gov-1-08-adr-without-a-status",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr",
+  "substitute": {
+    "notes/plan/adr/0036-authoritative-workbench-daemon.md": [
+      {
+        "find": "## Status\nAccepted.",
+        "replace": "## Notes\nAccepted."
+      }
+    ]
+  }
+}

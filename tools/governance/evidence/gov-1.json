@@ -1,0 +1,409 @@
+{
+  "artifact": "continuum.governance.evidence/gov-1",
+  "authority": {
+    "constitution": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71 (Repository constitution)",
+    "requirement_ids": "notes/plan/notes/PLAN_REQUIREMENTS.json"
+  },
+  "determinism": "This file records no timestamp, commit id, or absolute path: it is a function of the repository contents alone, so an unchanged tree reproduces it byte-for-byte.",
+  "produced_by": "tools/governance/check_code_policy.py",
+  "reproduce": "python3 tools/governance/check_code_policy.py --evidence tools/governance/evidence/gov-1.json",
+  "requirements": {
+    "GOV-1-01": {
+      "boundary": null,
+      "enforces": "`rust-toolchain.toml` exists and pins an exact `major.minor.patch` channel; `[workspace.package]` sets `edition` and the `rust-version` floor; every crate inherits the edition with `edition.workspace = true` rather than pinning its own.",
+      "fixtures_proven_caught": [
+        "gov-1-01-absent-toolchain-file",
+        "gov-1-01-crate-pins-own-edition",
+        "gov-1-01-floating-toolchain-channel",
+        "gov-1-01-two-component-channel"
+      ],
+      "result": "pass",
+      "rule": "toolchain-pinned",
+      "scanned": [
+        "rust-toolchain.toml",
+        "Cargo.toml",
+        "crates/*/Cargo.toml"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Rust edition/toolchain pinned.",
+      "violations": []
+    },
+    "GOV-1-02": {
+      "boundary": null,
+      "enforces": "`[workspace.lints.rust] unsafe_code = \"forbid\"` is set; every crate opts in with `[lints] workspace = true`; no crate manifest re-declares `unsafe_code`; no source relaxes the lint by attribute; no `unsafe` item exists in any crate source, tests included.",
+      "fixtures_proven_caught": [
+        "gov-1-02-crate-level-override",
+        "gov-1-02-crate-not-opted-in",
+        "gov-1-02-source-allow-attribute",
+        "gov-1-02-unsafe-item-in-source",
+        "gov-1-02-workspace-lint-relaxed"
+      ],
+      "result": "pass",
+      "rule": "unsafe-forbidden",
+      "scanned": [
+        "Cargo.toml",
+        "crates/*/Cargo.toml",
+        "crates/**/*.rs"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "`unsafe` forbidden by default.",
+      "violations": []
+    },
+    "GOV-1-03": {
+      "boundary": "Scope is the semantic-core tier only. Boundary crates (the effect packs, asupersync, Forge, the benchmark harness, the security crate, the proof-service client) and the protocol adapters are excluded by design: owning an ambient resource behind a declared capability is their job. The rule sees declared uses, not a `HashMap` reached through a third-party dependency's public API.",
+      "enforces": "No `HashMap`/`HashSet`/`hash_map`/`hash_set`/`DashMap` and no nondeterministic-collection dependency in the semantic core's `src/`. The crate tiering that defines the semantic core is checked against plan \u00a720 in the same rule, so a new crate cannot be added without being classified. An inline `// continuum:allow(deterministic-collections): <reason>` waiver covers its own line and the next; every granted waiver is listed in this file.",
+      "fixtures_proven_caught": [
+        "gov-1-03-hashmap-in-canonical-value",
+        "gov-1-03-hashset-in-kernel",
+        "gov-1-03-nondeterministic-collection-dependency",
+        "gov-1-03-unclassified-plan-20-crate",
+        "gov-1-03-waiver-without-a-reason"
+      ],
+      "result": "pass",
+      "rule": "deterministic-collections",
+      "scanned": [
+        "notes/plan/plan.md \u00a720",
+        "crates/<semantic-core>/src/**/*.rs",
+        "crates/*/Cargo.toml"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Deterministic collections in semantic paths.",
+      "violations": []
+    },
+    "GOV-1-04": {
+      "boundary": "Two deliberate extensions beyond the literal bullet, both declared: the process environment is enforced on ADR-0003/INV-005's authority (\"ambient nondeterminism\"), and the search engines are inside the enforced tier because a seed-dependent frontier yields a seed-dependent counterexample. Scope is the semantic-core tier; boundary crates are the capability providers and are excluded by design. The rule sees declared uses, not time or randomness reached through a third-party dependency.",
+      "enforces": "No `SystemTime`/`Instant`/`UNIX_EPOCH`/`chrono`/`OffsetDateTime`, no `rand`/`getrandom`/`thread_rng`/`OsRng`/`StdRng`/`SmallRng`/`fastrand`/`random()`, and no dependency on a clock or RNG crate anywhere in the semantic core's `src/`. `std::env::var`/`vars` and `std::process::id` are enforced under the same rule.",
+      "fixtures_proven_caught": [
+        "gov-1-04-ambient-dependency",
+        "gov-1-04-clock-dependency",
+        "gov-1-04-environment-read-in-core",
+        "gov-1-04-systemtime-in-kernel",
+        "gov-1-04-thread-rng-in-engine"
+      ],
+      "result": "pass",
+      "rule": "no-ambient-time-rng",
+      "scanned": [
+        "crates/<semantic-core>/src/**/*.rs",
+        "crates/*/Cargo.toml"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "No ambient time/RNG in core.",
+      "violations": []
+    },
+    "GOV-1-05": {
+      "boundary": "The hasher scan runs over the whole semantic-core tier, a superset of the canonical-format crates, so that half is wider than the bullet rather than narrower. The `Hash`-derive prohibition is scoped to the canonical value module alone: `continuum-value`'s epoch tokens and assurance dimensions, and `continuum-workspace`'s path and handle types, derive `Hash` legitimately \u2014 they are labels, not canonical states. The prohibition is on fingerprinting a *value*, not on being a map key.",
+      "enforces": "No `DefaultHasher`/`RandomState`/`BuildHasherDefault`/`SipHasher` and no `ahash`/`fxhash`/`rustc_hash`/`twox_hash`/`seahash`/`metrohash` symbol or dependency in the semantic core. The identity seam `crates/continuum-value/src/identity.rs` still declares `trait ContentHasher` and `struct HashAlgorithm` and imports no `std::hash`. No type in the canonical value module `crates/continuum-value/src/value.rs` derives or implements `Hash`, which is what makes hash-indexed state identity unrepresentable (ADR-0013).",
+      "fixtures_proven_caught": [
+        "gov-1-05-default-hasher-in-identity-seam",
+        "gov-1-05-hash-derive-on-canonical-value",
+        "gov-1-05-platform-hash-dependency",
+        "gov-1-05-seam-loses-its-algorithm-label"
+      ],
+      "result": "pass",
+      "rule": "no-platform-hashing",
+      "scanned": [
+        "crates/<semantic-core>/src/**/*.rs",
+        "crates/continuum-value/src/identity.rs",
+        "crates/continuum-value/src/value.rs",
+        "crates/*/Cargo.toml"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "No platform-dependent hashing in canonical formats.",
+      "violations": []
+    },
+    "GOV-1-06": {
+      "boundary": "Workspace-internal edges are exact. External dependencies are checked at the *declared* level: a third-party crate that itself pulls in a socket is not audited here. Deep transitive auditing of third-party crates is PR 9's kernel covenant tooling. The workspace currently declares no external dependency at all, so this rule's external half is proven only by its fixtures today.",
+      "enforces": "The workspace-internal closure of the four `continuum-kernel-*` crates and `continuum-certificate` contains no network-capable member (`continuum-effects-network`, `continuum-asupersync`, `continuum-proof-client`, `continuumd`, any adapter); no crate in that closure declares a network or async-runtime dependency; no checker source names a socket type.",
+      "fixtures_proven_caught": [
+        "gov-1-06-http-client-in-kernel",
+        "gov-1-06-socket-in-certificate-crate",
+        "gov-1-06-transitive-async-runtime",
+        "gov-1-06-transitive-network-member"
+      ],
+      "result": "pass",
+      "rule": "no-network-in-checker",
+      "scanned": [
+        "crates/*/Cargo.toml (transitive closure)",
+        "crates/<checker>/src/**/*.rs"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "No network access in certificate checking.",
+      "violations": []
+    },
+    "GOV-1-07": {
+      "boundary": "The rule enforces that a rationale and a classification exist and that the classification is consistent with how the dependency is actually linked. Whether the rationale is a *good* reason is a review judgement no check can make.",
+      "enforces": "Every dependency declared anywhere in the workspace has exactly one entry in `tools/governance/dependency-rationale.toml` and every entry corresponds to a real dependency. Each entry states a one-line rationale, a `tcb_class` from {trusted-checking-base, engine, dev-only, build-only}, an accurate `origin`, and accurate `used_by`/`kinds` sets. A dependency linked by the certificate checker must be classified `trusted-checking-base`; a dependency used only in dev or build position must be classified `dev-only`/`build-only`.",
+      "fixtures_proven_caught": [
+        "gov-1-07-checker-dependency-not-tcb",
+        "gov-1-07-missing-manifest",
+        "gov-1-07-rationale-not-stated",
+        "gov-1-07-stale-entry",
+        "gov-1-07-tcb-class-not-recognized",
+        "gov-1-07-undeclared-dependency"
+      ],
+      "result": "pass",
+      "rule": "dependency-rationale",
+      "scanned": [
+        "crates/*/Cargo.toml",
+        "tools/governance/dependency-rationale.toml"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Dependency additions require rationale and TCB classification.",
+      "violations": []
+    },
+    "GOV-1-08": {
+      "boundary": "PROXY. One revision cannot show that a *change* was semantic, so this enforces the artifact-level consequences instead: decisions are discoverable, statuses are declared, citations resolve, and semantic code names the record that authorized it. A semantic change made inside an already-cited module without amending its ADR is not visible here; that remains the docs/12 \u00a74 review obligation.",
+      "enforces": "`notes/plan/adr/README.md` and the ADR files are a bijection, so a decision cannot be landed unindexed or indexed without a file. Every ADR declares a docs/12 \u00a72 status. Every `ADR-NNNN`/`RFC NNNN` citation in crate sources resolves to an existing record. Every semantic-core crate that carries code cites at least one numbered decision record in its `src/`.",
+      "fixtures_proven_caught": [
+        "gov-1-08-adr-without-a-status",
+        "gov-1-08-dangling-adr-citation",
+        "gov-1-08-semantic-code-without-a-decision-record",
+        "gov-1-08-unindexed-adr"
+      ],
+      "result": "pass",
+      "rule": "semantic-change-adr",
+      "scanned": [
+        "notes/plan/adr/*.md",
+        "notes/plan/adr/README.md",
+        "notes/plan/rfcs/*.md",
+        "crates/**/*.rs"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Semantic changes require ADR.",
+      "violations": []
+    },
+    "GOV-1-09": {
+      "boundary": "PROXY. Detecting that a change *was* breaking requires comparing two revisions; this runs over one. What is enforced is that the epoch machinery cannot be bypassed or quietly desynchronized: identities agree, the vocabulary is one set, and an advance carries a published compatibility verdict. A breaking edit made *without* touching `$id` or `schema_epoch` is invisible here and needs a revision-diff gate \u2014 see README-gov1.md, \"Known gaps\".",
+      "enforces": "`schemas/README.md` still states the normative \"MUST advance `schema_epoch`\" rule and what advances an epoch. Every schema document's `$id` epoch segment equals its `schema_epoch`, and its pinned instance class identity equals its own class identity. Every example instance names an epoch its schema actually is. The six epoch kinds in `crates/continuum-value/src/epoch.rs` are exactly the six the schemas README names, and `EpochAdvance::new` cannot record an advance without a `Compatibility` verdict.",
+      "fixtures_proven_caught": [
+        "gov-1-09-advance-without-a-compatibility-verdict",
+        "gov-1-09-epoch-rules-removed",
+        "gov-1-09-epoch-vocabulary-drift",
+        "gov-1-09-id-and-epoch-disagree",
+        "gov-1-09-instance-pins-a-nonexistent-epoch"
+      ],
+      "result": "pass",
+      "rule": "epoch-discipline",
+      "scanned": [
+        "notes/plan/schemas/README.md",
+        "notes/plan/schemas/*.schema.json",
+        "notes/plan/schemas/examples/*.json",
+        "crates/continuum-value/src/epoch.rs"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Every breaking change increments semantic epoch.",
+      "violations": []
+    },
+    "GOV-1-10": {
+      "boundary": "PROXY for one clause. \"Every pack operation\" is enforced over every pack manifest the repository contains \u2014 today that is the storage append-log manifest. A pack shipped out-of-tree is reached by the same schema but not by this run. Whether a stated contract is *correct* is the docs/17 \u00a75 three-implementation refinement obligation, not a shape check.",
+      "enforces": "`domain-pack.schema.json` requires `operations`, requires name/command_type/response_type/effect_phases on every operation, and closes the operation object, so an operation without a contract is unrepresentable in a valid manifest. docs/17 \u00a74's `OperationContract` fields and the schema's operation properties are checked against each other in both directions. Every domain-pack manifest in the dossier states the whole contract for every operation, including the parts the schema leaves optional (footprint_rule, cancellation_points, observer_events).",
+      "fixtures_proven_caught": [
+        "gov-1-10-doc-field-without-a-schema-property",
+        "gov-1-10-operation-without-a-footprint",
+        "gov-1-10-schema-drops-a-required-contract-field",
+        "gov-1-10-schema-opens-the-operation-object"
+      ],
+      "result": "pass",
+      "rule": "pack-operation-contract",
+      "scanned": [
+        "notes/plan/schemas/domain-pack.schema.json",
+        "notes/plan/docs/17_DOMAIN_PACK_CONTRACT.md",
+        "notes/plan/schemas/examples/*.json"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Every pack operation has a normative contract.",
+      "violations": []
+    },
+    "GOV-1-11": {
+      "boundary": "PROXY. Temporal precedence between a specific optimization and its reference semantics is not observable from one revision. What is enforced is the structural form of the rule: the oracle exists, is independent of the things it judges, and no optimized path claims its own output as truth. The two documentation sub-checks (docs/01 \u00a77.1/\u00a77.2 wording, and the per-engine serialization-boundary sentence) prove a normative claim is still made, not that any differential campaign was run \u2014 that evidence is docs/19's, not this check's.",
+      "enforces": "docs/01 \u00a77.1 (Reference path) precedes \u00a77.2 (Optimized paths) and still declares the reference path to define differential truth; \u00a77.2 still requires every optimized path to emit evidence checked outside the search implementation. `continuum-engine-reference` exists, declares itself the differential oracle, and has no workspace dependency \u2014 direct or transitive \u2014 on any optimized engine. Every optimized engine crate still states plan \u00a720's serialization boundary: its results reach the trust base only as certificates \"checked from wire form\", so an optimized path never becomes the meaning.",
+      "fixtures_proven_caught": [
+        "gov-1-11-engine-drops-the-serialization-boundary",
+        "gov-1-11-optimized-paths-documented-first",
+        "gov-1-11-optimized-paths-unchecked",
+        "gov-1-11-reference-built-on-an-optimized-path",
+        "gov-1-11-reference-no-longer-the-oracle"
+      ],
+      "result": "pass",
+      "rule": "reference-precedes-optimization",
+      "scanned": [
+        "notes/plan/docs/01_ARCHITECTURE.md",
+        "crates/continuum-engine-*/src/**/*.rs",
+        "crates/*/Cargo.toml"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Reference semantics precedes optimization.",
+      "violations": []
+    },
+    "GOV-1-12": {
+      "boundary": "PROXY. \"Ambiguous behavior\" is a property of a specification, and no program decides whether prose is ambiguous. This enforces the mechanical instances the dossier already commits to: closed schemas, named contracts, a closed verdict vocabulary, and a typed inconclusive. Nested schema objects are *not* required to be closed \u2014 several legitimately carry open maps \u2014 so the closure check is top-level only.",
+      "enforces": "The constitution still states the rule. Every schema document closes its top level, so an unrecognized field is rejected rather than given a local meaning. Every artifact schema requires and `const`-pins `schema_id` and `schema_epoch`, so an instance always names the contract it was written under. The assurance verdict vocabulary is closed at exactly {established, refuted, inconclusive}, and an inconclusive verdict is required to carry its reason \u2014 in the schema conditionally, and in `continuum-task` structurally, where `TaskOutcome::Inconclusive` takes a non-optional `InconclusiveReason`.",
+      "fixtures_proven_caught": [
+        "gov-1-12-constitution-statement-removed",
+        "gov-1-12-inconclusive-reason-made-optional",
+        "gov-1-12-instance-need-not-name-its-contract",
+        "gov-1-12-schema-accepts-unknown-fields",
+        "gov-1-12-verdict-vocabulary-opened"
+      ],
+      "result": "pass",
+      "rule": "ambiguity-is-an-error",
+      "scanned": [
+        "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md",
+        "notes/plan/schemas/*.schema.json",
+        "notes/plan/schemas/assurance-result.schema.json",
+        "crates/continuum-task/src/result.rs"
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71",
+      "summary": "Ambiguous behavior is an error, not implementation freedom.",
+      "violations": []
+    }
+  },
+  "scope": {
+    "adapter_crates": [
+      "continuum-cli",
+      "continuum-dap",
+      "continuum-lsp",
+      "continuum-mcp",
+      "continuum-sarif",
+      "continuumd"
+    ],
+    "boundary_crates": [
+      "continuum-asupersync",
+      "continuum-benchmark",
+      "continuum-effects-network",
+      "continuum-effects-process",
+      "continuum-effects-storage",
+      "continuum-effects-time",
+      "continuum-forge",
+      "continuum-proof-client",
+      "continuum-security"
+    ],
+    "certificate_checking_base": [
+      "continuum-certificate",
+      "continuum-kernel-core",
+      "continuum-kernel-sat",
+      "continuum-kernel-smt",
+      "continuum-kernel-temporal"
+    ],
+    "semantic_core_crates": [
+      "continuum-certificate",
+      "continuum-cir",
+      "continuum-cml-elab",
+      "continuum-cml-syntax",
+      "continuum-context",
+      "continuum-corpus",
+      "continuum-debugger",
+      "continuum-engine-dpor",
+      "continuum-engine-explicit",
+      "continuum-engine-liveness",
+      "continuum-engine-reference",
+      "continuum-engine-symbolic",
+      "continuum-evidence",
+      "continuum-incremental",
+      "continuum-intent",
+      "continuum-kernel-core",
+      "continuum-kernel-sat",
+      "continuum-kernel-smt",
+      "continuum-kernel-temporal",
+      "continuum-model-core",
+      "continuum-observer",
+      "continuum-refinement",
+      "continuum-repair",
+      "continuum-semantic-diff",
+      "continuum-task",
+      "continuum-value",
+      "continuum-workspace"
+    ],
+    "workspace_members": 42
+  },
+  "self_test": {
+    "failures": [],
+    "fixtures": 56,
+    "fixtures_by_requirement": {
+      "GOV-1-01": [
+        "gov-1-01-absent-toolchain-file",
+        "gov-1-01-crate-pins-own-edition",
+        "gov-1-01-floating-toolchain-channel",
+        "gov-1-01-two-component-channel"
+      ],
+      "GOV-1-02": [
+        "gov-1-02-crate-level-override",
+        "gov-1-02-crate-not-opted-in",
+        "gov-1-02-source-allow-attribute",
+        "gov-1-02-unsafe-item-in-source",
+        "gov-1-02-workspace-lint-relaxed"
+      ],
+      "GOV-1-03": [
+        "gov-1-03-hashmap-in-canonical-value",
+        "gov-1-03-hashset-in-kernel",
+        "gov-1-03-nondeterministic-collection-dependency",
+        "gov-1-03-unclassified-plan-20-crate",
+        "gov-1-03-waiver-without-a-reason"
+      ],
+      "GOV-1-04": [
+        "gov-1-04-ambient-dependency",
+        "gov-1-04-clock-dependency",
+        "gov-1-04-environment-read-in-core",
+        "gov-1-04-systemtime-in-kernel",
+        "gov-1-04-thread-rng-in-engine"
+      ],
+      "GOV-1-05": [
+        "gov-1-05-default-hasher-in-identity-seam",
+        "gov-1-05-hash-derive-on-canonical-value",
+        "gov-1-05-platform-hash-dependency",
+        "gov-1-05-seam-loses-its-algorithm-label"
+      ],
+      "GOV-1-06": [
+        "gov-1-06-http-client-in-kernel",
+        "gov-1-06-socket-in-certificate-crate",
+        "gov-1-06-transitive-async-runtime",
+        "gov-1-06-transitive-network-member"
+      ],
+      "GOV-1-07": [
+        "gov-1-07-checker-dependency-not-tcb",
+        "gov-1-07-missing-manifest",
+        "gov-1-07-rationale-not-stated",
+        "gov-1-07-stale-entry",
+        "gov-1-07-tcb-class-not-recognized",
+        "gov-1-07-undeclared-dependency"
+      ],
+      "GOV-1-08": [
+        "gov-1-08-adr-without-a-status",
+        "gov-1-08-dangling-adr-citation",
+        "gov-1-08-semantic-code-without-a-decision-record",
+        "gov-1-08-unindexed-adr"
+      ],
+      "GOV-1-09": [
+        "gov-1-09-advance-without-a-compatibility-verdict",
+        "gov-1-09-epoch-rules-removed",
+        "gov-1-09-epoch-vocabulary-drift",
+        "gov-1-09-id-and-epoch-disagree",
+        "gov-1-09-instance-pins-a-nonexistent-epoch"
+      ],
+      "GOV-1-10": [
+        "gov-1-10-doc-field-without-a-schema-property",
+        "gov-1-10-operation-without-a-footprint",
+        "gov-1-10-schema-drops-a-required-contract-field",
+        "gov-1-10-schema-opens-the-operation-object"
+      ],
+      "GOV-1-11": [
+        "gov-1-11-engine-drops-the-serialization-boundary",
+        "gov-1-11-optimized-paths-documented-first",
+        "gov-1-11-optimized-paths-unchecked",
+        "gov-1-11-reference-built-on-an-optimized-path",
+        "gov-1-11-reference-no-longer-the-oracle"
+      ],
+      "GOV-1-12": [
+        "gov-1-12-constitution-statement-removed",
+        "gov-1-12-inconclusive-reason-made-optional",
+        "gov-1-12-instance-need-not-name-its-contract",
+        "gov-1-12-schema-accepts-unknown-fields",
+        "gov-1-12-verdict-vocabulary-opened"
+      ]
+    },
+    "requirements_covered": 12,
+    "status": "pass"
+  },
+  "status": "pass",
+  "waivers_granted": []
+}

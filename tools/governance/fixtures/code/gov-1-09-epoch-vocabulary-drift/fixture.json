@@ -1,0 +1,15 @@
+{
+  "check": "epoch-kinds-agree-with-docs",
+  "description": "The code renames an epoch kind while the schemas README still names the old set; the six independently versioned epochs stop being one vocabulary.",
+  "id": "gov-1-09-epoch-vocabulary-drift",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline",
+  "substitute": {
+    "crates/continuum-value/src/epoch.rs": [
+      {
+        "find": "Self::Corpus => \"corpus\",",
+        "replace": "Self::Corpus => \"corpora\","
+      }
+    ]
+  }
+}

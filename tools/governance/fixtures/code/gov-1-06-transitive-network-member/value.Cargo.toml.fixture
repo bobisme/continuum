@@ -1,0 +1,13 @@
+[package]
+name = "continuum-value"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+continuum-effects-network = { path = "../continuum-effects-network" }
+
+[lints]
+workspace = true

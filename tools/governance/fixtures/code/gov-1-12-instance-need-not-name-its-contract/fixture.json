@@ -1,0 +1,15 @@
+{
+  "check": "instances-name-their-contract",
+  "description": "A schema stops requiring `schema_epoch`, so an instance that does not say which contract it was written under has to be guessed at.",
+  "id": "gov-1-12-instance-need-not-name-its-contract",
+  "requirement": "GOV-1-12",
+  "rule": "ambiguity-is-an-error",
+  "substitute": {
+    "notes/plan/schemas/domain-pack.schema.json": [
+      {
+        "find": "  \"required\": [\n    \"schema_id\",\n    \"schema_epoch\",\n    \"pack\",",
+        "replace": "  \"required\": [\n    \"schema_id\",\n    \"pack\","
+      }
+    ]
+  }
+}

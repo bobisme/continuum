@@ -1,0 +1,10 @@
+{
+  "check": "rationale-is-stated",
+  "description": "An entry exists but states no reason; the obligation is a rationale, not a checkbox.",
+  "id": "gov-1-07-rationale-not-stated",
+  "overlay": {
+    "tools/governance/dependency-rationale.toml": "dependency-rationale.toml.fixture"
+  },
+  "requirement": "GOV-1-07",
+  "rule": "dependency-rationale"
+}

@@ -1,0 +1,11 @@
+{
+  "check": "no-network-dependency-in-closure",
+  "description": "A kernel crate reaches `tokio` through a workspace hop, breaking the plan \u00a720 covenant that the trusted checking base is synchronous and offline.",
+  "id": "gov-1-06-transitive-async-runtime",
+  "overlay": {
+    "crates/continuum-kernel-core/Cargo.toml": "kernel.Cargo.toml.fixture",
+    "crates/continuum-value/Cargo.toml": "value.Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-06",
+  "rule": "no-network-in-checker"
+}

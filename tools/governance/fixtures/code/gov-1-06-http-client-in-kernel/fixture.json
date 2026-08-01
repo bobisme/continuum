@@ -1,0 +1,10 @@
+{
+  "check": "no-network-dependency-in-closure",
+  "description": "A kernel crate depends on `reqwest`; a checker that can fetch can be pointed at something other than the certificate it was handed.",
+  "id": "gov-1-06-http-client-in-kernel",
+  "overlay": {
+    "crates/continuum-kernel-sat/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-06",
+  "rule": "no-network-in-checker"
+}

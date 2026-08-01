@@ -1,0 +1,11 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-engine-explicit` — the optimized explicit-state engine.
+//!
+//! # Responsibility
+//!
+//! Optimized explicit-state exploration: state hashing, frontier management, and
+//! parallel search over the model core.
+//!
+//! # Dependency-boundary contract
+//!
+//! - No `continuum-certificate` or `continuum-kernel-*` crate may depend on this crate.

@@ -1,0 +1,10 @@
+{
+  "check": "crate-inherits-edition",
+  "description": "A crate sets `edition = \"2021\"` instead of inheriting the workspace edition, so the workspace no longer has one edition.",
+  "id": "gov-1-01-crate-pins-own-edition",
+  "overlay": {
+    "crates/continuum-value/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-01",
+  "rule": "toolchain-pinned"
+}

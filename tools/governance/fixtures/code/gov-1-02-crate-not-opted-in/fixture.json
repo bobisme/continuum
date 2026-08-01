@@ -1,0 +1,10 @@
+{
+  "check": "crate-opts-into-workspace-lints",
+  "description": "A crate omits `[lints] workspace = true`, so the workspace forbid level never reaches it.",
+  "id": "gov-1-02-crate-not-opted-in",
+  "overlay": {
+    "crates/continuum-certificate/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-02",
+  "rule": "unsafe-forbidden"
+}

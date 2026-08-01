@@ -1,0 +1,15 @@
+{
+  "check": "epoch-rules-are-stated",
+  "description": "The schemas README stops stating what advances a schema epoch; the rule that a breaking change mints a new epoch has to be written down to be followed.",
+  "id": "gov-1-09-epoch-rules-removed",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline",
+  "substitute": {
+    "notes/plan/schemas/README.md": [
+      {
+        "find": "## What advances a schema epoch",
+        "replace": "## Notes on epochs"
+      }
+    ]
+  }
+}

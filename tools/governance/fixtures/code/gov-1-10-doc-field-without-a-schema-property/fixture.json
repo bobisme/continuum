@@ -1,0 +1,15 @@
+{
+  "check": "doc-and-schema-agree",
+  "description": "docs/17 \u00a74 gains a contract field the manifest schema cannot carry, so the field is normative in prose and unenforceable in artifacts.",
+  "id": "gov-1-10-doc-field-without-a-schema-property",
+  "requirement": "GOV-1-10",
+  "rule": "pack-operation-contract",
+  "substitute": {
+    "notes/plan/docs/17_DOMAIN_PACK_CONTRACT.md": [
+      {
+        "find": "    cancel_points: Vec<CancelPoint>,",
+        "replace": "    cancel_points: Vec<CancelPoint>,\n    retry_policy: RetryPolicy,"
+      }
+    ]
+  }
+}

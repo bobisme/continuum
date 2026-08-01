@@ -1,0 +1,10 @@
+{
+  "check": "every-dependency-has-an-entry",
+  "description": "A crate gains an external dependency with no rationale entry and no TCB classification.",
+  "id": "gov-1-07-undeclared-dependency",
+  "overlay": {
+    "crates/continuum-value/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-07",
+  "rule": "dependency-rationale"
+}

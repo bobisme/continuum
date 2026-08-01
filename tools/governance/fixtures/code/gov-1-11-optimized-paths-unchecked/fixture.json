@@ -1,0 +1,15 @@
+{
+  "check": "optimized-paths-are-checked-outside-search",
+  "description": "The architecture stops requiring optimized paths to emit evidence checked outside the search implementation, which would let an optimization become the meaning.",
+  "id": "gov-1-11-optimized-paths-unchecked",
+  "requirement": "GOV-1-11",
+  "rule": "reference-precedes-optimization",
+  "substitute": {
+    "notes/plan/docs/01_ARCHITECTURE.md": [
+      {
+        "find": "checked outside the search implementation",
+        "replace": "validated by its own internal assertions"
+      }
+    ]
+  }
+}

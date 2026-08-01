@@ -1,0 +1,15 @@
+{
+  "check": "tier-partition-covers-plan-20",
+  "description": "Plan \u00a720 gains a crate that the policy tiering does not classify, so the scanned set would silently stop covering the workspace.",
+  "id": "gov-1-03-unclassified-plan-20-crate",
+  "requirement": "GOV-1-03",
+  "rule": "deterministic-collections",
+  "substitute": {
+    "notes/plan/plan.md": [
+      {
+        "find": "continuum-corpus\ncontinuumd\n",
+        "replace": "continuum-corpus\ncontinuum-unclassified\ncontinuumd\n"
+      }
+    ]
+  }
+}

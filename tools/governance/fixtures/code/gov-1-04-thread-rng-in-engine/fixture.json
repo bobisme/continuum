@@ -1,0 +1,10 @@
+{
+  "check": "ambient-rng",
+  "description": "A search engine draws ambient randomness, so the counterexample it reports depends on an unrecorded seed.",
+  "id": "gov-1-04-thread-rng-in-engine",
+  "overlay": {
+    "crates/continuum-engine-dpor/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-04",
+  "rule": "no-ambient-time-rng"
+}

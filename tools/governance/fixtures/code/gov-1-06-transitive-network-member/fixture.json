@@ -1,0 +1,11 @@
+{
+  "check": "no-network-capable-crate-in-closure",
+  "description": "The certificate crate reaches `continuum-effects-network` through an innocent hop; the network is in the checking closure even though no checker manifest names it.",
+  "id": "gov-1-06-transitive-network-member",
+  "overlay": {
+    "crates/continuum-certificate/Cargo.toml": "certificate.Cargo.toml.fixture",
+    "crates/continuum-value/Cargo.toml": "value.Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-06",
+  "rule": "no-network-in-checker"
+}

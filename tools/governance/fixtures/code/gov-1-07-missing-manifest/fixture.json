@@ -1,0 +1,10 @@
+{
+  "check": "manifest-present",
+  "description": "The rationale manifest is deleted; every dependency loses its stated reason at once.",
+  "id": "gov-1-07-missing-manifest",
+  "remove": [
+    "tools/governance/dependency-rationale.toml"
+  ],
+  "requirement": "GOV-1-07",
+  "rule": "dependency-rationale"
+}

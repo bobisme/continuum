@@ -1,0 +1,10 @@
+{
+  "check": "adr-index-is-a-bijection",
+  "description": "A decision record is added without being indexed, so the next change that would contradict it cannot find it.",
+  "id": "gov-1-08-unindexed-adr",
+  "overlay": {
+    "notes/plan/adr/0099-unindexed-decision.md": "0099-unindexed-decision.md.fixture"
+  },
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr"
+}

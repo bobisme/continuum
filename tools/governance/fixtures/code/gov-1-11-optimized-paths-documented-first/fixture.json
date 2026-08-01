@@ -1,0 +1,15 @@
+{
+  "check": "architecture-orders-reference-first",
+  "description": "The architecture stops putting the reference path first.",
+  "id": "gov-1-11-optimized-paths-documented-first",
+  "requirement": "GOV-1-11",
+  "rule": "reference-precedes-optimization",
+  "substitute": {
+    "notes/plan/docs/01_ARCHITECTURE.md": [
+      {
+        "find": "### 7.1 Reference path",
+        "replace": "### 7.3 Reference path"
+      }
+    ]
+  }
+}

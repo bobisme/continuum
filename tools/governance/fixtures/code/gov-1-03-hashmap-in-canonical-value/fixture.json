@@ -1,0 +1,15 @@
+{
+  "check": "deterministic-collections",
+  "description": "The canonical value module imports `HashMap`; hash-ordered iteration over values is seed-dependent and fails the docs/19 \u00a77 determinism matrix.",
+  "id": "gov-1-03-hashmap-in-canonical-value",
+  "requirement": "GOV-1-03",
+  "rule": "deterministic-collections",
+  "substitute": {
+    "crates/continuum-value/src/value.rs": [
+      {
+        "find": "use std::collections::{BTreeMap, BTreeSet};",
+        "replace": "use std::collections::{BTreeMap, BTreeSet, HashMap};"
+      }
+    ]
+  }
+}

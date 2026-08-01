@@ -1,0 +1,10 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-kernel-core` — trusted checking base.
+
+use std::time::SystemTime;
+
+/// When this check ran.
+#[must_use]
+pub fn checked_at() -> SystemTime {
+    SystemTime::now()
+}

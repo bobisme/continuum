@@ -1,0 +1,8 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-refinement` — refinement relations.
+
+/// Whether a concrete run refines an abstract one.
+#[must_use]
+pub fn refines(concrete: &[u8], abstract_run: &[u8]) -> bool {
+    concrete.starts_with(abstract_run)
+}

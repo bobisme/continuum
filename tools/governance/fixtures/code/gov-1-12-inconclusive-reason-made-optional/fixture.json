@@ -1,0 +1,15 @@
+{
+  "check": "inconclusive-carries-its-reason",
+  "description": "The INV-008 reason becomes optional, so an inconclusive outcome with no stated reason compiles.",
+  "id": "gov-1-12-inconclusive-reason-made-optional",
+  "requirement": "GOV-1-12",
+  "rule": "ambiguity-is-an-error",
+  "substitute": {
+    "crates/continuum-task/src/result.rs": [
+      {
+        "find": "    Inconclusive(InconclusiveReason),",
+        "replace": "    Inconclusive(Option<InconclusiveReason>),"
+      }
+    ]
+  }
+}

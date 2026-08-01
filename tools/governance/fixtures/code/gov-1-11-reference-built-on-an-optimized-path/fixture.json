@@ -1,0 +1,10 @@
+{
+  "check": "reference-engine-is-independent",
+  "description": "The reference path is built on the DPOR engine, so the oracle inherits the bugs of the thing it is supposed to judge.",
+  "id": "gov-1-11-reference-built-on-an-optimized-path",
+  "overlay": {
+    "crates/continuum-engine-reference/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-11",
+  "rule": "reference-precedes-optimization"
+}

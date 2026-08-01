@@ -1,0 +1,67 @@
+# Dependency rationale and TCB classification.
+#
+#   dependency additions require rationale and TCB classification.
+#     — notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md §1, "Code policy" (GOV-1-07)
+#
+# Every dependency declared anywhere in the workspace — `[dependencies]`,
+# `[dev-dependencies]`, `[build-dependencies]`, and any `[target.*]` variant, in
+# `Cargo.toml` or in any `crates/*/Cargo.toml` — has exactly one entry here.
+# `tools/governance/check_code_policy.py` fails if a dependency has no entry, if
+# an entry names a dependency nobody declares, or if an entry's `origin`,
+# `used_by`, or `kinds` disagrees with the manifests. Adding a dependency is
+# therefore a two-step change: edit the manifest, then say here why it exists and
+# what trusting it costs.
+#
+# `tcb_class` — what a bug in this dependency can do:
+#
+#   trusted-checking-base
+#       Linked by `continuum-kernel-*` or `continuum-certificate`, or otherwise
+#       inside the certificate-checking trust base (docs/03 §5): a bug here can
+#       make an unsound claim believable. The check *enforces* this class for
+#       anything the certificate checker links — it is not a self-assessment.
+#   engine
+#       Linked by search, elaboration, or tooling that produces results the trust
+#       base then re-checks from wire form. A bug here produces a wrong answer
+#       that the kernel is expected to reject.
+#   dev-only
+#       Only ever a `[dev-dependencies]` entry. Never in a shipped artifact.
+#   build-only
+#       Only ever a `[build-dependencies]` entry. In the build graph, not the
+#       runtime graph.
+#
+# As of this revision the workspace declares no external dependency at all: every
+# entry below is a workspace-internal path edge. That is a fact about the PR-1
+# scaffold, not a policy — the first external crate needs an entry here with an
+# honest class before `just check` will pass.
+
+[[dependency]]
+name = "continuum-value"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["dev", "normal"]
+used_by = ["continuum-task"]
+rationale = "Canonical value encoding, content identity, epochs, and the assurance envelope (ADR-0013); a machine result cannot name its epochs or its envelope without them."
+
+[[dependency]]
+name = "continuum-evidence"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["dev", "normal"]
+used_by = ["continuum-task"]
+rationale = "The claim-status lattice that decides whether a write would lower a claim (plan §11.4, §11.7); a second implementation would be a checker checking its own assumption."
+
+[[dependency]]
+name = "continuum-cml-syntax"
+origin = "workspace"
+tcb_class = "engine"
+kinds = ["normal"]
+used_by = ["continuum-cml-elab"]
+rationale = "The model-language surface syntax the elaborator consumes; elaboration is a producer whose output is re-checked, so a parse bug surfaces as a wrong model rather than as false assurance."
+
+[[dependency]]
+name = "continuum-forge"
+origin = "workspace"
+tcb_class = "engine"
+kinds = ["normal"]
+used_by = ["continuum-repair"]
+rationale = "Violating fixture: no manifest in the workspace declares this dependency."

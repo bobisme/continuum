@@ -1,0 +1,8 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-kernel-smt` — trusted checking base.
+
+/// Reinterpret a byte as a signed byte.
+#[must_use]
+pub fn transmute_byte(byte: u8) -> i8 {
+    unsafe { std::mem::transmute::<u8, i8>(byte) }
+}

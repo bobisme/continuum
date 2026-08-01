@@ -1,0 +1,15 @@
+{
+  "check": "every-operation-states-its-contract",
+  "description": "A pack operation omits its footprint rule, so nothing says which resources it touches and independence cannot be decided for it.",
+  "id": "gov-1-10-operation-without-a-footprint",
+  "requirement": "GOV-1-10",
+  "rule": "pack-operation-contract",
+  "substitute": {
+    "notes/plan/schemas/examples/storage-pack.manifest.json": [
+      {
+        "find": "      \"footprint_rule\": \"append touches one node log suffix\",\n",
+        "replace": ""
+      }
+    ]
+  }
+}

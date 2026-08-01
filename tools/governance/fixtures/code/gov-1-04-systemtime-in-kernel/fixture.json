@@ -1,0 +1,10 @@
+{
+  "check": "ambient-time",
+  "description": "A kernel crate reads the wall clock, so a receipt would record a fact about when it ran rather than about what it checked (INV-005, ADR-0003).",
+  "id": "gov-1-04-systemtime-in-kernel",
+  "overlay": {
+    "crates/continuum-kernel-core/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-04",
+  "rule": "no-ambient-time-rng"
+}

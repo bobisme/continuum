@@ -1,0 +1,15 @@
+{
+  "check": "instance-epoch-matches-its-schema",
+  "description": "A published artifact claims an epoch its governing schema is not, which is an unresolvable contract.",
+  "id": "gov-1-09-instance-pins-a-nonexistent-epoch",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline",
+  "substitute": {
+    "notes/plan/schemas/examples/storage-pack.manifest.json": [
+      {
+        "find": "\"schema_epoch\": 1",
+        "replace": "\"schema_epoch\": 2"
+      }
+    ]
+  }
+}

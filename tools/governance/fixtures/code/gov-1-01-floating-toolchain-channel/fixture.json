@@ -1,0 +1,10 @@
+{
+  "check": "toolchain-channel-exact",
+  "description": "rust-toolchain.toml pins the `stable` channel, so the toolchain identity a receipt records is a function of install date rather than of this repository (INV-014).",
+  "id": "gov-1-01-floating-toolchain-channel",
+  "overlay": {
+    "rust-toolchain.toml": "rust-toolchain.toml.fixture"
+  },
+  "requirement": "GOV-1-01",
+  "rule": "toolchain-pinned"
+}

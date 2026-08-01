@@ -1,0 +1,10 @@
+{
+  "check": "deterministic-collections",
+  "description": "A kernel crate keeps checked obligations in a `HashSet`, so the order it reports them in depends on the process hash seed.",
+  "id": "gov-1-03-hashset-in-kernel",
+  "overlay": {
+    "crates/continuum-kernel-temporal/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-03",
+  "rule": "deterministic-collections"
+}

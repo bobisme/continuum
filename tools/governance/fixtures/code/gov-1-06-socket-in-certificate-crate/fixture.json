@@ -1,0 +1,10 @@
+{
+  "check": "no-socket-in-checker",
+  "description": "The certificate crate opens a TCP stream.",
+  "id": "gov-1-06-socket-in-certificate-crate",
+  "overlay": {
+    "crates/continuum-certificate/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-06",
+  "rule": "no-network-in-checker"
+}

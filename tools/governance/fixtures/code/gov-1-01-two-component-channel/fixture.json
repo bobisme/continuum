@@ -1,0 +1,10 @@
+{
+  "check": "toolchain-channel-exact",
+  "description": "rust-toolchain.toml pins `1.97`, which resolves to whichever patch release a machine installs first \u2014 the ambient nondeterminism INV-005 keeps out of the semantic path.",
+  "id": "gov-1-01-two-component-channel",
+  "overlay": {
+    "rust-toolchain.toml": "rust-toolchain.toml.fixture"
+  },
+  "requirement": "GOV-1-01",
+  "rule": "toolchain-pinned"
+}

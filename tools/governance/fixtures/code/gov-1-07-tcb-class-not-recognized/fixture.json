@@ -1,0 +1,10 @@
+{
+  "check": "tcb-class-is-declared",
+  "description": "An entry invents its own TCB class, which classifies nothing.",
+  "id": "gov-1-07-tcb-class-not-recognized",
+  "overlay": {
+    "tools/governance/dependency-rationale.toml": "dependency-rationale.toml.fixture"
+  },
+  "requirement": "GOV-1-07",
+  "rule": "dependency-rationale"
+}

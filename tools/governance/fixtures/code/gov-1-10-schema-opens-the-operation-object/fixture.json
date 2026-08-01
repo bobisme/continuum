@@ -1,0 +1,15 @@
+{
+  "check": "schema-requires-a-contract",
+  "description": "The operation object stops being closed, so an unrecognized operation field is accepted with no defined meaning.",
+  "id": "gov-1-10-schema-opens-the-operation-object",
+  "requirement": "GOV-1-10",
+  "rule": "pack-operation-contract",
+  "substitute": {
+    "notes/plan/schemas/domain-pack.schema.json": [
+      {
+        "find": "        },\n        \"additionalProperties\": false\n      }\n    },\n    \"profiles\": {",
+        "replace": "        },\n        \"additionalProperties\": true\n      }\n    },\n    \"profiles\": {"
+      }
+    ]
+  }
+}

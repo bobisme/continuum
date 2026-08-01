@@ -1,0 +1,10 @@
+{
+  "check": "no-crate-level-override",
+  "description": "A kernel crate re-declares `unsafe_code` at crate level. No crate-level override exists.",
+  "id": "gov-1-02-crate-level-override",
+  "overlay": {
+    "crates/continuum-kernel-core/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "GOV-1-02",
+  "rule": "unsafe-forbidden"
+}

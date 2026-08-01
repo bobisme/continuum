@@ -1,0 +1,15 @@
+{
+  "check": "constitution-states-the-rule",
+  "description": "The constitution stops stating that ambiguous behavior is an error.",
+  "id": "gov-1-12-constitution-statement-removed",
+  "requirement": "GOV-1-12",
+  "rule": "ambiguity-is-an-error",
+  "substitute": {
+    "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md": [
+      {
+        "find": "- ambiguous behavior is an error, not implementation freedom.",
+        "replace": "- ambiguous behavior is resolved by the implementation."
+      }
+    ]
+  }
+}

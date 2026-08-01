@@ -1,0 +1,8 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-cir` — causal intermediate representation (ADR-0002).
+
+/// Whether strict lowering is enabled.
+#[must_use]
+pub fn strict() -> bool {
+    std::env::var("CONTINUUM_STRICT").is_ok()
+}

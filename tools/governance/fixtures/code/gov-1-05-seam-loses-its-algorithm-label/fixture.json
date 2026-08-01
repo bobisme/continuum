@@ -1,0 +1,15 @@
+{
+  "check": "identity-seam-declared",
+  "description": "The identity seam stops carrying an algorithm label, so a digest no longer says which function produced it and the hash silently becomes ambient.",
+  "id": "gov-1-05-seam-loses-its-algorithm-label",
+  "requirement": "GOV-1-05",
+  "rule": "no-platform-hashing",
+  "substitute": {
+    "crates/continuum-value/src/identity.rs": [
+      {
+        "find": "pub struct HashAlgorithm {",
+        "replace": "pub struct HashLabel {"
+      }
+    ]
+  }
+}

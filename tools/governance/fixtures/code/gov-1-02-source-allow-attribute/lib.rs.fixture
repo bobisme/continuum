@@ -1,0 +1,4 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-kernel-sat` — trusted checking base.
+
+#![allow(unsafe_code)]

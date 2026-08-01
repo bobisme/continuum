@@ -1,0 +1,10 @@
+{
+  "check": "optimized-engine-declares-its-check",
+  "description": "An optimized engine stops stating that its results reach the trust base only as certificates checked from wire form.",
+  "id": "gov-1-11-engine-drops-the-serialization-boundary",
+  "overlay": {
+    "crates/continuum-engine-explicit/src/lib.rs": "lib.rs.fixture"
+  },
+  "requirement": "GOV-1-11",
+  "rule": "reference-precedes-optimization"
+}

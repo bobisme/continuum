@@ -1,0 +1,15 @@
+{
+  "check": "schema-requires-a-contract",
+  "description": "The manifest schema stops requiring `effect_phases`, so an operation with no phase machine becomes representable.",
+  "id": "gov-1-10-schema-drops-a-required-contract-field",
+  "requirement": "GOV-1-10",
+  "rule": "pack-operation-contract",
+  "substitute": {
+    "notes/plan/schemas/domain-pack.schema.json": [
+      {
+        "find": "\"response_type\",\n          \"effect_phases\"\n        ],",
+        "replace": "\"response_type\"\n        ],"
+      }
+    ]
+  }
+}

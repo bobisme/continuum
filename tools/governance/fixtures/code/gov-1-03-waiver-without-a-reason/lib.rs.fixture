@@ -1,0 +1,11 @@
+//! Violating fixture. Inert data: never compiled, never a workspace member.
+//! `continuum-context` — typed context packs.
+
+// continuum:allow(deterministic-collections): ok
+use std::collections::HashMap;
+
+/// Cached packs.
+#[derive(Debug, Default)]
+pub struct Cache {
+    packs: HashMap<String, String>,
+}

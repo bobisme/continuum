@@ -1,0 +1,4 @@
+# Violating fixture: a floating channel is not a pin.
+[toolchain]
+channel = "stable"
+components = ["clippy", "rustfmt"]

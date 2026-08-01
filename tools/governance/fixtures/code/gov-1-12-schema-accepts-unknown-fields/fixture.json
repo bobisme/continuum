@@ -1,0 +1,15 @@
+{
+  "check": "schemas-are-closed",
+  "description": "A schema opens its top level, so an unrecognized field is accepted with whatever meaning a reader chooses to give it.",
+  "id": "gov-1-12-schema-accepts-unknown-fields",
+  "requirement": "GOV-1-12",
+  "rule": "ambiguity-is-an-error",
+  "substitute": {
+    "notes/plan/schemas/proof-receipt.schema.json": [
+      {
+        "find": "\n  \"additionalProperties\": false",
+        "replace": "\n  \"additionalProperties\": true"
+      }
+    ]
+  }
+}
