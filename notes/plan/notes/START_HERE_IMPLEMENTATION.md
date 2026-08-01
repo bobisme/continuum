@@ -136,9 +136,9 @@ Implement:
 Implement schema/types for:
 
 - properties; (delivered: bn-u8z2)
-- assumptions;
+- assumptions; (delivered: bn-136f)
 - observers;
-- bounds;
+- bounds; (delivered: bn-1tgp)
 - faults;
 - fairness;
 - assurance policy;

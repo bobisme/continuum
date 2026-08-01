@@ -1127,8 +1127,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "assumptions"
+      "status": "satisfied",
+      "summary": "assumptions; (delivered: bn-136f)"
     },
     {
       "category": "pr-deliverable",
@@ -1151,8 +1151,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "bounds"
+      "status": "satisfied",
+      "summary": "bounds; (delivered: bn-1tgp)"
     },
     {
       "category": "pr-deliverable",
