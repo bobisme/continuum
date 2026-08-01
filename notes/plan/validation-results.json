@@ -58,8 +58,8 @@
     },
     "plan_bones_traceability": {
       "active_bones": 859,
-      "active_edges": 1981,
-      "active_requirements": 744,
+      "active_edges": 1979,
+      "active_requirements": 743,
       "coverage": "complete",
       "dependency_layers": 14,
       "leaf_bones": 757,
