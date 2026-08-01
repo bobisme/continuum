@@ -57,3 +57,11 @@ tcb_class = "engine"
 kinds = ["normal"]
 used_by = ["continuum-cml-elab"]
 rationale = "The model-language surface syntax the elaborator consumes; elaboration is a producer whose output is re-checked, so a parse bug surfaces as a wrong model rather than as false assurance."
+
+[[dependency]]
+name = "continuum-kernel-core"
+origin = "workspace"
+tcb_class = "dev-only"
+kinds = ["dev"]
+used_by = ["continuum-engine-reference"]
+rationale = "The differential itself, and dev-position only. crates/continuum-engine-reference/tests/certificate_kernel_differential.rs feeds the finite-closure certificate the reference engine emits to check_certificate and asserts the verdict — the fourth frozen TV-009 fact, 'certificate accepted by an independent checker'. The library edge does not exist and must not: plan §20 puts a serialization boundary between every engine and the kernel, and src/certificate.rs writes the wire form from the documented grammar so producer and checker share no codec (docs/03 §8, 'certificate decoding' is an axis independent paths must differ along). The class is dev-only because that is what the edge is — the checker is never in a shipped artifact of this crate — and because tools/check_crate_boundaries.py:37-39 admits exactly this case: 'dev-dependencies are reported but not enforced, because a differential test may legitimately link an engine it would never ship against'. A bug in the kernel here can only make this test wrong, never a claim believable: the kernel's own trust class is established where the kernel is checked (tools/check_kernel_covenant.py), not by this edge."

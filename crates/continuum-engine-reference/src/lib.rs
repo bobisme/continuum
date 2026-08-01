@@ -30,18 +30,21 @@
 //! # What is here, and what is not
 //!
 //! PR 8 has five deliverables
-//! (`notes/plan/notes/START_HERE_IMPLEMENTATION.md:205-215`). Two are here:
+//! (`notes/plan/notes/START_HERE_IMPLEMENTATION.md:205-215`). Three are here:
 //!
 //! - the **programmatic transition model** ([`model`], with [`ident`], [`domain`],
 //!   [`expr`], [`diehard`]) — how a finite transition system is declared, what a state
 //!   is, and how guards, updates, and named predicates are evaluated;
 //! - **deterministic breadth-first exploration** ([`bfs`]) — the reachable set of a
 //!   declared model, in canonical order, with each state's depth, under explicitly
-//!   declared bounds.
+//!   declared bounds;
+//! - the **finite closure certificate** ([`certificate`]) — a closed reachable set
+//!   written as `CONTCERT` wire bytes, the only form in which anything this crate
+//!   computes reaches the trusted checking base.
 //!
-//! The other three — invariant/deadlock checking, shortest witness, and the finite
-//! closure certificate — are separate bones, and both landed modules are written so
-//! each attaches without changing them; see the seam tables in [`model`] and [`bfs`].
+//! The other two — invariant/deadlock checking and the shortest witness — are separate
+//! bones, and the landed modules are written so each attaches without changing them;
+//! see the seam tables in [`model`] and [`bfs`].
 //!
 //! [`bfs`] searches; [`model`] does not, and the split is load-bearing. Exploration
 //! reads the model layer through [`model::Model::initial_states`] and
@@ -84,6 +87,7 @@
 )]
 
 pub mod bfs;
+pub mod certificate;
 pub mod diehard;
 pub mod domain;
 pub mod expr;
@@ -93,6 +97,9 @@ pub mod witness;
 
 pub use bfs::{
     Bound, Bounds, Discovery, Exploration, ExplorationError, Partial, Reachable, explore,
+};
+pub use certificate::{
+    ClaimEnvelope, ClosedSet, EmissionError, EnvelopeError, Field, emit_finite_closure,
 };
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};

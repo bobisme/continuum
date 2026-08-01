@@ -80,6 +80,9 @@ version = "0.0.0"
 [[package]]
 name = "continuum-engine-reference"
 version = "0.0.0"
+dependencies = [
+ "continuum-kernel-core",
+]
 
 [[package]]
 name = "continuum-engine-symbolic"
