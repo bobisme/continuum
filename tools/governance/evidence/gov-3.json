@@ -1,0 +1,434 @@
+{
+  "check": "tools/governance/check_claim_governance.py",
+  "claim_registry": {
+    "active_claims": 33,
+    "declared_states": [
+      "HYPOTHESIS",
+      "TARGET",
+      "OBSERVED",
+      "ESTABLISHED-BOUNDED",
+      "ESTABLISHED",
+      "BLOCKED",
+      "REFUTED"
+    ],
+    "generated_mirror": "notes/plan/notes/PLAN_REQUIREMENTS.json (category \u201cclaim\u201d)",
+    "ownership_ledger": ".bones/events/*.events",
+    "referenced_by_document": [
+      "C035"
+    ],
+    "referenced_claims": 33,
+    "referenced_only_by_bone": [
+      "C001",
+      "C002",
+      "C003",
+      "C004",
+      "C005",
+      "C006",
+      "C007",
+      "C008",
+      "C009",
+      "C010",
+      "C011",
+      "C012",
+      "C013",
+      "C014",
+      "C015",
+      "C016",
+      "C017",
+      "C018",
+      "C019",
+      "C020",
+      "C021",
+      "C022",
+      "C023",
+      "C024",
+      "C026",
+      "C027",
+      "C028",
+      "C029",
+      "C031",
+      "C032",
+      "C033",
+      "C034"
+    ],
+    "registry": "notes/plan/docs/18_CLAIMS_MATRIX.md",
+    "rows": 35
+  },
+  "controlled_verbs": [
+    "observed",
+    "tested",
+    "bounded",
+    "exhaustively checked",
+    "proved under",
+    "certificate checked",
+    "hypothesized"
+  ],
+  "counts": {
+    "bounded": 2,
+    "certificate checked": 0,
+    "exempted:hedged": 4,
+    "exempted:negated": 6,
+    "exempted:qualified": 4,
+    "exhaustively checked": 0,
+    "hypothesized": 0,
+    "observed": 0,
+    "proved under": 0,
+    "tested": 4,
+    "uncontrolled-candidates": 11
+  },
+  "cross_check": {
+    "bone": "bn-18cg",
+    "boundary": "The claim-assertion grammar is a proxy for English. It matches copula/perfect constructions with the verb in predicate position, over the scan scope only, with fenced code, inline code, and curly-quoted vocabulary removed. Claims phrased outside that grammar, or written in an RFC/ADR/research note, are not seen. `claim-registered-referenced` is satisfied by a Bone that owns the claim as well as by a document that cites it, so it proves ownership, not published citation.",
+    "obligation": "CI cross-checks claim IDs.",
+    "real_run": {
+      "status": "pass",
+      "violations": []
+    },
+    "recorded_against": [
+      "GOV-3-01",
+      "GOV-3-02",
+      "GOV-3-03",
+      "GOV-3-04",
+      "GOV-3-05",
+      "GOV-3-06",
+      "GOV-3-07"
+    ],
+    "rules": [
+      "claim-uncontrolled-verb",
+      "claim-id-resolves",
+      "claim-registry-mirror",
+      "claim-registered-referenced",
+      "claim-state-declared"
+    ]
+  },
+  "cross_check_sentence": "CI cross-checks claim IDs.",
+  "grandfathered": {
+    "count": 4,
+    "instances": [
+      {
+        "line": 147,
+        "path": "notes/plan/docs/06_RESEARCH_AGENDA.md",
+        "reason": "Research-agenda C3 states the independence requirement for synthesized abstraction maps with no scope, corpus, or claim row. Pay off by naming the checker and the claim row, or by restating with a controlled verb.",
+        "rule": "claim-uncontrolled-verb",
+        "text": "All synthesized maps are verified independently."
+      },
+      {
+        "line": 39,
+        "path": "notes/plan/docs/52_RELEASE_GATES_REV3.md",
+        "reason": "G2 exit criterion. The bullet asserts boundedness of the artifact class with no budget, so a reader cannot size it. Pay off by naming the pack budget the gate measures against.",
+        "rule": "claim-verb-discipline",
+        "text": "- Context Packs are bounded, carry omission manifests and expansion handles, and improve agent benchmark effectiveness;"
+      },
+      {
+        "line": 2335,
+        "path": "notes/plan/plan.md",
+        "reason": "plan \u00a722's mirror of the same G2 criterion. Both copies are grandfathered separately so paying one off does not silently cover the other.",
+        "rule": "claim-verb-discipline",
+        "text": "- Context Packs are bounded, carry omission manifests and expansion handles, and improve agent benchmark effectiveness;"
+      },
+      {
+        "line": 64,
+        "path": "notes/plan/docs/18_CLAIMS_MATRIX.md",
+        "reason": "docs/18 C025 carries the state OBSERVED-BOUNDED, which its own evidence-state list does not declare. Known defect, independently reported in plan.review.1.md ('docs/18 C025 uses an undeclared state'). Pay off by declaring the state or by restating C025 as ESTABLISHED-BOUNDED.",
+        "rule": "claim-state-declared",
+        "text": "C025 OBSERVED-BOUNDED"
+      }
+    ]
+  },
+  "id_mapping_note": "PLAN_REQUIREMENTS.json assigns GOV-3-01 \u2026 GOV-3-07 to the seven controlled verbs, one each \u2014 GOV-3-07 is \u201chypothesized.\u201d, not the CI cross-check. \u00a73's closing sentence \u201cCI cross-checks claim IDs.\u201d carries no requirement ID of its own, so the rules implementing it are recorded against all seven IDs and collected under `cross_check` (bn-18cg).",
+  "obligation_source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a73 \u201cClaim governance\u201d",
+  "obligations": {
+    "GOV-3-01": {
+      "boundary": "Proxy. Only assertive uses (copula or perfect + `observed` in predicate position) are seen; an observation reported as a noun phrase or a bare table cell is not.",
+      "fixtures_caught": [
+        "claim-observed-tested-no-scope.md",
+        "claim-uncontrolled-verb.md",
+        "claim-verb-set-drift.md"
+      ],
+      "real_run": {
+        "discipline_exercised_on_real_corpus": false,
+        "in_scope_assertive_uses": 0,
+        "note": "No assertive use of this verb in the scan scope, so claim-verb-discipline is exercised by fixture only. claim-verb-registered and the cross-check rules bind on real content for this ID regardless.",
+        "status": "pass",
+        "violations": []
+      },
+      "requirement": {
+        "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md:45 \u00a73 bullet 1",
+        "summary": "observed"
+      },
+      "rules": [
+        "claim-verb-registered",
+        "claim-verb-discipline",
+        "claim-uncontrolled-verb",
+        "claim-id-resolves",
+        "claim-registry-mirror",
+        "claim-registered-referenced",
+        "claim-state-declared"
+      ],
+      "verb": "observed"
+    },
+    "GOV-3-02": {
+      "boundary": "Proxy. Only assertive uses are seen, and the corpus requirement is satisfied by any scope preposition \u2014 the check cannot tell a named corpus from a vague one.",
+      "fixtures_caught": [
+        "claim-observed-tested-no-scope.md",
+        "claim-uncontrolled-verb.md",
+        "claim-verb-set-drift.md"
+      ],
+      "real_run": {
+        "discipline_exercised_on_real_corpus": true,
+        "in_scope_assertive_uses": 4,
+        "note": "",
+        "status": "pass",
+        "violations": []
+      },
+      "requirement": {
+        "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md:45 \u00a73 bullet 2",
+        "summary": "tested"
+      },
+      "rules": [
+        "claim-verb-registered",
+        "claim-verb-discipline",
+        "claim-uncontrolled-verb",
+        "claim-id-resolves",
+        "claim-registry-mirror",
+        "claim-registered-referenced",
+        "claim-state-declared"
+      ],
+      "verb": "tested"
+    },
+    "GOV-3-03": {
+      "boundary": "Proxy. A numeral or a scope preposition counts as the bound; the check does not verify the bound is the one the evidence actually holds within.",
+      "fixtures_caught": [
+        "claim-bounded-no-bound.md",
+        "claim-uncontrolled-verb.md",
+        "claim-verb-set-drift.md"
+      ],
+      "real_run": {
+        "discipline_exercised_on_real_corpus": true,
+        "in_scope_assertive_uses": 2,
+        "note": "",
+        "status": "pass",
+        "violations": []
+      },
+      "requirement": {
+        "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md:45 \u00a73 bullet 3",
+        "summary": "bounded"
+      },
+      "rules": [
+        "claim-verb-registered",
+        "claim-verb-discipline",
+        "claim-uncontrolled-verb",
+        "claim-id-resolves",
+        "claim-registry-mirror",
+        "claim-registered-referenced",
+        "claim-state-declared"
+      ],
+      "verb": "bounded"
+    },
+    "GOV-3-04": {
+      "boundary": "Proxy. Same bound test as `bounded`. The check cannot verify exhaustiveness \u2014 only that a bound is stated alongside the word.",
+      "fixtures_caught": [
+        "claim-bounded-no-bound.md",
+        "claim-uncontrolled-verb.md",
+        "claim-verb-set-drift.md"
+      ],
+      "real_run": {
+        "discipline_exercised_on_real_corpus": false,
+        "in_scope_assertive_uses": 0,
+        "note": "No assertive use of this verb in the scan scope, so claim-verb-discipline is exercised by fixture only. claim-verb-registered and the cross-check rules bind on real content for this ID regardless.",
+        "status": "pass",
+        "violations": []
+      },
+      "requirement": {
+        "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md:45 \u00a73 bullet 4",
+        "summary": "exhaustively checked"
+      },
+      "rules": [
+        "claim-verb-registered",
+        "claim-verb-discipline",
+        "claim-uncontrolled-verb",
+        "claim-id-resolves",
+        "claim-registry-mirror",
+        "claim-registered-referenced",
+        "claim-state-declared"
+      ],
+      "verb": "exhaustively checked"
+    },
+    "GOV-3-05": {
+      "boundary": "Proxy. The check verifies that assumptions are *named* after `under`; it cannot verify they are the assumptions the proof actually needs.",
+      "fixtures_caught": [
+        "claim-proved-under-no-assumptions.md",
+        "claim-uncontrolled-verb.md",
+        "claim-verb-set-drift.md"
+      ],
+      "real_run": {
+        "discipline_exercised_on_real_corpus": false,
+        "in_scope_assertive_uses": 0,
+        "note": "No assertive use of this verb in the scan scope, so claim-verb-discipline is exercised by fixture only. claim-verb-registered and the cross-check rules bind on real content for this ID regardless.",
+        "status": "pass",
+        "violations": []
+      },
+      "requirement": {
+        "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md:45 \u00a73 bullet 5",
+        "summary": "proved under"
+      },
+      "rules": [
+        "claim-verb-registered",
+        "claim-verb-discipline",
+        "claim-uncontrolled-verb",
+        "claim-id-resolves",
+        "claim-registry-mirror",
+        "claim-registered-referenced",
+        "claim-state-declared"
+      ],
+      "verb": "proved under"
+    },
+    "GOV-3-06": {
+      "boundary": "Proxy. The check verifies an artifact or checker is named in the sentence; it does not re-check the certificate.",
+      "fixtures_caught": [
+        "claim-certificate-checked-no-artifact.md",
+        "claim-uncontrolled-verb.md",
+        "claim-verb-set-drift.md"
+      ],
+      "real_run": {
+        "discipline_exercised_on_real_corpus": false,
+        "in_scope_assertive_uses": 0,
+        "note": "No assertive use of this verb in the scan scope, so claim-verb-discipline is exercised by fixture only. claim-verb-registered and the cross-check rules bind on real content for this ID regardless.",
+        "status": "pass",
+        "violations": []
+      },
+      "requirement": {
+        "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md:45 \u00a73 bullet 6",
+        "summary": "certificate checked"
+      },
+      "rules": [
+        "claim-verb-registered",
+        "claim-verb-discipline",
+        "claim-uncontrolled-verb",
+        "claim-id-resolves",
+        "claim-registry-mirror",
+        "claim-registered-referenced",
+        "claim-state-declared"
+      ],
+      "verb": "certificate checked"
+    },
+    "GOV-3-07": {
+      "boundary": "Proxy. The check rejects a hypothesis stated alongside a stronger claim word; it cannot judge whether a statement should have been a hypothesis.",
+      "fixtures_caught": [
+        "claim-hypothesized-with-strength.md",
+        "claim-uncontrolled-verb.md",
+        "claim-verb-set-drift.md"
+      ],
+      "real_run": {
+        "discipline_exercised_on_real_corpus": false,
+        "in_scope_assertive_uses": 0,
+        "note": "No assertive use of this verb in the scan scope, so claim-verb-discipline is exercised by fixture only. claim-verb-registered and the cross-check rules bind on real content for this ID regardless.",
+        "status": "pass",
+        "violations": []
+      },
+      "requirement": {
+        "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md:45 \u00a73 bullet 7",
+        "summary": "hypothesized"
+      },
+      "rules": [
+        "claim-verb-registered",
+        "claim-verb-discipline",
+        "claim-uncontrolled-verb",
+        "claim-id-resolves",
+        "claim-registry-mirror",
+        "claim-registered-referenced",
+        "claim-state-declared"
+      ],
+      "verb": "hypothesized"
+    }
+  },
+  "scan_scope": {
+    "documents": [
+      "README.md",
+      "notes/plan/README.md",
+      "notes/plan/docs/00_EXECUTIVE_SPEC.md",
+      "notes/plan/docs/01_ARCHITECTURE.md",
+      "notes/plan/docs/02_SEMANTICS.md",
+      "notes/plan/docs/03_ASSURANCE_AND_TCB.md",
+      "notes/plan/docs/05_RESEARCH_LANDSCAPE.md",
+      "notes/plan/docs/06_RESEARCH_AGENDA.md",
+      "notes/plan/docs/07_BENCHMARKS_AND_EVALUATION.md",
+      "notes/plan/docs/08_RISK_REGISTER.md",
+      "notes/plan/docs/09_THREAT_MODEL.md",
+      "notes/plan/docs/10_INTEROP_AND_MIGRATION.md",
+      "notes/plan/docs/11_LANGUAGE_AND_DX.md",
+      "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md",
+      "notes/plan/docs/13_BIBLIOGRAPHY.md",
+      "notes/plan/docs/14_GLOSSARY.md",
+      "notes/plan/docs/15_COMPETITIVE_MATRIX.md",
+      "notes/plan/docs/16_PROOF_OBLIGATIONS.md",
+      "notes/plan/docs/17_DOMAIN_PACK_CONTRACT.md",
+      "notes/plan/docs/18_CLAIMS_MATRIX.md",
+      "notes/plan/docs/19_TEST_STRATEGY.md",
+      "notes/plan/docs/20_ADVERSARIAL_DESIGN_REVIEW.md",
+      "notes/plan/docs/21_NOVEL_CONTRIBUTIONS.md",
+      "notes/plan/docs/22_TLA_EXAMPLES_COMPATIBILITY_PROGRAM.md",
+      "notes/plan/docs/23_LEAN4_FORMALIZATION_PROGRAM.md",
+      "notes/plan/docs/24_REVISION_2_ARCHITECTURE.md",
+      "notes/plan/docs/25_SEMANTIC_FEATURE_MATRIX.md",
+      "notes/plan/docs/26_RELEASE_GATES_REV2.md",
+      "notes/plan/docs/27_SPIKE_FINDINGS_REV2.md",
+      "notes/plan/docs/28_THEORY_OF_SUCCESS.md",
+      "notes/plan/docs/29_PROOF_ENGINEERING_STRATEGY.md",
+      "notes/plan/docs/30_AGENT_NATIVE_MICRO_REVOLUTION.md",
+      "notes/plan/docs/31_FALSIFICATION_AND_KILL_CRITERIA.md",
+      "notes/plan/docs/32_CORPUS_PORTING_PLAYBOOK.md",
+      "notes/plan/docs/33_REVISION_3_ARCHITECTURE.md",
+      "notes/plan/docs/34_DEVELOPER_EXPERIENCE_PRODUCT_CONTRACT.md",
+      "notes/plan/docs/35_CONTINUUMD_WORKBENCH_DAEMON.md",
+      "notes/plan/docs/36_AGENT_PROTOCOL_AND_TOOL_CONTRACTS.md",
+      "notes/plan/docs/37_HUMAN_WORKFLOWS.md",
+      "notes/plan/docs/38_COUNTEREXAMPLE_EXPERIENCE.md",
+      "notes/plan/docs/39_VERIFICATION_DEBUGGER.md",
+      "notes/plan/docs/40_SEMANTIC_DIFF_AND_IMPACT.md",
+      "notes/plan/docs/41_REPAIR_TRANSACTIONS.md",
+      "notes/plan/docs/42_INCREMENTAL_VERIFICATION.md",
+      "notes/plan/docs/43_CONTINUUM_FORGE.md",
+      "notes/plan/docs/44_MULTI_AGENT_EVIDENCE_GRAPH.md",
+      "notes/plan/docs/45_CONTINUUMBENCH.md",
+      "notes/plan/docs/46_IDE_CLI_DAP_MCP_AND_SARIF.md",
+      "notes/plan/docs/47_ONBOARDING_AND_PROGRESSIVE_DISCLOSURE.md",
+      "notes/plan/docs/48_EXPLANATION_SCIENCE.md",
+      "notes/plan/docs/49_SECURITY_FOR_AUTONOMOUS_AGENTS.md",
+      "notes/plan/docs/50_AGENT_EVALUATION_AND_REWARD_HACKING.md",
+      "notes/plan/docs/51_PRODUCT_WALKTHROUGHS.md",
+      "notes/plan/docs/52_RELEASE_GATES_REV3.md",
+      "notes/plan/docs/53_SPIKE_FINDINGS_REV3.md",
+      "notes/plan/docs/54_THEORY_OF_AGENTIC_ACCELERATION.md",
+      "notes/plan/docs/55_AGENT_API_REFERENCE_SKETCH.md",
+      "notes/plan/plan.md"
+    ],
+    "excluded": [
+      "notes/plan/rfcs/",
+      "notes/plan/adr/",
+      "notes/plan/research/",
+      "notes/plan/plan.review.*.md",
+      "notes/plan/archive/",
+      "notes/plan/spikes/",
+      "crates/",
+      "AGENTS.md"
+    ],
+    "excluded_within_documents": [
+      "fenced code blocks",
+      "inline code spans",
+      "curly-quoted strings"
+    ],
+    "globs": [
+      "README.md",
+      "notes/plan/README.md",
+      "notes/plan/docs/*.md",
+      "notes/plan/plan.md"
+    ]
+  },
+  "self_test": {
+    "failures": [],
+    "fixtures": 13,
+    "status": "pass"
+  },
+  "status": "pass"
+}
