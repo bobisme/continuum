@@ -62,4 +62,10 @@ ADRs are normative unless superseded.
 | [0051](0051-assurance-envelope.md) | Assurance Envelope Instead of Verified Badge |
 | [0052](0052-multi-agent-evidence-graph.md) | Multi-Agent Evidence Graph |
 
+## Program decisions
+
+| ADR | Decision |
+|---|---|
+| [0053](0053-product-license-mit-or-apache-2.md) | Product license is `MIT OR Apache-2.0`; the asupersync rider is accepted and disclosed |
+
 New ADRs use the next number and include context, decision, consequences, evidence requirements, and supersession rules.

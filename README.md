@@ -137,7 +137,7 @@ These are adapters over one native protocol. None owns hidden semantic state.
 The current dossier provides:
 
 - a Revision 3 master architecture and an ordered first 30 pull requests;
-- 52 architecture decisions and 40 implementable RFCs;
+- 53 architecture decisions and 40 implementable RFCs;
 - JSON Schemas and fixtures for intent, snapshots, evidence, repair, synthesis,
   semantic diffs, and agent tasks;
 - eight executable Revision 3 spike groups covering causal Context Packs, intent
@@ -230,3 +230,40 @@ unbounded checking, or certainty from incomplete production evidence.
 Its narrower promise is ambitious enough: one coherent semantic system,
 explicit abstraction and refinement, aggressive but checkable analysis, honest
 assurance, and first-class workflows for both developers and coding agents.
+
+## License
+
+Continuum is dual-licensed under [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE), at your option. Contributions are accepted under
+the same dual terms.
+
+**One thing to know before you build or ship a Continuum binary.** Continuum's
+execution substrate is [asupersync](https://crates.io/crates/asupersync)
+([ADR-0001](notes/plan/adr/0001-asupersync-execution-substrate.md)), which is
+distributed under `LicenseRef-MIT-OpenAI-Anthropic-Rider` — the MIT license plus
+a rider that grants **no rights to OpenAI, L.L.C., Anthropic, PBC, their
+affiliates, or anyone acting on their behalf, for their benefit, or under their
+direction**, and that requires the rider to travel unmodified with every
+distribution of the software or a derivative work.
+
+That rider is not Continuum's to remove, and our MIT/Apache-2.0 grant does not
+override it:
+
+- **A build that links asupersync carries the rider to whoever receives it.**
+  That includes any release binary, installer, container image, or packaged
+  distribution of Continuum's real-code execution path. If you are one of the
+  restricted parties named above, the rider withholds the substrate's grant from
+  you, and no election of Continuum's own license changes that.
+- **A model-only build does not.** Continuum stays capable of model-only
+  execution without asupersync (ADR-0001), and its model core is forbidden from
+  depending on it, so such a build distributes only first-party code under the
+  dual grant plus its other dependencies' ordinary terms.
+
+The project chose to accept this exposure and state it plainly rather than let
+recipients discover it inside a dependency license bundle. The reasoning is in
+[ADR-0053](notes/plan/adr/0053-product-license-mit-or-apache-2.md) and the
+analysis it accepts,
+[`LICENSE_DECISION_PACKAGE.md`](notes/plan/notes/LICENSE_DECISION_PACKAGE.md).
+
+None of this is legal advice; the rider's plain terms are quoted above so you can
+take your own.

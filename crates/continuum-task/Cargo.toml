@@ -3,6 +3,7 @@ name = "continuum-task"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 # Two workspace edges, both stated in `src/lib.rs`'s dependency-boundary contract:

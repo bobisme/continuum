@@ -23,8 +23,16 @@ edition = "2024"
 # `rust-toolchain.toml` (PR-1 / IMPL-05, plan §20's reproducible-build
 # covenant and INV-014).
 rust-version = "1.85"
-# No `license` field yet: the product license decision is PR 0 (plan §21.1).
-# Every crate sets `publish = false` until it is made.
+# Product license, decided in PR 0 (plan §21.1) and recorded in
+# notes/plan/adr/0053-product-license-mit-or-apache-2.md: the Rust-ecosystem
+# dual grant, so a recipient elects MIT (GPLv2-compatible) or Apache-2.0 (express
+# patent grant). Texts are `LICENSE-MIT` and `LICENSE-APACHE` at the repo root.
+# This is Continuum's *outbound* grant only; it does not and cannot strip the
+# `LicenseRef-MIT-OpenAI-Anthropic-Rider` that asupersync's pass-through clause
+# attaches to any binary linking it (ADR-0001, ADR-0053 D0, README "License").
+# Crates keep `publish = false` until the project decides to publish; that is a
+# release decision, not a licensing one.
+license = "MIT OR Apache-2.0"
 
 # Workspace-wide lint defaults. Each crate opts in with `[lints] workspace =
 # true`, so this table is the single place to add project-wide policy —

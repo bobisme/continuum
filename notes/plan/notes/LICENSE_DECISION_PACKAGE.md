@@ -1,13 +1,14 @@
 # Product License Decision Package
 
-> **STATUS: PREPARED — AWAITING PRIVILEGED DECISION.**
-> This document does not choose a license. It assembles the constraints, the verified
-> facts, the candidate set, and a recommendation so that the choice can be made once and
-> recorded. No `LICENSE` file has been added, no `license` field has been set in
-> `Cargo.toml`, and no ADR has been written. Selecting the product license is a human
-> action (plan §21.1 and the swarm execution map in
-> [`START_HERE_IMPLEMENTATION.md`](START_HERE_IMPLEMENTATION.md)); an agent may only
-> prepare the package.
+> **STATUS: DECIDED 2026-07-31 — recorded in [ADR-0053](../adr/0053-product-license-mit-or-apache-2.md).**
+> The project owner accepted this package's recommendation on 2026-07-31: D0 —
+> the asupersync rider exposure is **accepted and disclosed**; D1 — the product
+> license is **`MIT OR Apache-2.0`**. The recording edits are done: `LICENSE-MIT`
+> and `LICENSE-APACHE` at the repository root, `[workspace.package] license` in
+> `Cargo.toml`, ADR-0053, the docs/12 §10 sentence, and the README's License
+> section (which carries the rider disclosure). The analysis below is left intact
+> as the record of what was weighed; it is not re-opened by later edits to the
+> residual questions D2–D6, which ADR-0053 tracks.
 
 **Prepared:** 2026-07-31 (PR 0 program decisions, bone `bn-2br`)
 **Decision required by:** [plan](../plan.md) §21.1 — "the product license (permissive,

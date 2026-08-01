@@ -2,7 +2,8 @@
 
 **Status:** Accepted  
 **Date:** 2026-07-24  
-**Decision owners:** Continuum architecture group
+**Decision owners:** Continuum architecture group  
+**Amended:** 2026-07-31 — substrate license exposure accepted and disclosed ([ADR-0053](0053-product-license-mit-or-apache-2.md) D0)
 
 ## Context
 
@@ -28,7 +29,8 @@ Costs/risks:
 - dependency on a young runtime;
 - possible pressure to use private Lab internals;
 - shared-runtime/common-mode bugs;
-- narrower initial audience than Tokio-based systems.
+- narrower initial audience than Tokio-based systems;
+- asupersync is distributed under `LicenseRef-MIT-OpenAI-Anthropic-Rider`, whose pass-through clause attaches the rider unmodified to any Continuum artifact that links it. [ADR-0053](0053-product-license-mit-or-apache-2.md) accepts that exposure and makes disclosing it a release obligation; the model-only capability stated above is what bounds it.
 
 ## Alternatives considered
 
