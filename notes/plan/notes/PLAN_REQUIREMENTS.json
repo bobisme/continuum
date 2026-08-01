@@ -1056,8 +1056,8 @@
         "line": 122,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "source/dependency/toolchain/config identities"
+      "status": "satisfied",
+      "summary": "source/dependency/toolchain/config identities (delivered: bn-2xri)"
     },
     {
       "category": "pr-deliverable",

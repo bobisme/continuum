@@ -45,5 +45,6 @@
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod artifact_path;
+pub mod components;
 pub mod publication;
 pub mod snapshot;
