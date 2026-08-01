@@ -2097,7 +2097,8 @@ Deliver:
 - Lean environment pinned and seed modules kernel-checked; T0/T1 theorems
   (transition-system safety, stuttering simulation, finite-closure
   certificate soundness) compile with no `sorry` and empty axiom manifests,
-  per the RFC 0012 theorem ladder and ADR-0035 axiom manifests.
+  per the RFC 0012 theorem ladder and ADR-0035 axiom manifests
+  (delivered: bn-zr81).
 
 Exit: Die Hard and Dining Philosophers can be checked through native API,
 CLI, and an agent client with identical artifacts; the ACI ablation shows

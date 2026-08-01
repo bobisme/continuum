@@ -176,6 +176,9 @@ def _extract_phases(requirements: list[dict[str, Any]]) -> None:
                     path,
                     source_line,
                     parent=phase_id,
+                    # Same living-document completion record as PR bullets:
+                    # "(delivered: bn-…)" on the Deliver bullet.
+                    status="satisfied" if "(delivered:" in summary else ACTIVE,
                 )
             )
         exit_match = re.search(r"\nExit:\s*(.*?)(?=\n\n|\Z)", body, re.DOTALL)
