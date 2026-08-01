@@ -1020,7 +1020,7 @@
         "line": 122,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Workspace snapshots [G1]"
     },
     {
@@ -1092,8 +1092,8 @@
         "line": 122,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "two clients can fork and analyze independently; an old snapshot remains reproducible after the working tree changes."
+      "status": "satisfied",
+      "summary": "two clients can fork and analyze independently; an old snapshot remains reproducible after the working tree changes (delivered: bn-3tkw)."
     },
     {
       "category": "pr",
