@@ -1030,6 +1030,16 @@ struct StoreState {
     /// Committed content, keyed by identity. Present here and absent from `index` is
     /// exactly docs/35's "unreachable content".
     content: BTreeMap<ArtifactHandle, Vec<u8>>,
+    /// Publications that have committed their content and not yet their index entry,
+    /// counted per identity — docs/35's "live tasks" half of the reachability root set.
+    ///
+    /// A count rather than a set because convergent publishers share an identity: N
+    /// threads publishing identical bytes hold N pins on one handle, and the content stops
+    /// being a root only when the last of them settles. One pin is taken by
+    /// [`StagedPublication::commit_content`], in the same critical section that makes the
+    /// content durable, and released when the resulting [`CommittedContent`] is consumed
+    /// or dropped.
+    in_flight: BTreeMap<ArtifactHandle, u64>,
     /// The index: the only thing a read consults. Never written before content.
     index: BTreeMap<ArtifactPath, ArtifactHandle>,
     /// Append-only receipt ledger, keyed by identity, in publication order.
@@ -1141,6 +1151,22 @@ impl ReferenceStore {
 
     fn record_abort(&self, aborted: PublicationAborted) {
         self.state().aborts.push(aborted);
+    }
+
+    /// Release one publication's claim on `handle` as a garbage-collection root.
+    ///
+    /// The counterpart of the pin [`StagedPublication::commit_content`] takes. Called from
+    /// [`CommittedContent`]'s [`Drop`], which every exit from that state runs through —
+    /// success, abandonment, and refused index write alike — so a pin cannot outlive the
+    /// publication holding it.
+    fn release_in_flight(&self, handle: &ArtifactHandle) {
+        let mut state = self.state();
+        if let Some(pins) = state.in_flight.get_mut(handle) {
+            *pins = pins.saturating_sub(1);
+            if *pins == 0 {
+                state.in_flight.remove(handle);
+            }
+        }
     }
 
     fn abort(&self, phase: PublicationPhase, reason: AbortReason) -> PublicationAborted {
@@ -1313,9 +1339,32 @@ impl ReferenceStore {
     /// reachability").
     ///
     /// Unreachable content is the residue docs/35 accepts in exchange for never writing a
-    /// stale index entry. Collecting it cannot make a published artifact unavailable,
-    /// because "published" means "named by the index" and this only removes content the
-    /// index does not name.
+    /// stale index entry. Collecting it cannot make a published artifact unavailable, and
+    /// cannot make one that is *about to be* published unavailable either, because the
+    /// root set is both halves of docs/35's — "named roots, live tasks, receipts, and
+    /// retention policy" — spelled for this store:
+    ///
+    /// - **named roots** are the index entries: an artifact is published exactly when the
+    ///   index names it, so every published identity is a root;
+    /// - **live tasks** are the publications between their two commits. Content is durable
+    ///   from [`StagedPublication::commit_content`], and until the matching
+    ///   [`CommittedContent::commit_index`] no index entry names it — so for that window
+    ///   the publication is its own root, held by the pin `commit_content` takes and
+    ///   released when [`CommittedContent`] is consumed or dropped. Without it, collection
+    ///   racing a publication would reclaim content the store had already told a publisher
+    ///   was durable: the G0-DX-13 defect reproduced in
+    ///   `crates/continuum-workspace/tests/dx13_falsification.rs`;
+    /// - **receipts** need no separate root and are deliberately not one. A receipt is
+    ///   appended in the same critical section that inserts the index entry naming it, an
+    ///   [`ArtifactPath`] determines its handle so that entry can name no other identity,
+    ///   and nothing in this store ever removes an index entry. Every receipted identity
+    ///   is therefore already a named root; adding receipts would be dead machinery;
+    /// - **retention policy** is a deployment's, not this store's: there is no
+    ///   time here to express one with, and time is an explicit effect (INV-005,
+    ///   ADR-0003).
+    ///
+    /// What is left over — content that no index entry names and no live publication is
+    /// holding — is crash residue, and only that is reclaimed.
     ///
     /// Returns the identities reclaimed, in store order.
     ///
@@ -1329,7 +1378,12 @@ impl ReferenceStore {
         self.authorize(administrator, Action::Administer, None, None)?;
 
         let mut state = self.state();
-        let reachable: BTreeSet<ArtifactHandle> = state.index.values().cloned().collect();
+        let reachable: BTreeSet<ArtifactHandle> = state
+            .index
+            .values()
+            .cloned()
+            .chain(state.in_flight.keys().cloned())
+            .collect();
         let unreachable: Vec<ArtifactHandle> = state
             .content
             .keys()
@@ -1470,6 +1524,13 @@ impl<'store> StagedPublication<'store> {
     /// Converges when the identity already names byte-identical content: the content is
     /// already durable, so there is nothing to write and nothing to overwrite.
     ///
+    /// Committing also pins the identity as a garbage-collection root for as long as the
+    /// returned [`CommittedContent`] is alive, in the same critical section that makes the
+    /// content durable — there is no instant at which the content exists and nothing
+    /// claims it. A converging publication takes a pin too: it is about to be handed a
+    /// receipt for content it did not write, and a receipt must name a readable artifact
+    /// however the bytes got there.
+    ///
     /// # Errors
     ///
     /// [`PublicationAborted`] with [`AbortReason::StorageExhausted`] when the storage
@@ -1502,6 +1563,9 @@ impl<'store> StagedPublication<'store> {
                     state.content.insert(self.handle.clone(), content);
                 }
             }
+            // Durable, and not yet named by the index: from here until the returned
+            // `CommittedContent` settles, this publication is the content's only root.
+            *state.in_flight.entry(self.handle.clone()).or_insert(0) += 1;
         }
 
         Ok(CommittedContent {
@@ -1541,6 +1605,19 @@ impl Drop for StagedPublication<'_> {
 /// Dropping it is the crash docs/35 describes: content is durable, no index entry names
 /// it, no receipt was issued. [`StoreAudit::fsck`] classifies the residue as
 /// [`StoreDefect::UnreachableContent`] and [`ReferenceStore::collect_garbage`] reclaims it.
+///
+/// # It is also the publication's garbage-collection root
+///
+/// While this value is alive its content is durable and *nothing else in the store makes
+/// it reachable* — the index entry that will name it has not been written yet. So it is a
+/// root in its own right, which is docs/35's "live tasks" clause of the root set: the pin
+/// is taken by [`StagedPublication::commit_content`] and released by this value's
+/// [`Drop`], and [`ReferenceStore::collect_garbage`] running concurrently on another
+/// thread therefore cannot reclaim content this publication has already been promised.
+///
+/// The lifetime of the pin is the lifetime of this value, which is why it is a value at
+/// all rather than a flag: there is no exit from this state — receipt, abandonment,
+/// refused index write, unwind — that can forget to release it.
 ///
 /// # The ordering is checked, not asserted
 ///
@@ -1667,6 +1744,9 @@ impl CommittedContent<'_> {
             .entry(self.handle.clone())
             .or_default()
             .push(receipt.clone());
+        // Released explicitly rather than at end of scope: `Drop` releases this
+        // publication's root pin and takes the same lock, so the guard must be gone first.
+        drop(state);
         Ok(receipt)
     }
 
@@ -1684,6 +1764,12 @@ impl Drop for CommittedContent<'_> {
             self.store
                 .abort(PublicationPhase::CommittingIndex, AbortReason::Abandoned);
         }
+        // Every exit from this state runs through here — receipt, abandonment, refused
+        // index write, panic — so the pin taken at the content commit is released exactly
+        // once and never leaks. It is released *last*: a successful publication has
+        // already written the index entry that takes over as the content's root, and a
+        // failed one leaves content that is now genuinely reclaimable.
+        self.store.release_in_flight(&self.handle);
     }
 }
 
@@ -1698,10 +1784,13 @@ impl Drop for CommittedContent<'_> {
 /// > — `notes/plan/docs/35_CONTINUUMD_WORKBENCH_DAEMON.md`
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StoreDefect {
-    /// Content no index entry names. Ordinary crash residue; garbage-collectable.
+    /// Content no index entry names: ordinary crash residue, or a publication caught
+    /// between its two commits. Garbage-collectable once no live publication holds it —
+    /// [`ReferenceStore::collect_garbage`] reclaims the first and leaves the second alone.
     UnreachableContent(ArtifactHandle),
     /// A live index entry whose content is absent. Never produced by this store's own
-    /// ordering — content is committed first — so finding one means external damage.
+    /// ordering — content is committed first and stays a collection root until the index
+    /// entry naming it lands — so finding one means external damage.
     MissingReferent(ArtifactPath),
     /// Content that does not identify to the identity it is filed under. Corruption:
     /// reported, never silently repaired.
@@ -2383,6 +2472,84 @@ mod tests {
                 AbortReason::Abandoned
             )]
         );
+    }
+
+    #[test]
+    fn garbage_collection_never_reclaims_a_publication_still_in_flight() {
+        // G0-DX-13, bn-21dd → bn-2siid. A root set derived from the index alone calls a
+        // publication between its two commits unreachable and reclaims content the store
+        // has already told the publisher is durable. Stated single-threaded: the race in
+        // `tests/dx13_falsification.rs` only makes the same window easier to hit.
+        let f = fixture();
+        let committed = f
+            .store
+            .stage(CLASS, b"payload".to_vec(), &f.author)
+            .expect("authorized")
+            .commit_content()
+            .expect("content commits");
+
+        let reclaimed = f
+            .store
+            .collect_garbage(&f.operator)
+            .expect("operator may collect");
+        assert_eq!(
+            reclaimed,
+            Vec::new(),
+            "collection reclaimed content a live publication is holding"
+        );
+
+        let receipt = committed.commit_index().expect("the index commits");
+        assert_eq!(
+            f.store
+                .read(receipt.handle(), &f.reader)
+                .expect("published"),
+            b"payload",
+            "a receipt was issued for an artifact the store cannot read back"
+        );
+        let view = f.store.audit_view(&f.operator).expect("operator");
+        assert_eq!(view.fsck(), Vec::new());
+    }
+
+    #[test]
+    fn an_in_flight_pin_is_released_only_when_its_last_holder_settles() {
+        // Convergent publishers share an identity, so the root is held by a count and not
+        // a flag: the first one to settle must not release the second one's claim.
+        let f = fixture();
+        let first = f
+            .store
+            .stage(CLASS, b"payload".to_vec(), &f.author)
+            .expect("authorized")
+            .commit_content()
+            .expect("content commits");
+        let second = f
+            .store
+            .stage(CLASS, b"payload".to_vec(), &f.author)
+            .expect("authorized")
+            .commit_content()
+            .expect("the second publication converges onto the same content");
+        let handle = first.handle().clone();
+        assert_eq!(second.handle(), &handle, "convergence derives one identity");
+
+        drop(first);
+        assert_eq!(
+            f.store
+                .collect_garbage(&f.operator)
+                .expect("operator may collect"),
+            Vec::new(),
+            "one publication settling released a root the other still holds"
+        );
+
+        drop(second);
+        assert_eq!(
+            f.store
+                .collect_garbage(&f.operator)
+                .expect("operator may collect"),
+            vec![handle],
+            "the pin outlived every publication holding it: residue is not reclaimable"
+        );
+        let view = f.store.audit_view(&f.operator).expect("operator");
+        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.storage_attribution(), BTreeMap::new());
     }
 
     #[test]

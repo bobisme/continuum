@@ -44,16 +44,19 @@
 //!
 //! Axes 1–4 did not break: twelve attacks, up to 48 threads, and the pass condition held
 //! every time. Axis 5 did break — garbage collection racing an in-flight publication. See
-//! the `violations` section at the bottom of this file. The three tests there are
-//! `#[ignore]`d **because they fail**, not because they are slow or flaky: two are
-//! deterministic reproductions of a genuine defect and the third corroborates it without
-//! any seam. They are kept executable
-//! (`cargo test -p continuum-workspace --test dx13_falsification -- --ignored`) so the
-//! follow-up fix has a red test to turn green, and they must not be deleted or weakened.
+//! the `violations` section at the bottom of this file: two deterministic reproductions of
+//! a genuine defect, and a third corroborating it without any seam.
 //!
-//! `#[ignore]` is a real cost and is recorded as one in
-//! `notes/plan/spikes/R3_SPIKE_REPORT.md` §9: it keeps `just check` honest about what is
-//! green, but it also means the defect will not re-announce itself on every run.
+//! Those three were retained `#[ignore]`d **because they failed**, not because they were
+//! slow or flaky, so the follow-up fix would have a red test to turn green. That fix has
+//! landed (bn-2siid: `ReferenceStore`'s reachability root set now includes publications
+//! between their two commits, not the index alone), the `#[ignore]`s are gone, and all
+//! three run in the default suite as regression guards. They must not be deleted or
+//! weakened.
+//!
+//! The campaign's own rule — *`src/` is not touched* — held for the campaign (bn-21dd),
+//! which is why the diagnosis and the fix are separate bones: the evidence that the defect
+//! was real was produced without any opportunity to shape the implementation around it.
 //!
 //! The campaign's honest limit: this is one process, one `Mutex`, and no disk. It says
 //! nothing about daemon-scale linearizability, real crash recovery, or a durable store;
@@ -1448,47 +1451,49 @@ fn baseline_garbage_collection_of_a_quiescent_store_reclaims_only_crash_residue(
 
 // --- violations --------------------------------------------------------------------------
 //
-// The two tests below FAIL. They are `#[ignore]`d so that `just check` stays green while
-// the defect is triaged, and for no other reason: they are not slow, not flaky, and not
-// speculative. Run them with
+// The three tests below FAILED when this campaign was written (bn-21dd), and were retained
+// `#[ignore]`d so that `just check` stayed honest while the defect was triaged — not
+// because they were slow, flaky, or speculative. bn-2siid fixed the defect in
+// `src/publication.rs`: the garbage collector's root set now pins publications that have
+// committed content and not yet their index entry, so it can no longer reclaim content a
+// publisher has already been told is durable.
 //
-//     cargo test -p continuum-workspace --test dx13_falsification -- --ignored
-//
-// Do not delete them, and do not weaken their assertions to make them pass. They assert
-// the G0-DX-13 pass condition verbatim; a version of them that passes against unchanged
-// `src/` would be a version that has stopped asserting it.
+// The `#[ignore]`s are therefore gone and these run on every `cargo test`. Do not delete
+// them and do not weaken their assertions: they assert the G0-DX-13 pass condition
+// verbatim, and each one still fails against the pre-fix store, which is the only thing
+// that makes them worth keeping.
 
-/// **FAILS — G0-DX-13 violation.** A receipt must name a readable artifact, even when
-/// garbage collection runs while the publication is between its two commits.
+/// **Was a G0-DX-13 violation; fixed by bn-2siid.** A receipt must name a readable
+/// artifact, even when garbage collection runs while the publication is between its two
+/// commits.
 ///
-/// `ReferenceStore::collect_garbage` computes its root set from the index alone:
+/// As found, `ReferenceStore::collect_garbage` computed its root set from the index alone:
 ///
 /// > let reachable: BTreeSet<ArtifactHandle> = state.index.values().cloned().collect();
 ///
-/// A publication that has completed `commit_content` and not yet `commit_index` is, by
-/// that definition, unreachable — so GC reclaims content that a live publisher has
-/// already been told is durable. The publisher then commits its index entry and receives
-/// a receipt for an artifact whose content is gone.
+/// A publication that has completed `commit_content` and not yet `commit_index` was, by
+/// that definition, unreachable — so GC reclaimed content that a live publisher had
+/// already been told was durable. The publisher then committed its index entry and
+/// received a receipt for an artifact whose content was gone.
 ///
-/// Three documented claims are false as a result:
+/// Three documented claims were false as a result:
 ///
-/// - plan §4.5 / INV-017 — the artifact is visible (`published_count == 1`) with no
+/// - plan §4.5 / INV-017 — the artifact was visible (`published_count == 1`) with no
 ///   durable content behind it, which is the "dangling index entry" docs/35 calls "a lie
 ///   about what the store holds";
 /// - `StoreDefect::MissingReferent`, documented as *"Never produced by this store's own
-///   ordering — content is committed first — so finding one means external damage"*, is
+///   ordering — content is committed first — so finding one means external damage"*, was
 ///   produced by this store's own GC with no external damage at all;
 /// - `ReferenceStore::collect_garbage`, documented as *"Collecting it cannot make a
-///   published artifact unavailable"*, makes one unavailable.
+///   published artifact unavailable"*, made one unavailable.
 ///
 /// docs/35 gives the root set as "named roots, **live tasks**, receipts, and retention
-/// policy". The store's root set is neither: it omits receipts and it omits in-flight
-/// publications. Diagnosis and fix belong to a follow-up bone — this campaign does not
-/// patch `src/`.
+/// policy", and the store's was neither: it omitted in-flight publications. The fix
+/// (bn-2siid) pins an identity as a root for exactly as long as its `CommittedContent`
+/// is alive; receipts turned out to need no root of their own, because a receipt is
+/// appended in the same critical section that inserts the index entry naming it. This
+/// test now runs in the default suite and is the regression guard for that.
 #[test]
-#[ignore = "FAILS: G0-DX-13 violation — concurrent GC reclaims the content of an in-flight \
-            publication, leaving a receipt that names an unreadable artifact. Reproduction \
-            kept deliberately; the fix belongs to a follow-up bone."]
 fn a_receipt_must_name_a_readable_artifact_when_gc_runs_concurrently() {
     let payload = b"published while the collector ran".to_vec();
     let (faults, reached, resume) = PauseFirstAt::new(PublicationPhase::CommittingIndex);
@@ -1532,8 +1537,8 @@ fn a_receipt_must_name_a_readable_artifact_when_gc_runs_concurrently() {
     );
 }
 
-/// **FAILS — G0-DX-13 violation, sharper witness.** The same race, with an adversarial
-/// identifier, substitutes one publisher's bytes for another's.
+/// **Was a G0-DX-13 violation, sharper witness; fixed by bn-2siid.** The same race, with
+/// an adversarial identifier, substituted one publisher's bytes for another's.
 ///
 /// Sequence, forced through the fault seam and asserted only on its outcome:
 ///
@@ -1544,15 +1549,27 @@ fn a_receipt_must_name_a_readable_artifact_when_gc_runs_concurrently() {
 ///    it, so the collision goes undetected and `impostor` is stored and indexed;
 /// 4. A resumes, converges onto the existing index entry, and is handed a receipt.
 ///
-/// A now holds a receipt for an identity whose content is bytes A never published. This
+/// A then held a receipt for an identity whose content was bytes A never published. That
 /// is strictly worse than the missing referent above: the store is internally consistent,
 /// `fsck` is clean, and the artifact reads — it just reads as somebody else's. Exact
 /// comparison was not defeated by a better collision; it was bypassed by deleting the
 /// value it was going to compare against.
+///
+/// # What step 3 must be instead, and why this test changed with the fix
+///
+/// Step 2 is the defect, and removing it necessarily changes step 3: with `original`
+/// pinned by A's in-flight publication, it is still there for exact comparison to reject
+/// `impostor` against, so B is *refused* with
+/// [`AbortReason::IdentityCollision`] rather than taking A's identity. There is no correct
+/// store in which B still succeeds — a success at A's identity with different bytes either
+/// conflates two artifacts (ADR-0013, and the mutation campaign's `OverwriteOnCollision`)
+/// or leaves B holding a receipt for A's bytes, which is the same lie this test is named
+/// after. So the line that asserted B's success is now an assertion of B's refusal, which
+/// is a *stronger* claim: the pre-fix store fails this test both ways, because there B
+/// succeeded and A read back `impostor`. Everything else, including the final assertion,
+/// is verbatim what the falsification campaign wrote (bn-21dd); the change is recorded on
+/// bone bn-2siid.
 #[test]
-#[ignore = "FAILS: G0-DX-13 violation — concurrent GC defeats ADR-0013 exact comparison, so a \
-            colliding publisher's receipt names another publisher's bytes. Reproduction kept \
-            deliberately; the fix belongs to a follow-up bone."]
 fn concurrent_gc_must_not_let_a_receipt_name_another_publishers_bytes() {
     let (faults, reached, resume) = PauseFirstAt::new(PublicationPhase::CommittingIndex);
     let store = store_with(TotalColliderIdentifier, faults, 2);
@@ -1569,9 +1586,7 @@ fn concurrent_gc_must_not_let_a_receipt_name_another_publishers_bytes() {
     store
         .collect_garbage(&token("operator"))
         .expect("operator may collect");
-    let second = store
-        .publish(CLASS, b"impostor".to_vec(), &publisher_token(1))
-        .expect("the second publication found nothing to collide with");
+    let second = store.publish(CLASS, b"impostor".to_vec(), &publisher_token(1));
     resume.send(()).expect("release the first publisher");
 
     let first = first
@@ -1579,7 +1594,30 @@ fn concurrent_gc_must_not_let_a_receipt_name_another_publishers_bytes() {
         .expect("no publisher panicked")
         .expect("the first publication reported success");
 
-    assert_eq!(first.handle(), second.handle(), "the identifier collides");
+    assert_eq!(
+        first.handle(),
+        &ArtifactHandle::new(CLASS, "collision").expect("the collider's identity is legal"),
+        "the identifier collides"
+    );
+    match second {
+        Ok(receipt) => panic!(
+            "the second publication found nothing to collide with: garbage collection \
+             deleted the operand of ADR-0013's exact comparison, so {} was published from \
+             bytes the publication that owns it never wrote",
+            receipt.handle()
+        ),
+        Err(PublishRefusal::Aborted(aborted)) => {
+            assert_eq!(
+                aborted.reason(),
+                AbortReason::IdentityCollision,
+                "the colliding publication was refused for the wrong reason"
+            );
+            assert_eq!(aborted.phase(), PublicationPhase::CommittingContent);
+        }
+        Err(PublishRefusal::CapabilityDenied(_)) => {
+            panic!("a collision was reported as a capability denial")
+        }
+    }
     assert_eq!(
         store.read(first.handle(), &token("reader")),
         Ok(b"original".to_vec()),
@@ -1587,21 +1625,19 @@ fn concurrent_gc_must_not_let_a_receipt_name_another_publishers_bytes() {
     );
 }
 
-/// **FAILS — G0-DX-13 violation, unassisted.** The same defect with no rendezvous: plain
-/// threads publishing while a collector runs.
+/// **Was a G0-DX-13 violation, unassisted; fixed by bn-2siid.** The same defect with no
+/// rendezvous: plain threads publishing while a collector runs.
 ///
 /// The two tests above force the interleaving through the fault seam, which invites the
 /// objection that the seam manufactured the bug. It did not. This test uses no seam at
-/// all — ordinary `publish` calls racing an ordinary `collect_garbage` loop — and the
-/// index verifier still reports missing referents, and receipts still name artifacts that
-/// cannot be read.
+/// all — ordinary `publish` calls racing an ordinary `collect_garbage` loop — and against
+/// the unfixed store the index verifier reported missing referents, and receipts named
+/// artifacts that could not be read.
 ///
 /// It is retained as corroboration only. The deterministic reproductions above are the
-/// ones to fix against; this one is a probability argument, and a scheduler that happened
-/// to serialize every publication would let it pass vacuously.
+/// ones the fix was written against; this one is a probability argument, and a scheduler
+/// that happened to serialize every publication would let it pass vacuously.
 #[test]
-#[ignore = "FAILS: G0-DX-13 violation — unassisted reproduction of the concurrent-GC defect, \
-            no fault seam involved. Corroborates the two deterministic reproductions above."]
 fn unassisted_concurrent_gc_and_publication_lose_committed_content() {
     const PUBLISHERS: usize = 16;
     const ROUNDS: usize = 40;

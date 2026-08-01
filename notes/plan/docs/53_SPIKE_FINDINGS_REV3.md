@@ -6,7 +6,7 @@
 
 All eight Revision 3 spike groups passed their internal assertions.
 
-Section 9 is a later addition and is not one of those eight: it is a Rust falsification campaign against a landed reference implementation, executed by `cargo test` rather than by the Python runner above, and it records a failure.
+Section 9 is a later addition and is not one of those eight: it is a Rust falsification campaign against a landed reference implementation, executed by `cargo test` rather than by the Python runner above, and it records a failure and the fix that closed it.
 
 ## 1. Context Pack causal slicing
 
@@ -193,6 +193,16 @@ Each catch asserts *which* complaint the check produced, so a coincidental catch
 ### Limits
 
 One process, one mutex, no disk. The campaign says nothing about daemon-scale linearizability, real crash recovery, restore, or a durable store; that evidence is `continuumd`'s, PR 6+ (docs/35). The garbage-collection defect is a finding against the in-memory reference — whether a durable implementation inherits it is a design question the follow-up owns, not one this campaign answered. The three retained failures are excluded from `just check` by `#[ignore]`, which keeps the gate honest about what is green but means the defect will not re-announce itself; it is recorded here and in the G0 matrix instead.
+
+### Resolution — fixed by bn-2siid
+
+The defect is repaired, and the two subsections above are retained as the record of how it was found rather than as a live finding.
+
+`ReferenceStore`'s reachability root set now carries both halves of docs/35's: **named roots** are the index entries as before, and **live tasks** are the publications between their two commits. A publication pins its identity as a root in the same critical section that makes its content durable, and releases it only when its index commit lands or it is abandoned — the pin's lifetime is the lifetime of the `CommittedContent` witness, so no exit from that state can forget it. A collector running concurrently therefore cannot reclaim content a publisher has already been told is durable. Receipts were checked and deliberately *not* added as roots: a receipt is appended in the same critical section that inserts the index entry naming it, an `ArtifactPath` determines that entry's identity, and nothing removes an index entry — so every receipted identity is already a named root, and a receipt root would be dead machinery.
+
+All three reproductions now pass with their assertions intact, their `#[ignore]` attributes are removed, and they run in the default `cargo test`. That pays off the cost recorded under **Limits** above: the suite re-announces this defect if it ever returns. Each still fails against the pre-fix store, which is what makes them worth keeping.
+
+One reproduction changed with the fix, and the change is recorded on bone bn-2siid: `concurrent_gc_must_not_let_a_receipt_name_another_publishers_bytes` asserted that the second, colliding publisher *succeeded* — but that success was itself the defect, since it happened only because collection had deleted the operand ADR-0013's exact comparison was about to use. With the first publisher's content pinned, the second is refused with `IdentityCollision`, and the test asserts that refusal instead. The claim is strictly stronger than the one it replaces.
 
 ## What the spikes changed
 
