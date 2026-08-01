@@ -27,24 +27,38 @@
 //!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 //!
-//! # What is here, and what is not
+//! # What is here
 //!
 //! PR 8 has five deliverables
-//! (`notes/plan/notes/START_HERE_IMPLEMENTATION.md:205-215`). Three are here:
+//! (`notes/plan/notes/START_HERE_IMPLEMENTATION.md:205-215`) and all five are here:
 //!
 //! - the **programmatic transition model** ([`model`], with [`ident`], [`domain`],
 //!   [`expr`], [`diehard`]) — how a finite transition system is declared, what a state
 //!   is, and how guards, updates, and named predicates are evaluated;
 //! - **deterministic breadth-first exploration** ([`bfs`]) — the reachable set of a
-//!   declared model, in canonical order, with each state's depth, under explicitly
-//!   declared bounds;
+//!   declared model, in canonical order, with each state's depth and the labelled
+//!   transition that first reached it, under explicitly declared bounds;
+//! - **invariant and deadlock checking** ([`checking`]) — a typed outcome per upheld
+//!   invariant over an explored set, and what the caller's declared completion policy
+//!   makes of the states with no enabled action;
+//! - the **shortest witness** ([`witness`]) — the labelled path to a chosen state,
+//!   read off the exploration's own discovery chain;
 //! - the **finite closure certificate** ([`certificate`]) — a closed reachable set
 //!   written as `CONTCERT` wire bytes, the only form in which anything this crate
 //!   computes reaches the trusted checking base.
 //!
-//! The other two — invariant/deadlock checking and the shortest witness — are separate
-//! bones, and the landed modules are written so each attaches without changing them;
-//! see the seam tables in [`model`] and [`bfs`].
+//! Each module was written to attach to the ones before it without changing them, and
+//! did: the seam tables in [`model`] and [`bfs`] are the contracts that made that
+//! possible, and they are kept because they record which primitive each answer comes
+//! from.
+//!
+//! The division of labour between the last three is deliberate and is the crate's
+//! central design decision. [`bfs`] surfaces an empty successor row and never calls it
+//! a deadlock; [`witness`] produces a path to a chosen state and never says whether
+//! reaching it is a defect; [`checking`] holds all of the policy and computes none of
+//! the search. So one model can be checked under several policies without being
+//! re-declared, and a witness to a violation, a witness to a deadlock, and a witness
+//! to an ordinary state are one object produced by one code path.
 //!
 //! [`bfs`] searches; [`model`] does not, and the split is load-bearing. Exploration
 //! reads the model layer through [`model::Model::initial_states`] and
@@ -88,6 +102,7 @@
 
 pub mod bfs;
 pub mod certificate;
+pub mod checking;
 pub mod diehard;
 pub mod domain;
 pub mod expr;
@@ -100,6 +115,10 @@ pub use bfs::{
 };
 pub use certificate::{
     ClaimEnvelope, ClosedSet, EmissionError, EnvelopeError, Field, emit_finite_closure,
+};
+pub use checking::{
+    CheckError, CheckOutcome, CheckReport, Deadlock, DeadlockOutcome, DeadlockPolicy, Evidence,
+    InvariantResult, Obligations, Scope, Unresolved, Verdict, check,
 };
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};

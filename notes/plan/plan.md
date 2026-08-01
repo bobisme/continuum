@@ -2089,6 +2089,25 @@ Deliver:
 - Context Pack v0;
 - semantic diff v0;
 - executable finite reference engine and certificates from Revision 2;
+  (delivered: bn-2d0e, bn-3p8u, bn-2pmc, bn-3e4l, bn-3e0m —
+  `crates/continuum-engine-reference` is the docs/01 §7.1 reference path,
+  executable end to end: a finite transition system declared as data, its
+  reachable set by deterministic breadth-first search under declared bounds, a
+  typed outcome per upheld invariant and per the declared completion policy, a
+  shortest labelled counterexample, and a docs/03 §6.1 closed-finite-state-space
+  certificate written as wire bytes. Die Hard's four frozen Revision 2 spike
+  facts are all re-derived through it and asserted — 16 reachable states, 96
+  labelled transitions, the depth-6 shortest violation equal to the path the Lean
+  port proves, and an engine-emitted certificate that an independent checker
+  verifies from bytes alone, sharing no codec with the producer. The certificate
+  the spike report calls "closure/type" is one artifact, not two: the
+  finite-closure family under the state-domain property class discharges the
+  state-typing obligation and the closure obligations in the same verdict. The
+  remaining docs/03 §6 families are not finite-engine output — inductive
+  invariant, refinement, liveness and probabilistic certificates belong to the
+  solver and temporal lanes — and Dining Philosophers is a Wave 1 corpus port
+  needing the procedural fragment, so it belongs to this phase's exit sentence
+  rather than to this bullet)
 - the four `continuum-kernel-*` crates under the docs/03 covenant
   (<15,000 non-test lines, no async, no unsafe, serialization boundary
   between engines and kernel) — phase-normative here, not only a PR 9
