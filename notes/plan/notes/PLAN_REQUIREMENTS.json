@@ -1448,8 +1448,8 @@
         "line": 185,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "drain/finalize behavior"
+      "status": "satisfied",
+      "summary": "drain/finalize behavior (delivered: bn-2gk \u2014 crates/continuum-task/src/region/: a region tree owning workers and child regions, with the one-way lifecycle Open \u2192 Draining(Closed | Cancelled) \u2192 Finalized and RFC 0026's request \u2192 drain \u2192 finalize as its three operations. cancel is the request: it reaches every non-finalized region in the subtree, upgrades a descendant that was merely closed, and opens RFC 0001's own named cancellation-finalization obligation, which stays visible in the ledger until the finalize discharges it. drain is total under cancellation \u2014 discard the staged publication, compute the typed outcome, transition exactly once, discharge the termination obligation, per worker in identity order, which is docs/35's six-step cancellation list in that order \u2014 and blocking under a normal close, where a non-terminal worker is a typed DrainBlocked naming it, because \"wait for owned work\" in a calculus with no waiting is a refusal that tells the schedule what it still has to step. finalize walks the subtree children-first and requires every owned worker to be terminal, not merely quiescent: a parked worker is not running, but a finalized region that still owns a resumable one is a continuation pointing into a scope that no longer exists, and the stronger gate is what makes the post-condition one sentence with no carve-out)"
     },
     {
       "category": "pr-deliverable",
@@ -1460,8 +1460,8 @@
         "line": 185,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "no orphan workers."
+      "status": "satisfied",
+      "summary": "no orphan workers (delivered: bn-2gk \u2014 the property is enforced by construction and instrumented three ways. The only constructor of a worker refuses any region that is not Open, so the set a teardown must account for stops growing at the request; the only writer of a worker's state is one private transition function, which discharges its worker-termination obligation on and only on the transition into a terminal state; finalize refuses while any owned worker is non-terminal. Finalization::istotal is the conjunction of three independently computed facts \u2014 the orphan set read off worker states, the unresolved-publication set read off evidence ledgers, and the obligation ledger's balance read off both an outstanding set and opened/discharged counters \u2014 so a bug that fooled one accounting still has two to get past. crates/continuum-task/tests/regionnoorphan.rs is the instrumented half: 210 interleavings of three worker programs across two regions, each swept with a cancellation request at all eight positions and again with a cancellation that completes at all eight, 3,570 teardowns in total, every one asserting the post-condition against the tree itself rather than only against the report it returned. The gate is shown to be load-bearing rather than vacuous by finalizerefuseswhenthedrainisskipped, and the sweep is shown to exercise more than one behaviour by collecting the distinct canonical renderings and requiring more than one)."
     },
     {
       "category": "pr-exit",
@@ -1480,7 +1480,7 @@
       "coverage": "any",
       "id": "PR-7",
       "source": {
-        "line": 198,
+        "line": 204,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1492,7 +1492,7 @@
       "id": "PR-7-IMPL-01",
       "parent": "PR-7",
       "source": {
-        "line": 198,
+        "line": 204,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1504,7 +1504,7 @@
       "id": "PR-7-IMPL-02",
       "parent": "PR-7",
       "source": {
-        "line": 198,
+        "line": 204,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1516,7 +1516,7 @@
       "id": "PR-7-IMPL-03",
       "parent": "PR-7",
       "source": {
-        "line": 198,
+        "line": 204,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1528,7 +1528,7 @@
       "id": "PR-7-IMPL-04",
       "parent": "PR-7",
       "source": {
-        "line": 198,
+        "line": 204,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1540,7 +1540,7 @@
       "id": "PR-7-EXIT",
       "parent": "PR-7",
       "source": {
-        "line": 198,
+        "line": 204,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1551,7 +1551,7 @@
       "coverage": "any",
       "id": "PR-8",
       "source": {
-        "line": 209,
+        "line": 215,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1563,7 +1563,7 @@
       "id": "PR-8-IMPL-01",
       "parent": "PR-8",
       "source": {
-        "line": 209,
+        "line": 215,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1575,7 +1575,7 @@
       "id": "PR-8-IMPL-02",
       "parent": "PR-8",
       "source": {
-        "line": 209,
+        "line": 215,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1587,7 +1587,7 @@
       "id": "PR-8-IMPL-03",
       "parent": "PR-8",
       "source": {
-        "line": 209,
+        "line": 215,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1599,7 +1599,7 @@
       "id": "PR-8-IMPL-04",
       "parent": "PR-8",
       "source": {
-        "line": 209,
+        "line": 215,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1611,7 +1611,7 @@
       "id": "PR-8-IMPL-05",
       "parent": "PR-8",
       "source": {
-        "line": 209,
+        "line": 215,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1623,7 +1623,7 @@
       "id": "PR-8-EXIT",
       "parent": "PR-8",
       "source": {
-        "line": 209,
+        "line": 215,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1634,7 +1634,7 @@
       "coverage": "any",
       "id": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1646,7 +1646,7 @@
       "id": "PR-9-IMPL-01",
       "parent": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1658,7 +1658,7 @@
       "id": "PR-9-IMPL-02",
       "parent": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1670,7 +1670,7 @@
       "id": "PR-9-IMPL-03",
       "parent": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1682,7 +1682,7 @@
       "id": "PR-9-IMPL-04",
       "parent": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1694,7 +1694,7 @@
       "id": "PR-9-IMPL-05",
       "parent": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1706,7 +1706,7 @@
       "id": "PR-9-IMPL-06",
       "parent": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1718,7 +1718,7 @@
       "id": "PR-9-EXIT",
       "parent": "PR-9",
       "source": {
-        "line": 221,
+        "line": 227,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
@@ -1729,7 +1729,7 @@
       "coverage": "any",
       "id": "PR-10",
       "source": {
-        "line": 234,
+        "line": 240,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1741,7 +1741,7 @@
       "id": "PR-10-IMPL-01",
       "parent": "PR-10",
       "source": {
-        "line": 234,
+        "line": 240,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1753,7 +1753,7 @@
       "id": "PR-10-IMPL-02",
       "parent": "PR-10",
       "source": {
-        "line": 234,
+        "line": 240,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1765,7 +1765,7 @@
       "id": "PR-10-IMPL-03",
       "parent": "PR-10",
       "source": {
-        "line": 234,
+        "line": 240,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1777,7 +1777,7 @@
       "id": "PR-10-IMPL-04",
       "parent": "PR-10",
       "source": {
-        "line": 234,
+        "line": 240,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1789,7 +1789,7 @@
       "id": "PR-10-IMPL-05",
       "parent": "PR-10",
       "source": {
-        "line": 234,
+        "line": 240,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1801,7 +1801,7 @@
       "id": "PR-10-EXIT",
       "parent": "PR-10",
       "source": {
-        "line": 234,
+        "line": 240,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1812,7 +1812,7 @@
       "coverage": "any",
       "id": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1824,7 +1824,7 @@
       "id": "PR-11-IMPL-01",
       "parent": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1836,7 +1836,7 @@
       "id": "PR-11-IMPL-02",
       "parent": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1848,7 +1848,7 @@
       "id": "PR-11-IMPL-03",
       "parent": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1860,7 +1860,7 @@
       "id": "PR-11-IMPL-04",
       "parent": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1872,7 +1872,7 @@
       "id": "PR-11-IMPL-05",
       "parent": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1884,7 +1884,7 @@
       "id": "PR-11-IMPL-06",
       "parent": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1896,7 +1896,7 @@
       "id": "PR-11-EXIT",
       "parent": "PR-11",
       "source": {
-        "line": 248,
+        "line": 254,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1907,7 +1907,7 @@
       "coverage": "any",
       "id": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1919,7 +1919,7 @@
       "id": "PR-12-IMPL-01",
       "parent": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1931,7 +1931,7 @@
       "id": "PR-12-IMPL-02",
       "parent": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1943,7 +1943,7 @@
       "id": "PR-12-IMPL-03",
       "parent": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1955,7 +1955,7 @@
       "id": "PR-12-IMPL-04",
       "parent": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1967,7 +1967,7 @@
       "id": "PR-12-IMPL-05",
       "parent": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1979,7 +1979,7 @@
       "id": "PR-12-IMPL-06",
       "parent": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -1991,7 +1991,7 @@
       "id": "PR-12-EXIT",
       "parent": "PR-12",
       "source": {
-        "line": 263,
+        "line": 269,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2002,7 +2002,7 @@
       "coverage": "any",
       "id": "PR-13",
       "source": {
-        "line": 278,
+        "line": 284,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2014,7 +2014,7 @@
       "id": "PR-13-EXIT",
       "parent": "PR-13",
       "source": {
-        "line": 278,
+        "line": 284,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2025,7 +2025,7 @@
       "coverage": "any",
       "id": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2037,7 +2037,7 @@
       "id": "PR-14-IMPL-01",
       "parent": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2049,7 +2049,7 @@
       "id": "PR-14-IMPL-02",
       "parent": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2061,7 +2061,7 @@
       "id": "PR-14-IMPL-03",
       "parent": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2073,7 +2073,7 @@
       "id": "PR-14-IMPL-04",
       "parent": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2085,7 +2085,7 @@
       "id": "PR-14-IMPL-05",
       "parent": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2097,7 +2097,7 @@
       "id": "PR-14-IMPL-06",
       "parent": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2109,7 +2109,7 @@
       "id": "PR-14-EXIT",
       "parent": "PR-14",
       "source": {
-        "line": 297,
+        "line": 303,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2120,7 +2120,7 @@
       "coverage": "any",
       "id": "PR-15",
       "source": {
-        "line": 310,
+        "line": 316,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2132,7 +2132,7 @@
       "id": "PR-15-IMPL-01",
       "parent": "PR-15",
       "source": {
-        "line": 310,
+        "line": 316,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2144,7 +2144,7 @@
       "id": "PR-15-IMPL-02",
       "parent": "PR-15",
       "source": {
-        "line": 310,
+        "line": 316,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2156,7 +2156,7 @@
       "id": "PR-15-IMPL-03",
       "parent": "PR-15",
       "source": {
-        "line": 310,
+        "line": 316,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2168,7 +2168,7 @@
       "id": "PR-15-IMPL-04",
       "parent": "PR-15",
       "source": {
-        "line": 310,
+        "line": 316,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2180,7 +2180,7 @@
       "id": "PR-15-EXIT",
       "parent": "PR-15",
       "source": {
-        "line": 310,
+        "line": 316,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2191,7 +2191,7 @@
       "coverage": "any",
       "id": "PR-15A",
       "source": {
-        "line": 321,
+        "line": 327,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2203,7 +2203,7 @@
       "id": "PR-15A-IMPL-01",
       "parent": "PR-15A",
       "source": {
-        "line": 321,
+        "line": 327,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2215,7 +2215,7 @@
       "id": "PR-15A-IMPL-02",
       "parent": "PR-15A",
       "source": {
-        "line": 321,
+        "line": 327,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2227,7 +2227,7 @@
       "id": "PR-15A-IMPL-03",
       "parent": "PR-15A",
       "source": {
-        "line": 321,
+        "line": 327,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2239,7 +2239,7 @@
       "id": "PR-15A-EXIT",
       "parent": "PR-15A",
       "source": {
-        "line": 321,
+        "line": 327,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2250,7 +2250,7 @@
       "coverage": "any",
       "id": "PR-15B",
       "source": {
-        "line": 331,
+        "line": 337,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2262,7 +2262,7 @@
       "id": "PR-15B-IMPL-01",
       "parent": "PR-15B",
       "source": {
-        "line": 331,
+        "line": 337,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2274,7 +2274,7 @@
       "id": "PR-15B-IMPL-02",
       "parent": "PR-15B",
       "source": {
-        "line": 331,
+        "line": 337,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2286,7 +2286,7 @@
       "id": "PR-15B-IMPL-03",
       "parent": "PR-15B",
       "source": {
-        "line": 331,
+        "line": 337,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2298,7 +2298,7 @@
       "id": "PR-15B-EXIT",
       "parent": "PR-15B",
       "source": {
-        "line": 331,
+        "line": 337,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2309,7 +2309,7 @@
       "coverage": "any",
       "id": "PR-16",
       "source": {
-        "line": 341,
+        "line": 347,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2321,7 +2321,7 @@
       "id": "PR-16-IMPL-01",
       "parent": "PR-16",
       "source": {
-        "line": 341,
+        "line": 347,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2333,7 +2333,7 @@
       "id": "PR-16-IMPL-02",
       "parent": "PR-16",
       "source": {
-        "line": 341,
+        "line": 347,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2345,7 +2345,7 @@
       "id": "PR-16-IMPL-03",
       "parent": "PR-16",
       "source": {
-        "line": 341,
+        "line": 347,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2357,7 +2357,7 @@
       "id": "PR-16-IMPL-04",
       "parent": "PR-16",
       "source": {
-        "line": 341,
+        "line": 347,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2369,7 +2369,7 @@
       "id": "PR-16-IMPL-05",
       "parent": "PR-16",
       "source": {
-        "line": 341,
+        "line": 347,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2381,7 +2381,7 @@
       "id": "PR-16-EXIT",
       "parent": "PR-16",
       "source": {
-        "line": 341,
+        "line": 347,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2392,7 +2392,7 @@
       "coverage": "any",
       "id": "PR-17",
       "source": {
-        "line": 353,
+        "line": 359,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2404,7 +2404,7 @@
       "id": "PR-17-IMPL-01",
       "parent": "PR-17",
       "source": {
-        "line": 353,
+        "line": 359,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2416,7 +2416,7 @@
       "id": "PR-17-IMPL-02",
       "parent": "PR-17",
       "source": {
-        "line": 353,
+        "line": 359,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2428,7 +2428,7 @@
       "id": "PR-17-IMPL-03",
       "parent": "PR-17",
       "source": {
-        "line": 353,
+        "line": 359,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2440,7 +2440,7 @@
       "id": "PR-17-IMPL-04",
       "parent": "PR-17",
       "source": {
-        "line": 353,
+        "line": 359,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2452,7 +2452,7 @@
       "id": "PR-17-IMPL-05",
       "parent": "PR-17",
       "source": {
-        "line": 353,
+        "line": 359,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2464,7 +2464,7 @@
       "id": "PR-17-EXIT",
       "parent": "PR-17",
       "source": {
-        "line": 353,
+        "line": 359,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2475,7 +2475,7 @@
       "coverage": "any",
       "id": "PR-18",
       "source": {
-        "line": 365,
+        "line": 371,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2487,7 +2487,7 @@
       "id": "PR-18-EXIT",
       "parent": "PR-18",
       "source": {
-        "line": 365,
+        "line": 371,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2498,7 +2498,7 @@
       "coverage": "any",
       "id": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2510,7 +2510,7 @@
       "id": "PR-19-IMPL-01",
       "parent": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2522,7 +2522,7 @@
       "id": "PR-19-IMPL-02",
       "parent": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2534,7 +2534,7 @@
       "id": "PR-19-IMPL-03",
       "parent": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2546,7 +2546,7 @@
       "id": "PR-19-IMPL-04",
       "parent": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2558,7 +2558,7 @@
       "id": "PR-19-IMPL-05",
       "parent": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2570,7 +2570,7 @@
       "id": "PR-19-IMPL-06",
       "parent": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2582,7 +2582,7 @@
       "id": "PR-19-EXIT",
       "parent": "PR-19",
       "source": {
-        "line": 371,
+        "line": 377,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2593,7 +2593,7 @@
       "coverage": "any",
       "id": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2605,7 +2605,7 @@
       "id": "PR-20-IMPL-01",
       "parent": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2617,7 +2617,7 @@
       "id": "PR-20-IMPL-02",
       "parent": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2629,7 +2629,7 @@
       "id": "PR-20-IMPL-03",
       "parent": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2641,7 +2641,7 @@
       "id": "PR-20-IMPL-04",
       "parent": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2653,7 +2653,7 @@
       "id": "PR-20-IMPL-05",
       "parent": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2665,7 +2665,7 @@
       "id": "PR-20-IMPL-06",
       "parent": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2677,7 +2677,7 @@
       "id": "PR-20-EXIT",
       "parent": "PR-20",
       "source": {
-        "line": 384,
+        "line": 390,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2688,7 +2688,7 @@
       "coverage": "any",
       "id": "PR-21",
       "source": {
-        "line": 397,
+        "line": 403,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2700,7 +2700,7 @@
       "id": "PR-21-EXIT",
       "parent": "PR-21",
       "source": {
-        "line": 397,
+        "line": 403,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2711,7 +2711,7 @@
       "coverage": "any",
       "id": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2723,7 +2723,7 @@
       "id": "PR-22-IMPL-01",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2735,7 +2735,7 @@
       "id": "PR-22-IMPL-02",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2747,7 +2747,7 @@
       "id": "PR-22-IMPL-03",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2759,7 +2759,7 @@
       "id": "PR-22-IMPL-04",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2771,7 +2771,7 @@
       "id": "PR-22-IMPL-05",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2783,7 +2783,7 @@
       "id": "PR-22-IMPL-06",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2795,7 +2795,7 @@
       "id": "PR-22-IMPL-07",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2807,7 +2807,7 @@
       "id": "PR-22-IMPL-08",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2819,7 +2819,7 @@
       "id": "PR-22-IMPL-09",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2831,7 +2831,7 @@
       "id": "PR-22-EXIT",
       "parent": "PR-22",
       "source": {
-        "line": 403,
+        "line": 409,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2842,7 +2842,7 @@
       "coverage": "any",
       "id": "PR-22A",
       "source": {
-        "line": 419,
+        "line": 425,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2854,7 +2854,7 @@
       "id": "PR-22A-IMPL-01",
       "parent": "PR-22A",
       "source": {
-        "line": 419,
+        "line": 425,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2866,7 +2866,7 @@
       "id": "PR-22A-IMPL-02",
       "parent": "PR-22A",
       "source": {
-        "line": 419,
+        "line": 425,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2878,7 +2878,7 @@
       "id": "PR-22A-IMPL-03",
       "parent": "PR-22A",
       "source": {
-        "line": 419,
+        "line": 425,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2890,7 +2890,7 @@
       "id": "PR-22A-EXIT",
       "parent": "PR-22A",
       "source": {
-        "line": 419,
+        "line": 425,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2901,7 +2901,7 @@
       "coverage": "any",
       "id": "PR-23",
       "source": {
-        "line": 429,
+        "line": 435,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2913,7 +2913,7 @@
       "id": "PR-23-EXIT",
       "parent": "PR-23",
       "source": {
-        "line": 429,
+        "line": 435,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2924,7 +2924,7 @@
       "coverage": "any",
       "id": "PR-24",
       "source": {
-        "line": 435,
+        "line": 441,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2936,7 +2936,7 @@
       "id": "PR-24-EXIT",
       "parent": "PR-24",
       "source": {
-        "line": 435,
+        "line": 441,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2947,7 +2947,7 @@
       "coverage": "any",
       "id": "PR-25",
       "source": {
-        "line": 443,
+        "line": 449,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2959,7 +2959,7 @@
       "id": "PR-25-EXIT",
       "parent": "PR-25",
       "source": {
-        "line": 443,
+        "line": 449,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2970,7 +2970,7 @@
       "coverage": "any",
       "id": "PR-25A",
       "source": {
-        "line": 449,
+        "line": 455,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2982,7 +2982,7 @@
       "id": "PR-25A-IMPL-01",
       "parent": "PR-25A",
       "source": {
-        "line": 449,
+        "line": 455,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -2994,7 +2994,7 @@
       "id": "PR-25A-IMPL-02",
       "parent": "PR-25A",
       "source": {
-        "line": 449,
+        "line": 455,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3006,7 +3006,7 @@
       "id": "PR-25A-IMPL-03",
       "parent": "PR-25A",
       "source": {
-        "line": 449,
+        "line": 455,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3018,7 +3018,7 @@
       "id": "PR-25A-IMPL-04",
       "parent": "PR-25A",
       "source": {
-        "line": 449,
+        "line": 455,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3030,7 +3030,7 @@
       "id": "PR-25A-IMPL-05",
       "parent": "PR-25A",
       "source": {
-        "line": 449,
+        "line": 455,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3042,7 +3042,7 @@
       "id": "PR-25A-EXIT",
       "parent": "PR-25A",
       "source": {
-        "line": 449,
+        "line": 455,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3053,7 +3053,7 @@
       "coverage": "any",
       "id": "PR-26",
       "source": {
-        "line": 461,
+        "line": 467,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3065,7 +3065,7 @@
       "id": "PR-26-EXIT",
       "parent": "PR-26",
       "source": {
-        "line": 461,
+        "line": 467,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3076,7 +3076,7 @@
       "coverage": "any",
       "id": "PR-26A",
       "source": {
-        "line": 467,
+        "line": 473,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3088,7 +3088,7 @@
       "id": "PR-26A-IMPL-01",
       "parent": "PR-26A",
       "source": {
-        "line": 467,
+        "line": 473,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3100,7 +3100,7 @@
       "id": "PR-26A-IMPL-02",
       "parent": "PR-26A",
       "source": {
-        "line": 467,
+        "line": 473,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3112,7 +3112,7 @@
       "id": "PR-26A-IMPL-03",
       "parent": "PR-26A",
       "source": {
-        "line": 467,
+        "line": 473,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3124,7 +3124,7 @@
       "id": "PR-26A-EXIT",
       "parent": "PR-26A",
       "source": {
-        "line": 467,
+        "line": 473,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3135,7 +3135,7 @@
       "coverage": "any",
       "id": "PR-27",
       "source": {
-        "line": 477,
+        "line": 483,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3147,7 +3147,7 @@
       "id": "PR-27-EXIT",
       "parent": "PR-27",
       "source": {
-        "line": 477,
+        "line": 483,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3158,7 +3158,7 @@
       "coverage": "any",
       "id": "PR-27A",
       "source": {
-        "line": 483,
+        "line": 489,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3170,7 +3170,7 @@
       "id": "PR-27A-IMPL-01",
       "parent": "PR-27A",
       "source": {
-        "line": 483,
+        "line": 489,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3182,7 +3182,7 @@
       "id": "PR-27A-IMPL-02",
       "parent": "PR-27A",
       "source": {
-        "line": 483,
+        "line": 489,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3194,7 +3194,7 @@
       "id": "PR-27A-IMPL-03",
       "parent": "PR-27A",
       "source": {
-        "line": 483,
+        "line": 489,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3206,7 +3206,7 @@
       "id": "PR-27A-EXIT",
       "parent": "PR-27A",
       "source": {
-        "line": 483,
+        "line": 489,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3217,7 +3217,7 @@
       "coverage": "any",
       "id": "PR-27B",
       "source": {
-        "line": 493,
+        "line": 499,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3229,7 +3229,7 @@
       "id": "PR-27B-IMPL-01",
       "parent": "PR-27B",
       "source": {
-        "line": 493,
+        "line": 499,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3241,7 +3241,7 @@
       "id": "PR-27B-IMPL-02",
       "parent": "PR-27B",
       "source": {
-        "line": 493,
+        "line": 499,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3253,7 +3253,7 @@
       "id": "PR-27B-EXIT",
       "parent": "PR-27B",
       "source": {
-        "line": 493,
+        "line": 499,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3264,7 +3264,7 @@
       "coverage": "any",
       "id": "PR-28",
       "source": {
-        "line": 502,
+        "line": 508,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3276,7 +3276,7 @@
       "id": "PR-28-EXIT",
       "parent": "PR-28",
       "source": {
-        "line": 502,
+        "line": 508,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3287,7 +3287,7 @@
       "coverage": "any",
       "id": "PR-29",
       "source": {
-        "line": 508,
+        "line": 514,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3299,7 +3299,7 @@
       "id": "PR-29-EXIT",
       "parent": "PR-29",
       "source": {
-        "line": 508,
+        "line": 514,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3310,7 +3310,7 @@
       "coverage": "any",
       "id": "PR-30",
       "source": {
-        "line": 514,
+        "line": 520,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3322,7 +3322,7 @@
       "id": "PR-30-IMPL-01",
       "parent": "PR-30",
       "source": {
-        "line": 514,
+        "line": 520,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3334,7 +3334,7 @@
       "id": "PR-30-IMPL-02",
       "parent": "PR-30",
       "source": {
-        "line": 514,
+        "line": 520,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3346,7 +3346,7 @@
       "id": "PR-30-IMPL-03",
       "parent": "PR-30",
       "source": {
-        "line": 514,
+        "line": 520,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3358,7 +3358,7 @@
       "id": "PR-30-IMPL-04",
       "parent": "PR-30",
       "source": {
-        "line": 514,
+        "line": 520,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3370,7 +3370,7 @@
       "id": "PR-30-IMPL-05",
       "parent": "PR-30",
       "source": {
-        "line": 514,
+        "line": 520,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",
@@ -3382,7 +3382,7 @@
       "id": "PR-30-EXIT",
       "parent": "PR-30",
       "source": {
-        "line": 514,
+        "line": 520,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "active",

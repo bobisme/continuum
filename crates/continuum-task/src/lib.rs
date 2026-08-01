@@ -49,9 +49,27 @@
 //!   and plan §20 states no such edge. A missing edge is cheap to add later; a wrong
 //!   edge is architectural debt.
 //!
-//! PR-1 / IMPL-01 scaffold: this crate declares its responsibility and its dependency
-//! boundary. The lifecycle types and behavior land in the PR named above; [`result`]
-//! landed with the PR-1 exit. `tools/check_crate_boundaries.py` enforces the forbidden
-//! edges mechanically.
+//! # What has landed
+//!
+//! - [`result`] — the typed machine result of a verification task (the PR-1 exit).
+//! - [`region`] — the region calculus the lifecycle runs in: a tree of regions owning
+//!   workers and child regions, `Open → Draining → Finalized`, subtree-wide cancellation,
+//!   the RFC 0026 request → drain → finalize teardown, and an obligation ledger that
+//!   makes "no orphan workers" a checked post-condition rather than a convention
+//!   (PR-6 / IMPL-01, IMPL-05, IMPL-06).
+//!
+//! [`region`] is deliberately *not* an asupersync integration. plan §21 puts
+//! "task/continuation lifecycle" in Phase A and the "asupersync semantic adapter" in
+//! Phase B (`continuum-asupersync`, PR 14), and ADR-0001 requires the separation to
+//! hold: "Continuum remains capable of model-only execution without asupersync. The
+//! normative abstract semantics are owned by Continuum, so the runtime cannot silently
+//! redefine model behavior." The region module is those normative semantics, written so
+//! the substrate slots behind the same seam later. Its own header says the rest.
+//!
+//! Still owed by this crate under PR 6: committed partial evidence as artifacts
+//! (IMPL-02), budget accounting (IMPL-03), and suspension/continuation as `cont_*`
+//! handles (IMPL-04). `tools/check_crate_boundaries.py` enforces the forbidden edges
+//! mechanically.
 
+pub mod region;
 pub mod result;
