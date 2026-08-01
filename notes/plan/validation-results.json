@@ -32,7 +32,7 @@
       "plan_bullets": 68
     },
     "handle_prefix_registry": {
-      "anchored_patterns": 47,
+      "anchored_patterns": 50,
       "registry_prefixes": 19
     },
     "json": {
@@ -57,12 +57,12 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 877,
+      "active_bones": 878,
       "active_edges": 2032,
       "active_requirements": 793,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 771,
+      "leaf_bones": 772,
       "requirements": 846
     },
     "program_status": {
