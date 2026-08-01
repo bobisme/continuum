@@ -2092,7 +2092,10 @@ Deliver:
 - the four `continuum-kernel-*` crates under the docs/03 covenant
   (<15,000 non-test lines, no async, no unsafe, serialization boundary
   between engines and kernel) — phase-normative here, not only a PR 9
-  annotation;
+  annotation; (delivered: bn-2i8, bn-n03, bn-15n — all four crates check
+  certificates from wire form only, each depending on no workspace and no
+  external crate; 8,460 non-test lines measured across the four at landing;
+  mechanical enforcement of the budget is bn-2he)
 - agent protocol spike parity;
 - Lean environment pinned and seed modules kernel-checked; T0/T1 theorems
   (transition-system safety, stuttering simulation, finite-closure
