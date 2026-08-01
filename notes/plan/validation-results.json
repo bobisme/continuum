@@ -46,7 +46,7 @@
       "files": 221
     },
     "markdown_links": {
-      "links": 376
+      "links": 405
     },
     "numbering": {
       "adr": 53,
@@ -57,9 +57,9 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 878,
-      "active_edges": 2032,
-      "active_requirements": 793,
+      "active_bones": 877,
+      "active_edges": 2030,
+      "active_requirements": 791,
       "coverage": "complete",
       "dependency_layers": 14,
       "leaf_bones": 772,

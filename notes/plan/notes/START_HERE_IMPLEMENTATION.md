@@ -85,8 +85,8 @@ PR numbers 1–30 are stable; inserted work carries PR 0 or a lettered suffix (4
 
 Implement (documentation, not code):
 
-- expand RFCs 0026, 0027, 0028, 0030, 0031, 0032, 0037 from summaries to full specifications: field types, enums, classification lattices, IDL, versioning, RFC-2119 language;
-- reconcile each RFC one-to-one with its plan section; where they disagree, correct the RFC and make it normative;
+- expand RFCs 0026, 0027, 0028, 0030, 0031, 0032, 0037 from summaries to full specifications: field types, enums, classification lattices, IDL, versioning, RFC-2119 language (delivered: bn-3ffu, bn-26fh, bn-4xxw, bn-3hkk, bn-39my, bn-3i38, bn-2s6q);
+- reconcile each RFC one-to-one with its plan section; where they disagree, correct the RFC and make it normative (delivered: bn-3ffu, bn-26fh, bn-4xxw, bn-3hkk, bn-39my, bn-3i38, bn-2s6q — each expansion records its corrections under "Corrections recorded by this RFC");
 - product license decision (permissive, compatible with asupersync and solver adapters, §21.1) (delivered: bn-2br);
 - corpus per-family redistribution audit before any public benchmark release (§21.1) (delivered: bn-2br);
 - ADR-0029 rule: foreign oracle tooling (TLC, Apalache, solvers) never ships in release binaries (delivered: bn-2br).

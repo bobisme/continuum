@@ -759,8 +759,8 @@
         "line": 84,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "expand RFCs 0026, 0027, 0028, 0030, 0031, 0032, 0037 from summaries to full specifications: field types, enums, classification lattices, IDL, versioning, RFC-2119 language"
+      "status": "satisfied",
+      "summary": "expand RFCs 0026, 0027, 0028, 0030, 0031, 0032, 0037 from summaries to full specifications: field types, enums, classification lattices, IDL, versioning, RFC-2119 language (delivered: bn-3ffu, bn-26fh, bn-4xxw, bn-3hkk, bn-39my, bn-3i38, bn-2s6q)"
     },
     {
       "category": "pr-deliverable",
@@ -771,8 +771,8 @@
         "line": 84,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "reconcile each RFC one-to-one with its plan section; where they disagree, correct the RFC and make it normative"
+      "status": "satisfied",
+      "summary": "reconcile each RFC one-to-one with its plan section; where they disagree, correct the RFC and make it normative (delivered: bn-3ffu, bn-26fh, bn-4xxw, bn-3hkk, bn-39my, bn-3i38, bn-2s6q \u2014 each expansion records its corrections under \"Corrections recorded by this RFC\")"
     },
     {
       "category": "pr-deliverable",
