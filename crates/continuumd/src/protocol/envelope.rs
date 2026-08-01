@@ -372,6 +372,13 @@ protocol_struct! {
         next_page_token: PageToken optional;
         /// The operation's response struct. Null on `status = error`.
         payload: Opaque nullable;
+        /// The audit record this call produced. REQUIRED on every result of an
+        /// `@audit_recorded` operation and on every admission denial, which is
+        /// audited whether or not it succeeded (plan §18.5). Absent where the
+        /// call was not recorded; a caller MUST NOT read absence as "the
+        /// record was withheld". See `rule audit.correlation`, which forbids
+        /// this field from becoming an existence oracle.
+        audit: AuditCorrelationId optional;
     }
 }
 

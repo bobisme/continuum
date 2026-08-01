@@ -124,7 +124,12 @@
 //   @streaming       long-lived; delivers `events` frames on the same
 //                    connection.
 //   @since("X.Y")    first protocol version defining the item. Omitted
-//                    means the version in `protocol.version`.
+//                    means the first minor of the current major (`3.0`),
+//                    never `protocol.version`: once a minor bump is taken
+//                    the two differ, and reading an unannotated item as
+//                    "defined at the current minor" would silently
+//                    re-date the whole 3.0 surface. Every item a later
+//                    minor adds carries the annotation.
 //   @deprecated("X.Y")  deprecated as of that version; still served.
 //   @open            enum MAY gain members within a major version (see
 //                    `rule versioning.enums`).
@@ -152,6 +157,27 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.2 — the RFC 0027 F1–F8 disposition (bn-3ayom), and the single
+  ///         protocol-minor bump 3.0 → 3.1 that covers it together with
+  ///         IDL 1.1's compatible fixes. Wire additions, each compatible
+  ///         under `rule versioning.compatible_change`:
+  ///         `CapabilityDescriptor` gains `profile: CapabilityProfile
+  ///         optional`, and `CapabilityProfile` and `DataGrant` are
+  ///         declared, giving admission test T3, docs/49's per-operation
+  ///         Reviewer restriction, `observe.ingest`'s production-trace
+  ///         grant, and RFC 0026's cross-principal sharing policy a wire
+  ///         representation (RFC 0027 F1, F5); `ServerReject` is
+  ///         declared with `rule handshake.rejection`, so a refused
+  ///         connection is a typed frame rather than a transport failure
+  ///         (RFC 0027 F4); `ResultEnvelope` gains `audit:
+  ///         AuditCorrelationId optional` with `rule audit.correlation`,
+  ///         so a caller can name the audit record its own privileged
+  ///         call produced (RFC 0027 F7); `rule
+  ///         conformance.adapter_mapping` is declared (RFC 0027 F6).
+  ///         RFC 0027's F2, F3, and F8 are deferred with their reasons
+  ///         recorded in their flag entries. No operation is added,
+  ///         removed, or moved: the 72-row registry, its five per-level
+  ///         counts, and its seven annotation counts are unchanged.
   ///   1.1 — the minimal additive fixes RFC 0026 flagged as F4–F7:
   ///         `StaleSnapshot` added to the `task.resume` and
   ///         `repair.resume` `errors` clauses (correction 22);
@@ -163,13 +189,22 @@ protocol continuum.native {
   ///         `ExplanationLevel` attribution corrected to RFC 0039.
   ///         The wire additions above are compatible changes under
   ///         `rule versioning.compatible_change`, which raises the
-  ///         protocol minor; `version` is left at "3.0" here and the
-  ///         bump is flagged for the protocol sweep rather than taken
-  ///         silently.
+  ///         protocol minor; `version` was left at "3.0" at 1.1 and the
+  ///         bump was deferred to the sweep rather than taken silently.
+  ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.1";
+  idl_version = "1.2";
   /// The protocol version this document defines.
-  version = "3.0";
+  ///
+  /// 3.1 is the single minor bump for IDL 1.1's compatible fixes and
+  /// IDL 1.2's F1–F8 sweep together, ratified by the user on
+  /// 2026-07-31 and taken by bn-3ayom on 2026-08-01. It is taken once:
+  /// neither revision bumps on its own. A 3.0 client is served
+  /// unchanged — every 1.1 and 1.2 addition is an `optional` field, a
+  /// new declaration, or a new `rule`, and `rule
+  /// versioning.compatible_change` forbids a daemon from emitting a
+  /// field the negotiated version does not define.
+  version = "3.1";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -380,6 +415,17 @@ alias PageToken = String;
 
 /// Stable identifier of an operation in the plan §10.2 registry.
 alias OperationName = String @pattern("^[a-z]+\\.[a-z_]+$");
+
+/// Correlation identity of an audit-log record (plan §18.5).
+///
+/// Deliberately not a handle and not a plan §4.4 artifact class: the
+/// audit log is not the content-addressed store, this identity is not
+/// dereferenceable through any operation in this file, and it carries no
+/// class prefix that would suggest otherwise. It names a record so a
+/// caller can cite the one its own call produced; what it names is read
+/// through the audit surface, not through the protocol.
+/// `rule audit.correlation` fixes how it is derived.
+alias AuditCorrelationId = String @pattern("^[A-Za-z0-9_-]+$") @since("3.1");
 
 
 // ---------------------------------------------------------------------
@@ -1026,6 +1072,13 @@ struct ResultEnvelope {
   next_page_token: PageToken optional;
   /// The operation's response struct. Null on `status = error`.
   payload: Opaque nullable;
+  /// The audit record this call produced. REQUIRED on every result of an
+  /// `@audit_recorded` operation and on every admission denial, which is
+  /// audited whether or not it succeeded (plan §18.5). Absent where the
+  /// call was not recorded; a caller MUST NOT read absence as "the
+  /// record was withheld". See `rule audit.correlation`, which forbids
+  /// this field from becoming an existence oracle.
+  audit: AuditCorrelationId optional @since("3.1");
 }
 
 /// The typed verdict families. An operation's `verdict` clause names the
@@ -1133,6 +1186,31 @@ rule idempotency.replay {
   """
 }
 
+rule audit.correlation {
+  """
+  `ResultEnvelope.audit` names the audit record the call produced, so a
+  caller can cite it rather than describe it. It MUST be present on every
+  result of an `@audit_recorded` operation, on every `@privileged` call
+  (which `@audit_recorded` covers), and on every result whose error is
+  `CapabilityDenied`, because a denial that leaves no audit record is
+  indistinguishable from an attack that was never tried (plan §18.5).
+
+  The identity MUST be a function of the request identity alone —
+  `request_id` and `actor` — and MUST NOT vary with the outcome, the
+  decision, the presented capability, or whether a named artifact exists.
+  Two denials that differ only in whether the artifact exists therefore
+  carry the same value and remain byte-identical envelopes, which is the
+  existence-oracle rule this field would otherwise break (RFC 0026, plan
+  §4.5). A per-record random identity is prohibited for that reason.
+
+  It MUST NOT carry, encode, or be derived from a `cap_*` token: the
+  identity is emitted to the caller, and a capability is a secret that
+  never appears in a result (RFC 0027 S5). The record it names is read
+  through the audit surface, not through this protocol; nothing here
+  makes the audit log readable to the caller.
+  """
+}
+
 rule authorization.independent_of_handles {
   """
   The `capability` in the request envelope is checked below the adapter,
@@ -1223,6 +1301,34 @@ struct ServerWelcome {
   pending_advances: list<EpochAdvanceNotice> required;
 }
 
+/// Second frame, sent by the daemon when it refuses the connection.
+///
+/// The alternative to `ServerWelcome`, never sent beside it. Without it a
+/// client cannot tell a typed refusal from a transport failure, which is
+/// the gap RFC 0027 raised as F4. The two frames are told apart by their
+/// required fields and neither validates as the other: `ServerWelcome`
+/// requires `protocol_version`, this frame requires `code`.
+@since("3.1")
+struct ServerReject {
+  /// Why the connection was refused. `rule handshake.rejection` fixes
+  /// the admissible set.
+  code: ErrorCode required;
+  /// Stable, non-interpolated explanation of the code. Never a rendering
+  /// of a capability, a token, or anything the client supplied
+  /// (INV-016).
+  detail: String required;
+  /// Whether an identical reconnection can succeed without any change by
+  /// the caller. False for every code this version admits; the field is
+  /// declared because `ErrorCode` is `@open` and a later minor may add a
+  /// connection-level refusal an identical retry can satisfy.
+  retryable: Bool required;
+  /// The majors this daemon serves: N and N−1. Present so a client
+  /// refused for its version learns the window from the refusal itself;
+  /// it never received a `ServerWelcome` and has no other channel for
+  /// it.
+  majors_served: list<U32> required;
+}
+
 /// An announced epoch advance (plan §4.6). Advancing never mutates an
 /// existing artifact: re-derived artifacts receive new identities linked
 /// to their predecessors by `SUPERSEDES` edges. The daemon may hold at
@@ -1256,6 +1362,59 @@ struct CapabilityDescriptor {
   expires_at: Timestamp nullable;
   /// Whether the holder may delegate, and how deeply.
   delegation_depth: U32 required;
+  /// The narrowing surface beyond level and scope. Absent is the
+  /// fail-closed reading and is exactly equivalent to an empty profile:
+  /// no privileged operation granted, no additional data grant held, no
+  /// cross-principal sharing. See `rule capability.profile_narrowing`.
+  profile: CapabilityProfile optional @since("3.1");
+}
+
+/// A grant a capability carries beyond its level and scope, for the
+/// operations that require one in addition to their `authority` clause.
+///
+/// `@open` per `rule versioning.enums`: a client MUST NOT infer semantics
+/// from an unrecognized member, which for a grant is the fail-closed
+/// reading — a grant it cannot name is a grant it MUST NOT assume it
+/// holds. Adding a member is therefore a compatible change.
+@open
+@since("3.1")
+enum DataGrant {
+  /// The production-trace grant `observe.ingest` requires in addition to
+  /// `authority execute` (plan §18.2, with the capture-time contract of
+  /// plan §18.4; RFC 0027 R-4).
+  production_trace,
+}
+
+/// What a capability grants and withholds beyond its level and scope
+/// (RFC 0027, "The admission predicate").
+///
+/// This is the wire form of admission test T3 and of the per-operation
+/// restrictions a level cannot express: two capabilities with identical
+/// levels and scopes differ here in whether they admit `intent.accept`,
+/// which before 3.1 was deployment folklore rather than a wire fact.
+/// Every field narrows; none widens. A profile can only subtract from
+/// what `level` and the scope lists already permit.
+@since("3.1")
+struct CapabilityProfile {
+  /// The `@privileged` operations this capability may invoke (T3). An
+  /// operation absent from this list is denied however high the level.
+  /// Naming a non-`@privileged` operation here grants nothing.
+  privileged_operations: list<OperationName> required;
+  /// Operations this capability may not invoke whatever its level
+  /// permits — docs/49's Reviewer cell, which a total order cannot
+  /// express (RFC 0027 correction 22). An operation named both here and
+  /// in `privileged_operations` is denied.
+  denied_operations: list<OperationName> required;
+  /// Additional grants this capability carries, for operations that
+  /// require one beyond their authority level.
+  data_grants: list<DataGrant> required;
+  /// Whether this capability's publications may be deduplicated against
+  /// content another principal already holds. RFC 0026 requires the
+  /// sharing policy to be a capability property rather than a
+  /// daemon-global flag, because a global flag cannot be scoped,
+  /// delegated, or revoked. False does not weaken the indistinguishable-
+  /// cost rule: a publication MUST report the same `cost` either way.
+  cross_principal_sharing: Bool required;
 }
 
 /// Server-declared operational limits, negotiated once per connection.
@@ -1278,6 +1437,66 @@ rule handshake.negotiation {
   outside the client's range. The daemon MUST serve majors N and N−1; a
   client on the previous major is rejected only when it falls outside
   this window. One encoding is selected for the life of the connection.
+  """
+}
+
+rule handshake.rejection {
+  """
+  The daemon's second frame is exactly one of `ServerWelcome` or
+  `ServerReject`, never both and never neither. A refusal MUST be the
+  typed frame: RFC 0026 requires the daemon to reject a connection whose
+  version falls outside the served window and one whose capability does
+  not admit it, and a client that receives only a closed socket cannot
+  tell either refusal from a network failure.
+
+  `ServerReject.code` MUST be `ProtocolVersionUnsupported` or
+  `CapabilityDenied`, and `retryable` MUST be false for both. A
+  capability refusal MUST NOT distinguish an unregistered token from an
+  expired, a revoked, or an unauthorized one: every admission failure is
+  one answer (RFC 0027 X1), and the connection frame is not an exception.
+  `detail` MUST NOT vary with which of them occurred.
+
+  The frame is sent before any version is negotiated, so it cannot be
+  gated on the negotiated version. A daemon MUST send it only when the
+  client's offered `VersionRange` reaches a version that defines it —
+  `high` at or above `"3.1"` — and MUST close the connection without a
+  frame otherwise, because a frame the client cannot parse is not a typed
+  refusal. `ServerReject` is terminal: the connection carries no request
+  after it.
+
+  A malformed `ClientHello` and an encoding mismatch are outside this
+  set. The protocol fixes no code for either — `MalformedRequest` is
+  defined against a request envelope, and the handshake precedes any —
+  so both remain transport-level closes until a code is declared here.
+  """
+}
+
+rule capability.profile_narrowing {
+  """
+  `CapabilityDescriptor.profile` can only deny. An absent profile is the
+  fail-closed reading and is equivalent to one whose lists are empty and
+  whose `cross_principal_sharing` is false; a daemon MUST NOT read
+  absence as "unrestricted".
+
+  Admission composes as a conjunction (RFC 0027 T1–T4). A
+  `privileged_operations` entry admits a `@privileged` operation only
+  where the level and scope tests already admit it, so no profile entry
+  reaches an operation the level denies. A `denied_operations` entry
+  denies unconditionally, and an operation named in both lists is denied.
+  A `data_grants` member is an additional requirement satisfied, never a
+  substitute for a level: `observe.ingest` still requires `execute`.
+
+  A delegated capability's profile MUST be a narrowing of its parent's:
+  `privileged_operations` and `data_grants` subsets of the parent's,
+  `denied_operations` a superset, and `cross_principal_sharing` false
+  wherever the parent's is false. Composed with the level, scope, expiry,
+  and depth rules, this is what makes a child's admission set a verified
+  subset of its parent's (RFC 0027 D6, D7) rather than a review
+  obligation.
+
+  The profile is what the connection's capability confers and is reported
+  in `ServerWelcome.grant`; it is never inferred from a successful call
+  and never widened by one (RFC 0027 A7, A9).
   """
 }
 
@@ -2896,6 +3115,21 @@ rule conformance.adapter_parity {
   adapter MUST yield identical artifacts and identical typed results.
   Adapters translate; they do not decide (ADR-0042). An adapter MUST NOT
   expose an operation this file does not declare.
+  """
+}
+
+rule conformance.adapter_mapping {
+  """
+  An adapter that renames an operation MUST ship a mapping manifest
+  generated from this file, and that manifest is a generated artifact
+  under `rule conformance.generated_artifacts`: regenerated, never
+  hand-edited. It MUST be total over the names the adapter exposes — a
+  name whose mapping target is not an `OperationName` declared here is
+  the violation (RFC 0026 correction 23) — and deterministically ordered
+  lexicographically by `OperationName`, so two listings under the same
+  protocol version, mapping, and capability are byte-identical (RFC 0027
+  TS-3). Without the manifest, totality, determinism, and the absence of
+  an undeclared surface are three claims no check can make.
   """
 }
 

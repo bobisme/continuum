@@ -946,11 +946,17 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     assert_eq!(document.operations.len(), 72, "operations");
     assert_eq!(document.scalars.len(), 9, "scalars");
     assert_eq!(document.handles.len(), 19, "handles");
-    assert_eq!(document.aliases.len(), 8, "aliases");
-    assert_eq!(document.enums.len(), 33, "enums");
-    assert_eq!(document.structs.len(), 42, "structs");
+    // Protocol 3.1 (IDL 1.2) adds one alias (`AuditCorrelationId`), one enum
+    // (`DataGrant`), two structs (`ServerReject`, `CapabilityProfile`), and four rules
+    // (`audit.correlation`, `handshake.rejection`, `capability.profile_narrowing`,
+    // `conformance.adapter_mapping`) — the RFC 0027 F1/F4/F5/F6/F7 payments. The
+    // operation count is deliberately unmoved: no flag was paid with a new verb, so the
+    // 72-row registry and RFC 0027's authority table are untouched.
+    assert_eq!(document.aliases.len(), 9, "aliases");
+    assert_eq!(document.enums.len(), 34, "enums");
+    assert_eq!(document.structs.len(), 44, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 29, "rules");
+    assert_eq!(document.rules.len(), 33, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()

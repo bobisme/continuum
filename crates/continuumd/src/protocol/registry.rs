@@ -18,15 +18,17 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.1";
+pub const IDL_VERSION: &str = "1.2";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
-/// Held at `"3.0"` deliberately: the 3.0 -> 3.1 minor bump for IDL 1.1's
-/// compatible additions is deferred and bundled into the RFC 0027 F1-F8 sweep
-/// (`notes/plan/notes/PR0_EXIT_EVIDENCE.md` §6). These types implement the IDL as
-/// it stands and do not take the bump.
-pub const PROTOCOL_VERSION: &str = "3.0";
+/// `"3.1"` as of IDL 1.2. The 3.0 -> 3.1 minor bump covers IDL 1.1's compatible
+/// fixes and IDL 1.2's RFC 0027 F1-F8 sweep together, ratified by the user on
+/// 2026-07-31 and taken once by bn-3ayom on 2026-08-01 — the deferral recorded
+/// here at IDL 1.1 (`notes/plan/notes/PR0_EXIT_EVIDENCE.md` §6) is discharged,
+/// not carried. Every addition either revision made is an `optional` field, a
+/// new declaration, or a new `rule`, so a 3.0 client is served unchanged.
+pub const PROTOCOL_VERSION: &str = "3.1";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -966,8 +968,10 @@ pub const NAMED_STRUCTS: &[StructSpec] = &[
     StructSpec::of::<VersionRange>(),
     StructSpec::of::<ClientHello>(),
     StructSpec::of::<ServerWelcome>(),
+    StructSpec::of::<ServerReject>(),
     StructSpec::of::<EpochAdvanceNotice>(),
     StructSpec::of::<CapabilityDescriptor>(),
+    StructSpec::of::<CapabilityProfile>(),
     StructSpec::of::<ServerLimits>(),
     StructSpec::of::<TaskRecord>(),
     StructSpec::of::<Milestone>(),
@@ -1012,6 +1016,7 @@ pub const ENUMS: &[EnumSpec] = &[
     EnumSpec::of::<DiagnosticSeverity>(),
     EnumSpec::of::<ErrorCode>(),
     EnumSpec::of::<StructuralOutcome>(),
+    EnumSpec::of::<DataGrant>(),
     EnumSpec::of::<TaskEventKind>(),
     EnumSpec::of::<EvidenceEventKind>(),
     EnumSpec::of::<DiffLayer>(),
@@ -1090,6 +1095,11 @@ pub const ALIASES: &[AliasSpec] = &[
         name: "OperationName",
         base: "String",
         pattern: Some(r"^[a-z]+\.[a-z_]+$"),
+    },
+    AliasSpec {
+        name: "AuditCorrelationId",
+        base: "String",
+        pattern: Some("^[A-Za-z0-9_-]+$"),
     },
 ];
 

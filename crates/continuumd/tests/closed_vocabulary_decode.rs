@@ -182,11 +182,17 @@ fn the_idl_identifier_is_not_a_wire_token() {
 }
 
 #[test]
-fn exactly_four_vocabularies_are_open_at_protocol_3_0() {
-    // > Four enums are `@open` at 3.0: `ErrorCode`, `TargetKind`, `ExplorationStrategy`,
-    // > `ExplanationLevel`. Every other enum is closed.
+fn exactly_five_vocabularies_are_open_at_protocol_3_1() {
+    // > Four enums are `@open` at 3.0 — `ErrorCode`, `TargetKind`, `ExplorationStrategy`,
+    // > `ExplanationLevel` — and five at 3.1, which adds `DataGrant`. Every other enum is
+    // > closed.
     // >
     // > — RFC 0026, "Versioning and revision"
+    //
+    // `DataGrant` is `@open` for the same reason `ErrorCode` is, read in the other
+    // direction: an unrecognized *grant* is one the holder MUST NOT assume it holds, so
+    // the fail-closed reading of an unknown member is already the required one, and
+    // closing the enum would make the next grant a breaking change.
     let open: Vec<&str> = continuumd::protocol::registry::ENUMS
         .iter()
         .filter(|spec| spec.open)
@@ -197,6 +203,7 @@ fn exactly_four_vocabularies_are_open_at_protocol_3_0() {
         [
             "TargetKind",
             "ErrorCode",
+            "DataGrant",
             "ExplorationStrategy",
             "ExplanationLevel"
         ]

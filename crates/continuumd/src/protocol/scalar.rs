@@ -429,6 +429,50 @@ impl OperationName {
     }
 }
 
+/// The correlation identity of an audit-log record,
+/// `@pattern("^[A-Za-z0-9_-]+$")`, `@since("3.1")`.
+///
+/// > Deliberately not a handle and not a plan §4.4 artifact class: the audit log is not
+/// > the content-addressed store, this identity is not dereferenceable through any
+/// > operation in this file, and it carries no class prefix that would suggest otherwise.
+/// >
+/// > — IDL §4
+///
+/// It is therefore not a [`ProtocolHandle`] and has no prefix rule. The pattern admits no
+/// `_`-separated class run *requirement*, which is the difference from
+/// [`ArtifactHandle`]: `receipt_1` satisfies both patterns, and only the carrying field
+/// says which one it is.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AuditCorrelationId(String);
+
+impl AuditCorrelationId {
+    /// The pattern this alias declares.
+    pub const PATTERN: &'static str = "^[A-Za-z0-9_-]+$";
+
+    /// Parse an audit-correlation identity.
+    ///
+    /// # Errors
+    ///
+    /// [`PatternMismatch`] when the text is empty or carries a character outside
+    /// `[A-Za-z0-9_-]`.
+    pub fn new(text: &str) -> Result<Self, PatternMismatch> {
+        let mismatch = PatternMismatch {
+            declared: "AuditCorrelationId",
+            pattern: Self::PATTERN,
+        };
+        if text.is_empty() || !text.bytes().all(is_opaque_byte) {
+            return Err(mismatch);
+        }
+        Ok(Self(text.to_owned()))
+    }
+
+    /// The identity's spelling.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A handle of any artifact class,
 /// `@pattern("^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$")`.
 ///

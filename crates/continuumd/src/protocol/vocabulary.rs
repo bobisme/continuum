@@ -600,6 +600,23 @@ protocol_enum! {
 }
 
 protocol_enum! {
+    /// A grant a capability carries beyond its level and scope, for the
+    /// operations that require one in addition to their `authority` clause.
+    ///
+    /// `@open` per `rule versioning.enums`: a client MUST NOT infer semantics from an
+    /// unrecognized member, which for a grant is the fail-closed reading — a grant it
+    /// cannot name is a grant it MUST NOT assume it holds. Adding a member is therefore a
+    /// compatible change, which is why the one grant the dossier fixes today does not
+    /// close the vocabulary against the next one.
+    open enum DataGrant {
+        /// The production-trace grant `observe.ingest` requires in addition to
+        /// `authority execute` (plan §18.2, with the capture-time contract of
+        /// plan §18.4; RFC 0027 R-4).
+        production_trace => ProductionTrace,
+    }
+}
+
+protocol_enum! {
     /// Kind of progress event on a task subscription. Events are hints.
     closed enum TaskEventKind {
         /// Wire token `milestone`.

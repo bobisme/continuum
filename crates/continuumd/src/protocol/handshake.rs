@@ -91,6 +91,35 @@ protocol_struct! {
 }
 
 protocol_struct! {
+    /// Second frame, sent by the daemon when it refuses the connection.
+    ///
+    /// The alternative to [`ServerWelcome`], never sent beside it. Without it a
+    /// client cannot tell a typed refusal from a transport failure, which is
+    /// the gap RFC 0027 raised as F4. The two frames are told apart by their
+    /// required fields and neither validates as the other: `ServerWelcome`
+    /// requires `protocol_version`, this frame requires `code`.
+    struct ServerReject {
+        /// Why the connection was refused. `rule handshake.rejection` fixes
+        /// the admissible set.
+        code: ErrorCode required;
+        /// Stable, non-interpolated explanation of the code. Never a rendering
+        /// of a capability, a token, or anything the client supplied
+        /// (INV-016).
+        detail: String required;
+        /// Whether an identical reconnection can succeed without any change by
+        /// the caller. False for every code this version admits; the field is
+        /// declared because `ErrorCode` is `@open` and a later minor may add a
+        /// connection-level refusal an identical retry can satisfy.
+        retryable: Bool required;
+        /// The majors this daemon serves: N and N−1. Present so a client
+        /// refused for its version learns the window from the refusal itself;
+        /// it never received a `ServerWelcome` and has no other channel for
+        /// it.
+        majors_served: list<U32> required;
+    }
+}
+
+protocol_struct! {
     /// An announced epoch advance (plan §4.6). Advancing never mutates an
     /// existing artifact: re-derived artifacts receive new identities linked
     /// to their predecessors by `SUPERSEDES` edges. The daemon may hold at
@@ -132,6 +161,44 @@ protocol_struct! {
         expires_at: Timestamp nullable;
         /// Whether the holder may delegate, and how deeply.
         delegation_depth: U32 required;
+        /// The narrowing surface beyond level and scope. Absent is the
+        /// fail-closed reading and is exactly equivalent to an empty profile:
+        /// no privileged operation granted, no additional data grant held, no
+        /// cross-principal sharing. See `rule capability.profile_narrowing`.
+        profile: CapabilityProfile optional;
+    }
+}
+
+protocol_struct! {
+    /// What a capability grants and withholds beyond its level and scope
+    /// (RFC 0027, "The admission predicate").
+    ///
+    /// This is the wire form of admission test T3 and of the per-operation
+    /// restrictions a level cannot express: two capabilities with identical
+    /// levels and scopes differ here in whether they admit `intent.accept`,
+    /// which before 3.1 was deployment folklore rather than a wire fact.
+    /// Every field narrows; none widens. A profile can only subtract from
+    /// what `level` and the scope lists already permit.
+    struct CapabilityProfile {
+        /// The `@privileged` operations this capability may invoke (T3). An
+        /// operation absent from this list is denied however high the level.
+        /// Naming a non-`@privileged` operation here grants nothing.
+        privileged_operations: list<OperationName> required;
+        /// Operations this capability may not invoke whatever its level
+        /// permits — docs/49's Reviewer cell, which a total order cannot
+        /// express (RFC 0027 correction 22). An operation named both here and
+        /// in `privileged_operations` is denied.
+        denied_operations: list<OperationName> required;
+        /// Additional grants this capability carries, for operations that
+        /// require one beyond their authority level.
+        data_grants: list<DataGrant> required;
+        /// Whether this capability's publications may be deduplicated against
+        /// content another principal already holds. RFC 0026 requires the
+        /// sharing policy to be a capability property rather than a
+        /// daemon-global flag, because a global flag cannot be scoped,
+        /// delegated, or revoked. False does not weaken the indistinguishable-
+        /// cost rule: a publication MUST report the same `cost` either way.
+        cross_principal_sharing: Bool required;
     }
 }
 
@@ -231,8 +298,9 @@ impl NegotiationError {
     /// handshake frame that is itself malformed, nor for an encoding mismatch:
     /// `MalformedRequest` is defined against a *request*, and the handshake precedes any
     /// request envelope (IDL §7). Choosing one here would be inventing wire semantics.
-    /// The transport half of PR 5 decides how a connection that cannot be opened reports
-    /// itself, and that decision belongs in the IDL first.
+    /// Protocol 3.1 declares the [`ServerReject`] frame and still fixes no code for those
+    /// two (`rule handshake.rejection` names the set explicitly), so both remain
+    /// transport-level closes.
     #[must_use]
     pub const fn error_code(self) -> Option<ErrorCode> {
         match self {
@@ -241,6 +309,52 @@ impl NegotiationError {
             }
             Self::MalformedRange | Self::NoCommonEncoding => None,
         }
+    }
+}
+
+/// The first protocol version that defines [`ServerReject`].
+///
+/// A refusal frame is sent *before* a version is negotiated, so it cannot be gated on
+/// one. The gate is the client's own offer instead: a client whose range reaches this
+/// version has told the daemon it can parse the frame.
+const REJECT_FRAME_SINCE: ProtocolVersion = ProtocolVersion::new(3, 1);
+
+impl ServerReject {
+    /// The typed refusal for `error`, or [`None`] where the connection must be closed
+    /// without a frame.
+    ///
+    /// > A daemon MUST send it only when the client's offered `VersionRange` reaches a
+    /// > version that defines it — `high` at or above `"3.1"` — and MUST close the
+    /// > connection without a frame otherwise, because a frame the client cannot parse is
+    /// > not a typed refusal.
+    /// >
+    /// > — `rule handshake.rejection`
+    ///
+    /// [`None`] therefore covers two different situations, and collapsing them would lose
+    /// the distinction the rule draws: a client too old to read the frame, and a failure
+    /// for which the protocol fixes no code ([`error_code`](NegotiationError::error_code)
+    /// returning [`None`]).
+    ///
+    /// `detail` is supplied by the caller and MUST be stable, non-interpolated text
+    /// (INV-016); [`NegotiationError`]'s own [`Display`](fmt::Display) is such a text and
+    /// is what a daemon is expected to pass. `retryable` is false for every code this
+    /// version admits.
+    #[must_use]
+    pub fn for_negotiation(
+        error: NegotiationError,
+        hello: &ClientHello,
+        majors_served: &[u32],
+        detail: &str,
+    ) -> Option<Self> {
+        if hello.protocol_versions.high < REJECT_FRAME_SINCE {
+            return None;
+        }
+        Some(Self {
+            code: error.error_code()?,
+            detail: detail.to_owned(),
+            retryable: false,
+            majors_served: majors_served.to_vec(),
+        })
     }
 }
 
