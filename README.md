@@ -186,16 +186,23 @@ that gap belongs to the kernel reproducible-build covenant (plan §20, PR 9).
 #### Toolchain
 
 `mise.toml` pins the CLI dependencies that sit outside Cargo and Lake: `just`
-and `uv` (both from mise's default registry) and `elan` (via the `ubi` backend,
-since elan has no default-registry entry). Rust and Lean are deliberately not
-pinned there — Rust stays on rustup + `rust-toolchain.toml`, and Lean stays on
-`lean/lean-toolchain` selected by the `elan` mise installs (mise → elan →
-pinned toolchain). Bootstrap a fresh checkout with:
+and `uv` (both from mise's default registry) and `elan` (via the `github`
+backend, since elan has no default-registry entry). Rust and Lean are
+deliberately not pinned there — Rust stays on rustup + `rust-toolchain.toml`, and
+Lean stays on `lean/lean-toolchain` selected by the `elan` mise installs
+(mise → elan → pinned toolchain). Bootstrap a fresh checkout with:
 
 ```bash
-mise install   # installs just, uv, elan
-just check     # fmt, clippy, tests, crate boundaries, dossier validation
+mise install   # installs just, uv, and elan's installer (elan-init)
+elan-init -y   # installs elan into ~/.elan and puts it on PATH
+just check     # fmt, clippy, tests, boundaries, dossier, Lean build + axiom manifest
 ```
+
+The second step is not redundant: the pinned elan release asset *is* the
+installer, so mise puts `elan-init` on PATH and `elan-init` puts `elan`, `lake`
+and `lean` on it. `just lean` (part of `just check`) looks `lake` up on PATH and
+never hardcodes an elan location, so either provider works; if it is missing the
+recipe says so and names this bootstrap instead of failing cryptically.
 
 ## Roadmap
 

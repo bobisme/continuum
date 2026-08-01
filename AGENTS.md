@@ -29,7 +29,9 @@ are kernel-checked.
 - `lean/` — the metatheory; RFC 0012 rungs T0/T1 build under `lake build` with no
   `sorry`, no axioms, no `native_decide`.
 - `just check` gates all of it: fmt, clippy, tests, crate boundaries, dossier
-  validator. The dossier is validated mechanically, so editing plan prose can fail it.
+  validator, and `just lean` (`lake build` plus the ADR-0035 axiom-manifest check).
+  The dossier is validated mechanically, so editing plan prose can fail it; the Lean
+  half needs elan on PATH (`mise install`, then `elan-init -y` — see README).
 
 ## Key invariants
 

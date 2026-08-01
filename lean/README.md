@@ -6,9 +6,15 @@ and refinement) are formalized and kernel-checked (PR-4A / IMPL-03). All 16
 modules under `Continuum/` build with `lake build`; the tree contains no
 `sorry`, declares no `axiom`, and uses no `native_decide` or `set_option` escape
 hatches. The 68 theorems of the T0/T1 ladder depend on **no axioms at all** — see
-`artifacts/axiom-manifest-t0-t1.json`. Wiring `lake build` and the manifest check
-into `just check` is a separate follow-up and has not been done yet — run them
-manually for now.
+`artifacts/axiom-manifest-t0-t1.json`. Both `lake build` and the manifest check
+run in CI-equivalent form as `just lean`, which is part of the `just check` gate
+(bn-1ee03) — the green build is no longer reproducible only by hand.
+
+`lakefile.toml` sets `autoImplicit = false` for the library: an unbound
+identifier is an error where it is written instead of being bound as a fresh
+implicit variable and resurfacing as an unrelated elaboration failure later
+(bn-fak5 lost time to exactly that, a capitalized `Some`). Every binder in the
+tree is declared explicitly, so the option costs nothing.
 
 ## Purpose
 
@@ -83,6 +89,12 @@ errors out if a listed theorem no longer exists, and writes:
 - `artifacts/axiom-manifest-t0-t1.txt` — the same content in the wording
   `#print axioms` prints, for human audit.
 
+`--check` never writes under `artifacts/`: it runs the generator with a scratch
+directory as its working directory and diffs the result against the checked-in
+files, so a stale manifest fails the gate rather than being rewritten under the
+person running it (bn-1ee03). Regenerating is always the explicit, unflagged
+invocation.
+
 **What "empty" means here.** Every one of the 68 T0/T1 theorems reports *does not
 depend on any axioms* — not even `propext`, `Quot.sound` or `Classical.choice`.
 The reflective checkers avoid `List.all` and `decide (· ∈ l)` because the core
@@ -135,8 +147,11 @@ delivery reports:
   (`checker trusted base (reflective plumbing)` and `instantiation: Die Hard
   finite closure and counterexample`); these are additive, not substitutes.
 
-The exit criterion holds. Wiring these commands into `just check` remains the
-open follow-up.
+The exit criterion holds. `lake build` and `sh scripts/axiom-manifest.sh --check`
+are now the `just lean` recipe and run as part of `just check` (bn-1ee03), so a
+regression fails the gate instead of waiting for someone to re-derive it by hand.
+Re-verified after `autoImplicit = false`: the clean rebuild is unchanged and the
+regenerated manifest is byte-identical to the checked-in artifacts.
 
 ## Mandatory CI before theorem claims
 

@@ -8,8 +8,8 @@ set positional-arguments
 default:
     @just --list
 
-# Full project gate: formatting, lints, tests, crate boundaries, dossier.
-check: fmt-check lint test boundaries dossier
+# Full project gate: formatting, lints, tests, crate boundaries, dossier, Lean.
+check: fmt-check lint test boundaries dossier lean
 
 # Reject unformatted Rust.
 fmt-check:
@@ -47,6 +47,31 @@ boundaries:
 # Mechanical validation of the architecture/research dossier.
 dossier:
     cd notes/plan && uv run --with jsonschema python3 tools/validate_dossier.py
+
+# Lean metatheory gate: build the RFC 0012 T0/T1 rungs and verify the ADR-0035
+# axiom manifest against the checked-in artifacts (`lean/artifacts/`).
+#
+# Toolchain layering (mise.toml): mise pins the elan release, elan reads
+# `lean/lean-toolchain` and installs/selects the Lean version named there. `lake`
+# is an elan proxy, so it is looked up on PATH and no elan or toolchain location
+# is hardcoded here — whichever install provides it (mise-exposed, or
+# `~/.elan/bin` from `. ~/.elan/env`) is the one the gate uses.
+#
+# `axiom-manifest.sh --check` is read-only with respect to `lean/artifacts/`: it
+# generates into a scratch directory and diffs, so a stale manifest fails the
+# gate instead of being silently rewritten under it.
+lean:
+    @command -v lake >/dev/null 2>&1 || { \
+        echo "continuum: 'lake' is not on PATH." >&2; \
+        echo "  Lean comes from elan: mise.toml pins the elan release and" >&2; \
+        echo "  lean/lean-toolchain pins the Lean version elan installs." >&2; \
+        echo "  Bootstrap: run 'mise install' (this installs elan-init), then" >&2; \
+        echo "  'elan-init -y', then make elan's bin directory visible to this" >&2; \
+        echo "  shell (e.g. '. ~/.elan/env'; login shells usually do it)." >&2; \
+        exit 1; \
+    }
+    cd lean && lake build
+    sh lean/scripts/axiom-manifest.sh --check
 
 # Regenerate the plan/Bones traceability registry and report.
 traceability:

@@ -2,5 +2,13 @@ name = "continuum-metatheory"
 version = "0.1.0"
 defaultTargets = ["Continuum"]
 
+# `autoImplicit` is off (bn-1ee03, from the bn-fak5 finding): with Lake's default
+# `autoImplicit := true`, a capitalized typo (`Some` for `some`) was silently
+# bound as a fresh implicit variable and surfaced much later as an unrelated
+# elaboration error. Off, an unbound identifier is reported where it is written.
+# Every binder in `Continuum/` is therefore declared explicitly.
+[leanOptions]
+autoImplicit = false
+
 [[lean_lib]]
 name = "Continuum"
