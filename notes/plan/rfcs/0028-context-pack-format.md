@@ -3,78 +3,318 @@
 ## Status
 Draft for implementation.
 
-**Target gate:** G2 (agent-computer interface); replay-preservation obligation feeds G6
+**Target gate:** G2 (agent-computer interface); the proof-pack profile feeds G6 and the compile-latency row feeds G5
 **Owners:** context/explanation leads
-**Normative language:** MUST/SHOULD/MAY per RFC 2119.
-**Normative schema:** [`../schemas/context-pack.schema.json`](../schemas/context-pack.schema.json).
+**Normative language:** MUST/MUST NOT/SHOULD/SHOULD NOT/MAY per RFC 2119.
+**Normative schema:** [`../schemas/context-pack.schema.json`](../schemas/context-pack.schema.json). Where this document and the JSON schema disagree, the schema is corrected or this RFC is amended by an explicit revision; neither drifts silently (INV-003: schemas decide artifact shape, prose does not).
+**Normative wire vocabulary:** [`../schemas/continuumd-native-protocol.idl`](../schemas/continuumd-native-protocol.idl) (RFC 0026) — `ContextHandle` (`ctx_`), `context.compile`, `context.expand`, `ExpansionRelation`, `ContextPolicy`, `Audience`, `OutputPolicy`, `Budget`, `Cost`, `Omission`, `OmissionReason`, `EvaluationVerdict`, `EvaluationVerdictValue`, `InconclusiveReason`, `AssuranceClass`, `AssuranceEnvelope`, `RedactionReason`, and the error codes `UnsupportedSemanticFeature`, `InsufficientEvidence`, `BudgetExhausted`, `MalformedRequest`, `CapabilityDenied`, `EpochUnsupported`. Where this document and the IDL disagree about a wire shape, the IDL decides and this RFC is corrected (RFC 0026, "IDL and versioning"); every such correction is recorded below.
+**Companion normative sources:** [RFC 0027](0027-agent-tool-protocol.md) (context policy, byte budgets, the expansion-relation vocabulary, the authority ladder), [RFC 0026](0026-continuumd-native-protocol.md) (envelopes, epochs, error taxonomy, `rule ordering.deterministic`, `rule idempotency.replay`, `rule envelope.assurance_required`), [RFC 0030](0030-incremental-semantic-query-engine.md) (query key, budget rule, reuse-edge classes, the parity audit's context-slice comparison), [RFC 0031](0031-semantic-and-intent-diff.md) (impact set, the `unknown`-is-dependent rule), [RFC 0037](0037-intent-contract.md) (contract identity and the intent epoch), [RFC 0038](0038-multi-agent-evidence-graph.md) (evidence nodes and edges), [RFC 0039](0039-explanation-engine.md) (explanation levels and types), [RFC 0029](0029-causal-verification-debugger.md) (`dbg_*` branches), [RFC 0035](0035-isolated-lean-proof-service.md) and [RFC 0012](0012-lean-metatheory-and-reflective-certificates.md) (proof service, axiom manifests), [RFC 0010](0010-assurance-results-and-claims.md) (assurance classes and evidence classes), [ADR-0040](../adr/0040-typed-context-packs.md), [ADR-0045](../adr/0045-progressive-disclosure-with-lossless-expansion.md), [ADR-0013](../adr/0013-exact-state-identity.md), [ADR-0018](../adr/0018-semantic-versioning-and-replay.md), [`../plan.md`](../plan.md) §6 (with §4.4–§4.7, §9.2, §12, §15.2, §15.3, §18.4, §22 G2), [`../docs/38_COUNTEREXAMPLE_EXPERIENCE.md`](../docs/38_COUNTEREXAMPLE_EXPERIENCE.md), [`../docs/34_DEVELOPER_EXPERIENCE_PRODUCT_CONTRACT.md`](../docs/34_DEVELOPER_EXPERIENCE_PRODUCT_CONTRACT.md), [`../docs/53_SPIKE_FINDINGS_REV3.md`](../docs/53_SPIKE_FINDINGS_REV3.md), [`../research/32-semantic-context-compilation-and-information-theory.md`](../research/32-semantic-context-compilation-and-information-theory.md), [`../research/28-agentic-proof-repair-and-context-compilation.md`](../research/28-agentic-proof-repair-and-context-compilation.md), [`../research/26-causal-and-contrastive-counterexample-explanations.md`](../research/26-causal-and-contrastive-counterexample-explanations.md), [`../schemas/README.md`](../schemas/README.md).
+**Landed vocabulary:** `crates/continuum-context` is the compiler's crate and already declares INV-007 (omission transparency) and INV-013 (property-scoped reduction) as its dependency-boundary contract; `crates/continuum-value/src/epoch.rs` (`EpochKind`, `EpochSet`, the five content-identity epoch newtypes) is the typed source of the epoch rules this RFC pins `ReplayPreserving` and pack reuse to. This RFC and those modules MUST be revised together; neither may move alone.
+**Frontier dependency:** general context compilation (plan §6) is a **ratified** register row (plan §24.5, `quote-id=context-compilation-win-margin`, owned by research/32 with research/25's ablation design and research/33's grading discipline). The ratified sentence is the sole authority for the win margin; this RFC restates none of its numbers and MUST NOT be read as relaxing any of them. Causal minimization (plan §6, §12) is a second ratified row (`quote-id=causal-minimization-core-ratio`, research/26). Both constrain this RFC's acceptance, and neither is re-derived here.
 
 ## Summary
 
-A Context Pack is a bounded, typed, property-directed compilation of the evidence graph for one question (plan §6). It is the default unit agents and humans receive; expansion, not dumping, reaches everything else (INV-007).
+A Context Pack is a bounded, typed, property-directed compilation of the evidence graph for one question (plan §6.1). It is the default unit agents and humans receive; expansion, not dumping, reaches everything else (INV-007, RFC 0027).
 
-## Artifact
+This RFC is the normative home of: the pack's field set and field types; the closed guarantee-class set and its composition rules; the selection-kind set; the ten-stage compiler pipeline and what each stage may license; the budget-packing order and the pack's frontier form; the omission manifest and its reconciliation equation; the expansion protocol and its typed outcomes; the redaction interaction; the four pack profiles; and the rendering rule. Plan §6, docs/38, and docs/34 are informal restatements; where they disagree with this document, this document governs (plan §25: "Where plan prose and RFC disagree, the RFC is corrected and becomes normative"). Every such correction is recorded below under "Corrections recorded by this RFC".
 
-Per the schema: pack identity (`ctx_*`, the plan §4.4 handle prefix), the `schema_id`/`schema_epoch` header (`schemas/README.md`), target question, snapshot + intent identities, pinned semantic epoch, typed verdict, assurance envelope (every B11 dimension present or typed `Unsupported`), selected items (events, state deltas, obligation/resource flow, order constraints, source/model/proof references, assumptions, counterfactuals, heuristic repair surfaces), per-pack guarantee set, omission manifest, expansion queries, evidence references, replay handle (`crash_*`) and optional debugger handle (`dbg_*`), canonical content hash (ADR-0013), and content budget. The semantic-epoch field is what `ReplayPreserving` is pinned to; a pack without it cannot claim that guarantee. Packs are immutable; `context.expand` creates a child pack referencing its parent.
+Three properties are load-bearing and are stated once here so nothing downstream re-derives them:
+
+- **A guarantee is a checked claim, never a score.** Every member of the `guarantees` set names a specific checker and a specific failure mode. A pack MUST NOT publish a guarantee whose checker did not run and pass. This is the distinction INV-007 exists to keep, and collapsing it into one relevance number is the failure ADR-0040 was accepted to prevent.
+- **Omission transparency is unconditional.** A pack that cannot name what it dropped is malformed, not compact. The manifest is reserved before optional content and is never the thing a budget squeezes out (INV-007).
+- **Inconclusiveness is typed, never absent.** A compile that cannot produce a faithful bounded answer returns `verdict: inconclusive` with one of the six `InconclusiveReason` tokens — never a tidy narrative, and never a success flag that outruns the evidence (INV-008; docs/38, "Failure of explanation").
+
+## Versioning and revision
+
+- The pack's encoding contract is versioned by `schema_epoch`, declared in the schema document's `$id` and in every instance's `schema_id`/`schema_epoch` header ([`../schemas/README.md`](../schemas/README.md), plan §25 SD-08). Epoch 1 is the vocabulary specified here. A consumer that does not implement an instance's `schema_epoch` MUST reject the pack with `EpochUnsupported`; a pack is never best-effort decoded across a breaking epoch (docs/09 T13).
+- **Closed sets.** The thirteen `guarantees` members, the eleven `selected[].kind` members, the four `verdict` members, the six `inconclusive_reason` members, the five `omissions[].reason` members, the five `assurance.class` members, the nine assurance-envelope dimensions, the three `redactions[].reason` members, and the eleven `ExpansionRelation` members are **closed**. Adding, removing, or renaming a member is a breaking change requiring a `schema_epoch` advance *and* an explicit revision of this RFC; where the token reaches the wire it is additionally an RFC 0026 protocol change under its N and N−1 protocol-major window.
+- **Fail closed on unrecognized tokens.** A consumer that reads a guarantee, selection kind, omission reason, inconclusive reason, or expansion relation it does not recognize MUST reject the pack with `MalformedRequest` — an unknown member of a closed enum — and MUST NOT treat the unknown token as absent, as `HeuristicRelevant`, or as permission to read the remaining guarantees as complete. Forward compatibility is achieved by rejecting, never by ignoring.
+- **Packs are immutable.** A pack is a plan §4.4 content-addressed artifact. Re-compiling under a changed input, epoch, or compiler version produces a *new* `ctx_*` linked to its predecessor by a `SUPERSEDES` edge (plan §4.6, INV-009); no pack is edited in place, including to correct a guarantee that later failed its checker. A guarantee discovered to be false is an engine defect (`defect_*`, plan §4.7), not an amendment.
+- **Epoch advances do not migrate packs.** `semantic_epoch` is pinned in the artifact, and `ReplayPreserving` is defined relative to it and to nothing else. An advance publishes the typed per-artifact-class statement `Preserved | Revalidate | Incompatible` before it is applied (plan §4.6); for the Context Pack class, `Revalidate` means every preserved guarantee MUST be re-checked before the pack is reused as evidence, and `Incompatible` means the pack is readable as history and MUST NOT support a claim.
+- **The intent, evidence, and proof epochs bear on packs too.** A pack names an `in_*` contract, `ev_*` evidence, and — in the proof profile — `proof_*` artifacts; the epochs governing those are the intent, evidence, and proof epochs. Six epochs are versioned independently and `schema_epoch` is not a seventh (`rule versioning.epoch_independence`; `crates/continuum-value/src/epoch.rs`).
+- **The compiler is versioned, and the pack does not yet say so.** The compiler version, the ranker identity, and the ranker's configuration are part of the pack's query identity under RFC 0030 and MUST be recorded as provenance by the daemon. The artifact carries no field for them; this is F3 below, and until it is paid a pack MUST NOT be reused across a compiler or ranker change even though its bytes are unchanged.
+
+## Pack identity, lineage, and determinism
+
+- `context_id` matches `^ctx_[A-Za-z0-9_-]+$`, the plan §4.4 registered prefix. `content_hash` is the canonical content identity of the pack (ADR-0013). Two packs are the same pack iff their canonical encodings are byte-equal.
+- **Determinism.** For a fixed compile key and budget the pack MUST be byte-identical across platforms, worker counts, and releases within a `schema_epoch` (docs/19 §7 determinism matrix). The six list-valued fields — `selected`, `omissions`, `expansions`, `evidence`, `guarantees`, `redactions` — MUST be deterministically ordered by content identity or by a declared sort key (`rule ordering.deterministic`). List order is part of the canonical encoding, so an unstable order is an identity defect, not a cosmetic one.
+- **Lineage.** `context.expand` returns both the child `ctx_*` and its `parent` on the wire, but the artifact has no lineage field at `schema_epoch` 1 (F1). Until it has one, the daemon MUST publish the parent-to-child relation into the evidence graph so a pack family is reconstructible from artifacts alone; a lineage recorded only in a connection's response is not evidence. This is not optional bookkeeping: the ratified FR-01 sentence grades context bytes "counting every expansion", so an unreconstructible family makes the ratified measurement uncomputable.
+- **The question is part of the identity.** `question` MUST be the canonical rendering of the compiled query: for `context.compile`, the caller's question; for `context.expand`, the canonical encoding of the triple (relation, anchor, depth). Two expansions of one parent that happen to select the same items are therefore distinct artifacts, which is correct — they answer different questions.
+
+## Required fields, reconciled with plan §6.2
+
+The schema's sixteen required properties are the universal minimum for every pack of every profile: `schema_id`, `schema_epoch`, `context_id`, `snapshot`, `intent`, `question`, `verdict`, `assurance`, `selected`, `omissions`, `expansions`, `evidence`, `replay`, `guarantees`, `semantic_epoch`, `content_hash`. Four properties are optional or conditional: `content_budget`, `debugger_branch`, `redactions`, and `inconclusive_reason` (required exactly when `verdict` is `inconclusive`).
+
+Plan §6.2's fourteen bullets describe the *failure* profile. They map one-to-one onto the schema as follows; the mapping is normative, and a bullet with no schema home is a defect in one of the two documents, never a licence to invent a field:
+
+| plan §6.2 bullet | Schema home | Type | Rule |
+|---|---|---|---|
+| target intent and property | `intent`, `question` | `^in_` handle; string | Both required. `intent` MUST resolve in the daemon's intent registry (RFC 0037) |
+| exact verdict and assurance envelope | `verdict`, `inconclusive_reason`, `assurance` | closed enums; envelope object | `assurance.class` is one of the five `AssuranceClass` tokens; `assurance.envelope` carries all nine B11 dimensions |
+| causal core and surrounding frontier | `selected[]` with `kind` in `event`, `order_constraint` | array | The core is the sub-slice required by the claimed preserved guarantees; the frontier is optional context |
+| concrete and abstract state deltas | `selected[].kind = state_delta` | array item | Deltas, never whole states (docs/38, "State delta") |
+| obligation/resource flow | `selected[].kind = obligation_flow` | array item | Cancellation and resource transfers (B19) |
+| missing or reversed order constraints | `selected[].kind = order_constraint` | array item | Order, conflict, concurrency, and absence used precisely (docs/38, "Missing order") |
+| relevant source spans and model actions | `selected[].kind` in `source`, `model` | array items | Source is untrusted data and MUST NOT be interpolated into any description (INV-016) |
+| proof/refinement slice | `selected[].kind = proof` | array item | Licenses `ProofRelevant` only when the proof-slice check ran |
+| assumptions used and unused | `selected[].kind = assumption` | array item | An unused assumption is a distinct fact and MUST NOT be dropped as irrelevant |
+| counterfactual safe branches | `selected[].kind = counterfactual` | array item | Requires `CounterfactualUnderNamedModel` and a named causality model |
+| candidate repair surfaces, clearly marked heuristic | `selected[].kind = repair_surface` | array item | Heuristic by construction; never in a preserved core (see "Guarantee classes") |
+| exact replay and debugger handles | `replay`, `debugger_branch` | `^crash_` nullable; `^dbg_` nullable | `replay` MUST be non-null whenever `ReplayPreserving` is claimed |
+| omitted-node counts and expansion queries | `omissions[]`, `expansions[]` | arrays | Counts are exact; see "Omission manifest" |
+| schema, semantic epoch, and content hash | `schema_id`/`schema_epoch`, `semantic_epoch`, `content_hash` | consts; string; string | The instance header is the SD-08 two-field form |
+
+Four required properties plan §6.2 does not name, and their sources: `snapshot` (`^ws_`, plan §4.2 — the sealed snapshot the pack is stated against), `evidence` (`ev_*` roots, plan §11), `content_budget` (research/32's rate term), and `redactions` (plan §4.5, §18.4). One selection kind has no §6.2 bullet either: `unknown` carries plan §12.2's "uncertainty and incompleteness" as a typed item and is the pack-level form of INV-008. A compiler MUST use `unknown` rather than omitting a fact it detected but could not classify.
+
+## Verdict and assurance
+
+- `verdict` is one of `satisfied`, `refuted`, `deadlock`, `inconclusive` — the IDL's `EvaluationVerdict`, identical to `assurance-result.schema.json`. It names the verdict of the evaluation the pack compiles evidence *for*. Unsupported semantics and engine errors are `inconclusive` with reason `Unsupported` or `EngineError`; they are never verdicts.
+- `inconclusive_reason` is one of `Unsupported`, `ResourceExhausted`, `EngineError`, `InsufficientTelemetry`, `AbstractionAmbiguity`, `IncompleteProofSearch`. The spelling is the schema's and the IDL's; it is shared token-for-token with RFC 0030 and RFC 0031 and MUST NOT be re-cased or extended here.
+- A pack whose question is not about an evaluation outcome — a proof-target pack, an invariant pack, a "what could affect this" pack — MUST carry `inconclusive` with the reason naming why no verdict is available: `IncompleteProofSearch` for an undischarged obligation, `AbstractionAmbiguity` for an unresolved correspondence, `InsufficientTelemetry` for missing observation. It MUST NOT default to `satisfied`. The vocabulary is being overloaded here, and that is recorded as F11.
+- `assurance.envelope` carries all nine B11 dimensions — `bounds`, `faults`, `fairness`, `values`, `schedules`, `memory_model`, `observer`, `proof_status`, `unknowns` — each naming a producing engine or carrying a typed `Unsupported(reason)`. Silent omission of a dimension is forbidden (`rule envelope.assurance_required`). Until the weak-memory lane ships (ADR-0032), `memory_model` reads `Unsupported(sequential-consistency-only)`.
+- The envelope in the pack is the *same* envelope as the one on the result it explains; the schema's copy is identity-checked against `assurance-result.schema.json` by the dossier validator (plan §25 SD-12), so the two cannot drift. A pack MUST NOT report an envelope stronger than the result's, and a compile that narrows the envelope — through redaction, or through a budget-dropped dimension — MUST report the narrowing in the manifest.
+- `assurance.class` is an assurance *class*: `observed < sampled < bounded < validated < proved`, RFC 0031's total order. Evidence *classes* — RFC 0010's thirteen — are a partial order, not a ladder, and MUST NOT be ranked or collapsed into the class field. A production observation is not "higher" or "lower" than an inductive proof.
 
 ## Guarantee classes
 
-`guarantees` is a closed enum; multiple MAY apply, and every claimed guarantee MUST be checkable:
+`guarantees` is a closed thirteen-member enum. Multiple members MAY apply. Every claimed guarantee MUST be checkable, and MUST have been checked and passed before publication.
 
-| Guarantee | Claim | Checked by |
-|---|---|---|
-| `ReplayPreserving` | the selected core replays to the same verdict under the pinned epoch | replay execution (INV-006) |
-| `PropertyPreserving` | the slice preserves the property automaton's verdict-relevant structure | independent monitor |
-| `ProofRelevant` | items lie on the proof dependency slice of the named obligations | proof-slice check |
-| `HeuristicRelevant` | ranked-relevant only; no semantic claim | none — MUST be structurally distinct, never mixed into a preserved core |
-| `OneMinimal` / `CardinalityMinimal` / `CausallyMinimal` / `ValueMinimal` / `OwnerMinimal` / `FaultMinimal` / `ExplanationMinimal` | which minimality was actually achieved (docs/38) | minimizer transcript |
-| `CausallyClosed` | selection is downward-closed under the causal order | closure check |
-| `CounterfactualUnderNamedModel` | counterfactual items are valid under a named causality model | model named in the item; "cause" language is prohibited otherwise (plan §12.2) |
+| Guarantee | Claim | Checker | Failure mode |
+|---|---|---|---|
+| `ReplayPreserving` | the selected core replays to the same verdict under the pinned `semantic_epoch` | replay execution against `replay` (INV-006) | divergence is an engine defect (plan §4.7), not a weaker pack |
+| `PropertyPreserving` | the slice preserves the property automaton's verdict-relevant structure | an independent property monitor, not the compiler | a monitor disagreement invalidates the pack |
+| `ProofRelevant` | every selected item lies on the proof dependency slice of the named obligations | proof-slice check (RFC 0035, RFC 0012) | an item off the slice is a false relevance claim |
+| `CausallyClosed` | the selection is downward-closed under the causal order | closure check over the CIR (RFC 0001); Lean `CausalSlice.downwardClosed` | an unselected causal predecessor breaks the claim |
+| `CounterfactualUnderNamedModel` | counterfactual items are valid under a *named* causality model | the named model's own evaluation | an unnamed model prohibits the item entirely (plan §12.2) |
+| `OneMinimal` | removing any one selected item destroys the witness | single-item removal transcript | a survivable removal refutes it |
+| `CardinalityMinimal` | no smaller selected set witnesses the failure | exhaustive smaller-set search transcript within declared bounds | an unbounded search cannot claim it |
+| `CausallyMinimal` | minimal configuration under causal closure | minimizer transcript over configurations | — |
+| `ValueMinimal` | domains and names reduced | minimizer transcript over the value domain | — |
+| `OwnerMinimal` | tasks and nodes reduced | minimizer transcript over owners | — |
+| `FaultMinimal` | no unnecessary injected fault | minimizer transcript over the fault set | — |
+| `ExplanationMinimal` | a human/agent study objective was met | preregistered study evidence (docs/48, plan §21.1, G8) | a minimizer transcript never licenses it |
+| `HeuristicRelevant` | ranked-relevant only; no semantic claim | none | mixing it into a preserved core is the INV-007 violation |
 
-The pack MUST record which minimality class was achieved rather than implying the strongest; "minimal" without a class is prohibited output.
+Six rules govern the set:
+
+- **C1 — Requested is not achieved.** `context.compile`'s `guarantees` list is a *request*. A daemon MUST NOT echo a requested guarantee it did not achieve. A requested-but-unachieved guarantee MUST appear in the omission manifest with reason `unsupported` (outside the engine's semantics) or `budget` (dropped by packing), and where its absence makes the answer unusable the verdict MUST be `inconclusive` with a typed reason.
+- **C2 — `ReplayPreserving` implies `CausallyClosed`.** A core that replays contains every causal predecessor its replay consumes, so a pack claiming `ReplayPreserving` MUST also claim and check `CausallyClosed`, and MUST carry a non-null `replay`. A set assembled from textual relevance is not accepted as replay-preserving (docs/38).
+- **C3 — Minimality classes are independent claims.** A pack MUST claim exactly the classes whose checks ran and passed, and a consumer MUST NOT infer one class from another on the wire. The pack records which class was achieved rather than implying the strongest; "minimal" without a class is prohibited output in every rendering (plan §6.4).
+- **C4 — Heuristics never upgrade and never mix.** Ranking (stage 9) MUST NOT change any item's guarantee standing. Because `schema_epoch` 1 has no per-item guarantee field (F2), the segregation is structural: inside a pack claiming any preserved guarantee, `repair_surface` is the only admissible heuristic kind, and every other selected item MUST be guarantee-bearing. Heuristic content of any other kind MUST travel as a child pack whose `guarantees` is exactly `["HeuristicRelevant"]`, reachable by expansion.
+- **C5 — Guarantees are per-pack and are not inherited.** An expansion child's guarantees are computed for the child. A child MUST NOT inherit its parent's guarantees, and a parent's guarantee is not evidence about a child's contents.
+- **C6 — A guarantee names no checker on the wire.** The artifact records the guarantee but neither the checker identity nor the check result (F9). Until that is paid, a consumer treating a `guarantees` entry as independently established is trusting the producer, and a promotion-relevant consumer MUST re-run the checker rather than read the field — INV-004's discipline applied to packs.
+
+## Selection and the causal core
+
+`selected[]` items carry `id` (required), `kind` (required, closed), `summary` (required, rendering only), and `artifact` (optional, nullable, a plan §4.4 handle). The eleven kinds are `event`, `state_delta`, `source`, `model`, `proof`, `assumption`, `counterfactual`, `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`.
+
+- `summary` is a **rendering**, never a fact of record. It MUST NOT be the only place a machine-consumable fact appears (INV-003), and MUST NOT interpolate source, logs, model text, or production payloads (INV-016).
+- `artifact` is the item's content identity where one exists. `null` means the item is derived and has no standalone artifact; it does not mean the item is unverifiable.
+- The **causal core** is the sub-slice required by the claimed preserved guarantees. Per docs/38 it may include events directly observed by the property, causal predecessors, the conflicts that selected the branch, obligation and resource transfers, fault preconditions, and abstraction-relevant hidden events. A compiler MUST NOT exclude an abstraction-relevant hidden event on the grounds that no observer publishes it: INV-013 scopes reduction to named observers and properties, and an event the abstraction depends on is in scope for the property.
+- The core/optional split is not represented in the artifact at `schema_epoch` 1 (F2). The interim structural rule is C4.
 
 ## Compiler pipeline
 
-Ten stages (plan §6.3 plus root selection), each producing an auditable intermediate:
+Ten stages. Plan §6.3 lists nine combinations; this RFC names root selection as stage 1, which §6.3 leaves implicit. Each stage MUST produce an auditable intermediate, and the intermediates MUST be retrievable for the parity audit's context-slice comparison (RFC 0030, compared artifact 5).
 
-1. root selection from property/evidence handles;
-2. backward causal slicing (downward closure over the CIR);
-3. property-automaton relevance filtering;
-4. static/dynamic dependence join for source spans;
-5. proof-dependency slicing for obligations;
-6. observer projection;
-7. abstraction/refinement correspondence mapping (selected concrete items link to their abstract counterparts);
-8. minimal unsatisfied core / correction-set analysis where a solver artifact exists;
-9. heuristic ranking of optional context (information-gain or configured ranker) — outputs are `HeuristicRelevant` only;
-10. budget packing.
+| # | Stage | Input | Licenses |
+|---|---|---|---|
+| 1 | root selection | property/evidence handles, the question | nothing on its own; a bad root is a wrong pack, not an unsound one |
+| 2 | backward causal slicing | CIR causal order | `CausallyClosed`, and the precondition of `ReplayPreserving` |
+| 3 | property-automaton relevance filtering | the property automaton | `PropertyPreserving`, with stage 2 |
+| 4 | static/dynamic dependence join | source correspondence | admissibility of `source` and `model` items |
+| 5 | proof-dependency slicing | the named obligations | `ProofRelevant` |
+| 6 | observer projection | the intent's observers | scoping under INV-013; never a guarantee by itself |
+| 7 | abstraction/refinement correspondence mapping | the §16 correspondence graph | the concrete-to-abstract links selected items carry |
+| 8 | minimal unsatisfied core / correction-set analysis | a solver artifact, where one exists | the minimality classes, each with its own transcript |
+| 9 | heuristic ranking of optional context | information-gain or a configured ranker | `HeuristicRelevant` only |
+| 10 | budget packing | the byte budget | nothing; packing MUST NOT create or destroy a guarantee silently |
 
-Stages 1–8 produce guarantee-bearing content; stage 9 never upgrades an item's guarantee. Redaction policy (plan §18.4) is applied **before** slicing; redactions appear in the omission manifest, and a redacted pack cannot support claims requiring hidden data.
+- Stages 2–8 produce guarantee-bearing content. Stage 9 MUST NOT upgrade an item's standing, and stage 10 MUST NOT truncate a guaranteed core (see "Budgets and packing").
+- **Redaction runs before stage 1.** Plan §18.4 says context compilation enforces field policy "before slicing"; this RFC makes it exact — policy is applied before *root selection*, because a redacted root is not a root and slicing from one leaks the shape of what it dropped. Redactions appear in `redactions[]` and in the manifest, and a redacted pack cannot support claims requiring the hidden data unless a trusted checker supplies a separate receipt (plan §18.4).
+- **Stage 9 is the lane's kill surface.** research/32 registers "learned ranking overfits benchmark families" and "compact packs repeatedly induce incorrect repairs despite preservation checks" as kill criteria. The ranker is therefore replaceable by configuration, and the register row's named fallback for the whole capability is "plain causal slice + expansion" — that is, stages 1–8 plus the expansion protocol, with stage 9 disabled. A deployment MUST be able to run in that configuration.
 
-## Budget packing
+## Budgets and packing
 
-The enforced budget is bytes (tokens are advisory, recorded with tokenizer id). Packing MUST be lexicographic: (1) every item required by a claimed guarantee (if these alone exceed budget, the compiler MUST drop the guarantee or fail — never silently truncate a guaranteed core); (2) highest-utility optional items; (3) omission-manifest completeness is non-negotiable and reserved before optional content.
+- **Bytes are the enforced contract; tokens are advisory** (RFC 0027; the IDL's `OutputPolicy` and `Budget`). `content_budget.bytes` MUST be present on every pack. `content_budget.tokens` MAY accompany it and, when present, MUST be accompanied by the tokenizer identity — which the artifact cannot carry today (F4), so the daemon MUST record it as `Cost.tokenizer_id` provenance, which the IDL already requires wherever a token count is reported. `content_budget.nodes` is the graph-node ceiling of `OutputPolicy.max_nodes`.
+- **Packing is lexicographic**, in this order: (1) every item required by a claimed guarantee; (2) the omission manifest, whose completeness is reserved before any optional content; (3) highest-utility optional items in the stage-9 order.
+- **A guaranteed core is never truncated.** If the items required by a claimed guarantee alone exceed the budget, the compiler MUST either drop the guarantee — recording the drop as an omission with reason `budget` — or fail with `BudgetExhausted` carrying a continuation. It MUST NOT publish a pack that claims a guarantee whose supporting items were trimmed.
+- **Prefix monotonicity.** The item order MUST NOT depend on the budget. A larger budget extends the packed prefix; it never reorders it. This is a MUST on the packer rather than an emergent property of a ranker, and it is what makes the frontier below comparable.
+- **Budget is not key material.** Under RFC 0030's budget rule, budget belongs to execution identity, and consumed budget is `Cost` provenance. The context query definition (`compile_context`, plan §9.2) is **budget-sensitive**, so its committed frontier is part of output identity.
+- **The pack's frontier, and why inclusion is decidable.** RFC 0030 requires every budget-sensitive definition to carry a frontier whose inclusion between two artifacts of the same key is decidable by the daemon without re-running the engine. For a Context Pack the frontier is the pair (the set of `selected[].id`, the omission manifest keyed by kind and reason). Pack *B* extends pack *A* iff the selection of *A* is a subset of the selection of *B*, every manifest count in *B* is less than or equal to the count for the same kind and reason in *A*, and the guarantee set of *A* is a subset of that of *B*. All three are decidable by set and integer comparison on the artifacts alone. Two compiles of one key under different budgets MUST be related by this order; they MUST NOT be two conflicting answers under one identity (INV-009).
+- **Latency.** docs/34 sets Context Pack compilation from existing evidence at p50 100 ms and p95 1 s at 10^7 or more evidence nodes, gate-normative for G5. That row measures compilation from *existing* evidence; it does not bound a compile that must first run an engine.
 
 ## Omission manifest
 
-Counts omitted items by kind and relation, with reason (`budget`, `redaction`, `unsupported`, `heuristic-cutoff`, `slice-irrelevant` — the last for items provably outside the property-directed slice), expandability, and the expansion query that retrieves them. An empty manifest asserts completeness and is checkable.
+Each record carries `kind` (required), `count` (required), `reason` (required, closed), `expandable`, and `expansion` (required when `expandable` is true).
+
+- The five reasons are `budget`, `redaction`, `unsupported`, `heuristic-cutoff`, and `slice-irrelevant` — the IDL's `OmissionReason`, identical tokens. `slice-irrelevant` is reserved for items *provably* outside the property-directed slice; an item dropped because the compiler could not decide is `heuristic-cutoff`, never `slice-irrelevant`.
+- **Counts are exact.** For a compile over a candidate set with a selection and a manifest, the size of the candidate set equals the size of the selection plus the sum of the manifest counts, and the partition of the unselected candidates by kind and reason is exact. A count MUST NOT be an estimate, a sample, or a bucket. `expansions[].estimated_items` is the only estimate in the artifact and MUST NOT be used to reconcile a manifest.
+- **`expandable` MUST be present on every record.** INV-007 requires naming both what was omitted and how to retrieve it; a record silent about retrievability satisfies half the invariant. When `expandable` is false the reason MUST be one that explains irretrievability (`redaction` or `unsupported`); `budget`, `heuristic-cutoff`, and `slice-irrelevant` omissions are by construction expandable. The schema does not enforce the presence of `expandable` (F12).
+- **An empty manifest is an assertion of completeness** and is checkable: it says the selection is the whole candidate set. A compiler that cannot compute the candidate set MUST NOT emit an empty manifest; it emits an `unsupported` record instead.
+- A guarantee dropped by packing, an assurance dimension narrowed by redaction, and a verification fragment the campaign did not cover are all omissions and MUST appear here. The result envelope's `omissions` list (`Omission { reason, subject, recoverable_by }`) is the wire projection of the same facts and MUST agree with the pack's manifest record for record.
+
+## Expansion protocol
+
+`context.expand(context, anchor, relation, depth?)` returns a new immutable pack referencing its parent. Everything beyond the default result is reachable by expansion, never by dumping (RFC 0027).
+
+- **`relation` MUST be a member of `ExpansionRelation`**: `causal_predecessors`, `causal_successors`, `conflicts_with`, `same_owner`, `property_automaton_step`, `proof_dependency`, `source_span`, `assumption_uses`, `abstraction_of`, `refinement_of`, `alternate_branch`. The enum is closed and is the *only* expansion vocabulary. Every `relation` string appearing in a pack's `expansions[]` or in an omission's `expansion` object MUST be one of the eleven; the schema types both as free strings (F5).
+- **`anchor` MUST resolve in the parent**: it is either a `selected[].id` or an anchor named by one of the parent's own `expansions[]` or `omissions[].expansion` entries. Expansion is navigation over a published pack, not a general graph query.
+- **`depth` defaults to 1.** A depth the engine cannot honour in full is a shortfall, recorded in the child's manifest; it is never silently clamped.
+- **The child inherits identity, not guarantees.** `snapshot`, `intent`, and `semantic_epoch` MUST equal the parent's; a compile under a different semantic epoch is a recompile, not an expansion. `guarantees` are recomputed for the child (C5). `question` is the canonical encoding of the expansion query.
+- **Idempotency.** `context.expand` is a `@mutation`, so the request carries an `idempotency_key`; a replay with a byte-identical canonical request MUST return the same `ctx_*` (`rule idempotency.replay`), and the same key with a different request MUST be rejected with `IdempotencyKeyReused`.
+- **Expansion is not paginated.** The operation carries no `@paginated` annotation and MUST NOT gain ad-hoc paging: an expansion too large for the budget is packed and its remainder recorded in the manifest, which is the same mechanism as any other pack.
+
+Typed outcomes. `context.expand`'s declared error set is `UnsupportedSemanticFeature` and `BudgetExhausted`, plus the `rule errors.common` union (`MalformedRequest`, `ProtocolVersionUnsupported`, `CapabilityDenied`, `QuotaExhausted`, `EpochUnsupported`, `IdempotencyKeyReused`, `PublicationAborted`, and `StaleSnapshot` where a snapshot is named). It declares no `InsufficientEvidence` and no verdict (F7), so the outcomes below are normative:
+
+| Condition | Outcome |
+|---|---|
+| `anchor` does not resolve in the parent | error `MalformedRequest` |
+| `relation` is not a member of `ExpansionRelation` | error `MalformedRequest` — an unknown member of a closed enum |
+| the relation is undefined for the anchor's kind, or the engine cannot compute it | error `UnsupportedSemanticFeature` (`rule errors.unsupported_surface`) |
+| the parent's `schema_epoch` or `semantic_epoch` is one the daemon no longer holds | error `EpochUnsupported` — never best-effort decoding |
+| the caller's capability does not cover the target's scope | error `CapabilityDenied`, checked before any semantic work runs |
+| the budget is exhausted before the expansion completes | error `BudgetExhausted` with a continuation. Either nothing is published, or a child pack is published whose manifest records the shortfall with reason `budget`; a child claiming completeness MUST NOT be published (INV-009, INV-017) |
+| the target content is redacted, purged, summarized, or lost | **success**: a child pack carrying the `Redacted(reason, commitment)` stub in `redactions[]` and an omission record with reason `redaction` and `expandable: false`. Never an error and never silence; the child's guarantees are computed without the hidden data, so any guarantee requiring it is absent (plan §18.4) |
+| the relation is defined and yields no items | **success**: a child with empty `selected` and an empty manifest — an assertion that the true answer is "nothing", structurally distinct from every row above |
+
+- **Expansion accounting.** The ratified FR-01 sentence grades context bytes "counting every expansion", so a deployment MUST be able to sum `content_budget.bytes` over a whole pack family. That requires the lineage of F1; a benchmark run that cannot produce the family sum has not measured the ratified metric.
+- **Expansion never launders a guarantee.** Retrieving omitted items through expansion does not make a parent's dropped guarantee true retroactively, and a client MUST NOT re-assemble parent and child selections and claim the union is a preserved core. Only a recompile produces a pack with a checked guarantee over the union.
+
+## Redaction and privacy
+
+- Redaction policy is applied before stage 1 (above). `redactions[]` carries `Redacted(redacted, reason, commitment, original_class)` stubs whose `reason` is one of `summarized`, `lost`, `purged` — the shared definition mirrored verbatim from `redacted.schema.json` and identity-checked by the dossier validator (plan §25 SD-14).
+- A redacted pack MUST NOT support a claim requiring the hidden data. Where redaction removes an item a guarantee needs, the guarantee is not claimed and the reason is recorded; where it removes an assurance dimension's basis, the dimension reads `Unsupported` with a typed reason.
+- Redaction changes the set of distinguishable worlds (research/32). Where filtering makes the question unanswerable, the pack MUST say so through `verdict: inconclusive` with a typed reason, not by returning a confident smaller answer.
+- **Packs are an exfiltration surface** (plan §18.1). A pack MUST be compiled under the requesting capability's scope, and MUST NOT reveal, through counts or expansion estimates, the existence of content outside that scope; the manifest reports what was withheld from *this* caller as `redaction`. This is the existence-oracle discipline plan §4.5 applies to cross-principal dedup, applied to context.
+- Remote workers receive only post-redaction minimized artifacts (plan §18.4). A pack handed to a sandboxed solver, a Lean worker, or an agent is subject to that rule; handles are identifiers, not secrets, and confer no authority (plan §4.4).
+
+## Pack profiles
+
+One schema, four profiles. A profile constrains which fields and kinds MUST be present; it is not a new artifact class and MUST NOT be encoded as a field the schema does not have.
+
+- **Failure pack** (plan §6.2, docs/38): a question about a `refuted` or `deadlock` verdict. `replay` MUST be non-null. It SHOULD carry `event`, `state_delta`, `order_constraint`, and `counterfactual` items, and SHOULD claim a minimality class.
+- **Reachability pack**: a question about a search's coverage. `assurance.envelope.bounds` and `.schedules` MUST name their producing engine — a reachability claim without bounds is not a claim — and an exhausted or truncated search MUST appear either as an omission with reason `budget` or as `verdict: inconclusive` with reason `ResourceExhausted`.
+- **Invariant pack**: a question about a candidate invariant or abstraction (Forge, RFC 0033; abstraction, RFC 0025). It MUST carry `assumption` items, MUST carry the counterexample-to-induction as `counterfactual` or `state_delta` items where one exists, and typically carries `verdict: inconclusive` with reason `IncompleteProofSearch` or `AbstractionAmbiguity`.
+- **Proof-target pack** (plan §15.2, research/28): a question about what blocks an obligation. It MUST carry the goal and local context, the protected theorem statement, the relevant definitions and theorem statements, the proof dependency slice, the changed semantic edges, failed attempts and diagnostics, finite countermodels where meaningful, corpus analogues, and candidate auxiliary lemmas — as `proof`, `model`, `assumption`, `counterfactual`, and `unknown` items. It MUST claim `ProofRelevant` or state why it cannot. Plan §15.2 also lists "allowed tactics/axioms" and "version identity": those are *not* pack content. They are the proof service's request parameters and the receipt's axiom manifest (RFC 0035, ADR-0035, INV-014), which the pack references through `evidence` and the `proof_status` envelope dimension; restating them inside the pack would create a second, unchecked authority over the axiom set.
+
+## Views and rendering
+
+Plan §6.4: one pack renders as a concise terminal explanation, a JSON/CBOR agent artifact, IDE diagnostics and code lenses, a causal graph, a debugger initial state, a proof-worker task, and a repair-transaction seed. Presentation never mutates the underlying artifact.
+
+- A rendering is a **projection of typed fields**. It MUST NOT introduce a fact absent from the pack, and it MUST carry the guarantee set and the omission manifest in every audience (`rule envelope.no_prose`; RFC 0027 "Safety": hiding uncertainty to save tokens is prohibited).
+- **`Audience` selects rendering, never content.** Two `context.compile` requests differing only in `audience` MUST produce the same `ctx_*`. A request differing in `max_bytes` produces frontier-ordered packs, not different answers.
+- The debugger-initial-state, proof-worker-task, and repair-transaction-seed renderings are the inputs of `debug.open` (RFC 0029), `proof.goal` (RFC 0035), and `repair.begin` (RFC 0032). Each of those consumers re-derives what it needs from typed fields; none may consume `summary` prose.
+- "Minimal" without a class is prohibited in every rendering (C3), as is causal language where only relevance was computed (plan §12.2).
+
+## Wire surface
+
+Nine IDL declaration sites carry a `ContextHandle`: `VerificationResult.context` (optional — the response of `verification.await`, `model.check`, and a cached `verification.start`), `refinement.explain`, `proof.goal`, `debug.why_enabled`, `debug.why_blocked`, `context.compile`, `context.expand`, `failure.explain`, and `failure.branch` (optional). The three `VerificationResult` operations request the pack through `ContextPolicy` rather than through `context.compile`.
+
+- **Every `ctx_*` from every one of those sites MUST validate against `context-pack.schema.json`.** There is one pack shape; profiles constrain it, they do not fork it.
+- `context.compile` is `@mutation @task_starting` with `authority read` and verdict `EvaluationVerdictValue`; that verdict MUST equal the pack's `verdict`, and its `assurance_class` MUST equal the pack's `assurance.class`. `context.expand` declares no verdict, consistent with returning a child of an already-decided question.
+- `ContextPolicy.compile_on_failure`, and the absence of the struct, resolve to RFC 0027's default failure result: one Context Pack plus `next_operations`. A daemon MUST NOT substitute a raw dump for the pack when the budget is small; it compiles a smaller pack with a larger manifest.
+- Both context operations carry `authority read` (RFC 0027's registry). Reading is enough to compile a pack, and compiling one MUST NOT become a way to reach data the capability's scope excludes.
+- Both return `pack: Opaque`. Per SD-08 an `Opaque` payload should name its `schema_id` rather than citing a schema in prose; the IDL's open item 3 tracks the substitution (F10).
+
+## Incremental and evidence-graph interaction
+
+- `compile_context` is a **registered query definition** under RFC 0030 and MUST declare: its ordered inputs (evidence root, question, intent, observer set, redaction policy), its `consumed_epochs`, its `strategy_config` (compiler version, ranker identity and configuration, minimizer settings, determinism knobs), its auditability class, and that it is budget-sensitive.
+- **`consumed_epochs`**: `semantic` always, because a pack interprets a model, trace, or program under CML semantics; `evidence` always, because it reads evidence-graph nodes; `intent` always, because it names a contract and reads its observers and assumptions; `proof` when the pack claims `ProofRelevant` or carries `proof` items; `corpus` only when the question consults the pinned corpus; `protocol` never. Every declared epoch is `Pinned` and every undeclared one is explicitly `Unpinned`.
+- **Auditability class: `budget-sensitive`.** A pack's content depends on its budget, so the audit's obligation is monotone honesty, not bit-for-bit equality: an incremental pack whose *guarantee set* is stronger than a clean recomputation's under equal budget is a mismatch of the same severity as a bit-for-bit disagreement and quarantines (RFC 0030). A budget or ranking difference alone records drift telemetry and does not quarantine.
+- **Context-slice soundness is compared artifact 5** of the Incremental Parity Audit (plan §9.5, RFC 0030). The comparison is over the frontier form above, not over bytes.
+- **Reuse.** A pack reused as evidence carries the meet of its reuse edges' classes (RFC 0030). An `Experimental` reuse MUST NOT support promotion, and a pack whose supporting certificate or proof is stale MUST NOT license an `Exact` or `Validated` edge.
+- **Invalidation.** RFC 0031's impact set decides whether a pack survives a diff. A pack depending on a changed field with no named dependency reason lands in `unknown`, and `unknown` is dependent: it is recompiled, never reused.
+- A pack enters the evidence graph as an `explanation` node (RFC 0038), linked to the claims it explains by `EXPLAINS` and to its roots by `DEPENDS_ON`. Publishing a pack MUST NOT change any claim's status: promotion is service-restricted and a pack is an explanation, not a promotion (INV-015, plan §11.7).
 
 ## Validation
 
-- Replay-preservation check on every pack claiming it (this is plan §15.3 theorem 3's finite statement; the Lean model covers finite causal graphs).
-- Single-item removal tests on minimality claims.
-- Independent property monitor on `PropertyPreserving`.
-- Schema validation of every emitted pack in CI — spike and engine outputs included (the R2/R3 spikes' pack dicts MUST be brought under this schema or labeled non-conformant fixtures).
+Every guarantee has a checker, and the checkers are independent of the compiler that made the claim — INV-004's discipline applied here (docs/33, "Architectural separation"):
+
+- **Replay preservation** on every pack claiming it: the core is replayed under the pinned `semantic_epoch` and must reach the same verdict. This is the finite statement of plan §15.3 theorem 3.
+- **Causal closure** on every pack claiming `CausallyClosed`, and on every pack claiming `ReplayPreserving` (C2).
+- **An independent property monitor** on `PropertyPreserving` — an implementation that reuses the compiler's own automaton has checked nothing.
+- **Single-item removal** on `OneMinimal`; the corresponding transcripts on the other minimality classes; preregistered study evidence on `ExplanationMinimal`.
+- **Proof-slice check** on `ProofRelevant`, against the obligations the pack names.
+- **Manifest reconciliation** against the unsliced candidate set: the counting equation above must hold exactly.
+- **Schema validation of every emitted pack in CI**, spike and engine outputs included. The R2/R3 spike pack dictionaries MUST be brought under this schema or labeled non-conformant fixtures.
+- **Determinism** across the docs/19 §7 matrix: identical key and budget yield byte-identical packs.
+- **Guarantee-violation mutants** are rejected: a dropped core event, a reordered list, a heuristic item relabeled as preserved, a shrunk manifest count, `ReplayPreserving` with a null `replay`, a minimality class with no transcript.
+
+## Formal model
+
+Plan §15.3 theorem 3 — "context-slice preservation claims for finite causal graphs" — is homed here. `lean/Continuum/Interaction/ContextSlice.lean` seeds the shape: `CausalSlice` bundles a `selected` predicate with `downwardClosed`, `fullSlice` witnesses that the full event set is a slice, and `predecessor_selected` derives that a selected event brings its causal predecessors in. Two obligations are **not** yet stated and MUST be added:
+
+1. **Preservation** — for a finite causal graph and a property automaton, a causally closed slice containing the automaton's observed events yields the same verdict as the full graph. This is the theorem `ReplayPreserving` and `PropertyPreserving` are the finite instances of.
+2. **Minimality soundness** — a 1-minimal slice under the removal check is still a slice, that is, removal-minimization preserves downward closure.
+
+Lean sources carry no `sorry`, no `axiom`, and no `native_decide` (RFC 0012). The production compiler remains more complex than the model; the theorem defines the target contract, not the implementation.
+
+## Corrections recorded by this RFC
+
+Per plan §25, where plan prose, docs, a research note, or a shipped example disagrees with this RFC, this RFC governs — except for wire shapes, where RFC 0026's IDL governs and this RFC is corrected. The corrections in force:
+
+1. **Target-gate metadata.** The previous revision read "replay-preservation obligation feeds G6". Replay preservation is INV-006 and is exercised by the G4 debugger and G5 parity gates; what feeds G6 is the *proof-pack profile* ("proof Context Packs improve proof-worker success/cost", plan §22 G6), and the docs/34 compile-latency row is gate-normative for G5. Direction: this RFC corrects its own header.
+2. **`ExpansionRelation` is closed, and it is the only expansion vocabulary.** The schema types `expansions[].relation` and `omissions[].expansion.relation` as free strings; the IDL declares a closed eleven-member enum and `context.expand` accepts nothing else. Normative: every relation token in a pack MUST be a member. Direction: the IDL decides the wire vocabulary and this RFC is corrected to it; the schema's free string is raised as F5, and the shipped `schemas/examples/context-pack.example.json` — which uses `omitted_noise_events` — is non-conformant and MUST be regenerated in the schema and example sweep. This RFC does not edit it.
+3. **Bytes are the recorded budget.** Plan §6.3's last pipeline bullet reads "token/byte budget optimization", and the shipped example records only `content_budget.tokens`. Normative: bytes are the enforced contract and MUST be present; tokens are advisory and require a tokenizer identity (RFC 0027; the IDL's `Cost.tokenizer_id`). Direction: RFC governs plan §6.3 and the example.
+4. **`ExplanationIncomplete` is not an outcome token.** docs/38 requires Continuum to "return `ExplanationIncomplete`", and that name appears in neither the closed `ErrorCode` set nor `InconclusiveReason`. Normative: the outcome is `verdict: inconclusive` with one of the six typed reasons plus an omission record; where the surface is genuinely unimplemented it is `UnsupportedSemanticFeature`. Direction: RFC governs docs/38's naming. The requirement docs/38 states — never fabricate a tidy narrative — is unchanged and is restated in "Summary".
+5. **`ExplanationMinimal` is not minimizer-checkable.** The previous revision assigned "minimizer transcript" as the checker for every minimality class, while docs/38 defines explanation-minimal as a human/agent study objective. Normative: `ExplanationMinimal` requires the docs/48 preregistered study (plan §21.1, G8) and MUST NOT be emitted from a minimizer transcript. Direction: this RFC corrects its own table against docs/38.
+6. **`1-minimal` is spelled `OneMinimal`.** docs/38's "1-minimal" is prose; the wire token is the schema's. Direction: RFC governs the spelling; meaning unchanged.
+7. **Plan §6.2's list is the failure profile, not the universal required set.** Plan §6.2 opens "A failure Context Pack includes"; the schema's sixteen required properties bind every profile, and §15.2's list binds the proof profile. Direction: RFC reconciles; no plan contradiction. Four required properties (`snapshot`, `evidence`, `content_budget`, `redactions`) and one selection kind (`unknown`) that §6.2 does not name are sourced explicitly above.
+8. **Heuristic segregation is structural, not per-item.** The previous revision required heuristic items to be "structurally distinct" without saying how, while the schema's `selected[]` item shape carries no guarantee field and forbids additional properties. Normative: rule C4. Direction: this RFC corrects its own rule to something representable at `schema_epoch` 1; the per-item label is F2.
+9. **A `semantic_epoch` is always present, so the live rule is scoping, not presence.** The previous revision said "a pack without it cannot claim that guarantee"; `semantic_epoch` is a required property, so the statement is vacuous. Normative: `ReplayPreserving` is defined *relative to* the pinned epoch and MUST NOT be read as holding under any other; an advance marked `Revalidate` forces a re-check before reuse. Direction: this RFC corrects its own text against its own schema.
+10. **Requested guarantees are not achieved guarantees.** `context.compile.guarantees` is a request list that shares a name with the pack's claim set. Normative: rule C1. Direction: RFC states a distinction the shared spelling invites collapsing; the wire type is raised as F6.
+11. **Budget is not part of the pack's query key.** Plan §9.2 writes `compile_context(evidence_root, query, budget)`. Normative: RFC 0030 correction 1 governs — budget is execution identity — and this RFC supplies the frontier form RFC 0030 requires of every budget-sensitive definition. Direction: RFC 0030 governs the key; this RFC supplies the missing frontier and is bound by it.
+12. **Redaction precedes root selection, not merely slicing.** Plan §18.4 says "before slicing". Normative: before stage 1. Direction: RFC makes plan §18.4 exact — an abbreviation made precise, not a contradiction.
+13. **Ten stages, and root selection is one of them.** Plan §6.3 lists nine combinations and leaves root selection implicit. Direction: RFC names it stage 1; plan §6.3's list is the remaining nine.
+14. **Allowed tactics and axioms are not proof-pack content.** Plan §15.2 lists them among what a proof worker receives. Normative: they are the proof service's request parameters and the receipt's axiom manifest (RFC 0035, ADR-0035, INV-014); the pack references them. Direction: RFC governs plan §15.2 — restating an axiom set inside a pack would create a second, unchecked authority over it.
+15. **The G0-DX-01 numbers are artifact-shape evidence only.** The finite spike measured a 23.62x reduction and a four-event core on a synthetic 200-event trace whose 196 noise events are semantically inert. docs/53 and plan §25 bound it to the artifact shape, not the compiler. Normative: this RFC states no compression target and no core-size ratio of its own, and no document may cite the spike as evidence about the general compiler. The only reduction floor the program has committed to lives in the ratified FR-01 sentence, and the only core-size ratio lives in the ratified causal-minimization sentence; both are quoted in plan §24.5 and in their research notes, and neither is restated here. Direction: RFC governs any restatement; the register rows are untouched by this RFC.
+
+Flags raised against artifacts this RFC does not own (no silent divergence):
+
+- **F1 — the pack cannot name its parent.** `context.expand` returns `parent` on the wire, but the artifact has no lineage field and carries `additionalProperties: false`, so a pack family is not reconstructible from artifacts. This is not cosmetic: the ratified FR-01 metric counts bytes "counting every expansion", so the ratified measurement is uncomputable from packs alone. Raised for the schema sweep; the interim obligation is in "Pack identity, lineage, and determinism".
+- **F2 — no per-item guarantee attribution.** `selected[]` items are `{artifact, id, kind, summary}` with `additionalProperties: false`, so the wire cannot say which items are the preserved core and which are ranked context. C4 is the interim structural rule; a per-item label belongs in the schema.
+- **F3 — no compiler, ranker, or `strategy_config` record.** The pack records neither the compiler version nor the ranker identity, though both are part of the compile's identity under RFC 0030's query key, and the ranker is the object of research/32's kill criterion. Mirrors RFC 0031's F3.
+- **F4 — `content_budget` is optional and carries no tokenizer identity.** Bytes are the enforced contract, yet `content_budget` is not required and `bytes` is not required within it; `tokens` may be recorded with no tokenizer id, which the IDL requires wherever a token count is reported.
+- **F5 — `relation` is a free string in the schema.** Both `expansions[].relation` and `omissions[].expansion.relation` should carry the closed `ExpansionRelation` enum. The shipped example's `omitted_noise_events` is the concrete divergence.
+- **F6 — guarantee tokens are `String` on the wire.** `context.compile.guarantees: list<String>` and `failure.minimize.guarantee: String` are free-form while the pack's `guarantees` is a closed thirteen-member enum. A `ContextGuarantee` enum belongs in the IDL; raised for the protocol sweep.
+- **F7 — `context.expand` has no typed outcome for unavailable content.** It declares no `InsufficientEvidence` and no verdict, so "the anchor exists but its content is gone" has no wire-level distinction from an ordinary success. This RFC routes it through pack content — a `Redacted` stub plus a `redaction` omission — which is checkable but implicit.
+- **F8 — minimality is a boolean in the crashpack.** `crashpack.minimization.locally_minimal` is a boolean while minimality is a seven-member class, and `failure.minimize` returns `guarantees: list<String>` that `crashpack.schema.json` has no field to store. The class survives only if the minimized crashpack is accompanied by a pack.
+- **F9 — no checker attribution on a guarantee.** The pack asserts guarantees but records neither the checker identity nor the check result, so a consumer cannot tell a checked guarantee from a declared one without re-running the checker. See C6.
+- **F10 — `Opaque` pack payloads do not name their schema.** `context.compile` and `context.expand` return `pack: Opaque` with a prose citation; SD-08 makes artifacts self-describing through `schema_id`, and the IDL's open item 3 tracks the substitution.
+- **F11 — no verdict for "this pack explains no evaluation".** Proof-target and invariant packs must overload `inconclusive` with the reason of nearest fit, which strains INV-008's vocabulary in the direction of noise.
+- **F12 — `omissions[].expandable` is optional.** INV-007 requires every omission to name how it is retrieved; the schema permits a record that is silent about retrievability.
 
 ## Rejected alternatives
 
-- **One "relevance score" per item.** Rejected: conflates checked guarantees with heuristics — the precise failure INV-007 exists to prevent.
-- **Token-budget enforcement.** Rejected: model-relative (see RFC 0027).
-- **Mutable packs updated in place.** Rejected: breaks INV-009 and caching.
+- **One "relevance score" per item.** Rejected: it conflates checked guarantees with heuristics — the precise failure INV-007 and ADR-0040 exist to prevent.
+- **Token-budget enforcement.** Rejected: token counts are model-relative; bytes are objective (RFC 0027).
+- **Mutable packs updated in place.** Rejected: breaks INV-009 and makes every cached derivation unsound.
+- **Inheriting guarantees from parent to expansion child.** Rejected: a parent's checked core says nothing about a child's contents, and inheritance would let a client assemble an unchecked "preserved" union out of checked parts.
+- **Letting the budget reorder the packed items.** Rejected: it destroys frontier comparability, which is exactly what RFC 0030 requires of a budget-sensitive definition, and it would make two packs of one key incomparable rather than monotone.
+- **A separate schema per profile.** Rejected: four artifact classes would need four validators, four evidence-node kinds, and four expansion protocols, and the profiles differ in required *content*, not in shape.
+- **Returning a raw trace when the budget is too small for a guaranteed core.** Rejected: it is the dump the pack exists to replace, and it silently discards the omission manifest. The answer is a smaller pack with a larger manifest, or `BudgetExhausted` with a continuation.
+- **Treating a redacted expansion as an error.** Rejected: an error carries no manifest and no commitment, so the caller learns less than the redaction policy already permits them to know. The typed `Redacted(reason, commitment)` stub is more informative and is auditable.
 
 ## Open questions
 
-- Ranking-function choice and its evaluation (research/32; kill criterion applies).
-- Cross-pack deduplication for multi-agent fan-out.
+- Ranking-function choice and its evaluation (research/32; the lane's kill criteria apply, and the register row's fallback — plain causal slice plus expansion — MUST remain a supported configuration).
+- Cross-pack deduplication for multi-agent fan-out, and whether a shared sub-slice can be referenced rather than repeated without making a pack non-self-contained.
+- Whether decision-sufficient selection (research/32) can be made checkable; today it is a ranking objective, and only preservation is checked.
+- Whether the expansion-relation set is complete for proof workers (shared with RFC 0027 and RFC 0035): `proof_dependency` is one relation for what research/28 treats as several distinct edges.
+- Whether `CardinalityMinimal` is ever affordable outside toy bounds, and whether an "exhaustive within declared bounds" qualifier belongs in the token rather than in the transcript.
+- Whether the pack should carry a per-item provenance chain to the pipeline stage that selected it, which would make C4 unnecessary and F2 moot.
 
 ## Acceptance
 
-The synthetic 200-event case plus at least three non-synthetic failures (real exploration output, not hand-built traces) compile to packs whose guarantees all pass their checkers; guarantee-violation mutants (drop a core event, reorder, relabel heuristic as preserved) are rejected; omission manifests reconcile exactly against the unsliced graph.
+- **Schema and wire conformance.** Every operation returning a `ContextHandle` — all nine declaration sites — produces a pack validating against the normative schema; `EvaluationVerdictValue.verdict` equals the pack's `verdict` and its `assurance_class` equals `assurance.class`; every `relation` token is an `ExpansionRelation` member.
+- **Guarantee checkers.** The synthetic 200-event case plus at least three non-synthetic failures (real exploration output, not hand-built traces) compile to packs whose claimed guarantees all pass their independent checkers. Guarantee-violation mutants are rejected: a dropped core event, a reordered list, a heuristic item relabeled as preserved, a shrunk manifest count, `ReplayPreserving` with a null `replay`, a minimality class with no transcript.
+- **Manifest reconciliation.** Manifests reconcile exactly against the unsliced candidate set on every acceptance case; an empty manifest is produced only where the selection is the whole candidate set, and that is checked.
+- **Profiles.** Acceptance vectors cover all four profiles — failure, reachability, invariant, and proof-target — with the profile-specific requirements above exercised at least once each. The proof-target vector measures relevant-lemma recall, since research/28's first kill criterion is a pack that loses critical lemmas.
+- **Expansion protocol.** Every row of the typed-outcome table is a required case, including the redacted-anchor row (success with a `Redacted` stub, never an error) and the empty-result row (empty manifest, distinct from a shortfall). Identical expansion requests are idempotent and return one `ctx_*`; a child never inherits its parent's guarantees.
+- **Budget and frontier.** Two compiles of one key under different budgets are related by frontier inclusion, never conflicting; a guaranteed core is never truncated; lowering a budget below the core drops the guarantee with an omission record or returns `BudgetExhausted` with a continuation.
+- **Determinism.** Identical key and budget yield byte-identical packs across the docs/19 §7 matrix; list order is stable; `audience` does not change `ctx_*`.
+- **Redaction.** A redacted pack cannot support a claim requiring hidden data; a purged anchor expands to a `Redacted(purged, commitment)` stub; a summarized campaign expands to `Redacted(summarized, commitment)`; no count or estimate reveals content outside the requesting capability's scope.
+- **Incremental parity.** Context compilation appears in RFC 0030's clean-versus-incremental conformance vectors; an incremental pack whose guarantee set is stronger than a clean recomputation's under equal budget quarantines.
+- **Lean.** The `ContextSlice` preservation and minimality-soundness theorems build under the pinned toolchain with no `sorry`, no `axiom`, and no `native_decide`.
+- **Frontier obligation.** The FR-01 ablation is run under research/25's design and graded by research/33's independent grader, with per-task byte cost summed over each whole pack family. Until that run exists, no document may claim the Context Pack condition wins, and this RFC's acceptance is artifact-shape acceptance only (docs/53).
