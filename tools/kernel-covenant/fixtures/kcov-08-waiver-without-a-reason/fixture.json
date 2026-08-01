@@ -6,7 +6,7 @@
   "substitute": {
     "tools/kernel-covenant/mutation-matrix.toml": [
       {
-        "find": "reason = \"Same gap as `smt`: the envelope is present and checked for shape, but no test pins the carried-label behaviour against a relabelled model or property digest.\"",
+        "find": "reason = \"Ranking and fair-SCC-exclusion certificates carry a fixed graph and a fixed rank vector, with no deletion step and no resource to reuse after release.\"",
         "replace": "reason = \"n/a\""
       }
     ]

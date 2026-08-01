@@ -141,6 +141,8 @@ mutation = "Change an envelope digest to name a different model, property, scope
 expected = "Still Verified, with the *claim* changed — the kernel checks digest shape, never digest contents, and says so through `trusted_components`. A checker that silently accepted a relabelled envelope as the same claim would be the overclaim INV-014 exists against."
 core = ["envelope_digests_are_carried_labels_not_facts_the_kernel_can_check"]
 sat = ["envelope_digests_are_carried_labels_not_facts_the_kernel_can_check"]
+smt = ["envelope_digests_are_carried_labels_not_facts_the_kernel_can_check"]
+temporal = ["envelope_digests_are_carried_labels_not_facts_the_kernel_can_check"]
 
 # --- encoding: canonicity of the byte string --------------------------------
 
@@ -347,18 +349,6 @@ smt = ["a_rejected_certificate_has_no_receipt", "an_unsupported_alethe_step_has_
 temporal = ["a_rejected_certificate_has_no_receipt", "an_unsupported_certificate_has_no_receipt"]
 
 # --- waivers ----------------------------------------------------------------
-
-[[waiver]]
-class = "envelope.digest-relabelling"
-crate = "smt"
-kind = "uncovered"
-reason = "The class applies — an SMT certificate carries the same eight-field RFC 0005 envelope — and no test asserts that relabelling a digest leaves the verdict alone while changing the claim. `continuum-kernel-core` and `continuum-kernel-sat` both have one; porting it is a follow-up on the crate, not on this matrix."
-
-[[waiver]]
-class = "envelope.digest-relabelling"
-crate = "temporal"
-kind = "uncovered"
-reason = "Same gap as `smt`: the envelope is present and checked for shape, but no test pins the carried-label behaviour against a relabelled model or property digest."
 
 [[waiver]]
 class = "body.resource-lifecycle"

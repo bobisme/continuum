@@ -6,8 +6,8 @@
   "substitute": {
     "tools/kernel-covenant/mutation-matrix.toml": [
       {
-        "find": "[[waiver]]\nclass = \"envelope.digest-relabelling\"\ncrate = \"smt\"",
-        "replace": "[[waiver]]\nclass = \"robustness.determinism\"\ncrate = \"core\"\nkind = \"uncovered\"\nreason = \"A stale waiver left behind after the determinism test landed, which is exactly what this rule exists to catch.\"\n\n[[waiver]]\nclass = \"envelope.digest-relabelling\"\ncrate = \"smt\""
+        "find": "[[waiver]]\nclass = \"body.resource-lifecycle\"\ncrate = \"core\"",
+        "replace": "[[waiver]]\nclass = \"robustness.determinism\"\ncrate = \"core\"\nkind = \"uncovered\"\nreason = \"A stale waiver left behind after the determinism test landed, which is exactly what this rule exists to catch.\"\n\n[[waiver]]\nclass = \"body.resource-lifecycle\"\ncrate = \"core\""
       }
     ]
   }

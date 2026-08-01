@@ -950,6 +950,26 @@ mod tests {
     }
 
     #[test]
+    fn envelope_digests_are_carried_labels_not_facts_the_kernel_can_check() {
+        // Stated as a test so the boundary cannot drift silently. The envelope is
+        // opaque to a self-contained checker: changing a digest byte produces a
+        // *different verified claim*, never a rejection, because nothing in the
+        // certificate lets the kernel recompute it. Binding those digests to real
+        // artifacts is the receipt's obligation (RFC 0024, ADR-0035), which is why
+        // `CheckedClaim::trusted_components` names it.
+        let mut plan = Plan::drain_ranking();
+        plan.model_digest = "blake3:some-other-model".to_owned();
+        let Verdict::Verified(claim) = verdict(&plan) else {
+            panic!("an envelope relabel is not a malformed certificate");
+        };
+        assert_eq!(
+            claim.envelope().model_digest().as_str(),
+            "blake3:some-other-model",
+            "the verdict must report the envelope it actually checked against"
+        );
+    }
+
+    #[test]
     fn counts_outside_the_declared_range_are_rejected() {
         let mut no_variables = Plan::drain_ranking();
         no_variables.variables.clear();
