@@ -4,21 +4,29 @@
 
 ### Code policy
 
-- Rust edition/toolchain pinned.
-- `unsafe` forbidden by default.
-- deterministic collections in semantic paths.
-- no ambient time/RNG in core.
-- no platform-dependent hashing in canonical formats.
-- no network access in certificate checking.
-- dependency additions require rationale and TCB classification.
+- Rust edition/toolchain pinned. (delivered: bn-1j0i)
+- `unsafe` forbidden by default. (delivered: bn-1j0i)
+- deterministic collections in semantic paths. (delivered: bn-1j0i)
+- no ambient time/RNG in core. (delivered: bn-1j0i)
+- no platform-dependent hashing in canonical formats. (delivered: bn-1j0i)
+- no network access in certificate checking. (delivered: bn-1j0i)
+- dependency additions require rationale and TCB classification. (delivered: bn-1j0i, bn-98nd)
 
 ### Semantic policy
 
-- semantic changes require ADR;
-- every breaking change increments semantic epoch;
-- every pack operation has a normative contract;
-- reference semantics precedes optimization;
-- ambiguous behavior is an error, not implementation freedom.
+- semantic changes require ADR; (delivered: bn-1j0i, bn-98nd)
+- every breaking change increments semantic epoch; (delivered: bn-1j0i, bn-98nd)
+- every pack operation has a normative contract; (delivered: bn-1j0i, bn-98nd)
+- reference semantics precedes optimization; (delivered: bn-1j0i, bn-98nd)
+- ambiguous behavior is an error, not implementation freedom. (delivered: bn-1j0i, bn-98nd)
+
+These twelve obligations are enforced by `tools/governance/check_code_policy.py`
+(self-testing, 56 fixtures; evidence in `tools/governance/evidence/gov-1.json`;
+dependency rationale and TCB classes in
+`tools/governance/dependency-rationale.toml`). GOV-1-08…12 are enforced at
+their checkable core with the proxy boundary stated per entry in the evidence
+file; a two-revision gate (diffing against the merge base) would make
+GOV-1-08/09 genuinely enforceable and is tracked as follow-up work.
 
 ## 2. Decision process
 

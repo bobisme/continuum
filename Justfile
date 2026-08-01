@@ -8,8 +8,8 @@ set positional-arguments
 default:
     @just --list
 
-# Full project gate: formatting, lints, tests, crate boundaries, dossier, Lean.
-check: fmt-check lint test boundaries dossier lean
+# Full project gate: formatting, lints, tests, crate boundaries, governance, dossier, Lean.
+check: fmt-check lint test boundaries governance dossier lean
 
 # Reject unformatted Rust.
 fmt-check:
@@ -43,6 +43,18 @@ build:
 boundaries:
     python3 tools/check_crate_boundaries.py --self-test
     python3 tools/check_crate_boundaries.py
+
+# Enforce the docs/12 executable policy obligations (GOV §1 code/semantic
+# policy, GOV §2 ADR process, GOV §3 claim governance). Each checker runs its
+# self-test first — every violating fixture must be caught — so none of the
+# three can pass vacuously. Evidence lands in tools/governance/evidence/.
+governance:
+    python3 tools/governance/check_code_policy.py --self-test
+    python3 tools/governance/check_code_policy.py
+    python3 tools/governance/check_adr_process.py --self-test
+    python3 tools/governance/check_adr_process.py
+    python3 tools/governance/check_claim_governance.py --self-test
+    python3 tools/governance/check_claim_governance.py
 
 # Mechanical validation of the architecture/research dossier.
 dossier:
