@@ -4,9 +4,10 @@
 //!
 //! [`explore`] turns a declared transition system into its **reachable set**: every
 //! state a finite sequence of transitions can reach from an enumerated initial state,
-//! each carrying the length of the shortest such sequence. That set, in canonical
-//! order, is the object docs/03 §6.1 calls a "canonical state table", and the depth
-//! column beside it is what the shortest-witness bone reads.
+//! each carrying the length of the shortest such sequence and the labelled transition
+//! that first reached it. That set, in canonical order, is the object docs/03 §6.1
+//! calls a "canonical state table"; the depth column beside it and the
+//! [`Discovery`] column beside that are what [`crate::witness`] reads.
 //!
 //! It consumes exactly the two primitives the model layer's seam table promised it
 //! ([`Model::initial_states`] and [`Model::successors`],
@@ -40,8 +41,8 @@
 //!   the exploration stops with that state back at the head of the queue. Admitting
 //!   part of a row would leave an explored set that is *not* a prefix of the canonical
 //!   breadth-first walk, and a frontier that could not be resumed from.
-//! - **New targets are admitted in ascending state order** (a `BTreeSet` of the row's
-//!   new targets), not in the row's own `(action, target)` order. Both are
+//! - **New targets are admitted in ascending state order** (a `BTreeMap` keyed by the
+//!   row's new targets), not in the row's own `(action, target)` order. Both are
 //!   deterministic; ascending is the stronger choice, because it makes queue order —
 //!   and therefore the frontier a bounded run reports — independent of how the actions
 //!   happen to be *named*. Two models with the same transition relation and different
@@ -50,6 +51,36 @@
 //! Layers are implicit and exact: a state's depth is written once, the first time it
 //! is discovered, and breadth-first order makes that first write the shortest distance
 //! (see [`Reachable::layer`]).
+//!
+//! # Where each state came from
+//!
+//! Beside the depth, and written at the same moment by the same rule, is a
+//! [`Discovery`]: either the state is one of the model's own initial states, or it
+//! names the state whose successor row first contained it and the action that did the
+//! containing. A depth says a `d`-step path exists; a chain of `Discovery::Step`s *is*
+//! that path, which is why [`crate::witness`] can hand back a labelled sequence
+//! without a second search.
+//!
+//! Two determinism questions have to be answered for that chain to be a function of
+//! the model alone, and both are answered by the order that was already there:
+//!
+//! - **Which predecessor?** The one whose expansion discovered the state, which is
+//!   fixed by queue order and therefore by the canonical walk. A state at depth `d`
+//!   may have many depth-`d-1` predecessors; the recorded one is the first to be
+//!   dequeued among them.
+//! - **Which action?** A successor row ascends by `(action index, target)`, so a
+//!   target reached under several actions appears first under the least of them, and
+//!   the least is what is recorded. The label is a function of the row, not of the
+//!   order the row happens to be scanned in.
+//!
+//! Recording this changes nothing else. The set of new targets an expansion admits is
+//! still a set keyed by [`State`], still iterated in ascending state order, and still
+//! the same size — a `BTreeMap<State, usize>` replaces a `BTreeSet<State>` and the
+//! keys, their order, and their count are unchanged, so the sequence of admissions,
+//! the queue, the depths, the frontier, the counters and the bound checks are the
+//! sequences and values they were before. `tests/bfs_origins.rs` asserts that against
+//! an independent hand walk and against the frozen queue-ordered frontier, which is
+//! the one observable an admission-order change would have to disturb.
 //!
 //! # Determinism (INV-005)
 //!
@@ -99,18 +130,18 @@
 //! # What is *not* here
 //!
 //! Whether an explored state violates an invariant, whether an empty successor row is
-//! a defect or a legitimate terminal state, which path reaches a chosen state, and how
-//! any of it is written to the wire are the other three PR 8 bones. This module
-//! surfaces the raw material for each and encodes none of the policy:
+//! a defect or a legitimate terminal state, and how any of it is written to the wire
+//! are other PR 8 bones. This module surfaces the raw material for each and encodes
+//! none of the policy:
 //!
 //! | Sibling | What it reads here |
 //! |---|---|
 //! | invariant/deadlock checking (IMPL-03) | [`Reachable::states`], plus `Model::successors` being empty at a state — surfaced, never judged |
-//! | shortest witness (IMPL-04) | [`Reachable::depth_of`] and [`Reachable::layer`]: a state at depth `d` has a `d`-step path, and its predecessors are the depth-`d-1` states whose row contains it |
+//! | shortest witness (IMPL-04) | [`Reachable::depth_of`] and [`Reachable::origin_of`]: a state at depth `d` has a `d`-step path, and the [`Discovery`] chain from it *is* that path. [`crate::witness`] walks it |
 //! | finite closure certificate (IMPL-05) | [`Exploration::closed`] — the ascending [`Reachable::states`] table, and `Post(S) ⊆ S` guaranteed by the arm rather than re-checked |
 
 use core::fmt;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::ident::Ident;
 use crate::model::{EvaluationError, Model, State};
@@ -278,12 +309,49 @@ impl fmt::Display for Bound {
 // the reachable set
 // ---------------------------------------------------------------------------
 
-/// The states an exploration discovered, in canonical order, with their depths.
+/// How one state was **first** reached.
+///
+/// Written once, at the moment the state is discovered, by the same rule that writes
+/// its depth — so a `Discovery` is a fact about the canonical breadth-first walk, not
+/// a preference among the paths that happen to exist. Following the chain from any
+/// discovered state reaches an initial state in exactly [`Reachable::depth_of`] hops,
+/// and the labelled sequence that comes back is a shortest path; [`crate::witness`]
+/// is that walk with the endpoint-selection policy attached.
+///
+/// The predecessor is carried by value rather than as an index into
+/// [`Reachable::states`]. An index would be smaller and is what a wire form would
+/// write, but resolving one during the walk means a lookup with an arm that cannot
+/// happen, and this crate's no-panic covenant makes every arm somebody's problem. A
+/// reference engine spends the memory and keeps the arm deleted; the index form is a
+/// projection the certificate bone can compute from the ascending table it already
+/// emits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Discovery {
+    /// The state is one of [`Model::initial_states`]. It was not reached — it is where
+    /// reaching starts, and it is the only [`Discovery`] a depth-0 state can have.
+    Initial,
+    /// The state was first seen in the successor row of `predecessor`, under the
+    /// action at index `action`.
+    Step {
+        /// The state whose expansion discovered this one. Its depth is one less.
+        predecessor: State,
+        /// The index into [`Model::actions`] of the action that reached it — the
+        /// **least** such index, because a successor row ascends by
+        /// `(action index, target)` and a target reached under several actions
+        /// appears first under the smallest of them.
+        action: usize,
+    },
+}
+
+/// The states an exploration discovered, in canonical order, with their depths and
+/// their discoveries.
 ///
 /// `states` is strictly ascending, which is the certificate wire form's rule for a
-/// state table (`crates/continuum-kernel-core/src/wire.rs:89-92`), and `depths` is
-/// parallel to it: `depths[i]` is the length of a shortest path from an initial state
-/// to `states[i]`. Emitting a state table from this is therefore a copy, not a sort.
+/// state table (`crates/continuum-kernel-core/src/wire.rs:89-92`), and the other two
+/// columns are parallel to it: `depths[i]` is the length of a shortest path from an
+/// initial state to `states[i]`, and `origins[i]` is the labelled transition that
+/// first reached it ([`Discovery`]). Emitting a state table from this is therefore a
+/// copy, not a sort.
 ///
 /// **Discovered is not expanded.** Every state here was reached; only
 /// [`Reachable::expanded`] of them had a successor row computed. For an
@@ -294,6 +362,7 @@ impl fmt::Display for Bound {
 pub struct Reachable {
     states: Vec<State>,
     depths: Vec<usize>,
+    origins: Vec<Discovery>,
     expanded: usize,
     transitions: u64,
 }
@@ -340,6 +409,24 @@ impl Reachable {
     pub fn depth_of(&self, state: &State) -> Option<usize> {
         let index = self.states.binary_search(state).ok()?;
         self.depths.get(index).copied()
+    }
+
+    /// How each discovered state was first reached, parallel to
+    /// [`Reachable::states`].
+    #[must_use]
+    pub fn origins(&self) -> &[Discovery] {
+        &self.origins
+    }
+
+    /// How one state was first reached, or `None` when it was not discovered.
+    ///
+    /// The same binary search [`Reachable::depth_of`] makes, sound for the same
+    /// reason: the slice is ascending by construction rather than by a precondition
+    /// someone has to remember.
+    #[must_use]
+    pub fn origin_of(&self, state: &State) -> Option<&Discovery> {
+        let index = self.states.binary_search(state).ok()?;
+        self.origins.get(index)
     }
 
     /// The states at one breadth-first layer, ascending.
@@ -606,14 +693,18 @@ pub fn explore(model: &Model, bounds: Bounds) -> Result<Exploration, Exploration
         });
     }
 
-    let mut visited: BTreeMap<State, usize> = BTreeMap::new();
+    let mut visited: BTreeMap<State, Visit> = BTreeMap::new();
     let mut queue: VecDeque<(State, usize)> = VecDeque::new();
     for state in initial {
         // `Model::initial_states` is strictly ascending and therefore duplicate free
         // (`crates/continuum-kernel-core/src/wire.rs:89-92`). Queueing only on a fresh
         // insert says so locally, so this loop does not silently double-queue if that
         // ever stops being true.
-        if visited.insert(state.clone(), 0).is_none() {
+        let visit = Visit {
+            depth: 0,
+            origin: Discovery::Initial,
+        };
+        if visited.insert(state.clone(), visit).is_none() {
             queue.push_back((state.clone(), 0));
         }
     }
@@ -636,11 +727,14 @@ pub fn explore(model: &Model, bounds: Bounds) -> Result<Exploration, Exploration
 
         // Ascending and deduplicated: the row is ordered by `(action, target)`, so one
         // target can appear under several actions and the targets are not themselves
-        // ordered.
-        let mut discovered: BTreeSet<State> = BTreeSet::new();
+        // ordered. The value is the action that reached the target *first* in that
+        // order — the least action index — which is the label the state's `Discovery`
+        // carries. Keying by `State` keeps this the same set, in the same order, with
+        // the same length as the `BTreeSet` it replaced.
+        let mut discovered: BTreeMap<State, usize> = BTreeMap::new();
         for step in &row {
-            if !visited.contains_key(step.target()) {
-                discovered.insert(step.target().clone());
+            if !visited.contains_key(step.target()) && !discovered.contains_key(step.target()) {
+                discovered.insert(step.target().clone(), step.action());
             }
         }
 
@@ -668,8 +762,15 @@ pub fn explore(model: &Model, bounds: Bounds) -> Result<Exploration, Exploration
             }
         };
 
-        for target in discovered {
-            visited.insert(target.clone(), commit.next);
+        for (target, action) in discovered {
+            let visit = Visit {
+                depth: commit.next,
+                origin: Discovery::Step {
+                    predecessor: here.clone(),
+                    action,
+                },
+            };
+            visited.insert(target.clone(), visit);
             queue.push_back((target, commit.next));
         }
         transitions = commit.transitions;
@@ -684,6 +785,16 @@ pub fn explore(model: &Model, bounds: Bounds) -> Result<Exploration, Exploration
         expanded,
         transitions,
     )))
+}
+
+/// What the visited map records about one discovered state.
+///
+/// The two columns are written together because they are decided together: the first
+/// expansion to reach a state fixes both its depth and where it came from.
+#[derive(Debug, Clone)]
+struct Visit {
+    depth: usize,
+    origin: Discovery,
 }
 
 /// What expanding one state would cost.
@@ -736,21 +847,25 @@ fn admit(bounds: Bounds, spend: Spend) -> Result<Commit, Bound> {
     Ok(Commit { transitions, next })
 }
 
-/// The visited map as a canonical state table with a parallel depth column.
+/// The visited map as a canonical state table with parallel depth and discovery
+/// columns.
 ///
 /// `BTreeMap` iteration is ascending by key, and [`State`]'s `Ord` is lexicographic on
 /// the state vector (`crates/continuum-engine-reference/src/model.rs:116-117`), so the
 /// table comes out in wire order with no sorting pass.
-fn collect(visited: BTreeMap<State, usize>, expanded: usize, transitions: u64) -> Reachable {
+fn collect(visited: BTreeMap<State, Visit>, expanded: usize, transitions: u64) -> Reachable {
     let mut states: Vec<State> = Vec::with_capacity(visited.len());
     let mut depths: Vec<usize> = Vec::with_capacity(visited.len());
-    for (state, depth) in visited {
+    let mut origins: Vec<Discovery> = Vec::with_capacity(visited.len());
+    for (state, visit) in visited {
         states.push(state);
-        depths.push(depth);
+        depths.push(visit.depth);
+        origins.push(visit.origin);
     }
     Reachable {
         states,
         depths,
+        origins,
         expanded,
         transitions,
     }

@@ -1602,8 +1602,8 @@
         "line": 205,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "shortest witness"
+      "status": "satisfied",
+      "summary": "shortest witness (delivered: bn-2pmc \u2014 crates/continuum-engine-reference/src/witness.rs, on a behaviour-preserving extension of src/bfs.rs: every discovered state now records the labelled transition that first reached it, written at the moment its depth is written and under the same canonical admission order, so the chain of those records is itself a shortest path and no second search is needed. Recording it changed nothing else \u2014 the newly admitted targets remain a set keyed by state, iterated in ascending state order, of the same size, so the explored states, their depths, the queue-ordered frontier, the counters and the bound checks are the values they were before, asserted against an independent hand walk and against the frozen frontier of a bounded Die Hard run. A target is data \u2014 one state, or one of the model's own declared predicates holding or failing \u2014 never a caller-supplied closure, because a witness's endpoint has to be something the model can state; the endpoint chosen is the shallowest satisfying state with ties going to the canonically least, so a witness is a function of the model and the target alone. Extraction answers only for a closed exploration, mirroring the closure seam: a path out of a bounded run is not known to be shortest and is refused by name, even when the endpoint was in fact discovered at its true depth (INV-008, INV-009). Die Hard's shortest violation of NotSolved comes back as the film's six-step solution ending at four gallons and three, pinned equal to the path the Lean port proves and replayed one transition at a time through the model layer)"
     },
     {
       "category": "pr-deliverable",

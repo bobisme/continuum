@@ -89,8 +89,11 @@ pub mod domain;
 pub mod expr;
 pub mod ident;
 pub mod model;
+pub mod witness;
 
-pub use bfs::{Bound, Bounds, Exploration, ExplorationError, Partial, Reachable, explore};
+pub use bfs::{
+    Bound, Bounds, Discovery, Exploration, ExplorationError, Partial, Reachable, explore,
+};
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};
 pub use ident::{Ident, IdentError};
@@ -98,3 +101,7 @@ pub use model::{
     Action, ActionDecl, Assignment, EvaluationError, Model, ModelBuilder, ModelError, Outcome,
     Predicate, Site, State, Step, Symbol,
 };
+// `witness::Step` is deliberately *not* re-exported: `model::Step` already holds that
+// name at the root, and a witness step and a successor-row step are different shapes.
+// Name it through its module — `witness::Step` — and the two never collide.
+pub use witness::{NoWitness, Target, Witness, shortest};
