@@ -5,6 +5,62 @@ Tools: `bones`, `maw`, `seal`, `rite`, `vessel`
 
 <!-- Add project-specific context below: architecture, conventions, key files, etc. -->
 
+## What Continuum is
+
+Continuum is an agent-native verification workbench for concurrent and distributed
+Rust. A mathematical **Model**, a real asupersync **Program**, and **Proof** (Lean 4
+plus machine-checked certificates) stay independently meaningful and are connected by
+explicit refinement; a protected, content-addressed **Intent Contract** sits above
+them, and **evidence** is the only currency of progress — a claim without an
+independently checkable artifact is a hypothesis, whoever produced it. Agents are
+first-class users but never trusted authorities: typed operations over explicit
+handles, not terminal prose. The repository is in the design-and-scaffold phase — the
+dossier is complete, the Rust crates are documented stubs, and the Lean T0/T1 rungs
+are kernel-checked.
+
+## Where things live
+
+- `notes/plan/` — the authoritative planning dossier, cited by section from code and
+  commits: `plan.md` (`§N`), `docs/NN_*.md`, `adr/` (binding decisions), `rfcs/`
+  (implementable specs), `research/` (frontier lanes with baselines and kill criteria),
+  `schemas/` (stable machine contracts), `spikes/` (executable experiments).
+- `crates/` — the Cargo workspace; membership is exactly plan §20, and the forbidden
+  dependency edges are enforced by `tools/check_crate_boundaries.py`.
+- `lean/` — the metatheory; RFC 0012 rungs T0/T1 build under `lake build` with no
+  `sorry`, no axioms, no `native_decide`.
+- `just check` gates all of it: fmt, clippy, tests, crate boundaries, dossier
+  validator. The dossier is validated mechanically, so editing plan prose can fail it.
+
+## Key invariants
+
+The full constitutional set is plan §2 (INV-001…INV-018). The ones that most change
+how you write code here:
+
+- **No self-certification** (INV-004, plan §20) — `continuum-certificate` and the
+  `continuum-kernel-*` trusted checking base may not depend on `continuum-engine-*`,
+  `continuum-forge`, or `continuum-asupersync`; Forge is never imported by the
+  verifier, and a certificate is checked from its wire form.
+- **Typed inconclusiveness** (INV-008) — timeout, unsupported semantics, insufficient
+  telemetry, abstraction ambiguity, and incomplete proof search are distinct outcomes.
+  Never a bare boolean, and never a success flag that outruns the evidence.
+- **Protected intent** (INV-001, INV-011) — weakening a property, strengthening an
+  assumption, shrinking a bound, hiding an event, removing a fault, or downgrading
+  assurance is a privileged intent revision with a semantic diff, never a repair.
+- **No ambient nondeterminism** (INV-005, ADR-0003) — scheduling, time, entropy, I/O,
+  faults, and cancellation reach controlled code through explicit capabilities.
+  Artifacts are deterministic to match: pinned toolchain, committed `Cargo.lock`,
+  every gate `--locked`, `overflow-checks` on in release.
+- **Epochs are content identities** (plan §4.6, ADR-0018) — an epoch advance never
+  mutates a published artifact; re-derived artifacts get new identities. Schema
+  document, class, and instance identity are three separate things
+  (`notes/plan/schemas/README.md`); do not conflate them.
+- **Schemas decide, prose does not** (INV-003) — `notes/plan/schemas/` is normative for
+  artifact shape; human text may accompany a machine result, never define it.
+- **`unsafe_code` is forbidden workspace-wide**, with no crate-level override
+  (`Cargo.toml` `[workspace.lints.rust]`, docs/03, docs/12).
+- **RFC beats plan** — where plan prose and an RFC disagree, the RFC is corrected and
+  becomes normative (plan §25); the plan is a map, not the spec.
+
 <!-- edict:managed-start -->## Edict Workflow
 
 ### How to Make Changes
