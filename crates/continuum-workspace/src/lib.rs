@@ -55,11 +55,15 @@
 //! unsaved editor buffers over a snapshot without mutating it, [`lineage`] names a
 //! divergence point and the line that runs from it, [`seal`] freezes a workspace into
 //! published records, and [`diff`] reports which files differ and under which identities.
+//! [`staleness`] (PR 3 / IMPL-04) answers what it means to name a `Fork`-tracked identity
+//! that is no longer current: a typed `StaleSnapshot`, kept distinct from an identity the
+//! lineage never held at all, plus guarded overlay-derivation, fork-advance, and seal
+//! variants that refuse a stale input before spending work on it.
 //!
 //! Everything above `publication` is pure: values in, values out, with the single
 //! deliberate exception of [`import`], which exists to be that boundary. Still open in
-//! this crate's own scope: the stale-snapshot error, and the six plan §4.2 components
-//! [`components`] lists as out of scope — the intent reference among them, which is PR 4's.
+//! this crate's own scope: the six plan §4.2 components [`components`] lists as out of
+//! scope — the intent reference among them, which is PR 4's.
 //!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
@@ -72,3 +76,4 @@ pub mod overlay;
 pub mod publication;
 pub mod seal;
 pub mod snapshot;
+pub mod staleness;

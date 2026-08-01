@@ -1068,8 +1068,8 @@
         "line": 122,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "stale-snapshot error"
+      "status": "satisfied",
+      "summary": "stale-snapshot error (delivered: bn-3tda)"
     },
     {
       "category": "pr-deliverable",

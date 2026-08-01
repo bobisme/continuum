@@ -126,7 +126,7 @@ Implement:
 - Merkle workspace snapshots (delivered: bn-15gj);
 - disk import, editor overlay, fork, seal, and diff (delivered: bn-1hrk);
 - source/dependency/toolchain/config identities (delivered: bn-2xri);
-- stale-snapshot error;
+- stale-snapshot error (delivered: bn-3tda);
 - deterministic file ordering (delivered: bn-1qhe).
 
 **Exit:** two clients can fork and analyze independently; an old snapshot remains reproducible after the working tree changes.
