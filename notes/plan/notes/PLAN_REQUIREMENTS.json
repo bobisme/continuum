@@ -4548,7 +4548,7 @@
       "metadata": {
         "experiment": "concurrent identical task creation and artifact publication",
         "failure_consequence": "redesign CAS/task transaction",
-        "matrix_status": "Evidence (reference implementation)",
+        "matrix_status": "Open \u2014 freeze-blocking (Phase A)",
         "pass_condition": "one semantic identity; no lost receipts; deterministic result"
       },
       "source": {

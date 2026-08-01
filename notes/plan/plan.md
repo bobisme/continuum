@@ -168,8 +168,8 @@ The following are explicitly weaker:
   spikes are finite Python reference experiments that validate artifact
   shapes and interaction contracts, not engines, scale, concurrency,
   persistence, or soundness (`docs/53`, "What remains unproven").
-- G0 status: DX-01, DX-02, DX-03, DX-12, and DX-13 carry spike evidence.
-  DX-10 and DX-14 are open and freeze-blocking (Phase A).
+- G0 status: DX-01, DX-02, DX-03, and DX-12 carry spike evidence.
+  DX-10, DX-13, and DX-14 are open and freeze-blocking (Phase A).
   DX-04, DX-05, DX-06, DX-07, DX-08, DX-09, DX-11, and DX-15 are
   re-homed to the gates owning their machinery (G4, G5, G4, G7, G6,
   G8, G6, G9 respectively — see §22 G0); each re-homing is that item's
