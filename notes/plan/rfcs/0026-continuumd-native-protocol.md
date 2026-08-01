@@ -40,7 +40,7 @@ Four artifact kinds carry protocol truth. The order is fixed:
 
 ## Versioning and revision
 
-- **Two versions, never conflated.** `protocol_version` (`"3.0"`) is the wire version this document and the IDL define; `idl_version` (`"1.0"`) versions the IDL *document* and is bumped on every change to that file, including changes that leave the protocol untouched. A client never negotiates `idl_version`.
+- **Two versions, never conflated.** `protocol_version` (`"3.0"`) is the wire version this document and the IDL define; `idl_version` (`"1.1"` as of the bn-2wu5j wire fixes) versions the IDL *document* and is bumped on every change to that file, including changes that leave the protocol untouched. A client never negotiates `idl_version`.
 - **`protocol_version` is `MAJOR.MINOR`**, decimal, no leading zeros, exactly one `.` — `ProtocolVersion`'s `@pattern`, and the parse/render round-trip of `ProtocolEpoch` in `crates/continuum-value/src/epoch.rs`. It is the one identity of the seven in `EpochSet` that carries a total order, because the daemon "selects the highest common version".
 - **Compatible (minor) changes**, per `rule versioning.compatible_change`: adding an operation; adding an `optional` field; adding a member to an `@open` enum; relaxing a server-side constraint; adding an error code. Each MUST raise the minor version.
 - **Breaking (major) changes**, per `rule versioning.breaking_change`: removing or renaming any declaration or field; changing a field's type or presence marker; adding a `required` or `nullable` field; adding or removing a member of a closed enum; changing an operation's authority level or verdict type; changing the meaning of an existing error code. Each MUST advance the major *and* MUST publish the typed per-artifact-class compatibility statement of plan §4.6 before it is applied.
@@ -534,6 +534,10 @@ Per plan §25, where plan prose, docs, or a dependent artifact disagrees with th
 36. **`continuum doctor` is not a protocol operation.** plan §4.7 and docs/35 name it as the defect-bundle assembler; it is in neither the 72-operation registry nor any adapter mapping. Normative: it is a local tool over published `defect_*` artifacts, not a wire operation, and it MUST NOT acquire semantics the protocol does not declare. Direction: RFC governs; if bundle assembly needs a wire surface it is a registry addition, not an implicit one.
 
 ### Flags raised against artifacts this RFC does not own
+
+F4, F5, F6, F7, and F12 were paid by the IDL 1.1 revision (bn-2wu5j,
+2026-07-31); their entries are retained as the record of what was flagged
+and why.
 
 - **F1 — the IDL cannot express presence conditioned on the carrier.** `EpochSet.engine` must be `nullable` for a result and non-null for a continuation; `idempotency_key` must be present for `@mutation` and absent for `@readonly`; `budget` must be present for `@task_starting`. All three are stated here as obligations because a presence marker is a property of the field, not of the context. A `@required_when(annotation)` form would make them generator-checkable; raised for the protocol sweep.
 - **F2 — `intent.lock` types the policy table as `map<String, String>`.** RFC 0037 fixes a closed eight-member verb set (`unlocked`, `proposal-only`, `review`, `locked`, `no-decrease`, `no-removal`, `no-downgrade`, `no-expansion`) and a closed fifteen-member field set, and neither is wire-enforced. INV-003 forbids prose-only machine interfaces. Mirrors RFC 0031's F4 and RFC 0030's F2.
