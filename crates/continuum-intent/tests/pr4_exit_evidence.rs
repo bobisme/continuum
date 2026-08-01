@@ -1700,37 +1700,21 @@ fn the_schemas_own_validated_example_decodes_as_a_whole_contract() {
 }
 
 #[test]
-fn the_schemas_example_is_schema_valid_and_violates_w7() {
-    // The adjudication `bn-fp0g` raised and `bn-16pyr` carries: nine of the example's
-    // fifteen fields carry the `review` verb and the instance has no
-    // `policy_reviewers` key at all. That is schema-valid — JSON Schema cannot
-    // quantify a relation between the keys of one object and the values of another —
-    // and it is a W7 violation. It must therefore *decode* and *fail the check*, which
-    // is the whole reason the two are different surfaces.
+fn the_schemas_example_is_schema_valid_and_well_formed() {
+    // The adjudication `bn-fp0g` raised and `bn-16pyr` resolved: nine of the
+    // example's fifteen fields carry the `review` verb, and — since bn-16pyr fixed
+    // the example — `policy_reviewers` names a principal for each of them. The
+    // decode/check split this test used to demonstrate through the violation is
+    // still demonstrated: decode accepts the artifact on schema-shape grounds
+    // alone, and the checker's verdict is a separate surface (here, clean).
     let contract = IntentContract::decode(SCHEMA_EXAMPLE.as_bytes()).expect("decodes");
     assert_eq!(
         contract.policy_reviewers().len(),
-        0,
-        "the example still declares no policy_reviewers; when bn-16pyr fixes the example, this \
-         assertion and `pr4 assurance_policy_contract.rs`'s pinning test move together"
+        9,
+        "the example names a reviewer set for each of its nine review-verb fields \
+         (bn-16pyr); this assertion and `change_policy_contract.rs`'s pinning test \
+         move together"
     );
-    let verdict = contract.check(
-        &CheckEnvironment::new()
-            .with_domain_pack_profiles(["storage-posix-v1".to_owned()])
-            .with_correspondence_maps(["map_register_abs_v1".to_owned()])
-            .with_minted_intent_id("in_ack_v1"),
-    );
-    assert!(!verdict.is_well_formed());
-    // The verdict carries one finding per (rule, group): `PolicyTable::check_reviewers`
-    // reports the first field, in wire order, whose `review` verb names no reviewer,
-    // and the contract level lifts that answer rather than opening a second
-    // implementation of W7. Nine of the example's fields carry the verb; fixing the
-    // named one and re-running surfaces the next.
-    let named = match verdict.findings_for(WellFormednessRule::W7).next() {
-        Some(ContractFinding::UnenforceableReview { field }) => *field,
-        other => panic!("expected a W7 finding, got {other:?}"),
-    };
-    assert_eq!(contract.policy().verb(named), PolicyVerb::Review);
     assert_eq!(
         contract
             .policy()
@@ -1740,6 +1724,13 @@ fn the_schemas_example_is_schema_valid_and_violates_w7() {
         9,
         "nine of the example's fifteen fields carry the review verb"
     );
-    // And nothing else is wrong with it: W2, W3, W8, and W9 all hold.
-    assert_eq!(verdict.findings().len(), 1, "{verdict}");
+    let verdict = contract.check(
+        &CheckEnvironment::new()
+            .with_domain_pack_profiles(["storage-posix-v1".to_owned()])
+            .with_correspondence_maps(["map_register_abs_v1".to_owned()])
+            .with_minted_intent_id("in_ack_v1"),
+    );
+    // W2, W3, W7, W8, and W9 all hold on the dossier's own example.
+    assert!(verdict.is_well_formed(), "{verdict}");
+    assert_eq!(verdict.findings().len(), 0, "{verdict}");
 }

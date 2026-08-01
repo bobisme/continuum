@@ -156,6 +156,35 @@
     "security_policy": "review",
     "trust_boundaries": "no-expansion"
   },
+  "policy_reviewers": {
+    "abstraction_maps": [
+      "verification-lead"
+    ],
+    "assumptions": [
+      "verification-lead"
+    ],
+    "completion_policy": [
+      "verification-lead"
+    ],
+    "fairness": [
+      "verification-lead"
+    ],
+    "nondeterminism": [
+      "verification-lead"
+    ],
+    "observers": [
+      "verification-lead"
+    ],
+    "optimization": [
+      "verification-lead"
+    ],
+    "scope": [
+      "verification-lead"
+    ],
+    "security_policy": [
+      "verification-lead"
+    ]
+  },
   "schema_epoch": 1,
   "schema_id": "https://continuum.dev/schema/intent-contract.json",
   "scope": {

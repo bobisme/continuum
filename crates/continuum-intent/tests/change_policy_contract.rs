@@ -314,30 +314,31 @@ fn the_dossiers_example_policy_table_round_trips_byte_for_byte() {
 }
 
 #[test]
-fn the_dossiers_example_carries_no_reviewers_for_its_nine_review_verbs() {
-    // The example instance is schema-valid — the dossier validator says so on every
-    // `just check` — and it is *not* W7-well-formed: nine fields carry `review` and
-    // the instance has no `policy_reviewers` key at all, so each of those nine is an
-    // unenforceable block. W7 is a checker rule the schema cannot state (RFC 0037 F3),
-    // which is exactly why the checker exists.
-    //
-    // *Raised as a flag against `schemas/examples/intent-contract.example.json`: the
-    // dossier's own example violates W7.*
+fn the_dossiers_example_names_reviewers_for_its_nine_review_verbs() {
+    // The example instance is schema-valid, and — since the bn-16pyr correction pass
+    // fixed the W7 flag this test used to pin — it is also W7-well-formed: nine
+    // fields carry `review` and `policy_reviewers` names a principal for each of
+    // them. W7 is a checker rule the schema cannot state (RFC 0037 F3), which is
+    // exactly why the checker exists; the empty-reviewers half below keeps the
+    // unenforceable-block rejection itself pinned.
     let example = parsed(EXAMPLE);
-    assert!(
+    let reviewers = PolicyReviewers::from_json(
         example
             .as_object()
             .expect("object")
             .get("policy_reviewers")
-            .is_none(),
-        "the example gained a policy_reviewers key; update this test and the flag"
-    );
+            .expect("the example names reviewers for its review verbs (bn-16pyr)"),
+    )
+    .expect("decodes");
     let table = PolicyTable::from_json(at(&example, &["policy"])).expect("decodes");
     let reviewing = table
         .iter()
         .filter(|(_, verb)| *verb == PolicyVerb::Review)
         .count();
     assert_eq!(reviewing, 9);
+    assert_eq!(table.check_reviewers(&reviewers), Ok(()));
+    // The rejection W7 exists for is still pinned: strip the reviewers and the
+    // first review-verb field (in field order) is an unenforceable block.
     assert_eq!(
         table.check_reviewers(&PolicyReviewers::empty()),
         Err(WellFormednessError::UnenforceableReview {

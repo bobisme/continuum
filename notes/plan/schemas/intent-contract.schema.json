@@ -948,14 +948,15 @@
       "type": "object"
     },
     "policy_reviewers": {
-      "$comment": "The `review` policy verb binds to this map: a policy field set to review names its reviewer principals here (review 5, A13). RFC 0037 F3 is paid in part here: W7's first half — every key is one of the fifteen policy keys — is now structural, and a named-but-empty principal list is rejected. W7's second half, that every field whose verb is `review` carries a non-empty list, stays a checker rule: JSON Schema cannot quantify a relation between the keys of one object and the values of another, so expressing it needs fifteen hand-written conditionals, which is more machinery than the rule is worth while `policy` and `policy_reviewers` are both in the identity preimage and checked together at acceptance.",
+      "$comment": "The `review` policy verb binds to this map: a policy field set to review names its reviewer principals here (review 5, A13). RFC 0037 F3 is paid in part here: W7's first half — every key is one of the fifteen policy keys — is now structural, and a named-but-empty principal list is rejected. W7's second half, that every field whose verb is `review` carries a non-empty list, stays a checker rule: JSON Schema cannot quantify a relation between the keys of one object and the values of another, so expressing it needs fifteen hand-written conditionals, which is more machinery than the rule is worth while `policy` and `policy_reviewers` are both in the identity preimage and checked together at acceptance. `uniqueItems` on the principal array is bn-16pyr's fix: this map is inside the ID2/ID5 identity preimage, so a repeated principal would let one reviewer set encode two ways, which is exactly the hazard `uniqueItems` closes on every other set-valued field in this document; narrowing it here is admissible pre-freeze (draft epoch).",
       "additionalProperties": {
-        "description": "Principals whose review satisfies the `review` verb for this field. A `review` verb naming no reviewer is an unenforceable block (W7), so an empty list is rejected.",
+        "description": "Principals whose review satisfies the `review` verb for this field. A `review` verb naming no reviewer is an unenforceable block (W7), so an empty list is rejected. `uniqueItems` matches every other set-valued field in the document: a repeated principal must not encode two ways for one identity preimage.",
         "items": {
           "type": "string"
         },
         "minItems": 1,
-        "type": "array"
+        "type": "array",
+        "uniqueItems": true
       },
       "description": "Map from policy field name to the principals whose review satisfies the review verb for that field. Keys are the fifteen policy keys and nothing else (W7); the map is inside the `in_*` identity preimage (ID2), so changing a reviewer list mints a new contract.",
       "propertyNames": {
