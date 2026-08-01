@@ -111,9 +111,8 @@ use core::cmp::Ordering;
 use core::fmt;
 use std::collections::BTreeMap;
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
 use crate::canonical_json::Json;
+use crate::identity::canonical_identity;
 
 /// One `values`/`depth` component: a finite integer bound, or no bound at all.
 ///
@@ -269,40 +268,12 @@ impl fmt::Display for BoundsRelation {
     }
 }
 
-/// The canonical identity of a `bounds` artifact.
-///
-/// Mirrors [`crate::property::PropertyIdentity`] (ADR-0013): this type *is* the
-/// identity-preimage bytes, not a struct holding a digest.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BoundsIdentity {
-    canonical: Vec<u8>,
-}
-
-impl BoundsIdentity {
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for BoundsIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+canonical_identity! {
+    /// The canonical identity of a `bounds` artifact.
+    ///
+    /// Mirrors `crate::identity::CanonicalIdentity` (ADR-0013): this type *is* the
+    /// identity-preimage bytes, not a struct holding a digest.
+    BoundsIdentity
 }
 
 /// `bounds`: the finite-exploration-bound tuple `(values, nodes, faults, depth)`.

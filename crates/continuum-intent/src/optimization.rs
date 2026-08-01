@@ -94,10 +94,9 @@
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
 use crate::canonical_json::{Json, JsonError};
 use crate::change_policy::{PolicyField, Relation};
+use crate::identity::canonical_identity;
 
 /// Which of the two `optimization` sets an objective belongs to.
 ///
@@ -256,40 +255,12 @@ impl fmt::Display for OptimizationUnit<'_> {
     }
 }
 
-/// The canonical identity of an `optimization` field group.
-///
-/// As [`crate::property::PropertyIdentity`], this type *is* the canonical preimage
-/// bytes rather than a digest of them (ADR-0013).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct OptimizationIdentity {
-    canonical: Vec<u8>,
-}
-
-impl OptimizationIdentity {
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for OptimizationIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+canonical_identity! {
+    /// The canonical identity of an `optimization` field group.
+    ///
+    /// As `crate::identity::CanonicalIdentity`, this type *is* the canonical preimage
+    /// bytes rather than a digest of them (ADR-0013).
+    OptimizationIdentity
 }
 
 /// The `optimization` object: `{hard, soft, non_vacuity}`, three string sets.

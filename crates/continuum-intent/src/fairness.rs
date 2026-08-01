@@ -83,18 +83,19 @@
 //! here and — as in [`crate::observers`] and [`crate::faults`] — the artifact form *is*
 //! the identity preimage.
 //!
-//! It also means this module needs to *read* a bare `$defs/formula`, and the crate's
-//! only property-AST reader is `property`'s, which is private to that module and
-//! reachable solely through [`crate::property::Claim::from_json`]. Rather than open a
-//! second formula decoder — two readers for one grammar is how a document comes to
-//! have two meanings — [`FairnessConstraint::from_json`] wraps the condition in the
-//! minimal claim the reader accepts and takes the AST back out. The wrapper is
-//! constructed in memory from constants, never parsed, so no wrapper-level rejection
-//! is reachable and every error a caller sees is the AST's own, named by the AST's own
-//! field paths. *Posted as a bone comment against the shared-module fence: the clean
-//! form of this is a public `ast::Formula::from_json` (or a public
-//! `property::PropertyExpression::from_json`), which is a change to a file this bone
-//! may not touch while its two siblings are in flight.*
+//! It also means this module needs to *read* a bare `$defs/formula`. There is exactly
+//! one reader for that grammar in the crate — `crate::codec` — because two readers
+//! for one grammar is how a document comes to have two meanings, and
+//! [`crate::ast::Formula::from_json`] is its bare-formula entry point. Every rejection
+//! a caller sees is therefore the AST's own, named by the AST's own field paths
+//! (`formula.kind`, `compare.op`, `term.kind`, …), which is what
+//! [`FairnessDecodeError::Condition`] carries.
+//!
+//! It was not always reachable: while the PR-4 field-group bones were in flight, that
+//! reader was private to `property.rs` and this module got at it by wrapping the
+//! condition in a minimal synthetic claim — a wrapper built from constants that could
+//! never itself be rejected, and a bone comment asking for the public constructor. The
+//! constructor exists now and the wrapper is gone.
 //!
 //! # Ordering
 //!
@@ -116,12 +117,11 @@ use core::cmp::Ordering;
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
 use crate::ast::Formula;
 use crate::canonical_json::{Json, JsonError};
 use crate::cpnf::{self, NormalizeError};
-use crate::property::{Claim, PropertyDecodeError};
+use crate::identity::canonical_identity;
+use crate::property::PropertyDecodeError;
 
 /// Which fairness a constraint declares: `fairness[].kind`, the closed two-member
 /// enum.
@@ -265,42 +265,13 @@ impl fmt::Display for FairnessKey {
     }
 }
 
-/// The canonical identity of a fairness artifact.
-///
-/// The discipline is [`crate::property::PropertyIdentity`]'s, stated in full there:
-/// the identity *is* the canonical preimage bytes, so equality is canonical comparison
-/// (ADR-0013) and [`FairnessIdentity::digest`] can only index.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FairnessIdentity {
-    canonical: Vec<u8>,
-}
-
-impl FairnessIdentity {
-    /// The identity of an already-canonical byte string.
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for FairnessIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+canonical_identity! {
+    /// The canonical identity of a fairness artifact.
+    ///
+    /// The discipline is `crate::identity::CanonicalIdentity`'s, stated in full
+    /// there: the identity *is* the canonical preimage bytes, so equality is canonical
+    /// comparison (ADR-0013) and [`FairnessIdentity::digest`] can only index.
+    FairnessIdentity
 }
 
 /// One fairness constraint: `fairness[]`.
@@ -575,29 +546,24 @@ fn temporal_wire(kind: &str) -> Option<&'static str> {
 
 /// Read a bare `$defs/state_formula` through the crate's one property-AST reader.
 ///
-/// See the module documentation for why the reader is reached through a synthetic
-/// claim rather than duplicated. The wrapper's own keys are constants, so no
-/// wrapper-level rejection is reachable and every error returned here is the AST's.
+/// [`Formula::from_json`] is that reader's bare-formula entry point, so the rejections
+/// a caller sees are the AST's own, named by the AST's own field paths — which is what
+/// [`FairnessDecodeError::Condition`] carries and documents.
+///
+/// The result is normalized here rather than left to [`FairnessConstraint::new`],
+/// because the two report a failed normalization differently: through this path it is
+/// the *reader's* failure, `Condition(Normalize(..))`, and that is what
+/// `fairness_adversarial_decode.rs` pins. W4 has already been applied structurally to
+/// the document above, so no temporal node reaches CPNF-1 from here.
 fn decode_condition(document: &Json) -> Result<Formula, FairnessDecodeError> {
     if let Some(operator) = temporal_operator_in_document(document) {
         return Err(FairnessDecodeError::Fairness(
             FairnessError::TemporalCondition { operator },
         ));
     }
-    let wrapper = Json::object([
-        (
-            "expression".to_owned(),
-            Json::object([("ast".to_owned(), document.clone())]).unwrap_or(Json::Null),
-        ),
-        (
-            "id".to_owned(),
-            Json::String("fairness[].condition".to_owned()),
-        ),
-        ("kind".to_owned(), Json::String("safety".to_owned())),
-        ("observer".to_owned(), Json::Null),
-    ])
-    .unwrap_or(Json::Null);
-    Ok(Claim::from_json(&wrapper)?.expression().ast().clone())
+    let ast = Formula::from_json(document)?;
+    cpnf::normalize(&ast)
+        .map_err(|error| FairnessDecodeError::Condition(PropertyDecodeError::Normalize(error)))
 }
 
 /// The `fairness` array: a set of constraints keyed by their (`kind`, `action`) pairs.

@@ -112,13 +112,12 @@
 use core::fmt;
 use std::collections::BTreeMap;
 
+use crate::canonical_json::{Json, JsonError};
+use crate::change_policy::Relation;
+use crate::identity::canonical_identity;
 use continuum_value::assurance::{
     AssuranceChange, AssuranceLevel, AssuranceRequirement, EvidenceClass,
 };
-use continuum_value::identity::{ContentHasher, Digest256};
-
-use crate::canonical_json::{Json, JsonError};
-use crate::change_policy::Relation;
 
 /// Recover an [`AssuranceLevel`] from its `assurance.minimum` wire literal.
 ///
@@ -144,41 +143,13 @@ pub fn evidence_class_from_wire(token: &str) -> Option<EvidenceClass> {
         .find(|class| class.as_str() == token)
 }
 
-/// The canonical identity of an `assurance` field group.
-///
-/// As [`crate::property::PropertyIdentity`], this type *is* the canonical preimage
-/// bytes rather than a digest of them (ADR-0013): equality is canonical comparison,
-/// and [`digest`](Self::digest) can only index.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct AssurancePolicyIdentity {
-    canonical: Vec<u8>,
-}
-
-impl AssurancePolicyIdentity {
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for AssurancePolicyIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+canonical_identity! {
+    /// The canonical identity of an `assurance` field group.
+    ///
+    /// As `crate::identity::CanonicalIdentity`, this type *is* the canonical preimage
+    /// bytes rather than a digest of them (ADR-0013): equality is canonical comparison,
+    /// and [`digest`](Self::digest) can only index.
+    AssurancePolicyIdentity
 }
 
 /// The `assurance` object: a demanded level, two optional checker flags, and the

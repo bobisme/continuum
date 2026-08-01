@@ -99,9 +99,8 @@ use core::cmp::Ordering;
 use core::fmt;
 use std::collections::BTreeSet;
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
 use crate::canonical_json::{Json, JsonError};
+use crate::identity::canonical_identity;
 
 /// One member of `fault_model.enabled`: the closed six-member fault vocabulary.
 ///
@@ -268,42 +267,13 @@ impl fmt::Display for FaultUnit {
     }
 }
 
-/// The canonical identity of a fault-model artifact.
-///
-/// The discipline is [`crate::property::PropertyIdentity`]'s, stated in full there:
-/// the identity *is* the canonical preimage bytes, so equality is canonical comparison
-/// (ADR-0013) and [`FaultModelIdentity::digest`] can only index.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FaultModelIdentity {
-    canonical: Vec<u8>,
-}
-
-impl FaultModelIdentity {
-    /// The identity of an already-canonical byte string.
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for FaultModelIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+canonical_identity! {
+    /// The canonical identity of a fault-model artifact.
+    ///
+    /// The discipline is `crate::identity::CanonicalIdentity`'s, stated in full
+    /// there: the identity *is* the canonical preimage bytes, so equality is canonical
+    /// comparison (ADR-0013) and [`FaultModelIdentity::digest`] can only index.
+    FaultModelIdentity
 }
 
 /// The fault model in force: the contract's `fault_model` object.

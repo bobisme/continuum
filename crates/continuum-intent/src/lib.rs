@@ -25,6 +25,20 @@
 //!   [`property::PropertyIdentity`]: a property's unit key, its class, its
 //!   normalized formula, and the identity derived from its canonical bytes.
 //!
+//! Two `pub(crate)` modules carry what all the field groups share, so that each rule
+//! is stated once rather than once per group:
+//!
+//! - `codec` — the crate's one reader for `$defs/property_expression` and the
+//!   `$defs/formula`/`$defs/term` node set beneath it. It is entered by
+//!   [`ast::Formula::from_json`] (a bare formula, as `fairness[].condition` carries)
+//!   and [`property::PropertyExpression::from_json`] (the expression object, as
+//!   `claims[]` and `assumptions[]` carry). Two readers for one grammar is how a
+//!   document comes to have two meanings.
+//! - `identity` — the ADR-0013 discipline, once. Each group's public identity type is
+//!   a distinct newtype over the one shared core, so a checker cannot pass an
+//!   observer's identity where a claim's is expected, and no group can quietly become
+//!   the one whose identity is a digest.
+//!
 //! ## Why this group first
 //!
 //! The Intent Contract exists to make a *weakening* visible, and RFC 0031 is allowed
@@ -85,9 +99,11 @@ pub mod ast;
 pub mod bounds;
 pub mod canonical_json;
 pub mod change_policy;
+pub(crate) mod codec;
 pub mod cpnf;
 pub mod fairness;
 pub mod faults;
+pub(crate) mod identity;
 pub mod observers;
 pub mod optimization;
 pub mod property;

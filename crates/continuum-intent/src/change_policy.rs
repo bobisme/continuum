@@ -100,9 +100,8 @@
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
 use crate::canonical_json::{Json, JsonError};
+use crate::identity::canonical_identity;
 
 // --- the fifteen policy keys ---------------------------------------------------------------
 
@@ -797,51 +796,24 @@ impl fmt::Display for PolicyVerb {
 
 // --- identity ------------------------------------------------------------------------------
 
-/// The canonical identity of a change-policy artifact: the `policy` table, or the
-/// `policy_reviewers` map.
-///
-/// As [`crate::property::PropertyIdentity`], this type *is* the canonical preimage
-/// bytes rather than a digest of them (ADR-0013), so equality is canonical comparison
-/// and [`digest`](Self::digest) can only index. Both artifacts are inside the `in_*`
-/// preimage:
-///
-/// > **ID2.** […] Nothing else is excluded — in particular the `policy` table,
-/// > `policy_reviewers`, `schema_id`, and `schema_epoch` are **in** the preimage.
-/// >
-/// > — RFC 0037, "Canonical identity"
-///
-/// which is why ID3 records that `intent.lock` mints a *successor* contract: a
-/// governance edit moves the identity with all fifteen fields classified `unchanged`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ChangePolicyIdentity {
-    canonical: Vec<u8>,
-}
-
-impl ChangePolicyIdentity {
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for ChangePolicyIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+canonical_identity! {
+    /// The canonical identity of a change-policy artifact: the `policy` table, or the
+    /// `policy_reviewers` map.
+    ///
+    /// As `crate::identity::CanonicalIdentity`, this type *is* the canonical preimage
+    /// bytes rather than a digest of them (ADR-0013), so equality is canonical
+    /// comparison and [`digest`](Self::digest) can only index. Both artifacts are
+    /// inside the `in_*` preimage:
+    ///
+    /// > **ID2.** […] Nothing else is excluded — in particular the `policy` table,
+    /// > `policy_reviewers`, `schema_id`, and `schema_epoch` are **in** the preimage.
+    /// >
+    /// > — RFC 0037, "Canonical identity"
+    ///
+    /// which is why ID3 records that `intent.lock` mints a *successor* contract: a
+    /// governance edit moves the identity with all fifteen fields classified
+    /// `unchanged`.
+    ChangePolicyIdentity
 }
 
 // --- the policy table ----------------------------------------------------------------------

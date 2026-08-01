@@ -66,29 +66,30 @@
 //! every closed enum in this crate is (for stable `BTreeMap`/`BTreeSet` use), not
 //! because RFC 0037 assigns classification a direction — it does not.
 //!
-//! # Why this module duplicates part of `property.rs`, and does not import it
+//! # Why this module shares `property.rs`'s reader, and keeps its own error type
 //!
 //! `assumptions[].expression` has the identical `$defs/property_expression` shape
 //! `claims[].expression` does, so this module reuses
 //! [`crate::property::PropertyExpression`] as a *type* — its normalization, its
 //! two byte spellings (artifact vs. identity preimage), and its identity
-//! discipline are exactly the claim's. What it cannot reuse is `property.rs`'s
-//! *decoder*: the recursive-descent formula/term parser
-//! ([`Formula`](crate::ast::Formula) and [`Term`](crate::ast::Term) node
-//! decoding) is private to that module, and the workspace fence for this bone
-//! forbids editing `property.rs` to expose it — two sibling agents are building
-//! the other PR-4 field groups in their own copies of this crate concurrently, so
-//! a shared-module change is exactly the kind of edit that has to be designed
-//! around rather than made. The decoder below ([`decode_formula`], [`decode_term`],
-//! and their helpers) is therefore a second copy of the same recursive descent,
-//! built only from `property.rs`'s *public* surface
-//! ([`PropertyExpression::normalized`], and the public `ast`/`canonical_json`/`cpnf`
-//! types), with its own error type so a rejection here still names the field and
-//! the token that failed. *Raised as a flag for the contract-assembly bone: the
-//! formula/term decoder should move to a shared, `pub(crate)` module both
-//! `property` and `assumptions` (and, later, `fairness`, whose `condition` is a
-//! bare formula of the same node set) import, rather than staying duplicated
-//! three times.*
+//! discipline are exactly the claim's — and now reuses its *reader* too, through
+//! [`PropertyExpression::from_json`]. It did not always: while the eight PR-4
+//! field-group bones were in flight in separate workspace copies of this crate,
+//! `property.rs`'s recursive-descent formula/term parser was private to that
+//! module and a shared-module change was an edit that had to be designed around
+//! rather than made, so this module carried a second copy of the same descent
+//! built only from `property.rs`'s public surface. The copy raised its own flag
+//! against itself; the flag is answered and the copy is gone. One grammar has one
+//! reader — `crate::codec` — because two readers is how a document comes to have
+//! two meanings.
+//!
+//! What does *not* move is the error type. A rejection has to name the field the
+//! author wrote, and this group's fields are `assumptions[].id`,
+//! `assumptions[].expression`, `assumptions[].classification`, and
+//! `assumptions[].fidelity_profile`. So [`AssumptionDecodeError`] stays this
+//! module's own vocabulary and the shared reader's [`PropertyDecodeError`] is
+//! translated into it variant for variant, with every message preserved verbatim.
+//! Sharing a reader is not the same as sharing a voice.
 //!
 //! # What is not here
 //!
@@ -105,15 +106,12 @@
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
-use crate::ast::{
-    ActionModality, AstError, Binder, ComparisonOperator, Formula, Fragment, Identifier, Literal,
-    Term,
-};
-use crate::canonical_json::{Json, JsonError, MAX_DEPTH};
-use crate::cpnf::{self, CPNF_VERSION, NormalizeError};
-use crate::property::{PropertyError, PropertyExpression};
+use crate::ast::{AstError, Fragment};
+use crate::canonical_json::{Json, JsonError};
+use crate::codec::{known_keys, object, string_field};
+use crate::cpnf::NormalizeError;
+use crate::identity::canonical_identity;
+use crate::property::{PropertyDecodeError, PropertyError, PropertyExpression};
 
 /// The classified-unit key of an assumption: `assumptions[].id`.
 ///
@@ -276,43 +274,17 @@ impl fmt::Display for FidelityProfile {
     }
 }
 
-/// The canonical identity of an assumption artifact (one assumption, or the whole
-/// `assumptions` set).
-///
-/// Mirrors [`crate::property::PropertyIdentity`] exactly, for the same reason
-/// (ADR-0013): this type *is* the identity-preimage bytes, not a struct holding a
-/// digest, so two assumptions (or two sets) are the same precisely when their
-/// canonical encodings agree.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct AssumptionIdentity {
-    canonical: Vec<u8>,
-}
-
-impl AssumptionIdentity {
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for AssumptionIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+canonical_identity! {
+    /// The canonical identity of an assumption artifact (one assumption, or the whole
+    /// `assumptions` set).
+    ///
+    /// Mirrors [`crate::property::PropertyIdentity`] exactly, for the same reason
+    /// (ADR-0013): this type *is* the identity-preimage bytes, not a struct holding a
+    /// digest, so two assumptions (or two sets) are the same precisely when their
+    /// canonical encodings agree. The discipline itself lives in
+    /// `crate::identity::CanonicalIdentity`; this is the `assumptions` group's name
+    /// for it.
+    AssumptionIdentity
 }
 
 /// One assumption: `assumptions[]`.
@@ -432,7 +404,7 @@ impl Assumption {
             &["classification", "expression", "fidelity_profile", "id"],
         )?;
         let unit = unit_key(string_field(fields, "assumptions[].id")?)?;
-        let expression = decode_expression(fields.get("expression").ok_or(
+        let expression = PropertyExpression::from_json(fields.get("expression").ok_or(
             AssumptionDecodeError::MissingField {
                 field: "assumptions[].expression",
             },
@@ -734,375 +706,18 @@ impl<'a> IntoIterator for &'a AssumptionSet {
 
 // --- decoding helpers ----------------------------------------------------------------------
 //
-// A second copy of `property.rs`'s recursive-descent formula/term decoder; see
-// the module documentation's "Why this module duplicates part of `property.rs`"
-// section for why it is a copy and not an import.
-
-fn object<'a>(
-    json: &'a Json,
-    field: &'static str,
-) -> Result<&'a BTreeMap<String, Json>, AssumptionDecodeError> {
-    json.as_object()
-        .ok_or_else(|| AssumptionDecodeError::TypeMismatch {
-            field,
-            expected: "object",
-            found: json.type_name(),
-        })
-}
-
-/// Enforce `additionalProperties: false` for one object.
-fn known_keys(
-    fields: &BTreeMap<String, Json>,
-    field: &'static str,
-    allowed: &[&str],
-) -> Result<(), AssumptionDecodeError> {
-    for key in fields.keys() {
-        if !allowed.contains(&key.as_str()) {
-            return Err(AssumptionDecodeError::UnknownField {
-                field,
-                key: key.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn string_field<'a>(
-    fields: &'a BTreeMap<String, Json>,
-    field: &'static str,
-) -> Result<&'a str, AssumptionDecodeError> {
-    let key = field.rsplit('.').next().unwrap_or(field);
-    let value = fields
-        .get(key)
-        .ok_or(AssumptionDecodeError::MissingField { field })?;
-    value
-        .as_str()
-        .ok_or_else(|| AssumptionDecodeError::TypeMismatch {
-            field,
-            expected: "string",
-            found: value.type_name(),
-        })
-}
+// The formula/term recursive descent lives in `crate::codec`, the crate's one reader
+// for the `$defs/formula`/`$defs/term` node set. This module used to carry a second
+// copy of it, built only from `property.rs`'s public surface because that module's
+// reader was private and the sibling PR-4 bones were in flight; the copy is gone and
+// the flag it raised — "the formula/term decoder should move to a shared, `pub(crate)`
+// module both `property` and `assumptions` (and, later, `fairness` …) import" — is
+// answered. What stays here is what is genuinely this group's: the `assumptions[].id`
+// wrapper, and the variant-for-variant translation of the shared reader's rejections
+// into this module's own vocabulary, so an error still names `assumptions[].*`.
 
 fn unit_key(id: &str) -> Result<UnitKey, AssumptionDecodeError> {
     Ok(UnitKey::new(id)?)
-}
-
-fn decode_expression(json: &Json) -> Result<PropertyExpression, AssumptionDecodeError> {
-    let fields = object(json, "expression")?;
-    known_keys(
-        fields,
-        "expression",
-        &["ast", "fragment", "normal_form", "source"],
-    )?;
-    let ast_json = fields
-        .get("ast")
-        .ok_or(AssumptionDecodeError::MissingField {
-            field: "expression.ast",
-        })?;
-    let ast = decode_formula(ast_json, 0)?;
-    let fragment =
-        match fields.get("fragment") {
-            None => None,
-            Some(Json::String(token)) => Some(Fragment::from_wire(token).ok_or_else(|| {
-                AssumptionDecodeError::UnknownToken {
-                    field: "expression.fragment",
-                    token: token.clone(),
-                }
-            })?),
-            Some(other) => {
-                return Err(AssumptionDecodeError::TypeMismatch {
-                    field: "expression.fragment",
-                    expected: "string",
-                    found: other.type_name(),
-                });
-            }
-        };
-    let source = match fields.get("source") {
-        None => None,
-        Some(Json::String(text)) => Some(text.clone()),
-        Some(other) => {
-            return Err(AssumptionDecodeError::TypeMismatch {
-                field: "expression.source",
-                expected: "string",
-                found: other.type_name(),
-            });
-        }
-    };
-    if let Some(declared) = fields.get("normal_form") {
-        let token = declared
-            .as_str()
-            .ok_or_else(|| AssumptionDecodeError::TypeMismatch {
-                field: "expression.normal_form",
-                expected: "string",
-                found: declared.type_name(),
-            })?;
-        if token != CPNF_VERSION {
-            return Err(AssumptionDecodeError::UnknownToken {
-                field: "expression.normal_form",
-                token: token.to_owned(),
-            });
-        }
-        if !cpnf::is_normal(&ast)? {
-            return Err(AssumptionDecodeError::FalseNormalForm);
-        }
-    }
-    Ok(PropertyExpression::normalized(&ast, fragment, source)?)
-}
-
-fn decode_formula(json: &Json, depth: usize) -> Result<Formula, AssumptionDecodeError> {
-    if depth >= MAX_DEPTH {
-        return Err(AssumptionDecodeError::Ast(AstError::TooDeep {
-            max: MAX_DEPTH,
-        }));
-    }
-    let fields = object(json, "formula")?;
-    let kind = string_field(fields, "formula.kind")?;
-    match kind {
-        "boolean" => {
-            known_keys(fields, "formula[boolean]", &["kind", "value"])?;
-            Ok(Formula::boolean(bool_field(fields, "boolean.value")?))
-        }
-        "predicate" => {
-            known_keys(fields, "formula[predicate]", &["args", "kind", "name"])?;
-            Ok(Formula::predicate(
-                identifier_field(fields, "predicate.name")?,
-                decode_terms(fields.get("args"), "predicate.args", depth)?,
-            ))
-        }
-        "action" => {
-            known_keys(fields, "formula[action]", &["kind", "modality", "name"])?;
-            let token = string_field(fields, "action.modality")?;
-            let modality = ActionModality::from_wire(token).ok_or_else(|| {
-                AssumptionDecodeError::UnknownToken {
-                    field: "action.modality",
-                    token: token.to_owned(),
-                }
-            })?;
-            Ok(Formula::action(
-                identifier_field(fields, "action.name")?,
-                modality,
-            ))
-        }
-        "compare" => {
-            known_keys(fields, "formula[compare]", &["kind", "left", "op", "right"])?;
-            let token = string_field(fields, "compare.op")?;
-            let op = ComparisonOperator::from_wire(token).ok_or_else(|| {
-                AssumptionDecodeError::UnknownToken {
-                    field: "compare.op",
-                    token: token.to_owned(),
-                }
-            })?;
-            Ok(Formula::compare(
-                op,
-                decode_term(child(fields, "compare.left", "left")?, depth + 1)?,
-                decode_term(child(fields, "compare.right", "right")?, depth + 1)?,
-            ))
-        }
-        "not" => {
-            known_keys(fields, "formula[not]", &["kind", "operand"])?;
-            Ok(Formula::not(decode_formula(
-                child(fields, "not.operand", "operand")?,
-                depth + 1,
-            )?))
-        }
-        "and" | "or" => {
-            known_keys(fields, "formula[junction]", &["kind", "operands"])?;
-            let operands = child(fields, "junction.operands", "operands")?
-                .as_array()
-                .ok_or(AssumptionDecodeError::TypeMismatch {
-                    field: "junction.operands",
-                    expected: "array",
-                    found: "non-array",
-                })?
-                .iter()
-                .map(|operand| decode_formula(operand, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?;
-            if kind == "and" {
-                Ok(Formula::and(operands)?)
-            } else {
-                Ok(Formula::or(operands)?)
-            }
-        }
-        "implies" | "leads_to" => {
-            known_keys(
-                fields,
-                "formula[implication]",
-                &["antecedent", "consequent", "kind"],
-            )?;
-            let antecedent = decode_formula(
-                child(fields, "implication.antecedent", "antecedent")?,
-                depth + 1,
-            )?;
-            let consequent = decode_formula(
-                child(fields, "implication.consequent", "consequent")?,
-                depth + 1,
-            )?;
-            if kind == "implies" {
-                Ok(Formula::implies(antecedent, consequent))
-            } else {
-                Ok(Formula::leads_to(antecedent, consequent))
-            }
-        }
-        "iff" => {
-            known_keys(fields, "formula[iff]", &["kind", "left", "right"])?;
-            Ok(Formula::iff(
-                decode_formula(child(fields, "iff.left", "left")?, depth + 1)?,
-                decode_formula(child(fields, "iff.right", "right")?, depth + 1)?,
-            ))
-        }
-        "always" | "eventually" => {
-            known_keys(fields, "formula[temporal]", &["kind", "operand"])?;
-            let operand = decode_formula(child(fields, "temporal.operand", "operand")?, depth + 1)?;
-            if kind == "always" {
-                Ok(Formula::always(operand))
-            } else {
-                Ok(Formula::eventually(operand))
-            }
-        }
-        "forall" | "exists" => {
-            known_keys(
-                fields,
-                "formula[quantification]",
-                &["binder", "body", "kind"],
-            )?;
-            let binder_json = child(fields, "quantification.binder", "binder")?;
-            let binder_fields = object(binder_json, "binder")?;
-            known_keys(binder_fields, "binder", &["domain", "variable"])?;
-            let binder = Binder::new(
-                identifier_field(binder_fields, "binder.variable")?,
-                decode_term(child(binder_fields, "binder.domain", "domain")?, depth + 1)?,
-            );
-            let body = decode_formula(child(fields, "quantification.body", "body")?, depth + 1)?;
-            if kind == "forall" {
-                Ok(Formula::forall(binder, body))
-            } else {
-                Ok(Formula::exists(binder, body))
-            }
-        }
-        other => Err(AssumptionDecodeError::UnknownToken {
-            field: "formula.kind",
-            token: other.to_owned(),
-        }),
-    }
-}
-
-fn decode_terms(
-    json: Option<&Json>,
-    field: &'static str,
-    depth: usize,
-) -> Result<Vec<Term>, AssumptionDecodeError> {
-    match json {
-        None => Ok(Vec::new()),
-        Some(Json::Array(items)) => items
-            .iter()
-            .map(|item| decode_term(item, depth + 1))
-            .collect(),
-        Some(other) => Err(AssumptionDecodeError::TypeMismatch {
-            field,
-            expected: "array",
-            found: other.type_name(),
-        }),
-    }
-}
-
-fn decode_term(json: &Json, depth: usize) -> Result<Term, AssumptionDecodeError> {
-    if depth >= MAX_DEPTH {
-        return Err(AssumptionDecodeError::Ast(AstError::TooDeep {
-            max: MAX_DEPTH,
-        }));
-    }
-    let fields = object(json, "term")?;
-    let kind = string_field(fields, "term.kind")?;
-    match kind {
-        "var" => {
-            known_keys(fields, "term[var]", &["kind", "name"])?;
-            Ok(Term::Var {
-                name: identifier_field(fields, "var.name")?,
-            })
-        }
-        "constant" => {
-            known_keys(fields, "term[constant]", &["kind", "name"])?;
-            Ok(Term::Constant {
-                name: identifier_field(fields, "constant.name")?,
-            })
-        }
-        "literal" => {
-            known_keys(fields, "term[literal]", &["kind", "value"])?;
-            let value = fields
-                .get("value")
-                .ok_or(AssumptionDecodeError::MissingField {
-                    field: "literal.value",
-                })?;
-            let literal = match value {
-                Json::Bool(v) => Literal::Boolean(*v),
-                Json::Integer(v) => Literal::Integer(*v),
-                Json::String(v) => Literal::Text(v.clone()),
-                Json::Null => Literal::Null,
-                other => {
-                    return Err(AssumptionDecodeError::TypeMismatch {
-                        field: "literal.value",
-                        expected: "boolean, integer, string, or null",
-                        found: other.type_name(),
-                    });
-                }
-            };
-            Ok(Term::Literal { value: literal })
-        }
-        "state" => {
-            known_keys(fields, "term[state]", &["indices", "kind", "name"])?;
-            Ok(Term::State {
-                name: identifier_field(fields, "state.name")?,
-                indices: decode_terms(fields.get("indices"), "state.indices", depth)?,
-            })
-        }
-        "apply" => {
-            known_keys(fields, "term[apply]", &["args", "kind", "operator"])?;
-            let args = decode_terms(fields.get("args"), "apply.args", depth)?;
-            Ok(Term::apply(
-                identifier_field(fields, "apply.operator")?,
-                args,
-            )?)
-        }
-        other => Err(AssumptionDecodeError::UnknownToken {
-            field: "term.kind",
-            token: other.to_owned(),
-        }),
-    }
-}
-
-fn child<'a>(
-    fields: &'a BTreeMap<String, Json>,
-    field: &'static str,
-    key: &str,
-) -> Result<&'a Json, AssumptionDecodeError> {
-    fields
-        .get(key)
-        .ok_or(AssumptionDecodeError::MissingField { field })
-}
-
-fn bool_field(
-    fields: &BTreeMap<String, Json>,
-    field: &'static str,
-) -> Result<bool, AssumptionDecodeError> {
-    let key = field.rsplit('.').next().unwrap_or(field);
-    let value = fields
-        .get(key)
-        .ok_or(AssumptionDecodeError::MissingField { field })?;
-    value
-        .as_bool()
-        .ok_or_else(|| AssumptionDecodeError::TypeMismatch {
-            field,
-            expected: "boolean",
-            found: value.type_name(),
-        })
-}
-
-fn identifier_field(
-    fields: &BTreeMap<String, Json>,
-    field: &'static str,
-) -> Result<Identifier, AssumptionDecodeError> {
-    Ok(Identifier::new(string_field(fields, field)?)?)
 }
 
 // --- errors --------------------------------------------------------------------------------
@@ -1260,6 +875,45 @@ impl From<PropertyError> for AssumptionDecodeError {
     }
 }
 
+/// The shared reader's rejections in this module's vocabulary.
+///
+/// `crate::codec` is the crate's one reader for `$defs/property_expression`, and it
+/// speaks [`PropertyDecodeError`] — the AST-level field paths (`formula.kind`,
+/// `compare.op`, `expression.normal_form`, …) that are the same wherever the
+/// expression is carried. This translation is total and variant-for-variant, so an
+/// assumption's rejection is exactly the rejection it was when this module carried its
+/// own copy of the reader: same variant, same field, same message. It exists rather
+/// than a shared error type because the *outer* paths differ — a claim's rejection
+/// names `claims[].id`, an assumption's names `assumptions[].id` — and a decoder that
+/// named the wrong group's field would be worse than a duplicated one.
+impl From<PropertyDecodeError> for AssumptionDecodeError {
+    fn from(error: PropertyDecodeError) -> Self {
+        match error {
+            PropertyDecodeError::Json(error) => Self::Json(error),
+            PropertyDecodeError::MissingField { field } => Self::MissingField { field },
+            PropertyDecodeError::TypeMismatch {
+                field,
+                expected,
+                found,
+            } => Self::TypeMismatch {
+                field,
+                expected,
+                found,
+            },
+            PropertyDecodeError::UnknownField { field, key } => Self::UnknownField { field, key },
+            PropertyDecodeError::UnknownToken { field, token } => {
+                Self::UnknownToken { field, token }
+            }
+            PropertyDecodeError::FalseNormalForm => Self::FalseNormalForm,
+            PropertyDecodeError::Ast(error) => Self::Ast(error),
+            PropertyDecodeError::Normalize(error) => Self::Normalize(error),
+            // `PropertyExpression::normalized`'s own failure, which the reader raises
+            // through the same `From<PropertyError>` this module already applies.
+            PropertyDecodeError::Property(error) => Self::from(error),
+        }
+    }
+}
+
 /// Why an assumption set is not well formed against the rest of a contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WellFormednessError {
@@ -1307,6 +961,8 @@ impl core::error::Error for WellFormednessError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::ast::{ActionModality, Formula, Identifier};
 
     fn ident(name: &str) -> Identifier {
         Identifier::new(name).expect("a test identifier is well formed")

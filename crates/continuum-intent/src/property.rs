@@ -88,6 +88,14 @@
 //!   `fairness[].condition` is a *bare* temporal-free formula, for which
 //!   [`crate::ast::Formula::is_temporal_free`] is the W4 check. Neither group is
 //!   implemented here.
+//! - **The reader is not here either.** The recursive descent over
+//!   `$defs/property_expression` and the formula/term nodes beneath it lives in
+//!   `crate::codec`, the crate's one reader for that grammar, and is entered from
+//!   here through [`PropertyExpression::from_json`]. It was private to this module
+//!   while the PR-4 field-group bones were in flight, which cost `assumptions` a
+//!   second copy of it and `fairness` a synthetic-claim wrapper to reach it; both
+//!   are gone. What stays here is what is the `claims[]` item's own: its four keys,
+//!   its two byte spellings, and its identity.
 //! - **W2 and W3 need the rest of the contract.** [`ClaimSet::observer_references`]
 //!   and [`ClaimSet::check_fragments`] are the property-side halves; the observer
 //!   ids and `scope.fragments` come from sibling groups, so the callers are the
@@ -102,14 +110,11 @@
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
-use crate::ast::{
-    ActionModality, AstError, Binder, ComparisonOperator, Formula, Fragment, Identifier, Literal,
-    Term,
-};
+use crate::ast::{AstError, Formula, Fragment};
 use crate::canonical_json::{Json, JsonError};
+use crate::codec::{known_keys, object, string_field};
 use crate::cpnf::{self, CPNF_VERSION, NormalizeError};
+use crate::identity::canonical_identity;
 
 /// The classified-unit key of a claim: `claims[].id`.
 ///
@@ -318,65 +323,31 @@ impl PropertyExpression {
     }
 }
 
-/// The canonical identity of a property artifact.
-///
-/// > Canonical structural encodings define identity. Hashes index and partition;
-/// > collisions resolve by exact comparison.
-/// >
-/// > — `notes/plan/adr/0013-exact-state-identity.md`, "Decision"
-///
-/// This type *is* the identity-preimage bytes, exactly as
-/// `continuum_value::identity::ContentIdentity` is the CVNF-1 bytes: not a struct
-/// holding a digest, not a newtype over a hash. There is no hasher parameter and no
-/// field a hash could reach, so two properties are the same property precisely when
-/// their canonical encodings agree — a fact no hash-vendor decision can change.
-/// [`PropertyIdentity::digest`] exists for indexing and takes the hasher explicitly,
-/// through `continuum-value`'s existing seam.
-///
-/// The bytes are UTF-8 by construction (ID5), so [`fmt::Display`] renders the
-/// identity as the canonical JSON itself. An identity that can be read is an
-/// identity a reviewer can check by hand, which is the point of ID7's checkable
-/// list.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PropertyIdentity {
-    canonical: Vec<u8>,
-}
-
-impl PropertyIdentity {
-    /// The identity of an already-canonical byte string.
+canonical_identity! {
+    /// The canonical identity of a property artifact.
     ///
-    /// Private on purpose: an identity is derived from a value, never asserted about
-    /// one. Compare `ContentIdentity::of`.
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only.
+    /// > Canonical structural encodings define identity. Hashes index and partition;
+    /// > collisions resolve by exact comparison.
+    /// >
+    /// > — `notes/plan/adr/0013-exact-state-identity.md`, "Decision"
     ///
-    /// ADR-0013's second clause: "Hashes index and partition; collisions resolve by
-    /// exact comparison." Nothing in this type consults the digest, so a caller that
-    /// keys a map by it must still compare [`canonical_bytes`](Self::canonical_bytes)
-    /// on a hit — which is what `continuum_value::identity::IdentityIndex` does, and
-    /// why the hasher is a parameter rather than a decision made here.
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for PropertyIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+    /// This type *is* the identity-preimage bytes, exactly as
+    /// `continuum_value::identity::ContentIdentity` is the CVNF-1 bytes: not a struct
+    /// holding a digest, not a newtype over a hash. There is no hasher parameter and
+    /// no field a hash could reach, so two properties are the same property precisely
+    /// when their canonical encodings agree — a fact no hash-vendor decision can
+    /// change. [`PropertyIdentity::digest`] exists for indexing and takes the hasher
+    /// explicitly, through `continuum-value`'s existing seam.
+    ///
+    /// The bytes are UTF-8 by construction (ID5), so [`fmt::Display`] renders the
+    /// identity as the canonical JSON itself. An identity that can be read is an
+    /// identity a reviewer can check by hand, which is the point of ID7's checkable
+    /// list.
+    ///
+    /// The discipline is `crate::identity::CanonicalIdentity`'s and is stated once
+    /// there; this is the `properties` group's name for it, distinct from its eight
+    /// siblings so that an identity of the wrong group does not typecheck.
+    PropertyIdentity
 }
 
 /// One claim: `claims[]`.
@@ -520,7 +491,7 @@ impl Claim {
                 field: "claims[].kind",
                 token: kind_token.to_owned(),
             })?;
-        let expression = decode_expression(fields.get("expression").ok_or(
+        let expression = PropertyExpression::from_json(fields.get("expression").ok_or(
             PropertyDecodeError::MissingField {
                 field: "claims[].expression",
             },
@@ -826,374 +797,6 @@ impl<'a> IntoIterator for &'a ClaimSet {
     }
 }
 
-// --- decoding helpers ----------------------------------------------------------------------
-
-fn object<'a>(
-    json: &'a Json,
-    field: &'static str,
-) -> Result<&'a BTreeMap<String, Json>, PropertyDecodeError> {
-    json.as_object()
-        .ok_or_else(|| PropertyDecodeError::TypeMismatch {
-            field,
-            expected: "object",
-            found: json.type_name(),
-        })
-}
-
-/// Enforce `additionalProperties: false` for one object.
-fn known_keys(
-    fields: &BTreeMap<String, Json>,
-    field: &'static str,
-    allowed: &[&str],
-) -> Result<(), PropertyDecodeError> {
-    for key in fields.keys() {
-        if !allowed.contains(&key.as_str()) {
-            return Err(PropertyDecodeError::UnknownField {
-                field,
-                key: key.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn string_field<'a>(
-    fields: &'a BTreeMap<String, Json>,
-    field: &'static str,
-) -> Result<&'a str, PropertyDecodeError> {
-    let key = field.rsplit('.').next().unwrap_or(field);
-    let value = fields
-        .get(key)
-        .ok_or(PropertyDecodeError::MissingField { field })?;
-    value
-        .as_str()
-        .ok_or_else(|| PropertyDecodeError::TypeMismatch {
-            field,
-            expected: "string",
-            found: value.type_name(),
-        })
-}
-
-fn decode_expression(json: &Json) -> Result<PropertyExpression, PropertyDecodeError> {
-    let fields = object(json, "expression")?;
-    known_keys(
-        fields,
-        "expression",
-        &["ast", "fragment", "normal_form", "source"],
-    )?;
-    let ast_json = fields.get("ast").ok_or(PropertyDecodeError::MissingField {
-        field: "expression.ast",
-    })?;
-    let ast = decode_formula(ast_json, 0)?;
-    let fragment =
-        match fields.get("fragment") {
-            None => None,
-            Some(Json::String(token)) => Some(Fragment::from_wire(token).ok_or_else(|| {
-                PropertyDecodeError::UnknownToken {
-                    field: "expression.fragment",
-                    token: token.clone(),
-                }
-            })?),
-            Some(other) => {
-                return Err(PropertyDecodeError::TypeMismatch {
-                    field: "expression.fragment",
-                    expected: "string",
-                    found: other.type_name(),
-                });
-            }
-        };
-    let source = match fields.get("source") {
-        None => None,
-        Some(Json::String(text)) => Some(text.clone()),
-        Some(other) => {
-            return Err(PropertyDecodeError::TypeMismatch {
-                field: "expression.source",
-                expected: "string",
-                found: other.type_name(),
-            });
-        }
-    };
-    // The `normal_form` declaration is a claim about the AST, and RFC 0037 says a
-    // checker "MUST verify the claim by re-normalizing and MUST reject a contract
-    // whose declaration does not hold".
-    if let Some(declared) = fields.get("normal_form") {
-        let token = declared
-            .as_str()
-            .ok_or_else(|| PropertyDecodeError::TypeMismatch {
-                field: "expression.normal_form",
-                expected: "string",
-                found: declared.type_name(),
-            })?;
-        if token != CPNF_VERSION {
-            return Err(PropertyDecodeError::UnknownToken {
-                field: "expression.normal_form",
-                token: token.to_owned(),
-            });
-        }
-        if !cpnf::is_normal(&ast)? {
-            return Err(PropertyDecodeError::FalseNormalForm);
-        }
-    }
-    Ok(PropertyExpression::normalized(&ast, fragment, source)?)
-}
-
-fn decode_formula(json: &Json, depth: usize) -> Result<Formula, PropertyDecodeError> {
-    if depth >= crate::canonical_json::MAX_DEPTH {
-        return Err(PropertyDecodeError::Ast(AstError::TooDeep {
-            max: crate::canonical_json::MAX_DEPTH,
-        }));
-    }
-    let fields = object(json, "formula")?;
-    let kind = string_field(fields, "formula.kind")?;
-    match kind {
-        "boolean" => {
-            known_keys(fields, "formula[boolean]", &["kind", "value"])?;
-            Ok(Formula::boolean(bool_field(fields, "boolean.value")?))
-        }
-        "predicate" => {
-            known_keys(fields, "formula[predicate]", &["args", "kind", "name"])?;
-            Ok(Formula::predicate(
-                identifier_field(fields, "predicate.name")?,
-                decode_terms(fields.get("args"), "predicate.args", depth)?,
-            ))
-        }
-        "action" => {
-            known_keys(fields, "formula[action]", &["kind", "modality", "name"])?;
-            let token = string_field(fields, "action.modality")?;
-            let modality = ActionModality::from_wire(token).ok_or_else(|| {
-                PropertyDecodeError::UnknownToken {
-                    field: "action.modality",
-                    token: token.to_owned(),
-                }
-            })?;
-            Ok(Formula::action(
-                identifier_field(fields, "action.name")?,
-                modality,
-            ))
-        }
-        "compare" => {
-            known_keys(fields, "formula[compare]", &["kind", "left", "op", "right"])?;
-            let token = string_field(fields, "compare.op")?;
-            let op = ComparisonOperator::from_wire(token).ok_or_else(|| {
-                PropertyDecodeError::UnknownToken {
-                    field: "compare.op",
-                    token: token.to_owned(),
-                }
-            })?;
-            Ok(Formula::compare(
-                op,
-                decode_term(child(fields, "compare.left", "left")?, depth + 1)?,
-                decode_term(child(fields, "compare.right", "right")?, depth + 1)?,
-            ))
-        }
-        "not" => {
-            known_keys(fields, "formula[not]", &["kind", "operand"])?;
-            Ok(Formula::not(decode_formula(
-                child(fields, "not.operand", "operand")?,
-                depth + 1,
-            )?))
-        }
-        "and" | "or" => {
-            known_keys(fields, "formula[junction]", &["kind", "operands"])?;
-            let operands = child(fields, "junction.operands", "operands")?
-                .as_array()
-                .ok_or(PropertyDecodeError::TypeMismatch {
-                    field: "junction.operands",
-                    expected: "array",
-                    found: "non-array",
-                })?
-                .iter()
-                .map(|operand| decode_formula(operand, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?;
-            if kind == "and" {
-                Ok(Formula::and(operands)?)
-            } else {
-                Ok(Formula::or(operands)?)
-            }
-        }
-        "implies" | "leads_to" => {
-            known_keys(
-                fields,
-                "formula[implication]",
-                &["antecedent", "consequent", "kind"],
-            )?;
-            let antecedent = decode_formula(
-                child(fields, "implication.antecedent", "antecedent")?,
-                depth + 1,
-            )?;
-            let consequent = decode_formula(
-                child(fields, "implication.consequent", "consequent")?,
-                depth + 1,
-            )?;
-            if kind == "implies" {
-                Ok(Formula::implies(antecedent, consequent))
-            } else {
-                Ok(Formula::leads_to(antecedent, consequent))
-            }
-        }
-        "iff" => {
-            known_keys(fields, "formula[iff]", &["kind", "left", "right"])?;
-            Ok(Formula::iff(
-                decode_formula(child(fields, "iff.left", "left")?, depth + 1)?,
-                decode_formula(child(fields, "iff.right", "right")?, depth + 1)?,
-            ))
-        }
-        "always" | "eventually" => {
-            known_keys(fields, "formula[temporal]", &["kind", "operand"])?;
-            let operand = decode_formula(child(fields, "temporal.operand", "operand")?, depth + 1)?;
-            if kind == "always" {
-                Ok(Formula::always(operand))
-            } else {
-                Ok(Formula::eventually(operand))
-            }
-        }
-        "forall" | "exists" => {
-            known_keys(
-                fields,
-                "formula[quantification]",
-                &["binder", "body", "kind"],
-            )?;
-            let binder_json = child(fields, "quantification.binder", "binder")?;
-            let binder_fields = object(binder_json, "binder")?;
-            known_keys(binder_fields, "binder", &["domain", "variable"])?;
-            let binder = Binder::new(
-                identifier_field(binder_fields, "binder.variable")?,
-                decode_term(child(binder_fields, "binder.domain", "domain")?, depth + 1)?,
-            );
-            let body = decode_formula(child(fields, "quantification.body", "body")?, depth + 1)?;
-            if kind == "forall" {
-                Ok(Formula::forall(binder, body))
-            } else {
-                Ok(Formula::exists(binder, body))
-            }
-        }
-        // `next`, a `cpnf-2` node, or a typo: all the same answer.
-        other => Err(PropertyDecodeError::UnknownToken {
-            field: "formula.kind",
-            token: other.to_owned(),
-        }),
-    }
-}
-
-fn decode_terms(
-    json: Option<&Json>,
-    field: &'static str,
-    depth: usize,
-) -> Result<Vec<Term>, PropertyDecodeError> {
-    match json {
-        // An absent optional list reads as empty; the encoder always writes it.
-        None => Ok(Vec::new()),
-        Some(Json::Array(items)) => items
-            .iter()
-            .map(|item| decode_term(item, depth + 1))
-            .collect(),
-        Some(other) => Err(PropertyDecodeError::TypeMismatch {
-            field,
-            expected: "array",
-            found: other.type_name(),
-        }),
-    }
-}
-
-fn decode_term(json: &Json, depth: usize) -> Result<Term, PropertyDecodeError> {
-    if depth >= crate::canonical_json::MAX_DEPTH {
-        return Err(PropertyDecodeError::Ast(AstError::TooDeep {
-            max: crate::canonical_json::MAX_DEPTH,
-        }));
-    }
-    let fields = object(json, "term")?;
-    let kind = string_field(fields, "term.kind")?;
-    match kind {
-        "var" => {
-            known_keys(fields, "term[var]", &["kind", "name"])?;
-            Ok(Term::Var {
-                name: identifier_field(fields, "var.name")?,
-            })
-        }
-        "constant" => {
-            known_keys(fields, "term[constant]", &["kind", "name"])?;
-            Ok(Term::Constant {
-                name: identifier_field(fields, "constant.name")?,
-            })
-        }
-        "literal" => {
-            known_keys(fields, "term[literal]", &["kind", "value"])?;
-            let value = fields
-                .get("value")
-                .ok_or(PropertyDecodeError::MissingField {
-                    field: "literal.value",
-                })?;
-            let literal = match value {
-                Json::Bool(v) => Literal::Boolean(*v),
-                Json::Integer(v) => Literal::Integer(*v),
-                Json::String(v) => Literal::Text(v.clone()),
-                Json::Null => Literal::Null,
-                other => {
-                    return Err(PropertyDecodeError::TypeMismatch {
-                        field: "literal.value",
-                        expected: "boolean, integer, string, or null",
-                        found: other.type_name(),
-                    });
-                }
-            };
-            Ok(Term::Literal { value: literal })
-        }
-        "state" => {
-            known_keys(fields, "term[state]", &["indices", "kind", "name"])?;
-            Ok(Term::State {
-                name: identifier_field(fields, "state.name")?,
-                indices: decode_terms(fields.get("indices"), "state.indices", depth)?,
-            })
-        }
-        "apply" => {
-            known_keys(fields, "term[apply]", &["args", "kind", "operator"])?;
-            let args = decode_terms(fields.get("args"), "apply.args", depth)?;
-            Ok(Term::apply(
-                identifier_field(fields, "apply.operator")?,
-                args,
-            )?)
-        }
-        other => Err(PropertyDecodeError::UnknownToken {
-            field: "term.kind",
-            token: other.to_owned(),
-        }),
-    }
-}
-
-fn child<'a>(
-    fields: &'a BTreeMap<String, Json>,
-    field: &'static str,
-    key: &str,
-) -> Result<&'a Json, PropertyDecodeError> {
-    fields
-        .get(key)
-        .ok_or(PropertyDecodeError::MissingField { field })
-}
-
-fn bool_field(
-    fields: &BTreeMap<String, Json>,
-    field: &'static str,
-) -> Result<bool, PropertyDecodeError> {
-    let key = field.rsplit('.').next().unwrap_or(field);
-    let value = fields
-        .get(key)
-        .ok_or(PropertyDecodeError::MissingField { field })?;
-    value
-        .as_bool()
-        .ok_or_else(|| PropertyDecodeError::TypeMismatch {
-            field,
-            expected: "boolean",
-            found: value.type_name(),
-        })
-}
-
-fn identifier_field(
-    fields: &BTreeMap<String, Json>,
-    field: &'static str,
-) -> Result<Identifier, PropertyDecodeError> {
-    Ok(Identifier::new(string_field(fields, field)?)?)
-}
-
 // --- errors --------------------------------------------------------------------------------
 
 /// Why a property could not be built.
@@ -1413,9 +1016,9 @@ impl core::error::Error for WellFormednessError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use continuum_value::identity::{Fnv1aPlaceholder, HashAlgorithm};
+    use continuum_value::identity::{ContentHasher, Digest256, Fnv1aPlaceholder, HashAlgorithm};
 
-    use crate::ast::ComparisonOperator;
+    use crate::ast::{Binder, ComparisonOperator, Identifier, Literal, Term};
 
     fn ident(name: &str) -> Identifier {
         Identifier::new(name).expect("a test identifier is well formed")

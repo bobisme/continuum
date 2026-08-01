@@ -91,9 +91,8 @@
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
-use continuum_value::identity::{ContentHasher, Digest256};
-
 use crate::canonical_json::{Json, JsonError};
+use crate::identity::canonical_identity;
 
 /// The classified-unit key of an observer: `observers[].id`.
 ///
@@ -214,50 +213,18 @@ impl fmt::Display for ProjectionKind {
     }
 }
 
-/// The canonical identity of an observer artifact.
-///
-/// The discipline is [`crate::property::PropertyIdentity`]'s, stated in full there and
-/// applied here: the identity *is* the canonical preimage bytes, not a digest of
-/// them, so equality is canonical comparison (ADR-0013) and
-/// [`ObserverIdentity::digest`] can only index. *A seam: when a later bone gives the
-/// crate one shared identity newtype, this type and its siblings in [`crate::faults`]
-/// and [`crate::fairness`] collapse into it. They are separate today because the
-/// eight PR-4 field-group bones land concurrently and a shared module is a shared
-/// line.*
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ObserverIdentity {
-    canonical: Vec<u8>,
-}
-
-impl ObserverIdentity {
-    /// The identity of an already-canonical byte string.
+canonical_identity! {
+    /// The canonical identity of an observer artifact.
     ///
-    /// Private on purpose: an identity is derived from a value, never asserted about
-    /// one.
-    fn of_bytes(canonical: Vec<u8>) -> Self {
-        Self { canonical }
-    }
-
-    /// The canonical bytes this identity is.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> &[u8] {
-        &self.canonical
-    }
-
-    /// A digest of the canonical bytes, for indexing only (ADR-0013).
-    #[must_use]
-    pub fn digest<H: ContentHasher>(&self) -> Digest256 {
-        H::hash(&self.canonical)
-    }
-}
-
-impl fmt::Display for ObserverIdentity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match core::str::from_utf8(&self.canonical) {
-            Ok(text) => f.write_str(text),
-            Err(_) => Err(fmt::Error),
-        }
-    }
+    /// The discipline is `crate::identity::CanonicalIdentity`'s, stated in full there
+    /// and applied here: the identity *is* the canonical preimage bytes, not a digest
+    /// of them, so equality is canonical comparison (ADR-0013) and
+    /// [`ObserverIdentity::digest`] can only index. *The seam this type's doc comment
+    /// used to name — "when a later bone gives the crate one shared identity newtype,
+    /// this type and its siblings […] collapse into it" — is closed: all nine field
+    /// groups are now newtypes over that one core. They stay nine distinct types so
+    /// that an observer's identity does not typecheck where a claim's is expected.*
+    ObserverIdentity
 }
 
 /// One observer: `observers[]`.
