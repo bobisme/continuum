@@ -2689,8 +2689,16 @@ projections, and the docs/35/40/41/42/45 corrections) are recorded in
   advance; docs/42 takes reuse across an advance, redacted and collected
   inputs, and parity mismatches as engine defects. Each absorbing
   document records its corrections with direction;
-- SD-10 (open): docs/41 regenerated around the 12-gate, phase-profile
-  repair design (RFC 0032 is normative in the interim);
+- SD-10 (paid, PR 0): docs/41 regenerated around the 12-gate,
+  phase-profile repair design — the twelve gates by name, the
+  phase-staged profiles with `not_yet_enforced`, derived-never-asserted
+  status, the gate-5 disclosure and counting rule by reference, and
+  worked examples against the shipped schema examples; RFC 0032 and
+  `schemas/repair-transaction.schema.json` /
+  `schemas/promotion-receipt.schema.json` are normative and docs/41 is
+  the non-normative guide around them, with RFC 0032's corrections 6, 8,
+  and 14 (gate 1 failed vs inconclusive, gate 3 on the recomputed
+  verdict, the struct that was never the artifact shape) applied;
 - SD-02 (paid, review 5): RFC 0026 absorbs the §4.3 requirements it
   omitted — the N and N−1 protocol-major window, evidence/receipt
   readability decoupling, mid-flight budget updates

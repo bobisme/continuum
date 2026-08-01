@@ -7217,14 +7217,14 @@
       "coverage": "leaf",
       "id": "SD-10",
       "metadata": {
-        "ledger_status": "open"
+        "ledger_status": "paid, PR 0"
       },
       "source": {
         "line": 2692,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "docs/41 regenerated around the 12-gate, phase-profile repair design (RFC 0032 is normative in the interim)"
+      "status": "satisfied",
+      "summary": "docs/41 regenerated around the 12-gate, phase-profile repair design \u2014 the twelve gates by name, the phase-staged profiles with notyetenforced, derived-never-asserted status, the gate-5 disclosure and counting rule by reference, and worked examples against the shipped schema examples; RFC 0032 and schemas/repair-transaction.schema.json / schemas/promotion-receipt.schema.json are normative and docs/41 is the non-normative guide around them, with RFC 0032's corrections 6, 8, and 14 (gate 1 failed vs inconclusive, gate 3 on the recomputed verdict, the struct that was never the artifact shape) applied"
     },
     {
       "category": "spec-debt",
@@ -7234,7 +7234,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2694,
+        "line": 2702,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7248,7 +7248,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2699,
+        "line": 2707,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7262,7 +7262,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2703,
+        "line": 2711,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7276,7 +7276,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2706,
+        "line": 2714,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7290,7 +7290,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2708,
+        "line": 2716,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7304,7 +7304,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2710,
+        "line": 2718,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7318,7 +7318,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2719,
+        "line": 2727,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7332,7 +7332,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2726,
+        "line": 2734,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7346,7 +7346,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2732,
+        "line": 2740,
         "path": "plan.md"
       },
       "status": "satisfied",
