@@ -2082,7 +2082,7 @@ Phase F.
 
 Deliver:
 
-- immutable workspace and intent schemas;
+- immutable workspace and intent schemas; (delivered: bn-15gj, bn-1qhe, bn-2xri, bn-1hrk, bn-u8z2, bn-136f, bn-1tgp, bn-7f23, bn-111k, bn-14w6, bn-fp0g, bn-1fc0, bn-185wn, bn-ces7)
 - native daemon protocol;
 - task/continuation lifecycle;
 - evidence graph;
