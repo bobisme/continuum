@@ -1139,8 +1139,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "observers"
+      "status": "satisfied",
+      "summary": "observers; (delivered: bn-7f23)"
     },
     {
       "category": "pr-deliverable",
@@ -1163,8 +1163,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "faults"
+      "status": "satisfied",
+      "summary": "faults; (delivered: bn-111k)"
     },
     {
       "category": "pr-deliverable",
@@ -1175,8 +1175,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "fairness"
+      "status": "satisfied",
+      "summary": "fairness; (delivered: bn-14w6)"
     },
     {
       "category": "pr-deliverable",

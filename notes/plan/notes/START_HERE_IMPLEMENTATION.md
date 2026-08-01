@@ -137,10 +137,10 @@ Implement schema/types for:
 
 - properties; (delivered: bn-u8z2)
 - assumptions; (delivered: bn-136f)
-- observers;
+- observers; (delivered: bn-7f23)
 - bounds; (delivered: bn-1tgp)
-- faults;
-- fairness;
+- faults; (delivered: bn-111k)
+- fairness; (delivered: bn-14w6)
 - assurance policy;
 - optimization/non-vacuity;
 - field-level change policy.
