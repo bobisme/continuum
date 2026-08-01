@@ -635,6 +635,32 @@ impl ClaimSet {
         &self.identity
     }
 
+    /// The `claims` portion of the contract's identity preimage, as JSON.
+    ///
+    /// The same `Layer::Identity` spelling [`ClaimSet::identity`] is taken over —
+    /// every `expression` reduced to its ID2 form, with `source` and `normal_form`
+    /// dropped — exposed so that [`crate::contract::IntentContract`] can compose the
+    /// whole-document preimage out of its groups' preimages rather than re-deriving
+    /// the exclusion list a second time. `identity_preimage_json().to_canonical_bytes()
+    /// == identity().canonical_bytes()`, and `tests/` asserts it.
+    #[must_use]
+    pub fn identity_preimage_json(&self) -> Json {
+        Json::Array(
+            self.claims
+                .values()
+                .map(|claim| {
+                    claim_json(
+                        claim.unit(),
+                        claim.class(),
+                        claim.expression(),
+                        claim.observer(),
+                        Layer::Identity,
+                    )
+                })
+                .collect(),
+        )
+    }
+
     /// How many claims the set carries. Always at least one.
     #[must_use]
     pub fn len(&self) -> usize {

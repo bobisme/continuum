@@ -145,7 +145,7 @@ Implement schema/types for:
 - optimization/non-vacuity; (delivered: bn-1fc0)
 - field-level change policy. (delivered: bn-185wn)
 
-**Exit:** Die Hard and replicated-register intents serialize canonically; ordinary operations cannot mutate them.
+**Exit:** Die Hard and replicated-register intents serialize canonically; ordinary operations cannot mutate them (delivered: bn-ces7).
 
 ### PR 4a — Lean environment and seed theorems [G6; Phase A band]
 

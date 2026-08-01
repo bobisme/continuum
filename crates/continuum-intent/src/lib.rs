@@ -70,14 +70,22 @@
 //! setter is the affordance by which an ordinary operation mutates intent, which is
 //! the single thing INV-001 forbids.
 //!
-//! ## Still to land in PR 4
+//! ## The assembled contract
 //!
 //! `assumptions`, `observers`, `bounds`, `faults`, `fairness`, the assurance policy,
-//! `optimization`/non-vacuity, and the field-level change policy are separate bones.
-//! Each module below names the seams it leaves them; in summary: they encode through
-//! [`canonical_json`], the two that carry property ASTs reuse [`ast`] and [`cpnf`]
-//! unchanged, and the contract-level identity (`in_*`, ID1) composes their preimages
-//! with [`property::ClaimSet::identity`].
+//! `optimization`/non-vacuity, and the field-level change policy each landed as their
+//! own bone; they encode through [`canonical_json`], the two that carry property ASTs
+//! reuse [`ast`] and [`cpnf`] unchanged, and each carries its own identity over its own
+//! ID2-reduced preimage.
+//!
+//! [`contract`] is where they become a document. It composes the nine groups, models
+//! the six RFC 0037 field groups no implementation bullet named (`scope`,
+//! `trust_boundaries`, `completion_policy`, `nondeterminism`, `abstraction_maps`,
+//! `security_policy`) together with the header keys, derives the whole-contract `in_*`
+//! identity from the ID1/ID2 preimage, and carries the cross-field well-formedness
+//! rules — W2, W3, W7, W8, W9 — as a verdict surface distinct from decoding, because a
+//! schema-valid document a checker rejects must still be readable. It also states the
+//! crate-wide array-ordering rule once, for all fifteen groups.
 //!
 //! # Dependency-boundary contract
 //!
@@ -100,6 +108,7 @@ pub mod bounds;
 pub mod canonical_json;
 pub mod change_policy;
 pub(crate) mod codec;
+pub mod contract;
 pub mod cpnf;
 pub mod fairness;
 pub mod faults;

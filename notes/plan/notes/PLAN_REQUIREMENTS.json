@@ -1103,7 +1103,7 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Intent Contract v0 [G1, G3]"
     },
     {
@@ -1223,8 +1223,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "Die Hard and replicated-register intents serialize canonically; ordinary operations cannot mutate them."
+      "status": "satisfied",
+      "summary": "Die Hard and replicated-register intents serialize canonically; ordinary operations cannot mutate them (delivered: bn-ces7)."
     },
     {
       "category": "pr",
