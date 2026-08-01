@@ -1,0 +1,95 @@
+# Continuum T0/T1 axiom manifest (ADR-0035, RFC 0012 theorem ladder)
+# requirement: PR-4A-IMPL-03
+# toolchain: leanprover/lean4:v4.32.1
+# generator: lean/AxiomManifest.lean (Lean.collectAxioms, same source as #print axioms)
+# regenerate: cd lean && sh scripts/axiom-manifest.sh
+
+## T0 — reachability induction
+'Continuum.TransitionSystem.reachable_satisfies' does not depend on any axioms
+'Continuum.TransitionSystem.reachable_isInductive' does not depend on any axioms
+'Continuum.TransitionSystem.reachable_least' does not depend on any axioms
+'Continuum.TransitionSystem.reachable_iff_exists_path' does not depend on any axioms
+'Continuum.TransitionSystem.isStutterRun_reachable' does not depend on any axioms
+'Continuum.TransitionSystem.isRun_reachable' does not depend on any axioms
+'Continuum.TransitionSystem.isRun_toStutterRun' does not depend on any axioms
+
+## T0 — inductive invariant preservation
+'Continuum.TransitionSystem.safety_iff_exists_inductiveInvariant' does not depend on any axioms
+'Continuum.TransitionSystem.InductiveInvariant.and' does not depend on any axioms
+'Continuum.TransitionSystem.InductiveInvariant.top' does not depend on any axioms
+'Continuum.TransitionSystem.InductiveInvariant.mono' does not depend on any axioms
+'Continuum.TransitionSystem.InductiveInvariant.holds_on_path' does not depend on any axioms
+'Continuum.TransitionSystem.always_of_inductiveInvariant' does not depend on any axioms
+
+## T0 — finite closure certificate soundness
+'Continuum.ClosureCertificate.provesSafety' does not depend on any axioms
+'Continuum.ClosureCertificate.isInductiveInvariant' does not depend on any axioms
+'Continuum.ClosureCertificate.exists_iff_safety' does not depend on any axioms
+'Continuum.FiniteSystem.checkClosure_eq_true_iff' does not depend on any axioms
+'Continuum.FiniteSystem.checkClosure_sound' does not depend on any axioms
+'Continuum.FiniteSystem.checkClosure_provesSafety' does not depend on any axioms
+'Continuum.FiniteSystem.checkClosure_eq_false_of_unclosed' does not depend on any axioms
+'Continuum.FiniteSystem.checkClosure_eq_false_of_missing_init' does not depend on any axioms
+
+## T0 — counterexample path validity
+'Continuum.TransitionSystem.pathFrom_append' does not depend on any axioms
+'Continuum.TransitionSystem.reachable_endpoint' does not depend on any axioms
+'Continuum.TransitionSystem.reachable_of_initial_path' does not depend on any axioms
+'Continuum.TransitionSystem.exists_path_of_reachable' does not depend on any axioms
+'Continuum.FiniteSystem.checkTrace_sound' does not depend on any axioms
+'Continuum.FiniteSystem.checkCounterexample_sound' does not depend on any axioms
+'Continuum.FiniteSystem.no_closure_of_counterexample' does not depend on any axioms
+
+## T0 — checker trusted base (reflective plumbing)
+'Continuum.Reflect.andLeft' does not depend on any axioms
+'Continuum.Reflect.andRight' does not depend on any axioms
+'Continuum.Reflect.andIntro' does not depend on any axioms
+'Continuum.Reflect.mem_sound' does not depend on any axioms
+'Continuum.Reflect.mem_complete' does not depend on any axioms
+'Continuum.Reflect.all_sound' does not depend on any axioms
+'Continuum.Reflect.all_complete' does not depend on any axioms
+'Continuum.TransitionSystem.endpoint_append' does not depend on any axioms
+'Continuum.FiniteSystem.toTransitionSystem_init' does not depend on any axioms
+'Continuum.FiniteSystem.toTransitionSystem_step' does not depend on any axioms
+
+## T0 — instantiation: Die Hard finite closure and counterexample
+'Continuum.Examples.DieHard.closure_accepted' does not depend on any axioms
+'Continuum.Examples.DieHard.jugInvariant_of_reachable' does not depend on any axioms
+'Continuum.Examples.DieHard.typeOK_of_reachable' does not depend on any axioms
+'Continuum.Examples.DieHard.closure_without_init_rejected' does not depend on any axioms
+'Continuum.Examples.DieHard.closure_not_closed_rejected' does not depend on any axioms
+'Continuum.Examples.DieHard.closure_unsafe_member_rejected' does not depend on any axioms
+'Continuum.Examples.DieHard.four_gallons_witness' does not depend on any axioms
+'Continuum.Examples.DieHard.four_gallons_reachable' does not depend on any axioms
+'Continuum.Examples.DieHard.skipping_path_rejected' does not depend on any axioms
+
+## T1 — stuttering simulation preserves reachable safety predicates
+'Continuum.StutteringSimulation.maps_reachable' does not depend on any axioms
+'Continuum.StutteringSimulation.transfer_safety' does not depend on any axioms
+'Continuum.StutteringSimulation.toReachable' does not depend on any axioms
+'Continuum.ReachableSimulation.maps_reachable' does not depend on any axioms
+'Continuum.ReachableSimulation.transfer_safety' does not depend on any axioms
+'Continuum.ReachableSimulation.of_inductiveInvariant' does not depend on any axioms
+
+## T1 — composition of simulations
+'Continuum.StutteringSimulation.refl' does not depend on any axioms
+'Continuum.StutteringSimulation.compose' does not depend on any axioms
+'Continuum.ReachableSimulation.compose' does not depend on any axioms
+'Continuum.StutteringSimulation.transfers_reachable_property' does not depend on any axioms
+
+## T1 — observer projection and hidden-event closure
+'Continuum.TransitionSystem.observe_step_visible' does not depend on any axioms
+'Continuum.TransitionSystem.observe_simulation' does not depend on any axioms
+'Continuum.TransitionSystem.observe_reachable_iff' does not depend on any axioms
+'Continuum.TransitionSystem.observe_safety_iff' does not depend on any axioms
+
+## T1 — history/auxiliary variable erasure
+'Continuum.HistoryAugmentation.erasure_simulation' does not depend on any axioms
+'Continuum.HistoryAugmentation.reachable_lift' does not depend on any axioms
+'Continuum.HistoryAugmentation.erases_safety' does not depend on any axioms
+
+## T1 — conditions for liveness preservation
+'Continuum.StutteringSimulation.projects_run' does not depend on any axioms
+'Continuum.StutteringSimulation.projects_run_of_visible' does not depend on any axioms
+'Continuum.StutteringSimulation.transfer_eventually' does not depend on any axioms
+'Continuum.StutteringSimulation.transfer_infinitelyOften' does not depend on any axioms
