@@ -574,7 +574,9 @@ def parse_verb_list(text: str) -> list[str]:
             continue
         if not in_section:
             continue
-        bullet = re.match(r"^-\s+`([^`]+)`\s*[;.]?\s*$", line.strip())
+        bullet = re.match(
+            r"^-\s+`([^`]+)`\s*[;.]?\s*(?:\(delivered:[^)]*\)\s*)?$", line.strip()
+        )
         if bullet:
             verbs.append(bullet.group(1).strip())
     return verbs

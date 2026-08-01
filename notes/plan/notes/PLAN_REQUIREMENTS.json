@@ -9860,7 +9860,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "proposed; (delivered: bn-29gc)"
+      "summary": "proposed"
     },
     {
       "category": "governance-policy",
@@ -9871,7 +9871,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "accepted; (delivered: bn-29gc)"
+      "summary": "accepted"
     },
     {
       "category": "governance-policy",
@@ -9882,7 +9882,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "superseded; (delivered: bn-29gc)"
+      "summary": "superseded"
     },
     {
       "category": "governance-policy",
@@ -9893,7 +9893,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "rejected; (delivered: bn-29gc)"
+      "summary": "rejected"
     },
     {
       "category": "governance-policy",
@@ -9904,7 +9904,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "experimental. (delivered: bn-29gc)"
+      "summary": "experimental."
     },
     {
       "category": "governance-policy",
@@ -9915,7 +9915,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "context; (delivered: bn-29gc)"
+      "summary": "context"
     },
     {
       "category": "governance-policy",
@@ -9926,7 +9926,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "decision; (delivered: bn-29gc)"
+      "summary": "decision"
     },
     {
       "category": "governance-policy",
@@ -9937,7 +9937,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "formal consequences; (delivered: bn-29gc)"
+      "summary": "formal consequences"
     },
     {
       "category": "governance-policy",
@@ -9948,7 +9948,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "alternatives; (delivered: bn-29gc)"
+      "summary": "alternatives"
     },
     {
       "category": "governance-policy",
@@ -9959,7 +9959,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "compatibility; (delivered: bn-29gc)"
+      "summary": "compatibility"
     },
     {
       "category": "governance-policy",
@@ -9970,7 +9970,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "security; (delivered: bn-29gc)"
+      "summary": "security"
     },
     {
       "category": "governance-policy",
@@ -9981,7 +9981,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "performance hypothesis; (delivered: bn-29gc)"
+      "summary": "performance hypothesis"
     },
     {
       "category": "governance-policy",
@@ -9992,7 +9992,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "validation plan; (delivered: bn-29gc, bn-xjz8)"
+      "summary": "validation plan"
     },
     {
       "category": "governance-policy",
@@ -10003,7 +10003,7 @@
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "satisfied",
-      "summary": "rollback. (delivered: bn-29gc, bn-xjz8)"
+      "summary": "rollback."
     },
     {
       "category": "governance-policy",
@@ -10013,7 +10013,7 @@
         "line": 50,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "observed"
     },
     {
@@ -10024,7 +10024,7 @@
         "line": 50,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "tested"
     },
     {
@@ -10035,7 +10035,7 @@
         "line": 50,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "bounded"
     },
     {
@@ -10046,7 +10046,7 @@
         "line": 50,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "exhaustively checked"
     },
     {
@@ -10057,7 +10057,7 @@
         "line": 50,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "proved under"
     },
     {
@@ -10068,7 +10068,7 @@
         "line": 50,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "certificate checked"
     },
     {
@@ -10079,7 +10079,7 @@
         "line": 50,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "hypothesized."
     },
     {
@@ -10087,7 +10087,7 @@
       "coverage": "leaf",
       "id": "GOV-4-01",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10098,7 +10098,7 @@
       "coverage": "leaf",
       "id": "GOV-4-02",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10109,7 +10109,7 @@
       "coverage": "leaf",
       "id": "GOV-4-03",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10120,7 +10120,7 @@
       "coverage": "leaf",
       "id": "GOV-4-04",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10131,7 +10131,7 @@
       "coverage": "leaf",
       "id": "GOV-4-05",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10142,7 +10142,7 @@
       "coverage": "leaf",
       "id": "GOV-4-06",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10153,7 +10153,7 @@
       "coverage": "leaf",
       "id": "GOV-4-07",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10164,7 +10164,7 @@
       "coverage": "leaf",
       "id": "GOV-4-08",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10175,7 +10175,7 @@
       "coverage": "leaf",
       "id": "GOV-4-09",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10186,7 +10186,7 @@
       "coverage": "leaf",
       "id": "GOV-4-10",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10197,7 +10197,7 @@
       "coverage": "leaf",
       "id": "GOV-4-11",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10208,7 +10208,7 @@
       "coverage": "leaf",
       "id": "GOV-4-12",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10219,7 +10219,7 @@
       "coverage": "leaf",
       "id": "GOV-4-13",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10230,7 +10230,7 @@
       "coverage": "leaf",
       "id": "GOV-4-14",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10241,7 +10241,7 @@
       "coverage": "leaf",
       "id": "GOV-4-15",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10252,7 +10252,7 @@
       "coverage": "leaf",
       "id": "GOV-4-16",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10263,7 +10263,7 @@
       "coverage": "leaf",
       "id": "GOV-4-17",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10274,7 +10274,7 @@
       "coverage": "leaf",
       "id": "GOV-4-18",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10285,7 +10285,7 @@
       "coverage": "leaf",
       "id": "GOV-4-19",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10296,7 +10296,7 @@
       "coverage": "leaf",
       "id": "GOV-4-20",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10307,7 +10307,7 @@
       "coverage": "leaf",
       "id": "GOV-4-21",
       "source": {
-        "line": 64,
+        "line": 70,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10318,7 +10318,7 @@
       "coverage": "leaf",
       "id": "GOV-5-01",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10329,7 +10329,7 @@
       "coverage": "leaf",
       "id": "GOV-5-02",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10340,7 +10340,7 @@
       "coverage": "leaf",
       "id": "GOV-5-03",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10351,7 +10351,7 @@
       "coverage": "leaf",
       "id": "GOV-5-04",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10362,7 +10362,7 @@
       "coverage": "leaf",
       "id": "GOV-5-05",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10373,7 +10373,7 @@
       "coverage": "leaf",
       "id": "GOV-5-06",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10384,7 +10384,7 @@
       "coverage": "leaf",
       "id": "GOV-5-07",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10395,7 +10395,7 @@
       "coverage": "leaf",
       "id": "GOV-5-08",
       "source": {
-        "line": 107,
+        "line": 113,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10406,7 +10406,7 @@
       "coverage": "leaf",
       "id": "GOV-7-01",
       "source": {
-        "line": 132,
+        "line": 138,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10417,7 +10417,7 @@
       "coverage": "leaf",
       "id": "GOV-7-02",
       "source": {
-        "line": 132,
+        "line": 138,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10428,7 +10428,7 @@
       "coverage": "leaf",
       "id": "GOV-7-03",
       "source": {
-        "line": 132,
+        "line": 138,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10439,7 +10439,7 @@
       "coverage": "leaf",
       "id": "GOV-7-04",
       "source": {
-        "line": 132,
+        "line": 138,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10450,7 +10450,7 @@
       "coverage": "leaf",
       "id": "GOV-7-05",
       "source": {
-        "line": 132,
+        "line": 138,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10461,7 +10461,7 @@
       "coverage": "leaf",
       "id": "GOV-7-06",
       "source": {
-        "line": 132,
+        "line": 138,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10472,7 +10472,7 @@
       "coverage": "leaf",
       "id": "GOV-7-07",
       "source": {
-        "line": 132,
+        "line": 138,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10483,7 +10483,7 @@
       "coverage": "leaf",
       "id": "GOV-8-01",
       "source": {
-        "line": 146,
+        "line": 152,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10494,7 +10494,7 @@
       "coverage": "leaf",
       "id": "GOV-8-02",
       "source": {
-        "line": 146,
+        "line": 152,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10505,7 +10505,7 @@
       "coverage": "leaf",
       "id": "GOV-8-03",
       "source": {
-        "line": 146,
+        "line": 152,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10516,7 +10516,7 @@
       "coverage": "leaf",
       "id": "GOV-8-04",
       "source": {
-        "line": 146,
+        "line": 152,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10527,7 +10527,7 @@
       "coverage": "leaf",
       "id": "GOV-8-05",
       "source": {
-        "line": 146,
+        "line": 152,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10538,7 +10538,7 @@
       "coverage": "leaf",
       "id": "GOV-9-01",
       "source": {
-        "line": 158,
+        "line": 164,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10549,7 +10549,7 @@
       "coverage": "leaf",
       "id": "GOV-9-02",
       "source": {
-        "line": 158,
+        "line": 164,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10560,7 +10560,7 @@
       "coverage": "leaf",
       "id": "GOV-9-03",
       "source": {
-        "line": 158,
+        "line": 164,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10571,7 +10571,7 @@
       "coverage": "leaf",
       "id": "GOV-9-04",
       "source": {
-        "line": 158,
+        "line": 164,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10582,7 +10582,7 @@
       "coverage": "leaf",
       "id": "GOV-9-05",
       "source": {
-        "line": 158,
+        "line": 164,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10593,7 +10593,7 @@
       "coverage": "leaf",
       "id": "GOV-9-06",
       "source": {
-        "line": 158,
+        "line": 164,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10604,7 +10604,7 @@
       "coverage": "leaf",
       "id": "GOV-9-07",
       "source": {
-        "line": 158,
+        "line": 164,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10615,7 +10615,7 @@
       "coverage": "leaf",
       "id": "GOV-11-01",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10626,7 +10626,7 @@
       "coverage": "leaf",
       "id": "GOV-11-02",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10637,7 +10637,7 @@
       "coverage": "leaf",
       "id": "GOV-11-03",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10648,7 +10648,7 @@
       "coverage": "leaf",
       "id": "GOV-11-04",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10659,7 +10659,7 @@
       "coverage": "leaf",
       "id": "GOV-11-05",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10670,7 +10670,7 @@
       "coverage": "leaf",
       "id": "GOV-11-06",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10681,7 +10681,7 @@
       "coverage": "leaf",
       "id": "GOV-11-07",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10692,7 +10692,7 @@
       "coverage": "leaf",
       "id": "GOV-11-08",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",

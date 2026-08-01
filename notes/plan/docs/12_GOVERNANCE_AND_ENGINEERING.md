@@ -51,15 +51,21 @@ gaps grandfathered per ADR and per section in
 
 Public docs use controlled verbs:
 
-- `observed`;
-- `tested`;
-- `bounded`;
-- `exhaustively checked`;
-- `proved under`;
-- `certificate checked`;
-- `hypothesized`.
+- `observed`; (delivered: bn-227c)
+- `tested`; (delivered: bn-227c)
+- `bounded`; (delivered: bn-227c)
+- `exhaustively checked`; (delivered: bn-227c)
+- `proved under`; (delivered: bn-227c)
+- `certificate checked`; (delivered: bn-227c)
+- `hypothesized`. (delivered: bn-227c, bn-18cg)
 
 CI cross-checks claim IDs.
+
+These obligations are enforced by `tools/governance/check_claim_governance.py`
+(self-testing; evidence in `tools/governance/evidence/gov-3.json`). The claim
+registry is `docs/18_CLAIMS_MATRIX.md` (C001–C035), mirrored by the generated
+requirements registry and bound bidirectionally by the check; four pre-existing
+instances are grandfathered by exact sentence, named in the evidence file.
 
 ## 4. Review requirements
 

@@ -483,6 +483,8 @@ def _extract_bullet_policy(
         section_id, _title = match.groups()
         line = _line_number(text, match.start())
         for ordinal, summary in enumerate(_top_level_bullets(body), 1):
+            status = "satisfied" if "(delivered:" in summary else ACTIVE
+            summary = re.sub(r"\s*\(delivered:[^)]*\)", "", summary)
             requirements.append(
                 _requirement(
                     f"{prefix}-{section_id}-{ordinal:02d}",
@@ -490,7 +492,7 @@ def _extract_bullet_policy(
                     summary,
                     path,
                     line,
-                    status="satisfied" if "(delivered:" in summary else ACTIVE,
+                    status=status,
                 )
             )
 
