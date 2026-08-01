@@ -1044,8 +1044,8 @@
         "line": 122,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "disk import, editor overlay, fork, seal, and diff"
+      "status": "satisfied",
+      "summary": "disk import, editor overlay, fork, seal, and diff (delivered: bn-1hrk)"
     },
     {
       "category": "pr-deliverable",

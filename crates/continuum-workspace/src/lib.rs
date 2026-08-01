@@ -38,13 +38,37 @@
 //!   [`ContentIdentifier`](publication::ContentIdentifier) parameter rather than importing
 //!   `continuum-value`, so an edge that would only carry an opaque token is not created.
 //!
-//! PR-1 / IMPL-01 scaffold: this crate declares its responsibility and its dependency
-//! boundary. The snapshot types and behavior land in the PR named above;
-//! [`artifact_path`] landed with PR-1 / IMPL-05 and [`publication`] with
-//! PR 2 / IMPL-05 and IMPL-06.
+//! # What is here now
+//!
+//! The crate has grown past its PR-1 scaffold and holds three layers, in dependency
+//! order. Underneath are the two seams every other module names: [`artifact_path`]
+//! (PR-1 / IMPL-05) decides where an artifact goes, and [`publication`]
+//! (PR 2 / IMPL-05, IMPL-06) decides when it becomes visible there and who may look,
+//! including the `ContentIdentifier` seam behind which `continuum-value` decides what an
+//! identity *is*. Above them is the immutable model: [`snapshot`] (PR 3 / IMPL-01,
+//! IMPL-05) is the Merkle tree of a workspace's files, its ordering contract, and the
+//! `admit` boundary that decides which operating-system names are workspace paths;
+//! [`components`] (PR 3 / IMPL-03) binds that tree beside dependency, toolchain, and
+//! configuration identities as one `WorkspaceDescriptor`. On top are the five operations
+//! a client performs on a workspace (PR 3 / IMPL-02): [`import`] walks a real directory
+//! and is the only module in the crate that touches a filesystem, [`overlay`] layers
+//! unsaved editor buffers over a snapshot without mutating it, [`lineage`] names a
+//! divergence point and the line that runs from it, [`seal`] freezes a workspace into
+//! published records, and [`diff`] reports which files differ and under which identities.
+//!
+//! Everything above `publication` is pure: values in, values out, with the single
+//! deliberate exception of [`import`], which exists to be that boundary. Still open in
+//! this crate's own scope: the stale-snapshot error, and the six plan §4.2 components
+//! [`components`] lists as out of scope — the intent reference among them, which is PR 4's.
+//!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod artifact_path;
 pub mod components;
+pub mod diff;
+pub mod import;
+pub mod lineage;
+pub mod overlay;
 pub mod publication;
+pub mod seal;
 pub mod snapshot;

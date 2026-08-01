@@ -124,7 +124,7 @@ Implement:
 Implement:
 
 - Merkle workspace snapshots (delivered: bn-15gj);
-- disk import, editor overlay, fork, seal, and diff;
+- disk import, editor overlay, fork, seal, and diff (delivered: bn-1hrk);
 - source/dependency/toolchain/config identities (delivered: bn-2xri);
 - stale-snapshot error;
 - deterministic file ordering (delivered: bn-1qhe).
