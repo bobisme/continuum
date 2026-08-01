@@ -57,12 +57,12 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 835,
-      "active_edges": 1931,
+      "active_bones": 834,
+      "active_edges": 1930,
       "active_requirements": 719,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 735,
+      "leaf_bones": 734,
       "requirements": 846
     },
     "program_status": {
