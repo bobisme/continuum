@@ -99,6 +99,45 @@ of the T0/T1 ladder:
 Compiler-generated lemmas (`*.mk.injEq`, equation lemmas) also carry `propext`;
 they are not authored claims and are not listed in the manifest.
 
+## PR-4A exit evidence
+
+**Verified 2026-07-31 (bn-zr81).** The PR-4A exit criterion — *T0/T1 compile with
+no `sorry` and empty axiom manifests* (RFC 0012 theorem ladder, ADR-0035 axiom
+manifests) — was re-derived from a clean tree rather than taken from the
+delivery reports:
+
+- `lake env lean --version` reports Lean 4.32.1, matching the pinned
+  `lean-toolchain`;
+- `lake clean && lake build` completes from scratch — 19 jobs, no errors and no
+  `declaration uses 'sorry'` warnings;
+- `sh scripts/axiom-manifest.sh --check` regenerates the manifest and reports
+  *axiom manifest is up to date*, so the checked-in artifacts match the built
+  environment;
+- a fresh `sorry` / `admit` / `axiom` / `native_decide` / `set_option` sweep over
+  `Continuum/` and `Continuum.lean` finds nothing (the only tree-wide hit is the
+  word "axiom" in a doc comment of `AxiomManifest.lean`, which is tooling outside
+  the library target);
+- all 68 manifest rows report an empty axiom list, and all 68 names resolve to
+  real theorems in the built environment — no dangling or renamed rows;
+- 18 rows spanning every one of the 11 rung items were re-checked one by one with
+  `#print axioms` against a freshly imported environment; every one printed *does
+  not depend on any axioms*, matching its manifest row;
+- an environment-wide `collectAxioms` sweep over all 204 theorems in the
+  `Continuum` modules finds 29 that depend on an axiom, always only `propext`,
+  and never `Classical.choice`, `Quot.sound` or `sorryAx`. Exactly two of the 29
+  are authored claims — `Continuum.cancel_step_decreases_rank` and
+  `Continuum.Examples.DieHard.solution_ends_with_four_gallons`, both pre-existing
+  and both outside the T0/T1 ladder, as recorded above. The remaining 27 are
+  compiler-generated (`*.mk.injEq`, equation lemmas, match equations);
+- every RFC 0012 T0 rung item (4) and T1 rung item (5) maps to at least one
+  manifest row, under the RFC's own wording — no rung item is unproved. The
+  manifest additionally carries two T0 groups the RFC does not enumerate
+  (`checker trusted base (reflective plumbing)` and `instantiation: Die Hard
+  finite closure and counterexample`); these are additive, not substitutes.
+
+The exit criterion holds. Wiring these commands into `just check` remains the
+open follow-up.
+
 ## Mandatory CI before theorem claims
 
 ```bash

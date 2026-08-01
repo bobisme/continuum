@@ -1234,7 +1234,7 @@
         "line": 150,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Lean environment and seed theorems [G6; Phase A band]"
     },
     {
@@ -1282,8 +1282,8 @@
         "line": 150,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "T0/T1 compile with no sorry and empty axiom manifests (RFC 0012 theorem ladder; axiom manifests per ADR-0035). The proof service remains PR 28."
+      "status": "satisfied",
+      "summary": "T0/T1 compile with no sorry and empty axiom manifests (RFC 0012 theorem ladder; axiom manifests per ADR-0035). The proof service remains PR 28 (delivered: bn-zr81)."
     },
     {
       "category": "pr",
