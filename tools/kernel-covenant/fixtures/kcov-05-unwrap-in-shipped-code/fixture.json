@@ -1,0 +1,14 @@
+{
+  "description": "`Token::as_str`'s total `unwrap_or` becomes `unwrap`, turning a malformed token into an unwind \u2014 docs/12 \u00a711's release-blocker class.",
+  "id": "kcov-05-unwrap-in-shipped-code",
+  "requirement": "KCOV-05",
+  "rule": "no-panic-escape",
+  "substitute": {
+    "crates/continuum-kernel-core/src/wire.rs": [
+      {
+        "find": "core::str::from_utf8(&self.0).unwrap_or(\"\")",
+        "replace": "core::str::from_utf8(&self.0).unwrap()"
+      }
+    ]
+  }
+}

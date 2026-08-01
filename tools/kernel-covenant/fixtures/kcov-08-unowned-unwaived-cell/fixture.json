@@ -1,0 +1,14 @@
+{
+  "description": "A (class, crate) cell loses its owning test and gains no waiver: the fail-closed case.",
+  "id": "kcov-08-unowned-unwaived-cell",
+  "requirement": "KCOV-08",
+  "rule": "mutation-matrix",
+  "substitute": {
+    "tools/kernel-covenant/mutation-matrix.toml": [
+      {
+        "find": "sat = [\"a_foreign_magic_is_rejected\"]",
+        "replace": "sat = []"
+      }
+    ]
+  }
+}

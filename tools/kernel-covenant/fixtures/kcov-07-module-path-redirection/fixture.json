@@ -1,0 +1,14 @@
+{
+  "description": "`#[path]` redirects `continuum-kernel-temporal`'s wire module outside `src/`, moving trusted code where the counter does not look.",
+  "id": "kcov-07-module-path-redirection",
+  "requirement": "KCOV-07",
+  "rule": "no-plugins-or-dynamic-loading",
+  "substitute": {
+    "crates/continuum-kernel-temporal/src/lib.rs": [
+      {
+        "find": "pub mod wire;",
+        "replace": "#[path = \"../../elsewhere/wire.rs\"]\npub mod wire;"
+      }
+    ]
+  }
+}

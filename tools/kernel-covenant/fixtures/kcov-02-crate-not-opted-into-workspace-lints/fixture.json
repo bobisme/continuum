@@ -1,0 +1,9 @@
+{
+  "description": "`continuum-kernel-smt` drops `[lints] workspace = true`, so the workspace's `unsafe_code = \"forbid\"` no longer applies to it.",
+  "id": "kcov-02-crate-not-opted-into-workspace-lints",
+  "overlay": {
+    "crates/continuum-kernel-smt/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "KCOV-02",
+  "rule": "lint-walls-present"
+}

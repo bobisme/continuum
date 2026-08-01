@@ -1,0 +1,14 @@
+{
+  "description": "`#![forbid(unsafe_code)]` is deleted from `continuum-kernel-core`'s crate root.",
+  "id": "kcov-02-forbid-unsafe-removed",
+  "requirement": "KCOV-02",
+  "rule": "lint-walls-present",
+  "substitute": {
+    "crates/continuum-kernel-core/src/lib.rs": [
+      {
+        "find": "#![forbid(unsafe_code)]\n",
+        "replace": ""
+      }
+    ]
+  }
+}

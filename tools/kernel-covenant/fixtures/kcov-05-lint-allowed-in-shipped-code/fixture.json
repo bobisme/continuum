@@ -1,0 +1,14 @@
+{
+  "description": "The SMT checking entry point carries a local `#[allow(clippy::panic)]`, which is how a denied lint gets escaped one item at a time.",
+  "id": "kcov-05-lint-allowed-in-shipped-code",
+  "requirement": "KCOV-05",
+  "rule": "no-panic-escape",
+  "substitute": {
+    "crates/continuum-kernel-smt/src/check.rs": [
+      {
+        "find": "pub fn check_certificate(bytes: &[u8]) -> Verdict {",
+        "replace": "#[allow(clippy::panic)]\npub fn check_certificate(bytes: &[u8]) -> Verdict {"
+      }
+    ]
+  }
+}

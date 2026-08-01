@@ -1,0 +1,9 @@
+{
+  "description": "`continuum-kernel-sat` declares a dependency, which plan \u00a720 admits none of for the trusted checking base.",
+  "id": "kcov-06-async-runtime-dependency",
+  "overlay": {
+    "crates/continuum-kernel-sat/Cargo.toml": "Cargo.toml.fixture"
+  },
+  "requirement": "KCOV-06",
+  "rule": "dependency-freedom"
+}

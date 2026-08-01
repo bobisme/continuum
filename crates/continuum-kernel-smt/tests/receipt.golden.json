@@ -1,0 +1,36 @@
+{
+  "schema_id": "https://continuum.dev/schema/proof-receipt.json",
+  "schema_epoch": 1,
+  "receipt_id": "receipt_ordering-congruence-0001",
+  "claim": {
+    "kind": "safety",
+    "text": "smt-proof certificate: the carried propositional skeleton conjoined with the used theory lemmas has no model — every resolution step replayed to the empty clause; 4 atoms, 3 assertions, 2 lemmas carried (2 used), 3 derived, 0 deleted, 4 propagations; assurance TRUSTED_SOLVER; trusted components: envelope-digest-binding, skeleton-model-correspondence, theory-lemma:LIA, theory-lemma:UF",
+    "property_hash": "blake3:ordering-property",
+    "verdict": "established"
+  },
+  "closure": {
+    "model_hash": "blake3:ordering-model",
+    "assumptions_hash": "blake3:empty-assumptions",
+    "observers_hash": "blake3:ordering-observers",
+    "domain_pack_hashes": []
+  },
+  "epochs": {
+    "semantic": "continuum-semantics-1",
+    "proof": "proof-2026-07"
+  },
+  "transformations": [],
+  "certificate": {
+    "kind": "smt-proof",
+    "hash": "blake3:cert-ordering-congruence"
+  },
+  "checker": {
+    "name": "continuum-kernel-smt",
+    "version": "0.0.0+wire.CONTSMTC.1",
+    "source_hash": "blake3:kernel-smt-source",
+    "binary_hash": "blake3:kernel-smt-binary",
+    "toolchain": "rustc 1.97.0 (pinned by rust-toolchain.toml)"
+  },
+  "reproduce": [
+    "continuum proof check --receipt receipt_ordering-congruence-0001"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "description": "`clippy::unwrap_used` is dropped from `continuum-kernel-sat`'s deny list, turning the no-panic covenant back into a review note.",
+  "id": "kcov-02-denied-lint-dropped",
+  "requirement": "KCOV-02",
+  "rule": "lint-walls-present",
+  "substitute": {
+    "crates/continuum-kernel-sat/src/lib.rs": [
+      {
+        "find": "    clippy::unwrap_used,\n",
+        "replace": ""
+      }
+    ]
+  }
+}

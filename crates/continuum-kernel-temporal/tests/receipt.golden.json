@@ -1,0 +1,36 @@
+{
+  "schema_id": "https://continuum.dev/schema/proof-receipt.json",
+  "schema_epoch": 1,
+  "receipt_id": "receipt_drain-ranking-0001",
+  "claim": {
+    "kind": "liveness",
+    "text": "ranking certificate: every non-goal state has a successor of strictly smaller rank and every goal state ranks 0, so progress is unconditional and no fairness assumption is discharged; 9 states (1 initial, 3 goal, 9 reachable) and 12 transitions; property class eventually-state-set; fairness weak-fairness over 0 declared fair actions; progress bound 4; trusted components: certificate-model-correspondence, envelope-digest-binding",
+    "property_hash": "blake3:eventually-goal",
+    "verdict": "established"
+  },
+  "closure": {
+    "model_hash": "blake3:drain-model",
+    "assumptions_hash": "blake3:empty-assumptions",
+    "observers_hash": "blake3:drain-observers",
+    "domain_pack_hashes": []
+  },
+  "epochs": {
+    "semantic": "continuum-semantics-1",
+    "proof": "proof-2026-07"
+  },
+  "transformations": [],
+  "certificate": {
+    "kind": "ranking",
+    "hash": "blake3:cert-drain-ranking"
+  },
+  "checker": {
+    "name": "continuum-kernel-temporal",
+    "version": "0.0.0+wire.CONTTMPC.1",
+    "source_hash": "blake3:kernel-temporal-source",
+    "binary_hash": "blake3:kernel-temporal-binary",
+    "toolchain": "rustc 1.97.0 (pinned by rust-toolchain.toml)"
+  },
+  "reproduce": [
+    "continuum proof check --receipt receipt_drain-ranking-0001"
+  ]
+}

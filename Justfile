@@ -8,8 +8,9 @@ set positional-arguments
 default:
     @just --list
 
-# Full project gate: formatting, lints, tests, crate boundaries, governance, dossier, Lean.
-check: fmt-check lint test boundaries governance dossier lean
+# Full project gate: formatting, lints, tests, crate boundaries, kernel covenant,
+# governance, dossier, Lean.
+check: fmt-check lint test boundaries covenant governance dossier lean
 
 # Reject unformatted Rust.
 fmt-check:
@@ -43,6 +44,19 @@ build:
 boundaries:
     python3 tools/check_crate_boundaries.py --self-test
     python3 tools/check_crate_boundaries.py
+
+# Enforce the docs/03 §5 / plan §20 kernel covenant over the four
+# `continuum-kernel-*` crates: the <15,000 non-test-line budget (with the counting
+# method documented in the checker), the no-async/no-unsafe/no-panic lint walls,
+# dependency freedom, the mutation-class matrix, and INV-014 receipt conformance.
+# The self-test runs first — every violating fixture must be caught — so the check
+# cannot pass vacuously. Evidence lands in tools/kernel-covenant/evidence/.
+#
+# `--strict` (not run here) promotes the matrix's `uncovered` waivers to failures;
+# it is the burn-down switch, not the gate.
+covenant:
+    python3 tools/check_kernel_covenant.py --self-test
+    python3 tools/check_kernel_covenant.py
 
 # Enforce the docs/12 executable policy obligations (GOV §1 code/semantic
 # policy, GOV §2 ADR process, GOV §3 claim governance). Each checker runs its

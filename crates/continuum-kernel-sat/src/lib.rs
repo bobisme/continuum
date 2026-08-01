@@ -122,6 +122,7 @@
 )]
 
 pub mod check;
+pub mod receipt;
 pub mod verdict;
 pub mod wire;
 
@@ -129,4 +130,5 @@ pub mod wire;
 mod fixture;
 
 pub use check::check_certificate;
+pub use receipt::{ClaimKind, Receipt, ReceiptError, Seam, SeamField, receipt};
 pub use verdict::{CertificateKind, CheckedClaim, Feature, Field, Rejection, TokenFault, Verdict};

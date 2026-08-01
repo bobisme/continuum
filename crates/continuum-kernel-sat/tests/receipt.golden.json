@@ -1,0 +1,36 @@
+{
+  "schema_id": "https://continuum.dev/schema/proof-receipt.json",
+  "schema_epoch": 1,
+  "receipt_id": "receipt_three-variable-refutation-0001",
+  "claim": {
+    "kind": "safety",
+    "text": "lrat certificate: the carried CNF has no model — every derived clause re-derived by unit propagation from its declared antecedents, ending in the empty clause; 3 variables, 8 input clauses, 7 derived, 6 deleted, 7 propagations; trusted components: envelope-digest-binding, formula-model-correspondence",
+    "property_hash": "blake3:unsatisfiable",
+    "verdict": "established"
+  },
+  "closure": {
+    "model_hash": "blake3:three-variable-cnf",
+    "assumptions_hash": "blake3:empty-assumptions",
+    "observers_hash": "blake3:three-variable-observers",
+    "domain_pack_hashes": []
+  },
+  "epochs": {
+    "semantic": "continuum-semantics-1",
+    "proof": "proof-2026-07"
+  },
+  "transformations": [],
+  "certificate": {
+    "kind": "lrat",
+    "hash": "blake3:cert-three-variable-refutation"
+  },
+  "checker": {
+    "name": "continuum-kernel-sat",
+    "version": "0.0.0+wire.CONTSATC.1",
+    "source_hash": "blake3:kernel-sat-source",
+    "binary_hash": "blake3:kernel-sat-binary",
+    "toolchain": "rustc 1.97.0 (pinned by rust-toolchain.toml)"
+  },
+  "reproduce": [
+    "continuum proof check --receipt receipt_three-variable-refutation-0001"
+  ]
+}

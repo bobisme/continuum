@@ -1,0 +1,14 @@
+{
+  "description": "A cell is both owned by a test and waived, so the waiver claims a gap that has been closed.",
+  "id": "kcov-08-waiver-outlives-its-gap",
+  "requirement": "KCOV-08",
+  "rule": "mutation-matrix",
+  "substitute": {
+    "tools/kernel-covenant/mutation-matrix.toml": [
+      {
+        "find": "[[waiver]]\nclass = \"envelope.digest-relabelling\"\ncrate = \"smt\"",
+        "replace": "[[waiver]]\nclass = \"robustness.determinism\"\ncrate = \"core\"\nkind = \"uncovered\"\nreason = \"A stale waiver left behind after the determinism test landed, which is exactly what this rule exists to catch.\"\n\n[[waiver]]\nclass = \"envelope.digest-relabelling\"\ncrate = \"smt\""
+      }
+    ]
+  }
+}

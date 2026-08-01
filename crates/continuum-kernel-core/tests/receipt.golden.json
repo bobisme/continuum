@@ -1,0 +1,36 @@
+{
+  "schema_id": "https://continuum.dev/schema/proof-receipt.json",
+  "schema_epoch": 1,
+  "receipt_id": "receipt_diehard-closure-0001",
+  "claim": {
+    "kind": "safety",
+    "text": "finite-closure certificate: Init ⊆ S, Post(S) ⊆ S and S ⊆ P re-derived over 16 states (1 initial) and 96 transitions; property class state-domain; trusted components: certificate-model-correspondence, envelope-digest-binding",
+    "property_hash": "blake3:diehard-typeok",
+    "verdict": "established"
+  },
+  "closure": {
+    "model_hash": "blake3:diehard-model",
+    "assumptions_hash": "blake3:empty-assumptions",
+    "observers_hash": "blake3:diehard-observers",
+    "domain_pack_hashes": []
+  },
+  "epochs": {
+    "semantic": "continuum-semantics-1",
+    "proof": "proof-2026-07"
+  },
+  "transformations": [],
+  "certificate": {
+    "kind": "closed-set",
+    "hash": "blake3:cert-diehard-closure"
+  },
+  "checker": {
+    "name": "continuum-kernel-core",
+    "version": "0.0.0+wire.CONTCERT.1",
+    "source_hash": "blake3:kernel-core-source",
+    "binary_hash": "blake3:kernel-core-binary",
+    "toolchain": "rustc 1.97.0 (pinned by rust-toolchain.toml)"
+  },
+  "reproduce": [
+    "continuum proof check --receipt receipt_diehard-closure-0001"
+  ]
+}

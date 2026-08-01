@@ -1,0 +1,14 @@
+{
+  "description": "`WIRE_EPOCH_ID` degrades to a bare ordinal, which names all four kernel crates at once and therefore none of them.",
+  "id": "kcov-09-wire-epoch-id-unqualified",
+  "requirement": "KCOV-09",
+  "rule": "receipt-conformance",
+  "substitute": {
+    "crates/continuum-kernel-core/src/receipt.rs": [
+      {
+        "find": "pub const WIRE_EPOCH_ID: &str = \"continuum-kernel-core/CONTCERT/1\";",
+        "replace": "pub const WIRE_EPOCH_ID: &str = \"1\";"
+      }
+    ]
+  }
+}

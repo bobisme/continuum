@@ -2094,8 +2094,11 @@ Deliver:
   between engines and kernel) — phase-normative here, not only a PR 9
   annotation; (delivered: bn-2i8, bn-n03, bn-15n — all four crates check
   certificates from wire form only, each depending on no workspace and no
-  external crate; 8,460 non-test lines measured across the four at landing;
-  mechanical enforcement of the budget is bn-2he)
+  external crate; two hand counts at landing disagreed by eight lines, and
+  bn-2he replaced both with one authority: `tools/check_kernel_covenant.py`,
+  which states its counting method, runs in `just check`, and measures 10,667
+  non-test lines across the four crates — 8,495 as landed plus the receipt
+  modules bn-2he added — against the 15,000 budget)
 - agent protocol spike parity;
 - Lean environment pinned and seed modules kernel-checked; T0/T1 theorems
   (transition-system safety, stuttering simulation, finite-closure

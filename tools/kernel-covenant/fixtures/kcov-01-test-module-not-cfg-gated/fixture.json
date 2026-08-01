@@ -1,0 +1,14 @@
+{
+  "description": "`continuum-kernel-core`'s wire test module loses its `#[cfg(test)]`, so ~145 lines of test code would ship inside the trusted base and would not be excluded by the counting method.",
+  "id": "kcov-01-test-module-not-cfg-gated",
+  "requirement": "KCOV-01",
+  "rule": "line-budget",
+  "substitute": {
+    "crates/continuum-kernel-core/src/wire.rs": [
+      {
+        "find": "#[cfg(test)]\nmod tests {",
+        "replace": "mod tests {"
+      }
+    ]
+  }
+}

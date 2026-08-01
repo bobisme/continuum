@@ -81,12 +81,21 @@
 //! pseudo-random corpus, every prefix of a valid certificate, and spliced
 //! corruptions.
 //!
+//! # Receipts
+//!
+//! [`receipt`] turns a [`Verdict::Verified`] into the `proof-receipt.schema.json`
+//! record INV-014 requires: this crate's *qualified* wire epoch
+//! ([`receipt::WIRE_EPOCH_ID`] — a bare `1` would name all four kernel crates at
+//! once), the envelope hashes the certificate carried, and a [`receipt::Seam`]
+//! carrying the build digest, toolchain identity and input digest that no
+//! self-contained checker can derive. Nothing on that seam is invented; see the
+//! module documentation.
+//!
 //! # Scope of this slice
 //!
-//! Receipt generation (INV-014: checker epoch, build digest, input hashes), the
-//! <15,000-line covenant tooling, and the full mutation campaign are PR 9's covenant
-//! slice, not this one. What lands here is the wire form, the two checkers, and the
-//! verdict vocabulary they answer in.
+//! The <15,000-non-test-line covenant and the cross-crate mutation matrix are
+//! enforced by `tools/check_kernel_covenant.py` (`just covenant`), not from inside
+//! the crate.
 
 #![forbid(unsafe_code)]
 // The no-panic covenant, as lints rather than as review notes. Malformed input has
@@ -104,6 +113,7 @@
 )]
 
 pub mod check;
+pub mod receipt;
 pub mod verdict;
 pub mod wire;
 
@@ -111,6 +121,7 @@ pub mod wire;
 mod fixture;
 
 pub use check::check_certificate;
+pub use receipt::{Receipt, ReceiptError, Seam, SeamField, receipt};
 pub use verdict::{
     CertificateKind, CheckedClaim, Feature, Field, PropertyClass, Rejection, TokenFault, Verdict,
 };

@@ -1,0 +1,14 @@
+{
+  "description": "A waiver keeps its kind but loses its reason, which is how a real gap becomes invisible.",
+  "id": "kcov-08-waiver-without-a-reason",
+  "requirement": "KCOV-08",
+  "rule": "mutation-matrix",
+  "substitute": {
+    "tools/kernel-covenant/mutation-matrix.toml": [
+      {
+        "find": "reason = \"Same gap as `smt`: the envelope is present and checked for shape, but no test pins the carried-label behaviour against a relabelled model or property digest.\"",
+        "replace": "reason = \"n/a\""
+      }
+    ]
+  }
+}

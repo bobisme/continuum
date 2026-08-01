@@ -1,0 +1,7 @@
+{
+  "budget": 500,
+  "description": "The four crates counted against a deliberately small budget: the real counting code path runs, only the threshold moves, so the rule is proven to fire on a count it must reject.",
+  "id": "kcov-01-budget-exceeded",
+  "requirement": "KCOV-01",
+  "rule": "line-budget"
+}

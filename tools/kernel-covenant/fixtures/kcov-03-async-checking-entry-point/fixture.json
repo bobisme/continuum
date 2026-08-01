@@ -1,0 +1,14 @@
+{
+  "description": "The core checking entry point becomes `async fn`, which would put an executor inside the trusted checking base.",
+  "id": "kcov-03-async-checking-entry-point",
+  "requirement": "KCOV-03",
+  "rule": "kernel-is-synchronous",
+  "substitute": {
+    "crates/continuum-kernel-core/src/check.rs": [
+      {
+        "find": "pub fn check_certificate(bytes: &[u8]) -> Verdict {",
+        "replace": "pub async fn check_certificate(bytes: &[u8]) -> Verdict {"
+      }
+    ]
+  }
+}

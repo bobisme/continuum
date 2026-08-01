@@ -1,0 +1,14 @@
+{
+  "description": "`forbid(unsafe_code)` is swapped for `allow(unsafe_code)` \u2014 the wall is still spelled at the crate root, but inverted.",
+  "id": "kcov-04-unsafe-code-re-allowed",
+  "requirement": "KCOV-04",
+  "rule": "no-unsafe",
+  "substitute": {
+    "crates/continuum-kernel-core/src/lib.rs": [
+      {
+        "find": "#![forbid(unsafe_code)]",
+        "replace": "#![allow(unsafe_code)]"
+      }
+    ]
+  }
+}

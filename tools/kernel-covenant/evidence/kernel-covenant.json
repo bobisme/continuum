@@ -1,0 +1,311 @@
+{
+  "artifact": "continuum.kernel-covenant.evidence/kcov",
+  "authority": {
+    "code_size_covenant": "notes/plan/docs/03_ASSURANCE_AND_TCB.md \u00a75",
+    "dependency_rules": "notes/plan/plan.md \u00a720",
+    "mutation_matrix": "tools/kernel-covenant/mutation-matrix.toml",
+    "pr_deliverables": "notes/plan/notes/START_HERE_IMPLEMENTATION.md PR 9",
+    "receipt_shape": "notes/plan/schemas/proof-receipt.schema.json"
+  },
+  "counting_method": {
+    "counted": "crates/continuum-kernel-*/src/**/*.rs",
+    "excluded_directories": [
+      "tests/",
+      "benches/",
+      "examples/"
+    ],
+    "excluded_files": [
+      "crates/continuum-kernel-core/src/fixture.rs",
+      "crates/continuum-kernel-sat/src/fixture.rs",
+      "crates/continuum-kernel-smt/src/fixture.rs",
+      "crates/continuum-kernel-temporal/src/fixture.rs"
+    ],
+    "excluded_items": "every `#[cfg(test)]` item, brace-matched or `;`-terminated",
+    "line_definition": "every surviving physical line, blank and comment lines included"
+  },
+  "determinism": "This file records no timestamp, commit id, or absolute path: it is a function of the repository contents alone, so an unchanged tree reproduces it byte-for-byte.",
+  "line_budget": {
+    "budget": 15000,
+    "by_crate": {
+      "continuum-kernel-core": {
+        "by_file": {
+          "crates/continuum-kernel-core/src/check.rs": 214,
+          "crates/continuum-kernel-core/src/lib.rs": 125,
+          "crates/continuum-kernel-core/src/receipt.rs": 527,
+          "crates/continuum-kernel-core/src/verdict.rs": 577,
+          "crates/continuum-kernel-core/src/wire.rs": 963
+        },
+        "non_blank": 2239,
+        "non_blank_non_comment": 1309,
+        "total": 2406
+      },
+      "continuum-kernel-sat": {
+        "by_file": {
+          "crates/continuum-kernel-sat/src/check.rs": 442,
+          "crates/continuum-kernel-sat/src/lib.rs": 132,
+          "crates/continuum-kernel-sat/src/receipt.rs": 531,
+          "crates/continuum-kernel-sat/src/verdict.rs": 624,
+          "crates/continuum-kernel-sat/src/wire.rs": 896
+        },
+        "non_blank": 2448,
+        "non_blank_non_comment": 1466,
+        "total": 2625
+      },
+      "continuum-kernel-smt": {
+        "by_file": {
+          "crates/continuum-kernel-smt/src/check.rs": 481,
+          "crates/continuum-kernel-smt/src/lib.rs": 121,
+          "crates/continuum-kernel-smt/src/receipt.rs": 554,
+          "crates/continuum-kernel-smt/src/verdict.rs": 645,
+          "crates/continuum-kernel-smt/src/wire.rs": 886
+        },
+        "non_blank": 2494,
+        "non_blank_non_comment": 1625,
+        "total": 2687
+      },
+      "continuum-kernel-temporal": {
+        "by_file": {
+          "crates/continuum-kernel-temporal/src/check.rs": 590,
+          "crates/continuum-kernel-temporal/src/lib.rs": 126,
+          "crates/continuum-kernel-temporal/src/receipt.rs": 543,
+          "crates/continuum-kernel-temporal/src/verdict.rs": 730,
+          "crates/continuum-kernel-temporal/src/wire.rs": 960
+        },
+        "non_blank": 2745,
+        "non_blank_non_comment": 1755,
+        "total": 2949
+      }
+    },
+    "context_only": "`non_blank` and `non_blank_non_comment` are reported for comparison and are not enforced; the enforced number is `total`.",
+    "headroom": 4333,
+    "total": 10667
+  },
+  "mutation_matrix": {
+    "cells": 92,
+    "classes": [
+      "assumption.strengthening",
+      "body.dangling-reference",
+      "body.element-drop",
+      "body.reference-retarget",
+      "body.resource-lifecycle",
+      "body.value-perturbation",
+      "encoding.count-out-of-range",
+      "encoding.injectivity",
+      "encoding.sequence-reorder-or-duplicate",
+      "envelope.digest-relabelling",
+      "envelope.token-corruption",
+      "framing.certificate-family-substitution",
+      "framing.magic-substitution",
+      "framing.oversize",
+      "framing.schema-epoch-mismatch",
+      "framing.trailing-bytes",
+      "framing.truncation-prefix",
+      "framing.wire-epoch-substitution",
+      "proof.termination-shortcut",
+      "receipt.non-verified-suppression",
+      "receipt.seam-corruption",
+      "robustness.determinism",
+      "robustness.garbage-corpus"
+    ],
+    "not_applicable": [
+      "body.resource-lifecycle/core",
+      "body.resource-lifecycle/temporal",
+      "proof.termination-shortcut/core",
+      "assumption.strengthening/core"
+    ],
+    "owning_tests": 166,
+    "policy": "fail-closed: a (class, crate) cell with no owning test and no waiver fails the gate. `uncovered` waivers are real gaps, listed above and reported by --strict.",
+    "uncovered_cells": [
+      "envelope.digest-relabelling/smt",
+      "envelope.digest-relabelling/temporal"
+    ]
+  },
+  "produced_by": "tools/check_kernel_covenant.py",
+  "receipts": {
+    "continuum-kernel-core": {
+      "golden": "crates/continuum-kernel-core/tests/receipt.golden.json",
+      "magic": "CONTCERT",
+      "wire_epoch": "1",
+      "wire_epoch_id": "continuum-kernel-core/CONTCERT/1"
+    },
+    "continuum-kernel-sat": {
+      "golden": "crates/continuum-kernel-sat/tests/receipt.golden.json",
+      "magic": "CONTSATC",
+      "wire_epoch": "1",
+      "wire_epoch_id": "continuum-kernel-sat/CONTSATC/1"
+    },
+    "continuum-kernel-smt": {
+      "golden": "crates/continuum-kernel-smt/tests/receipt.golden.json",
+      "magic": "CONTSMTC",
+      "wire_epoch": "1",
+      "wire_epoch_id": "continuum-kernel-smt/CONTSMTC/1"
+    },
+    "continuum-kernel-temporal": {
+      "golden": "crates/continuum-kernel-temporal/tests/receipt.golden.json",
+      "magic": "CONTTMPC",
+      "wire_epoch": "1",
+      "wire_epoch_id": "continuum-kernel-temporal/CONTTMPC/1"
+    }
+  },
+  "reproduce": "python3 tools/check_kernel_covenant.py --evidence tools/kernel-covenant/evidence/kernel-covenant.json",
+  "requirements": {
+    "KCOV-01": {
+      "boundary": "EXACT for the stated method, which the module docstring fixes. The count is a forcing function, not a proof of trustworthiness \u2014 docs/03 says so outright.",
+      "fixtures_proven_caught": [
+        "kcov-01-budget-exceeded",
+        "kcov-01-test-module-not-cfg-gated"
+      ],
+      "result": "pass",
+      "rule": "line-budget",
+      "source": "notes/plan/docs/03_ASSURANCE_AND_TCB.md \u00a75; plan \u00a720; START_HERE PR 9 IMPL-03",
+      "summary": "Fewer than 15,000 non-test lines across the four kernel crates.",
+      "violations": []
+    },
+    "KCOV-02": {
+      "boundary": "PROXY for the compile-time enforcement, which is `cargo clippy -D warnings` in `just lint`. This rule proves the walls have not been deleted; clippy proves they hold.",
+      "fixtures_proven_caught": [
+        "kcov-02-crate-not-opted-into-workspace-lints",
+        "kcov-02-denied-lint-dropped",
+        "kcov-02-forbid-unsafe-removed"
+      ],
+      "result": "pass",
+      "rule": "lint-walls-present",
+      "source": "docs/03 \u00a75; docs/12 \u00a711; docs/16 PO-KER-001",
+      "summary": "Every kernel crate still carries the forbid/deny walls that make the covenant a compile error.",
+      "violations": []
+    },
+    "KCOV-03": {
+      "boundary": "Textual over the comment- and string-blanked source, so prose about async does not trip it. Declared external async runtimes are `tools/check_crate_boundaries.py`.",
+      "fixtures_proven_caught": [
+        "kcov-03-async-checking-entry-point"
+      ],
+      "result": "pass",
+      "rule": "kernel-is-synchronous",
+      "source": "plan \u00a720 ('no async'); docs/03 \u00a75 ('single-threaded')",
+      "summary": "No async, await, or future machinery in shipped kernel code.",
+      "violations": []
+    },
+    "KCOV-04": {
+      "boundary": "Textual. `forbid` already makes this a compile error; the rule catches an attempt to weaken the attribute in the same change that adds the `unsafe`.",
+      "fixtures_proven_caught": [
+        "kcov-04-unsafe-block-in-decoder",
+        "kcov-04-unsafe-code-re-allowed"
+      ],
+      "result": "pass",
+      "rule": "no-unsafe",
+      "source": "plan \u00a720 ('no unsafe'); workspace `unsafe_code = \"forbid\"`",
+      "summary": "No `unsafe`, and no re-allowing of `unsafe_code`, in shipped kernel code.",
+      "violations": []
+    },
+    "KCOV-05": {
+      "boundary": "Textual, and wider than the lints: `assert!` is not covered by `clippy::panic` but still turns bad data into an unwind. Test modules are excluded, because their harness is allowed to panic.",
+      "fixtures_proven_caught": [
+        "kcov-05-lint-allowed-in-shipped-code",
+        "kcov-05-unwrap-in-shipped-code"
+      ],
+      "result": "pass",
+      "rule": "no-panic-escape",
+      "source": "docs/12 \u00a711 (malformed artifact panic in kernel = release blocker); docs/16 PO-KER-001",
+      "summary": "No unwind construct in shipped kernel code, and no local escape from the denied lints.",
+      "violations": []
+    },
+    "KCOV-06": {
+      "boundary": "Manifest-level and exact. Transitive third-party auditing is not needed while the admitted set is empty; widening it is an edit to this file plus an ADR.",
+      "fixtures_proven_caught": [
+        "kcov-06-async-runtime-dependency"
+      ],
+      "result": "pass",
+      "rule": "dependency-freedom",
+      "source": "plan \u00a720 dependency rules; docs/03 \u00a78 (implementation diversity)",
+      "summary": "The kernel crates declare only the dependencies plan \u00a720 admits \u2014 today, none.",
+      "violations": []
+    },
+    "KCOV-07": {
+      "boundary": "Textual. `include!` and `#[path]` are here as much for the line budget as for the covenant: both move code into a crate from somewhere the counter does not look.",
+      "fixtures_proven_caught": [
+        "kcov-07-module-path-redirection",
+        "kcov-07-source-splicing"
+      ],
+      "result": "pass",
+      "rule": "no-plugins-or-dynamic-loading",
+      "source": "plan \u00a720 ('no plugins or dynamic loading')",
+      "summary": "No FFI, dynamic loading, source splicing, or module-path redirection in the kernel.",
+      "violations": []
+    },
+    "KCOV-08": {
+      "boundary": "INDEX, not execution: the sweeps themselves run under `cargo test`. What this proves is that the map from mutation class to owning test is complete and not stale \u2014 a class nobody owns is a check that might not be load-bearing.",
+      "fixtures_proven_caught": [
+        "kcov-08-matrix-names-a-missing-test",
+        "kcov-08-unowned-unwaived-cell",
+        "kcov-08-waiver-outlives-its-gap",
+        "kcov-08-waiver-without-a-reason"
+      ],
+      "result": "pass",
+      "rule": "mutation-matrix",
+      "source": "START_HERE PR 9 exit; docs/19 \u00a74 (mutation testing)",
+      "summary": "Every mutation class is owned by a named, existing test in every kernel crate, or explicitly waived.",
+      "violations": []
+    },
+    "KCOV-09": {
+      "boundary": "The golden receipts are produced by the crates' own `to_json` and asserted byte-for-byte in their unit tests, so validating the goldens here validates the emitters. The schema subset covers exactly the keywords a kernel receipt exercises and refuses to guess at the rest.",
+      "fixtures_proven_caught": [
+        "kcov-09-checker-epoch-written-into-epochs",
+        "kcov-09-magic-collision",
+        "kcov-09-receipt-carries-an-unknown-field",
+        "kcov-09-wire-epoch-id-unqualified"
+      ],
+      "result": "pass",
+      "rule": "receipt-conformance",
+      "source": "INV-014; RFC 0024; RFC 0026 correction 17; schemas/proof-receipt.schema.json",
+      "summary": "Kernel receipts validate against proof-receipt.schema.json and name which crate's wire epoch they mean.",
+      "violations": []
+    }
+  },
+  "self_test": {
+    "failures": [],
+    "fixtures": 21,
+    "fixtures_by_requirement": {
+      "KCOV-01": [
+        "kcov-01-budget-exceeded",
+        "kcov-01-test-module-not-cfg-gated"
+      ],
+      "KCOV-02": [
+        "kcov-02-crate-not-opted-into-workspace-lints",
+        "kcov-02-denied-lint-dropped",
+        "kcov-02-forbid-unsafe-removed"
+      ],
+      "KCOV-03": [
+        "kcov-03-async-checking-entry-point"
+      ],
+      "KCOV-04": [
+        "kcov-04-unsafe-block-in-decoder",
+        "kcov-04-unsafe-code-re-allowed"
+      ],
+      "KCOV-05": [
+        "kcov-05-lint-allowed-in-shipped-code",
+        "kcov-05-unwrap-in-shipped-code"
+      ],
+      "KCOV-06": [
+        "kcov-06-async-runtime-dependency"
+      ],
+      "KCOV-07": [
+        "kcov-07-module-path-redirection",
+        "kcov-07-source-splicing"
+      ],
+      "KCOV-08": [
+        "kcov-08-matrix-names-a-missing-test",
+        "kcov-08-unowned-unwaived-cell",
+        "kcov-08-waiver-outlives-its-gap",
+        "kcov-08-waiver-without-a-reason"
+      ],
+      "KCOV-09": [
+        "kcov-09-checker-epoch-written-into-epochs",
+        "kcov-09-magic-collision",
+        "kcov-09-receipt-carries-an-unknown-field",
+        "kcov-09-wire-epoch-id-unqualified"
+      ]
+    },
+    "status": "pass"
+  },
+  "status": "pass"
+}

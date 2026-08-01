@@ -1,0 +1,385 @@
+# The kernel mutation matrix (PR 9, bn-2he).
+#
+# START_HERE PR 9's exit condition is "every single-field certificate mutation in
+# the test suite is rejected". The four `continuum-kernel-*` crates each carry their
+# own single-byte injectivity and field-mutation sweeps; what was missing was a
+# statement of *which mutation classes exist* and *which test owns each class in
+# each crate*, so that a class with no owning test is visible rather than absent.
+#
+# This file is that statement, and `tools/check_kernel_covenant.py` (KCOV-08)
+# enforces it:
+#
+#   - every test named below must exist, as a `#[test]`, in the crate it is named
+#     under — a renamed or deleted test fails the gate;
+#   - every (class, crate) cell must be either owned by at least one test or
+#     covered by an explicit `[[waiver]]` — an unowned, unwaived cell fails the
+#     gate (fail-closed);
+#   - a cell that is both owned and waived fails the gate, so a waiver cannot
+#     linger after the test that closed it lands.
+#
+# Waivers come in two kinds, and the distinction is the point:
+#
+#   - `not-applicable` — the crate's certificate families have no structure the
+#     mutation could act on. Permanent, and the reason says why.
+#   - `uncovered`      — the mutation class applies to this crate and no test owns
+#     it today. A real gap. The checker reports every one of these in its evidence
+#     under `uncovered_cells`, and `--strict` promotes them to failures so the
+#     backlog can be burned down without editing this file's discipline.
+#
+# The matrix indexes the existing sweeps; it deliberately does not duplicate them.
+# A mutation that survives is a check that is not load-bearing, so the value here is
+# entirely in the mapping being checkable.
+
+schema = "continuum.kernel-covenant.mutation-matrix/1"
+crates = ["core", "sat", "smt", "temporal"]
+
+# --- framing: the bytes before the body ------------------------------------
+
+[[class]]
+id = "framing.magic-substitution"
+mutation = "Replace the eight-byte format magic with a foreign or sibling-kernel magic."
+expected = "Rejected(BadMagic) — a sibling kernel's certificate is not this kernel's certificate."
+core = ["a_foreign_magic_is_rejected"]
+sat = ["a_foreign_magic_is_rejected"]
+smt = ["a_sibling_kernels_magic_is_rejected"]
+temporal = ["a_sibling_kernels_magic_is_rejected"]
+
+[[class]]
+id = "framing.wire-epoch-substitution"
+mutation = "Write a wire epoch this build does not implement, above and below the implemented one."
+expected = "Unsupported(WireEpoch) — never Rejected: the artifact may be valid under a contract this build has never seen (INV-008)."
+core = ["a_wire_epoch_this_build_does_not_implement_is_unsupported_not_rejected"]
+sat = ["a_wire_epoch_this_build_does_not_implement_is_unsupported_not_rejected"]
+smt = ["a_wire_epoch_this_build_does_not_implement_is_unsupported_not_rejected"]
+temporal = ["unimplemented_contracts_are_unsupported_not_rejected"]
+
+[[class]]
+id = "framing.certificate-family-substitution"
+mutation = "Write a certificate family — or property/fairness class — code outside the set this crate implements."
+expected = "Unsupported(CertificateKind / PropertyClass / FairnessClass), never Rejected."
+core = [
+    "an_unimplemented_certificate_family_is_unsupported",
+    "an_unimplemented_property_class_is_unsupported",
+]
+sat = ["an_unimplemented_certificate_family_is_unsupported"]
+smt = ["an_unimplemented_certificate_family_is_unsupported"]
+temporal = ["unimplemented_contracts_are_unsupported_not_rejected"]
+
+[[class]]
+id = "framing.schema-epoch-mismatch"
+mutation = "Make the envelope's schema epoch disagree with the header's wire epoch."
+expected = "Rejected(SchemaEpochMismatch) — the certificate names two contracts for itself."
+core = ["an_envelope_that_names_a_different_schema_epoch_is_rejected"]
+sat = ["an_envelope_that_names_a_different_schema_epoch_is_rejected"]
+smt = ["an_envelope_that_names_a_different_schema_epoch_is_rejected"]
+temporal = ["an_envelope_that_names_a_different_schema_epoch_is_rejected"]
+
+[[class]]
+id = "framing.truncation-prefix"
+mutation = "Cut the certificate at every prefix length, including the empty input."
+expected = "Rejected(Truncated) at every length — never Verified, never a panic."
+core = [
+    "truncated_bytes_are_rejected_at_every_length",
+    "empty_input_is_a_truncation_not_a_verdict",
+    "a_missing_successor_row_is_a_truncation",
+    "every_prefix_of_a_valid_certificate_is_rejected_not_accepted",
+]
+sat = [
+    "truncated_bytes_are_rejected_at_every_length",
+    "empty_input_is_a_truncation_not_a_verdict",
+    "every_prefix_of_a_valid_certificate_is_rejected_not_accepted",
+]
+smt = [
+    "truncated_bytes_are_rejected_at_every_length",
+    "empty_input_is_a_truncation_not_a_verdict",
+    "every_prefix_of_a_valid_certificate_is_rejected_not_accepted",
+]
+temporal = [
+    "truncated_bytes_are_rejected_at_every_length",
+    "empty_input_is_a_truncation_not_a_verdict",
+    "every_prefix_of_a_valid_certificate_is_rejected_not_accepted",
+]
+
+[[class]]
+id = "framing.trailing-bytes"
+mutation = "Append bytes after the certificate body ends."
+expected = "Rejected(TrailingBytes) — a trailing-byte tolerance is a second encoding of the same certificate (RFC 0005 resource bounds)."
+core = ["trailing_bytes_are_rejected", "trailing_bytes_are_a_second_encoding_and_are_rejected"]
+sat = ["trailing_bytes_are_rejected", "trailing_bytes_are_a_second_encoding_and_are_rejected"]
+smt = [
+    "trailing_bytes_and_oversized_inputs_are_rejected",
+    "trailing_bytes_are_a_second_encoding_and_are_rejected",
+]
+temporal = [
+    "trailing_bytes_and_oversized_inputs_are_rejected",
+    "trailing_bytes_are_a_second_encoding_and_are_rejected",
+]
+
+[[class]]
+id = "framing.oversize"
+mutation = "Present an input larger than the format's declared byte ceiling."
+expected = "Rejected(Oversized) before any parsing happens — certificate checking is itself an attack surface."
+core = ["an_oversized_input_is_rejected_before_it_is_parsed"]
+sat = ["an_oversized_input_is_rejected_before_it_is_parsed"]
+smt = ["trailing_bytes_and_oversized_inputs_are_rejected"]
+temporal = ["trailing_bytes_and_oversized_inputs_are_rejected"]
+
+# --- envelope: the claim the certificate is relative to ---------------------
+
+[[class]]
+id = "envelope.token-corruption"
+mutation = "Make each envelope token empty, over-long, or non-printable, one field at a time."
+expected = "Rejected(MalformedToken) naming the field — an identity with two spellings is two identities (ADR-0013)."
+core = ["malformed_envelope_tokens_are_rejected_by_field", "tokens_reject_empty_oversized_and_non_printable"]
+sat = ["malformed_envelope_tokens_are_rejected_by_field", "tokens_reject_empty_oversized_and_non_printable"]
+smt = ["malformed_tokens_are_rejected_by_field", "tokens_reject_empty_oversized_and_non_printable"]
+temporal = ["malformed_tokens_are_rejected_by_field", "tokens_reject_empty_oversized_and_non_printable"]
+
+[[class]]
+id = "envelope.digest-relabelling"
+mutation = "Change an envelope digest to name a different model, property, scope or assumption set."
+expected = "Still Verified, with the *claim* changed — the kernel checks digest shape, never digest contents, and says so through `trusted_components`. A checker that silently accepted a relabelled envelope as the same claim would be the overclaim INV-014 exists against."
+core = ["envelope_digests_are_carried_labels_not_facts_the_kernel_can_check"]
+sat = ["envelope_digests_are_carried_labels_not_facts_the_kernel_can_check"]
+
+# --- encoding: canonicity of the byte string --------------------------------
+
+[[class]]
+id = "encoding.count-out-of-range"
+mutation = "Write a declared count above the format's ceiling, below its floor, or larger than the body that follows."
+expected = "Rejected(CountOutOfRange / Truncated) — a declared count is never trusted as an allocation hint."
+core = [
+    "counts_outside_the_declared_range_are_rejected",
+    "a_declared_count_larger_than_the_body_cannot_be_verified",
+    "an_inverted_variable_range_is_rejected",
+]
+sat = ["counts_outside_the_declared_range_are_rejected"]
+smt = ["counts_outside_the_declared_range_are_rejected"]
+temporal = ["counts_outside_the_declared_range_are_rejected", "an_inverted_variable_range_is_rejected"]
+
+[[class]]
+id = "encoding.sequence-reorder-or-duplicate"
+mutation = "Reorder or duplicate an element of a sequence the format requires to be strictly ascending."
+expected = "Rejected(NotStrictlyAscending / duplicate identifier) — canonical order is what makes the encoding unique."
+core = ["unordered_sequences_are_rejected_as_ambiguous_encodings"]
+sat = [
+    "unordered_domain_packs_are_rejected_as_ambiguous_encodings",
+    "unordered_or_duplicated_literals_are_rejected",
+    "an_unordered_deletion_list_is_rejected",
+    "a_reused_or_descending_clause_identifier_is_rejected",
+]
+smt = ["an_unordered_or_duplicated_atom_table_is_rejected", "a_reused_clause_identifier_is_rejected"]
+temporal = ["unordered_sequences_are_rejected_as_ambiguous_encodings"]
+
+[[class]]
+id = "encoding.injectivity"
+mutation = "Flip a single byte anywhere in a green certificate and decode the result."
+expected = "No two byte strings decode to the same certificate: every surviving decode differs, so the wire form has no redundant encodings a producer could hide a change in."
+core = ["no_two_byte_strings_decode_to_the_same_certificate"]
+sat = ["no_two_byte_strings_decode_to_the_same_certificate"]
+smt = ["no_two_byte_strings_decode_to_the_same_certificate"]
+temporal = ["no_two_byte_strings_decode_to_the_same_certificate"]
+
+# --- body: the obligations themselves ---------------------------------------
+
+[[class]]
+id = "body.element-drop"
+mutation = "Remove one element the discharged obligation depends on — a reachable state, an antecedent, an input clause, a used lemma, a transition target."
+expected = "Rejected. This is the mutation a truncated exploration or a padded proof produces, and the one a certificate exists to catch."
+core = ["dropping_a_reachable_state_breaks_closure", "a_certificate_with_no_initial_states_is_rejected"]
+sat = ["dropping_any_antecedent_breaks_its_step", "dropping_any_input_clause_breaks_the_refutation"]
+smt = ["dropping_any_antecedent_breaks_its_step", "dropping_a_lemma_the_proof_uses_breaks_the_proof"]
+temporal = ["removing_any_transition_target_from_the_table_breaks_the_certificate"]
+
+[[class]]
+id = "body.reference-retarget"
+mutation = "Repoint every internal reference in turn — a transition target, an antecedent identifier — to a different existing element."
+expected = "Rejected at every position: an exhaustive sweep, not a sample."
+core = ["every_transition_retarget_is_rejected", "a_transition_to_an_unlisted_state_breaks_closure"]
+sat = ["every_antecedent_retarget_is_rejected"]
+smt = ["every_antecedent_retarget_is_rejected"]
+temporal = ["a_transition_leaving_the_table_breaks_closure", "making_the_trap_reachable_refutes_the_certificate"]
+
+[[class]]
+id = "body.dangling-reference"
+mutation = "Name an entity the certificate never declared — an action, a variable, a clause, an atom, a fair action."
+expected = "Rejected(UnknownAction / undefined clause / literal out of range) — an index is never trusted as in-bounds."
+core = ["an_initial_state_outside_the_table_is_rejected", "a_transition_naming_an_undeclared_action_is_rejected"]
+sat = [
+    "an_antecedent_naming_an_undefined_clause_is_rejected",
+    "a_literal_beyond_the_declared_variable_count_is_rejected",
+    "a_zero_literal_names_no_variable_and_is_rejected",
+]
+smt = ["an_antecedent_naming_an_undefined_clause_is_rejected", "a_literal_outside_the_atom_table_is_rejected"]
+temporal = [
+    "an_initial_or_goal_state_outside_the_table_is_rejected",
+    "a_transition_naming_an_undeclared_action_is_rejected",
+    "a_fair_action_outside_the_action_table_is_rejected",
+]
+
+[[class]]
+id = "body.value-perturbation"
+mutation = "Change one carried value without changing the structure — a state variable, a literal polarity, a rank, a clause width."
+expected = "Rejected, or a strictly weaker claim. The sweeps are exhaustive over the fixture's fields, which is what 'every single-field certificate mutation' means."
+core = ["every_state_table_mutation_is_rejected", "a_state_outside_the_declared_domain_is_rejected"]
+sat = ["flipping_any_input_literal_breaks_the_refutation", "weakening_a_derived_clause_breaks_the_chain_that_used_it"]
+smt = [
+    "a_tautological_derivation_carries_no_evidence_and_is_rejected",
+    "the_same_clause_as_an_assertion_is_a_stronger_claim_not_a_weaker_one",
+]
+temporal = [
+    "the_carried_ranking_is_minimal_so_no_rank_can_shrink",
+    "raising_a_rank_is_rejected_wherever_a_predecessor_depends_on_it",
+    "raising_the_top_rank_only_loosens_the_bound_it_reports",
+    "a_state_outside_the_declared_domain_is_rejected",
+]
+
+[[class]]
+id = "body.resource-lifecycle"
+mutation = "Abuse the family's deletion operation — delete an undefined clause, delete twice, or use a clause after deleting it."
+expected = "Rejected. A deleted clause is gone; a checker that kept it would accept proofs a solver never justified."
+sat = [
+    "an_antecedent_naming_a_deleted_clause_is_rejected",
+    "deleting_an_undefined_clause_is_rejected",
+    "deleting_the_same_clause_twice_is_rejected",
+]
+smt = ["deletion_is_checked_against_the_active_set", "deleting_a_clause_a_later_step_needs_is_rejected"]
+
+[[class]]
+id = "proof.termination-shortcut"
+mutation = "Stop the derivation before its goal, or continue past it, or claim the goal without paying for it."
+expected = "Rejected — a proof that never reaches the empty clause refutes nothing, and one that continues past it is a second encoding."
+sat = [
+    "a_proof_that_never_reaches_the_empty_clause_refutes_nothing",
+    "a_proof_that_continues_past_the_empty_clause_is_rejected",
+    "a_chain_that_never_conflicts_is_rejected",
+    "a_chain_that_conflicts_early_is_rejected_as_a_second_encoding",
+    "a_satisfied_antecedent_is_not_a_propagation",
+    "an_antecedent_with_two_unassigned_literals_is_not_unit",
+]
+smt = [
+    "a_proof_that_never_reaches_the_empty_clause_refutes_nothing",
+    "a_proof_that_continues_past_the_empty_clause_is_rejected",
+    "a_chain_that_never_conflicts_is_rejected",
+]
+temporal = [
+    "a_certificate_that_omits_a_goal_state_is_refuted_by_its_own_graph",
+    "a_goal_state_with_a_non_zero_rank_is_rejected",
+    "a_non_goal_state_with_no_successors_cannot_progress",
+]
+
+[[class]]
+id = "assumption.strengthening"
+mutation = "Ask the checker to trust more than it checked — declare extra fair actions, carry an unused or unchecked lemma, use a proof rule this build does not replay."
+expected = "Unsupported, or Verified with the extra trust *named* in the claim's trusted components. Never a silent upgrade (ADR-0017, INV-013)."
+sat = ["a_rat_step_is_unsupported_never_rejected"]
+smt = [
+    "an_unused_lemma_does_not_enter_the_trusted_set",
+    "relabelling_a_lemma_changes_the_trusted_set_and_nothing_else",
+    "a_tautological_theory_lemma_is_rejected",
+    "an_alethe_theory_step_is_unsupported_never_rejected",
+]
+temporal = [
+    "a_ranking_that_declares_fair_actions_is_unsupported",
+    "a_fairness_free_ranking_cannot_prove_a_fairness_dependent_property",
+    "declaring_an_extra_action_fair_can_only_exclude_more_cycles",
+    "without_the_fairness_assumption_the_wait_cycle_refutes_progress",
+]
+
+# --- robustness: properties of the checker, not of one certificate ----------
+
+[[class]]
+id = "robustness.garbage-corpus"
+mutation = "Feed a reproducible pseudo-random corpus, every prefix of a valid certificate, and spliced corruptions."
+expected = "A typed verdict on every input and no panic on any — docs/12 §11 classes a malformed-artifact panic in the kernel as a release blocker."
+core = ["garbage_bytes_never_panic", "garbage_from_outside_the_crate_never_panics"]
+sat = ["garbage_bytes_never_panic", "a_public_consumer_sees_typed_rejections_not_panics"]
+smt = ["garbage_bytes_never_panic", "a_public_consumer_sees_typed_rejections_not_panics"]
+temporal = ["garbage_bytes_never_panic", "a_public_consumer_sees_typed_rejections_not_panics"]
+
+[[class]]
+id = "robustness.determinism"
+mutation = "Check the same bytes twice in the same process."
+expected = "Byte-identical verdicts. The checker reads no clock, draws no randomness and iterates only over decode-time-ordered sequences (INV-005; ADR-0003)."
+core = ["checking_is_deterministic_over_the_same_bytes"]
+sat = ["checking_is_deterministic_over_the_same_bytes"]
+smt = ["checking_is_deterministic_over_the_same_bytes"]
+temporal = ["checking_is_deterministic_over_the_same_bytes"]
+
+# --- receipts: the INV-014 layer added by this bone -------------------------
+
+[[class]]
+id = "receipt.seam-corruption"
+mutation = "Empty or non-printable seam field, a receipt id outside the schema pattern, an empty reproduction list."
+expected = "A typed ReceiptError, never a published receipt. The kernel checks seam *shape*; contents stay the caller's obligation and are named as trusted inputs."
+core = [
+    "every_seam_field_is_shape_checked",
+    "a_seam_string_with_a_control_byte_is_refused",
+    "a_receipt_id_outside_the_schema_pattern_is_refused",
+    "a_receipt_without_a_reproduction_command_is_refused",
+]
+sat = [
+    "every_seam_field_is_shape_checked",
+    "a_seam_string_with_a_control_byte_is_refused",
+    "a_receipt_id_outside_the_schema_pattern_is_refused",
+    "a_receipt_without_a_reproduction_command_is_refused",
+]
+smt = [
+    "every_seam_field_is_shape_checked",
+    "a_seam_string_with_a_control_byte_is_refused",
+    "a_receipt_id_outside_the_schema_pattern_is_refused",
+    "a_receipt_without_a_reproduction_command_is_refused",
+]
+temporal = [
+    "every_seam_field_is_shape_checked",
+    "a_seam_string_with_a_control_byte_is_refused",
+    "a_receipt_id_outside_the_schema_pattern_is_refused",
+    "a_receipt_without_a_reproduction_command_is_refused",
+]
+
+[[class]]
+id = "receipt.non-verified-suppression"
+mutation = "Ask for a receipt for a rejected or unsupported verdict."
+expected = "ReceiptError::NotVerified. A receipt records a discharged claim; there is no `claim.verdict` the schema admits for either other arm."
+core = ["a_rejected_certificate_has_no_receipt", "an_unsupported_certificate_has_no_receipt"]
+sat = ["a_rejected_certificate_has_no_receipt", "an_unsupported_rat_step_has_no_receipt"]
+smt = ["a_rejected_certificate_has_no_receipt", "an_unsupported_alethe_step_has_no_receipt"]
+temporal = ["a_rejected_certificate_has_no_receipt", "an_unsupported_certificate_has_no_receipt"]
+
+# --- waivers ----------------------------------------------------------------
+
+[[waiver]]
+class = "envelope.digest-relabelling"
+crate = "smt"
+kind = "uncovered"
+reason = "The class applies — an SMT certificate carries the same eight-field RFC 0005 envelope — and no test asserts that relabelling a digest leaves the verdict alone while changing the claim. `continuum-kernel-core` and `continuum-kernel-sat` both have one; porting it is a follow-up on the crate, not on this matrix."
+
+[[waiver]]
+class = "envelope.digest-relabelling"
+crate = "temporal"
+kind = "uncovered"
+reason = "Same gap as `smt`: the envelope is present and checked for shape, but no test pins the carried-label behaviour against a relabelled model or property digest."
+
+[[waiver]]
+class = "body.resource-lifecycle"
+crate = "core"
+kind = "not-applicable"
+reason = "The closed-set and state-type wire forms carry no deletion operation and no mutable clause store: there is no resource whose lifetime a mutation could abuse. The nearest applicable class is `body.element-drop`."
+
+[[waiver]]
+class = "body.resource-lifecycle"
+crate = "temporal"
+kind = "not-applicable"
+reason = "Ranking and fair-SCC-exclusion certificates carry a fixed graph and a fixed rank vector, with no deletion step and no resource to reuse after release."
+
+[[waiver]]
+class = "proof.termination-shortcut"
+crate = "core"
+kind = "not-applicable"
+reason = "A closed-set certificate is a set plus a relation, not a derivation sequence, so it has no terminating step to cut short or overrun. The mutation that corresponds — a producer that stopped exploring — is `body.element-drop`, where `dropping_a_reachable_state_breaks_closure` owns it."
+
+[[waiver]]
+class = "assumption.strengthening"
+crate = "core"
+kind = "not-applicable"
+reason = "The closed-set and state-type families discharge their obligations from carried data alone: no fairness assumption, no external solver result, and no proof rule this build declines. The only carried trust is the envelope's digests, which `envelope.digest-relabelling` owns."

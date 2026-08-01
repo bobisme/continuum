@@ -1,0 +1,14 @@
+{
+  "description": "A golden receipt renames `closure.model_hash`, so it carries a property the schema does not admit and drops one it requires.",
+  "id": "kcov-09-receipt-carries-an-unknown-field",
+  "requirement": "KCOV-09",
+  "rule": "receipt-conformance",
+  "substitute": {
+    "crates/continuum-kernel-core/tests/receipt.golden.json": [
+      {
+        "find": "\"model_hash\":",
+        "replace": "\"model_digest\":"
+      }
+    ]
+  }
+}

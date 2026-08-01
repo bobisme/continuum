@@ -1,0 +1,14 @@
+{
+  "description": "`continuum-kernel-sat` adopts `continuum-kernel-core`'s magic, so two kernels' wire epochs become indistinguishable in a receipt.",
+  "id": "kcov-09-magic-collision",
+  "requirement": "KCOV-09",
+  "rule": "receipt-conformance",
+  "substitute": {
+    "crates/continuum-kernel-sat/src/wire.rs": [
+      {
+        "find": "pub const MAGIC: [u8; 8] = *b\"CONTSATC\";",
+        "replace": "pub const MAGIC: [u8; 8] = *b\"CONTCERT\";"
+      }
+    ]
+  }
+}

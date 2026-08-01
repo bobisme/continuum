@@ -1,0 +1,14 @@
+{
+  "description": "`include!` splices a file from outside the crate into the kernel: code the covenant did not review and the line counter does not see.",
+  "id": "kcov-07-source-splicing",
+  "requirement": "KCOV-07",
+  "rule": "no-plugins-or-dynamic-loading",
+  "substitute": {
+    "crates/continuum-kernel-core/src/wire.rs": [
+      {
+        "find": "pub const MAGIC: [u8; 8] = *b\"CONTCERT\";",
+        "replace": "include!(\"../../../elsewhere.rs\");\npub const MAGIC: [u8; 8] = *b\"CONTCERT\";"
+      }
+    ]
+  }
+}

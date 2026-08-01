@@ -1,0 +1,14 @@
+{
+  "description": "The receipt writes a checker epoch into `epochs`. RFC 0026 correction 17: there is no checker epoch, and a native checker's identity is not one of the six.",
+  "id": "kcov-09-checker-epoch-written-into-epochs",
+  "requirement": "KCOV-09",
+  "rule": "receipt-conformance",
+  "substitute": {
+    "crates/continuum-kernel-core/tests/receipt.golden.json": [
+      {
+        "find": "\"proof\": \"proof-2026-07\"",
+        "replace": "\"checker\": \"CONTCERT/1\""
+      }
+    ]
+  }
+}

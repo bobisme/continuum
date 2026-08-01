@@ -1,0 +1,14 @@
+{
+  "description": "An `unsafe` block appears in `continuum-kernel-temporal`'s wire module.",
+  "id": "kcov-04-unsafe-block-in-decoder",
+  "requirement": "KCOV-04",
+  "rule": "no-unsafe",
+  "substitute": {
+    "crates/continuum-kernel-temporal/src/wire.rs": [
+      {
+        "find": "pub const MAGIC: [u8; 8] = *b\"CONTTMPC\";",
+        "replace": "pub const MAGIC: [u8; 8] = unsafe { *b\"CONTTMPC\" };"
+      }
+    ]
+  }
+}
