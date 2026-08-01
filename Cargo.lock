@@ -234,6 +234,7 @@ version = "0.0.0"
 name = "continuumd"
 version = "0.0.0"
 dependencies = [
+ "continuum-evidence",
  "continuum-intent",
  "continuum-value",
  "continuum-workspace",

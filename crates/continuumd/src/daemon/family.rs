@@ -48,20 +48,32 @@ use continuum_workspace::publication::ReferenceStore;
 
 use super::state::DaemonState;
 use super::{Services, errors};
-use crate::protocol::envelope::{ArtifactRef, Omission, RequestEnvelope, Verdict, Warning};
+use crate::protocol::envelope::{
+    ArtifactRef, AssuranceEnvelope, Omission, RequestEnvelope, Verdict, Warning,
+};
 use crate::protocol::handshake::CapabilityDescriptor;
+use crate::protocol::operations::evidence::{
+    EvidenceGetRequest, EvidenceGetResponse, EvidenceQueryRequest, EvidenceQueryResponse,
+    EvidenceSubscribeRequest, EvidenceSubscribeResponse, EvidenceVerifyRequest,
+    EvidenceVerifyResponse,
+};
 use crate::protocol::operations::intent::{
     IntentAcceptRequest, IntentAcceptResponse, IntentDiffRequest, IntentDiffResponse,
     IntentGetRequest, IntentGetResponse, IntentLockRequest, IntentLockResponse,
     IntentProposeRevisionRequest, IntentProposeRevisionResponse, IntentRejectRequest,
     IntentRejectResponse,
 };
+use crate::protocol::operations::observe::{
+    ObserveClassifyRequest, ObserveClassifyResponse, ObserveIngestRequest, ObserveIngestResponse,
+    ObserveResultRequest,
+};
 use crate::protocol::operations::workspace::{
     WorkspaceCreateRequest, WorkspaceCreateResponse, WorkspaceDiffRequest, WorkspaceDiffResponse,
     WorkspaceForkRequest, WorkspaceForkResponse, WorkspaceSealRequest, WorkspaceSealResponse,
 };
 use crate::protocol::scalar::{AuditCorrelationId, IntentHandle, WorkspaceHandle};
-use crate::protocol::spec::{Nullable, OperationSpec};
+use crate::protocol::shared::VerificationResult;
+use crate::protocol::spec::{Nullable, OperationSpec, Optional};
 use crate::protocol::vocabulary::ErrorCode;
 
 /// A decoded operation request body.
@@ -102,6 +114,20 @@ pub enum Arguments {
     IntentReject(IntentRejectRequest),
     /// `intent.lock`.
     IntentLock(IntentLockRequest),
+    /// `evidence.get`.
+    EvidenceGet(EvidenceGetRequest),
+    /// `evidence.query`.
+    EvidenceQuery(EvidenceQueryRequest),
+    /// `evidence.verify`.
+    EvidenceVerify(EvidenceVerifyRequest),
+    /// `evidence.subscribe`.
+    EvidenceSubscribe(EvidenceSubscribeRequest),
+    /// `observe.ingest`.
+    ObserveIngest(ObserveIngestRequest),
+    /// `observe.classify`.
+    ObserveClassify(ObserveClassifyRequest),
+    /// `observe.result`.
+    ObserveResult(ObserveResultRequest),
 }
 
 impl Arguments {
@@ -119,6 +145,13 @@ impl Arguments {
             Self::IntentAccept(_) => "intent.accept",
             Self::IntentReject(_) => "intent.reject",
             Self::IntentLock(_) => "intent.lock",
+            Self::EvidenceGet(_) => "evidence.get",
+            Self::EvidenceQuery(_) => "evidence.query",
+            Self::EvidenceVerify(_) => "evidence.verify",
+            Self::EvidenceSubscribe(_) => "evidence.subscribe",
+            Self::ObserveIngest(_) => "observe.ingest",
+            Self::ObserveClassify(_) => "observe.classify",
+            Self::ObserveResult(_) => "observe.result",
         }
     }
 }
@@ -154,6 +187,21 @@ pub enum Payload {
     IntentReject(IntentRejectResponse),
     /// `intent.lock`.
     IntentLock(IntentLockResponse),
+    /// `evidence.get`.
+    EvidenceGet(EvidenceGetResponse),
+    /// `evidence.query`.
+    EvidenceQuery(EvidenceQueryResponse),
+    /// `evidence.verify`.
+    EvidenceVerify(EvidenceVerifyResponse),
+    /// `evidence.subscribe`.
+    EvidenceSubscribe(EvidenceSubscribeResponse),
+    /// `observe.ingest`.
+    ObserveIngest(ObserveIngestResponse),
+    /// `observe.classify`.
+    ObserveClassify(ObserveClassifyResponse),
+    /// `observe.result`. The IDL declares the *named* body `VerificationResult` here rather
+    /// than an anonymous one, so this variant carries the shared type.
+    ObserveResult(VerificationResult),
 }
 
 impl Payload {
@@ -173,6 +221,13 @@ impl Payload {
             Self::IntentAccept(_) => Some("intent.accept"),
             Self::IntentReject(_) => Some("intent.reject"),
             Self::IntentLock(_) => Some("intent.lock"),
+            Self::EvidenceGet(_) => Some("evidence.get"),
+            Self::EvidenceQuery(_) => Some("evidence.query"),
+            Self::EvidenceVerify(_) => Some("evidence.verify"),
+            Self::EvidenceSubscribe(_) => Some("evidence.subscribe"),
+            Self::ObserveIngest(_) => Some("observe.ingest"),
+            Self::ObserveClassify(_) => Some("observe.classify"),
+            Self::ObserveResult(_) => Some("observe.result"),
         }
     }
 }
@@ -224,6 +279,19 @@ pub struct Effect {
     /// `verdict` clause; the dispatcher checks the agreement against
     /// [`OperationSpec::verdict`].
     pub verdict: Nullable<Verdict>,
+    /// The nine-dimension assurance envelope.
+    ///
+    /// > A result whose `verdict` is `semantic` or `evaluation` MUST carry the
+    /// > nine-dimension `assurance` envelope, and every dimension MUST name a producing
+    /// > engine or carry a typed `Unsupported(reason)` (plan B11). Hiding uncertainty to
+    /// > save tokens is prohibited.
+    /// >
+    /// > — `rule envelope.assurance_required`
+    ///
+    /// Absent for a `structural` or `policy` verdict, and for an operation with no verdict
+    /// clause at all: the envelope is a statement about a *semantic* claim, and attaching
+    /// nine dimensions to a snapshot creation would be nine claims nothing established.
+    pub assurance: Optional<AssuranceEnvelope>,
     /// Artifacts the call produced or named.
     pub artifacts: Vec<ArtifactRef>,
     /// The INV-007 omission manifest.
@@ -239,6 +307,7 @@ impl Effect {
         Self {
             payload,
             verdict,
+            assurance: Optional::Absent,
             artifacts: Vec::new(),
             omissions: Vec::new(),
             warnings: Vec::new(),
@@ -249,6 +318,20 @@ impl Effect {
     #[must_use]
     pub fn with_artifacts(mut self, artifacts: Vec<ArtifactRef>) -> Self {
         self.artifacts = artifacts;
+        self
+    }
+
+    /// The same result, carrying the assurance envelope its semantic verdict obliges.
+    #[must_use]
+    pub fn with_assurance(mut self, assurance: AssuranceEnvelope) -> Self {
+        self.assurance = Optional::Present(assurance);
+        self
+    }
+
+    /// The same result, naming what it deliberately left out (INV-007).
+    #[must_use]
+    pub fn with_omissions(mut self, omissions: Vec<Omission>) -> Self {
+        self.omissions = omissions;
         self
     }
 }

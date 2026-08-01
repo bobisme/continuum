@@ -29,18 +29,27 @@
 
 use std::collections::BTreeMap;
 
+use continuum_evidence::claim_status::{
+    ClaimStatus, PromotionRejected, StatusConflict, compare_and_set,
+};
 use continuum_intent::contract::IntentContract;
+use continuum_value::assurance::ValidationBasis;
 use continuum_workspace::components::WorkspaceDescriptor;
 use continuum_workspace::lineage::{Fork, ForkName};
 use continuum_workspace::snapshot::WorkspacePath;
 
 use super::family::Arguments;
 use super::{OperationOutcome, ServiceError};
-use crate::protocol::envelope::RequestEnvelope;
+use crate::protocol::envelope::{Redacted, RequestEnvelope};
 use crate::protocol::handshake::CapabilityDescriptor;
-use crate::protocol::scalar::{CapabilityHandle, Commitment, IntentHandle, WorkspaceHandle};
+use crate::protocol::scalar::{
+    ActorId, CapabilityHandle, Commitment, EvidenceHandle, IntentHandle, Timestamp, WorkspaceHandle,
+};
 use crate::protocol::spec::Nullable;
-use crate::protocol::vocabulary::AuthorityLevel;
+use crate::protocol::task::EvidenceEvent;
+use crate::protocol::vocabulary::{
+    AuthorityLevel, EvidenceKind, EvidenceNodeKind, InconclusiveReason,
+};
 
 /// A registered capability: what it confers, and the capability it was delegated from.
 ///
@@ -166,6 +175,106 @@ pub struct StagedFile {
     pub content: Vec<u8>,
 }
 
+/// One write to a claim's status, as the graph records it.
+///
+/// A status is never *edited*: every write appends one of these to
+/// [`EvidenceNode::history`], and the claim's current status is the last one. That is plan
+/// §11.7's "the evidence graph is append-only; nothing is edited in place" expressed as the
+/// only shape this type has — there is no field to overwrite and no method that removes an
+/// element.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusWrite {
+    /// The status after this write.
+    pub status: ClaimStatus,
+    /// The daemon service identity that performed the promotion, for the statuses whose
+    /// schema conditional requires one.
+    ///
+    /// > Assurance-bearing status promotion is service-attributed: `sampled`, `bounded`,
+    /// > `validated`, and `proved` statuses name the daemon service identity that performed
+    /// > the promotion (plan §11.7 write model).
+    /// >
+    /// > — `schemas/evidence-graph-node.schema.json`
+    ///
+    /// [`None`] on the producer's own append, which is exactly the point: an entry a
+    /// producer wrote names no service, and a status that requires one therefore cannot be
+    /// reached by an append (INV-004).
+    pub service_identity: Option<String>,
+    /// `checked-certificate` or `trusted-solver`; required by the node schema when the
+    /// status is `validated`.
+    pub validation_basis: Option<ValidationBasis>,
+    /// The typed INV-008 reason, required by the node schema when the status is
+    /// `inconclusive`.
+    pub inconclusive_reason: Option<InconclusiveReason>,
+}
+
+/// One evidence-graph node as the daemon holds it.
+///
+/// Every field but [`history`](EvidenceNode::history) is written once, at append, and the
+/// state exposes no way to change any of them: [`DaemonState::append_evidence`] refuses to
+/// replace an existing entry and there is no `evidence_mut`, no remove, and no clear. The
+/// append-only write model is therefore a property of the surface rather than of a
+/// convention a handler could forget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceNode {
+    /// `kind` — the plan §11.2 node type.
+    pub kind: EvidenceNodeKind,
+    /// The assurance-result evidence class this node offers toward its claim.
+    pub evidence_kind: EvidenceKind,
+    /// `claim_id` — "Claim identity this node's status promotion is linearized against".
+    pub claim_id: String,
+    /// `artifact` — the artifact this node is *about*, by identity.
+    pub artifact: Commitment,
+    /// `provenance.actor` — the identity that appended this node, taken from the admitted
+    /// capability rather than from the request body. A producer cannot name someone else as
+    /// the author of its own append.
+    pub producer: ActorId,
+    /// `provenance.tool`.
+    pub tool: String,
+    /// `provenance.created_at`.
+    pub created_at: Timestamp,
+    /// `provenance.inputs`.
+    pub inputs: Vec<String>,
+    /// `idempotency_key` — "Idempotency key making agent retries safe (plan §11.7)".
+    pub idempotency_key: String,
+    /// Every status this claim has held, in write order. Never empty: the append itself is
+    /// the first element.
+    pub history: Vec<StatusWrite>,
+    /// Present when the content this node references has stopped being readable
+    /// (summarized, purged, or lost — plan §4.5).
+    pub redaction: Option<Redacted>,
+}
+
+impl EvidenceNode {
+    /// The claim's current status: the last one written.
+    ///
+    /// # Panics
+    ///
+    /// Never: `history` is non-empty by construction — [`DaemonState::append_evidence`] is
+    /// the only constructor path and it writes the appended status first.
+    #[must_use]
+    pub fn status(&self) -> ClaimStatus {
+        self.history
+            .last()
+            .map_or(ClaimStatus::BOTTOM, |write| write.status)
+    }
+
+    /// The statuses this claim has held, in write order — the input
+    /// [`verify_promotion_history`](continuum_evidence::claim_status::verify_promotion_history)
+    /// checks.
+    #[must_use]
+    pub fn status_history(&self) -> Vec<ClaimStatus> {
+        self.history.iter().map(|write| write.status).collect()
+    }
+
+    /// The service identity that performed the last status write, if any.
+    #[must_use]
+    pub fn service_identity(&self) -> Option<&str> {
+        self.history
+            .last()
+            .and_then(|write| write.service_identity.as_deref())
+    }
+}
+
 /// A replayed mutation: the request it was produced for, and the result it produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Replay {
@@ -215,6 +324,8 @@ pub struct DaemonState {
     lineages: BTreeMap<ForkName, Fork>,
     content: BTreeMap<Commitment, StagedFile>,
     intents: BTreeMap<IntentHandle, IntentRecord>,
+    evidence: BTreeMap<EvidenceHandle, EvidenceNode>,
+    evidence_events: Vec<EvidenceEvent>,
     idempotency: BTreeMap<(String, String), Replay>,
     admissions: Vec<AdmissionRecord>,
 }
@@ -296,9 +407,31 @@ impl DaemonState {
         path: WorkspacePath,
         content: Vec<u8>,
     ) -> Result<Commitment, ServiceError> {
+        let commitment = Self::commit_of(identifier, &path, &content)?;
+        self.content
+            .insert(commitment.clone(), StagedFile { path, content });
+        Ok(commitment)
+    }
+
+    /// The commitment a `(path, content)` record has, without staging it.
+    ///
+    /// Factored out of [`stage`](DaemonState::stage) rather than duplicated because the
+    /// daemon derives this value twice for two different reasons — once to *name* staged
+    /// content and once to *re-derive* it, which is the independent check
+    /// `evidence.verify` runs (INV-004) — and a second spelling of the preimage would make
+    /// the check pass against its own copy of the rule rather than against the rule.
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceError::Identity`] when the identity seam cannot name the record.
+    pub fn commit_of(
+        identifier: &dyn continuum_workspace::publication::ContentIdentifier,
+        path: &WorkspacePath,
+        content: &[u8],
+    ) -> Result<Commitment, ServiceError> {
         let mut preimage = Vec::new();
         let rendered = path.to_string();
-        for part in [rendered.as_bytes(), content.as_slice()] {
+        for part in [rendered.as_bytes(), content] {
             preimage.extend_from_slice(&(part.len() as u64).to_be_bytes());
             preimage.extend_from_slice(part);
         }
@@ -308,10 +441,7 @@ impl DaemonState {
                 &preimage,
             )
             .map_err(|_| ServiceError::Identity)?;
-        let commitment = Commitment::new(&handle.to_string());
-        self.content
-            .insert(commitment.clone(), StagedFile { path, content });
-        Ok(commitment)
+        Ok(Commitment::new(&handle.to_string()))
     }
 
     /// The file a commitment names, or [`None`] when nothing is staged under it.
@@ -343,6 +473,119 @@ impl DaemonState {
     /// member to record it as.
     pub fn drop_intent(&mut self, handle: &IntentHandle) -> Option<IntentRecord> {
         self.intents.remove(handle)
+    }
+
+    // --- the evidence graph ----------------------------------------------------------
+
+    /// Append one node to the evidence graph, or return the node already filed under
+    /// `handle`.
+    ///
+    /// > The graph is append-only; nothing is edited in place. […] Idempotency keys
+    /// > (RFC 0026) make agent retries safe: a replayed write returns the original node
+    /// > identity.
+    /// >
+    /// > — RFC 0038, "Write and concurrency model"
+    ///
+    /// So a second append under an identity the graph already holds is a *convergence*, not
+    /// an overwrite and not an error: the stored node is returned untouched, which is what
+    /// makes "returns the original node identity" true even when the two appends disagree
+    /// about everything else. The returned flag says which of the two happened, for the
+    /// caller that must decide whether to emit a `node_published` event.
+    pub fn append_evidence(
+        &mut self,
+        handle: EvidenceHandle,
+        node: EvidenceNode,
+    ) -> (&EvidenceNode, bool) {
+        use std::collections::btree_map::Entry;
+        match self.evidence.entry(handle) {
+            Entry::Occupied(occupied) => (occupied.into_mut(), false),
+            Entry::Vacant(vacant) => (vacant.insert(node), true),
+        }
+    }
+
+    /// The evidence node `handle` names, or [`None`].
+    #[must_use]
+    pub fn evidence(&self, handle: &EvidenceHandle) -> Option<&EvidenceNode> {
+        self.evidence.get(handle)
+    }
+
+    /// Every node in the graph, in handle order.
+    ///
+    /// Deterministic by the container: a [`BTreeMap`]'s iteration order is a function of
+    /// the keys present and of nothing else, which is what `rule pagination.deterministic`
+    /// needs from a query that returns a page of it.
+    pub fn evidence_nodes(&self) -> impl Iterator<Item = (&EvidenceHandle, &EvidenceNode)> {
+        self.evidence.iter()
+    }
+
+    /// Record that a node's referenced content has stopped being readable.
+    ///
+    /// The out-of-band half of plan §4.5: content is summarized after promotion, purged by
+    /// key shred, or lost across a restore, and none of those three is an operation in this
+    /// protocol version. It does not edit the node's claim — the redaction is *about the
+    /// referenced content* — and it cannot invent one: a handle the graph does not hold is
+    /// a no-op, so probing the graph through this surface reveals nothing.
+    pub fn redact_evidence(&mut self, handle: &EvidenceHandle, redaction: Redacted) {
+        if let Some(node) = self.evidence.get_mut(handle) {
+            node.redaction = Some(redaction);
+        }
+    }
+
+    /// Advance a claim's status. **The service-restricted write** (RFC 0038, INV-004).
+    ///
+    /// The `promotion` argument is not decoration and is not a parameter a caller chooses:
+    /// [`Promotion`](super::evidence::Promotion) has private fields and no public
+    /// constructor, so it can be built only inside `daemon::evidence` — the daemon's
+    /// verification service. `daemon::observe`, which is where a *producer's* append runs,
+    /// cannot name a value of this type, so "a producer may not promote its own claim" is
+    /// enforced by what compiles rather than by a check a handler could omit.
+    ///
+    /// The advance itself is plan §11.7's compare-and-set, decided by
+    /// [`continuum_evidence::claim_status::compare_and_set`] rather than restated here, so
+    /// the daemon and any independent linearizability checker (plan §24.5) share one
+    /// implementation of "would this write lower the claim?".
+    ///
+    /// # Errors
+    ///
+    /// [`PromotionRejected`] when the expected status is not the current one, or when the
+    /// write would regress the lattice. A node the graph does not hold reports a lost
+    /// compare-and-set against the lattice's bottom rather than a not-found, because a
+    /// distinguishable not-found is the existence oracle RFC 0027 X2 forbids.
+    pub fn promote_evidence(
+        &mut self,
+        handle: &EvidenceHandle,
+        expected: ClaimStatus,
+        promotion: &super::evidence::Promotion,
+    ) -> Result<ClaimStatus, PromotionRejected> {
+        let Some(node) = self.evidence.get_mut(handle) else {
+            return Err(PromotionRejected::Conflict(StatusConflict {
+                expected,
+                actual: ClaimStatus::BOTTOM,
+            }));
+        };
+        let settled = compare_and_set(node.status(), expected, promotion.status())?;
+        node.history.push(promotion.write(settled));
+        Ok(settled)
+    }
+
+    /// Record one committed evidence-graph delta.
+    ///
+    /// > `evidence.subscribe` streams typed evidence-graph deltas for a declared scope; the
+    /// > graph itself remains authoritative on reconnect.
+    /// >
+    /// > — `rule subscription.hints_only`
+    ///
+    /// The log is the daemon-side half of that stream: a delta is recorded when it is
+    /// *committed*, so a transport that drains this log can never deliver an event for a
+    /// write that did not land.
+    pub fn record_evidence_event(&mut self, event: EvidenceEvent) {
+        self.evidence_events.push(event);
+    }
+
+    /// Every committed evidence-graph delta so far, in commit order.
+    #[must_use]
+    pub fn evidence_events(&self) -> &[EvidenceEvent] {
+        &self.evidence_events
     }
 
     // --- workspaces and lineages ---------------------------------------------------

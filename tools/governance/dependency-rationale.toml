@@ -109,8 +109,8 @@ name = "continuum-evidence"
 origin = "workspace"
 tcb_class = "trusted-checking-base"
 kinds = ["dev", "normal"]
-used_by = ["continuum-task"]
-rationale = "The claim-status lattice that decides whether a write would lower a claim (plan §11.4, §11.7); a second implementation would be a checker checking its own assumption."
+used_by = ["continuum-task", "continuumd"]
+rationale = "The claim-status lattice that decides whether a write would lower a claim (plan §11.4, §11.7); a second implementation would be a checker checking its own assumption. continuumd's evidence.verify promotion is that compare-and-set: the crate's own module documentation names the daemon and any independent linearizability checker (plan §24.5) as the two consumers that must share one implementation of the order, and a lost CAS is what the wire's StatusConflict reports. Classed trusted-checking-base because the non-regression predicate is what stands between a racing promotion and a silently lowered claim; nothing downstream re-derives it."
 
 [[dependency]]
 name = "continuum-cml-syntax"

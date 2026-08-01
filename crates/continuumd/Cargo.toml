@@ -32,17 +32,28 @@ publish = false
 #   intent — is that crate's immutability plus this crate's admission predicate; a second
 #   policy table here would be the second spelling ADR-0013 forbids.
 #
-# Both are "top of the dependency islands" crates and neither depends on the daemon, so no
+# A fourth arrived with the `evidence` family:
+#
+# - `continuum-evidence` owns the plan §11.4 claim-status lattice and the plan §11.7
+#   compare-and-set that decides "would this write lower the claim?". Its own module
+#   documentation names this daemon as one of the two consumers that must share one
+#   implementation of that predicate — "a checker that recomputed the order for itself
+#   would be checking its own assumption" — so `evidence.verify`'s promotion calls
+#   `compare_and_set` rather than restating the order here.
+#
+# All are "top of the dependency islands" crates and none depends on the daemon, so no
 # cycle and no forbidden edge is created (`tools/check_crate_boundaries.py`).
 #
 # Repeated under [dev-dependencies] because integration tests in `tests/` are separate
 # crates and do not inherit the library's dependencies.
 [dependencies]
+continuum-evidence = { path = "../continuum-evidence" }
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 
 [dev-dependencies]
+continuum-evidence = { path = "../continuum-evidence" }
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }

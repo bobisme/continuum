@@ -1,0 +1,1870 @@
+//! The `evidence` and `observe` operation families, the capability-negotiation surface,
+//! and INV-004.
+//!
+//! # What these tests are evidence for
+//!
+//! The bone this file lands with carries `req:inv-004`, and the dimension it owes is the
+//! one no other Bone could reach: **a producer may not promote its own claim**. Everything
+//! below runs through [`Daemon::dispatch`] or [`Daemon::welcome`] — the same two entry
+//! points a transport calls — with no filesystem, no clock beyond the reading the daemon is
+//! handed, no runtime and no network.
+//!
+//! The INV-004 claim is made in four independent ways, deliberately, because a single test
+//! of an authority rule proves only that one path was closed:
+//!
+//! 1. a producer's append lands at the lattice's bottom and no request field reaches the
+//!    status ([`a_producers_append_lands_at_the_lattices_bottom`]);
+//! 2. the verification service is the only status-advancing path, and the status it writes
+//!    is what it checked rather than what the caller asked for
+//!    ([`the_status_written_is_what_the_checker_established_not_what_the_caller_named`]);
+//! 3. a service that produced a claim may not verify it
+//!    ([`a_verification_service_may_not_promote_a_claim_it_produced_itself`]);
+//! 4. `validated` and `proved` are unreachable without the checkers that establish them
+//!    ([`a_class_whose_independent_checker_has_not_shipped_is_never_promoted`]).
+//!
+//! A fifth is not a test at all and is stronger than any of them: `daemon::observe` cannot
+//! construct a `daemon::evidence::Promotion`, so the producer-side code *cannot be written*
+//! to promote. That is checked by the compiler on every build.
+
+use continuum_evidence::claim_status::{ClaimStatus, verify_promotion_history};
+use continuum_value::epoch::ProtocolWindow;
+use continuumd::daemon::capability::{ConnectionPolicy, Refusal};
+use continuumd::daemon::evidence::{DEFAULT_SERVICE, EvidenceFamily, lattice_status, wire_status};
+use continuumd::daemon::family::{Arguments, Payload};
+use continuumd::daemon::identity::Blake3Identity;
+use continuumd::daemon::observe::ObserveFamily;
+use continuumd::daemon::state::EvidenceNode;
+use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest, errors, evidence, observe};
+use continuumd::protocol::envelope::{
+    Budget, EnvelopeDimension, Redacted, RequestEnvelope, Verdict,
+};
+use continuumd::protocol::handshake::{
+    CapabilityDescriptor, CapabilityProfile, ClientHello, Negotiated, ServerLimits, VersionRange,
+    negotiate,
+};
+use continuumd::protocol::operations::evidence::{
+    EvidenceGetRequest, EvidenceQueryRequest, EvidenceSubscribeRequest, EvidenceVerifyRequest,
+};
+use continuumd::protocol::operations::observe::{
+    ObserveClassifyRequest, ObserveIngestRequest, ObserveResultRequest,
+};
+use continuumd::protocol::registry::{self, ENCODINGS};
+use continuumd::protocol::scalar::{
+    ActorId, ByteCount, CapabilityHandle, Commitment, DurationMs, EvidenceHandle, Opaque,
+    OperationName, ProtocolVersion, RequestId, Timestamp,
+};
+use continuumd::protocol::shared::EvidenceQuery;
+use continuumd::protocol::spec::{Nullable, Optional, ProtocolEnum};
+use continuumd::protocol::vocabulary::{
+    AuthorityLevel, DataGrant, Encoding, ErrorCode, EvidenceEventKind, EvidenceKind,
+    EvidenceNodeKind, EvidenceStatus, InconclusiveReason, OmissionReason, RedactionReason,
+    ResultStatus, SemanticVerdict,
+};
+
+use continuum_workspace::snapshot::WorkspacePath;
+
+/// A production trace, as a captured bundle would arrive.
+const TRACE: &str = "{\"events\":[{\"at\":0,\"op\":\"fill\"},{\"at\":1,\"op\":\"pour\"}]}\n";
+
+/// A second, different trace, so a query has more than one node to filter.
+const OTHER_TRACE: &str = "{\"events\":[{\"at\":0,\"op\":\"empty\"}]}\n";
+
+/// The instrumentation profile the traces above were captured under (plan §18.4).
+const PROFILE: &str = "otel-1.0/sampled";
+
+// --- fixtures ----------------------------------------------------------------------------
+
+fn version() -> ProtocolVersion {
+    ProtocolVersion::new(3, 1)
+}
+
+fn cap(handle: &str) -> CapabilityHandle {
+    CapabilityHandle::new(handle).expect("a well-formed capability handle")
+}
+
+fn who(actor: &str) -> ActorId {
+    ActorId::new(actor).expect("a well-formed actor identity")
+}
+
+fn name(operation: &str) -> OperationName {
+    OperationName::new(operation).expect("a well-formed operation name")
+}
+
+fn when(text: &str) -> Timestamp {
+    Timestamp::new(text).expect("a well-formed timestamp")
+}
+
+/// The reading every daemon in this file is built with, unless a test needs otherwise.
+fn now() -> Timestamp {
+    when("2026-08-01T00:00:00.000Z")
+}
+
+fn traced(grants: &[DataGrant]) -> CapabilityProfile {
+    CapabilityProfile {
+        privileged_operations: Vec::new(),
+        denied_operations: Vec::new(),
+        data_grants: grants.to_vec(),
+        cross_principal_sharing: false,
+    }
+}
+
+fn grant(
+    handle: &str,
+    actor: &str,
+    level: AuthorityLevel,
+    depth: u32,
+    profile: Optional<CapabilityProfile>,
+) -> CapabilityDescriptor {
+    CapabilityDescriptor {
+        capability: cap(handle),
+        actor: who(actor),
+        level,
+        snapshots: Vec::new(),
+        intents: Vec::new(),
+        artifact_classes: Vec::new(),
+        expires_at: Nullable::Null,
+        delegation_depth: depth,
+        profile,
+    }
+}
+
+fn negotiated() -> Negotiated {
+    negotiate(
+        &[version()],
+        ProtocolWindow::new(3),
+        ENCODINGS,
+        &hello("cap_root", "service:continuumd", version(), version()),
+    )
+    .expect("3.1 is served")
+}
+
+fn hello(
+    capability: &str,
+    actor: &str,
+    low: ProtocolVersion,
+    high: ProtocolVersion,
+) -> ClientHello {
+    ClientHello {
+        protocol_versions: VersionRange { low, high },
+        encodings: vec![Encoding::CanonicalJson],
+        client: "continuumd-daemon-evidence-test".to_owned(),
+        actor: who(actor),
+        capability: cap(capability),
+        features: Optional::Absent,
+    }
+}
+
+/// The capability tree, with the connection capability at its root.
+///
+/// Every non-root capability is a registered *delegation* of `cap_root`: RFC 0027 defines a
+/// narrower capability as "the connection's own capability or a descendant of it in the
+/// delegation tree", so a suite whose capabilities were unrelated roots would exercise
+/// D6/D7 nowhere.
+fn daemon_with(clock: Option<Timestamp>) -> Daemon {
+    let root = Some(cap("cap_root"));
+    let mut builder = Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
+        .capability(
+            {
+                let mut descriptor = grant(
+                    "cap_root",
+                    "service:continuumd",
+                    AuthorityLevel::Promote,
+                    4,
+                    Optional::Present(traced(&[DataGrant::ProductionTrace])),
+                );
+                descriptor.delegation_depth = 4;
+                descriptor
+            },
+            None,
+        )
+        // The producer: `execute` plus the plan §18.2 production-trace grant `observe.ingest`
+        // requires beyond its level (RFC 0027 R-4).
+        .capability(
+            grant(
+                "cap_observer",
+                "agent:observer",
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            root.clone(),
+        )
+        // A second producer, so two nodes can carry two different producers.
+        .capability(
+            grant(
+                "cap_second",
+                "agent:second-observer",
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            root.clone(),
+        )
+        // A reader: enough for every `evidence` operation, which is entirely `read`.
+        .capability(
+            grant(
+                "cap_reader",
+                "agent:reader",
+                AuthorityLevel::Read,
+                3,
+                Optional::Absent,
+            ),
+            root.clone(),
+        )
+        // `execute` and no production-trace grant: the level admits `observe.ingest` and the
+        // profile does not.
+        .capability(
+            grant(
+                "cap_ungranted",
+                "agent:ungranted",
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(traced(&[])),
+            ),
+            root.clone(),
+        )
+        // The self-certification fixture: a producer whose actor *is* the daemon's
+        // verification service identity.
+        .capability(
+            grant(
+                "cap_service",
+                DEFAULT_SERVICE,
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            root.clone(),
+        )
+        // Registered so it can be revoked mid-connection (RFC 0027 R1).
+        .capability(
+            grant(
+                "cap_revocable",
+                "agent:revocable",
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            root.clone(),
+        )
+        // A mis-provisioned delegation: a child of the *reader* claiming `execute` and a
+        // data grant its parent does not hold. D6/D7 make a child's admission set a subset
+        // of its parent's, so admission refuses it on the chain.
+        .capability(
+            grant(
+                "cap_escalating",
+                "agent:escalating",
+                AuthorityLevel::Execute,
+                2,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            Some(cap("cap_reader")),
+        )
+        // Expiring, so expiry can be judged against a reading or refused without one.
+        .capability(
+            {
+                let mut expiring = grant(
+                    "cap_expiring",
+                    "agent:expiring",
+                    AuthorityLevel::Execute,
+                    3,
+                    Optional::Present(traced(&[DataGrant::ProductionTrace])),
+                );
+                expiring.expires_at = Nullable::Value(when("2026-07-01T00:00:00.000Z"));
+                expiring
+            },
+            root,
+        )
+        .family(EvidenceFamily::new())
+        .family(ObserveFamily);
+    if let Some(reading) = clock {
+        builder = builder.now(reading);
+    }
+    builder.build()
+}
+
+/// The daemon every test uses unless it needs a different clock.
+fn daemon() -> Daemon {
+    daemon_with(Some(now()))
+}
+
+/// A daemon holding both traces as staged content.
+struct Fixture {
+    daemon: Daemon,
+    trace: Commitment,
+    other: Commitment,
+}
+
+fn fixture() -> Fixture {
+    fixture_with(Some(now()))
+}
+
+fn fixture_with(clock: Option<Timestamp>) -> Fixture {
+    let mut daemon = daemon_with(clock);
+    let stage = |daemon: &mut Daemon, path: &str, content: &str| {
+        daemon
+            .state_mut()
+            .stage(
+                &Blake3Identity,
+                WorkspacePath::new(path).expect("a workspace path"),
+                content.as_bytes().to_vec(),
+            )
+            .expect("staging names its content")
+    };
+    let trace = stage(&mut daemon, "traces/die-hard.jsonl", TRACE);
+    let other = stage(&mut daemon, "traces/other.jsonl", OTHER_TRACE);
+    Fixture {
+        daemon,
+        trace,
+        other,
+    }
+}
+
+fn envelope(operation: &str, actor: &str, capability: &str, request: &str) -> RequestEnvelope {
+    RequestEnvelope {
+        protocol_version: version(),
+        request_id: RequestId::new(request).expect("a well-formed request id"),
+        idempotency_key: Optional::Absent,
+        actor: who(actor),
+        capability: cap(capability),
+        operation: name(operation),
+        snapshot: Nullable::Null,
+        intent: Nullable::Null,
+        arguments: Opaque::from_bytes(Vec::new()),
+        budget: Optional::Absent,
+        output_policy: Optional::Absent,
+        trace: Optional::Absent,
+        page: Optional::Absent,
+    }
+}
+
+fn budget() -> Budget {
+    Budget {
+        wall_ms: Optional::Absent,
+        cpu_ms: Optional::Absent,
+        memory_bytes: Optional::Absent,
+        states: Optional::Absent,
+        solver_ms: Optional::Absent,
+        proof_ms: Optional::Absent,
+        tokens: Optional::Absent,
+        candidates: Optional::Absent,
+        bytes: Optional::Absent,
+    }
+}
+
+/// A `@mutation @task_starting` envelope: a non-empty idempotency key and a budget, which
+/// `obligation` requires before any family runs.
+fn started(mut envelope: RequestEnvelope, key: &str) -> RequestEnvelope {
+    envelope.idempotency_key = Optional::Present(key.to_owned());
+    envelope.budget = Optional::Present(budget());
+    envelope
+}
+
+fn ingest_with(
+    fixture: &mut Fixture,
+    actor: &str,
+    capability: &str,
+    trace: &Commitment,
+    request: &str,
+    key: &str,
+) -> OperationOutcome {
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: started(envelope("observe.ingest", actor, capability, request), key),
+        arguments: Arguments::ObserveIngest(ObserveIngestRequest {
+            trace: trace.clone(),
+            instrumentation_profile: PROFILE.to_owned(),
+        }),
+    })
+}
+
+/// The green-path ingest: the observer appends the Die Hard trace.
+fn ingest(fixture: &mut Fixture, request: &str, key: &str) -> OperationOutcome {
+    let trace = fixture.trace.clone();
+    ingest_with(
+        fixture,
+        "agent:observer",
+        "cap_observer",
+        &trace,
+        request,
+        key,
+    )
+}
+
+fn ingested_handle(outcome: &OperationOutcome) -> EvidenceHandle {
+    match &outcome.payload {
+        Payload::ObserveIngest(response) => response
+            .evidence
+            .first()
+            .cloned()
+            .expect("an ingest names the node it appended"),
+        other => panic!("expected an observe.ingest payload, got {other:?}"),
+    }
+}
+
+fn verify_with(
+    fixture: &mut Fixture,
+    handle: &EvidenceHandle,
+    expected: Optional<EvidenceStatus>,
+    request: &str,
+    key: &str,
+) -> OperationOutcome {
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: started(
+            envelope("evidence.verify", "agent:reader", "cap_reader", request),
+            key,
+        ),
+        arguments: Arguments::EvidenceVerify(EvidenceVerifyRequest {
+            evidence: handle.clone(),
+            expected_status: expected,
+        }),
+    })
+}
+
+fn verify(
+    fixture: &mut Fixture,
+    handle: &EvidenceHandle,
+    request: &str,
+    key: &str,
+) -> OperationOutcome {
+    verify_with(fixture, handle, Optional::Absent, request, key)
+}
+
+fn get(fixture: &mut Fixture, handle: &EvidenceHandle, request: &str) -> OperationOutcome {
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("evidence.get", "agent:reader", "cap_reader", request),
+        arguments: Arguments::EvidenceGet(EvidenceGetRequest {
+            evidence: handle.clone(),
+            inline: Optional::Absent,
+        }),
+    })
+}
+
+fn empty_query() -> EvidenceQuery {
+    EvidenceQuery {
+        node_kinds: Optional::Absent,
+        edge_kinds: Optional::Absent,
+        statuses: Optional::Absent,
+        claim_id: Optional::Absent,
+        roots: Optional::Absent,
+        max_depth: Optional::Absent,
+    }
+}
+
+fn query(fixture: &mut Fixture, query: EvidenceQuery, request: &str) -> OperationOutcome {
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("evidence.query", "agent:reader", "cap_reader", request),
+        arguments: Arguments::EvidenceQuery(EvidenceQueryRequest { query }),
+    })
+}
+
+fn code(outcome: &OperationOutcome) -> ErrorCode {
+    outcome.error_code().expect("an error result")
+}
+
+fn node(fixture: &Fixture, handle: &EvidenceHandle) -> EvidenceNode {
+    fixture
+        .daemon
+        .state()
+        .evidence(handle)
+        .expect("the graph holds the node")
+        .clone()
+}
+
+fn verify_response(
+    outcome: &OperationOutcome,
+) -> &continuumd::protocol::operations::evidence::EvidenceVerifyResponse {
+    match &outcome.payload {
+        Payload::EvidenceVerify(response) => response,
+        other => panic!("expected an evidence.verify payload, got {other:?}"),
+    }
+}
+
+fn redaction(reason: RedactionReason, commitment: &Commitment) -> Redacted {
+    Redacted {
+        redacted: true,
+        reason,
+        commitment: commitment.clone(),
+        original_class: "ev".to_owned(),
+    }
+}
+
+// --- the green path ----------------------------------------------------------------------
+
+#[test]
+fn a_trace_is_ingested_and_then_independently_verified_through_the_operation_layer() {
+    let mut fixture = fixture();
+    let ingested = ingest(&mut fixture, "req_ingest", "idem-ingest");
+    assert_eq!(
+        ingested.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        ingested.envelope.error
+    );
+    let handle = ingested_handle(&ingested);
+    assert!(handle.as_str().starts_with("ev_"));
+
+    // `@audit_recorded`: the result cites the correlation identity, and the store audited
+    // the publication the append performed.
+    assert!(!ingested.envelope.audit.is_absent());
+    assert!(!fixture.daemon.store_audit().is_empty());
+    assert_eq!(ingested.envelope.artifacts.len(), 1);
+    assert_eq!(ingested.envelope.artifacts[0].kind, "ev");
+
+    let verified = verify(&mut fixture, &handle, "req_verify", "idem-verify");
+    assert_eq!(
+        verified.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        verified.envelope.error
+    );
+    let response = verify_response(&verified);
+    assert_eq!(response.evidence, handle);
+    assert_eq!(response.status, EvidenceStatus::Observed);
+    assert_eq!(response.evidence_kind, EvidenceKind::ProductionObservation);
+    assert_eq!(response.checker, DEFAULT_SERVICE);
+}
+
+// --- INV-004 ------------------------------------------------------------------------------
+
+#[test]
+fn a_producers_append_lands_at_the_lattices_bottom() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let appended = node(&fixture, &handle);
+
+    assert_eq!(appended.status(), ClaimStatus::BOTTOM);
+    assert_eq!(appended.status(), ClaimStatus::Proposed);
+    assert_eq!(
+        appended.history.len(),
+        1,
+        "an append writes exactly one status"
+    );
+    // The producer's own write names no service identity, which is why the four
+    // assurance-bearing statuses are unreachable from it: their schema conditional
+    // requires one.
+    assert_eq!(appended.service_identity(), None);
+    assert_eq!(appended.history[0].validation_basis, None);
+    // `provenance.actor` comes from the admitted grant, not from the request body.
+    assert_eq!(appended.producer, who("agent:observer"));
+}
+
+#[test]
+fn the_producers_request_body_has_no_field_that_could_name_a_status() {
+    // The structural half of the claim above: `observe.ingest`'s declared request is two
+    // fields, and neither is a status, a confidence, or a service identity. A caller
+    // therefore cannot *express* a promoted append — the refusal is the wire's shape rather
+    // than a validation a handler performs.
+    let spec = registry::operation("observe.ingest").expect("the registry declares it");
+    let fields: Vec<&str> = spec.request.fields.iter().map(|field| field.name).collect();
+    assert_eq!(fields, vec!["trace", "instrumentation_profile"]);
+
+    // And the one evidence operation that *can* move a status takes the caller's status
+    // only as the compare-and-set guard.
+    let verify = registry::operation("evidence.verify").expect("the registry declares it");
+    let fields: Vec<&str> = verify
+        .request
+        .fields
+        .iter()
+        .map(|field| field.name)
+        .collect();
+    assert_eq!(fields, vec!["evidence", "expected_status"]);
+}
+
+#[test]
+fn the_status_written_is_what_the_checker_established_not_what_the_caller_named() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    // The caller names `proposed` as the status it believes the claim holds — a truthful
+    // guard — and the daemon writes `observed`, which is what its own check supports. The
+    // guard is never the written value.
+    let verified = verify_with(
+        &mut fixture,
+        &handle,
+        Optional::Present(EvidenceStatus::Proposed),
+        "req_verify",
+        "idem-verify",
+    );
+    assert_eq!(verified.envelope.status, ResultStatus::Ok);
+    assert_eq!(verify_response(&verified).status, EvidenceStatus::Observed);
+
+    let promoted = node(&fixture, &handle);
+    assert_eq!(promoted.status(), ClaimStatus::Observed);
+    assert_eq!(
+        promoted.history.len(),
+        2,
+        "a promotion appends, never edits"
+    );
+    // The append's record is untouched: the first write is still the producer's.
+    assert_eq!(promoted.history[0].status, ClaimStatus::Proposed);
+    assert_eq!(promoted.history[0].service_identity, None);
+}
+
+#[test]
+fn a_caller_naming_a_promoted_status_as_its_guard_loses_the_compare_and_set() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    // `validated` is not what the claim holds, and naming it does not make it so: the CAS
+    // is decided against the claim's *current* status, so the promotion is refused and
+    // nothing is written.
+    let lost = verify_with(
+        &mut fixture,
+        &handle,
+        Optional::Present(EvidenceStatus::Validated),
+        "req_lie",
+        "idem-lie",
+    );
+    assert_eq!(code(&lost), ErrorCode::StatusConflict);
+
+    let unchanged = node(&fixture, &handle);
+    assert_eq!(unchanged.status(), ClaimStatus::Proposed);
+    assert_eq!(unchanged.history.len(), 1);
+}
+
+#[test]
+fn a_verification_service_may_not_promote_a_claim_it_produced_itself() {
+    // The self-certification case the wire cannot prevent: every step obeys the protocol,
+    // and the producer's identity happens to be the identity the daemon verifies under.
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+    let ingested = ingest_with(
+        &mut fixture,
+        DEFAULT_SERVICE,
+        "cap_service",
+        &trace,
+        "req_self_ingest",
+        "idem-self-ingest",
+    );
+    assert_eq!(ingested.envelope.status, ResultStatus::Ok);
+    let handle = ingested_handle(&ingested);
+    assert_eq!(node(&fixture, &handle).producer.as_str(), DEFAULT_SERVICE);
+
+    let refused = verify(&mut fixture, &handle, "req_self_verify", "idem-self-verify");
+    assert_eq!(code(&refused), ErrorCode::InsufficientEvidence);
+    assert_eq!(
+        node(&fixture, &handle).status(),
+        ClaimStatus::Proposed,
+        "a refused self-certification writes nothing"
+    );
+    assert_eq!(node(&fixture, &handle).history.len(), 1);
+}
+
+#[test]
+fn the_same_claim_produced_by_another_identity_is_promoted() {
+    // The control for the test above: the refusal is about *who produced the claim*, not
+    // about the trace, the caller, or the class of evidence. One byte of the fixture
+    // changes — the capability the append ran under — and the promotion succeeds.
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+    let handle = ingested_handle(&ingest_with(
+        &mut fixture,
+        "agent:second-observer",
+        "cap_second",
+        &trace,
+        "req_ingest",
+        "idem-ingest",
+    ));
+    let verified = verify(&mut fixture, &handle, "req_verify", "idem-verify");
+    assert_eq!(
+        verified.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        verified.envelope.error
+    );
+    assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Observed);
+}
+
+#[test]
+fn the_checker_a_verification_names_is_the_service_and_never_the_caller() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let verified = verify(&mut fixture, &handle, "req_verify", "idem-verify");
+
+    let response = verify_response(&verified);
+    assert_eq!(response.checker, DEFAULT_SERVICE);
+    assert_ne!(
+        response.checker, "agent:reader",
+        "who asked is not who checked"
+    );
+    assert_ne!(
+        response.checker, "agent:observer",
+        "who produced is not who checked"
+    );
+}
+
+#[test]
+fn a_deployments_own_service_identity_is_what_the_refusal_compares_against() {
+    // The service identity is a property of the family, not a constant, so a deployment
+    // running two checkers gets two answers for the same graph. `agent:observer` produced
+    // the node; a service verifying *as* `agent:observer` is self-certifying even though
+    // the identity is not the default one.
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    let mut impersonating = Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
+        .capability(
+            grant(
+                "cap_root",
+                "service:continuumd",
+                AuthorityLevel::Promote,
+                4,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            None,
+        )
+        .capability(
+            grant(
+                "cap_reader",
+                "agent:reader",
+                AuthorityLevel::Read,
+                3,
+                Optional::Absent,
+            ),
+            Some(cap("cap_root")),
+        )
+        .now(now())
+        .family(EvidenceFamily::verifying_as(who("agent:observer")))
+        .build();
+    let appended = node(&fixture, &handle);
+    impersonating
+        .state_mut()
+        .append_evidence(handle.clone(), appended);
+
+    let refused = impersonating.dispatch(&OperationRequest {
+        envelope: started(
+            envelope(
+                "evidence.verify",
+                "agent:reader",
+                "cap_reader",
+                "req_verify",
+            ),
+            "idem-verify",
+        ),
+        arguments: Arguments::EvidenceVerify(EvidenceVerifyRequest {
+            evidence: handle.clone(),
+            expected_status: Optional::Absent,
+        }),
+    });
+    assert_eq!(code(&refused), ErrorCode::InsufficientEvidence);
+}
+
+#[test]
+fn a_class_whose_independent_checker_has_not_shipped_is_never_promoted() {
+    // `validated` needs the independent certificate checker and `proved` needs the Lean
+    // kernel; neither runs in this process. A node offering certificate evidence is
+    // therefore refused rather than promoted on the strength of a check that did not run —
+    // which is INV-004 one level below authority.
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let mut certificate = node(&fixture, &handle);
+    certificate.evidence_kind = EvidenceKind::Certificate;
+    let certificate_handle =
+        EvidenceHandle::new("ev_certificate-fixture").expect("a well-formed handle");
+    fixture
+        .daemon
+        .state_mut()
+        .append_evidence(certificate_handle.clone(), certificate);
+
+    let refused = verify(&mut fixture, &certificate_handle, "req_cert", "idem-cert");
+    assert_eq!(code(&refused), ErrorCode::InsufficientEvidence);
+    assert_eq!(
+        node(&fixture, &certificate_handle).status(),
+        ClaimStatus::Proposed
+    );
+}
+
+#[test]
+fn a_node_whose_reference_does_not_resolve_is_refused_rather_than_believed() {
+    // RFC 0038's whiteboard compiler "rejects nonexistent references"; this is that rule
+    // where the graph is written. The daemon does not take the producer's word that the
+    // identity a node names is content it holds.
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    let mut dangling = node(&fixture, &handle);
+    dangling.artifact = Commitment::new("ws_nothing-is-staged-here");
+    let dangling_handle = EvidenceHandle::new("ev_dangling").expect("a well-formed handle");
+    fixture
+        .daemon
+        .state_mut()
+        .append_evidence(dangling_handle.clone(), dangling);
+
+    let refused = verify(
+        &mut fixture,
+        &dangling_handle,
+        "req_dangling",
+        "idem-dangling",
+    );
+    assert_eq!(code(&refused), ErrorCode::InsufficientEvidence);
+    assert_eq!(
+        node(&fixture, &dangling_handle).status(),
+        ClaimStatus::Proposed
+    );
+}
+
+#[test]
+fn a_node_filed_under_an_identity_it_does_not_derive_is_rejected() {
+    // The half of the check that makes it a check rather than a formality. A node's identity
+    // is a function of what it is *about*, so a node filed under an identity it does not
+    // derive is claiming to be about something other than what it is — and the daemon
+    // re-derives instead of believing it.
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    // Correct in every other respect: the class is one this daemon checks, and the reference
+    // resolves. Only the identity it is filed under is someone else's.
+    let honest = node(&fixture, &handle);
+    let misfiled =
+        EvidenceHandle::new("ev_not-the-identity-this-node-derives").expect("a well-formed handle");
+    fixture
+        .daemon
+        .state_mut()
+        .append_evidence(misfiled.clone(), honest);
+
+    let rejected = verify(&mut fixture, &misfiled, "req_misfiled", "idem-misfiled");
+    assert_eq!(code(&rejected), ErrorCode::CertificateRejected);
+    assert_eq!(node(&fixture, &misfiled).status(), ClaimStatus::Proposed);
+
+    // The same node under the identity it *does* derive verifies, so the refusal is about
+    // the identity and about nothing else.
+    let accepted = verify(&mut fixture, &handle, "req_filed", "idem-filed");
+    assert_eq!(
+        accepted.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        accepted.envelope.error
+    );
+}
+
+#[test]
+fn a_node_that_changed_what_it_is_about_no_longer_derives_its_own_identity() {
+    // The same check from the other direction: leave the node where it is and change what it
+    // references. An identity that is a function of the content cannot follow the content
+    // silently, which is what makes tampering visible.
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    let mut retargeted = node(&fixture, &handle);
+    // A real, staged, re-derivable referent — just not the one this node's identity commits
+    // to.
+    retargeted.artifact = fixture.other.clone();
+    let retargeted_handle = EvidenceHandle::new("ev_retargeted").expect("a well-formed handle");
+    fixture
+        .daemon
+        .state_mut()
+        .append_evidence(retargeted_handle.clone(), retargeted);
+
+    let rejected = verify(
+        &mut fixture,
+        &retargeted_handle,
+        "req_retarget",
+        "idem-retarget",
+    );
+    assert_eq!(code(&rejected), ErrorCode::CertificateRejected);
+}
+
+#[test]
+fn a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does() {
+    // RFC 0027 X2: "a read of an artifact that does not exist and a read of one that exists
+    // but is out of scope return byte-identical envelopes". The two daemons below differ in
+    // exactly one thing — whether the graph holds the node — and are sent the same request.
+    let mut holding = fixture();
+    let handle = ingested_handle(&ingest(&mut holding, "req_ingest", "idem-ingest"));
+    let mut empty = fixture();
+
+    // The holding daemon's reader is scoped away from the node by presenting a capability
+    // whose actor does not match, which admission refuses; the empty daemon simply does not
+    // hold it.
+    let request = OperationRequest {
+        envelope: started(
+            envelope("evidence.verify", "agent:reader", "cap_reader", "req_probe"),
+            "idem-probe",
+        ),
+        arguments: Arguments::EvidenceVerify(EvidenceVerifyRequest {
+            evidence: EvidenceHandle::new("ev_never-appended").expect("handle"),
+            expected_status: Optional::Absent,
+        }),
+    };
+    let absent_from_holding = holding.daemon.dispatch(&request);
+    let absent_from_empty = empty.daemon.dispatch(&request);
+    assert_eq!(absent_from_holding, absent_from_empty);
+    assert_eq!(code(&absent_from_holding), ErrorCode::CapabilityDenied);
+
+    // And the same probe against a handle that *does* exist in one daemon and not the other
+    // is the same envelope again, because the existing one is out of the caller's scope.
+    let existing = OperationRequest {
+        envelope: envelope(
+            "evidence.get",
+            "agent:escalating",
+            "cap_escalating",
+            "req_probe2",
+        ),
+        arguments: Arguments::EvidenceGet(EvidenceGetRequest {
+            evidence: handle.clone(),
+            inline: Optional::Absent,
+        }),
+    };
+    let denied_present = holding.daemon.dispatch(&existing);
+    let denied_absent = empty.daemon.dispatch(&existing);
+    assert_eq!(denied_present, denied_absent);
+    assert_eq!(code(&denied_present), ErrorCode::CapabilityDenied);
+}
+
+// --- append-only ---------------------------------------------------------------------------
+
+#[test]
+fn re_ingesting_one_trace_converges_on_the_original_node_identity() {
+    let mut fixture = fixture();
+    let first = ingested_handle(&ingest(&mut fixture, "req_first", "idem-first"));
+    // A different request identity and a different idempotency key, so the ledger's replay
+    // path is not what makes the two agree: the identity is derived from the content.
+    let second = ingested_handle(&ingest(&mut fixture, "req_second", "idem-second"));
+    assert_eq!(first, second);
+    assert_eq!(
+        fixture.daemon.state().evidence_nodes().count(),
+        1,
+        "a re-ingest appends no second node"
+    );
+    // And exactly one `node_published` delta was committed.
+    let published = fixture
+        .daemon
+        .state()
+        .evidence_events()
+        .iter()
+        .filter(|event| event.kind == EvidenceEventKind::NodePublished)
+        .count();
+    assert_eq!(published, 1);
+}
+
+#[test]
+fn a_re_ingest_after_a_promotion_does_not_lower_the_claim() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_first", "idem-first"));
+    verify(&mut fixture, &handle, "req_verify", "idem-verify");
+    assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Observed);
+
+    // The producer appends again. An append that overwrote would silently regress a
+    // promoted claim to `proposed`, which is the failure the append-only model exists to
+    // prevent.
+    let again = ingest(&mut fixture, "req_again", "idem-again");
+    assert_eq!(again.envelope.status, ResultStatus::Ok);
+    assert_eq!(ingested_handle(&again), handle);
+
+    let after = node(&fixture, &handle);
+    assert_eq!(after.status(), ClaimStatus::Observed);
+    assert_eq!(after.history.len(), 2);
+}
+
+#[test]
+fn the_status_history_grows_and_never_regresses() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    assert_eq!(
+        node(&fixture, &handle).status_history(),
+        vec![ClaimStatus::Proposed]
+    );
+
+    verify(&mut fixture, &handle, "req_verify", "idem-verify");
+    // A second verification is a reassertion — equal statuses — which the lattice permits
+    // "because a replayed idempotency key must return the original node identity rather
+    // than an error".
+    let again = verify(&mut fixture, &handle, "req_again", "idem-again");
+    assert_eq!(again.envelope.status, ResultStatus::Ok);
+    assert_eq!(verify_response(&again).status, EvidenceStatus::Observed);
+
+    let history = node(&fixture, &handle).status_history();
+    assert_eq!(
+        history,
+        vec![
+            ClaimStatus::Proposed,
+            ClaimStatus::Observed,
+            ClaimStatus::Observed
+        ]
+    );
+    // Checked by the crate that owns the order, not by this file's reading of it.
+    assert!(verify_promotion_history(&history).is_ok());
+}
+
+#[test]
+fn no_operation_in_either_family_removes_or_edits_an_appended_node() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let before = node(&fixture, &handle);
+
+    // Every operation both families serve, run against the node. The status-advancing one
+    // is deliberately excluded: it is the *only* write, and it appends.
+    // The outcomes are deliberately unread: what this test asserts is what the *graph*
+    // looks like afterwards.
+    get(&mut fixture, &handle, "req_get");
+    query(&mut fixture, empty_query(), "req_query");
+    let _ = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope(
+            "evidence.subscribe",
+            "agent:reader",
+            "cap_reader",
+            "req_sub",
+        ),
+        arguments: Arguments::EvidenceSubscribe(EvidenceSubscribeRequest {
+            scope: empty_query(),
+        }),
+    });
+    let _ = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("observe.classify", "agent:reader", "cap_reader", "req_cls"),
+        arguments: Arguments::ObserveClassify(ObserveClassifyRequest {
+            evidence: handle.clone(),
+        }),
+    });
+    let _ = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("observe.result", "agent:reader", "cap_reader", "req_res"),
+        arguments: Arguments::ObserveResult(ObserveResultRequest {
+            evidence: handle.clone(),
+        }),
+    });
+    ingest(&mut fixture, "req_reingest", "idem-reingest");
+
+    assert_eq!(node(&fixture, &handle), before);
+    assert_eq!(fixture.daemon.state().evidence_nodes().count(), 1);
+}
+
+// --- redaction -----------------------------------------------------------------------------
+
+#[test]
+fn a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission() {
+    for reason in [
+        RedactionReason::Summarized,
+        RedactionReason::Purged,
+        RedactionReason::Lost,
+    ] {
+        let mut fixture = fixture();
+        let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+        let commitment = fixture.trace.clone();
+        fixture
+            .daemon
+            .state_mut()
+            .redact_evidence(&handle, redaction(reason, &commitment));
+
+        let read = get(&mut fixture, &handle, "req_get");
+        assert_eq!(read.envelope.status, ResultStatus::Ok);
+        let response = match &read.payload {
+            Payload::EvidenceGet(response) => response,
+            other => panic!("expected an evidence.get payload, got {other:?}"),
+        };
+        let stub = match &response.redacted {
+            Optional::Present(stub) => stub,
+            Optional::Absent => panic!("a redacted reference is a typed stub, never an absence"),
+        };
+        assert!(stub.redacted);
+        assert_eq!(stub.reason, reason);
+        assert_eq!(stub.commitment, commitment);
+        assert_eq!(stub.original_class, "ev");
+        // "a client MUST be able to tell 'withheld' from 'absent' structurally": the node
+        // record is still returned beside the stub.
+        assert!(matches!(response.node, Nullable::Value(_)));
+        // "Every redacted value MUST also appear in the result's `omissions` manifest with
+        // reason `redaction` (INV-007)."
+        assert!(
+            read.envelope
+                .omissions
+                .iter()
+                .any(|omission| omission.reason == OmissionReason::Redaction)
+        );
+    }
+}
+
+#[test]
+fn verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let commitment = fixture.trace.clone();
+    fixture
+        .daemon
+        .state_mut()
+        .redact_evidence(&handle, redaction(RedactionReason::Summarized, &commitment));
+
+    let verified = verify(&mut fixture, &handle, "req_verify", "idem-verify");
+
+    // Not a bare failure: the receipt is intact.
+    assert_eq!(
+        verified.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        verified.envelope.error
+    );
+    // Not a bare success: the claim is no longer fully supported.
+    match &verified.envelope.verdict {
+        Nullable::Value(Verdict::Semantic(value)) => {
+            assert_eq!(value.verdict, SemanticVerdict::Inconclusive);
+            assert_eq!(
+                value.inconclusive_reason,
+                Optional::Present(InconclusiveReason::InsufficientTelemetry),
+                "INV-008: inconclusive is never untyped"
+            );
+        }
+        other => panic!("expected a semantic verdict, got {other:?}"),
+    }
+    // The redaction travels in the response, which is the field IDL 1.1 added for it.
+    assert!(matches!(
+        verify_response(&verified).redacted,
+        Optional::Present(_)
+    ));
+    assert!(
+        verified
+            .envelope
+            .omissions
+            .iter()
+            .any(|omission| omission.reason == OmissionReason::Redaction)
+    );
+    // Nothing is promoted over content the daemon cannot read.
+    assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Proposed);
+    // "any claim that required the hidden data MUST downgrade in the `assurance` envelope".
+    let assurance = match &verified.envelope.assurance {
+        Optional::Present(envelope) => envelope,
+        Optional::Absent => panic!("a semantic verdict carries the nine-dimension envelope"),
+    };
+    for dimension in dimensions(assurance) {
+        assert!(
+            matches!(dimension, EnvelopeDimension::Unsupported(_)),
+            "a redacted input downgrades every dimension"
+        );
+    }
+}
+
+// --- the assurance envelope ----------------------------------------------------------------
+
+/// The nine dimensions of an envelope, in the IDL's declaration order.
+fn dimensions(
+    envelope: &continuumd::protocol::envelope::AssuranceEnvelope,
+) -> [&EnvelopeDimension; 9] {
+    [
+        &envelope.bounds,
+        &envelope.faults,
+        &envelope.fairness,
+        &envelope.values,
+        &envelope.schedules,
+        &envelope.memory_model,
+        &envelope.observer,
+        &envelope.proof_status,
+        &envelope.unknowns,
+    ]
+}
+
+#[test]
+fn a_semantic_verdict_carries_all_nine_dimensions_and_a_structural_one_carries_none() {
+    let mut fixture = fixture();
+    let ingested = ingest(&mut fixture, "req_ingest", "idem-ingest");
+    // `observe.ingest` declares a `structural` verdict, and `rule
+    // envelope.assurance_required` attaches the envelope to `semantic` and `evaluation`
+    // verdicts only. Nine dimensions on a snapshot append would be nine claims nothing
+    // established.
+    assert!(ingested.envelope.assurance.is_absent());
+
+    let handle = ingested_handle(&ingested);
+    let verified = verify(&mut fixture, &handle, "req_verify", "idem-verify");
+    let assurance = match &verified.envelope.assurance {
+        Optional::Present(envelope) => envelope,
+        Optional::Absent => panic!("`rule envelope.assurance_required` obliges the envelope"),
+    };
+    // "every dimension MUST name a producing engine or carry a typed `Unsupported(reason)`
+    // […] A dimension is never silently omitted." The union has two variants and both are
+    // meaningful; what the rule forbids is a dimension that says nothing.
+    let produced = dimensions(assurance)
+        .into_iter()
+        .filter(|dimension| matches!(dimension, EnvelopeDimension::Produced(_)))
+        .count();
+    assert_eq!(
+        produced, 1,
+        "one dimension is established by the reference re-derivation, and eight are not"
+    );
+    for dimension in dimensions(assurance) {
+        match dimension {
+            EnvelopeDimension::Produced(value) => {
+                assert_eq!(value.engine, DEFAULT_SERVICE);
+                assert!(!value.summary.is_empty());
+            }
+            EnvelopeDimension::Unsupported(value) => assert!(!value.reason.is_empty()),
+        }
+    }
+}
+
+// --- evidence.get / query / subscribe -------------------------------------------------------
+
+#[test]
+fn a_read_returns_the_node_record_the_schema_declares_and_no_edge() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let read = get(&mut fixture, &handle, "req_get");
+    assert_eq!(read.envelope.status, ResultStatus::Ok);
+
+    let response = match &read.payload {
+        Payload::EvidenceGet(response) => response,
+        other => panic!("expected an evidence.get payload, got {other:?}"),
+    };
+    let bytes = match &response.node {
+        Nullable::Value(node) => node.as_bytes().to_vec(),
+        Nullable::Null => panic!("the node record is not null for a node the graph holds"),
+    };
+    let text = String::from_utf8(bytes).expect("canonical JSON is UTF-8");
+    // The six members `evidence-graph-node.schema.json` marks required, plus the two plan
+    // §11.7 write-model members it names.
+    for required in [
+        "\"schema_id\"",
+        "\"schema_epoch\"",
+        "\"node_id\"",
+        "\"kind\"",
+        "\"artifact\"",
+        "\"status\"",
+        "\"provenance\"",
+        "\"claim_id\"",
+        "\"idempotency_key\"",
+    ] {
+        assert!(text.contains(required), "node record is missing {required}");
+    }
+    assert!(text.contains("\"status\":\"proposed\""));
+    assert!(text.contains("\"kind\":\"run\""));
+    // `additionalProperties` is false and the schema admits `service_identity` only on the
+    // four assurance-bearing statuses, so a `proposed` node must not carry one.
+    assert!(!text.contains("\"service_identity\""));
+    // No operation in the 72 appends an edge, so `edge` reads null rather than inventing
+    // an artifact.
+    assert_eq!(response.edge, Nullable::Null);
+}
+
+#[test]
+fn a_read_that_asks_for_inline_content_says_what_it_did_not_return() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let read = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("evidence.get", "agent:reader", "cap_reader", "req_get"),
+        arguments: Arguments::EvidenceGet(EvidenceGetRequest {
+            evidence: handle,
+            inline: Optional::Present(true),
+        }),
+    });
+    assert_eq!(read.envelope.status, ResultStatus::Ok);
+    assert!(
+        read.envelope
+            .omissions
+            .iter()
+            .any(|omission| omission.reason == OmissionReason::Unsupported),
+        "INV-007: what was left out is named, never implied"
+    );
+}
+
+#[test]
+fn a_query_filters_by_status_kind_claim_and_roots_and_returns_no_edges() {
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+    let other = fixture.other.clone();
+    let first = ingested_handle(&ingest_with(
+        &mut fixture,
+        "agent:observer",
+        "cap_observer",
+        &trace,
+        "req_a",
+        "idem-a",
+    ));
+    let second = ingested_handle(&ingest_with(
+        &mut fixture,
+        "agent:observer",
+        "cap_observer",
+        &other,
+        "req_b",
+        "idem-b",
+    ));
+    verify(&mut fixture, &first, "req_verify", "idem-verify");
+
+    let all = query(&mut fixture, empty_query(), "req_all");
+    let nodes = |outcome: &OperationOutcome| match &outcome.payload {
+        Payload::EvidenceQuery(response) => {
+            assert!(response.edges.is_empty(), "this graph holds no edges");
+            response.nodes.clone()
+        }
+        other => panic!("expected an evidence.query payload, got {other:?}"),
+    };
+    let listed = nodes(&all);
+    assert_eq!(listed.len(), 2);
+    // Deterministic: the container's key order, which is a function of the keys present and
+    // of nothing else (`rule pagination.deterministic`).
+    let mut sorted = listed.clone();
+    sorted.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    assert_eq!(listed, sorted);
+
+    let by_status = query(
+        &mut fixture,
+        EvidenceQuery {
+            statuses: Optional::Present(vec![EvidenceStatus::Observed]),
+            ..empty_query()
+        },
+        "req_status",
+    );
+    assert_eq!(nodes(&by_status), vec![first.clone()]);
+
+    let by_kind = query(
+        &mut fixture,
+        EvidenceQuery {
+            node_kinds: Optional::Present(vec![EvidenceNodeKind::Certificate]),
+            ..empty_query()
+        },
+        "req_kind",
+    );
+    assert!(nodes(&by_kind).is_empty());
+
+    let by_claim = query(
+        &mut fixture,
+        EvidenceQuery {
+            claim_id: Optional::Present(other.as_str().to_owned()),
+            ..empty_query()
+        },
+        "req_claim",
+    );
+    assert_eq!(nodes(&by_claim), vec![second.clone()]);
+
+    let by_root = query(
+        &mut fixture,
+        EvidenceQuery {
+            roots: Optional::Present(vec![second.clone()]),
+            ..empty_query()
+        },
+        "req_root",
+    );
+    assert_eq!(nodes(&by_root), vec![second]);
+}
+
+#[test]
+fn a_subscription_is_refused_because_its_event_channel_is_not_served() {
+    let mut fixture = fixture();
+    let refused = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope(
+            "evidence.subscribe",
+            "agent:reader",
+            "cap_reader",
+            "req_sub",
+        ),
+        arguments: Arguments::EvidenceSubscribe(EvidenceSubscribeRequest {
+            scope: empty_query(),
+        }),
+    });
+    // A frontier returned by a subscription that can never deliver an event is the "empty
+    // success" `rule errors.unsupported_surface` forbids.
+    assert_eq!(code(&refused), ErrorCode::UnsupportedSemanticFeature);
+}
+
+#[test]
+fn every_committed_delta_is_recorded_for_a_transport_to_drain() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    verify(&mut fixture, &handle, "req_verify", "idem-verify");
+
+    let events = fixture.daemon.state().evidence_events();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].kind, EvidenceEventKind::NodePublished);
+    assert_eq!(events[0].node, Optional::Present(handle.clone()));
+    assert_eq!(events[1].kind, EvidenceEventKind::StatusTransition);
+    assert_eq!(
+        events[1].status,
+        Optional::Present(EvidenceStatus::Observed),
+        "a delta references a committed artifact, not a hint"
+    );
+}
+
+#[test]
+fn the_two_observe_reads_are_refused_typed_rather_than_degraded() {
+    let mut fixture = fixture();
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    let classify = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("observe.classify", "agent:reader", "cap_reader", "req_cls"),
+        arguments: Arguments::ObserveClassify(ObserveClassifyRequest {
+            evidence: handle.clone(),
+        }),
+    });
+    assert_eq!(code(&classify), ErrorCode::UnsupportedSemanticFeature);
+
+    let result = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("observe.result", "agent:reader", "cap_reader", "req_res"),
+        arguments: Arguments::ObserveResult(ObserveResultRequest { evidence: handle }),
+    });
+    assert_eq!(code(&result), ErrorCode::UnsupportedSemanticFeature);
+}
+
+// --- capability negotiation -----------------------------------------------------------------
+
+fn limits() -> ServerLimits {
+    ServerLimits {
+        idempotency_retention_ms: DurationMs::new(86_400_000),
+        max_page_size: 100,
+        max_result_bytes: ByteCount::new(1_048_576),
+        max_concurrent_tasks: 4,
+    }
+}
+
+fn policy() -> ConnectionPolicy {
+    ConnectionPolicy::new(
+        vec![ProtocolVersion::new(3, 0), version()],
+        ProtocolWindow::new(3),
+        ENCODINGS.to_vec(),
+        limits(),
+        "continuumd-test".to_owned(),
+    )
+    .features(vec!["evidence-subscriptions".to_owned()])
+}
+
+#[test]
+fn the_welcome_reports_the_authority_the_daemon_holds_and_not_the_one_the_client_claims() {
+    let daemon = daemon();
+    let (negotiated, welcome) = daemon
+        .welcome(
+            &policy(),
+            &hello("cap_reader", "agent:reader", version(), version()),
+        )
+        .expect("the reader's capability is registered");
+
+    assert_eq!(negotiated.protocol_version(), version());
+    // `ServerWelcome.grant` is the only authority channel, and it is the *registered*
+    // descriptor: the hello carries no level, no scope, and no profile to copy from.
+    assert_eq!(welcome.grant.capability, cap("cap_reader"));
+    assert_eq!(welcome.grant.level, AuthorityLevel::Read);
+    assert_eq!(welcome.grant.actor, who("agent:reader"));
+    assert_eq!(welcome.majors_served, vec![3, 2]);
+    assert_eq!(welcome.limits, limits());
+    assert_eq!(welcome.epochs.protocol, version());
+}
+
+#[test]
+fn a_client_offering_a_range_is_served_the_highest_common_version_and_never_one_outside_it() {
+    let daemon = daemon();
+    // The full range: the highest the daemon serves.
+    let (negotiated, welcome) = daemon
+        .welcome(
+            &policy(),
+            &hello(
+                "cap_reader",
+                "agent:reader",
+                ProtocolVersion::new(3, 0),
+                version(),
+            ),
+        )
+        .expect("3.1 is common");
+    assert_eq!(negotiated.protocol_version(), version());
+    assert_eq!(welcome.protocol_version, version());
+
+    // A client that only speaks 3.0 is downgraded to 3.0, not upgraded past its range.
+    let (downgraded, _) = daemon
+        .welcome(
+            &policy(),
+            &hello(
+                "cap_reader",
+                "agent:reader",
+                ProtocolVersion::new(3, 0),
+                ProtocolVersion::new(3, 0),
+            ),
+        )
+        .expect("3.0 is common");
+    assert_eq!(downgraded.protocol_version(), ProtocolVersion::new(3, 0));
+
+    // A client whose whole range lies outside the daemon's served set is refused with the
+    // version code, and is told the window from the refusal itself — it never received a
+    // `ServerWelcome` and has no other channel for it.
+    let refused = daemon
+        .welcome(
+            &policy(),
+            &hello(
+                "cap_reader",
+                "agent:reader",
+                ProtocolVersion::new(4, 0),
+                ProtocolVersion::new(4, 2),
+            ),
+        )
+        .expect_err("major 4 is not served");
+    let frame = refused
+        .frame
+        .expect("a client whose offer reaches 3.1 can parse the frame");
+    assert_eq!(frame.code, ErrorCode::ProtocolVersionUnsupported);
+    assert!(!frame.retryable);
+    assert_eq!(frame.majors_served, vec![3, 2]);
+
+    // A client below the window is refused too, and gets no frame: its offer does not reach
+    // the version that defines one, and "a frame the client cannot parse is not a typed
+    // refusal".
+    let old = daemon
+        .welcome(
+            &policy(),
+            &hello(
+                "cap_reader",
+                "agent:reader",
+                ProtocolVersion::new(1, 0),
+                ProtocolVersion::new(1, 9),
+            ),
+        )
+        .expect_err("major 1 is not served");
+    assert_eq!(old.frame, None);
+}
+
+#[test]
+fn an_unknown_feature_is_never_echoed_and_a_known_one_is_intersected() {
+    let daemon = daemon();
+    let mut asking = hello("cap_reader", "agent:reader", version(), version());
+    asking.features = Optional::Present(vec![
+        "evidence-subscriptions".to_owned(),
+        "promote-my-own-claims".to_owned(),
+    ]);
+    let (_, welcome) = daemon
+        .welcome(&policy(), &asking)
+        .expect("the reader's capability is registered");
+    assert_eq!(welcome.features, vec!["evidence-subscriptions".to_owned()]);
+    assert!(
+        !welcome
+            .features
+            .iter()
+            .any(|feature| feature == "promote-my-own-claims"),
+        "an identifier the daemon does not implement is never granted by being echoed"
+    );
+
+    // A client offering nothing is granted nothing, rather than everything the daemon has.
+    let (_, silent) = daemon
+        .welcome(
+            &policy(),
+            &hello("cap_reader", "agent:reader", version(), version()),
+        )
+        .expect("registered");
+    assert!(silent.features.is_empty());
+}
+
+#[test]
+fn every_capability_failure_at_the_handshake_is_one_answer() {
+    let daemon = daemon();
+    let refusals: Vec<Refusal> = [
+        // never registered
+        hello("cap_never-minted", "agent:reader", version(), version()),
+        // registered, wrong actor
+        hello("cap_reader", "agent:observer", version(), version()),
+        // registered, expired against the daemon's reading
+        hello("cap_expiring", "agent:expiring", version(), version()),
+    ]
+    .into_iter()
+    .map(|hello| {
+        daemon
+            .welcome(&policy(), &hello)
+            .expect_err("each of these is refused")
+    })
+    .collect();
+
+    // X1: "a client MUST NOT be able to tell them apart".
+    assert_eq!(refusals[0], refusals[1]);
+    assert_eq!(refusals[1], refusals[2]);
+    let frame = refusals[0].frame.clone().expect("a typed refusal frame");
+    assert_eq!(frame.code, ErrorCode::CapabilityDenied);
+    assert!(!frame.retryable);
+
+    // And a revoked token joins them: revocation, not purge, is how a capability stops
+    // being usable, and a revoked one is indistinguishable from one never registered.
+    let mut revoking = daemon_with(Some(now()));
+    revoking
+        .state_mut()
+        .revoke_capability(&cap("cap_revocable"));
+    let revoked = revoking
+        .welcome(
+            &policy(),
+            &hello("cap_revocable", "agent:revocable", version(), version()),
+        )
+        .expect_err("a revoked capability is refused");
+    assert_eq!(revoked, refusals[0]);
+}
+
+#[test]
+fn a_client_too_old_to_parse_the_reject_frame_is_closed_without_one() {
+    let daemon = daemon();
+    let refused = daemon
+        .welcome(
+            &policy(),
+            &hello(
+                "cap_never-minted",
+                "agent:reader",
+                ProtocolVersion::new(3, 0),
+                ProtocolVersion::new(3, 0),
+            ),
+        )
+        .expect_err("an unregistered capability is refused");
+    assert_eq!(
+        refused.frame, None,
+        "a frame the client cannot parse is not a typed refusal"
+    );
+}
+
+#[test]
+fn revocation_takes_effect_on_the_next_request_and_unmakes_nothing() {
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+    let handle = ingested_handle(&ingest_with(
+        &mut fixture,
+        "agent:revocable",
+        "cap_revocable",
+        &trace,
+        "req_ingest",
+        "idem-ingest",
+    ));
+
+    fixture
+        .daemon
+        .state_mut()
+        .revoke_capability(&cap("cap_revocable"));
+
+    // R1 / E1: the grant is not cached at handshake time, so the very next request fails.
+    let denied = ingest_with(
+        &mut fixture,
+        "agent:revocable",
+        "cap_revocable",
+        &trace,
+        "req_after",
+        "idem-after",
+    );
+    assert_eq!(code(&denied), ErrorCode::CapabilityDenied);
+
+    // R2 / E3: "Revocation MUST NOT delete or invalidate any published artifact, and MUST
+    // NOT retroactively unmake a result the capability lawfully produced (INV-009)."
+    let read = get(&mut fixture, &handle, "req_get");
+    assert_eq!(read.envelope.status, ResultStatus::Ok);
+    assert_eq!(node(&fixture, &handle).producer, who("agent:revocable"));
+}
+
+#[test]
+fn an_expiring_capability_is_judged_against_a_reading_and_denied_without_one() {
+    // Judged: a daemon whose reading is past the expiry denies, at the handshake and again
+    // at dispatch. Undecidable: a daemon with no reading denies, because "a daemon that
+    // cannot decide admission fails closed".
+    for clock in [Some(now()), None] {
+        let mut fixture = fixture_with(clock);
+        let trace = fixture.trace.clone();
+        let handshake = fixture.daemon.welcome(
+            &policy(),
+            &hello("cap_expiring", "agent:expiring", version(), version()),
+        );
+        assert!(handshake.is_err());
+
+        let dispatched = ingest_with(
+            &mut fixture,
+            "agent:expiring",
+            "cap_expiring",
+            &trace,
+            "req_expired",
+            "idem-expired",
+        );
+        assert_eq!(code(&dispatched), ErrorCode::CapabilityDenied);
+    }
+
+    // A reading *before* the expiry admits it, which is what makes the two above a decision
+    // rather than a blanket refusal.
+    let mut early = fixture_with(Some(when("2026-06-01T00:00:00.000Z")));
+    let trace = early.trace.clone();
+    let admitted = ingest_with(
+        &mut early,
+        "agent:expiring",
+        "cap_expiring",
+        &trace,
+        "req_early",
+        "idem-early",
+    );
+    assert_eq!(
+        admitted.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        admitted.envelope.error
+    );
+}
+
+#[test]
+fn a_delegated_capability_that_exceeds_its_parent_is_refused_before_the_family_runs() {
+    // D6/D7: `cap_escalating` is a child of the *reader* and claims `execute` plus a data
+    // grant its parent does not hold. Admission walks the chain and refuses it, so the
+    // `observe` family never sees the request — asserted by the graph staying empty rather
+    // than by inspecting the predicate.
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+    let denied = ingest_with(
+        &mut fixture,
+        "agent:escalating",
+        "cap_escalating",
+        &trace,
+        "req_escalate",
+        "idem-escalate",
+    );
+    assert_eq!(code(&denied), ErrorCode::CapabilityDenied);
+    assert_eq!(fixture.daemon.state().evidence_nodes().count(), 0);
+    // "denial precedes semantic work and precedes the index" (X3): nothing was published.
+    assert!(fixture.daemon.state().evidence_events().is_empty());
+}
+
+#[test]
+fn the_production_trace_grant_is_required_beyond_the_execute_level() {
+    // R-4: `observe.ingest` requires `production_trace` in addition to `execute`, and a
+    // capability without it is denied even though its level admits the operation. The check
+    // is `admission::required_grant`, decided from registry data before any family runs.
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+    let denied = ingest_with(
+        &mut fixture,
+        "agent:ungranted",
+        "cap_ungranted",
+        &trace,
+        "req_ungranted",
+        "idem-ungranted",
+    );
+    assert_eq!(code(&denied), ErrorCode::CapabilityDenied);
+    assert_eq!(fixture.daemon.state().evidence_nodes().count(), 0);
+
+    // The same request under a capability that holds the grant succeeds, so the refusal is
+    // about the grant and not about the level.
+    let admitted = ingest(&mut fixture, "req_granted", "idem-granted");
+    assert_eq!(admitted.envelope.status, ResultStatus::Ok);
+}
+
+// --- conformance ----------------------------------------------------------------------------
+
+#[test]
+fn every_fault_these_families_can_raise_is_inside_its_operations_error_union() {
+    for (operation, code) in evidence::FAULTS.iter().chain(observe::FAULTS) {
+        let spec = registry::operation(operation).expect("a registered operation");
+        assert!(
+            errors::admits(spec, *code),
+            "{operation} may not answer with {code:?} under `rule errors.common`"
+        );
+    }
+}
+
+#[test]
+fn the_payload_beside_the_envelope_is_the_operations_own_response_body() {
+    let mut fixture = fixture();
+    let ingested = ingest(&mut fixture, "req_ingest", "idem-ingest");
+    assert_eq!(ingested.payload.operation(), Some("observe.ingest"));
+    let handle = ingested_handle(&ingested);
+
+    assert_eq!(
+        get(&mut fixture, &handle, "req_get").payload.operation(),
+        Some("evidence.get")
+    );
+    assert_eq!(
+        query(&mut fixture, empty_query(), "req_query")
+            .payload
+            .operation(),
+        Some("evidence.query")
+    );
+    assert_eq!(
+        verify(&mut fixture, &handle, "req_verify", "idem-verify")
+            .payload
+            .operation(),
+        Some("evidence.verify")
+    );
+
+    // The envelope's own `payload` reads null at this layer, whatever the typed body is:
+    // there is no codec here, and inventing bytes for an `Opaque` would be inventing wire
+    // format.
+    assert_eq!(ingested.envelope.payload, Nullable::Null);
+}
+
+#[test]
+fn the_wire_status_vocabulary_and_the_lattice_agree_token_for_token() {
+    // Two crates transcribe plan §11.4's nine statuses, and this daemon converts between
+    // them on every promotion. The agreement is asserted rather than trusted.
+    assert_eq!(EvidenceStatus::ALL.len(), ClaimStatus::ALL.len());
+    for (wire, lattice) in EvidenceStatus::ALL.iter().zip(ClaimStatus::ALL) {
+        assert_eq!(wire.as_wire(), lattice.as_str());
+        assert_eq!(lattice_status(*wire), lattice);
+        assert_eq!(wire_status(lattice), *wire);
+    }
+    // And the lattice's bottom is the status an append lands at.
+    assert_eq!(wire_status(ClaimStatus::BOTTOM), EvidenceStatus::Proposed);
+}
+
+#[test]
+fn the_default_service_identity_is_a_well_formed_service_actor() {
+    let family = EvidenceFamily::new();
+    assert_eq!(family.service().as_str(), DEFAULT_SERVICE);
+    assert!(DEFAULT_SERVICE.starts_with("service:"));
+}
+
+#[test]
+fn an_unkeyed_mutation_and_an_unbudgeted_task_are_refused_before_the_graph_is_touched() {
+    // The obligations `obligation::check_request` reads off the registry, exercised through
+    // this family's own operations so the inheritance is evidenced rather than assumed.
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+
+    let mut unkeyed = envelope("observe.ingest", "agent:observer", "cap_observer", "req_a");
+    unkeyed.budget = Optional::Present(budget());
+    let refused = fixture.daemon.dispatch(&OperationRequest {
+        envelope: unkeyed,
+        arguments: Arguments::ObserveIngest(ObserveIngestRequest {
+            trace: trace.clone(),
+            instrumentation_profile: PROFILE.to_owned(),
+        }),
+    });
+    assert_eq!(code(&refused), ErrorCode::MalformedRequest);
+
+    let mut unbudgeted = envelope("observe.ingest", "agent:observer", "cap_observer", "req_b");
+    unbudgeted.idempotency_key = Optional::Present("idem-b".to_owned());
+    let refused = fixture.daemon.dispatch(&OperationRequest {
+        envelope: unbudgeted,
+        arguments: Arguments::ObserveIngest(ObserveIngestRequest {
+            trace: trace.clone(),
+            instrumentation_profile: PROFILE.to_owned(),
+        }),
+    });
+    assert_eq!(code(&refused), ErrorCode::MalformedRequest);
+
+    // A key on a `@readonly` read is refused too: a caller that believes a read mutates
+    // something has misunderstood, and honouring the key would put that misunderstanding in
+    // the ledger.
+    let mut keyed_read = envelope("evidence.get", "agent:reader", "cap_reader", "req_c");
+    keyed_read.idempotency_key = Optional::Present("idem-c".to_owned());
+    let refused = fixture.daemon.dispatch(&OperationRequest {
+        envelope: keyed_read,
+        arguments: Arguments::EvidenceGet(EvidenceGetRequest {
+            evidence: EvidenceHandle::new("ev_anything").expect("handle"),
+            inline: Optional::Absent,
+        }),
+    });
+    assert_eq!(code(&refused), ErrorCode::MalformedRequest);
+
+    assert_eq!(fixture.daemon.state().evidence_nodes().count(), 0);
+}
+
+#[test]
+fn a_replayed_ingest_returns_the_first_results_node_identity_verbatim() {
+    // `rule idempotency.replay`, inherited from the dispatcher: the same key with the same
+    // request returns the recorded outcome rather than appending twice.
+    let mut fixture = fixture();
+    let first = ingest(&mut fixture, "req_ingest", "idem-ingest");
+    let replay = ingest(&mut fixture, "req_ingest", "idem-ingest");
+    assert_eq!(first, replay);
+
+    // A different request under the same key is the typed refusal, and it changes nothing.
+    let other = fixture.other.clone();
+    let reused = ingest_with(
+        &mut fixture,
+        "agent:observer",
+        "cap_observer",
+        &other,
+        "req_other",
+        "idem-ingest",
+    );
+    assert_eq!(code(&reused), ErrorCode::IdempotencyKeyReused);
+    assert_eq!(fixture.daemon.state().evidence_nodes().count(), 1);
+}
+
+#[test]
+fn a_daemon_with_no_clock_refuses_to_stamp_a_provenance_record_it_cannot_derive() {
+    // `provenance.created_at` is required by the node schema and time is an explicit effect
+    // (INV-005, ADR-0003). A daemon built with no reading says so rather than inventing one.
+    let mut fixture = fixture_with(None);
+    let trace = fixture.trace.clone();
+    let refused = ingest_with(
+        &mut fixture,
+        "agent:observer",
+        "cap_observer",
+        &trace,
+        "req_ingest",
+        "idem-ingest",
+    );
+    assert_eq!(code(&refused), ErrorCode::UnsupportedSemanticFeature);
+    assert_eq!(fixture.daemon.state().evidence_nodes().count(), 0);
+}

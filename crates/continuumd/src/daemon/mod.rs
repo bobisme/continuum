@@ -60,11 +60,14 @@
 //! handler. See [`family`] for the four-step seam.
 
 pub mod admission;
+pub mod capability;
 pub mod errors;
+pub mod evidence;
 pub mod family;
 pub mod identity;
 pub mod intent;
 pub mod obligation;
+pub mod observe;
 pub mod result;
 pub mod state;
 pub mod workspace;

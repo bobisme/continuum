@@ -102,10 +102,14 @@ pub fn success(
         verdict: effect.verdict.clone(),
         error: Optional::Absent,
         // `rule envelope.assurance_required` attaches the nine-dimension envelope to
-        // `semantic` and `evaluation` verdicts. Neither family here produces one — the
-        // workspace and intent operations carry `structural` and `policy` verdicts — so
-        // the field is absent rather than filled with dimensions nothing established.
-        assurance: Optional::Absent,
+        // `semantic` and `evaluation` verdicts, and to no others: the `workspace` and
+        // `intent` operations carry `structural` and `policy` verdicts and supply none, so
+        // their results read absent rather than carrying dimensions nothing established.
+        // A family that *does* produce a semantic verdict — `evidence.verify` — states its
+        // nine dimensions on the `Effect`, and this is where they reach the envelope. The
+        // agreement between the two is asserted rather than assumed: see
+        // `tests/daemon_evidence.rs`.
+        assurance: effect.assurance.clone(),
         artifacts: effect.artifacts.clone(),
         task: Optional::Absent,
         continuation: Optional::Absent,
