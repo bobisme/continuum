@@ -18,13 +18,34 @@ publish = false
 # printable-ASCII rule *is* `^[!-~]+$`). Restating either here would be a second spelling
 # of one identity, which is what ADR-0013 forbids. No external dependency is added.
 #
+# Two more arrived with the operation layer (`src/daemon`), and both are the crates the
+# operations are *wiring*, not crates whose work is restated here:
+#
+# - `continuum-workspace` owns the snapshot model the `workspace` family operates on
+#   (import, overlay, fork, seal, diff, staleness) and the publication/authorization
+#   reference implementation RFC 0027's "Landed vocabulary" clause binds this daemon to.
+#   The store-side `CapabilityDescriptor` is a documented *subset* of the wire one, so the
+#   daemon holds the wire descriptor and derives the store's from it rather than keeping
+#   two independent tables;
+# - `continuum-intent` owns the Intent Contract, its canonical JSON, and the field-level
+#   change policy the `intent` family enforces. INV-001 — ordinary operations cannot mutate
+#   intent — is that crate's immutability plus this crate's admission predicate; a second
+#   policy table here would be the second spelling ADR-0013 forbids.
+#
+# Both are "top of the dependency islands" crates and neither depends on the daemon, so no
+# cycle and no forbidden edge is created (`tools/check_crate_boundaries.py`).
+#
 # Repeated under [dev-dependencies] because integration tests in `tests/` are separate
 # crates and do not inherit the library's dependencies.
 [dependencies]
+continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
+continuum-workspace = { path = "../continuum-workspace" }
 
 [dev-dependencies]
+continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
+continuum-workspace = { path = "../continuum-workspace" }
 
 [lints]
 workspace = true

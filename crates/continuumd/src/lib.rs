@@ -31,8 +31,16 @@
 //! `notes/plan/schemas/continuumd-native-protocol.idl` by `tests/idl_conformance.rs`,
 //! which parses that file and fails closed on any disagreement.
 //!
-//! Transport, the daemon's behavior, and the byte-level canonical JSON/CBOR codec are not
-//! here yet; [`protocol`]'s documentation states exactly where the type layer stops and
-//! why.
+//! [`daemon`] — the operation layer over that type layer: a dispatch skeleton that enforces
+//! the version window, RFC 0027's admission predicate, and the IDL's annotation obligations
+//! *from registry data*, and the `workspace` and `intent` operation families wired to
+//! `continuum-workspace` and `continuum-intent`. It is pure request-in/result-out over
+//! explicit state — no runtime, no clock, no filesystem, no `async` — so it is testable
+//! without I/O, which is what INV-005 and ADR-0003 ask of the daemon core.
+//!
+//! Transport and the byte-level canonical JSON/CBOR codec are not here yet; [`protocol`]'s
+//! documentation states exactly where the type layer stops and why, and [`daemon`]'s states
+//! how the operation layer is parameterized over the codec's absence.
 
+pub mod daemon;
 pub mod protocol;

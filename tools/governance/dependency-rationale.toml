@@ -89,6 +89,22 @@ used_by = ["continuum-intent", "continuum-task", "continuumd"]
 rationale = "Canonical value encoding, content identity, epochs, and the assurance envelope (ADR-0013); a machine result cannot name its epochs or its envelope without them. continuum-intent reuses the ContentHasher/Digest256 identity seam for RFC 0037's canonical property bytes rather than opening a second one. continuumd's native protocol takes ProtocolEpoch and EpochIdentity as-is because RFC 0026 requires the daemon and that module to agree on negotiation and the N/N-1 window, and two spellings of one identity is what ADR-0013 forbids."
 
 [[dependency]]
+name = "continuum-workspace"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["dev", "normal"]
+used_by = ["continuumd"]
+rationale = "The snapshot model and the publication/authorization reference implementation the daemon's workspace operation family wires: import, overlay, fork, seal, diff, and the typed StaleSnapshot the wire code of the same name reports (plan §4.2, RFC 0026 rule errors.common). RFC 0027's Landed vocabulary clause binds this RFC and that module together and makes its store-side CapabilityDescriptor a declared subset of the wire one, so the daemon holds the wire descriptor and derives the store's from it rather than keeping a second capability table. Classed trusted-checking-base rather than engine because ReferenceStore::authorize is where an admission decision is actually taken and audited: a defect there makes an unauthorized read believable, and nothing downstream re-checks an authorization the way the kernel re-checks a certificate."
+
+[[dependency]]
+name = "continuum-intent"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["dev", "normal"]
+used_by = ["continuumd"]
+rationale = "The Intent Contract, its ID5 canonical JSON writer, and RFC 0037's field-level change policy — the fifteen policy keys, the eight verbs, the W6 applicability matrix, and the P1-P6 enforcement — which the daemon's intent family enforces rather than restates. INV-001 says ordinary operations cannot mutate intent; that is this crate's immutability (no &mut self anywhere in it) plus the daemon's admission predicate, and a second policy table in continuumd would be exactly the second spelling ADR-0013 forbids. Classed trusted-checking-base because the contract parser and the lock policy sit inside docs/33's smallest trust base by that crate's own boundary contract, and a defect in the verb matrix makes a forbidden intent weakening look permitted."
+
+[[dependency]]
 name = "continuum-evidence"
 origin = "workspace"
 tcb_class = "trusted-checking-base"
