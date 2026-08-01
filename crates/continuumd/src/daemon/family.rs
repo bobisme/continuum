@@ -67,6 +67,15 @@ use crate::protocol::operations::observe::{
     ObserveClassifyRequest, ObserveClassifyResponse, ObserveIngestRequest, ObserveIngestResponse,
     ObserveResultRequest,
 };
+use crate::protocol::operations::task::{
+    TaskCancelRequest, TaskCancelResponse, TaskResumeRequest, TaskResumeResponse,
+    TaskStatusRequest, TaskSubscribeRequest, TaskSubscribeResponse, TaskUpdateBudgetRequest,
+    TaskUpdateBudgetResponse,
+};
+use crate::protocol::operations::verification::{
+    VerificationAwaitRequest, VerificationResultRequest, VerificationStartRequest,
+    VerificationStartResponse,
+};
 use crate::protocol::operations::workspace::{
     WorkspaceCreateRequest, WorkspaceCreateResponse, WorkspaceDiffRequest, WorkspaceDiffResponse,
     WorkspaceForkRequest, WorkspaceForkResponse, WorkspaceSealRequest, WorkspaceSealResponse,
@@ -74,6 +83,7 @@ use crate::protocol::operations::workspace::{
 use crate::protocol::scalar::{AuditCorrelationId, IntentHandle, WorkspaceHandle};
 use crate::protocol::shared::VerificationResult;
 use crate::protocol::spec::{Nullable, OperationSpec, Optional};
+use crate::protocol::task::TaskRecord;
 use crate::protocol::vocabulary::ErrorCode;
 
 /// A decoded operation request body.
@@ -128,6 +138,22 @@ pub enum Arguments {
     ObserveClassify(ObserveClassifyRequest),
     /// `observe.result`.
     ObserveResult(ObserveResultRequest),
+    /// `verification.start`.
+    VerificationStart(VerificationStartRequest),
+    /// `verification.result`.
+    VerificationResult(VerificationResultRequest),
+    /// `verification.await`.
+    VerificationAwait(VerificationAwaitRequest),
+    /// `task.status`.
+    TaskStatus(TaskStatusRequest),
+    /// `task.cancel`.
+    TaskCancel(TaskCancelRequest),
+    /// `task.resume`.
+    TaskResume(TaskResumeRequest),
+    /// `task.subscribe`.
+    TaskSubscribe(TaskSubscribeRequest),
+    /// `task.update_budget`.
+    TaskUpdateBudget(TaskUpdateBudgetRequest),
 }
 
 impl Arguments {
@@ -152,6 +178,14 @@ impl Arguments {
             Self::ObserveIngest(_) => "observe.ingest",
             Self::ObserveClassify(_) => "observe.classify",
             Self::ObserveResult(_) => "observe.result",
+            Self::VerificationStart(_) => "verification.start",
+            Self::VerificationResult(_) => "verification.result",
+            Self::VerificationAwait(_) => "verification.await",
+            Self::TaskStatus(_) => "task.status",
+            Self::TaskCancel(_) => "task.cancel",
+            Self::TaskResume(_) => "task.resume",
+            Self::TaskSubscribe(_) => "task.subscribe",
+            Self::TaskUpdateBudget(_) => "task.update_budget",
         }
     }
 }
@@ -202,6 +236,24 @@ pub enum Payload {
     /// `observe.result`. The IDL declares the *named* body `VerificationResult` here rather
     /// than an anonymous one, so this variant carries the shared type.
     ObserveResult(VerificationResult),
+    /// `verification.start`.
+    VerificationStart(VerificationStartResponse),
+    /// `verification.result`. The IDL declares a *named* response body here
+    /// (`response VerificationResult;`), shared with five other operations, so the variant
+    /// carries the shared struct rather than an anonymous one.
+    VerificationResult(VerificationResult),
+    /// `verification.await`, whose named response body is the same shared struct.
+    VerificationAwait(VerificationResult),
+    /// `task.status`, whose named response body is [`TaskRecord`].
+    TaskStatus(TaskRecord),
+    /// `task.cancel`.
+    TaskCancel(TaskCancelResponse),
+    /// `task.resume`.
+    TaskResume(TaskResumeResponse),
+    /// `task.subscribe`.
+    TaskSubscribe(TaskSubscribeResponse),
+    /// `task.update_budget`.
+    TaskUpdateBudget(TaskUpdateBudgetResponse),
 }
 
 impl Payload {
@@ -228,6 +280,14 @@ impl Payload {
             Self::ObserveIngest(_) => Some("observe.ingest"),
             Self::ObserveClassify(_) => Some("observe.classify"),
             Self::ObserveResult(_) => Some("observe.result"),
+            Self::VerificationStart(_) => Some("verification.start"),
+            Self::VerificationResult(_) => Some("verification.result"),
+            Self::VerificationAwait(_) => Some("verification.await"),
+            Self::TaskStatus(_) => Some("task.status"),
+            Self::TaskCancel(_) => Some("task.cancel"),
+            Self::TaskResume(_) => Some("task.resume"),
+            Self::TaskSubscribe(_) => Some("task.subscribe"),
+            Self::TaskUpdateBudget(_) => Some("task.update_budget"),
         }
     }
 }
@@ -291,6 +351,16 @@ pub struct Effect {
     /// Absent for a `structural` or `policy` verdict, and for an operation with no verdict
     /// clause at all: the envelope is a statement about a *semantic* claim, and attaching
     /// nine dimensions to a snapshot creation would be nine claims nothing established.
+    /// > engine or carry a typed `Unsupported(reason)` (plan B11).
+    /// >
+    /// > — `rule envelope.assurance_required`
+    ///
+    /// It sits on the family's own output rather than being filled in by [`result`]
+    /// (super::result) because it is a statement about *what produced the verdict*, and only
+    /// the family that ran the engine knows that. A family whose operations declare
+    /// `structural` or `policy` verdicts leaves it [`Optional::Absent`], which is what
+    /// [`Effect::new`] does; a family that emits a `semantic` verdict without one would
+    /// break the rule above, which is why the field exists at all.
     pub assurance: Optional<AssuranceEnvelope>,
     /// Artifacts the call produced or named.
     pub artifacts: Vec<ArtifactRef>,

@@ -121,6 +121,14 @@ used_by = ["continuum-cml-elab"]
 rationale = "The model-language surface syntax the elaborator consumes; elaboration is a producer whose output is re-checked, so a parse bug surfaces as a wrong model rather than as false assurance."
 
 [[dependency]]
+name = "continuum-engine-reference"
+origin = "workspace"
+tcb_class = "engine"
+kinds = ["dev", "normal"]
+used_by = ["continuumd"]
+rationale = "The exact finite model service PR 8 wraps behind the native protocol, and the one engine continuumd's verification family runs: verification.start explores breadth-first under declared bounds, checks the declared invariants and the deadlock question, and projects the engine's own answers onto the wire — the reachable-state count into Cost.states, the report's three-way verdict into SemanticVerdictValue, the engine's typed Unresolved into the INV-008 inconclusive reason, and the queue-ordered frontier of a bounded run into the cont_* continuation. Nothing is re-decided here and no second exploration exists to disagree with it. Classed engine, which is exactly what the class means: an engine is an untrusted producer whose results reach the trust base only as certificates re-checked from wire form, so a defect here produces a wrong verification answer that a finite-closure certificate check is expected to reject — it cannot make a certificate believable, because this daemon emits none and the kernel shares no code with it. The edge is permitted: the forbidden engine edge is the certificate checker's (START_HERE's 'the certificate checker may not depend on search', enforced as RULE certificate-checker-not-search over continuum-kernel-* and continuum-certificate), and continuumd is on the other side of it while plan §4.1 lists an Engine orchestrator among the things continuumd is composed of."
+
+[[dependency]]
 name = "continuum-kernel-core"
 origin = "workspace"
 tcb_class = "dev-only"

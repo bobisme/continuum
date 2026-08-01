@@ -44,16 +44,29 @@ publish = false
 # All are "top of the dependency islands" crates and none depends on the daemon, so no
 # cycle and no forbidden edge is created (`tools/check_crate_boundaries.py`).
 #
+# A fourth arrived with the `verification` family (`src/daemon/verification.rs`):
+#
+# - `continuum-engine-reference` is the exact finite model service PR 8 wraps "behind native
+#   protocol", and plan §4.1 lists an "Engine orchestrator" among the things `continuumd` is
+#   composed of. `verification.start` explores and checks through that crate and re-decides
+#   none of it: the reachable set, the invariant and deadlock outcomes, the shortest witness
+#   and the typed INV-008 reasons are its answers, projected onto the wire. The forbidden
+#   engine edge is the *checker*'s — "the certificate checker may not depend on search"
+#   (START_HERE, enforced as RULE certificate-checker-not-search) — and the daemon is on the
+#   other side of it.
+#
 # Repeated under [dev-dependencies] because integration tests in `tests/` are separate
 # crates and do not inherit the library's dependencies.
 [dependencies]
 continuum-evidence = { path = "../continuum-evidence" }
+continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 
 [dev-dependencies]
 continuum-evidence = { path = "../continuum-evidence" }
+continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }

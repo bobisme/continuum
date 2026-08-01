@@ -70,6 +70,8 @@ pub mod obligation;
 pub mod observe;
 pub mod result;
 pub mod state;
+pub mod task;
+pub mod verification;
 pub mod workspace;
 
 use core::fmt;

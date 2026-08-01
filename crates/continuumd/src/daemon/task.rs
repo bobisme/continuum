@@ -1,0 +1,1034 @@
+//! The `task` family — `status`, `cancel`, `resume`, `subscribe`, `update_budget` — and
+//! the table its tasks are values in.
+//!
+//! # A task is a value, and that is the whole design
+//!
+//! Plan §20 gives `continuumd` no async runtime edge, INV-005 and ADR-0003 put the daemon
+//! core inside the deterministic band, and [`Daemon::dispatch`](super::Daemon::dispatch)
+//! takes `&mut self`. So there is no thread, no executor, and no interleaving here: a task
+//! is an entry in [`TaskTable`], and the only thing that advances one is an explicit
+//! dispatch. Three consequences are load-bearing rather than incidental:
+//!
+//! - **[`TaskStatus::Running`] is representable and never reported.** It is the state a
+//!   task is in *during* the dispatch that advances it, and no second dispatch can observe
+//!   it, because `dispatch` holds `&mut DaemonState` for the whole call. The statuses a
+//!   caller can read are `Suspended`, `Completed`, `Failed`, and `Cancelled`. That is a
+//!   property of the borrow, not a simplification of the lifecycle.
+//! - **`rule task.status_monotonic` is enforced by construction.** [`TaskEntry::advance`]
+//!   is the only writer of `status`, and it refuses every transition out of a terminal
+//!   state. Milestones and `committed_evidence` are appended and never removed.
+//! - **A bounded campaign that cannot finish parks instead of truncating.** The engine's
+//!   `Exploration::Exhausted` arm already carries the explored set, the queue-ordered
+//!   frontier and which bound tripped; the frontier *is* the continuation payload, so the
+//!   type-level seam RFC 0026's "budget exhaustion carries a continuation" rule needs was
+//!   already there, and this module binds a `cont_*` handle to it.
+//!
+//! # The five operations
+//!
+//! | Operation | Rule | What it does here |
+//! |---|---|---|
+//! | `task.status` | `rule task.status_monotonic` | projects a [`TaskEntry`] onto the wire's [`TaskRecord`] |
+//! | `task.cancel` | `rule task.cancel_correct` | marks a non-terminal task `Cancelled`, reporting the continuation it holds — or `null`, the *named* "nothing published" outcome |
+//! | `task.resume` | `rule task.resume` | the admissibility predicate, then one more bounded run under the pinned epochs |
+//! | `task.subscribe` | `rule subscription.hints_only` | answers the record the IDL declares as its response body; the events are the recorded transitions |
+//! | `task.update_budget` | `rule task.update_budget` | re-admits a parked task under a larger bound, with no identity churn |
+//!
+//! # Identity, and why it is content-addressed
+//!
+//! A `task_*` handle is the content identity of what the task *is* — its snapshot, intent,
+//! target, portfolio, priority class, budget and epochs — and a `cont_*` handle is the
+//! content identity of what a continuation *pins*. Neither is drawn, counted, or timed, so
+//! "replaying an idempotent request returns the same task identity" (the PR 5 exit) holds
+//! before the idempotency ledger is consulted at all: two equal requests name one task
+//! because they name one preimage. The ledger then makes the whole *outcome* identical; the
+//! identity agrees without it. It is also exactly what the IDL asks `verification.start`
+//! for — "a cached result when one exists for the same snapshot, intent, target, and epochs"
+//! is a lookup by that identity, not a cache key invented beside it.
+//!
+//! # Where the frozen Die Hard facts are, and where the wire has no room for them
+//!
+//! `TaskRecord.cost.states` carries the reachable-state count — **16** for Die Hard — and
+//! that is the one frozen fact RFC 0026's `Cost` declares a dimension for. The **96**
+//! labelled transitions and the depth-**6** shortest witness have no wire field at protocol
+//! 3.1: `Cost` declares no transition dimension, and a witness reaches a client only as a
+//! `crash_*` crashpack, which is `schemas/crashpack.schema.json` and not an artifact this
+//! daemon can build. Both are held as the engine's own typed values on
+//! [`TaskEntry::campaign`] and are reachable through [`Daemon::state`](super::Daemon::state);
+//! the gap is the IDL's, and is recorded against it rather than papered over by repurposing
+//! a dimension that means something else.
+
+use std::collections::BTreeMap;
+
+use continuum_engine_reference::bfs::{Bound, Bounds, Exploration};
+use continuum_engine_reference::checking::{
+    CheckOutcome, CheckReport, DeadlockOutcome, Unresolved,
+};
+use continuum_engine_reference::model::State;
+use continuum_workspace::artifact_path::ArtifactClass;
+use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
+use continuum_workspace::staleness::check_current;
+
+use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::state::DaemonState;
+use super::{Services, verification};
+use crate::protocol::envelope::{
+    Budget, Cost, EpochSet, Omission, StructuralVerdictValue, Verdict,
+};
+use crate::protocol::operations::task::{
+    TaskCancelRequest, TaskCancelResponse, TaskResumeRequest, TaskResumeResponse,
+    TaskStatusRequest, TaskSubscribeRequest, TaskSubscribeResponse, TaskUpdateBudgetRequest,
+    TaskUpdateBudgetResponse,
+};
+use crate::protocol::scalar::{
+    Commitment, ContinuationHandle, EpochIdentity, EvidenceHandle, IntentHandle, OperationName,
+    TaskHandle, Timestamp, WorkspaceHandle,
+};
+use crate::protocol::shared::Target;
+use crate::protocol::spec::{Nullable, Optional};
+use crate::protocol::task::{Milestone, TaskEvent, TaskRecord};
+use crate::protocol::vocabulary::{
+    ErrorCode, OmissionReason, Portfolio, PriorityClass, StructuralOutcome, TaskEventKind,
+    TaskStatus,
+};
+
+// ---------------------------------------------------------------------------
+// what a campaign produced
+// ---------------------------------------------------------------------------
+
+/// One bounded run of the reference engine, kept as the engine's own values.
+///
+/// Held rather than flattened onto the wire because the wire cannot carry it: see this
+/// module's documentation on the frozen facts. Everything a wire answer needs is projected
+/// out of it by [`TaskEntry::record`] and by the `verification` family.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Campaign {
+    /// What checking every declared obligation over this exploration established.
+    pub report: CheckReport,
+    /// Labelled transitions counted across every expanded row. **96** for a closed Die Hard.
+    pub transitions: u64,
+    /// The deepest layer discovered, or [`None`] for an empty exploration.
+    pub max_depth: Option<usize>,
+    /// The queue-ordered frontier when a bound tripped; empty when the exploration closed.
+    ///
+    /// This is the resume point, and the reason the continuation payload needed no
+    /// invention: `Partial::frontier` already names "discovered states that were never
+    /// expanded", in the order a resumed walk takes them.
+    pub frontier: Vec<State>,
+    /// Which declared bound stopped the walk, or [`None`] when it closed.
+    pub tripped: Option<Bound>,
+}
+
+impl Campaign {
+    /// Read one exploration and its report into a campaign.
+    #[must_use]
+    pub fn of(exploration: &Exploration, report: CheckReport) -> Self {
+        let reachable = exploration.reachable();
+        let partial = exploration.exhausted();
+        Self {
+            report,
+            transitions: reachable.transitions(),
+            max_depth: reachable.max_depth(),
+            frontier: partial
+                .map(|partial| partial.frontier().to_vec())
+                .unwrap_or_default(),
+            tripped: partial.map(super::verification::tripped),
+        }
+    }
+
+    /// How many states the answers were computed over. **16** for a closed Die Hard.
+    #[must_use]
+    pub fn states(&self) -> usize {
+        self.report.scope().states()
+    }
+
+    /// Whether the exploration closed — docs/03 §3 `EXHAUSTIVE_FINITE`.
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.report.scope().is_complete()
+    }
+
+    /// The first typed reason a claim in this report was not decided, when there is one.
+    ///
+    /// INV-008: an inconclusive verdict is never silent, so the wire's
+    /// `SemanticVerdictValue.inconclusive_reason` is read off the engine's own
+    /// [`Unresolved`] rather than guessed from the scope.
+    #[must_use]
+    pub fn unresolved(&self) -> Option<&Unresolved> {
+        for result in self.report.invariants() {
+            if let CheckOutcome::Inconclusive(reason) = result.outcome() {
+                return Some(reason);
+            }
+        }
+        match self.report.deadlock() {
+            DeadlockOutcome::Inconclusive(reason) => Some(reason),
+            DeadlockOutcome::NotJudged { .. }
+            | DeadlockOutcome::Free { .. }
+            | DeadlockOutcome::Deadlocked { .. } => None,
+        }
+    }
+
+    /// The shallowest depth at which some declared invariant is violated, when one is.
+    ///
+    /// Die Hard's frozen third fact reads off this: `NotSolved` is refuted at depth **6**,
+    /// the film's six-step solution.
+    #[must_use]
+    pub fn violation_depth(&self) -> Option<usize> {
+        self.report
+            .invariants()
+            .iter()
+            .filter_map(|result| match result.outcome() {
+                CheckOutcome::Violated { depth, .. } => Some(*depth),
+                CheckOutcome::Holds { .. } | CheckOutcome::Inconclusive(_) => None,
+            })
+            .min()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// continuations
+// ---------------------------------------------------------------------------
+
+/// The compatibility epochs a continuation pins, and the engine identity beside them.
+///
+/// > A continuation MUST leave `protocol` `Unpinned` in its pinned set: the protocol epoch
+/// > is connection-scoped and is consumed by no task.
+/// >
+/// > — RFC 0026, "The two-predicate obligation"
+///
+/// The wire's [`EpochSet`] cannot express that — its `protocol` field is `required` — so the
+/// pinned set is this struct rather than an `EpochSet`, and the protocol epoch is
+/// *structurally* absent from a resume comparison instead of being skipped by a rule
+/// somebody has to remember. Five compatibility epochs are pinnable, because those are the
+/// five `EpochSet` carries beside `protocol`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinnedEpochs {
+    /// The meaning of evaluation (plan §4.6, ADR-0018).
+    pub semantic: Nullable<EpochIdentity>,
+    /// The Intent Contract vocabulary and its policy tables.
+    pub intent: Nullable<EpochIdentity>,
+    /// The evidence-graph and receipt schema epoch.
+    pub evidence: Nullable<EpochIdentity>,
+    /// The Lean toolchain and theorem-package closure (ADR-0035).
+    pub proof: Nullable<EpochIdentity>,
+    /// The pinned corpus revision and oracle toolchain.
+    pub corpus: Nullable<EpochIdentity>,
+    /// Engine identity (plan §4.7) — provenance, not a seventh epoch.
+    pub engine: Nullable<EpochIdentity>,
+}
+
+impl PinnedEpochs {
+    /// What a result's [`EpochSet`] pins, with `protocol` deliberately dropped.
+    #[must_use]
+    pub fn of(epochs: &EpochSet) -> Self {
+        Self {
+            semantic: epochs.semantic.clone(),
+            intent: epochs.intent.clone(),
+            evidence: epochs.evidence.clone(),
+            proof: epochs.proof.clone(),
+            corpus: epochs.corpus.clone(),
+            engine: epochs.engine.clone(),
+        }
+    }
+
+    /// The five compatibility epochs, in `EpochKind::ALL` order minus `protocol`.
+    fn compatibility(&self) -> [&Nullable<EpochIdentity>; 5] {
+        [
+            &self.semantic,
+            &self.intent,
+            &self.evidence,
+            &self.proof,
+            &self.corpus,
+        ]
+    }
+}
+
+/// A `cont_*` continuation: what it pins, and the search state it resumes from.
+///
+/// Everything RFC 0026's "Continuations and resume admissibility" clause requires a
+/// continuation to pin at creation is a field here — the snapshot, the intent where the task
+/// is intent-scoped, the committed frontier, the compatibility epochs, and engine identity —
+/// and this type has no way to be built without them. A continuation omitting one "is
+/// malformed and MUST be rejected at creation, not at resume"; here it is unconstructible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Continuation {
+    /// The continuation's own content identity.
+    pub handle: ContinuationHandle,
+    /// The task it resumes.
+    pub task: TaskHandle,
+    /// The snapshot the parked run was over.
+    pub snapshot: WorkspaceHandle,
+    /// The governing intent, by identity only (plan §4.2, INV-001).
+    pub intent: Nullable<IntentHandle>,
+    /// The epochs and the engine identity the parked run consumed.
+    pub pinned: PinnedEpochs,
+    /// The bounds that tripped.
+    pub bounds: Bounds,
+    /// The queue-ordered frontier: discovered states that were never expanded.
+    pub frontier: Vec<State>,
+}
+
+// ---------------------------------------------------------------------------
+// the table
+// ---------------------------------------------------------------------------
+
+/// One task, as the daemon holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskEntry {
+    /// The task's content identity.
+    pub handle: TaskHandle,
+    /// The `@task_starting` operation that created it. `rule task.no_generic_start`: there
+    /// is no generic `task.start`, so every task names the operation it came from.
+    pub operation: OperationName,
+    /// Lifecycle state (plan §4.1).
+    pub status: TaskStatus,
+    /// The snapshot the campaign is over.
+    pub snapshot: Nullable<WorkspaceHandle>,
+    /// The governing Intent Contract, by identity only.
+    pub intent: Nullable<IntentHandle>,
+    /// What the campaign is aimed at.
+    pub target: Target,
+    /// The declared portfolio profile.
+    pub portfolio: Portfolio,
+    /// The declared priority class.
+    pub priority_class: PriorityClass,
+    /// The budget in force. `task.update_budget` replaces it; the identity does not change.
+    pub budget: Budget,
+    /// The engine bounds `budget` declares, after `verification::bounds_of`.
+    pub bounds: Bounds,
+    /// The epochs the task was created under, copied onto its record.
+    pub epochs: EpochSet,
+    /// The content identity of the model source the campaign runs against.
+    pub model: Commitment,
+    /// Semantic milestones reached, in order. Append-only.
+    pub milestones: Vec<Milestone>,
+    /// Evidence committed so far. Append-only; empty until the evidence graph ships.
+    pub committed_evidence: Vec<EvidenceHandle>,
+    /// The transitions this task recorded, which is what a subscription delivers.
+    pub events: Vec<TaskEvent>,
+    /// The continuation, present while `status = suspended` and after a cancel that left one.
+    pub continuation: Option<ContinuationHandle>,
+    /// REQUIRED when `status = failed` (plan §4.5): a `Failed` task is never silent.
+    pub failed_reason: Option<ErrorCode>,
+    /// REQUIRED when `failed_reason = BudgetExhausted` and no continuation exists.
+    pub non_resumable_reason: Option<String>,
+    /// What the last run produced, or [`None`] when nothing ran.
+    pub campaign: Option<Campaign>,
+}
+
+impl TaskEntry {
+    /// Whether the task can no longer change (`rule task.status_monotonic`).
+    #[must_use]
+    pub const fn is_terminal(&self) -> bool {
+        matches!(
+            self.status,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+        )
+    }
+
+    /// Move to `status`, recording the transition, unless the task is already terminal.
+    ///
+    /// Returns whether the move happened. The refusal is the whole of
+    /// `rule task.status_monotonic`'s "a terminal status never changes": no other path
+    /// writes `status`.
+    pub fn advance(&mut self, status: TaskStatus, now: Option<&Timestamp>) -> bool {
+        if self.is_terminal() {
+            return false;
+        }
+        self.status = status;
+        if let Some(at) = now {
+            self.events.push(TaskEvent {
+                task: self.handle.clone(),
+                at: at.clone(),
+                kind: TaskEventKind::StatusChange,
+                milestone: Optional::Absent,
+                cost: Optional::Absent,
+                status: Optional::Present(status),
+            });
+        }
+        true
+    }
+
+    /// Append a milestone and the event that reports it.
+    ///
+    /// A [`Milestone`] REQUIRES a `Timestamp`, and time is not ambient (INV-005, ADR-0003),
+    /// so a deployment that supplied no reading records none — and [`TaskEntry::omissions`]
+    /// says so with a typed [`Omission`] rather than inventing a clock or emitting a
+    /// milestone at a made-up time.
+    pub fn reach(&mut self, name: &str, now: Option<&Timestamp>) {
+        let Some(at) = now else { return };
+        let milestone = Milestone {
+            name: name.to_owned(),
+            at: at.clone(),
+        };
+        self.milestones.push(milestone.clone());
+        self.events.push(TaskEvent {
+            task: self.handle.clone(),
+            at: at.clone(),
+            kind: TaskEventKind::Milestone,
+            milestone: Optional::Present(milestone),
+            cost: Optional::Absent,
+            status: Optional::Absent,
+        });
+    }
+
+    /// What this task spent, in the dimensions the engine measures.
+    ///
+    /// > A dimension the engine does not measure is absent, never zero.
+    /// >
+    /// > — `Cost`, IDL §6
+    ///
+    /// The reference engine counts states and labelled transitions; RFC 0026's `Cost`
+    /// declares a dimension for the first and none for the second, so `states` is reported
+    /// and every other dimension is absent. Nothing here reads a clock, so `wall_ms` is
+    /// absent on every task — absent as a missing *measurement*, which is also what keeps
+    /// `rule ordering.deterministic`'s byte-identical repeat true of a wall clock's output.
+    #[must_use]
+    pub fn cost(&self) -> Cost {
+        let mut cost = super::result::unmeasured();
+        if let Some(campaign) = &self.campaign {
+            cost.states = Optional::Present(campaign.states() as u64);
+        }
+        cost
+    }
+
+    /// The wire record for this task.
+    #[must_use]
+    pub fn record(&self) -> TaskRecord {
+        TaskRecord {
+            task: self.handle.clone(),
+            operation: self.operation.clone(),
+            status: self.status,
+            snapshot: self.snapshot.clone(),
+            intent: self.intent.clone(),
+            failed_reason: optional(self.failed_reason),
+            continuation: optional(self.continuation.clone()),
+            non_resumable_reason: optional(self.non_resumable_reason.clone()),
+            budget: self.budget.clone(),
+            cost: self.cost(),
+            epochs: self.epochs.clone(),
+            priority_class: self.priority_class,
+            milestones: self.milestones.clone(),
+            committed_evidence: self.committed_evidence.clone(),
+        }
+    }
+
+    /// What an answer about this task deliberately leaves out (INV-007).
+    #[must_use]
+    pub fn omissions(&self) -> Vec<Omission> {
+        let mut omissions = Vec::new();
+        if self.milestones.is_empty() {
+            // No clock reading was supplied, so no milestone could be timed. Named rather
+            // than inferred from an empty list.
+            omissions.push(unsupported("task.milestones"));
+        }
+        if self.committed_evidence.is_empty() {
+            // The evidence graph is PR 7; a task that commits none says so.
+            omissions.push(unsupported("task.committed_evidence"));
+        }
+        omissions
+    }
+}
+
+/// Every task this daemon holds, and every continuation that names one.
+///
+/// Both maps are [`BTreeMap`]s: iteration order is a function of the keys present and of
+/// nothing else, which is what `rule ordering.deterministic` needs from the container layer.
+#[derive(Debug, Default)]
+pub struct TaskTable {
+    tasks: BTreeMap<TaskHandle, TaskEntry>,
+    continuations: BTreeMap<ContinuationHandle, Continuation>,
+}
+
+impl TaskTable {
+    /// The empty table.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert or replace a task.
+    pub fn put(&mut self, entry: TaskEntry) {
+        self.tasks.insert(entry.handle.clone(), entry);
+    }
+
+    /// The task `handle` names, or [`None`].
+    #[must_use]
+    pub fn get(&self, handle: &TaskHandle) -> Option<&TaskEntry> {
+        self.tasks.get(handle)
+    }
+
+    /// The task `handle` names, mutably.
+    pub fn get_mut(&mut self, handle: &TaskHandle) -> Option<&mut TaskEntry> {
+        self.tasks.get_mut(handle)
+    }
+
+    /// Every task handle, in identity order.
+    #[must_use]
+    pub fn handles(&self) -> Vec<&TaskHandle> {
+        self.tasks.keys().collect()
+    }
+
+    /// Bind a continuation.
+    pub fn park(&mut self, continuation: Continuation) {
+        self.continuations
+            .insert(continuation.handle.clone(), continuation);
+    }
+
+    /// The continuation `handle` names, or [`None`].
+    #[must_use]
+    pub fn continuation(&self, handle: &ContinuationHandle) -> Option<&Continuation> {
+        self.continuations.get(handle)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// handle minting
+// ---------------------------------------------------------------------------
+
+/// An unambiguous concatenation: every part is length-prefixed, so no pair of inputs can
+/// produce another pair's preimage by concatenation.
+#[derive(Debug, Default)]
+pub struct Preimage(Vec<u8>);
+
+impl Preimage {
+    /// The empty preimage.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Append one part.
+    pub fn push(&mut self, part: &[u8]) {
+        self.0.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        self.0.extend_from_slice(part);
+    }
+
+    /// Append one textual part.
+    pub fn text(&mut self, part: &str) {
+        self.push(part.as_bytes());
+    }
+
+    /// The bytes.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// Name a `task_*` handle for a preimage.
+///
+/// # Errors
+///
+/// [`Fault`] carrying [`ErrorCode::PublicationAborted`] when the identity seam cannot name
+/// the record. Nothing is named under a guessed identity.
+pub fn task_handle(
+    identifier: &dyn ContentIdentifier,
+    preimage: &Preimage,
+) -> Result<TaskHandle, Fault> {
+    let handle = identifier
+        .identify(ArtifactClass::Task, preimage.bytes())
+        .map_err(|_| identity_fault())?;
+    TaskHandle::new(&handle.to_string()).map_err(|_| identity_fault())
+}
+
+/// Name a `cont_*` handle for a preimage.
+///
+/// # Errors
+///
+/// As [`task_handle`].
+pub fn continuation_handle(
+    identifier: &dyn ContentIdentifier,
+    preimage: &Preimage,
+) -> Result<ContinuationHandle, Fault> {
+    let handle = identifier
+        .identify(ArtifactClass::Continuation, preimage.bytes())
+        .map_err(|_| identity_fault())?;
+    ContinuationHandle::new(&handle.to_string()).map_err(|_| identity_fault())
+}
+
+fn identity_fault() -> Fault {
+    Fault::new(
+        ErrorCode::PublicationAborted,
+        "no content identity could be derived for a task record",
+    )
+}
+
+/// The nine budget dimensions, written into a preimage.
+pub fn budget_preimage(preimage: &mut Preimage, budget: &Budget) {
+    for dimension in [
+        budget.wall_ms.value().map(|value| value.millis()),
+        budget.cpu_ms.value().map(|value| value.millis()),
+        budget.memory_bytes.value().map(|value| value.bytes()),
+        budget.states.value().copied(),
+        budget.solver_ms.value().map(|value| value.millis()),
+        budget.proof_ms.value().map(|value| value.millis()),
+        budget.tokens.value().copied(),
+        budget.candidates.value().copied(),
+        budget.bytes.value().map(|value| value.bytes()),
+    ] {
+        match dimension {
+            Some(value) => preimage.push(&value.to_be_bytes()),
+            None => preimage.text("-"),
+        }
+    }
+}
+
+/// The six identities an [`EpochSet`] pins beside the protocol version, written into a
+/// preimage.
+pub fn epochs_preimage(preimage: &mut Preimage, epochs: &EpochSet) {
+    for identity in [
+        epochs.semantic.value(),
+        epochs.intent.value(),
+        epochs.evidence.value(),
+        epochs.proof.value(),
+        epochs.corpus.value(),
+        epochs.engine.value(),
+    ] {
+        match identity {
+            Some(identity) => preimage.text(identity.as_str()),
+            None => preimage.text("-"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the family
+// ---------------------------------------------------------------------------
+
+/// The `task` namespace's five operations.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TaskFamily;
+
+/// Every `(operation, code)` pair this family can answer with.
+///
+/// A data table rather than a comment, so `tests/daemon_task_operations.rs` can hold every
+/// one of them to `rule errors.common` ∪ the operation's `errors` clause instead of trusting
+/// that the handlers stayed inside it.
+pub const FAULTS: &[(&str, ErrorCode)] = &[
+    ("task.status", ErrorCode::CapabilityDenied),
+    ("task.cancel", ErrorCode::CapabilityDenied),
+    ("task.resume", ErrorCode::CapabilityDenied),
+    ("task.resume", ErrorCode::StaleSnapshot),
+    ("task.resume", ErrorCode::ContinuationEpochMismatch),
+    ("task.resume", ErrorCode::EpochUnsupported),
+    ("task.resume", ErrorCode::PublicationAborted),
+    ("task.subscribe", ErrorCode::CapabilityDenied),
+    ("task.update_budget", ErrorCode::CapabilityDenied),
+];
+
+impl OperationFamily for TaskFamily {
+    fn namespace(&self) -> &'static str {
+        "task"
+    }
+
+    fn scope(&self, arguments: &Arguments) -> ScopeClaim {
+        // A `task_*` handle is neither a snapshot nor an intent, and RFC 0027 T2 scopes
+        // instances by those two plus artifact classes. So a task operation claims the task
+        // class, and the snapshot the task runs over is deliberately *not* claimed here:
+        // this function is pure in the arguments and is given no state, so resolving a task
+        // handle to the snapshot behind it would be the store lookup X3 forbids before
+        // admission. The handler re-reads that binding afterwards, where a lookup is allowed.
+        let task = ArtifactClass::Task.token();
+        match arguments {
+            Arguments::TaskStatus(_)
+            | Arguments::TaskCancel(_)
+            | Arguments::TaskSubscribe(_)
+            | Arguments::TaskUpdateBudget(_) => ScopeClaim {
+                snapshots: Vec::new(),
+                intents: Vec::new(),
+                classes: vec![task],
+            },
+            Arguments::TaskResume(_) => ScopeClaim {
+                snapshots: Vec::new(),
+                intents: Vec::new(),
+                classes: vec![task, ArtifactClass::Continuation.token()],
+            },
+            _ => ScopeClaim::default(),
+        }
+    }
+
+    fn handle(
+        &self,
+        call: &Call<'_>,
+        state: &mut DaemonState,
+        services: &Services,
+        _store: &ReferenceStore,
+    ) -> Result<Effect, Fault> {
+        match call.arguments {
+            Arguments::TaskStatus(request) => status(request, state),
+            Arguments::TaskCancel(request) => cancel(request, state, services),
+            Arguments::TaskResume(request) => resume(call, request, state, services),
+            Arguments::TaskSubscribe(request) => subscribe(request, state),
+            Arguments::TaskUpdateBudget(request) => update_budget(request, state, services),
+            // Unreachable: the dispatcher checked shape agreement against the registry
+            // before routing. A typed refusal rather than an `unreachable!`, because a
+            // daemon does not abort on its own invariant.
+            _ => Err(Fault::new(
+                ErrorCode::MalformedRequest,
+                "the request body is not the shape this operation declares",
+            )),
+        }
+    }
+}
+
+/// `task.status` — project the entry onto the wire.
+///
+/// `errors []`, so the codes available are `rule errors.common`'s five and no more. A task
+/// the daemon does not hold is [`Fault::denied`], byte-identical with every other denial:
+/// RFC 0027 X2 forbids a distinguishable not-found, and there is no `UnknownTask` code to
+/// build one out of.
+fn status(request: &TaskStatusRequest, state: &DaemonState) -> Result<Effect, Fault> {
+    let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+    Ok(reported(
+        Payload::TaskStatus(entry.record()),
+        Nullable::Null,
+        entry,
+    ))
+}
+
+/// `task.subscribe` — the record now; the events are the recorded transitions.
+///
+/// > `task.subscribe` streams progress events; they are hints. Committed artifacts and
+/// > `task.status` are authoritative. […] A dropped subscription changes nothing (INV-002);
+/// > a client MUST be able to recover the same state by re-reading.
+/// >
+/// > — `rule subscription.hints_only`
+///
+/// The IDL's response body for this operation is exactly one field — "snapshot of the record
+/// at subscription time; events follow" — and that is what this layer answers, because a
+/// *stream* is a transport object and this layer emits no wire bytes. The events that follow
+/// are [`TaskEntry::events`], recorded as the transitions happened; a transport replays them
+/// and, by the rule above, a client that observes none of them recovers the same state from
+/// `task.status`.
+///
+/// So the operation is **served, not refused**. The bn-i4aem finding — that `errors []` and
+/// `rule errors.unsupported_surface` contradict each other for the eleven operations
+/// declaring an empty clause — does not bite here, because that rule is about an operation
+/// "registered ahead of its producing subsystem" and the task table is not a missing
+/// subsystem. `task.subscribe` returns only common codes, which is what its empty clause
+/// permits, and the daemon's documented `unsupported_surface` path is not taken.
+fn subscribe(request: &TaskSubscribeRequest, state: &DaemonState) -> Result<Effect, Fault> {
+    let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+    Ok(reported(
+        Payload::TaskSubscribe(TaskSubscribeResponse {
+            record: entry.record(),
+        }),
+        Nullable::Null,
+        entry,
+    ))
+}
+
+/// `task.cancel` — request, drain, finalize, at a grain where all three are one step.
+///
+/// > `task.cancel` triggers request, drain, finalize. It MUST leave either committed partial
+/// > evidence plus a valid continuation, or nothing published (INV-009, plan B19).
+/// > Cancellation MUST NOT truncate a publication in progress (INV-017).
+/// >
+/// > — `rule task.cancel_correct`
+///
+/// A dispatch is atomic here — it holds `&mut DaemonState` for its whole extent — so there
+/// is never a publication in progress for a cancel to truncate, and "drain" has nothing to
+/// drain. **No leak is possible by construction at this grain**, which is a claim about the
+/// borrow and not about care taken. What remains is the part that is a real obligation: the
+/// response's `continuation` is `nullable`, so "cancelled with nothing published" is a
+/// *named* outcome, and this function names it rather than leaving a client to infer it from
+/// an absent field.
+///
+/// Cancelling a task that is already terminal changes nothing and says so with
+/// [`StructuralOutcome::Unchanged`]; `rule task.status_monotonic`'s "a terminal status never
+/// changes" is the reason, and [`TaskEntry::advance`] is where it is enforced.
+fn cancel(
+    request: &TaskCancelRequest,
+    state: &mut DaemonState,
+    services: &Services,
+) -> Result<Effect, Fault> {
+    let now = services.now().cloned();
+    let entry = state
+        .tasks_mut()
+        .get_mut(&request.task)
+        .ok_or_else(Fault::denied)?;
+    let moved = entry.advance(TaskStatus::Cancelled, now.as_ref());
+    if moved {
+        entry.reach(MILESTONE_CANCELLED, now.as_ref());
+    }
+    let outcome = if moved {
+        StructuralOutcome::Cancelled
+    } else {
+        StructuralOutcome::Unchanged
+    };
+    let payload = Payload::TaskCancel(TaskCancelResponse {
+        task: entry.handle.clone(),
+        status: entry.status,
+        continuation: match &entry.continuation {
+            Some(handle) => Nullable::Value(handle.clone()),
+            None => Nullable::Null,
+        },
+        committed_evidence: entry.committed_evidence.clone(),
+    });
+    let omissions = entry.omissions();
+    let mut effect = Effect::new(payload, structural(outcome));
+    effect.omissions = omissions;
+    Ok(effect)
+}
+
+/// `task.update_budget` — re-admit a parked task under a larger bound, with no identity
+/// churn.
+///
+/// > Raising a dimension extends the current run. Lowering a dimension below committed spend
+/// > triggers suspension-with-continuation (plan B18) […] Silent truncation of a campaign is
+/// > prohibited (INV-009).
+/// >
+/// > — `rule task.update_budget`
+///
+/// At this grain there is no run to extend *while it runs*: a campaign either closed inside
+/// the dispatch that started it or parked. So "raising a dimension extends the current run"
+/// is served in two steps a caller can see — this operation records the new budget and
+/// leaves the task `Suspended` with its continuation intact, and `task.resume` is what
+/// re-runs under it. **The task identity does not change**, which is the PR 5 exit's second
+/// clause: the budget is a field of the entry and never re-enters the handle's preimage.
+///
+/// A terminal task keeps the budget it ran under and answers
+/// [`StructuralOutcome::Unchanged`]: a terminal task's budget is a historical fact, and
+/// rewriting it would make its recorded cost unreadable.
+fn update_budget(
+    request: &TaskUpdateBudgetRequest,
+    state: &mut DaemonState,
+    services: &Services,
+) -> Result<Effect, Fault> {
+    let now = services.now().cloned();
+    let entry = state
+        .tasks_mut()
+        .get_mut(&request.task)
+        .ok_or_else(Fault::denied)?;
+    let outcome = if entry.is_terminal() {
+        StructuralOutcome::Unchanged
+    } else {
+        entry.budget = request.budget.clone();
+        entry.bounds = verification::bounds_of(&request.budget);
+        entry.reach(MILESTONE_BUDGET_UPDATED, now.as_ref());
+        StructuralOutcome::Updated
+    };
+    let payload = Payload::TaskUpdateBudget(TaskUpdateBudgetResponse {
+        task: entry.handle.clone(),
+        status: entry.status,
+        budget: entry.budget.clone(),
+        // "Present when lowering the budget suspended the task." A task that is not terminal
+        // here is already suspended-with-continuation, so the field reports the continuation
+        // that makes the suspension resumable — never an absent field standing in for one.
+        continuation: optional(entry.continuation.clone()),
+    });
+    let omissions = entry.omissions();
+    let mut effect = Effect::new(payload, structural(outcome));
+    effect.omissions = omissions;
+    Ok(effect)
+}
+
+/// `task.resume` — the admissibility predicate, then one more bounded run.
+///
+/// # The predicate, and why each answer is the code it is
+///
+/// RFC 0026's resume decision table, in the order this function checks it:
+///
+/// | Condition | Error |
+/// |---|---|
+/// | the continuation is not one this daemon holds | `CapabilityDenied` (X2: no distinguishable not-found) |
+/// | the envelope names a snapshot other than the one the continuation pinned | `StaleSnapshot` |
+/// | the pinned snapshot is not held, is not sealed, or has been superseded in its lineage | `StaleSnapshot` |
+/// | a pinned epoch names a kind the daemon pins no identity for | `EpochUnsupported` |
+/// | a pinned epoch disagrees with the daemon's current epoch of that kind (P1) | `ContinuationEpochMismatch` |
+/// | the pinned engine identity disagrees with the daemon's (P2) | `ContinuationEpochMismatch` |
+///
+/// **Both epoch predicates are checked, and neither implies the other** (RFC 0026, "The
+/// two-predicate obligation"): P1 alone would admit a resume onto a different engine build,
+/// which is the case plan §4.7's defect lifecycle exists to catch, and P2 alone a resume
+/// across a semantic-epoch advance, which ADR-0018 forbids. **The protocol epoch does not
+/// participate** — it is not a field of [`PinnedEpochs`] at all, so that rule is a property
+/// of the type rather than a step somebody has to remember.
+///
+/// The snapshot test is the R3 spike §3's proven behaviour — "rejection of continuation
+/// under a different workspace snapshot" — and it reads the *envelope*'s `snapshot`, because
+/// `task.resume`'s request body carries a continuation and a budget and nothing else. Naming
+/// no snapshot says nothing and is admitted; naming a different one is refused.
+///
+/// # What "resume" does at a synchronous grain, and why it is not a silent re-run
+///
+/// `bfs::explore` takes a model and bounds and has no partial-state entry point, so resuming
+/// means exploring the same model again under the larger bound. That is *not* the "quietly
+/// restart the task under current epochs" RFC 0026 forbids, and the difference is checkable
+/// rather than asserted: breadth-first exploration admits states in canonical order, so the
+/// parked explored set is a **prefix** of the resumed one and every parked frontier state is
+/// discovered again. The run is under the *pinned* epochs, because the predicate above has
+/// already refused every case where the daemon's differ. `tests/daemon_task_operations.rs`
+/// asserts the prefix property instead of trusting it.
+fn resume(
+    call: &Call<'_>,
+    request: &TaskResumeRequest,
+    state: &mut DaemonState,
+    services: &Services,
+) -> Result<Effect, Fault> {
+    let continuation = state
+        .tasks()
+        .continuation(&request.continuation)
+        .ok_or_else(Fault::denied)?
+        .clone();
+
+    if let Nullable::Value(named) = &call.envelope.snapshot {
+        if named != &continuation.snapshot {
+            return Err(stale());
+        }
+    }
+
+    let record = state
+        .workspace(&continuation.snapshot)
+        .ok_or_else(Fault::denied)?;
+    if !record.sealed {
+        return Err(stale());
+    }
+    let lineage_name = record.lineage.clone();
+    let head = record.descriptor.source().identity().clone();
+    let lineage = state.lineage(&lineage_name).ok_or_else(Fault::denied)?;
+    check_current(lineage, &head).map_err(|_| stale())?;
+
+    admissible_epochs(&continuation.pinned, services.epochs())?;
+
+    let task = continuation.task.clone();
+    if let Optional::Present(budget) = &request.budget {
+        let bounds = verification::bounds_of(budget);
+        if let Some(entry) = state.tasks_mut().get_mut(&task) {
+            entry.budget = budget.clone();
+            entry.bounds = bounds;
+        }
+    }
+
+    // A terminal task is not resumed. `rule task.status_monotonic` says a terminal status
+    // never changes and `rule task.resume` says a resume "MUST NOT replace prior artifacts
+    // under the same identity"; a no-op does neither, and returning the terminal status is
+    // the honest answer to "resume this". There is no code in this operation's union for
+    // "already terminal", and pressing one of the common five into that service would name
+    // something false.
+    let bounds = {
+        let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
+        if entry.is_terminal() {
+            return Ok(reported(
+                Payload::TaskResume(TaskResumeResponse {
+                    task: entry.handle.clone(),
+                    status: entry.status,
+                }),
+                Nullable::Null,
+                entry,
+            ));
+        }
+        entry.bounds
+    };
+
+    // The run's own refusals are the `verification` family's, and `task.resume` declares a
+    // narrower `errors` clause than `verification.start` does — `UnsupportedSemanticFeature`
+    // is outside it. A model this daemon can no longer construct is, at RFC 0027 X2's grain,
+    // indistinguishable from a continuation this daemon does not hold: both name something
+    // the caller cannot get an answer for, and the caller learns nothing about which. So a
+    // code outside the union collapses to the one denial, byte-identical with every other,
+    // rather than being reported outside `rule errors.common`. That the IDL leaves
+    // `task.resume` no way to say "the model went away" is the IDL's gap, recorded rather
+    // than worked around by putting an undeclared code on the wire.
+    verification::advance(&task, bounds, state, services).map_err(|fault| {
+        if super::errors::admits(call.spec, fault.code) {
+            fault
+        } else {
+            Fault::denied()
+        }
+    })?;
+    let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
+    Ok(reported(
+        Payload::TaskResume(TaskResumeResponse {
+            task: entry.handle.clone(),
+            status: entry.status,
+        }),
+        Nullable::Null,
+        entry,
+    ))
+}
+
+/// P1 and P2, composed. See [`resume`] for the decision table this implements.
+///
+/// # Errors
+///
+/// [`ErrorCode::EpochUnsupported`] when a pinned epoch names a kind the daemon pins no
+/// identity for — "an artifact or continuation declares a schema or semantic epoch unknown
+/// or incompatible with this daemon […] typed rejection, never best-effort decoding" — and
+/// [`ErrorCode::ContinuationEpochMismatch`] when the two sides pin different identities.
+///
+/// An epoch the continuation left unpinned constrains nothing, which is
+/// `EpochSet::first_mismatch`'s own permissive rule: "a continuation resumes only under its
+/// pinned epoch, and one that pinned nothing declared nothing to resume under". What makes
+/// that safe is the *creation-time* obligation, which [`Continuation`] discharges by having
+/// no constructor that can omit a field.
+pub fn admissible_epochs(pinned: &PinnedEpochs, current: &EpochSet) -> Result<(), Fault> {
+    let held = PinnedEpochs::of(current);
+    for (want, have) in pinned.compatibility().into_iter().zip(held.compatibility()) {
+        match (want.value(), have.value()) {
+            (None, _) => {}
+            (Some(_), None) => {
+                return Err(Fault::new(
+                    ErrorCode::EpochUnsupported,
+                    "the continuation pins an epoch this daemon holds no identity for",
+                ));
+            }
+            (Some(want), Some(have)) if want == have => {}
+            (Some(_), Some(_)) => {
+                return Err(Fault::new(
+                    ErrorCode::ContinuationEpochMismatch,
+                    "a pinned compatibility epoch disagrees with this daemon's current one",
+                ));
+            }
+        }
+    }
+    // P2 is equality on `EpochIdentity`, never an ordering: engine identities are content
+    // identities, and there is no "newer engine" relation to accept a resume on.
+    match (pinned.engine.value(), held.engine.value()) {
+        (None, _) => Ok(()),
+        (Some(want), Some(have)) if want == have => Ok(()),
+        (Some(_), _) => Err(Fault::new(
+            ErrorCode::ContinuationEpochMismatch,
+            "the continuation's pinned engine identity is not this daemon's",
+        )),
+    }
+}
+
+/// The milestone a cancel records.
+pub const MILESTONE_CANCELLED: &str = "task.cancelled";
+/// The milestone a budget update records.
+pub const MILESTONE_BUDGET_UPDATED: &str = "task.budget_updated";
+
+fn stale() -> Fault {
+    Fault::new(
+        ErrorCode::StaleSnapshot,
+        "the snapshot the continuation pinned is not the current sealed snapshot",
+    )
+}
+
+/// One answer about a task, carrying the task's own omission manifest.
+fn reported(payload: Payload, verdict: Nullable<Verdict>, entry: &TaskEntry) -> Effect {
+    let mut effect = Effect::new(payload, verdict);
+    effect.omissions = entry.omissions();
+    effect
+}
+
+/// A typed "this daemon does not produce that" omission (INV-007).
+pub fn unsupported(subject: &str) -> Omission {
+    Omission {
+        reason: OmissionReason::Unsupported,
+        subject: subject.to_owned(),
+        recoverable_by: Optional::Absent,
+    }
+}
+
+fn structural(outcome: StructuralOutcome) -> Nullable<Verdict> {
+    Nullable::Value(Verdict::Structural(StructuralVerdictValue { outcome }))
+}
+
+fn optional<T>(value: Option<T>) -> Optional<T> {
+    match value {
+        Some(value) => Optional::Present(value),
+        None => Optional::Absent,
+    }
+}

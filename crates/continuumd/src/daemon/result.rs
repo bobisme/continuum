@@ -109,6 +109,11 @@ pub fn success(
         // nine dimensions on the `Effect`, and this is where they reach the envelope. The
         // agreement between the two is asserted rather than assumed: see
         // `tests/daemon_evidence.rs`.
+        // `semantic` and `evaluation` verdicts, and the family that ran the engine is the
+        // only thing that knows what produced each dimension — so it arrives on the
+        // `Effect` rather than being assembled here. An operation carrying a `structural` or
+        // `policy` verdict leaves it absent, which is `Effect::new`'s default: absent because
+        // nothing established those dimensions, never a placeholder standing in for them.
         assurance: effect.assurance.clone(),
         artifacts: effect.artifacts.clone(),
         task: Optional::Absent,

@@ -328,6 +328,8 @@ pub struct DaemonState {
     evidence_events: Vec<EvidenceEvent>,
     idempotency: BTreeMap<(String, String), Replay>,
     admissions: Vec<AdmissionRecord>,
+    tasks: super::task::TaskTable,
+    models: super::verification::ModelCatalog,
 }
 
 impl DaemonState {
@@ -615,6 +617,34 @@ impl DaemonState {
     #[must_use]
     pub fn lineage(&self, name: &ForkName) -> Option<&Fork> {
         self.lineages.get(name)
+    }
+
+    // --- tasks and the models they run over -----------------------------------------
+
+    /// Every task this daemon holds, and every continuation that names one.
+    #[must_use]
+    pub const fn tasks(&self) -> &super::task::TaskTable {
+        &self.tasks
+    }
+
+    /// The task table, mutably.
+    pub const fn tasks_mut(&mut self) -> &mut super::task::TaskTable {
+        &mut self.tasks
+    }
+
+    /// The models this daemon can construct.
+    ///
+    /// Registered out of band, like capabilities and staged content, and for the same
+    /// reason: elaborating CML source is not an operation in this protocol version, and
+    /// there is no CML front end to do it with (see [`verification`](super::verification)).
+    #[must_use]
+    pub const fn models(&self) -> &super::verification::ModelCatalog {
+        &self.models
+    }
+
+    /// The model catalog, mutably — the registration surface itself.
+    pub const fn models_mut(&mut self) -> &mut super::verification::ModelCatalog {
+        &mut self.models
     }
 
     // --- idempotency ----------------------------------------------------------------
