@@ -490,6 +490,7 @@ def _extract_bullet_policy(
                     summary,
                     path,
                     line,
+                    status="satisfied" if "(delivered:" in summary else ACTIVE,
                 )
             )
 

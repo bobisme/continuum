@@ -24,23 +24,28 @@
 
 ADRs have statuses:
 
-- proposed;
-- accepted;
-- superseded;
-- rejected;
-- experimental.
+- proposed; (delivered: bn-29gc)
+- accepted; (delivered: bn-29gc)
+- superseded; (delivered: bn-29gc)
+- rejected; (delivered: bn-29gc)
+- experimental. (delivered: bn-29gc)
 
 An ADR must include:
 
-- context;
-- decision;
-- formal consequences;
-- alternatives;
-- compatibility;
-- security;
-- performance hypothesis;
-- validation plan;
-- rollback.
+- context; (delivered: bn-29gc)
+- decision; (delivered: bn-29gc)
+- formal consequences; (delivered: bn-29gc)
+- alternatives; (delivered: bn-29gc)
+- compatibility; (delivered: bn-29gc)
+- security; (delivered: bn-29gc)
+- performance hypothesis; (delivered: bn-29gc)
+- validation plan; (delivered: bn-29gc, bn-xjz8)
+- rollback. (delivered: bn-29gc, bn-xjz8)
+
+These fourteen obligations are enforced by `tools/governance/check_adr_process.py`
+(self-testing; evidence in `tools/governance/evidence/gov-2.json`; pre-existing
+gaps grandfathered per ADR and per section in
+`tools/governance/adr-grandfathered.toml`, 52 of 53 ADRs as of 2026-07-31).
 
 ## 3. Claim governance
 
