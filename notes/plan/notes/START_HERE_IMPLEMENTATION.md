@@ -110,8 +110,8 @@ Implement:
 
 Implement:
 
-- exact finite values from Revision 2;
-- canonical encoding and total order;
+- exact finite values from Revision 2 (delivered: bn-23m);
+- canonical encoding and total order (delivered: bn-23m);
 - content identity per ADR-0013: in certified lanes, canonical content identity is primary and hash collisions are resolved by canonical comparison; 256-bit-hash identity only in explicitly labeled non-certified modes;
 - collision-injection tests;
 - atomic artifact publication;

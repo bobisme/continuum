@@ -937,8 +937,8 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "exact finite values from Revision 2"
+      "status": "satisfied",
+      "summary": "exact finite values from Revision 2 (delivered: bn-23m)"
     },
     {
       "category": "pr-deliverable",
@@ -949,8 +949,8 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "canonical encoding and total order"
+      "status": "satisfied",
+      "summary": "canonical encoding and total order (delivered: bn-23m)"
     },
     {
       "category": "pr-deliverable",

@@ -61,17 +61,16 @@ dossier:
 # generates into a scratch directory and diffs, so a stale manifest fails the
 # gate instead of being silently rewritten under it.
 lean:
-    @command -v lake >/dev/null 2>&1 || { \
-        echo "continuum: 'lake' is not on PATH." >&2; \
+    @export PATH="$HOME/.elan/bin:$PATH"; \
+    command -v lake >/dev/null 2>&1 || { \
+        echo "continuum: 'lake' is not on PATH (also tried ~/.elan/bin)." >&2; \
         echo "  Lean comes from elan: mise.toml pins the elan release and" >&2; \
         echo "  lean/lean-toolchain pins the Lean version elan installs." >&2; \
         echo "  Bootstrap: run 'mise install' (this installs elan-init), then" >&2; \
-        echo "  'elan-init -y', then make elan's bin directory visible to this" >&2; \
-        echo "  shell (e.g. '. ~/.elan/env'; login shells usually do it)." >&2; \
+        echo "  'elan-init -y'." >&2; \
         exit 1; \
-    }
-    cd lean && lake build
-    sh lean/scripts/axiom-manifest.sh --check
+    }; \
+    (cd lean && lake build) && sh lean/scripts/axiom-manifest.sh --check
 
 # Regenerate the plan/Bones traceability registry and report.
 traceability:
