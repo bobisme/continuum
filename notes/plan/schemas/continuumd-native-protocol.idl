@@ -150,7 +150,24 @@
 protocol continuum.native {
   /// Version of this IDL document. Bumped on every change to the file,
   /// independently of the protocol version it defines.
-  idl_version = "1.0";
+  ///
+  /// Revisions:
+  ///   1.1 — the minimal additive fixes RFC 0026 flagged as F4–F7:
+  ///         `StaleSnapshot` added to the `task.resume` and
+  ///         `repair.resume` `errors` clauses (correction 22);
+  ///         `evidence.verify` gains the `redacted` response field
+  ///         (SD-09); `program.replay` gains `defect` and
+  ///         `rule errors.defect_emission` is declared (plan §4.7);
+  ///         open items 1 and 2 recorded as resolved by RFC 0026
+  ///         "Capability administration" (corrections 20 and 21); the
+  ///         `ExplanationLevel` attribution corrected to RFC 0039.
+  ///         The wire additions above are compatible changes under
+  ///         `rule versioning.compatible_change`, which raises the
+  ///         protocol minor; `version` is left at "3.0" here and the
+  ///         bump is flagged for the protocol sweep rather than taken
+  ///         silently.
+  ///   1.0 — first normative definition of protocol 3.0.
+  idl_version = "1.1";
   /// The protocol version this document defines.
   version = "3.0";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
@@ -377,8 +394,10 @@ alias OperationName = String @pattern("^[a-z]+\\.[a-z_]+$");
 // `Encoding`, `Audience`, `DiffLayer`, `TargetKind`,
 // `ExplorationStrategy`, `StructuralOutcome`, `DiagnosticSeverity`,
 // `TaskEventKind`, and `EvidenceEventKind` are registered here.
-// `Portfolio` and `ExplanationLevel` are promoted here from the
-// non-normative sketches that named them (docs/55, RFC 0039).
+// `Portfolio` is promoted here from the non-normative sketch that named
+// it (docs/55); `ExplanationLevel` is promoted from RFC 0039, its sole
+// source — docs/55 names neither that enum, the `level` argument, nor
+// any of its members — as the `ExplanationLevel` declaration records.
 // ---------------------------------------------------------------------
 
 /// The five authority levels, ordered `read < propose < execute <
@@ -1425,6 +1444,19 @@ rule errors.unsupported_surface {
   """
 }
 
+rule errors.defect_emission {
+  """
+  A `ReplayDiverged`, an incremental-parity mismatch, an engine crash, or
+  an explanation-validation failure MUST publish a `defect_*` artifact,
+  and the result reporting the condition MUST carry that handle in
+  `artifacts` (plan §4.7). A client MUST NOT have to reconstruct a defect
+  report from an error string. An engine defect is never a semantic
+  verdict about the client's program: the task reports typed
+  inconclusiveness (INV-008) and the assurance envelope names the
+  dimensions it could not establish.
+  """
+}
+
 
 // ---------------------------------------------------------------------
 // 9. Shared operation types
@@ -1896,6 +1928,9 @@ operation program.replay {
   response {
     causal_graph: CausalGraphHandle required;
     divergence: Opaque optional;
+    /// Engine-defect report, present on divergence (plan §4.7,
+    /// `rule errors.defect_emission`).
+    defect: DefectHandle optional;
   };
   verdict EvaluationVerdictValue;
   errors [ReplayDiverged, BudgetExhausted, EpochUnsupported];
@@ -2414,7 +2449,8 @@ operation repair.resume {
     gates: list<GateOutcome> required;
   };
   verdict PolicyVerdictValue;
-  errors [ContinuationEpochMismatch, BudgetExhausted, EpochUnsupported];
+  errors [StaleSnapshot, ContinuationEpochMismatch, BudgetExhausted,
+          EpochUnsupported];
 }
 
 /// Return the reviewer projection of a transaction: semantic and intent
@@ -2662,7 +2698,8 @@ operation task.resume {
     task: TaskHandle required;
     status: TaskStatus required;
   };
-  errors [ContinuationEpochMismatch, EpochUnsupported, BudgetExhausted];
+  errors [StaleSnapshot, ContinuationEpochMismatch, EpochUnsupported,
+          BudgetExhausted];
 }
 
 /// Stream progress events for a task on this connection. Events are
@@ -2758,6 +2795,10 @@ operation evidence.verify {
     checker: String required;
     /// `checked-certificate` or `trusted-solver`.
     validation_basis: String required;
+    /// Present when content the verified receipt references is redacted
+    /// (plan §4.5, SD-09): the structural result and the redaction are
+    /// returned together, never one in place of the other.
+    redacted: Redacted optional;
   };
   verdict SemanticVerdictValue;
   errors [StatusConflict, CertificateRejected, InsufficientEvidence,
@@ -2884,20 +2925,31 @@ rule conformance.generated_artifacts {
 //
 // Recorded here so the gaps are visible in the normative artifact rather
 // than only in review notes. Each MUST be closed before PR 5 freezes the
-// interface.
+// interface; a resolved item keeps its entry, with its resolution, so
+// the history stays visible.
 //
-//   1. Capability administration. RFC 0026 states that capabilities are
-//      minted, scoped, delegated, and revoked through daemon operations
-//      recorded in the audit log (plan §4.5), but no such operations
-//      exist in the plan §10.2 registry, which this file implements
-//      exactly. The administrative surface is therefore undeclared here.
-//      Closing it requires either registry entries (plan §10.2 and RFC
-//      0027's authority table) or an explicit statement that capability
-//      administration is out-of-band. `CapabilityDescriptor` already
-//      fixes what such operations would manipulate.
-//   2. Delegation depth and expiry defaults for multi-agent handoff
-//      (RFC 0026 and RFC 0027 open questions). `delegation_depth` and
-//      `expires_at` are declared; their defaults are not.
+//   1. Capability administration — resolved by RFC 0026, "Capability
+//      administration" (correction 20). Capabilities are minted, scoped,
+//      delegated, and revoked through an out-of-band administrative
+//      surface at protocol major 3, not through the plan §10.2 registry
+//      this file implements exactly: no operation in this protocol may
+//      widen the authority of the connection invoking it (INV-015). The
+//      audit, descriptor, revocation, and delegation obligations hold
+//      wherever that surface lives, and `CapabilityDescriptor` fixes
+//      what it manipulates. Bringing it into the protocol at a future
+//      major requires plan §10.2 entries, RFC 0027 authority rows, and
+//      declarations here, together and in one change.
+//   2. Delegation depth and expiry defaults for multi-agent handoff —
+//      resolved by RFC 0026, "Delegation and expiry defaults"
+//      (correction 21), in the fail-closed direction:
+//      `delegation_depth` defaults to `0`; a delegated capability never
+//      exceeds its parent in level, scope, expiry, or depth, and
+//      revoking a parent revokes its delegation subtree;
+//      `expires_at: null` means non-expiring and is confined to a shared
+//      trust domain — in remote mode a mint naming no expiry is
+//      rejected rather than defaulted. What remains open is the numeric
+//      expiry a deployment chooses, which is deployment policy and not
+//      protocol.
 //   3. `Opaque` fields name their governing schema in prose. The SD-08
 //      `$id`/schema-epoch convention is now paid (`schemas/README.md`):
 //      every artifact instance carries a `schema_id`/`schema_epoch`
