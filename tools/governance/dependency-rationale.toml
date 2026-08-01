@@ -39,8 +39,8 @@ name = "continuum-value"
 origin = "workspace"
 tcb_class = "trusted-checking-base"
 kinds = ["dev", "normal"]
-used_by = ["continuum-intent", "continuum-task"]
-rationale = "Canonical value encoding, content identity, epochs, and the assurance envelope (ADR-0013); a machine result cannot name its epochs or its envelope without them. continuum-intent reuses the ContentHasher/Digest256 identity seam for RFC 0037's canonical property bytes rather than opening a second one."
+used_by = ["continuum-intent", "continuum-task", "continuumd"]
+rationale = "Canonical value encoding, content identity, epochs, and the assurance envelope (ADR-0013); a machine result cannot name its epochs or its envelope without them. continuum-intent reuses the ContentHasher/Digest256 identity seam for RFC 0037's canonical property bytes rather than opening a second one. continuumd's native protocol takes ProtocolEpoch and EpochIdentity as-is because RFC 0026 requires the daemon and that module to agree on negotiation and the N/N-1 window, and two spellings of one identity is what ADR-0013 forbids."
 
 [[dependency]]
 name = "continuum-evidence"

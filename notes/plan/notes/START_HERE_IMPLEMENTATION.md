@@ -174,6 +174,8 @@ Implement request/response types and local transport for the plan §10.2 operati
 - capability negotiation;
 - typed errors and idempotency keys.
 
+The *type* layer common to all six bullets landed in `crates/continuumd/src/protocol` (bn-mtw): all 72 §10.2 operations with their request/response/verdict/error declarations, the request and result envelopes, the connection handshake and the protocol-major N/N−1 window, and the complete §10.3 error taxonomy — held to `schemas/continuumd-native-protocol.idl` by a test that parses the IDL and fails closed on any disagreement (`rule conformance.registry_agreement`), with RFC 0027's authority table as an independent third source. No bullet is delivered by it: each still needs the local transport and the daemon behaviour that make it observable, which is where its own evidence-owning Bone finishes. The byte-level canonical JSON/CBOR codec is deliberately not in that layer — the IDL fixes the two encodings but not their canonical field order, union tagging, or the shape of the envelope's `Opaque` payloads (the IDL's own open item 3), so it belongs with the transport half rather than being invented ahead of it.
+
 **Exit:** replaying an idempotent request returns the same task/artifact identity. May not merge before PR 0 closes.
 
 ### PR 6 — Cancel-correct task service [G0 (DX-14), G1]

@@ -20,6 +20,19 @@
 //!   and services but never substitutes its own judgement for a kernel check.
 //! - Adapters depend on `continuumd`; `continuumd` does not depend on adapters.
 //!
-//! PR-1 / IMPL-01 scaffold: this crate declares its responsibility and its dependency
-//! boundary. The types and behavior land in the PR named above.
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
+//!
+//! # What is here
+//!
+//! [`protocol`] — the native protocol's type layer: every plan §10.2 operation with its
+//! request, response, verdict, and error declarations, the request and result envelopes,
+//! the connection handshake and the protocol-major N/N−1 window, and the complete plan
+//! §10.3 error taxonomy. The types are held to
+//! `notes/plan/schemas/continuumd-native-protocol.idl` by `tests/idl_conformance.rs`,
+//! which parses that file and fails closed on any disagreement.
+//!
+//! Transport, the daemon's behavior, and the byte-level canonical JSON/CBOR codec are not
+//! here yet; [`protocol`]'s documentation states exactly where the type layer stops and
+//! why.
+
+pub mod protocol;

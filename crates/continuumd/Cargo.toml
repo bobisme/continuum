@@ -6,5 +6,25 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# One workspace edge, and RFC 0026 is the reason it is not optional:
+#
+#   `ProtocolEpoch::negotiate` is the typed form of this rule and `ProtocolWindow` of
+#   the major window; the daemon and that module MUST agree.
+#     -- RFC 0026, "Version window and negotiation"
+#
+# Two of the IDL's eight string aliases are already that crate's types: `ProtocolVersion`
+# is `ProtocolEpoch` (whose parse/render round-trip *is* the IDL's
+# `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`) and `EpochIdentity` is `EpochIdentity` (whose
+# printable-ASCII rule *is* `^[!-~]+$`). Restating either here would be a second spelling
+# of one identity, which is what ADR-0013 forbids. No external dependency is added.
+#
+# Repeated under [dev-dependencies] because integration tests in `tests/` are separate
+# crates and do not inherit the library's dependencies.
+[dependencies]
+continuum-value = { path = "../continuum-value" }
+
+[dev-dependencies]
+continuum-value = { path = "../continuum-value" }
+
 [lints]
 workspace = true
