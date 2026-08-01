@@ -210,10 +210,10 @@ Wrap Revision 2 reference semantics behind native protocol:
 
 Implement the trusted checking base as four crates — `continuum-kernel-core`, `continuum-kernel-sat`, `continuum-kernel-smt`, `continuum-kernel-temporal` (plan §20):
 
-- finite closure/type certificate checking;
-- no shared evaluator code with any engine; no async, no unsafe, no plugins or dynamic loading;
+- finite closure/type certificate checking (delivered: bn-2i8);
+- no shared evaluator code with any engine; no async, no unsafe, no plugins or dynamic loading (delivered: bn-2i8 — `continuum-kernel-core` depends on no workspace crate and no external crate, so its decoder, arithmetic and state representation are its own per docs/03 §8);
 - <15,000 non-test-line covenant across the four crates (docs/03);
-- serialization boundary: certificates are checked from wire form, never from shared memory;
+- serialization boundary: certificates are checked from wire form, never from shared memory (delivered: bn-2i8 — the only checking entry point takes `&[u8]`, and `wire::Certificate` has no constructor outside `wire::decode`);
 - receipt generation with checker epoch, build digest, and input hashes;
 - mutation tests.
 

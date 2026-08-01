@@ -1649,8 +1649,8 @@
         "line": 209,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "finite closure/type certificate checking"
+      "status": "satisfied",
+      "summary": "finite closure/type certificate checking (delivered: bn-2i8)"
     },
     {
       "category": "pr-deliverable",
@@ -1661,8 +1661,8 @@
         "line": 209,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "no shared evaluator code with any engine; no async, no unsafe, no plugins or dynamic loading"
+      "status": "satisfied",
+      "summary": "no shared evaluator code with any engine; no async, no unsafe, no plugins or dynamic loading (delivered: bn-2i8 \u2014 continuum-kernel-core depends on no workspace crate and no external crate, so its decoder, arithmetic and state representation are its own per docs/03 \u00a78)"
     },
     {
       "category": "pr-deliverable",
@@ -1685,8 +1685,8 @@
         "line": 209,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "serialization boundary: certificates are checked from wire form, never from shared memory"
+      "status": "satisfied",
+      "summary": "serialization boundary: certificates are checked from wire form, never from shared memory (delivered: bn-2i8 \u2014 the only checking entry point takes &[u8], and wire::Certificate has no constructor outside wire::decode)"
     },
     {
       "category": "pr-deliverable",
