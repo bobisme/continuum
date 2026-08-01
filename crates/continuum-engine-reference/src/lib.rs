@@ -22,8 +22,8 @@
 //!   candidate and was declined for a specific, recorded reason — see [`ident`]: its
 //!   canonical name order is shortlex, while the certificate wire form this engine must
 //!   satisfy orders names by bytes. An *external* crate would additionally need an entry
-//!   in `tools/governance/dependency-rationale.toml`, which today records that the
-//!   workspace "declares no external dependency at all".
+//!   in `tools/governance/dependency-rationale.toml`, the way `continuum-value`'s
+//!   vendored `blake3` hasher is recorded there.
 //!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 //!

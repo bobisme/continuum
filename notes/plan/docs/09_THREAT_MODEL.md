@@ -89,7 +89,7 @@ Controls:
 - no recursive descent on unbounded attacker structures;
 - fuzzing and corpus tests.
 
-### T02 — Hash collision changes reachability
+### T02 — Hash collision changes reachability (delivered: bn-277, bn-2res, bn-30eym)
 
 Controls:
 

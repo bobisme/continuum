@@ -2103,8 +2103,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "Workspace-internal edges are exact. External dependencies are checked at the *declared* "
             "level: a third-party crate that itself pulls in a socket is not audited here. Deep "
             "transitive auditing of third-party crates is PR 9's kernel covenant tooling. The workspace "
-            "currently declares no external dependency at all, so this rule's external half is proven "
-            "only by its fixtures today."
+            "declares one external dependency (blake3, dev-visible plus continuum-value's hasher seam, "
+            "recorded in dependency-rationale.toml since bn-30eym); the external half is exercised by "
+            "that entry and by its fixtures."
         ),
         fn=rule_no_network_in_checker,
     ),

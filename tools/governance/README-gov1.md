@@ -149,9 +149,10 @@ moved.
    `schema_epoch` advancing, past the PR 5 freeze, is a mechanical violation. That
    needs a two-revision runner and belongs with the CI wiring, not here.
 2. **External dependencies are checked at the declared level.** The workspace
-   currently declares no external dependency at all, so `GOV-1-04`/`05`/`06`'s
-   external halves and all of `GOV-1-07`'s external-crate handling are exercised
-   only by their fixtures today. Deep transitive auditing of third-party crates is
+   declares one external dependency (`blake3`, vendored behind the ADR-0013
+   hasher seam by bn-30eym and recorded in `dependency-rationale.toml`), so
+   `GOV-1-07`'s external-crate handling is exercised by a real entry as well as
+   by its fixtures; `GOV-1-04`/`05`/`06`'s external halves remain fixture-proven. Deep transitive auditing of third-party crates is
    PR 9's kernel covenant tooling.
 3. **Out-of-tree packs.** `GOV-1-10` reaches every pack manifest in the
    repository — today one. A pack shipped out of tree is governed by the same

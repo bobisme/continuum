@@ -335,11 +335,13 @@ def _extract_headings(
             for paragraph in re.split(r"\n\s*\n", body)
             if _clean(paragraph) and not paragraph.lstrip().startswith("#")
         ]
-        status = (
-            "deferred"
-            if any(req_id.startswith(prefix) for prefix in deferred_prefixes)
-            else ACTIVE
-        )
+        if any(req_id.startswith(prefix) for prefix in deferred_prefixes):
+            status = "deferred"
+        elif "(delivered:" in summary:
+            status = "satisfied"
+            summary = re.sub(r"\s*\(delivered:[^)]*\)", "", summary)
+        else:
+            status = ACTIVE
         metadata: dict[str, Any] = {}
         if paragraphs:
             metadata["contract"] = paragraphs[0]

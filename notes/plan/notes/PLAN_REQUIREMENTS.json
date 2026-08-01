@@ -6094,7 +6094,7 @@
         "line": 92,
         "path": "docs/09_THREAT_MODEL.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Hash collision changes reachability"
     },
     {

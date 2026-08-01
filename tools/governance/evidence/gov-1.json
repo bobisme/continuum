@@ -112,7 +112,7 @@
       "violations": []
     },
     "GOV-1-06": {
-      "boundary": "Workspace-internal edges are exact. External dependencies are checked at the *declared* level: a third-party crate that itself pulls in a socket is not audited here. Deep transitive auditing of third-party crates is PR 9's kernel covenant tooling. The workspace currently declares no external dependency at all, so this rule's external half is proven only by its fixtures today.",
+      "boundary": "Workspace-internal edges are exact. External dependencies are checked at the *declared* level: a third-party crate that itself pulls in a socket is not audited here. Deep transitive auditing of third-party crates is PR 9's kernel covenant tooling. The workspace declares one external dependency (blake3, dev-visible plus continuum-value's hasher seam, recorded in dependency-rationale.toml since bn-30eym); the external half is exercised by that entry and by its fixtures.",
       "enforces": "The workspace-internal closure of the four `continuum-kernel-*` crates and `continuum-certificate` contains no network-capable member (`continuum-effects-network`, `continuum-asupersync`, `continuum-proof-client`, `continuumd`, any adapter); no crate in that closure declares a network or async-runtime dependency; no checker source names a socket type.",
       "fixtures_proven_caught": [
         "gov-1-06-http-client-in-kernel",
