@@ -30,18 +30,26 @@
 //! # What is here, and what is not
 //!
 //! PR 8 has five deliverables
-//! (`notes/plan/notes/START_HERE_IMPLEMENTATION.md:205-215`). This slice is the first:
-//! the **programmatic transition model** — how a finite transition system is declared,
-//! what a state is, and how guards, updates, and named predicates are evaluated. The
-//! other four — deterministic BFS, invariant/deadlock checking, shortest witness, and
-//! the finite closure certificate — are separate bones, and [`model`] is written so
-//! each attaches without changing it; see the seam table in that module's
-//! documentation.
+//! (`notes/plan/notes/START_HERE_IMPLEMENTATION.md:205-215`). Two are here:
 //!
-//! Nothing here searches. There is no reachable-set computation, no frontier, and no
-//! visited set in this crate's shipped code. The Die Hard evidence tests walk the model
-//! with their own closure, deliberately: the exploration bone should land against a
-//! model layer that never had a private path to the answer.
+//! - the **programmatic transition model** ([`model`], with [`ident`], [`domain`],
+//!   [`expr`], [`diehard`]) — how a finite transition system is declared, what a state
+//!   is, and how guards, updates, and named predicates are evaluated;
+//! - **deterministic breadth-first exploration** ([`bfs`]) — the reachable set of a
+//!   declared model, in canonical order, with each state's depth, under explicitly
+//!   declared bounds.
+//!
+//! The other three — invariant/deadlock checking, shortest witness, and the finite
+//! closure certificate — are separate bones, and both landed modules are written so
+//! each attaches without changing them; see the seam tables in [`model`] and [`bfs`].
+//!
+//! [`bfs`] searches; [`model`] does not, and the split is load-bearing. Exploration
+//! reads the model layer through [`model::Model::initial_states`] and
+//! [`model::Model::successors`] and through nothing else, so it has no private path to
+//! an answer the model layer cannot also give. `tests/diehard_evidence.rs` walks the
+//! model with its own nine-line closure and was written before [`bfs`] existed; it is
+//! retained as the corroborating layer, and the two must agree on the frozen Die Hard
+//! facts or one of them is wrong.
 //!
 //! # Determinism (INV-005)
 //!
@@ -75,12 +83,14 @@
     clippy::arithmetic_side_effects
 )]
 
+pub mod bfs;
 pub mod diehard;
 pub mod domain;
 pub mod expr;
 pub mod ident;
 pub mod model;
 
+pub use bfs::{Bound, Bounds, Exploration, ExplorationError, Partial, Reachable, explore};
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};
 pub use ident::{Ident, IdentError};
