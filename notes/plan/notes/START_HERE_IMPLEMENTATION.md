@@ -141,9 +141,9 @@ Implement schema/types for:
 - bounds; (delivered: bn-1tgp)
 - faults; (delivered: bn-111k)
 - fairness; (delivered: bn-14w6)
-- assurance policy;
-- optimization/non-vacuity;
-- field-level change policy.
+- assurance policy; (delivered: bn-fp0g)
+- optimization/non-vacuity; (delivered: bn-1fc0)
+- field-level change policy. (delivered: bn-185wn)
 
 **Exit:** Die Hard and replicated-register intents serialize canonically; ordinary operations cannot mutate them.
 

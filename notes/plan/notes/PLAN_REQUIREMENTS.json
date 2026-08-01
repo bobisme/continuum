@@ -1187,8 +1187,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "assurance policy"
+      "status": "satisfied",
+      "summary": "assurance policy; (delivered: bn-fp0g)"
     },
     {
       "category": "pr-deliverable",
@@ -1199,8 +1199,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "optimization/non-vacuity"
+      "status": "satisfied",
+      "summary": "optimization/non-vacuity; (delivered: bn-1fc0)"
     },
     {
       "category": "pr-deliverable",
@@ -1211,8 +1211,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "field-level change policy."
+      "status": "satisfied",
+      "summary": "field-level change policy. (delivered: bn-185wn)"
     },
     {
       "category": "pr-exit",
