@@ -8,7 +8,12 @@
 //!
 //! Content identity per ADR-0013: in certified lanes canonical content identity is
 //! primary and hash collisions are resolved by canonical comparison; 256-bit-hash
-//! identity is permitted only in explicitly labeled non-certified modes.
+//! identity is permitted only in explicitly labeled non-certified modes. That rule is
+//! implemented in [`identity`] (PR 2), directly on top of [`value`]'s canonical
+//! encoding: a certified identity *is* the encoding, so it carries no hasher and no
+//! hash-vendor decision can change what two values being "the same artifact" means.
+//! The hash the ADR gives an indexing role sits behind the [`identity::ContentHasher`]
+//! seam, currently filled by a labeled, deliberately non-cryptographic placeholder.
 //!
 //! Compatibility epochs live here too, in [`epoch`] (PR-1 / IMPL-02). Plan §4.6 states
 //! it directly — "Epochs are content identities" — and docs/33 "Trust boundary" places
@@ -40,10 +45,11 @@
 //! - Leaf crate — it may not import any other Continuum crate.
 //!
 //! The exact finite values, their canonical encoding, and their total order live in
-//! [`value`] (PR 2); [`epoch`] landed with PR-1 / IMPL-02 and [`assurance`] with
-//! PR-1 / IMPL-03. `tools/check_crate_boundaries.py` enforces the forbidden edges
-//! mechanically.
+//! [`value`] (PR 2) and ADR-0013 content identity in [`identity`] (PR 2); [`epoch`]
+//! landed with PR-1 / IMPL-02 and [`assurance`] with PR-1 / IMPL-03.
+//! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod assurance;
 pub mod epoch;
+pub mod identity;
 pub mod value;
