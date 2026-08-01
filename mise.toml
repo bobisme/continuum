@@ -4,11 +4,13 @@
 # Rust: NOT pinned here. rustup + rust-toolchain.toml own the exact Rust
 # toolchain (bn-2b8w); mise only supplies the tools that sit outside that.
 #
-# Lean: NOT pinned here either. The layering is mise -> elan -> pinned
-# toolchain: mise installs `elan` (below), and elan reads lean/lean-toolchain
-# (currently `leanprover/lean4:v4.32.1`) to install and select the actual Lean
-# toolchain. lean/lean-toolchain remains the single source of truth for the
-# Lean version; mise.toml must never duplicate that pin.
+# Lean: NOT pinned here either. The layering is mise -> elan-init -> elan ->
+# pinned toolchain: mise installs `elan-init` (the installer; the release
+# asset carries no elan binary), `elan-init -y` populates ~/.elan/bin, and
+# elan reads lean/lean-toolchain (currently `leanprover/lean4:v4.32.1`) to
+# install and select the actual Lean toolchain. lean/lean-toolchain remains
+# the single source of truth for the Lean version; mise.toml must never
+# duplicate that pin. Bootstrap: `mise install && elan-init -y && just check`.
 #
 # elan itself has no entry in mise's default (aqua/asdf) registries, so it is
 # fetched via the github backend directly from GitHub releases.
