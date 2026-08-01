@@ -167,16 +167,20 @@ Implement:
 
 Implement request/response types and local transport for the plan §10.2 operation names:
 
-- workspace.create / fork / diff / seal;
-- intent.get / diff / propose_revision / accept / reject / lock;
-- verification.start; task.status / cancel / resume / subscribe;
-- evidence.get / query / verify;
-- capability negotiation;
-- typed errors and idempotency keys.
+- workspace.create / fork / diff / seal (delivered: bn-mtw, bn-3gi, bn-3bhkp);
+- intent.get / diff / propose_revision / accept / reject / lock (delivered: bn-mtw, bn-3gi, bn-3bhkp);
+- verification.start; task.status / cancel / resume / subscribe (delivered: bn-mtw, bn-18z, bn-3bhkp);
+- evidence.get / query / verify (delivered: bn-mtw, bn-24i, bn-3bhkp);
+- capability negotiation (delivered: bn-mtw, bn-24i, bn-3bhkp);
+- typed errors and idempotency keys (delivered: bn-mtw, bn-3gi, bn-24i, bn-18z, bn-3bhkp).
 
-The *type* layer common to all six bullets landed in `crates/continuumd/src/protocol` (bn-mtw): all 72 §10.2 operations with their request/response/verdict/error declarations, the request and result envelopes, the connection handshake and the protocol-major N/N−1 window, and the complete §10.3 error taxonomy — held to `schemas/continuumd-native-protocol.idl` by a test that parses the IDL and fails closed on any disagreement (`rule conformance.registry_agreement`), with RFC 0027's authority table as an independent third source. No bullet is delivered by it: each still needs the local transport and the daemon behaviour that make it observable, which is where its own evidence-owning Bone finishes. The byte-level canonical JSON/CBOR codec is deliberately not in that layer — the IDL fixes the two encodings but not their canonical field order, union tagging, or the shape of the envelope's `Opaque` payloads (the IDL's own open item 3), so it belongs with the transport half rather than being invented ahead of it.
+The *type* layer common to all six bullets landed in `crates/continuumd/src/protocol` (bn-mtw): all 72 §10.2 operations with their request/response/verdict/error declarations, the request and result envelopes, the connection handshake and the protocol-major N/N−1 window, and the complete §10.3 error taxonomy — held to `schemas/continuumd-native-protocol.idl` by a test that parses the IDL and fails closed on any disagreement (`rule conformance.registry_agreement`), with RFC 0027's authority table as an independent third source. The *daemon-behaviour* half landed next, one family bone per bullet (bn-3gi, bn-24i, bn-18z), and each declined its own annotation on the same ground: this section's stem says "request/response types **and local transport**", and the transport was genuinely absent, because the IDL fixed the two encodings but neither their canonical field order nor their union tagging, and its own open item 3 left the envelope's `Opaque` payloads without a declared shape — a codec written then would have been invented wire format.
 
-**Exit:** replaying an idempotent request returns the same task/artifact identity. May not merge before PR 0 closes.
+Those three decisions are now taken, in the IDL where a wire decision belongs (`rule encoding.canonical_form`, `rule encoding.union_tagging`, `rule encoding.opaque_payloads`, protocol 3.2), and the transport half is delivered by bn-3bhkp: a connected pair of endpoints exchanging length-prefixed canonical frames, driving `Daemon::dispatch` end to end, with `ServerReject` reachable before any request is negotiated and `ResultEnvelope.payload` carrying the operation's response struct as real bytes. That is what makes each bullet's annotation honest rather than generous — both halves the stem names now exist, and `crates/continuumd/tests/transport_local.rs` exercises them across a byte boundary.
+
+Two things are *not* claimed by these annotations, and the honest reading needs both. `workspace.diff` and `evidence.subscribe` answer `UnsupportedSemanticFeature`, which is what `rule errors.unsupported_surface` requires of an operation whose producing subsystem has not shipped — a served surface, not a working one. And `canonical_cbor` has no implementation: the IDL fixes two encodings, this transport speaks one, and the CBOR half of every golden vector `rule conformance.golden_traces` requires is owed.
+
+**Exit:** replaying an idempotent request returns the same task/artifact identity (delivered: bn-3bhkp — asserted through the transport for both identity kinds, with byte-identical result frames; `replaying_an_idempotent_request_through_the_transport_returns_a_byte_identical_frame`). May not merge before PR 0 closes.
 
 ### PR 6 — Cancel-correct task service [G0 (DX-14), G1]
 

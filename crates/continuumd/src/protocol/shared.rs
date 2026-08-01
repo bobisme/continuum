@@ -18,7 +18,9 @@ protocol_struct! {
     /// Content identities of the ten plan §4.2 snapshot components
     /// (`schemas/workspace-snapshot.schema.json`).
     struct SnapshotComponents {
-        /// IDL `files: list<Commitment> required`.
+        /// Content identities of the source files. This list says *what* the
+        /// snapshot's files are and not *where* they go; `file_components`
+        /// says where (`rule snapshot.file_components`).
         files: list<Commitment> required;
         /// IDL `cml_modules: list<Commitment> required`.
         cml_modules: list<Commitment> required;
@@ -41,6 +43,25 @@ protocol_struct! {
         proof_environment: list<Commitment> required;
         /// IDL `configuration: list<Commitment> required`.
         configuration: list<Commitment> required;
+        /// The `files` components with the workspace-relative path each one sits at, so
+        /// a snapshot is reconstructable from the request that creates it
+        /// (`rule snapshot.file_components`, protocol 3.2).
+        file_components: list<FileComponent> optional;
+    }
+}
+
+protocol_struct! {
+    /// One source-file component: the path the content sits at, and the content
+    /// identity of the content itself.
+    ///
+    /// `schemas/workspace-snapshot.schema.json` requires both members of every `files`
+    /// item (`path` and `digest`), so this struct is what the normative artifact class
+    /// already says a file component is; before 3.2 the wire carried only the second.
+    struct FileComponent {
+        /// Workspace-relative path, the schema's `files[].path`.
+        path: String required;
+        /// Content identity of the file, the schema's `files[].digest`.
+        commitment: Commitment required;
     }
 }
 
@@ -52,7 +73,9 @@ protocol_struct! {
         semantic: EpochIdentity required;
         /// IDL `proof: EpochIdentity required`.
         proof: EpochIdentity required;
-        /// IDL `toolchain: EpochIdentity optional`.
+        /// The snapshot's toolchain *epoch*, which is what plan §4.2 and
+        /// `schemas/workspace-snapshot.schema.json` both declare. It is not a content
+        /// identity of a toolchain declaration file; no plan §4.2 component is.
         toolchain: EpochIdentity optional;
     }
 }

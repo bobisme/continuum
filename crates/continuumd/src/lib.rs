@@ -38,9 +38,22 @@
 //! explicit state — no runtime, no clock, no filesystem, no `async` — so it is testable
 //! without I/O, which is what INV-005 and ADR-0003 ask of the daemon core.
 //!
-//! Transport and the byte-level canonical JSON/CBOR codec are not here yet; [`protocol`]'s
-//! documentation states exactly where the type layer stops and why, and [`daemon`]'s states
-//! how the operation layer is parameterized over the codec's absence.
+//! [`codec`] — the canonical codec over that type layer: `rule encoding.canonical_form`'s
+//! code-point field order, `rule encoding.union_tagging`'s externally tagged unions, and
+//! `rule encoding.opaque_payloads`'s per-operation resolution of the envelope's `Opaque`
+//! fields. It is the byte spelling the IDL's two encodings share; `canonical_json` is
+//! implemented, and `canonical_cbor` is the same value model under a different writer.
+//!
+//! [`transport`] — the byte boundary: a pair of connected endpoints exchanging
+//! length-prefixed canonical frames, driving a [`daemon::Daemon`] end to end. Bytes in,
+//! dispatch, bytes out, with the `ServerReject` frame reachable before any request is
+//! negotiated.
+//!
+//! The layering is one-directional and load-bearing: `daemon` never encodes anything, so
+//! it stays a pure function of typed values; `codec` never dispatches anything; and
+//! `transport` is the only module that has both.
 
+pub mod codec;
 pub mod daemon;
 pub mod protocol;
+pub mod transport;

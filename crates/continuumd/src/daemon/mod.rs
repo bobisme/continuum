@@ -12,10 +12,15 @@
 //!   entropy (capability identities are supplied, never drawn), no filesystem (content
 //!   arrives through [`DaemonState::stage`]), no network;
 //! - **no codec.** `RequestEnvelope.arguments` and `ResultEnvelope.payload` are `Opaque`,
-//!   and RFC 0026 fixes neither the canonical field order of its two encodings nor their
-//!   union tagging; the IDL's own open item 3 leaves those payloads without a declared
-//!   shape. So this layer takes an already-decoded [`Arguments`] and emits a typed
-//!   [`Payload`] beside the envelope, and the transport half of PR 5 supplies the codec.
+//!   and this layer takes an already-decoded [`Arguments`] and emits a typed [`Payload`]
+//!   beside the envelope. That was forced until protocol 3.2, when the IDL fixed neither
+//!   the canonical field order of its two encodings nor their union tagging nor those
+//!   payloads' shape; it is now a *choice*, and the better one. A dispatch that parsed
+//!   bytes would be a dispatch whose failures are two kinds — "I cannot read this" and "I
+//!   will not do this" — mixed in one function. [`crate::codec`] does the first and
+//!   [`crate::transport`] joins them, so this layer stays a pure function of typed values.
+//!   The one seam back is [`Daemon::refuse`], which builds the answer a caller is owed for
+//!   a request the codec could not read.
 //!
 //! What remains is the half that decides things, and it is testable without I/O.
 //!
@@ -86,7 +91,7 @@ use crate::protocol::handshake::{CapabilityDescriptor, Negotiated};
 use crate::protocol::registry;
 use crate::protocol::scalar::{CapabilityHandle, Timestamp};
 use crate::protocol::spec::Annotation;
-use crate::protocol::vocabulary::ErrorCode;
+use crate::protocol::vocabulary::{ErrorCode, ResultStatus};
 
 use family::{Arguments, Call, Fault, OperationFamily, Payload, ScopeClaim};
 use identity::{AuditCorrelator, HashedCorrelation};
@@ -304,6 +309,41 @@ impl Daemon {
         &self.store_audit
     }
 
+    /// The typed refusal for a request this daemon could not *read*.
+    ///
+    /// The codec sits outside the operation layer, so a request whose `arguments` do not
+    /// decode never reaches [`dispatch`](Daemon::dispatch) — and a caller that sent a
+    /// message this daemon cannot read is still owed an answer rather than a closed
+    /// connection. This builds that answer through the same three seams every other
+    /// result goes through: the epoch set (`rule envelope.epochs_named`), the
+    /// audit-correlation identity derived from the request identity alone
+    /// (`rule audit.correlation`), and the error-code union check.
+    ///
+    /// `code` is the caller's, and it is the codec's: [`CodecError::code`] names the wire
+    /// code RFC 0026's malformed-input list fixes for each decode failure.
+    ///
+    /// [`CodecError::code`]: crate::codec::CodecError::code
+    #[must_use]
+    pub fn refuse(&self, envelope: &RequestEnvelope, code: ErrorCode) -> ResultEnvelope {
+        let audit = self
+            .services
+            .correlator
+            .correlate(&envelope.request_id, &envelope.actor);
+        let audit_required = registry::operation(envelope.operation.as_str())
+            .is_some_and(obligation::audit_required);
+        raise(
+            &self.services,
+            envelope,
+            Fault::new(
+                code,
+                "the request body is not the shape this operation declares",
+            ),
+            &audit,
+            audit_required,
+        )
+        .envelope
+    }
+
     /// Answer one operation call.
     ///
     /// See this module's documentation for the eight steps and the reasons for their order.
@@ -457,6 +497,12 @@ impl Daemon {
                     Some(spec.name),
                     "an operation's payload is its own `response` body"
                 );
+                debug_assert!(
+                    effect.completion.status() == ResultStatus::Ok
+                        || spec.has(Annotation::TaskStarting),
+                    "only a `@task_starting` operation MAY return `task_started` or \
+                     `task_suspended`"
+                );
                 OperationOutcome {
                     envelope: result::success(
                         &envelope.request_id,
@@ -519,40 +565,37 @@ fn raise(
 /// >
 /// > — `rule errors.unsupported_surface`
 ///
-/// # The one place two IDL rules disagree, and how it is resolved
+/// # The rule conflict this used to work around, and what closed it
 ///
-/// `rule errors.common` says "A daemon MUST NOT return a code outside that union for the
-/// operation", and the union is the five common codes plus the operation's own `errors`
-/// clause. Eleven operations declare `errors []` — `workspace.seal`, `task.status`,
-/// `task.subscribe` among them — so for those the two rules cannot both be obeyed while
-/// the operation is unshipped: `errors.unsupported_surface` requires exactly the code
-/// `errors.common` forbids.
+/// Until protocol 3.2 this was the one construction path that did **not** assert
+/// `rule errors.common`, because the two rules contradicted each other: the union was the
+/// five common codes plus the operation's own `errors` clause, and twenty-five of the
+/// seventy-two operations — the three declaring `errors []` and the twenty-two that never
+/// named the code — could not return `UnsupportedSemanticFeature` while
+/// `rule errors.unsupported_surface` required exactly that of an unshipped lane.
+/// bn-3gi resolved it in favour of `errors.unsupported_surface` here and recorded the
+/// defect; bn-i4aem paid it in the IDL, where it belonged.
 ///
-/// `errors.unsupported_surface` wins, because it is the rule written *about this
-/// situation* while `errors.common` is written about an operation that is being served,
-/// and because the alternative — answering `MalformedRequest` for a well-formed request —
-/// would tell the caller something false. This function is therefore the one construction
-/// path that does not assert the union, and it is deliberately the only one: every other
-/// code a family raises still goes through [`raise`]'s check. The defect is recorded
-/// against the IDL rather than papered over here.
+/// `UnsupportedSemanticFeature` is now the sixth always-admissible code
+/// (`rule errors.common`, protocol 3.2), so this path goes through [`raise`] like every
+/// other and the bypass is gone. Nothing about the *answer* changed; what changed is that
+/// the daemon no longer has a documented exception to one of its own rules.
 fn unsupported_surface(
     services: &Services,
     envelope: &RequestEnvelope,
     audit: &crate::protocol::scalar::AuditCorrelationId,
     required: bool,
 ) -> OperationOutcome {
-    OperationOutcome {
-        envelope: result::failure(
-            &envelope.request_id,
-            Fault::new(
-                ErrorCode::UnsupportedSemanticFeature,
-                "this operation's subsystem is not served by this daemon",
-            ),
-            &services.epochs,
-            required.then_some(audit),
+    raise(
+        services,
+        envelope,
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "this operation's subsystem is not served by this daemon",
         ),
-        payload: Payload::None,
-    }
+        audit,
+        required,
+    )
 }
 
 /// The namespace half of a `namespace.verb` operation name.

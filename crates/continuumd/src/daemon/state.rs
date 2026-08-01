@@ -398,7 +398,21 @@ impl DaemonState {
     /// together, not the content alone, because a snapshot component has to be placeable:
     /// two files with identical bytes at two paths are two components, and one commitment
     /// for both would make a snapshot unreconstructable from `SnapshotComponents.files`.
-    /// See this module's sibling `workspace` for the wire gap this covers.
+    ///
+    /// Until protocol 3.2 that derivation was also the *only* place a file's path existed:
+    /// `files` was a bare commitment list, so the path had to be smuggled through the
+    /// preimage and recovered from daemon-held state, which is the workaround bn-3gi
+    /// documented and bn-i4aem paid. `SnapshotComponents.file_components` now declares the
+    /// placement on the wire (`rule snapshot.file_components`), and the preimage is no
+    /// longer carrying that weight — a request says where its files go, and
+    /// `daemon::workspace` checks the two statements against each other instead of
+    /// deriving one from the other.
+    ///
+    /// The preimage itself is unchanged, deliberately. It binds path to content, which is
+    /// what makes the agreement check mean something, and it is the same derivation
+    /// `evidence.verify` re-runs for INV-004 ([`commit_of`](DaemonState::commit_of)):
+    /// changing it here would move an identity two subsystems agree on for the sake of a
+    /// field that is now checked rather than needed.
     ///
     /// # Errors
     ///

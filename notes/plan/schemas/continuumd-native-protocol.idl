@@ -157,6 +157,32 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.3 — the bn-i4aem wire-defect reconciliation and the bn-3bhkp
+  ///         codec decisions, and the single protocol-minor bump
+  ///         3.1 → 3.2 that covers both. Wire changes, each compatible
+  ///         under `rule versioning.compatible_change`:
+  ///         `rule errors.common` gains `UnsupportedSemanticFeature`
+  ///         among the always-admissible codes — a relaxed server-side
+  ///         constraint — which is what resolves its contradiction with
+  ///         `rule errors.unsupported_surface` for the three operations
+  ///         declaring `errors []` and the twenty-two that do not
+  ///         declare the code (item 1); `FileComponent` is declared and
+  ///         `SnapshotComponents` gains `file_components:
+  ///         list<FileComponent> optional` under `rule
+  ///         snapshot.file_components`, so a snapshot's file *placement*
+  ///         is on the wire instead of being recoverable only from
+  ///         daemon-held state (item 2); and the three decisions a codec
+  ///         needs and no normative source fixed are taken as `rule
+  ///         encoding.canonical_form`, `rule encoding.union_tagging`,
+  ///         and `rule encoding.opaque_payloads` (bn-3bhkp). Open item 3
+  ///         is resolved for `arguments`, `payload`, and
+  ///         `NextOperation.arguments`; its other two groups keep their
+  ///         entries, and its misgrouping of `Error.data` is corrected.
+  ///         Items 3, 4, 5, 6, 7, 8, and 11 of bn-i4aem's list are
+  ///         deferred, each with its reason recorded in RFC 0026. No
+  ///         operation is added, removed, or moved: the 72-row registry,
+  ///         its five per-level counts, and its seven annotation counts
+  ///         are unchanged.
   ///   1.2 — the RFC 0027 F1–F8 disposition (bn-3ayom), and the single
   ///         protocol-minor bump 3.0 → 3.1 that covers it together with
   ///         IDL 1.1's compatible fixes. Wire additions, each compatible
@@ -193,18 +219,28 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.2";
+  idl_version = "1.3";
   /// The protocol version this document defines.
   ///
-  /// 3.1 is the single minor bump for IDL 1.1's compatible fixes and
+  /// 3.1 was the single minor bump for IDL 1.1's compatible fixes and
   /// IDL 1.2's F1–F8 sweep together, ratified by the user on
-  /// 2026-07-31 and taken by bn-3ayom on 2026-08-01. It is taken once:
-  /// neither revision bumps on its own. A 3.0 client is served
-  /// unchanged — every 1.1 and 1.2 addition is an `optional` field, a
-  /// new declaration, or a new `rule`, and `rule
-  /// versioning.compatible_change` forbids a daemon from emitting a
-  /// field the negotiated version does not define.
-  version = "3.1";
+  /// 2026-07-31 and taken by bn-3ayom on 2026-08-01.
+  ///
+  /// 3.2 is the single minor bump for IDL 1.3, taken once at the end of
+  /// that revision and covering all of it: the defect reconciliation,
+  /// the `file_components` addition, and the three encoding rules. It
+  /// follows the 3.1 precedent exactly — one uninterrupted stretch of
+  /// compatible work raises the minor once, rather than once per edit.
+  /// A 3.0 or 3.1 client is served unchanged: every 1.3 change is an
+  /// `optional` field, a new declaration, a new `rule`, or a relaxed
+  /// server-side constraint, and `rule versioning.compatible_change`
+  /// forbids a daemon from emitting a field the negotiated version does
+  /// not define. The relaxation is the one case worth naming: a 3.1
+  /// client can already receive `UnsupportedSemanticFeature` from any
+  /// operation, because `ErrorCode` is `@open` and a client is required
+  /// to treat any code it does not expect as a non-retryable typed
+  /// failure (`rule versioning.error_codes`).
+  version = "3.2";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -285,6 +321,124 @@ rule versioning.handle_stability {
 }
 
 
+// --- the canonical form of both encodings (@since 3.2) ---------------
+//
+// `encodings` above names two encodings and RFC 0026 requires them to
+// carry "identical canonical field order", without ever saying what that
+// order is. The three rules below say it. Each is a decision this file
+// takes because no other normative source took it, and each cites the
+// discipline it follows rather than a preference.
+
+rule encoding.canonical_form {
+  """
+  Both encodings are canonical: one message has exactly one byte
+  spelling under the negotiated encoding, and re-encoding a decoded
+  message MUST reproduce it byte for byte (`rule
+  conformance.golden_traces`, "a golden vector is a byte sequence, not a
+  shape").
+
+  **Field order is ascending Unicode code-point order of the field
+  name**, in both encodings and at every nesting depth. This is RFC
+  0037's ID5 rule — "object keys sorted ascending by Unicode code point"
+  — applied to the wire rather than restated for it, and it is the order
+  `crates/continuum-intent/src/canonical_json.rs` already implements for
+  Intent Contract documents. Declaration order is NOT the canonical
+  order: an `optional` field a message omits has no declaration position
+  to occupy, a `map<String, T>` has no declaration order at all, and a
+  reader would have to hold this file to know the order of a document it
+  can otherwise read. Code-point order is a property of the message.
+  A canonical-CBOR encoder therefore orders map keys by field name in
+  code-point order and MUST NOT use the length-first map ordering the
+  CBOR specification's own deterministic-encoding section fixes: this
+  protocol fixes one order for both encodings, and the IDL is the source
+  of it.
+
+  The order binds the *reader* as well as the writer: a reader MUST
+  reject a message whose keys are not in that order rather than
+  re-ordering them, with `MalformedRequest`. A reader that silently
+  re-sorted would accept a second byte spelling of a message that
+  already has one, which is the property this rule exists to establish
+  and the one `rule ordering.deterministic` is stated against.
+
+  The remaining spellings, each fixed once:
+    - no insignificant whitespace in `canonical_json`;
+    - integers in shortest decimal form, no sign, no leading zeros; no
+      floating-point value appears anywhere in this protocol;
+    - `U64` is a JSON number when it is exactly representable and a
+      decimal string otherwise (IDL §3), and a `U64` outside exact
+      representation encoded as a number is `MalformedRequest`;
+    - `Bytes` is base64url without padding in JSON, a byte string in
+      CBOR;
+    - identity-bearing strings are NFC, and a non-canonical spelling is
+      rejected rather than normalized (ADR-0013);
+    - `required` fields are present and non-null; a `nullable` field is
+      present and MAY be null; an `optional` field is absent or present
+      and non-null. Emitting `null` for an `optional` field, or omitting
+      a `nullable` one, is `MalformedRequest` — absent and null are
+      distinct in both directions.
+  """
+}
+
+rule encoding.union_tagging {
+  """
+  A `union` is encoded **externally tagged**: a one-member object whose
+  single key is the variant identifier this file declares and whose
+  value is the variant's payload — `{"semantic": {…}}`, `{"produced":
+  {…}}`. A message carrying no key, more than one key, or a key that is
+  not a declared variant of that union is `MalformedRequest`.
+
+  This is the shape the `variant` production already has (`ident`, then
+  its payload type), so the encoding names the variant with the
+  identifier the declaration gives it and adds nothing. Internal tagging
+  — a tag field inside the payload object — is rejected: the tag is not
+  a declared field of the payload struct, and `rule
+  envelope.unknown_fields` forbids a daemon from emitting a field the
+  negotiated version does not define, so an internally tagged union
+  would be non-conforming against this file by construction. It is also
+  what makes the union tag load-bearing where RFC 0026 requires it: the
+  same token `refuted` is a member of `SemanticVerdict` and of
+  `EvaluationVerdict`, and the tag is what disambiguates them.
+
+  A union is closed: adding or removing a variant changes the
+  declaration and is a breaking change under `rule
+  versioning.breaking_change`. A reader MUST fail closed on an
+  unrecognized variant key rather than surfacing it, which is the
+  closed-enum treatment of `rule versioning.enums` — an `@open` union
+  does not exist in this file.
+  """
+}
+
+rule encoding.opaque_payloads {
+  """
+  An `Opaque` field carries a structured value, never free-form bytes,
+  and what governs it is decided by the *carrying field*, not by the
+  codec:
+
+    - `RequestEnvelope.arguments` is the request struct of the operation
+      the same envelope's `operation` field names, and
+      `ResultEnvelope.payload` is that operation's response struct.
+      `NextOperation.arguments` is the request struct of the operation
+      that struct's own `operation` field names. Each resolution is a
+      function of the message alone — the naming field is `required` in
+      the same object — so a reader needs no connection state, no
+      registry lookup beyond this file, and no prose to decode them.
+      A payload that does not validate against the named struct is
+      `MalformedRequest`;
+    - every other `Opaque` names a schema in `schemas/` in its doc
+      comment and is carried verbatim as a canonical value of the
+      negotiated encoding. The codec does not interpret it and MUST NOT
+      re-order, re-spell, or re-encode it into a different shape; the
+      canonical form of the enclosing message applies to it because it
+      is itself canonical.
+
+  `Error.data` is neither: its shape is "determined by `code`" and no
+  struct or schema is declared for any code, so a daemon that has no
+  typed specifics to report MUST leave it absent rather than inventing a
+  shape. See open item 3.
+  """
+}
+
+
 // ---------------------------------------------------------------------
 // 3. Primitive types
 // ---------------------------------------------------------------------
@@ -333,6 +487,11 @@ scalar ByteCount;
 /// not implement rather than best-effort decoding it (plan §4.6, docs/09
 /// T13). Declaring those identities in the IDL instead of in prose is
 /// open item 3.
+///
+/// How an `Opaque` is encoded is `rule encoding.opaque_payloads`: the
+/// envelope's `arguments` and `payload` resolve to the request and
+/// response structs of the operation the same envelope names, and every
+/// other `Opaque` is carried verbatim as a canonical value.
 scalar Opaque;
 
 
@@ -458,7 +617,8 @@ enum AuthorityLevel {
 }
 
 /// Wire encoding of a connection. One encoding per connection,
-/// negotiated at open; canonical field order is identical in both.
+/// negotiated at open; canonical field order is identical in both, and
+/// what that order is is fixed by `rule encoding.canonical_form`.
 enum Encoding {
   /// Canonical JSON (ADR-0013 canonical form), for debugging.
   canonical_json,
@@ -1645,12 +1805,32 @@ rule subscription.hints_only {
 rule errors.common {
   """
   Every operation MAY additionally return `MalformedRequest`,
-  `ProtocolVersionUnsupported`, `CapabilityDenied`, `QuotaExhausted`, and
-  `EpochUnsupported`; every `@mutation` operation MAY additionally return
-  `IdempotencyKeyReused` and `PublicationAborted`; every operation taking
-  a non-null `snapshot` MAY additionally return `StaleSnapshot`. An
-  operation's `errors` clause lists the codes it may return beyond these.
-  A daemon MUST NOT return a code outside that union for the operation.
+  `ProtocolVersionUnsupported`, `CapabilityDenied`, `QuotaExhausted`,
+  `EpochUnsupported`, and `UnsupportedSemanticFeature`; every
+  `@mutation` operation MAY additionally return `IdempotencyKeyReused`
+  and `PublicationAborted`; every operation taking a non-null `snapshot`
+  MAY additionally return `StaleSnapshot`. An operation's `errors`
+  clause lists the codes it may return beyond these. A daemon MUST NOT
+  return a code outside that union for the operation.
+
+  `UnsupportedSemanticFeature` joined the always-admissible set at 3.2,
+  and the reason is that it had to: `rule errors.unsupported_surface`
+  REQUIRES that code of any operation whose producing subsystem has not
+  shipped, while this rule forbade it for the three operations declaring
+  `errors []` and the twenty-two that do not name it — so for those
+  twenty-five the two rules could not both be obeyed, and a daemon had
+  to break one of them or return a code that names something false.
+  Fifty of the seventy-two already declared it, so admitting it
+  everywhere moves the wire very little and states what was already
+  true: whether a lane has shipped is a property of a deployment, not of
+  an operation, and every operation can meet a deployment that does not
+  implement it. Those fifty clauses keep the code; a clause that names a
+  code the union already admits is redundant, not wrong, and removing
+  fifty entries would be churn with no wire effect. The compatible
+  direction is `rule versioning.compatible_change`'s "relaxing a
+  server-side constraint", and a client is unaffected because `ErrorCode`
+  is `@open` and an unrecognized code is already required to be treated
+  as a non-retryable typed failure.
   """
 }
 
@@ -1659,7 +1839,10 @@ rule errors.unsupported_surface {
   Operations registered in plan §10.2 ahead of their producing subsystem
   (the `observe` family, and any operation whose lane has not shipped)
   MUST fail with the typed `UnsupportedSemanticFeature` rather than
-  degrading, guessing, or returning an empty success.
+  degrading, guessing, or returning an empty success. The code is inside
+  every operation's union as of 3.2 (`rule errors.common`), so obeying
+  this rule never requires returning a code that rule forbids; before
+  3.2 it did, for twenty-five of the seventy-two.
   """
 }
 
@@ -1690,6 +1873,9 @@ struct Target {
 /// Content identities of the ten plan §4.2 snapshot components
 /// (`schemas/workspace-snapshot.schema.json`).
 struct SnapshotComponents {
+  /// Content identities of the source files. This list says *what* the
+  /// snapshot's files are and not *where* they go; `file_components`
+  /// says where (`rule snapshot.file_components`).
   files: list<Commitment> required;
   cml_modules: list<Commitment> required;
   rust_extraction: list<Commitment> required;
@@ -1705,12 +1891,64 @@ struct SnapshotComponents {
   correspondence: list<Commitment> required;
   proof_environment: list<Commitment> required;
   configuration: list<Commitment> required;
+  /// The `files` components with the workspace-relative path each one
+  /// sits at, so a snapshot is reconstructable from the request that
+  /// creates it. See `rule snapshot.file_components`.
+  file_components: list<FileComponent> optional @since("3.2");
+}
+
+/// One source-file component: the path the content sits at, and the
+/// content identity of the content itself.
+///
+/// `schemas/workspace-snapshot.schema.json` requires both members of
+/// every `files` item (`path` and `digest`), so this struct is what the
+/// normative artifact class already says a file component is; before 3.2
+/// the wire carried only the second of the two.
+struct FileComponent {
+  /// Workspace-relative path, the schema's `files[].path`.
+  path: String required;
+  /// Content identity of the file, the schema's `files[].digest`.
+  commitment: Commitment required;
 }
 
 struct SnapshotEpochs {
   semantic: EpochIdentity required;
   proof: EpochIdentity required;
+  /// The snapshot's toolchain *epoch*, which is what plan §4.2 and
+  /// `schemas/workspace-snapshot.schema.json` both declare. It is not a
+  /// content identity of a toolchain declaration file; no plan §4.2
+  /// component is.
   toolchain: EpochIdentity optional;
+}
+
+rule snapshot.file_components {
+  """
+  When `SnapshotComponents.file_components` is present it MUST have the
+  same length as `files` and its `commitment` values MUST equal `files`
+  element for element, in order: the two fields are one statement about
+  one set of files, and `files` is its projection onto content
+  identities. A daemon MUST reject a disagreement with
+  `MalformedRequest` rather than preferring either list, and MUST place
+  each file at its declared `path`.
+
+  When it is absent the request declares no placement and a daemon MUST
+  NOT invent one: it either resolves the placement out of band — content
+  reaches a daemon out of band in any case, since no operation in this
+  file carries file bytes — or refuses. Two files with identical bytes
+  at two paths are two components, and before 3.2 the wire could not say
+  so, which is what made a snapshot unreconstructable from the
+  `workspace.create` request that named it.
+
+  The field is `optional` rather than replacing `files`, because
+  changing that field's type is a breaking change under `rule
+  versioning.breaking_change` and this revision is a minor. The eight
+  other component lists carry the same gap against the same schema —
+  `named_digest_list` requires a `name` beside each `digest` — and are
+  recorded as RFC 0026 F15 rather than paid here: fixing them the same
+  way is eight more optional fields for a gap nothing has reached, and
+  fixing them properly is the major-version type change this one is a
+  compatible stand-in for.
+  """
 }
 
 /// An in-memory editor buffer overlaid on a snapshot's files.
@@ -3195,9 +3433,32 @@ rule conformance.generated_artifacts {
 //      payload is a schema in `schemas/` (`changes`, `summary`,
 //      `contract`, `record`, `pack`, `node`, `edge`, the receipts) take
 //      the annotation as written; fields whose payload is a struct
-//      declared in this file (`arguments`, `payload`, `data`) name that
-//      struct, not a URI, and SHOULD stop being `Opaque` once the
-//      generator can express it; and fields that name neither today
-//      (`frontier`, `delta`, `state`, `classification`) have no declared
-//      shape at all, which is the gap this item is really tracking.
+//      declared in this file (`arguments`, `payload`,
+//      `NextOperation.arguments`) name that struct, not a URI, and
+//      SHOULD stop being `Opaque` once the generator can express it; and
+//      fields that name neither today (`frontier`, `delta`, `state`,
+//      `classification`) have no declared shape at all, which is the gap
+//      this item is really tracking.
+//
+//      **Partly resolved at 3.2 (IDL 1.3).** The second group is
+//      resolved *behaviourally* by `rule encoding.opaque_payloads`: the
+//      envelope's `arguments` and `payload`, and
+//      `NextOperation.arguments`, resolve to the request and response
+//      structs of the operation the carrying object's own `operation`
+//      field names, so a reader decodes them from the message alone. The
+//      declaration half of the item stands — they are still spelled
+//      `Opaque` here — because narrowing them to a per-operation type is
+//      a grammar change (a field whose type varies with a sibling
+//      field's value), not an additive one, and that is the same class
+//      of change as RFC 0026 F1's `@required_when`.
+//
+//      One correction to this item's own text: `Error.data` was listed
+//      in the second group, and it does not belong there. No struct is
+//      declared in this file for any error code's specifics, and no
+//      schema in `schemas/` governs them, so `data` belongs with the
+//      third group — shapeless — and `rule encoding.opaque_payloads`
+//      requires a daemon with no typed specifics to leave it absent
+//      rather than invent a shape. RFC 0026 F11 (a typed retry-after for
+//      the two retryable codes) is the first concrete proposal for what
+//      it would carry.
 // ---------------------------------------------------------------------

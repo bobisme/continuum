@@ -398,6 +398,7 @@ fn components(fixture: &Fixture) -> SnapshotComponents {
         correspondence: Vec::new(),
         proof_environment: Vec::new(),
         configuration: vec![fixture.configuration.clone()],
+        file_components: Optional::Absent,
     }
 }
 

@@ -29,12 +29,19 @@ use crate::protocol::spec::{Annotation, OperationSpec};
 use crate::protocol::vocabulary::ErrorCode;
 
 /// The codes every operation may return.
+///
+/// `UnsupportedSemanticFeature` is the sixth as of protocol 3.2, and it is here because
+/// `rule errors.unsupported_surface` requires it of any operation whose producing
+/// subsystem has not shipped while this union forbade it for twenty-five of the
+/// seventy-two — the contradiction bn-3gi documented and bn-i4aem reconciled. The
+/// direction is recorded in `rule errors.common` itself and in RFC 0026 correction 42.
 pub const COMMON: &[ErrorCode] = &[
     ErrorCode::MalformedRequest,
     ErrorCode::ProtocolVersionUnsupported,
     ErrorCode::CapabilityDenied,
     ErrorCode::QuotaExhausted,
     ErrorCode::EpochUnsupported,
+    ErrorCode::UnsupportedSemanticFeature,
 ];
 
 /// The codes every `@mutation` operation may additionally return.

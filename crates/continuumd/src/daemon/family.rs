@@ -80,21 +80,26 @@ use crate::protocol::operations::workspace::{
     WorkspaceCreateRequest, WorkspaceCreateResponse, WorkspaceDiffRequest, WorkspaceDiffResponse,
     WorkspaceForkRequest, WorkspaceForkResponse, WorkspaceSealRequest, WorkspaceSealResponse,
 };
-use crate::protocol::scalar::{AuditCorrelationId, IntentHandle, WorkspaceHandle};
+use crate::protocol::scalar::{
+    AuditCorrelationId, ContinuationHandle, IntentHandle, TaskHandle, WorkspaceHandle,
+};
 use crate::protocol::shared::VerificationResult;
 use crate::protocol::spec::{Nullable, OperationSpec, Optional};
 use crate::protocol::task::TaskRecord;
-use crate::protocol::vocabulary::ErrorCode;
+use crate::protocol::vocabulary::{ErrorCode, ResultStatus};
 
 /// A decoded operation request body.
 ///
 /// The envelope's `arguments` field is declared `Opaque`, and this layer deliberately does
-/// not decode it: RFC 0026 fixes two encodings but neither their canonical field order nor
-/// their union tagging, and the IDL's own open item 3 leaves the envelope's `Opaque`
-/// payloads without a declared shape. So the operation layer takes the request *already
-/// decoded* and the transport half of PR 5 supplies the decoder. Everything the wire *did*
-/// fix — the field names, types, and three-valued presence of each body — is still enforced,
-/// because each variant carries the IDL's own struct.
+/// not decode it: the operation layer takes the request *already decoded*, and
+/// [`crate::codec::operations::decode_arguments`] is what produces this value from the
+/// envelope's bytes (`rule encoding.opaque_payloads`, protocol 3.2). Everything the wire
+/// fixes — the field names, types, and three-valued presence of each body — is enforced
+/// either way, because each variant carries the IDL's own struct.
+///
+/// This enum is therefore one half of a pair: a new operation is a variant here and an arm
+/// in that table, and a mismatch between them is a compile error rather than a decode that
+/// silently produces the wrong shape.
 // `workspace.create`'s request body carries `SnapshotComponents`, which is ten commitment
 // lists, and is several times the size of the smallest body here. Boxing it would make the
 // seam asymmetric — "add one variant carrying the IDL's request struct" would become "add
@@ -193,10 +198,11 @@ impl Arguments {
 /// A typed operation response body.
 ///
 /// Carried beside the [`ResultEnvelope`](crate::protocol::envelope::ResultEnvelope) rather
-/// than inside its `payload` field for the reason [`Arguments`] gives: there is no codec at
-/// this layer, so the envelope's `payload` reads `null` and this value is what the transport
-/// encodes into it. `tests/daemon_operations.rs` pins that invariant so the two can never
-/// drift into disagreeing.
+/// than inside its `payload` field for the reason [`Arguments`] gives: this layer emits no
+/// bytes, so the envelope's `payload` reads `null` here and
+/// [`crate::transport::Server::answer`] is what encodes this value into it before the
+/// frame is written. `tests/daemon_operations.rs` pins that the two agree, and
+/// `tests/transport_local.rs` pins that the field carries real bytes at the boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Payload {
     /// No response body: the result is an error, and `payload` is null on `status = error`.
@@ -330,11 +336,91 @@ pub struct Call<'a> {
     pub audit: &'a AuditCorrelationId,
 }
 
+/// Where a family's result lands on the result envelope's `status` lane, and which
+/// handles the envelope names because of it.
+///
+/// > `task` — present when `status` is `task_started` or `task_suspended`, and on results
+/// > of task-observing operations.
+/// > `continuation` — present when `status = task_suspended`, and on a resumable failure.
+/// >
+/// > — `ResultEnvelope`, IDL §6
+///
+/// The three lanes are a closed enum rather than three independent fields because the
+/// presence rules above are a *joint* condition: `task_suspended` without a continuation,
+/// or `task_started` without a task, is not a result envelope the IDL admits, and three
+/// fields set independently can spell both. Here they cannot be spelled at all.
+///
+/// [`Completion::Answered`] carries an optional task for the second half of the `task`
+/// rule — a task-observing operation at `status = ok`, such as `task.status` or
+/// `verification.result`, names the task its answer is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Completion {
+    /// `status = ok`: the operation answered.
+    Answered {
+        /// The task this answer is about, for a task-observing operation.
+        task: Optional<TaskHandle>,
+    },
+    /// `status = task_started`: work was started and the handle is the answer.
+    TaskStarted {
+        /// The started task.
+        task: TaskHandle,
+    },
+    /// `status = task_suspended`: work parked with committed partial evidence plus a
+    /// valid continuation (`rule task.cancel_correct`, `rule task.update_budget`).
+    TaskSuspended {
+        /// The parked task.
+        task: TaskHandle,
+        /// The continuation that resumes it. Never absent on this lane.
+        continuation: ContinuationHandle,
+    },
+}
+
+impl Completion {
+    /// The envelope status this lane reports.
+    #[must_use]
+    pub const fn status(&self) -> ResultStatus {
+        match self {
+            Self::Answered { .. } => ResultStatus::Ok,
+            Self::TaskStarted { .. } => ResultStatus::TaskStarted,
+            Self::TaskSuspended { .. } => ResultStatus::TaskSuspended,
+        }
+    }
+
+    /// The task the envelope names, if any.
+    #[must_use]
+    pub fn task(&self) -> Optional<TaskHandle> {
+        match self {
+            Self::Answered { task } => task.clone(),
+            Self::TaskStarted { task } | Self::TaskSuspended { task, .. } => {
+                Optional::Present(task.clone())
+            }
+        }
+    }
+
+    /// The continuation the envelope names, if any.
+    #[must_use]
+    pub fn continuation(&self) -> Optional<ContinuationHandle> {
+        match self {
+            Self::Answered { .. } | Self::TaskStarted { .. } => Optional::Absent,
+            Self::TaskSuspended { continuation, .. } => Optional::Present(continuation.clone()),
+        }
+    }
+}
+
 /// What a family produced on success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Effect {
     /// The operation's response body.
     pub payload: Payload,
+    /// The envelope status lane this result lands on.
+    ///
+    /// Until bn-i4aem item 9 there was no such field and
+    /// [`result::success`](super::result::success) hard-coded `status = ok` with `task`
+    /// and `continuation` absent, so the `task_started`/`task_suspended` lane the IDL
+    /// declares was unreachable however the operation behaved. A parked campaign reported
+    /// `ok` and left the caller to find the continuation in a typed payload — true, but
+    /// not what the envelope says.
+    pub completion: Completion,
     /// The operation's typed verdict. `Null` exactly when the operation declares no
     /// `verdict` clause; the dispatcher checks the agreement against
     /// [`OperationSpec::verdict`].
@@ -376,12 +462,44 @@ impl Effect {
     pub fn new(payload: Payload, verdict: Nullable<Verdict>) -> Self {
         Self {
             payload,
+            completion: Completion::Answered {
+                task: Optional::Absent,
+            },
             verdict,
             assurance: Optional::Absent,
             artifacts: Vec::new(),
             omissions: Vec::new(),
             warnings: Vec::new(),
         }
+    }
+
+    /// The same result at `status = ok`, naming the task it is *about*.
+    ///
+    /// For the task-observing operations — `task.status`, `task.cancel`,
+    /// `task.subscribe`, `task.update_budget`, `verification.result`,
+    /// `verification.await` — which the IDL's `task` presence rule covers in its second
+    /// clause.
+    #[must_use]
+    pub fn observing(mut self, task: TaskHandle) -> Self {
+        self.completion = Completion::Answered {
+            task: Optional::Present(task),
+        };
+        self
+    }
+
+    /// The same result at `status = task_started`.
+    #[must_use]
+    pub fn started(mut self, task: TaskHandle) -> Self {
+        self.completion = Completion::TaskStarted { task };
+        self
+    }
+
+    /// The same result at `status = task_suspended`, naming the continuation that
+    /// resumes the parked task.
+    #[must_use]
+    pub fn suspended(mut self, task: TaskHandle, continuation: ContinuationHandle) -> Self {
+        self.completion = Completion::TaskSuspended { task, continuation };
+        self
     }
 
     /// The same result, naming the artifacts it produced.

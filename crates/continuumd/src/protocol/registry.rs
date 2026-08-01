@@ -18,17 +18,20 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.2";
+pub const IDL_VERSION: &str = "1.3";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
-/// `"3.1"` as of IDL 1.2. The 3.0 -> 3.1 minor bump covers IDL 1.1's compatible
+/// `"3.2"` as of IDL 1.3. The 3.0 -> 3.1 minor bump covered IDL 1.1's compatible
 /// fixes and IDL 1.2's RFC 0027 F1-F8 sweep together, ratified by the user on
 /// 2026-07-31 and taken once by bn-3ayom on 2026-08-01 — the deferral recorded
 /// here at IDL 1.1 (`notes/plan/notes/PR0_EXIT_EVIDENCE.md` §6) is discharged,
-/// not carried. Every addition either revision made is an `optional` field, a
-/// new declaration, or a new `rule`, so a 3.0 client is served unchanged.
-pub const PROTOCOL_VERSION: &str = "3.1";
+/// not carried. The 3.1 -> 3.2 bump covers IDL 1.3 — the bn-i4aem defect
+/// reconciliation, the `file_components` addition, and the three encoding rules
+/// — and is taken once at the end of that revision on the same precedent. Every
+/// change is an `optional` field, a new declaration, a new `rule`, or a relaxed
+/// server-side constraint, so a 3.0 or 3.1 client is served unchanged.
+pub const PROTOCOL_VERSION: &str = "3.2";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -979,6 +982,7 @@ pub const NAMED_STRUCTS: &[StructSpec] = &[
     StructSpec::of::<EvidenceEvent>(),
     StructSpec::of::<Target>(),
     StructSpec::of::<SnapshotComponents>(),
+    StructSpec::of::<FileComponent>(),
     StructSpec::of::<SnapshotEpochs>(),
     StructSpec::of::<FileOverlay>(),
     StructSpec::of::<ContextPolicy>(),

@@ -383,6 +383,7 @@ fn fixture() -> Fixture {
                 correspondence: Vec::new(),
                 proof_environment: Vec::new(),
                 configuration: vec![configuration],
+                file_components: Optional::Absent,
             },
             overlay: Optional::Absent,
             seal: Optional::Present(true),
@@ -555,11 +556,21 @@ fn die_hard_returns_sixteen_states_and_a_depth_six_solution_through_the_daemon_a
         Some(64),
         target(TargetKind::AllClaims, "DieHard"),
     );
+    // `verification.start` is `@task_starting`, and its response names a *task* rather
+    // than a cached result, so the envelope reports `task_started` — "a long operation was
+    // started; `task` is present". The status and the response body's own discriminator
+    // agree by construction, and `the_envelope_status_lane_agrees_with_the_response_body`
+    // holds them to it.
     assert_eq!(
         started.envelope.status,
-        ResultStatus::Ok,
+        ResultStatus::TaskStarted,
         "{:?}",
         started.envelope.error
+    );
+    assert_eq!(
+        started.envelope.task.value().map(TaskHandle::as_str),
+        Some(started_task(&started).as_str()),
+        "the envelope names the task it started"
     );
     let task = started_task(&started);
     assert!(task.as_str().starts_with("task_"));
@@ -1937,6 +1948,7 @@ fn clockless_fixture() -> Fixture {
                 correspondence: Vec::new(),
                 proof_environment: Vec::new(),
                 configuration: Vec::new(),
+                file_components: Optional::Absent,
             },
             overlay: Optional::Absent,
             seal: Optional::Present(true),

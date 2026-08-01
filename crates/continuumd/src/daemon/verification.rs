@@ -616,7 +616,10 @@ fn start(
     if let Some(entry) = state.tasks().get(&handle) {
         if entry.status == TaskStatus::Completed {
             let (payload, verdict, omissions) = cached(entry)?;
-            let mut effect = Effect::new(payload, verdict.0);
+            // The cached lane answers with a *result*, not a task, so its status is `ok`;
+            // the envelope still names the task the result is about, which is the second
+            // clause of the `task` presence rule.
+            let mut effect = Effect::new(payload, verdict.0).observing(entry.handle.clone());
             effect.assurance = verdict.1;
             effect.omissions = omissions;
             return Ok(effect);
@@ -654,6 +657,14 @@ fn start(
 }
 
 /// The `verification.start` answer that names a task.
+///
+/// The envelope's status lane is read off the task rather than fixed: a campaign that
+/// parked reports `task_suspended` and names the continuation that resumes it, and every
+/// other outcome reports `task_started`, which is what `ResultStatus::task_started` says
+/// — "a long operation was started; `task` is present". Both lanes are open to this
+/// operation because it is `@task_starting`, and until bn-i4aem item 9 neither was
+/// reachable: `result::success` hard-coded `ok` with both handles absent, so a parked
+/// campaign's continuation was reachable only by a second `task.status` call.
 fn started(entry: &TaskEntry, budget: &Budget) -> Effect {
     let mut effect = Effect::new(
         Payload::VerificationStart(VerificationStartResponse {
@@ -663,7 +674,12 @@ fn started(entry: &TaskEntry, budget: &Budget) -> Effect {
         Nullable::Null,
     );
     effect.omissions = [entry.omissions(), unenforced(budget)].concat();
-    effect
+    match (entry.status, &entry.continuation) {
+        (TaskStatus::Suspended, Some(continuation)) => {
+            effect.suspended(entry.handle.clone(), continuation.clone())
+        }
+        _ => effect.started(entry.handle.clone()),
+    }
 }
 
 /// The `verification.start` answer that carries a cached result instead of a task.
@@ -714,9 +730,20 @@ fn result(handle: &TaskHandle, state: &DaemonState, awaiting: bool) -> Result<Ef
     } else {
         Payload::VerificationResult(result)
     };
-    let mut effect = Effect::new(payload, Nullable::Value(Verdict::Semantic(verdict)));
+    let mut effect = Effect::new(payload, Nullable::Value(Verdict::Semantic(verdict)))
+        .observing(entry.handle.clone());
     effect.assurance = Optional::Present(assurance(entry));
     effect.omissions = [entry.omissions(), coverage()].concat();
+    // `verification.await` is `@task_starting` and `verification.result` is not, so only
+    // the first may report a parked task on the `task_suspended` lane. The asymmetry is
+    // the IDL's annotation, not a preference: `result` is a read of a task's answer, and
+    // `await` is the operation that waits for one, so it is the one that can say "still
+    // parked, here is the continuation".
+    if awaiting {
+        if let (TaskStatus::Suspended, Some(continuation)) = (entry.status, &entry.continuation) {
+            return Ok(effect.suspended(entry.handle.clone(), continuation.clone()));
+        }
+    }
     Ok(effect)
 }
 

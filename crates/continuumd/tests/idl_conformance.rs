@@ -952,11 +952,19 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // `conformance.adapter_mapping`) — the RFC 0027 F1/F4/F5/F6/F7 payments. The
     // operation count is deliberately unmoved: no flag was paid with a new verb, so the
     // 72-row registry and RFC 0027's authority table are untouched.
+    //
+    // Protocol 3.2 (IDL 1.3) adds one struct (`FileComponent`) and four rules
+    // (`encoding.canonical_form`, `encoding.union_tagging`,
+    // `encoding.opaque_payloads`, `snapshot.file_components`) — the bn-i4aem
+    // reconciliation and the bn-3bhkp codec decisions. The operation count is again
+    // unmoved: no defect was paid with a new verb, and one that needs one
+    // (`bn-i4aem` item 4, an evidence-edge append) is deferred to a registry edit in
+    // plan §10.2, RFC 0027's table, and this file together.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
-    assert_eq!(document.structs.len(), 44, "structs");
+    assert_eq!(document.structs.len(), 45, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 33, "rules");
+    assert_eq!(document.rules.len(), 37, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
@@ -1103,6 +1111,80 @@ fn the_error_taxonomy_is_the_complete_idl_set() {
             .iter()
             .any(|spec| spec.name == "Redacted")
     );
+}
+
+/// `rule errors.common`'s body, as raw text.
+///
+/// The parser above drops `"""` blocks — they carry normative prose, not structure — so a
+/// rule's *content* is invisible to every other comparison in this file. That is a hole
+/// wherever a rule states something the types transcribe, and `errors::COMMON` is exactly
+/// such a transcription: bn-i4aem moved a code into that union and nothing would have
+/// caught the mirror staying behind.
+fn rule_body(name: &str) -> String {
+    let source = std::fs::read_to_string(IDL_PATH).expect("the IDL is readable");
+    let start = source
+        .find(&format!("rule {name} {{"))
+        .unwrap_or_else(|| panic!("the IDL declares `rule {name}`"));
+    let open = source[start..].find("\"\"\"").expect("a rule body opens") + start + 3;
+    let close = source[open..].find("\"\"\"").expect("a rule body closes") + open;
+    source[open..close].to_owned()
+}
+
+#[test]
+fn the_common_error_union_agrees_with_the_rule_that_states_it() {
+    use continuumd::daemon::errors::{COMMON, MUTATION, SNAPSHOT};
+    use continuumd::protocol::vocabulary::ErrorCode;
+
+    // The rule states three clauses, separated by `;`. Each names its codes in backticks,
+    // and the codes are the only backticked tokens in it that are `ErrorCode` members —
+    // `@mutation` and `snapshot` are not.
+    //
+    // Only the union sentence is read: the rest of the rule is the *record* of why the
+    // 3.2 payment was made, and it names codes in prose. The sentence ends where the
+    // clause-meaning sentence begins.
+    let body = rule_body("errors.common");
+    let union = &body[..body
+        .find("An operation's")
+        .expect("the rule states what a clause means")];
+    let clauses: Vec<&str> = union.split(';').collect();
+    assert_eq!(clauses.len(), 3, "the rule states three clauses");
+
+    let codes_in = |text: &str| -> Vec<&'static str> {
+        let mut found = Vec::new();
+        for member in ErrorCode::ALL {
+            let quoted = format!("`{}`", member.ident());
+            if text.contains(&quoted) {
+                found.push(member.ident());
+            }
+        }
+        found.sort_unstable();
+        found
+    };
+    let mine = |codes: &[ErrorCode]| -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = codes.iter().map(|code| code.ident()).collect();
+        names.sort_unstable();
+        names
+    };
+
+    assert_eq!(
+        codes_in(clauses[0]),
+        mine(COMMON),
+        "the always-admissible codes"
+    );
+    assert_eq!(
+        codes_in(clauses[1]),
+        mine(MUTATION),
+        "the `@mutation` codes"
+    );
+    assert_eq!(
+        codes_in(clauses[2]),
+        mine(SNAPSHOT),
+        "the non-null-`snapshot` code"
+    );
+    // The 3.2 payment, named so that losing it is a failure here and not only inside a
+    // list comparison: `rule errors.unsupported_surface` requires this code of any
+    // operation whose lane has not shipped, and 25 of the 72 could not return it before.
+    assert!(COMMON.contains(&ErrorCode::UnsupportedSemanticFeature));
 }
 
 #[test]

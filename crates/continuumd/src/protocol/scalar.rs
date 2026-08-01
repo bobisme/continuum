@@ -586,6 +586,32 @@ macro_rules! protocol_handle {
             const HANDLE_NAME: &'static str = stringify!($name);
             const PREFIX: &'static str = $prefix;
         }
+
+        impl $crate::codec::ProtocolValue for $name {
+            fn encode(
+                &self,
+            ) -> ::core::result::Result<
+                $crate::codec::json::Json,
+                $crate::codec::CodecError,
+            > {
+                ::core::result::Result::Ok($crate::codec::json::Json::String(
+                    self.as_str().to_owned(),
+                ))
+            }
+
+            fn decode(
+                value: &$crate::codec::json::Json,
+            ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
+                let text = value.as_str().ok_or($crate::codec::CodecError::TypeMismatch {
+                    expected: stringify!($name),
+                    found: value.kind(),
+                })?;
+                // The prefix rule is the constructor's, not a second copy of it here.
+                Self::new(text).map_err(|_| $crate::codec::CodecError::Pattern {
+                    declared: stringify!($name),
+                })
+            }
+        }
     };
 }
 

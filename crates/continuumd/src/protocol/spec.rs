@@ -522,11 +522,25 @@ impl OperationSpec {
 
 // --- the macros --------------------------------------------------------------------
 
-/// Emit a protocol struct and the [`FieldSpec`] list describing it, from one text.
+/// Emit a protocol struct, the [`FieldSpec`] list describing it, and its codec, from one
+/// text.
 ///
 /// The body is the IDL's own field syntax: `name: type presence;`, with `list<T>` and
-/// `map<String, T>` written as the IDL writes them. See the module documentation for
-/// why both outputs come from one declaration.
+/// `map<String, T>` written as the IDL writes them. See the module documentation for why
+/// all three outputs come from one declaration.
+///
+/// # Why the codec is emitted here too
+///
+/// The same argument that makes [`FieldSpec`] macro-generated makes the codec
+/// macro-generated: a hand-written encoder beside a hand-written struct is two texts that
+/// can disagree, and the disagreement is invisible — a field written under the wrong key,
+/// or silently not written at all, is a message that still parses. Here the wire key, the
+/// struct field, and the `FieldSpec` name all come from one token, so a rename moves all
+/// three or none.
+///
+/// The presence marker reaches the codec the same way: it selects which of the nine
+/// `put_*`/`take_*` helpers a field uses, so "absent and null are distinct in both
+/// directions" is a property of the declaration rather than of nine hand-written matches.
 #[macro_export]
 macro_rules! protocol_struct {
     (
@@ -534,12 +548,18 @@ macro_rules! protocol_struct {
         struct $name:ident { $($body:tt)* }
     ) => {
         $crate::protocol_struct!(
-            @munch $name { $(#[doc = $struct_doc])* } { } { } $($body)*
+            @munch $name { $(#[doc = $struct_doc])* } { } { } { } $($body)*
         );
     };
 
-    // --- terminal: emit the struct and its description ---
-    (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }) => {
+    // --- terminal: emit the struct, its description, and its codec ---
+    //
+    // The codec is generated *here*, from an accumulated `field @ mode` list, rather than
+    // accumulated as expressions in the arms below: `self` and the field map are bound in
+    // this arm, and macro hygiene keeps tokens produced by a different arm from naming
+    // them. The mode token is what carries the presence marker across.
+    (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($member:ident @ $mode:ident)* }) => {
         $($sdoc)*
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub struct $name { $($fields)* }
@@ -548,10 +568,39 @@ macro_rules! protocol_struct {
             const STRUCT_NAME: &'static str = stringify!($name);
             const FIELDS: &'static [$crate::protocol::spec::FieldSpec] = &[$($specs)*];
         }
+
+        impl $crate::codec::ProtocolValue for $name {
+            fn encode(
+                &self,
+            ) -> ::core::result::Result<
+                $crate::codec::json::Json,
+                $crate::codec::CodecError,
+            > {
+                let mut into = ::std::collections::BTreeMap::new();
+                $($crate::__protocol_put!(
+                    $mode, into, stringify!($member), &self.$member);)*
+                ::core::result::Result::Ok($crate::codec::json::Json::Object(into))
+            }
+
+            fn decode(
+                value: &$crate::codec::json::Json,
+            ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
+                let from = $crate::codec::object_of(value, stringify!($name))?;
+                // Unknown keys are ignored rather than rejected: "a daemon MUST ignore
+                // unknown `optional` request fields" (`rule envelope.unknown_fields`) is
+                // this protocol's only forward-compatibility mechanism, and rejecting them
+                // would make every compatible minor breaking for an older reader.
+                ::core::result::Result::Ok(Self {
+                    $($member: $crate::__protocol_take!(
+                        $mode, from, stringify!($name), stringify!($member))?,)*
+                })
+            }
+        }
     };
 
     // --- plain type ---
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : $ty:ident required ; $($rest:tt)*
     ) => {
         $crate::protocol_struct!(@munch $name { $($sdoc)* }
@@ -559,9 +608,11 @@ macro_rules! protocol_struct {
             { $($specs)* $crate::protocol::spec::FieldSpec::new(
                 stringify!($field), stringify!($ty),
                 $crate::protocol::spec::Presence::Required), }
+            { $($codec)* $field @ required }
             $($rest)*);
     };
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : $ty:ident nullable ; $($rest:tt)*
     ) => {
         $crate::protocol_struct!(@munch $name { $($sdoc)* }
@@ -570,9 +621,11 @@ macro_rules! protocol_struct {
             { $($specs)* $crate::protocol::spec::FieldSpec::new(
                 stringify!($field), stringify!($ty),
                 $crate::protocol::spec::Presence::Nullable), }
+            { $($codec)* $field @ nullable }
             $($rest)*);
     };
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : $ty:ident optional ; $($rest:tt)*
     ) => {
         $crate::protocol_struct!(@munch $name { $($sdoc)* }
@@ -581,11 +634,13 @@ macro_rules! protocol_struct {
             { $($specs)* $crate::protocol::spec::FieldSpec::new(
                 stringify!($field), stringify!($ty),
                 $crate::protocol::spec::Presence::Optional), }
+            { $($codec)* $field @ optional }
             $($rest)*);
     };
 
     // --- list<T> ---
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : list < $ty:ident > required ; $($rest:tt)*
     ) => {
         $crate::protocol_struct!(@munch $name { $($sdoc)* }
@@ -593,9 +648,11 @@ macro_rules! protocol_struct {
             { $($specs)* $crate::protocol::spec::FieldSpec::new(
                 stringify!($field), concat!("list<", stringify!($ty), ">"),
                 $crate::protocol::spec::Presence::Required), }
+            { $($codec)* $field @ required_list }
             $($rest)*);
     };
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : list < $ty:ident > nullable ; $($rest:tt)*
     ) => {
         $crate::protocol_struct!(@munch $name { $($sdoc)* }
@@ -604,9 +661,11 @@ macro_rules! protocol_struct {
             { $($specs)* $crate::protocol::spec::FieldSpec::new(
                 stringify!($field), concat!("list<", stringify!($ty), ">"),
                 $crate::protocol::spec::Presence::Nullable), }
+            { $($codec)* $field @ nullable_list }
             $($rest)*);
     };
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : list < $ty:ident > optional ; $($rest:tt)*
     ) => {
         $crate::protocol_struct!(@munch $name { $($sdoc)* }
@@ -615,11 +674,13 @@ macro_rules! protocol_struct {
             { $($specs)* $crate::protocol::spec::FieldSpec::new(
                 stringify!($field), concat!("list<", stringify!($ty), ">"),
                 $crate::protocol::spec::Presence::Optional), }
+            { $($codec)* $field @ optional_list }
             $($rest)*);
     };
 
     // --- map<String, T> ---
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : map < $key:ident , $ty:ident > required ;
         $($rest:tt)*
     ) => {
@@ -630,9 +691,11 @@ macro_rules! protocol_struct {
                 stringify!($field),
                 concat!("map<", stringify!($key), ",", stringify!($ty), ">"),
                 $crate::protocol::spec::Presence::Required), }
+            { $($codec)* $field @ required_map }
             $($rest)*);
     };
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : map < $key:ident , $ty:ident > nullable ;
         $($rest:tt)*
     ) => {
@@ -643,9 +706,11 @@ macro_rules! protocol_struct {
                 stringify!($field),
                 concat!("map<", stringify!($key), ",", stringify!($ty), ">"),
                 $crate::protocol::spec::Presence::Nullable), }
+            { $($codec)* $field @ nullable_map }
             $($rest)*);
     };
     (@munch $name:ident { $($sdoc:tt)* } { $($fields:tt)* } { $($specs:tt)* }
+        { $($codec:tt)* }
         $(#[doc = $fdoc:literal])* $field:ident : map < $key:ident , $ty:ident > optional ;
         $($rest:tt)*
     ) => {
@@ -656,7 +721,74 @@ macro_rules! protocol_struct {
                 stringify!($field),
                 concat!("map<", stringify!($key), ",", stringify!($ty), ">"),
                 $crate::protocol::spec::Presence::Optional), }
+            { $($codec)* $field @ optional_map }
             $($rest)*);
+    };
+}
+
+/// Dispatch a field's presence-and-shape mode to the codec helper that writes it.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __protocol_put {
+    (required, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_required(&mut $into, $name, $value)?
+    };
+    (nullable, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_nullable(&mut $into, $name, $value)?
+    };
+    (optional, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_optional(&mut $into, $name, $value)?
+    };
+    (required_list, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_required_list(&mut $into, $name, $value)?
+    };
+    (nullable_list, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_nullable_list(&mut $into, $name, $value)?
+    };
+    (optional_list, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_optional_list(&mut $into, $name, $value)?
+    };
+    (required_map, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_required_map(&mut $into, $name, $value)?
+    };
+    (nullable_map, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_nullable_map(&mut $into, $name, $value)?
+    };
+    (optional_map, $into:ident, $name:expr, $value:expr) => {
+        $crate::codec::put_optional_map(&mut $into, $name, $value)?
+    };
+}
+
+/// Dispatch a field's presence-and-shape mode to the codec helper that reads it.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __protocol_take {
+    (required, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_required($from, $declared, $name)
+    };
+    (nullable, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_nullable($from, $declared, $name)
+    };
+    (optional, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_optional($from, $declared, $name)
+    };
+    (required_list, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_required_list($from, $declared, $name)
+    };
+    (nullable_list, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_nullable_list($from, $declared, $name)
+    };
+    (optional_list, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_optional_list($from, $declared, $name)
+    };
+    (required_map, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_required_map($from, $declared, $name)
+    };
+    (nullable_map, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_nullable_map($from, $declared, $name)
+    };
+    (optional_map, $from:ident, $declared:expr, $name:expr) => {
+        $crate::codec::take_optional_map($from, $declared, $name)
     };
 }
 
@@ -726,6 +858,44 @@ macro_rules! protocol_enum {
                 }
             }
         }
+
+        impl $crate::codec::ProtocolValue for $name {
+            fn encode(
+                &self,
+            ) -> ::core::result::Result<
+                $crate::codec::json::Json,
+                $crate::codec::CodecError,
+            > {
+                ::core::result::Result::Ok($crate::codec::json::Json::String(
+                    <Self as $crate::protocol::spec::ProtocolEnum>::as_wire(*self).to_owned(),
+                ))
+            }
+
+            fn decode(
+                value: &$crate::codec::json::Json,
+            ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
+                let token = value.as_str().ok_or($crate::codec::CodecError::TypeMismatch {
+                    expected: stringify!($name),
+                    found: value.kind(),
+                })?;
+                // A closed enum fails closed and an `@open` one surfaces the token
+                // verbatim — the two halves of `rule versioning.enums`, decided from the
+                // `@open` annotation the declaration already carries rather than from a
+                // second list of which enums are open.
+                <Self as $crate::protocol::spec::ProtocolEnum>::from_wire(token).map_err(|_| {
+                    if <Self as $crate::protocol::spec::ProtocolEnum>::OPEN {
+                        $crate::codec::CodecError::UnknownOpenMember {
+                            enum_name: stringify!($name),
+                            token: token.into(),
+                        }
+                    } else {
+                        $crate::codec::CodecError::UnknownMember {
+                            enum_name: stringify!($name),
+                        }
+                    }
+                })
+            }
+        }
     };
 }
 
@@ -757,6 +927,55 @@ macro_rules! protocol_union {
                     stringify!($member), stringify!($ty),
                 ),)*
             ];
+        }
+
+        impl $crate::codec::ProtocolValue for $name {
+            fn encode(
+                &self,
+            ) -> ::core::result::Result<
+                $crate::codec::json::Json,
+                $crate::codec::CodecError,
+            > {
+                // `rule encoding.union_tagging`: externally tagged, one key, the variant
+                // identifier the IDL declares.
+                let mut object = ::std::collections::BTreeMap::new();
+                match self {
+                    $(Self::$variant(inner) => {
+                        object.insert(
+                            stringify!($member).to_owned(),
+                            $crate::codec::ProtocolValue::encode(inner)?,
+                        );
+                    })*
+                }
+                ::core::result::Result::Ok($crate::codec::json::Json::Object(object))
+            }
+
+            fn decode(
+                value: &$crate::codec::json::Json,
+            ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
+                let object = $crate::codec::object_of(value, stringify!($name))?;
+                let mut entries = object.iter();
+                let (tag, inner) = match (entries.next(), entries.next()) {
+                    (::core::option::Option::Some(first), ::core::option::Option::None) => first,
+                    _ => {
+                        return ::core::result::Result::Err(
+                            $crate::codec::CodecError::UnionArity {
+                                union: stringify!($name),
+                            },
+                        );
+                    }
+                };
+                match tag.as_str() {
+                    $(stringify!($member) => ::core::result::Result::Ok(Self::$variant(
+                        <$ty as $crate::codec::ProtocolValue>::decode(inner)?,
+                    )),)*
+                    // A union is closed, so an unrecognized variant key fails closed
+                    // rather than being surfaced: there is no `@open` union in the IDL.
+                    _ => ::core::result::Result::Err($crate::codec::CodecError::UnknownVariant {
+                        union: stringify!($name),
+                    }),
+                }
+            }
         }
     };
 }

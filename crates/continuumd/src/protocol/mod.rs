@@ -64,25 +64,23 @@
 //! [`Optional`](spec::Optional) types, the `@pattern` of every string alias, and every
 //! handle prefix.
 //!
-//! It stops short of a byte-level codec, deliberately. Three things a codec needs are not
-//! fixed by any normative source this bone may read:
+//! Until protocol 3.2 it stopped short of a byte-level codec, and the reason was that
+//! three things a codec needs were fixed by no normative source: the canonical field
+//! order the two encodings share, how a union spells its tag, and what the envelope's
+//! `Opaque` payloads are. Choosing values for them here would have been inventing wire
+//! format.
 //!
-//! - **canonical field order.** RFC 0026 requires the two encodings to carry "identical
-//!   canonical field order" but never says what that order *is*, and ADR-0013 — the
-//!   citation for "canonical form" — is about state identity, not wire layout;
-//! - **union tagging.** RFC 0026 says a verdict "is a tagged union value, never a bare
-//!   scalar", and neither it nor the IDL says how [`Verdict`](envelope::Verdict) or
-//!   [`EnvelopeDimension`](envelope::EnvelopeDimension) spells its tag;
-//! - **the `Opaque` payloads.** The IDL's own open item 3 records that `arguments`,
-//!   `payload`, and `data` "SHOULD stop being `Opaque` once the generator can express
-//!   it" — the envelope's principal payload fields have no declared shape yet.
+//! All three are now decided *in the IDL*, where a wire decision belongs — `rule
+//! encoding.canonical_form`, `rule encoding.union_tagging`, `rule
+//! encoding.opaque_payloads` — and [`crate::codec`] implements them. This module is still
+//! the layer that stops at the type: it enforces what the declaration fixes, and the
+//! codec turns a declaration into bytes. What connects them is that the codec is
+//! *emitted* from the same macros — [`protocol_struct!`](crate::protocol_struct) writes
+//! the struct, its [`FieldSpec`](spec::FieldSpec) list, and its encoder from one token —
+//! so a renamed field cannot encode under its old key.
 //!
-//! Choosing values for those three would be inventing wire format, and RFC 0026 binds
-//! them to golden byte vectors ("A golden vector is a byte sequence, not a shape") that a
-//! *conforming daemon* must ship. They belong with the transport half of PR 5, which is a
-//! different bone. What this module gives that bone is a type layer where every wire-
-//! visible decision the IDL *did* fix is already enforced, so the codec has nothing left
-//! to decide except the three items above.
+//! The byte boundary itself is [`crate::transport`]: `daemon` still takes typed arguments
+//! and emits a typed payload, and the transport is the only place bytes and dispatch meet.
 //!
 //! # Layout
 //!

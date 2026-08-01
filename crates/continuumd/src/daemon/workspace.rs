@@ -209,11 +209,27 @@ fn create(
     check_epochs(&request.components, services)?;
     check_unsupported_components(&request.components)?;
 
+    let placement = declared_placement(&request.components)?;
+
     // Resolve the staged content before touching any state, so a request naming content the
     // daemon does not hold leaves nothing behind.
     let mut content = WorkspaceContent::new();
-    for commitment in &request.components.files {
+    for (index, commitment) in request.components.files.iter().enumerate() {
         let staged = state.staged(commitment).ok_or_else(Fault::denied)?;
+        if let Some(declared) = placement.and_then(|list| list.get(index)) {
+            // `rule snapshot.file_components` — the two lists are one statement, so a
+            // disagreement is refused rather than resolved in either list's favour. It is
+            // not an existence oracle: the caller reached this line by naming a commitment
+            // this daemon holds, and the commitment's preimage is the (path, content)
+            // record it would have had to build to name it.
+            if declared.path.as_str() != staged.path.to_string() {
+                return Err(Fault::new(
+                    ErrorCode::MalformedRequest,
+                    "a declared file component names a path other than the one its \
+                     commitment was derived over",
+                ));
+            }
+        }
         content
             .insert(staged.path.clone(), staged.content.clone())
             .map_err(|_| {
@@ -468,6 +484,41 @@ fn check_unsupported_components(components: &SnapshotComponents) -> Result<(), F
 ///
 /// The landed descriptor carries *one* dependency and *one* configuration component, so a
 /// list naming several is a typed refusal rather than a silent choice among them.
+/// The declared placement of the `files` components, checked against `files` itself.
+///
+/// > When `SnapshotComponents.file_components` is present it MUST have the same length as
+/// > `files` and its `commitment` values MUST equal `files` element for element, in
+/// > order […]. A daemon MUST reject a disagreement with `MalformedRequest` rather than
+/// > preferring either list.
+/// >
+/// > — `rule snapshot.file_components`
+///
+/// Returning [`None`] is the pre-3.2 lane: the request declares no placement, and the
+/// daemon resolves it from what was staged out of band. That lane is not a workaround any
+/// more — it is what a 3.0/3.1 client sends, and `rule versioning.compatible_change`
+/// requires it to keep working.
+fn declared_placement(
+    components: &SnapshotComponents,
+) -> Result<Option<&Vec<crate::protocol::shared::FileComponent>>, Fault> {
+    let Optional::Present(declared) = &components.file_components else {
+        return Ok(None);
+    };
+    let disagreement = Fault::new(
+        ErrorCode::MalformedRequest,
+        "`file_components` and `files` do not name the same file components in the same \
+         order",
+    );
+    if declared.len() != components.files.len() {
+        return Err(disagreement);
+    }
+    for (component, commitment) in declared.iter().zip(&components.files) {
+        if &component.commitment != commitment {
+            return Err(disagreement);
+        }
+    }
+    Ok(Some(declared))
+}
+
 fn single_component(
     commitments: &[Commitment],
     state: &DaemonState,

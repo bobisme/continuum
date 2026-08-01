@@ -45,17 +45,27 @@
 //! for — "a cached result when one exists for the same snapshot, intent, target, and epochs"
 //! is a lookup by that identity, not a cache key invented beside it.
 //!
-//! # Where the frozen Die Hard facts are, and where the wire has no room for them
+//! # Where the frozen Die Hard facts are, and which of the two gaps is the wire's
 //!
 //! `TaskRecord.cost.states` carries the reachable-state count — **16** for Die Hard — and
-//! that is the one frozen fact RFC 0026's `Cost` declares a dimension for. The **96**
-//! labelled transitions and the depth-**6** shortest witness have no wire field at protocol
-//! 3.1: `Cost` declares no transition dimension, and a witness reaches a client only as a
-//! `crash_*` crashpack, which is `schemas/crashpack.schema.json` and not an artifact this
-//! daemon can build. Both are held as the engine's own typed values on
-//! [`TaskEntry::campaign`] and are reachable through [`Daemon::state`](super::Daemon::state);
-//! the gap is the IDL's, and is recorded against it rather than papered over by repurposing
-//! a dimension that means something else.
+//! that is the one frozen fact RFC 0026's `Cost` declares a dimension for. The other two
+//! are held as the engine's own typed values on [`TaskEntry::campaign`] and are reachable
+//! through [`Daemon::state`](super::Daemon::state), and bn-i4aem item 8 separated them,
+//! because they are not the same kind of gap:
+//!
+//! - the **96** labelled transitions have no wire field and cannot get one at a minor.
+//!   `Cost` and `Budget` carry one nine-dimension list, and SD-12 holds that list
+//!   identical across this protocol, `schemas/verification-task.schema.json` (whose
+//!   `budget` object sets `additionalProperties: false`), and the plan §8.6 cost ledger.
+//!   A tenth dimension therefore moves four artifacts together, one of them rank-1, and is
+//!   not something a wire revision decides on its own. Deferred, recorded as RFC 0026 F16;
+//! - the depth-**6** shortest witness **does** have a wire home and always did:
+//!   `VerificationResult.crashpack`, whose artifact class is
+//!   `schemas/crashpack.schema.json`. What is missing is a producer — nothing in this
+//!   workspace builds a crashpack — so this is an implementation gap wearing a wire gap's
+//!   clothes, and reporting it as the IDL's would have sent a fix to the wrong artifact.
+//!
+//! Neither is papered over by repurposing a dimension that means something else.
 
 use std::collections::BTreeMap;
 
@@ -702,11 +712,13 @@ fn status(request: &TaskStatusRequest, state: &DaemonState) -> Result<Effect, Fa
 /// `task.status`.
 ///
 /// So the operation is **served, not refused**. The bn-i4aem finding — that `errors []` and
-/// `rule errors.unsupported_surface` contradict each other for the eleven operations
-/// declaring an empty clause — does not bite here, because that rule is about an operation
-/// "registered ahead of its producing subsystem" and the task table is not a missing
-/// subsystem. `task.subscribe` returns only common codes, which is what its empty clause
-/// permits, and the daemon's documented `unsupported_surface` path is not taken.
+/// `rule errors.unsupported_surface` contradicted each other for the three operations
+/// declaring an empty clause and the twenty-two more that never named the code — does not
+/// bite here, and did not before it was paid: that rule is about an operation "registered
+/// ahead of its producing subsystem", and the task table is not a missing subsystem.
+/// `task.subscribe` returns only common codes, which is what its empty clause permits, and
+/// the `unsupported_surface` path is not taken. The contradiction itself is gone as of
+/// protocol 3.2 (bn-i4aem item 1).
 fn subscribe(request: &TaskSubscribeRequest, state: &DaemonState) -> Result<Effect, Fault> {
     let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
     Ok(reported(
@@ -766,7 +778,8 @@ fn cancel(
         committed_evidence: entry.committed_evidence.clone(),
     });
     let omissions = entry.omissions();
-    let mut effect = Effect::new(payload, structural(outcome));
+    let handle = entry.handle.clone();
+    let mut effect = Effect::new(payload, structural(outcome)).observing(handle);
     effect.omissions = omissions;
     Ok(effect)
 }
@@ -818,7 +831,13 @@ fn update_budget(
         continuation: optional(entry.continuation.clone()),
     });
     let omissions = entry.omissions();
-    let mut effect = Effect::new(payload, structural(outcome));
+    // `task.update_budget` is `@mutation` and NOT `@task_starting`, so it never lands on
+    // the `task_suspended` lane however the task is parked: only a `@task_starting`
+    // operation MAY report that status. A task that parked again under the new budget is
+    // reported through this operation's own `continuation` response field, and the
+    // dispatcher's check on the lane is what keeps the two readings from drifting.
+    let handle = entry.handle.clone();
+    let mut effect = Effect::new(payload, structural(outcome)).observing(handle);
     effect.omissions = omissions;
     Ok(effect)
 }
@@ -837,6 +856,7 @@ fn update_budget(
 /// | a pinned epoch names a kind the daemon pins no identity for | `EpochUnsupported` |
 /// | a pinned epoch disagrees with the daemon's current epoch of that kind (P1) | `ContinuationEpochMismatch` |
 /// | the pinned engine identity disagrees with the daemon's (P2) | `ContinuationEpochMismatch` |
+/// | the model the continuation names is no longer one this daemon can construct | `UnsupportedSemanticFeature` (3.2; see the comment at the call) |
 ///
 /// **Both epoch predicates are checked, and neither implies the other** (RFC 0026, "The
 /// two-predicate obligation"): P1 alone would admit a resume onto a different engine build,
@@ -922,14 +942,23 @@ fn resume(
     };
 
     // The run's own refusals are the `verification` family's, and `task.resume` declares a
-    // narrower `errors` clause than `verification.start` does — `UnsupportedSemanticFeature`
-    // is outside it. A model this daemon can no longer construct is, at RFC 0027 X2's grain,
-    // indistinguishable from a continuation this daemon does not hold: both name something
-    // the caller cannot get an answer for, and the caller learns nothing about which. So a
-    // code outside the union collapses to the one denial, byte-identical with every other,
-    // rather than being reported outside `rule errors.common`. That the IDL leaves
-    // `task.resume` no way to say "the model went away" is the IDL's gap, recorded rather
-    // than worked around by putting an undeclared code on the wire.
+    // narrower `errors` clause than `verification.start` does. Until protocol 3.2 that
+    // included `UnsupportedSemanticFeature`, so "the model this continuation named is no
+    // longer one this daemon can construct" had no admissible code and collapsed to the one
+    // denial — the workaround bn-18z recorded as wire defect (7).
+    //
+    // `rule errors.common` admits that code for every operation as of 3.2, so the honest
+    // answer now reaches the wire: the same code `verification.start` returns for the same
+    // condition, which is what makes the two operations agree about one fact. It is not a
+    // new existence oracle. Reaching this line already required holding a continuation this
+    // daemon has — an unheld one was denied at the top of this function — and a *successful*
+    // resume was always distinguishable from a denial, so nothing here tells a caller
+    // anything a success did not already tell it. RFC 0027 X2 is about a caller out of scope
+    // for an artifact, and such a caller never reaches a handler.
+    //
+    // The collapse itself stays, for every code still outside the union: a family may not
+    // put an undeclared code on the wire, and the check is registry data rather than a list
+    // maintained here, so it tracks the IDL by construction.
     verification::advance(&task, bounds, state, services).map_err(|fault| {
         if super::errors::admits(call.spec, fault.code) {
             fault
@@ -938,14 +967,26 @@ fn resume(
         }
     })?;
     let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
-    Ok(reported(
+    let effect = reported(
         Payload::TaskResume(TaskResumeResponse {
             task: entry.handle.clone(),
             status: entry.status,
         }),
         Nullable::Null,
         entry,
-    ))
+    );
+    // A resumed run that parked again lands on the `task_suspended` lane, which is what
+    // `@task_starting` licenses this operation to report and what makes the second
+    // continuation reachable without a second read. bn-18z recorded the absence of any
+    // field for "parked again under a new continuation" as wire defect (8) and covered it
+    // by a documented reliance on `task.status`; the envelope had the two fields all
+    // along, and `result::success` was hard-coding both away (item 9).
+    Ok(match (entry.status, &entry.continuation) {
+        (TaskStatus::Suspended, Some(continuation)) => {
+            effect.suspended(entry.handle.clone(), continuation.clone())
+        }
+        _ => effect,
+    })
 }
 
 /// P1 and P2, composed. See [`resume`] for the decision table this implements.
@@ -1007,8 +1048,12 @@ fn stale() -> Fault {
 }
 
 /// One answer about a task, carrying the task's own omission manifest.
+///
+/// The envelope names the task, which is the second clause of the IDL's `task` presence
+/// rule — "and on results of task-observing operations". Every operation in this family
+/// observes one, so every answer it builds names it.
 fn reported(payload: Payload, verdict: Nullable<Verdict>, entry: &TaskEntry) -> Effect {
-    let mut effect = Effect::new(payload, verdict);
+    let mut effect = Effect::new(payload, verdict).observing(entry.handle.clone());
     effect.omissions = entry.omissions();
     effect
 }
