@@ -1,0 +1,245 @@
+# Grandfather allowlist for GOV §2 ADR-process checks (bn-29gc, bn-xjz8).
+#
+# tools/governance/check_adr_process.py enforces docs/12_GOVERNANCE_AND_ENGINEERING.md
+# §2: every ADR's status must be a member of the closed five-value set, and every
+# ADR must carry all nine required sections. Most of the 53 real ADRs under
+# notes/plan/adr/*.md predate that nine-section discipline (only ADR-0053 is
+# fully compliant as scanned), so a mechanical, honest check needs an explicit,
+# per-ADR, per-section exemption list rather than a blanket pass.
+#
+# Each [[grandfathered]] entry below names one pre-existing ADR file and the
+# exact set of required sections (by canonical key) it is missing. The checker:
+#   - exempts exactly the (adr, section) pairs listed here from failure;
+#   - still fails a grandfathered ADR for any OTHER missing section not named
+#     in its entry, or for a status outside the closed set;
+#   - fails the run if an entry names a section that is not actually missing
+#     (a stale/overly broad exemption) or names an ADR file that does not exist;
+#   - grants no exemption at all to any ADR file not listed here, so a new ADR
+#     must be fully compliant from the day it lands.
+#
+# Canonical section keys (docs/12 §2's nine required sections, in the order the
+# script checks them, GOV-2-06..14): context, decision, formal_consequences,
+# alternatives, compatibility, security, performance_hypothesis, validation_plan,
+# rollback.
+#
+# `formal_consequences` matches a plain "## Consequences" heading (the house
+# style; no real ADR spells out "Formal consequences"). `alternatives` matches
+# any heading containing the word "alternative(s)" (e.g. "Alternatives
+# considered", "Rejected alternatives"). `validation_plan` and `rollback` each
+# also match a combined "## Validation and rollback" heading, which the house
+# style used through ADR-0029/0053 to satisfy both at once.
+#
+# Populated 2026-07-31 by a full scan of notes/plan/adr/*.md (53 real ADRs,
+# README.md excluded) at the commit implementing bn-29gc/bn-xjz8. Re-run
+# `python3 tools/governance/check_adr_process.py` after adding or editing an
+# ADR; a newly honest ADR should have entries removed here, not added to.
+#
+# Grandfathered ADR count: 52 of 53 (only ADR-0053 needs no exemption).
+
+[[grandfathered]]
+adr = "0001-asupersync-execution-substrate.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0002-causal-intermediate-representation.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0003-no-ambient-nondeterminism.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0004-standalone-models-and-zoomable-refinement.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0005-partial-order-primary-semantics.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0006-typed-assurance-lattice.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0007-verification-engine-portfolio.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0008-proof-carrying-results.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0009-production-partial-order-conformance.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0010-cancellation-calculus.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0011-semantic-domain-packs.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0012-dual-authoring-surfaces.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0013-exact-state-identity.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0014-explicit-fairness-and-ranking-liveness.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0015-strong-refinement-for-hyperproperties.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0016-typed-timed-and-probabilistic-extensions.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0017-solver-and-tcb-policy.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0018-semantic-versioning-and-replay.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0019-adapter-isolation.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0020-experimental-mathematics-governance.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0021-tla-examples-corpus-contract.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0022-lean4-metatheory-and-certificate-authority.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0023-semantic-triptych-and-independent-paths.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0024-observer-indexed-independence.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0025-stratified-model-language-fragments.md"
+missing_sections = ["compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0026-proof-producing-reductions.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0027-nominal-orbit-finite-symmetry.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0028-assumption-synthesis-as-games.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0029-semantic-equivalence-not-tla-source-cloning.md"
+missing_sections = ["performance_hypothesis"]
+
+[[grandfathered]]
+adr = "0030-semiring-valued-analysis.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0031-corpus-derived-language-governance.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0032-weak-memory-execution-graph-lane.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0033-checked-projection-and-generated-rust-interfaces.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0034-owned-temporal-semantics-with-leanltl-bridge.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0035-proof-receipts-and-axiom-manifests.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0036-authoritative-workbench-daemon.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0037-explicit-content-addressed-handles.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0038-machine-contracts-not-terminal-prose.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0039-protected-intent-contract.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0040-typed-context-packs.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0041-verification-debugger-and-dap.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0042-mcp-adapter-not-authority.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0043-repair-transactions.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0044-incremental-semantic-database.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0045-progressive-disclosure-with-lossless-expansion.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0046-semantic-diff-gates.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0047-forge-sandbox-and-nonvacuity.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0048-proof-service-isolation.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0049-explicit-budgets-and-resumable-search.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0050-proof-oriented-model-program-lenses.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0051-assurance-envelope.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]
+
+[[grandfathered]]
+adr = "0052-multi-agent-evidence-graph.md"
+missing_sections = ["alternatives", "compatibility", "security", "performance_hypothesis", "validation_plan", "rollback"]

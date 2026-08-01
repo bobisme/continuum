@@ -1,0 +1,605 @@
+{
+  "authoritative_text": [
+    "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a72",
+    "notes/plan/notes/PLAN_REQUIREMENTS.json (GOV-2-01..GOV-2-14)"
+  ],
+  "grandfather_file": "tools/governance/adr-grandfathered.toml",
+  "grandfathered_adr_count": 52,
+  "grandfathered_adr_names": [
+    "0001-asupersync-execution-substrate.md",
+    "0002-causal-intermediate-representation.md",
+    "0003-no-ambient-nondeterminism.md",
+    "0004-standalone-models-and-zoomable-refinement.md",
+    "0005-partial-order-primary-semantics.md",
+    "0006-typed-assurance-lattice.md",
+    "0007-verification-engine-portfolio.md",
+    "0008-proof-carrying-results.md",
+    "0009-production-partial-order-conformance.md",
+    "0010-cancellation-calculus.md",
+    "0011-semantic-domain-packs.md",
+    "0012-dual-authoring-surfaces.md",
+    "0013-exact-state-identity.md",
+    "0014-explicit-fairness-and-ranking-liveness.md",
+    "0015-strong-refinement-for-hyperproperties.md",
+    "0016-typed-timed-and-probabilistic-extensions.md",
+    "0017-solver-and-tcb-policy.md",
+    "0018-semantic-versioning-and-replay.md",
+    "0019-adapter-isolation.md",
+    "0020-experimental-mathematics-governance.md",
+    "0021-tla-examples-corpus-contract.md",
+    "0022-lean4-metatheory-and-certificate-authority.md",
+    "0023-semantic-triptych-and-independent-paths.md",
+    "0024-observer-indexed-independence.md",
+    "0025-stratified-model-language-fragments.md",
+    "0026-proof-producing-reductions.md",
+    "0027-nominal-orbit-finite-symmetry.md",
+    "0028-assumption-synthesis-as-games.md",
+    "0029-semantic-equivalence-not-tla-source-cloning.md",
+    "0030-semiring-valued-analysis.md",
+    "0031-corpus-derived-language-governance.md",
+    "0032-weak-memory-execution-graph-lane.md",
+    "0033-checked-projection-and-generated-rust-interfaces.md",
+    "0034-owned-temporal-semantics-with-leanltl-bridge.md",
+    "0035-proof-receipts-and-axiom-manifests.md",
+    "0036-authoritative-workbench-daemon.md",
+    "0037-explicit-content-addressed-handles.md",
+    "0038-machine-contracts-not-terminal-prose.md",
+    "0039-protected-intent-contract.md",
+    "0040-typed-context-packs.md",
+    "0041-verification-debugger-and-dap.md",
+    "0042-mcp-adapter-not-authority.md",
+    "0043-repair-transactions.md",
+    "0044-incremental-semantic-database.md",
+    "0045-progressive-disclosure-with-lossless-expansion.md",
+    "0046-semantic-diff-gates.md",
+    "0047-forge-sandbox-and-nonvacuity.md",
+    "0048-proof-service-isolation.md",
+    "0049-explicit-budgets-and-resumable-search.md",
+    "0050-proof-oriented-model-program-lenses.md",
+    "0051-assurance-envelope.md",
+    "0052-multi-agent-evidence-graph.md"
+  ],
+  "real_scan": {
+    "adr_count": 53,
+    "status": "pass",
+    "violation_count": 0,
+    "violations": []
+  },
+  "requirements": {
+    "GOV-2-01": {
+      "fixtures_caught": [
+        "status-out-of-set.md",
+        "status-missing.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR status value \"proposed\" is a member of the closed five-value set {proposed, accepted, superseded, rejected, experimental}; no other status value is admitted (docs/12 \u00a72)",
+      "real_count_using_value": 0,
+      "result": "pass",
+      "rule": "status extracted from an inline '**Status:** X' line or a '## Status' heading block, normalized to its leading alphabetic word (lowercased); the normalized word must be in the closed set, and a status must be present at all",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-02": {
+      "fixtures_caught": [
+        "status-out-of-set.md",
+        "status-missing.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR status value \"accepted\" is a member of the closed five-value set {proposed, accepted, superseded, rejected, experimental}; no other status value is admitted (docs/12 \u00a72)",
+      "real_count_using_value": 52,
+      "result": "pass",
+      "rule": "status extracted from an inline '**Status:** X' line or a '## Status' heading block, normalized to its leading alphabetic word (lowercased); the normalized word must be in the closed set, and a status must be present at all",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-03": {
+      "fixtures_caught": [
+        "status-out-of-set.md",
+        "status-missing.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR status value \"superseded\" is a member of the closed five-value set {proposed, accepted, superseded, rejected, experimental}; no other status value is admitted (docs/12 \u00a72)",
+      "real_count_using_value": 0,
+      "result": "pass",
+      "rule": "status extracted from an inline '**Status:** X' line or a '## Status' heading block, normalized to its leading alphabetic word (lowercased); the normalized word must be in the closed set, and a status must be present at all",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-04": {
+      "fixtures_caught": [
+        "status-out-of-set.md",
+        "status-missing.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR status value \"rejected\" is a member of the closed five-value set {proposed, accepted, superseded, rejected, experimental}; no other status value is admitted (docs/12 \u00a72)",
+      "real_count_using_value": 0,
+      "result": "pass",
+      "rule": "status extracted from an inline '**Status:** X' line or a '## Status' heading block, normalized to its leading alphabetic word (lowercased); the normalized word must be in the closed set, and a status must be present at all",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-05": {
+      "fixtures_caught": [
+        "status-out-of-set.md",
+        "status-missing.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR status value \"experimental\" is a member of the closed five-value set {proposed, accepted, superseded, rejected, experimental}; no other status value is admitted (docs/12 \u00a72)",
+      "real_count_using_value": 1,
+      "result": "pass",
+      "rule": "status extracted from an inline '**Status:** X' line or a '## Status' heading block, normalized to its leading alphabetic word (lowercased); the normalized word must be in the closed set, and a status must be present at all",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-06": {
+      "fixtures_caught": [
+        "missing-context.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR includes the \"context\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 0,
+      "real_missing_count": 0,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Context\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-07": {
+      "fixtures_caught": [
+        "missing-decision.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR includes the \"decision\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 0,
+      "real_missing_count": 0,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Decision\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-08": {
+      "fixtures_caught": [
+        "missing-formal-consequences.md"
+      ],
+      "grandfathered": [],
+      "obligation": "ADR includes the \"formal_consequences\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 0,
+      "real_missing_count": 0,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Consequences\" or \"Formal consequences\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-09": {
+      "fixtures_caught": [
+        "missing-alternatives.md"
+      ],
+      "grandfathered": [
+        "0024-observer-indexed-independence.md",
+        "0026-proof-producing-reductions.md",
+        "0027-nominal-orbit-finite-symmetry.md",
+        "0028-assumption-synthesis-as-games.md",
+        "0030-semiring-valued-analysis.md",
+        "0031-corpus-derived-language-governance.md",
+        "0032-weak-memory-execution-graph-lane.md",
+        "0033-checked-projection-and-generated-rust-interfaces.md",
+        "0034-owned-temporal-semantics-with-leanltl-bridge.md",
+        "0035-proof-receipts-and-axiom-manifests.md",
+        "0036-authoritative-workbench-daemon.md",
+        "0037-explicit-content-addressed-handles.md",
+        "0038-machine-contracts-not-terminal-prose.md",
+        "0039-protected-intent-contract.md",
+        "0040-typed-context-packs.md",
+        "0041-verification-debugger-and-dap.md",
+        "0042-mcp-adapter-not-authority.md",
+        "0043-repair-transactions.md",
+        "0044-incremental-semantic-database.md",
+        "0045-progressive-disclosure-with-lossless-expansion.md",
+        "0046-semantic-diff-gates.md",
+        "0047-forge-sandbox-and-nonvacuity.md",
+        "0048-proof-service-isolation.md",
+        "0049-explicit-budgets-and-resumable-search.md",
+        "0050-proof-oriented-model-program-lenses.md",
+        "0051-assurance-envelope.md",
+        "0052-multi-agent-evidence-graph.md"
+      ],
+      "obligation": "ADR includes the \"alternatives\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 27,
+      "real_missing_count": 27,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading contains the word \"alternative(s)\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-10": {
+      "fixtures_caught": [
+        "missing-compatibility.md"
+      ],
+      "grandfathered": [
+        "0001-asupersync-execution-substrate.md",
+        "0002-causal-intermediate-representation.md",
+        "0003-no-ambient-nondeterminism.md",
+        "0004-standalone-models-and-zoomable-refinement.md",
+        "0005-partial-order-primary-semantics.md",
+        "0006-typed-assurance-lattice.md",
+        "0007-verification-engine-portfolio.md",
+        "0008-proof-carrying-results.md",
+        "0009-production-partial-order-conformance.md",
+        "0010-cancellation-calculus.md",
+        "0011-semantic-domain-packs.md",
+        "0012-dual-authoring-surfaces.md",
+        "0013-exact-state-identity.md",
+        "0014-explicit-fairness-and-ranking-liveness.md",
+        "0015-strong-refinement-for-hyperproperties.md",
+        "0016-typed-timed-and-probabilistic-extensions.md",
+        "0017-solver-and-tcb-policy.md",
+        "0018-semantic-versioning-and-replay.md",
+        "0019-adapter-isolation.md",
+        "0020-experimental-mathematics-governance.md",
+        "0021-tla-examples-corpus-contract.md",
+        "0022-lean4-metatheory-and-certificate-authority.md",
+        "0023-semantic-triptych-and-independent-paths.md",
+        "0024-observer-indexed-independence.md",
+        "0025-stratified-model-language-fragments.md",
+        "0026-proof-producing-reductions.md",
+        "0027-nominal-orbit-finite-symmetry.md",
+        "0028-assumption-synthesis-as-games.md",
+        "0030-semiring-valued-analysis.md",
+        "0031-corpus-derived-language-governance.md",
+        "0032-weak-memory-execution-graph-lane.md",
+        "0033-checked-projection-and-generated-rust-interfaces.md",
+        "0034-owned-temporal-semantics-with-leanltl-bridge.md",
+        "0035-proof-receipts-and-axiom-manifests.md",
+        "0036-authoritative-workbench-daemon.md",
+        "0037-explicit-content-addressed-handles.md",
+        "0038-machine-contracts-not-terminal-prose.md",
+        "0039-protected-intent-contract.md",
+        "0040-typed-context-packs.md",
+        "0041-verification-debugger-and-dap.md",
+        "0042-mcp-adapter-not-authority.md",
+        "0043-repair-transactions.md",
+        "0044-incremental-semantic-database.md",
+        "0045-progressive-disclosure-with-lossless-expansion.md",
+        "0046-semantic-diff-gates.md",
+        "0047-forge-sandbox-and-nonvacuity.md",
+        "0048-proof-service-isolation.md",
+        "0049-explicit-budgets-and-resumable-search.md",
+        "0050-proof-oriented-model-program-lenses.md",
+        "0051-assurance-envelope.md",
+        "0052-multi-agent-evidence-graph.md"
+      ],
+      "obligation": "ADR includes the \"compatibility\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 51,
+      "real_missing_count": 51,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Compatibility\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-11": {
+      "fixtures_caught": [
+        "missing-security.md"
+      ],
+      "grandfathered": [
+        "0001-asupersync-execution-substrate.md",
+        "0002-causal-intermediate-representation.md",
+        "0003-no-ambient-nondeterminism.md",
+        "0004-standalone-models-and-zoomable-refinement.md",
+        "0005-partial-order-primary-semantics.md",
+        "0006-typed-assurance-lattice.md",
+        "0007-verification-engine-portfolio.md",
+        "0008-proof-carrying-results.md",
+        "0009-production-partial-order-conformance.md",
+        "0010-cancellation-calculus.md",
+        "0011-semantic-domain-packs.md",
+        "0012-dual-authoring-surfaces.md",
+        "0013-exact-state-identity.md",
+        "0014-explicit-fairness-and-ranking-liveness.md",
+        "0015-strong-refinement-for-hyperproperties.md",
+        "0016-typed-timed-and-probabilistic-extensions.md",
+        "0017-solver-and-tcb-policy.md",
+        "0018-semantic-versioning-and-replay.md",
+        "0019-adapter-isolation.md",
+        "0020-experimental-mathematics-governance.md",
+        "0021-tla-examples-corpus-contract.md",
+        "0022-lean4-metatheory-and-certificate-authority.md",
+        "0023-semantic-triptych-and-independent-paths.md",
+        "0024-observer-indexed-independence.md",
+        "0025-stratified-model-language-fragments.md",
+        "0026-proof-producing-reductions.md",
+        "0027-nominal-orbit-finite-symmetry.md",
+        "0028-assumption-synthesis-as-games.md",
+        "0030-semiring-valued-analysis.md",
+        "0031-corpus-derived-language-governance.md",
+        "0032-weak-memory-execution-graph-lane.md",
+        "0033-checked-projection-and-generated-rust-interfaces.md",
+        "0034-owned-temporal-semantics-with-leanltl-bridge.md",
+        "0035-proof-receipts-and-axiom-manifests.md",
+        "0036-authoritative-workbench-daemon.md",
+        "0037-explicit-content-addressed-handles.md",
+        "0038-machine-contracts-not-terminal-prose.md",
+        "0039-protected-intent-contract.md",
+        "0040-typed-context-packs.md",
+        "0041-verification-debugger-and-dap.md",
+        "0042-mcp-adapter-not-authority.md",
+        "0043-repair-transactions.md",
+        "0044-incremental-semantic-database.md",
+        "0045-progressive-disclosure-with-lossless-expansion.md",
+        "0046-semantic-diff-gates.md",
+        "0047-forge-sandbox-and-nonvacuity.md",
+        "0048-proof-service-isolation.md",
+        "0049-explicit-budgets-and-resumable-search.md",
+        "0050-proof-oriented-model-program-lenses.md",
+        "0051-assurance-envelope.md",
+        "0052-multi-agent-evidence-graph.md"
+      ],
+      "obligation": "ADR includes the \"security\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 51,
+      "real_missing_count": 51,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Security\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-12": {
+      "fixtures_caught": [
+        "missing-performance-hypothesis.md"
+      ],
+      "grandfathered": [
+        "0001-asupersync-execution-substrate.md",
+        "0002-causal-intermediate-representation.md",
+        "0003-no-ambient-nondeterminism.md",
+        "0004-standalone-models-and-zoomable-refinement.md",
+        "0005-partial-order-primary-semantics.md",
+        "0006-typed-assurance-lattice.md",
+        "0007-verification-engine-portfolio.md",
+        "0008-proof-carrying-results.md",
+        "0009-production-partial-order-conformance.md",
+        "0010-cancellation-calculus.md",
+        "0011-semantic-domain-packs.md",
+        "0012-dual-authoring-surfaces.md",
+        "0013-exact-state-identity.md",
+        "0014-explicit-fairness-and-ranking-liveness.md",
+        "0015-strong-refinement-for-hyperproperties.md",
+        "0016-typed-timed-and-probabilistic-extensions.md",
+        "0017-solver-and-tcb-policy.md",
+        "0018-semantic-versioning-and-replay.md",
+        "0019-adapter-isolation.md",
+        "0020-experimental-mathematics-governance.md",
+        "0021-tla-examples-corpus-contract.md",
+        "0022-lean4-metatheory-and-certificate-authority.md",
+        "0023-semantic-triptych-and-independent-paths.md",
+        "0024-observer-indexed-independence.md",
+        "0025-stratified-model-language-fragments.md",
+        "0026-proof-producing-reductions.md",
+        "0027-nominal-orbit-finite-symmetry.md",
+        "0028-assumption-synthesis-as-games.md",
+        "0029-semantic-equivalence-not-tla-source-cloning.md",
+        "0030-semiring-valued-analysis.md",
+        "0031-corpus-derived-language-governance.md",
+        "0032-weak-memory-execution-graph-lane.md",
+        "0033-checked-projection-and-generated-rust-interfaces.md",
+        "0034-owned-temporal-semantics-with-leanltl-bridge.md",
+        "0035-proof-receipts-and-axiom-manifests.md",
+        "0036-authoritative-workbench-daemon.md",
+        "0037-explicit-content-addressed-handles.md",
+        "0038-machine-contracts-not-terminal-prose.md",
+        "0039-protected-intent-contract.md",
+        "0040-typed-context-packs.md",
+        "0041-verification-debugger-and-dap.md",
+        "0042-mcp-adapter-not-authority.md",
+        "0043-repair-transactions.md",
+        "0044-incremental-semantic-database.md",
+        "0045-progressive-disclosure-with-lossless-expansion.md",
+        "0046-semantic-diff-gates.md",
+        "0047-forge-sandbox-and-nonvacuity.md",
+        "0048-proof-service-isolation.md",
+        "0049-explicit-budgets-and-resumable-search.md",
+        "0050-proof-oriented-model-program-lenses.md",
+        "0051-assurance-envelope.md",
+        "0052-multi-agent-evidence-graph.md"
+      ],
+      "obligation": "ADR includes the \"performance_hypothesis\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 52,
+      "real_missing_count": 52,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Performance\" or \"Performance hypothesis\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-13": {
+      "fixtures_caught": [
+        "missing-validation-plan.md"
+      ],
+      "grandfathered": [
+        "0021-tla-examples-corpus-contract.md",
+        "0022-lean4-metatheory-and-certificate-authority.md",
+        "0023-semantic-triptych-and-independent-paths.md",
+        "0024-observer-indexed-independence.md",
+        "0025-stratified-model-language-fragments.md",
+        "0026-proof-producing-reductions.md",
+        "0027-nominal-orbit-finite-symmetry.md",
+        "0028-assumption-synthesis-as-games.md",
+        "0030-semiring-valued-analysis.md",
+        "0031-corpus-derived-language-governance.md",
+        "0032-weak-memory-execution-graph-lane.md",
+        "0033-checked-projection-and-generated-rust-interfaces.md",
+        "0034-owned-temporal-semantics-with-leanltl-bridge.md",
+        "0035-proof-receipts-and-axiom-manifests.md",
+        "0036-authoritative-workbench-daemon.md",
+        "0037-explicit-content-addressed-handles.md",
+        "0038-machine-contracts-not-terminal-prose.md",
+        "0039-protected-intent-contract.md",
+        "0040-typed-context-packs.md",
+        "0041-verification-debugger-and-dap.md",
+        "0042-mcp-adapter-not-authority.md",
+        "0043-repair-transactions.md",
+        "0044-incremental-semantic-database.md",
+        "0045-progressive-disclosure-with-lossless-expansion.md",
+        "0046-semantic-diff-gates.md",
+        "0047-forge-sandbox-and-nonvacuity.md",
+        "0048-proof-service-isolation.md",
+        "0049-explicit-budgets-and-resumable-search.md",
+        "0050-proof-oriented-model-program-lenses.md",
+        "0051-assurance-envelope.md",
+        "0052-multi-agent-evidence-graph.md"
+      ],
+      "obligation": "ADR includes the \"validation_plan\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 31,
+      "real_missing_count": 31,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Validation\", \"Validation plan\", or \"Validation and rollback\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    },
+    "GOV-2-14": {
+      "fixtures_caught": [
+        "missing-rollback.md"
+      ],
+      "grandfathered": [
+        "0021-tla-examples-corpus-contract.md",
+        "0022-lean4-metatheory-and-certificate-authority.md",
+        "0023-semantic-triptych-and-independent-paths.md",
+        "0024-observer-indexed-independence.md",
+        "0025-stratified-model-language-fragments.md",
+        "0026-proof-producing-reductions.md",
+        "0027-nominal-orbit-finite-symmetry.md",
+        "0028-assumption-synthesis-as-games.md",
+        "0030-semiring-valued-analysis.md",
+        "0031-corpus-derived-language-governance.md",
+        "0032-weak-memory-execution-graph-lane.md",
+        "0033-checked-projection-and-generated-rust-interfaces.md",
+        "0034-owned-temporal-semantics-with-leanltl-bridge.md",
+        "0035-proof-receipts-and-axiom-manifests.md",
+        "0036-authoritative-workbench-daemon.md",
+        "0037-explicit-content-addressed-handles.md",
+        "0038-machine-contracts-not-terminal-prose.md",
+        "0039-protected-intent-contract.md",
+        "0040-typed-context-packs.md",
+        "0041-verification-debugger-and-dap.md",
+        "0042-mcp-adapter-not-authority.md",
+        "0043-repair-transactions.md",
+        "0044-incremental-semantic-database.md",
+        "0045-progressive-disclosure-with-lossless-expansion.md",
+        "0046-semantic-diff-gates.md",
+        "0047-forge-sandbox-and-nonvacuity.md",
+        "0048-proof-service-isolation.md",
+        "0049-explicit-budgets-and-resumable-search.md",
+        "0050-proof-oriented-model-program-lenses.md",
+        "0051-assurance-envelope.md",
+        "0052-multi-agent-evidence-graph.md"
+      ],
+      "obligation": "ADR includes the \"rollback\" section (docs/12 \u00a72)",
+      "real_grandfathered_count": 31,
+      "real_missing_count": 31,
+      "real_ungrandfathered_failures": 0,
+      "result": "pass",
+      "rule": "heading == \"Rollback\" or \"Validation and rollback\"",
+      "scan_scope": "53 real ADRs under notes/plan/adr/*.md (README.md excluded)"
+    }
+  },
+  "script": "tools/governance/check_adr_process.py",
+  "self_test": {
+    "clean_fixture_ok": true,
+    "failures": [],
+    "fixture_cases": 11,
+    "fixture_results": {
+      "missing-alternatives.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:alternatives"
+        ],
+        "tags_found": [
+          "section-missing:alternatives"
+        ]
+      },
+      "missing-compatibility.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:compatibility"
+        ],
+        "tags_found": [
+          "section-missing:compatibility"
+        ]
+      },
+      "missing-context.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:context"
+        ],
+        "tags_found": [
+          "section-missing:context"
+        ]
+      },
+      "missing-decision.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:decision"
+        ],
+        "tags_found": [
+          "section-missing:decision"
+        ]
+      },
+      "missing-formal-consequences.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:formal_consequences"
+        ],
+        "tags_found": [
+          "section-missing:formal_consequences"
+        ]
+      },
+      "missing-performance-hypothesis.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:performance_hypothesis"
+        ],
+        "tags_found": [
+          "section-missing:performance_hypothesis"
+        ]
+      },
+      "missing-rollback.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:rollback"
+        ],
+        "tags_found": [
+          "section-missing:rollback"
+        ]
+      },
+      "missing-security.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:security"
+        ],
+        "tags_found": [
+          "section-missing:security"
+        ]
+      },
+      "missing-validation-plan.md": {
+        "caught": true,
+        "expected_tags": [
+          "section-missing:validation_plan"
+        ],
+        "tags_found": [
+          "section-missing:validation_plan"
+        ]
+      },
+      "status-missing.md": {
+        "caught": true,
+        "expected_tags": [
+          "status-required"
+        ],
+        "tags_found": [
+          "status-required"
+        ]
+      },
+      "status-out-of-set.md": {
+        "caught": true,
+        "expected_tags": [
+          "status-closed-set"
+        ],
+        "tags_found": [
+          "status-closed-set"
+        ]
+      }
+    },
+    "self_test": "pass"
+  },
+  "status": "pass"
+}
