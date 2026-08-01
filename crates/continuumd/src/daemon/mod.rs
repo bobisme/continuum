@@ -73,6 +73,7 @@ pub mod identity;
 pub mod intent;
 pub mod obligation;
 pub mod observe;
+pub mod region;
 pub mod result;
 pub mod state;
 pub mod task;

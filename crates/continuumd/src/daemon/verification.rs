@@ -66,6 +66,7 @@ use continuum_engine_reference::checking::{
     self, DeadlockPolicy, Obligations, Scope, Verdict as EngineVerdict,
 };
 use continuum_engine_reference::model::Model;
+use continuum_task::region::worker::WorkerStep;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
 use continuum_workspace::snapshot::Snapshot;
@@ -73,6 +74,10 @@ use continuum_workspace::staleness::check_current;
 
 use super::Services;
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+// `Scope` is `continuum_engine_reference::checking::Scope` in this module — the exploration's
+// completeness — so the region scope is imported under a name that says which of the two it
+// is rather than shadowing the engine's vocabulary.
+use super::region::{self, Scope as RegionScope};
 use super::state::DaemonState;
 use super::task::{
     Campaign, Continuation, PinnedEpochs, Preimage, TaskEntry, budget_preimage,
@@ -342,7 +347,34 @@ fn run(model: &Model, target: &Target, bounds: Bounds) -> Result<Result<Campaign
 ///
 /// This is the single writer of a task's outcome: `verification.start` calls it to run a
 /// fresh task and `task.resume` calls it to run a parked one, so the two cannot drift into
-/// recording different things about the same campaign.
+/// recording different things about the same campaign. It is therefore also the one place
+/// PR 6's rule applies — **a unit of task work runs inside a region** — and
+/// [`region::scoped`] is the bracket: the scope is opened before the model is looked up and
+/// finalized on every path out, including the two that return a [`Fault`] and the one where
+/// the engine's own bound tripped.
+///
+/// # The run, as the region layer sees it
+///
+/// | What happened | Worker step | Why there |
+/// |---|---|---|
+/// | the run started | `Begin` | `TaskStatus::Running`, which is representable and never reported |
+/// | the model is not one this daemon holds | `Fail(UnsupportedSemanticFeature)` | nothing was published, and nothing is left behind for a resume |
+/// | the state budget cannot hold the initial states | `Fail(BudgetExhausted)` | RFC 0026's failure with no continuation and a `non_resumable_reason` beside it |
+/// | a campaign came back | `Reserve` | staged: the result exists and no reader can see it yet |
+/// | it was written onto the task | `Commit` | `verification.result` can read it now, and INV-009 makes it monotone |
+/// | the exploration closed | `Complete` | |
+/// | a bound tripped | `Suspend` | parked with committed partial evidence plus a valid continuation (B18) |
+///
+/// The order is not decoration: `Suspend` after `Commit` is the only order the region layer
+/// admits, because "cancellation MUST NOT truncate a publication in progress" makes parking
+/// mid-publication a typed refusal one layer down. A wiring that parked first would be
+/// caught as a defect rather than shipped as a subtly wrong lifecycle.
+///
+/// And then the scope ends. A parked worker is not terminal, so the teardown escalates from
+/// a close to a cancellation and the parked *execution* is terminated by the scope exit —
+/// which is exactly right, because what survives a suspension is the `cont_*` artifact this
+/// function minted and filed, not a live worker. [`region`](super::region) states the RFC
+/// argument for that resolution in full.
 ///
 /// # Errors
 ///
@@ -363,16 +395,62 @@ pub fn advance(
             entry.intent.clone(),
         )
     };
+    let now = services.now().cloned();
+    // A campaign is admitted as resumable work: the reference engine's own
+    // `Exploration::Exhausted` carries the queue-ordered frontier, so a bounded run has a
+    // resume point by construction. The one outcome that has none — a budget too small to
+    // hold the initial states — is a *failure*, and a failure does not park.
+    region::scoped(state, region::resumability(true), |state, scope| {
+        {
+            let entry = state
+                .tasks_mut()
+                .get_mut(handle)
+                .ok_or_else(Fault::denied)?;
+            entry.region = Some(scope.region());
+            entry.worker = Some(scope.worker());
+        }
+        state.regions_mut().step(scope, WorkerStep::Begin);
+        run_in(
+            scope, handle, bounds, &source, &target, &snapshot, &intent, &now, state, services,
+        )
+    })?;
+    Ok(())
+}
+
+/// One run, inside the scope that owns it. See [`advance`] for the step table.
+#[allow(clippy::too_many_arguments)]
+fn run_in(
+    scope: RegionScope,
+    handle: &TaskHandle,
+    bounds: Bounds,
+    source: &Commitment,
+    target: &Target,
+    snapshot: &Nullable<crate::protocol::scalar::WorkspaceHandle>,
+    intent: &Nullable<crate::protocol::scalar::IntentHandle>,
+    now: &Option<crate::protocol::scalar::Timestamp>,
+    state: &mut DaemonState,
+    services: &Services,
+) -> Result<(), Fault> {
     // The model is data — named variables, named actions, an explicit initial-state
     // enumeration — so cloning it out of the catalog costs a copy of that data and buys the
     // disjoint borrow the task table needs. Nothing about the run depends on the copy.
-    let model = state.models().get(&source).ok_or_else(no_model)?.clone();
+    let Some(model) = state.models().get(source).cloned() else {
+        let fault = no_model();
+        state.regions_mut().fail(scope, fault.code);
+        return Err(fault);
+    };
 
-    let now = services.now().cloned();
-    let outcome = run(&model, &target, bounds)?;
+    let outcome = match run(&model, target, bounds) {
+        Ok(outcome) => outcome,
+        Err(fault) => {
+            state.regions_mut().fail(scope, fault.code);
+            return Err(fault);
+        }
+    };
     let campaign = match outcome {
         Ok(campaign) => campaign,
         Err(fault) => {
+            state.regions_mut().fail(scope, fault.code);
             let entry = state
                 .tasks_mut()
                 .get_mut(handle)
@@ -384,13 +462,22 @@ pub fn advance(
         }
     };
 
+    // The result exists and nothing a reader can observe does. The store-side counterpart is
+    // `StagedPublication`, whose phase says outright: "nothing is stored".
+    state.regions_mut().step(scope, WorkerStep::Reserve);
+
     // Park before the status moves, so a `Suspended` task never exists without the
     // continuation `rule task.status_monotonic` says it has by definition.
     let continuation = if campaign.is_closed() {
         None
     } else {
         let pinned = PinnedEpochs::of(services.epochs());
-        let snapshot = snapshot.value().cloned().ok_or_else(Fault::denied)?;
+        let Some(snapshot) = snapshot.value().cloned() else {
+            // Unreachable, and it discards the staged publication rather than leaving it in
+            // flight: a campaign without a snapshot could not have been started.
+            state.regions_mut().fail(scope, ErrorCode::CapabilityDenied);
+            return Err(Fault::denied());
+        };
         let mut preimage = Preimage::new();
         preimage.text(handle.as_str());
         preimage.text(snapshot.as_str());
@@ -402,43 +489,63 @@ pub fn advance(
             }
         }
         epochs_preimage(&mut preimage, services.epochs());
+        let named = match continuation_handle(services.identifier(), &preimage) {
+            Ok(named) => named,
+            Err(fault) => {
+                state.regions_mut().fail(scope, fault.code);
+                return Err(fault);
+            }
+        };
         let parked = Continuation {
-            handle: continuation_handle(services.identifier(), &preimage)?,
+            handle: named.clone(),
             task: handle.clone(),
             snapshot,
-            intent,
+            intent: intent.clone(),
             pinned,
             bounds,
             frontier: campaign.frontier.clone(),
         };
-        let named = parked.handle.clone();
         state.tasks_mut().park(parked);
         Some(named)
     };
 
-    let entry = state
-        .tasks_mut()
-        .get_mut(handle)
-        .ok_or_else(Fault::denied)?;
     let closed = campaign.is_closed();
-    entry.campaign = Some(campaign);
-    entry.continuation = continuation;
-    entry.reach(
+    {
+        let entry = state
+            .tasks_mut()
+            .get_mut(handle)
+            .ok_or_else(Fault::denied)?;
+        entry.campaign = Some(campaign);
+        entry.continuation = continuation;
+        entry.publications += 1;
+        entry.reach(
+            if closed {
+                MILESTONE_CLOSED
+            } else {
+                MILESTONE_BOUNDED
+            },
+            now.as_ref(),
+        );
+        entry.reach(MILESTONE_CHECKED, now.as_ref());
+        entry.advance(
+            if closed {
+                TaskStatus::Completed
+            } else {
+                TaskStatus::Suspended
+            },
+            now.as_ref(),
+        );
+    }
+    // The campaign is on the task now, so a reader can observe it: the commit and the write
+    // are one event reported in the order they happened.
+    state.regions_mut().step(scope, WorkerStep::Commit);
+    state.regions_mut().step(
+        scope,
         if closed {
-            MILESTONE_CLOSED
+            WorkerStep::Complete
         } else {
-            MILESTONE_BOUNDED
+            WorkerStep::Suspend
         },
-        now.as_ref(),
-    );
-    entry.reach(MILESTONE_CHECKED, now.as_ref());
-    entry.advance(
-        if closed {
-            TaskStatus::Completed
-        } else {
-            TaskStatus::Suspended
-        },
-        now.as_ref(),
     );
     Ok(())
 }
@@ -647,6 +754,11 @@ fn start(
         failed_reason: None,
         non_resumable_reason: None,
         campaign: None,
+        // Nothing has run yet, so this task has been in no region and published nothing.
+        // `advance` writes all three, inside the scope it opens.
+        region: None,
+        worker: None,
+        publications: 0,
     };
     let bounds = entry.bounds;
     state.tasks_mut().put(entry);

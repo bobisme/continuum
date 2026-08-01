@@ -113,6 +113,14 @@ used_by = ["continuum-task", "continuumd"]
 rationale = "The claim-status lattice that decides whether a write would lower a claim (plan §11.4, §11.7); a second implementation would be a checker checking its own assumption. continuumd's evidence.verify promotion is that compare-and-set: the crate's own module documentation names the daemon and any independent linearizability checker (plan §24.5) as the two consumers that must share one implementation of the order, and a lost CAS is what the wire's StatusConflict reports. Classed trusted-checking-base because the non-regression predicate is what stands between a racing promotion and a silently lowered claim; nothing downstream re-derives it."
 
 [[dependency]]
+name = "continuum-task"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["dev", "normal"]
+used_by = ["continuumd"]
+rationale = "The region calculus plan §20 gives that crate — task lifecycle, committed partial evidence, suspension/continuation, drain and finalize behavior, and the guarantee of no orphan workers — which PR 6 puts continuumd's task work inside rather than restating: every unit of that work is a region opened and finalized within one dispatch, task.cancel drives RFC 0026's request → drain → finalize through it, and the three arms of rule task.cancel_correct are its CancelOutcome, which has no constructor for committed evidence without a continuation or for a continuation without committed evidence. Classed trusted-checking-base because nothing downstream re-derives what it decides: a defect in the obligation ledger makes a leaked obligation look discharged and a defect in the outcome table makes a truncated campaign look resumable, and both are wire claims a client has no second reading of — the same argument continuum-evidence's entry makes about the claim-status lattice. It adds no runtime and no external edge: the crate has no thread, clock, executor or interior mutability, and its own two dependencies are continuum-value and continuum-evidence, both already here. The asupersync adapter is a Phase B deliverable in continuum-asupersync (plan §21) and this edge is not it."
+
+[[dependency]]
 name = "continuum-cml-syntax"
 origin = "workspace"
 tcb_class = "engine"

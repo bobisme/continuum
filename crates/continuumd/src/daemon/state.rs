@@ -329,6 +329,7 @@ pub struct DaemonState {
     idempotency: BTreeMap<(String, String), Replay>,
     admissions: Vec<AdmissionRecord>,
     tasks: super::task::TaskTable,
+    regions: super::region::TaskRegions,
     models: super::verification::ModelCatalog,
 }
 
@@ -644,6 +645,28 @@ impl DaemonState {
     /// The task table, mutably.
     pub const fn tasks_mut(&mut self) -> &mut super::task::TaskTable {
         &mut self.tasks
+    }
+
+    /// Every region this daemon has opened for task work, and what each teardown left
+    /// behind.
+    ///
+    /// The daemon's structured-concurrency scope, and the evidence that it is one: PR 6
+    /// puts every unit of task work inside a region that is opened and finalized within one
+    /// dispatch, and [`TaskRegions::is_total`](super::region::TaskRegions::is_total) is that
+    /// sentence as a value a caller — or a test — can read without re-deriving it.
+    #[must_use]
+    pub const fn regions(&self) -> &super::region::TaskRegions {
+        &self.regions
+    }
+
+    /// The region ledger, mutably.
+    ///
+    /// The step surface: a unit of work says what it just did and the region layer decides
+    /// whether that was legal. Opening and tearing down a scope is *not* reachable here —
+    /// both are private to [`region`](super::region), and
+    /// [`region::scoped`](super::region::scoped) is the only bracket that does either.
+    pub const fn regions_mut(&mut self) -> &mut super::region::TaskRegions {
+        &mut self.regions
     }
 
     /// The models this daemon can construct.

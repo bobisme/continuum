@@ -55,12 +55,28 @@ publish = false
 #   (START_HERE, enforced as RULE certificate-checker-not-search) — and the daemon is on the
 #   other side of it.
 #
+# A fifth arrived with PR 6's task-lifecycle rewiring (`src/daemon/region.rs`):
+#
+# - `continuum-task` owns the region calculus plan §20 gives it — "task lifecycle,
+#   committed partial evidence, budget accounting, suspension/continuation, drain and
+#   finalize behavior, and the guarantee of no orphan workers". START_HERE's PR 6 stem is
+#   "use asupersync regions for daemon work", and daemon work is dispatched here, so the
+#   daemon is the consumer that sentence names. Its own module documentation designs this
+#   seam outright ("the PR 6 rewiring is a `TaskEntry` gaining a `RegionId` and
+#   delegating"), and the edge runs in the only direction that keeps it: `continuum-task`
+#   declares no `continuumd` dependency and mints no wire vocabulary — it spells RFC 0026's
+#   six `TaskStatus` tokens through `WorkerState::status_token` precisely so the two crates
+#   agree without either importing the other's protocol. No async runtime arrives with it:
+#   that crate has no thread, clock, executor, or interior mutability, and its two edges are
+#   `continuum-value` and `continuum-evidence`.
+#
 # Repeated under [dev-dependencies] because integration tests in `tests/` are separate
 # crates and do not inherit the library's dependencies.
 [dependencies]
 continuum-evidence = { path = "../continuum-evidence" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
+continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 
@@ -68,6 +84,7 @@ continuum-workspace = { path = "../continuum-workspace" }
 continuum-evidence = { path = "../continuum-evidence" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
+continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 

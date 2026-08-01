@@ -23,12 +23,19 @@
 //!   type-level seam RFC 0026's "budget exhaustion carries a continuation" rule needs was
 //!   already there, and this module binds a `cont_*` handle to it.
 //!
+//! What a task's *execution* is, on the other hand, is a region. PR 6 puts every unit of
+//! task work inside one, opened and finalized within the dispatch that runs it, and that is
+//! what makes "no orphan work" a checked property rather than a consequence of the borrow
+//! alone. [`region`](super::region) is that join, and it is where the one design question
+//! this rewiring had to answer — whether a parked continuation is a live worker — is
+//! answered, argued from RFC 0026, and made visible in [`TaskEntry::region`].
+//!
 //! # The five operations
 //!
 //! | Operation | Rule | What it does here |
 //! |---|---|---|
 //! | `task.status` | `rule task.status_monotonic` | projects a [`TaskEntry`] onto the wire's [`TaskRecord`] |
-//! | `task.cancel` | `rule task.cancel_correct` | marks a non-terminal task `Cancelled`, reporting the continuation it holds — or `null`, the *named* "nothing published" outcome |
+//! | `task.cancel` | `rule task.cancel_correct` | marks a non-terminal task `Cancelled`, and drives cancel → drain → finalize over the task's residual work, reporting the arm that teardown landed on — a continuation, or `null`, the *named* "nothing published" outcome |
 //! | `task.resume` | `rule task.resume` | the admissibility predicate, then one more bounded run under the pinned epochs |
 //! | `task.subscribe` | `rule subscription.hints_only` | answers the record the IDL declares as its response body; the events are the recorded transitions |
 //! | `task.update_budget` | `rule task.update_budget` | re-admits a parked task under a larger bound, with no identity churn |
@@ -74,11 +81,14 @@ use continuum_engine_reference::checking::{
     CheckOutcome, CheckReport, DeadlockOutcome, Unresolved,
 };
 use continuum_engine_reference::model::State;
+use continuum_task::region::RegionId;
+use continuum_task::region::worker::{WorkerId, WorkerStep};
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
 use continuum_workspace::staleness::check_current;
 
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::region::{self, Scope, TaskRegions};
 use super::state::DaemonState;
 use super::{Services, verification};
 use crate::protocol::envelope::{
@@ -323,6 +333,33 @@ pub struct TaskEntry {
     pub non_resumable_reason: Option<String>,
     /// What the last run produced, or [`None`] when nothing ran.
     pub campaign: Option<Campaign>,
+    /// The region the task's most recent run happened in, or [`None`] before anything ran.
+    ///
+    /// The seam bn-2gk designed — "the PR 6 rewiring is a `TaskEntry` gaining a
+    /// [`RegionId`] and delegating" — and the field where this bone's design decision is
+    /// legible: it is **not** a handle to a live scope, because a resumed task's region is
+    /// a *different* one from the region it parked in. A parked continuation is a durable
+    /// artifact, not a live worker; [`region`](super::region) states the RFC argument in
+    /// full.
+    pub region: Option<RegionId>,
+    /// The worker that most recent run *was*, or [`None`] before anything ran.
+    pub worker: Option<WorkerId>,
+    /// How many artifacts this task has committed — the daemon-side mirror of the region
+    /// layer's evidence ledger.
+    ///
+    /// It counts *campaign results*: a run that produced one wrote it onto
+    /// [`Self::campaign`], where `verification.result` reads it, and that is what a reader
+    /// can observe of this task today. The evidence-graph handles in
+    /// [`Self::committed_evidence`] are PR 7's, and a task that commits none says so
+    /// through [`Self::omissions`] rather than reporting a zero it did not measure.
+    ///
+    /// Monotone: `task.resume` adds to it and nothing subtracts, which is INV-009's
+    /// "resuming a task may add evidence … it may not silently replace prior artifacts" at
+    /// the counter. The invariant `continuation.is_some() ⇒ publications > 0` is what makes
+    /// the cancellation table's both-or-neither arms unconstructable wrong, and it holds by
+    /// construction: [`verification::advance`](super::verification::advance) is the one
+    /// writer of both, and it writes the campaign before it mints the continuation.
+    pub publications: u32,
 }
 
 impl TaskEntry {
@@ -730,7 +767,7 @@ fn subscribe(request: &TaskSubscribeRequest, state: &DaemonState) -> Result<Effe
     ))
 }
 
-/// `task.cancel` — request, drain, finalize, at a grain where all three are one step.
+/// `task.cancel` — request, drain, finalize, driven through the region that owns the work.
 ///
 /// > `task.cancel` triggers request, drain, finalize. It MUST leave either committed partial
 /// > evidence plus a valid continuation, or nothing published (INV-009, plan B19).
@@ -738,43 +775,89 @@ fn subscribe(request: &TaskSubscribeRequest, state: &DaemonState) -> Result<Effe
 /// >
 /// > — `rule task.cancel_correct`
 ///
-/// A dispatch is atomic here — it holds `&mut DaemonState` for its whole extent — so there
-/// is never a publication in progress for a cancel to truncate, and "drain" has nothing to
-/// drain. **No leak is possible by construction at this grain**, which is a claim about the
-/// borrow and not about care taken. What remains is the part that is a real obligation: the
-/// response's `continuation` is `nullable`, so "cancelled with nothing published" is a
-/// *named* outcome, and this function names it rather than leaving a client to infer it from
-/// an absent field.
+/// # What is torn down, and why it is a scope of its own
+///
+/// A dispatch holds `&mut DaemonState` for its whole extent, so when this operation runs
+/// there is no *live* execution of the task to interrupt: the dispatch that ran the campaign
+/// finalized its own region before it returned (see [`region`](super::region)). What the
+/// cancel tears down is the task's **residual** work — the evidence it has committed and the
+/// possibility of resuming from it — and it does so in a region of its own, spawned with the
+/// two facts the outcome depends on: how much this task has published
+/// ([`TaskEntry::publications`]) and whether it holds a continuation to resume from.
+///
+/// That is not ceremony, and the difference it makes is checkable rather than rhetorical.
+/// The three arms of `rule task.cancel_correct` are
+/// [`CancelOutcome`](continuum_task::region::worker::CancelOutcome), which has **no
+/// constructor** for "committed evidence and no continuation" and none for "a continuation
+/// and nothing committed" — the first is the leaked-obligation shape G0-DX-14 exists to
+/// catch and the second is a resume pointer into nothing. So this function does not decide
+/// which arm it is on; it states two facts, the layer that owns the rule decides, and the
+/// daemon supplies the `cont_*` handle for the arm that carries one. The region-layer
+/// continuation is bookkeeping and never reaches the wire (see [`region`](super::region)).
+///
+/// The honest limit is worth stating too: at this grain the drain has no in-flight
+/// publication to close, so what this shape prevents is a *reporting* leak rather than a
+/// runtime one. The runtime half is prevented by the borrow, and by the region bracket that
+/// finalizes the campaign's own scope inside the dispatch that opened it.
 ///
 /// Cancelling a task that is already terminal changes nothing and says so with
 /// [`StructuralOutcome::Unchanged`]; `rule task.status_monotonic`'s "a terminal status never
-/// changes" is the reason, and [`TaskEntry::advance`] is where it is enforced.
+/// changes" is the reason, and [`TaskEntry::advance`] is where it is enforced. Its scope is
+/// still opened and torn down, because "what did this task leave behind" is the same
+/// question whichever answer the status gives, and asking it in one place is what keeps the
+/// rows from drifting.
 fn cancel(
     request: &TaskCancelRequest,
     state: &mut DaemonState,
     services: &Services,
 ) -> Result<Effect, Fault> {
     let now = services.now().cloned();
-    let entry = state
-        .tasks_mut()
-        .get_mut(&request.task)
-        .ok_or_else(Fault::denied)?;
-    let moved = entry.advance(TaskStatus::Cancelled, now.as_ref());
-    if moved {
-        entry.reach(MILESTONE_CANCELLED, now.as_ref());
-    }
+    let residual = {
+        let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+        Residual {
+            publications: entry.publications,
+            resumable: entry.continuation.is_some(),
+        }
+    };
+    let task = request.task.clone();
+    let (moved, settlement) = region::scoped(
+        state,
+        region::resumability(residual.resumable),
+        |state, scope| {
+            let entry = state.tasks_mut().get_mut(&task).ok_or_else(Fault::denied)?;
+            let moved = entry.advance(TaskStatus::Cancelled, now.as_ref());
+            if moved {
+                entry.reach(MILESTONE_CANCELLED, now.as_ref());
+            }
+            residual.admit(state.regions_mut(), scope);
+            Ok(moved)
+        },
+    )?;
+
+    let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
     let outcome = if moved {
         StructuralOutcome::Cancelled
     } else {
         StructuralOutcome::Unchanged
     };
+    // The arm is the region layer's; the handle is this daemon's. `and` is the join: an arm
+    // carrying a continuation reports the `cont_*` the task holds, and every other arm
+    // reports `null` — the *named* "cancelled with nothing published" outcome, never an
+    // absent field a client has to interpret.
+    let continuation = match settlement.continuation().and(entry.continuation.clone()) {
+        Some(handle) => Nullable::Value(handle),
+        None => Nullable::Null,
+    };
+    debug_assert_eq!(
+        settlement.continuation().is_some(),
+        entry.continuation.is_some(),
+        "the region's cancellation arm and the task's continuation are two readings of one \
+         fact and MUST agree"
+    );
     let payload = Payload::TaskCancel(TaskCancelResponse {
         task: entry.handle.clone(),
         status: entry.status,
-        continuation: match &entry.continuation {
-            Some(handle) => Nullable::Value(handle.clone()),
-            None => Nullable::Null,
-        },
+        continuation,
         committed_evidence: entry.committed_evidence.clone(),
     });
     let omissions = entry.omissions();
@@ -782,6 +865,36 @@ fn cancel(
     let mut effect = Effect::new(payload, structural(outcome)).observing(handle);
     effect.omissions = omissions;
     Ok(effect)
+}
+
+/// What a cancellation finds when it reaches a task: what the task published, and whether
+/// any of it can be resumed.
+///
+/// The two facts [`CancelOutcome`](continuum_task::region::worker::CancelOutcome) is
+/// computed from, read off the task table once and written into the scope's worker. Both are
+/// *the task's*, not the request's: a caller cannot make a task resumable by asking it to be.
+#[derive(Debug, Clone, Copy)]
+struct Residual {
+    publications: u32,
+    resumable: bool,
+}
+
+impl Residual {
+    /// Re-establish this task's committed evidence inside the scope that is about to be
+    /// cancelled.
+    ///
+    /// Each publication is a `Reserve` followed immediately by its `Commit`, which is the
+    /// only order the region layer admits and the only one that is true of what happened:
+    /// nothing is staged at rest, so there is no in-flight publication for the cancellation
+    /// to truncate (INV-017), and the drain finds committed evidence exactly where the task
+    /// table says there is some.
+    fn admit(self, regions: &mut TaskRegions, scope: Scope) {
+        regions.step(scope, WorkerStep::Begin);
+        for _ in 0..self.publications {
+            regions.step(scope, WorkerStep::Reserve);
+            regions.step(scope, WorkerStep::Commit);
+        }
+    }
 }
 
 /// `task.update_budget` — re-admit a parked task under a larger bound, with no identity
