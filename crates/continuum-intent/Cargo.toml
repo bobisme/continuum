@@ -6,5 +6,20 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# One workspace edge, stated in `src/lib.rs`'s dependency-boundary contract.
+# `continuum-value` is the workspace's only declared leaf crate and it owns the
+# ADR-0013 identity discipline: identity *is* canonical bytes, a digest only
+# indexes, and collisions resolve by canonical comparison. This crate's
+# `PropertyIdentity` applies that discipline to RFC 0037's byte spelling and
+# reuses `continuum_value::identity`'s `ContentHasher`/`Digest256` seam rather
+# than opening a second one. Repeated under [dev-dependencies] because
+# integration tests in `tests/` are separate crates and do not inherit the
+# library's dependencies.
+[dependencies]
+continuum-value = { path = "../continuum-value" }
+
+[dev-dependencies]
+continuum-value = { path = "../continuum-value" }
+
 [lints]
 workspace = true

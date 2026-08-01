@@ -1115,8 +1115,8 @@
         "line": 134,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "properties"
+      "status": "satisfied",
+      "summary": "properties; (delivered: bn-u8z2)"
     },
     {
       "category": "pr-deliverable",

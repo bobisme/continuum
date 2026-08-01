@@ -135,7 +135,7 @@ Implement:
 
 Implement schema/types for:
 
-- properties;
+- properties; (delivered: bn-u8z2)
 - assumptions;
 - observers;
 - bounds;

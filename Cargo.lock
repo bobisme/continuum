@@ -100,6 +100,9 @@ version = "0.0.0"
 [[package]]
 name = "continuum-intent"
 version = "0.0.0"
+dependencies = [
+ "continuum-value",
+]
 
 [[package]]
 name = "continuum-kernel-core"
