@@ -46,3 +46,4 @@
 
 pub mod artifact_path;
 pub mod publication;
+pub mod snapshot;

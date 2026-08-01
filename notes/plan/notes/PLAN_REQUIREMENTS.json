@@ -1032,8 +1032,8 @@
         "line": 122,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "Merkle workspace snapshots"
+      "status": "satisfied",
+      "summary": "Merkle workspace snapshots (delivered: bn-15gj)"
     },
     {
       "category": "pr-deliverable",

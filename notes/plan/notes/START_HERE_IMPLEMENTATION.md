@@ -123,7 +123,7 @@ Implement:
 
 Implement:
 
-- Merkle workspace snapshots;
+- Merkle workspace snapshots (delivered: bn-15gj);
 - disk import, editor overlay, fork, seal, and diff;
 - source/dependency/toolchain/config identities;
 - stale-snapshot error;
