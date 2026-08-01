@@ -183,8 +183,18 @@ Bit-identical binaries are not claimed yet: Cargo's `trim-paths` is still unstab
 on the pinned toolchain, so absolute build paths can reach object code. Closing
 that gap belongs to the kernel reproducible-build covenant (plan §20, PR 9).
 
+#### Toolchain
+
+`mise.toml` pins the CLI dependencies that sit outside Cargo and Lake: `just`
+and `uv` (both from mise's default registry) and `elan` (via the `ubi` backend,
+since elan has no default-registry entry). Rust and Lean are deliberately not
+pinned there — Rust stays on rustup + `rust-toolchain.toml`, and Lean stays on
+`lean/lean-toolchain` selected by the `elan` mise installs (mise → elan →
+pinned toolchain). Bootstrap a fresh checkout with:
+
 ```bash
-just check   # fmt, clippy, tests, crate boundaries, dossier validation
+mise install   # installs just, uv, elan
+just check     # fmt, clippy, tests, crate boundaries, dossier validation
 ```
 
 ## Roadmap
