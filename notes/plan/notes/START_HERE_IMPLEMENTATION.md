@@ -206,7 +206,7 @@ Implement node/edge/status types, immutable versions, and queries:
 
 Wrap Revision 2 reference semantics behind native protocol:
 
-- programmatic transition model;
+- programmatic transition model (delivered: bn-2d0e — `crates/continuum-engine-reference/src/{ident,domain,expr,model,diehard}.rs`: named variables over inclusive `i64` domains, named actions as guarded deterministic-or-enumerated simultaneous updates, an explicit initial-state enumeration, and named predicates, all as inert data rather than closures so INV-005 is a property of the types; state vectors, action indices, initial states and successor rows in the certificate wire form's canonical byte order, and the TV-009 Die Hard port asserted against the frozen 16-state/96-transition/depth-6 facts);
 - deterministic BFS;
 - invariant/deadlock checking;
 - shortest witness;
