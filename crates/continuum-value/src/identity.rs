@@ -86,33 +86,80 @@
 //! call. A caller who wants a hash identity computes one from the value, in a
 //! lane that has already named itself.
 //!
-//! # The hash seam, and the placeholder standing in it
+//! # The hash seam, and the two hashers standing in it
 //!
-//! ADR-0013 says artifact digests use *cryptographic* hashes. This workspace has
-//! zero external dependencies, and the decision about which hash to vendor — and
-//! the review that decision needs — is not this module's to make. Hand-rolling a
-//! cryptographic primitive to fill the gap would be worse than the gap: it would
-//! produce something that *looks* like a release hash and is not.
+//! ADR-0013 says artifact digests use *cryptographic* hashes, and the hash is a
+//! seam so that saying which one is a dependency decision rather than a
+//! structural one. [`ContentHasher`] is the whole contract — a
+//! [`HashAlgorithm`] label and a pure `&[u8] -> Digest256` function — and two
+//! implementations ship, for two different jobs:
 //!
-//! So the hash is a seam. [`ContentHasher`] is the whole contract — a
-//! [`HashAlgorithm`] label and a pure `&[u8] -> Digest256` function — and
-//! [`Fnv1aPlaceholder`] is a deliberately, visibly inadequate implementation of
-//! it:
+//! - [`Blake3Hasher`] is the production hasher. Its token is `blake3-256`,
+//!   [`HashAlgorithm::is_cryptographic`] returns `true` for it, and it is the
+//!   one to use anywhere a digest indexes real artifacts, reaches a store path,
+//!   or is written into a receipt. It is the `blake3` crate at the workspace's
+//!   pinned version, entered through one line of code and no state; see
+//!   `tools/governance/dependency-rationale.toml` for what trusting it costs.
+//! - [`Fnv1aPlaceholder`] is retained as the *test-grade* hasher: an honest,
+//!   dependency-free partitioner used as the cheap double in this crate's suites
+//!   and in `continuum-intent`'s. Its token is `placeholder-fnv1a-256`,
+//!   `is_cryptographic()` is `false`, and both facts are pinned by
+//!   `the_placeholder_declares_itself_non_cryptographic`, so it cannot be
+//!   mistaken for the production hasher by a reader, a log line, or a receipt.
 //!
-//! - its algorithm token is `placeholder-fnv1a-256`, so any artifact, receipt, or
-//!   log line that records the algorithm records the word "placeholder";
-//! - [`HashAlgorithm::is_cryptographic`] returns `false` for it, so the weakness
-//!   is machine-readable and not only prose;
-//! - its documentation states outright that four FNV-1a lanes over one input are
-//!   strongly correlated and that the construction has nothing resembling
-//!   128-bit collision resistance, let alone 256.
+//! The seam is deliberately still a seam. Nothing in this module defaults to
+//! [`Blake3Hasher`]: [`ContentIdentity::digest`], [`HashIdentity::compute`] and
+//! [`IdentityIndex`] all take the hasher as a type parameter with no default, so
+//! a lane can install a different partitioner — a test double, an adversarial
+//! collider, a future migration's hash — without editing identity. Vendoring a
+//! cryptographic hash was therefore an *addition*: it changes **no** certified
+//! identity, and every test that states ADR-0013's semantics is parameterized
+//! over the hasher and asserted while a maximally colliding one is installed.
+//! That is the property that made deferring the vendor decision safe, and it is
+//! the same property that makes having taken it uneventful.
 //!
-//! Replacing it is a one-line change at every call site (the turbofish on
-//! [`ContentIdentity::digest`], [`HashIdentity::compute`], and
-//! [`IdentityIndex`]), and it changes **no** certified identity: the tests that
-//! state ADR-0013's semantics are parameterized over the hasher and are run
-//! against a maximally colliding one. That is the property that makes deferring
-//! the vendor decision safe rather than merely convenient.
+//! ## docs/09 T02, control 3
+//!
+//! > ### T02 — Hash collision changes reachability
+//! >
+//! > Controls: […] cryptographic digests for artifact identity; […]
+//! >
+//! > — `notes/plan/docs/09_THREAT_MODEL.md` §5
+//!
+//! [`Blake3Hasher`] is that control, delivered. The evidence, in this module
+//! unless stated otherwise:
+//!
+//! - **It is BLAKE3, not something shaped like it.**
+//!   `blake3_matches_the_published_test_vectors` pins the digests of the BLAKE3
+//!   specification's own inputs — the empty string and the `0,1,…,250`-repeating
+//!   sequence at lengths 1, 2, 3, 1023, 1024, 1025 and 2048, so both the
+//!   single-chunk and the multi-chunk tree paths are covered — as literals.
+//! - **It is a pure function.** `blake3_is_a_pure_function_of_the_bytes` and
+//!   `blake3_digest_vectors_are_pinned`; the second is the cross-process half,
+//!   since a literal in the source was produced by an earlier run.
+//! - **It is honest about what it is.**
+//!   `the_vendored_hasher_declares_itself_cryptographic` and
+//!   `every_algorithm_token_is_well_formed`.
+//! - **It is a real upgrade over the stand-in.**
+//!   `the_placeholder_diffuses_worse_than_the_vendored_hasher` measures single-bit
+//!   diffusion over a fixed corpus and shows the placeholder's four lanes moving
+//!   together where BLAKE3's quarters never do. A smoke test, explicitly not a
+//!   cryptographic proof — see its own comment.
+//! - **It changed no identity discipline.** The collision-injection suite
+//!   (`certified_identity_equality_cannot_consult_a_hash`,
+//!   `an_index_under_a_maximally_colliding_hash_still_separates_every_value`,
+//!   `a_colliding_lookup_does_not_report_a_false_hit`,
+//!   `every_injected_hash_gives_the_same_certified_answers`,
+//!   `a_listing_is_the_same_under_every_hash`) and
+//!   `tests/t02_reachability_evidence.rs` are unchanged and still pass; they name
+//!   no hasher they do not define themselves, which is what makes them the
+//!   hash-agnostic proof rather than a regression suite for one hash.
+//!
+//! Controls 1, 2 and 4 were already discharged and are unaffected: this is a
+//! defense-in-depth control, because `tests/t02_reachability_evidence.rs` proves
+//! reachability is computed identically under a total collider, a partial
+//! collider and an honest hash. A better hash buys shorter buckets and a
+//! meaningful artifact digest, never a different reachable set.
 //!
 //! # How this reaches the store
 //!
@@ -187,7 +234,11 @@
 //!   yields one identity" with the concurrency and the durability removed. A
 //!   store, a lock, a fsync order, and a capability check are not a leaf crate's
 //!   business.
-//! - **The release hash is not here** — see "The hash seam" above.
+//! - **The release hash is no longer one of these.** [`Blake3Hasher`] fills it
+//!   (see "The hash seam" above). What stays open on purpose is the *choice* at
+//!   each call site: the hasher is a type parameter with no default, so nothing
+//!   here decides which hash a given lane partitions by. Naming a default is a
+//!   policy decision for the crate that owns the lane, not a leaf crate's.
 //! - **Artifact handles are not here.** A handle is a class prefix plus an
 //!   identity token (plan §4.4); the class vocabulary and the path layout live in
 //!   `continuum-workspace`. This module supplies the token and asserts it fits.
@@ -326,8 +377,11 @@ pub struct HashAlgorithm {
 impl HashAlgorithm {
     /// Declare a hash the project has accepted as cryptographic.
     ///
-    /// Reserved for a vendored, reviewed primitive. Nothing in this crate uses it
-    /// yet — see the module documentation's "hash seam" section.
+    /// Reserved for a vendored, reviewed primitive: a dependency with an entry in
+    /// `tools/governance/dependency-rationale.toml` stating a TCB class, which
+    /// `just check` enforces (GOV-1-07). [`Blake3Hasher`] is the one such hasher
+    /// this crate ships; a hand-rolled construction is never one, however wide
+    /// its output.
     #[must_use]
     pub const fn cryptographic(token: &'static str) -> Self {
         Self {
@@ -398,32 +452,96 @@ pub trait ContentHasher {
     fn hash(bytes: &[u8]) -> Digest256;
 }
 
+/// The production content hasher: BLAKE3, at its default output width.
+///
+/// BLAKE3's output is an extendable stream; [`DIGEST_LEN`] is 32 bytes, which is
+/// exactly its default length, so nothing is truncated and nothing is extended. A
+/// [`Digest256`] produced here is the standard BLAKE3 hash of the canonical
+/// encoding and nothing else — no length prefix, no domain separator, no framing
+/// this module invented.
+/// `blake3_matches_the_published_test_vectors` pins that against the digests in
+/// the BLAKE3 specification's own vector file, so an implementation swap that
+/// changed the function would fail rather than silently redefine every artifact
+/// token in the workspace.
+///
+/// This is what ADR-0013 means by "artifact digests use cryptographic hashes" and
+/// what `docs/09_THREAT_MODEL.md`'s T02 lists as control 3. Use it wherever a
+/// digest is written down: a store path, an artifact handle, a receipt field, a
+/// [`HashIdentity`] in a labeled lane, a long-lived [`IdentityIndex`].
+///
+/// What it does **not** change is the identity relation. ADR-0013's certified
+/// lane compares canonical encodings, and this type appears nowhere in
+/// [`ContentIdentity`]'s equality, ordering, or storage — the collision-injection
+/// suite still installs hashers that collide by construction and still gets the
+/// same answers. A digest from here is a better index, not a different kind of
+/// claim: an [`IdentityIndex`] under this hasher still resolves a bucket by exact
+/// comparison, and it must, because "collision-free" is a belief about BLAKE3
+/// rather than a fact about the program.
+///
+/// The construction is a pure call with no state, no seed, and no configuration:
+/// the same bytes give the same digest in every process, on every platform, under
+/// every feature selection the workspace pins (`default-features = false`,
+/// `pure`, so the digest comes from Rust code and no C toolchain enters the build
+/// — see the root `Cargo.toml`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Blake3Hasher;
+
+impl ContentHasher for Blake3Hasher {
+    const ALGORITHM: HashAlgorithm = HashAlgorithm::cryptographic("blake3-256");
+
+    fn hash(bytes: &[u8]) -> Digest256 {
+        Digest256::from_bytes(*blake3::hash(bytes).as_bytes())
+    }
+}
+
 /// FNV-1a offset basis, 64-bit.
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 /// FNV-1a prime, 64-bit.
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// **Not the release hash.** A non-cryptographic stand-in that fills the
-/// [`ContentHasher`] seam until the dependency decision lands.
+/// **Not the release hash — the test-grade one.** The production hasher is
+/// [`Blake3Hasher`]; this is the dependency-free double the suites partition by.
 ///
 /// Four 64-bit FNV-1a lanes, domain-separated by a leading lane byte, concatenated
 /// big-endian into 256 bits. FNV-1a is a well-known, deliberately simple,
 /// deliberately non-cryptographic construction; running it four times over the
 /// same input produces four strongly correlated lanes, so this hash has nothing
 /// resembling 128-bit collision resistance, let alone the 256 bits its output
-/// width suggests. Second preimages are trivial to construct. It is here because
-/// something must be, and because being obviously inadequate is safer than being
-/// plausibly inadequate.
+/// width suggests. Second preimages are trivial to construct.
+/// `the_placeholder_diffuses_worse_than_the_vendored_hasher` makes the lane
+/// correlation observable rather than merely asserted here.
+///
+/// # Why it was retained rather than retired
+///
+/// Retiring it was the alternative, and it was rejected for three reasons:
+///
+/// 1. **It is the seam's proof of openness.** The claim that identity is
+///    structurally independent of the hash is only checkable while more than one
+///    [`ContentHasher`] exists outside `#[cfg(test)]`. With a single shipped
+///    hasher the turbofish would be a formality, and the first person to add
+///    `impl Default` for a hasher choice would meet no resistance.
+/// 2. **It is what the suites actually use.** `continuum-intent`'s contract,
+///    property, and PR-4 exit suites mint identities through
+///    `digest::<Fnv1aPlaceholder>()`, and `continuum-workspace`'s exit evidence
+///    mirrors its construction. Those are tests of *identity plumbing*, not of
+///    hashing; making them depend on a cryptographic primitive would couple them
+///    to a dependency they have no interest in.
+/// 3. **Retiring it is a public-API break for no benefit.** It is `pub` and it is
+///    used outside this crate (`continuum-intent`, in `src/` tests and in three
+///    integration suites), and it is honest: its token contains the word
+///    "placeholder" and [`HashAlgorithm::is_cryptographic`] is `false` for it, so
+///    it cannot be mistaken for the release hash by anything that renders it.
 ///
 /// What it *is* good for: deterministically partitioning identities into buckets so
 /// that [`IdentityIndex`] does fewer canonical comparisons than a linear scan. That
 /// is the only job ADR-0013 gives a hash in a certified lane, and this discharges
-/// it correctly.
+/// it correctly. What it is *not* good for is any artifact that outlives a test
+/// run — for that, use [`Blake3Hasher`].
 ///
-/// Replacing it changes every digest and every artifact *token*, and changes no
-/// [`ContentIdentity`] at all. Certified identities are canonical encodings, so
-/// they are not invalidated by a hash change; the digests pinned in this module's
-/// tests are labeled as placeholder-specific and are expected to change with it.
+/// Choosing between the two changes every digest and every artifact *token*, and
+/// changes no [`ContentIdentity`] at all. Certified identities are canonical
+/// encodings, so they are not invalidated by a hash change; the digests pinned in
+/// this module's tests are labeled with the hasher that produced them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Fnv1aPlaceholder;
 
@@ -1590,8 +1708,10 @@ mod tests {
 
     #[test]
     fn the_placeholder_declares_itself_non_cryptographic() {
-        // The seam's honesty contract. If a real hash lands and this test is updated to
-        // expect `true`, that edit is the visible record of the vendor decision.
+        // The seam's honesty contract. The placeholder was *retained* when
+        // `Blake3Hasher` landed (see its documentation for why), so this stays `false`
+        // forever: it is now the test-grade hasher rather than a stand-in awaiting one,
+        // and a lane that reads `is_cryptographic()` must still be told the truth.
         assert!(!Fnv1aPlaceholder::ALGORITHM.is_cryptographic());
         assert_eq!(Fnv1aPlaceholder::ALGORITHM.token(), "placeholder-fnv1a-256");
         assert!(
@@ -1607,6 +1727,7 @@ mod tests {
     #[test]
     fn every_algorithm_token_is_well_formed() {
         for algorithm in [
+            Blake3Hasher::ALGORITHM,
             Fnv1aPlaceholder::ALGORITHM,
             ConstantHash::ALGORITHM,
             KindTagHash::ALGORITHM,
@@ -1647,6 +1768,358 @@ mod tests {
         }
         assert_eq!(index.digest_count(), index.len());
         assert_eq!(index.collisions().count(), 0);
+    }
+
+    // --- the vendored production hasher -----------------------------------------------------
+    //
+    // docs/09 T02's control 3, "cryptographic digests for artifact identity". Everything
+    // below is about the *digest*; not one assertion in this section touches what two
+    // values being the same artifact means, because under ADR-0013 nothing can.
+
+    /// The BLAKE3 specification's test-vector input: the bytes `0,1,…,250`, repeating.
+    fn blake3_vector_input(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    #[test]
+    fn the_vendored_hasher_declares_itself_cryptographic() {
+        // The other half of the seam's honesty contract: the production hasher says so,
+        // in the machine-readable field and in the token that travels with every digest.
+        assert!(Blake3Hasher::ALGORITHM.is_cryptographic());
+        assert_eq!(Blake3Hasher::ALGORITHM.token(), "blake3-256");
+        assert!(
+            !Blake3Hasher::ALGORITHM.token().contains("placeholder"),
+            "the production hasher must not be labeled as a stand-in"
+        );
+        assert_eq!(
+            IdentityIndex::<Blake3Hasher>::algorithm(),
+            Blake3Hasher::ALGORITHM
+        );
+
+        // And the two shipped hashers are distinguishable everywhere it matters: a
+        // digest minted under one is never accepted as one minted under the other.
+        assert_ne!(Blake3Hasher::ALGORITHM, Fnv1aPlaceholder::ALGORITHM);
+        let value = Value::text("a");
+        assert_ne!(
+            HashIdentity::compute::<Blake3Hasher>(&value, label("lane")),
+            HashIdentity::compute::<Fnv1aPlaceholder>(&value, label("lane"))
+        );
+    }
+
+    #[test]
+    fn blake3_matches_the_published_test_vectors() {
+        // Literals from the BLAKE3 specification's own vector file, not recomputation:
+        // this is what pins that `Blake3Hasher` is *BLAKE3* and not merely some
+        // 256-bit-wide function the vendored crate happens to compute today. A
+        // dependency bump, a feature change (the workspace pins `pure`, so these digests
+        // come from Rust code rather than the assembly path), or a swapped
+        // implementation that changed the function would fail here rather than silently
+        // redefine every artifact token in the workspace.
+        //
+        // The lengths straddle BLAKE3's 1024-byte chunk boundary in both directions, so
+        // the single-chunk path and the multi-chunk tree path are both covered.
+        let vectors: [(usize, &str); 8] = [
+            (
+                0,
+                "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+            ),
+            (
+                1,
+                "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213",
+            ),
+            (
+                2,
+                "7b7015bb92cf0b318037702a6cdd81dee41224f734684c2c122cd6359cb1ee63",
+            ),
+            (
+                3,
+                "e1be4d7a8ab5560aa4199eea339849ba8e293d55ca0a81006726d184519e647f",
+            ),
+            (
+                1023,
+                "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11",
+            ),
+            (
+                1024,
+                "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7",
+            ),
+            (
+                1025,
+                "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444",
+            ),
+            (
+                2048,
+                "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a",
+            ),
+        ];
+        for (len, expected) in vectors {
+            let digest = Blake3Hasher::hash(&blake3_vector_input(len));
+            assert_eq!(digest.to_token(), expected, "input length {len}");
+            // And the token round-trips, so a digest that reaches a store path comes
+            // back the same digest.
+            assert_eq!(Digest256::from_token(expected), Ok(digest));
+        }
+
+        // The widely published `blake3("abc")`, from outside the vector file.
+        assert_eq!(
+            Blake3Hasher::hash(b"abc").to_token(),
+            "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+        );
+    }
+
+    #[test]
+    fn blake3_is_a_pure_function_of_the_bytes() {
+        // The `ContentHasher` contract: a function of the input alone — no seed, no
+        // clock, no interior state — because docs/19 §7 requires the artifacts derived
+        // from it to be identical across processes, machines, and restarts.
+        for value in sample_values() {
+            let identity = ContentIdentity::of(&value);
+            assert_eq!(
+                identity.digest::<Blake3Hasher>(),
+                identity.digest::<Blake3Hasher>()
+            );
+            assert_eq!(
+                identity.digest::<Blake3Hasher>(),
+                Blake3Hasher::hash(&value.encode())
+            );
+        }
+
+        // Reached by a different route — encoded, shipped, decoded — the digest is the
+        // same, because the identity is.
+        let value = Value::record([(name("k"), Value::nat(9))]).expect("valid");
+        let shipped =
+            ContentIdentity::from_canonical_bytes(&value.encode()).expect("canonical bytes");
+        assert_eq!(
+            shipped.digest::<Blake3Hasher>(),
+            ContentIdentity::of(&value).digest::<Blake3Hasher>()
+        );
+
+        // Value identity, not construction order: a set built two ways is one digest.
+        let ascending = Value::set([Value::nat(1), Value::nat(2), Value::nat(3)]).expect("valid");
+        let descending = Value::set([Value::nat(3), Value::nat(2), Value::nat(1)]).expect("valid");
+        assert_eq!(
+            ContentIdentity::of(&ascending).digest::<Blake3Hasher>(),
+            ContentIdentity::of(&descending).digest::<Blake3Hasher>()
+        );
+    }
+
+    #[test]
+    fn blake3_digest_vectors_are_pinned() {
+        // The cross-process half of determinism: these literals were produced by an
+        // earlier run of a different process, so a run that agrees with them agrees
+        // across processes and restarts, not merely with itself.
+        //
+        // Unlike `certified_identity_vectors_are_pinned`, changing these is not a
+        // semantic-epoch event *for identity* — a certified identity carries no hasher —
+        // but it does change every artifact token derived from them, so it is a
+        // publication-visible change and never a fix.
+        let tokens: Vec<String> = [Value::Null, Value::Bool(true), Value::nat(0)]
+            .iter()
+            .map(|value| {
+                ContentIdentity::of(value)
+                    .digest::<Blake3Hasher>()
+                    .to_token()
+            })
+            .collect();
+        assert_eq!(
+            tokens,
+            [
+                "48fc721fbbc172e0925fa27af1671de225ba927134802998b10a1568a188652b",
+                "6abc4fcdb4f073e1c863ffb08389b349b2d6f61e0ea935d8f07d014fa3078cc5",
+                "fd07e5b69bfa982855889ce70a028ccba18098d71529ec8d4367bb5d86c8ac98",
+            ]
+        );
+        // They are the hash of the canonical encoding and of nothing else — no length
+        // prefix, no domain separator, no framing this module invented.
+        assert_eq!(
+            tokens[0],
+            Blake3Hasher::hash(&Value::Null.encode()).to_token()
+        );
+    }
+
+    #[test]
+    fn the_vendored_hasher_separates_the_sample_domain() {
+        // The same usefulness claim `the_placeholder_separates_the_sample_domain` makes,
+        // asserted for the production hasher: one bucket per identity, no collisions.
+        // Not a security claim — a partitioner that put everything in one bucket would
+        // still be *correct* under ADR-0013 and would be worthless.
+        let mut index: IdentityIndex<Blake3Hasher> = IdentityIndex::new();
+        for identity in sample_identities() {
+            index.insert(identity);
+        }
+        assert_eq!(index.digest_count(), index.len());
+        assert_eq!(index.collisions().count(), 0);
+    }
+
+    #[test]
+    fn the_placeholder_diffuses_worse_than_the_vendored_hasher() {
+        // Why the upgrade was worth a dependency, made observable.
+        //
+        // This is a *smoke test over a fixed corpus*, not a cryptographic result. No
+        // finite test distinguishes a cryptographic hash from a well-diffusing one, and
+        // nothing here claims to. What it does show is the specific weakness
+        // `Fnv1aPlaceholder`'s own documentation states in prose — "four strongly
+        // correlated lanes" — as a measurement, and shows BLAKE3 not having it.
+        //
+        // Two statistics over every single-bit flip of a fixed 32-message corpus:
+        //
+        //   avalanche — how many of the 256 output bits a one-bit input change moves;
+        //   lane skew — how differently the four 64-bit quarters of the output move.
+        //               For four independent quarters, two difference patterns should
+        //               agree in about half their bits; identical patterns should not
+        //               occur at all.
+        fn measure<H: ContentHasher>() -> (u32, u32, u32) {
+            let mut min_avalanche = u32::MAX;
+            let mut min_quarter_distance = u32::MAX;
+            let mut identical_quarter_pairs = 0u32;
+            for len in 1..=32usize {
+                let message: Vec<u8> = (0..len).map(|i| ((i * 13 + len) % 251) as u8).collect();
+                let base = H::hash(&message);
+                for bit in 0..len * 8 {
+                    let mut flipped = message.clone();
+                    flipped[bit / 8] ^= 1 << (bit % 8);
+                    let moved = H::hash(&flipped);
+
+                    let difference: Vec<u8> = base
+                        .as_bytes()
+                        .iter()
+                        .zip(moved.as_bytes())
+                        .map(|(a, b)| a ^ b)
+                        .collect();
+                    min_avalanche =
+                        min_avalanche.min(difference.iter().map(|b| b.count_ones()).sum());
+
+                    for left in 0..4 {
+                        for right in left + 1..4 {
+                            let distance: u32 = (0..8)
+                                .map(|k| {
+                                    (difference[left * 8 + k] ^ difference[right * 8 + k])
+                                        .count_ones()
+                                })
+                                .sum();
+                            min_quarter_distance = min_quarter_distance.min(distance);
+                            if distance == 0 {
+                                identical_quarter_pairs += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            (min_avalanche, min_quarter_distance, identical_quarter_pairs)
+        }
+
+        let (placeholder_avalanche, placeholder_quarters, placeholder_identical) =
+            measure::<Fnv1aPlaceholder>();
+        let (blake3_avalanche, blake3_quarters, blake3_identical) = measure::<Blake3Hasher>();
+
+        // The placeholder: some one-bit change moves a quarter of the output or less,
+        // and some one-bit change moves two of its four lanes in *exactly* the same bit
+        // positions — which is what "correlated lanes" means when it is measured rather
+        // than asserted, and why 256 bits of width is not 256 bits of hash.
+        assert!(
+            placeholder_avalanche <= 64,
+            "expected the placeholder to diffuse poorly somewhere; min avalanche was \
+             {placeholder_avalanche}/256"
+        );
+        assert_eq!(placeholder_quarters, 0);
+        assert!(
+            placeholder_identical > 0,
+            "expected at least one pair of identically-moving lanes"
+        );
+
+        // BLAKE3, over the same corpus, does neither.
+        assert!(
+            blake3_avalanche >= 96,
+            "min avalanche was {blake3_avalanche}/256"
+        );
+        assert!(
+            blake3_quarters >= 8,
+            "closest pair of quarter-differences was {blake3_quarters} bits apart"
+        );
+        assert_eq!(blake3_identical, 0);
+    }
+
+    #[test]
+    fn the_certified_lane_is_unchanged_under_the_vendored_hasher() {
+        // The collision-injection suite above is the hash-agnostic proof and is
+        // deliberately left untouched by the vendor decision — it names no hasher it
+        // does not define itself. This is the corresponding observation from the other
+        // side: installing the production hasher produces the *same* certified answers
+        // the adversarial hashers produce, so the upgrade moved nothing.
+        let identities = sample_identities();
+        let mut index: IdentityIndex<Blake3Hasher> = IdentityIndex::new();
+        for identity in identities.clone() {
+            index.insert(identity.clone());
+            assert_eq!(index.insert(identity), Insertion::Existing);
+        }
+        assert_eq!(index.len(), identities.len());
+        for identity in &identities {
+            assert_eq!(index.get(identity), Some(identity));
+        }
+
+        // The listing — the thing that gets published — is byte-for-byte what every
+        // other hasher produces (docs/19 §7).
+        let listing: Vec<String> = index
+            .sorted_identities()
+            .into_iter()
+            .map(ContentIdentity::to_hex)
+            .collect();
+        let mut reference: IdentityIndex<ConstantHash> = IdentityIndex::new();
+        for identity in identities.clone() {
+            reference.insert(identity);
+        }
+        assert_eq!(
+            listing,
+            reference
+                .sorted_identities()
+                .into_iter()
+                .map(ContentIdentity::to_hex)
+                .collect::<Vec<String>>()
+        );
+
+        // Lookup still decides by canonical comparison, not by digest presence: a value
+        // that is absent stays absent, and the code path that says so is the same one
+        // the colliding hashers exercise.
+        let absent = ContentIdentity::of(&Value::text("not in the sample domain"));
+        assert!(!index.contains(&absent));
+        assert_eq!(index.get(&absent), None);
+    }
+
+    #[test]
+    fn the_seam_still_accepts_a_hasher_this_crate_does_not_ship() {
+        // Nothing was hardcoded when the vendor decision landed. A caller can still
+        // install an arbitrary `ContentHasher` — including one that collides on
+        // everything — and every certified-lane guarantee holds under it, which is the
+        // property that keeps the hash a dependency decision rather than a semantic one.
+        /// Defined here, after `Blake3Hasher` exists, so it cannot be mistaken for a
+        /// leftover from the pre-vendor world.
+        #[derive(Debug, Clone, Copy)]
+        struct PostVendorCollider;
+
+        impl ContentHasher for PostVendorCollider {
+            const ALGORITHM: HashAlgorithm =
+                HashAlgorithm::non_cryptographic("test-post-vendor-collider");
+
+            fn hash(_bytes: &[u8]) -> Digest256 {
+                Digest256::from_bytes([0xc3; DIGEST_LEN])
+            }
+        }
+
+        let identities = sample_identities();
+        let mut index: IdentityIndex<PostVendorCollider> = IdentityIndex::new();
+        for identity in identities.clone() {
+            index.insert(identity);
+        }
+        assert_eq!(index.digest_count(), 1);
+        assert_eq!(index.len(), identities.len());
+        for identity in &identities {
+            assert!(index.contains(identity), "{identity} was suppressed");
+        }
+        assert_eq!(
+            IdentityIndex::<PostVendorCollider>::algorithm().token(),
+            "test-post-vendor-collider"
+        );
+        assert!(!IdentityIndex::<PostVendorCollider>::algorithm().is_cryptographic());
     }
 
     // --- digest tokens ---------------------------------------------------------------------

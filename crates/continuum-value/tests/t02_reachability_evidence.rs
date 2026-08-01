@@ -74,29 +74,35 @@
 //! **Existing coverage**: `identity.rs`'s "The hash seam" module-doc section and
 //! `identity::tests::the_placeholder_declares_itself_non_cryptographic`,
 //! `every_algorithm_token_is_well_formed`,
-//! `a_non_certified_lane_cannot_be_entered_unlabeled` — [`Fnv1aPlaceholder`] is
-//! the only [`ContentHasher`] this workspace ships outside test doubles, its
-//! `ALGORITHM.is_cryptographic()` is pinned `false`, and its algorithm token
+//! `a_non_certified_lane_cannot_be_entered_unlabeled` — [`Fnv1aPlaceholder`]'s
+//! `ALGORITHM.is_cryptographic()` is pinned `false` and its algorithm token
 //! contains the word "placeholder", so nothing in the workspace can present it
 //! as a cryptographic digest without visibly lying.
 //!
-//! **Finding, not a violation** (reported for the lead, `src/` is out of this
-//! bone's scope regardless): no *cryptographic* [`ContentHasher`] or
-//! [`continuum_workspace::publication::ContentIdentifier`] is vendored anywhere
-//! in `crates/*/src/` today — a repo-wide search finds `impl ContentIdentifier`
-//! only inside test files, and the only `HashAlgorithm::cryptographic(...)` call
-//! site is an illustrative literal inside `identity.rs`'s own test module. This
-//! is a pre-existing, explicitly documented deferral (identity.rs, "Seams left
-//! open on purpose": "The release hash is not here" — the vendor decision needs
-//! its own review), not something this bone introduces or can fix from a
-//! test-only workspace fence. It is *not* a T02 reachability defect: this
-//! file's own positive test proves reachability is computed identically under
-//! [`Fnv1aPlaceholder`], under a total collider, and under a partial collider —
-//! the deferred cryptographic choice can only change how many canonical
-//! comparisons a bucket does, never which states are found. Vendoring the real
-//! hash later is therefore a performance change, not a correctness one, and
-//! that invariance is exactly what [`positive_reachable_sets_match_ground_truth_under_every_adversarial_hash`]
-//! pins.
+//! **Delivered** (bone `bn-30eym`; this file's earlier revision recorded the gap
+//! as a finding, and the finding is now closed): `continuum_value::identity::`
+//! `Blake3Hasher` is a cryptographic [`ContentHasher`] in `crates/*/src/`,
+//! backed by the `blake3` crate pinned in the root `[workspace.dependencies]`
+//! with a TCB class in `tools/governance/dependency-rationale.toml` (GOV-1-07).
+//! Its evidence lives in `identity.rs`: `blake3_matches_the_published_test_`
+//! `vectors` pins the BLAKE3 specification's own vectors as literals,
+//! `blake3_is_a_pure_function_of_the_bytes` and `blake3_digest_vectors_are_`
+//! `pinned` pin determinism within and across processes,
+//! `the_vendored_hasher_declares_itself_cryptographic` pins the honesty field,
+//! and `the_placeholder_diffuses_worse_than_the_vendored_hasher` measures the
+//! weakness that motivated the upgrade. [`Fnv1aPlaceholder`] was deliberately
+//! *retained* — as the test-grade hasher, and as the second implementation that
+//! keeps the seam observably open — so nothing in this file changed.
+//!
+//! That last point is the load-bearing one, and it is why the vendor decision
+//! was safe to take late: this file's positive test proves reachability is
+//! computed identically under [`Fnv1aPlaceholder`], under a total collider, and
+//! under a partial collider, so the cryptographic choice can only change how
+//! many canonical comparisons a bucket does, never which states are found.
+//! Vendoring the real hash was therefore a defense-in-depth and artifact-digest
+//! change, not a correctness one, and that invariance is exactly what
+//! [`positive_reachable_sets_match_ground_truth_under_every_adversarial_hash`]
+//! pins — unchanged, and still passing, on both sides of the upgrade.
 //!
 //! ## 4. "adversarial collision corpus"
 //!

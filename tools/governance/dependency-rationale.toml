@@ -29,10 +29,56 @@
 #       Only ever a `[build-dependencies]` entry. In the build graph, not the
 #       runtime graph.
 #
-# As of this revision the workspace declares no external dependency at all: every
-# entry below is a workspace-internal path edge. That is a fact about the PR-1
-# scaffold, not a policy — the first external crate needs an entry here with an
-# honest class before `just check` will pass.
+# The workspace declares exactly one external dependency: `blake3`, entered in
+# `bn-30eym` to fill the ADR-0013 hash seam. Every other entry below is a
+# workspace-internal path edge. The bar for a second one is the same as the bar
+# for the first: an honest class, a stated cost, and a tree small enough to read.
+#
+# --- blake3, the one external edge ------------------------------------------
+#
+# Version and features are pinned once, in the root `[workspace.dependencies]`:
+#
+#     blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
+#
+# `cargo tree -p continuum-value -e normal,build --target all` at that pin:
+#
+#     continuum-value
+#     └── blake3 v1.8.5
+#         ├── arrayref v0.3.9
+#         ├── arrayvec v0.7.8          (default-features = false)
+#         ├── cfg-if v1.0.4
+#         ├── constant_time_eq v0.4.2  (default-features = false)
+#         └── cpufeatures v0.3.0
+#             └── libc v0.2.189        (aarch64/loongarch targets only)
+#         [build-dependencies]
+#         └── cc v1.4.0
+#             ├── find-msvc-tools v0.1.9
+#             └── shlex v2.0.1
+#
+# Nine crates, of which five are compiled into the artifact on x86-64 and four
+# are build-graph only. Two feature choices shrink it and are load-bearing:
+# `default-features = false` drops `std` (the seam is a pure `&[u8] -> [u8; 32]`
+# function; nothing here writes through `io::Write` or maps a file), and `pure`
+# stops `blake3`'s `build.rs` from invoking a C compiler on the bundled assembly
+# and intrinsics, selecting its Rust SIMD implementations instead. `cc` stays in
+# the build graph because `blake3` declares it unconditionally, but with `pure`
+# it is never *called*: no C toolchain is required to build this workspace, and
+# the emitted digests are not a function of the host's `cc`. That matters because
+# plan §20 requires trust-base crates to "build reproducibly from pinned sources"
+# and INV-014 requires a receipt's build identity to be independently
+# re-derivable. BLAKE3's output is specified, so `pure` costs throughput and
+# nothing else — `blake3_matches_the_published_test_vectors` pins the
+# specification's own vectors as literals, so a feature or version change that
+# altered the function fails the gate instead of silently redefining every
+# artifact token.
+
+[[dependency]]
+name = "blake3"
+origin = "external"
+tcb_class = "trusted-checking-base"
+kinds = ["normal"]
+used_by = ["continuum-value"]
+rationale = "The cryptographic hash behind continuum-value's ContentHasher seam (identity::Blake3Hasher): ADR-0013's \"artifact digests use cryptographic hashes\" and docs/09 T02's control 3, \"cryptographic digests for artifact identity\". Vendored rather than hand-rolled because a hand-rolled primitive would look like a release hash and not be one (identity.rs, \"The hash seam\"); BLAKE3 specifically because it is specified, has published test vectors this crate pins as literals, is pure Rust under the `pure` feature so no C toolchain enters a trust-base crate's build, and needs no seed, clock, or interior state — the seam requires a function of its input alone (docs/19 §7). Classed trusted-checking-base because it is linked in normal position by continuum-value, which is itself trusted-checking-base and inside docs/33's smallest trust base; a dependency of the trust base is in the trust base whatever the consuming call site does with it, and the class must not be a self-assessment that a caller's discipline pays for. What that discipline actually buys is stated for the reviewer rather than used to discount the class: under ADR-0013 a certified identity IS the canonical Value::encode byte string and every digest collision is resolved by exact comparison, so no defect in this crate — collision, truncation, or a wrong digest outright — can make two distinct values one certified identity or hide one from an IdentityIndex; identity.rs's collision-injection suite asserts exactly that while hashers that collide by construction are installed, and mentions BLAKE3 nowhere. The blast radius a defect does have is real and is why the class is not lower: artifact-handle tokens and store paths are digests (plan §4.4), a HashIdentity in a labeled non-certified lane IS its digest by construction (ADR-0013's rejected alternative 2), and T02 control 3 is a defense-in-depth control that a broken hash silently removes."
 
 [[dependency]]
 name = "continuum-value"

@@ -13,7 +13,9 @@
 //! encoding: a certified identity *is* the encoding, so it carries no hasher and no
 //! hash-vendor decision can change what two values being "the same artifact" means.
 //! The hash the ADR gives an indexing role sits behind the [`identity::ContentHasher`]
-//! seam, currently filled by a labeled, deliberately non-cryptographic placeholder.
+//! seam, filled by [`identity::Blake3Hasher`] for anything written down and by the
+//! retained, labeled, deliberately non-cryptographic [`identity::Fnv1aPlaceholder`] for
+//! the suites that partition by a hasher they do not want a dependency on.
 //!
 //! Compatibility epochs live here too, in [`epoch`] (PR-1 / IMPL-02). Plan §4.6 states
 //! it directly — "Epochs are content identities" — and docs/33 "Trust boundary" places
@@ -43,6 +45,10 @@
 //! - The canonical value decoder is a trust-base component (docs/33): no async, no
 //!   search, no adapter, and no Forge dependency.
 //! - Leaf crate — it may not import any other Continuum crate.
+//! - One external edge: `blake3`, reached only from [`identity::Blake3Hasher`]'s single
+//!   `ContentHasher` impl. It computes digests, which ADR-0013 makes an index; it is not
+//!   in the path of any certified identity decision. Rationale and TCB class are in
+//!   `tools/governance/dependency-rationale.toml` (GOV-1-07).
 //!
 //! The exact finite values, their canonical encoding, and their total order live in
 //! [`value`] (PR 2) and ADR-0013 content identity in [`identity`] (PR 2); [`epoch`]

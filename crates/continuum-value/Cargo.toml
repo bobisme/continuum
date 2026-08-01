@@ -6,5 +6,19 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# The one external dependency of the workspace's leaf crate: BLAKE3, plugged
+# into the `ContentHasher` seam as `Blake3Hasher` (src/identity.rs). Version and
+# features are pinned in the root `[workspace.dependencies]`; the rationale and
+# TCB class are in `tools/governance/dependency-rationale.toml`.
+#
+# It buys a digest, never an identity. ADR-0013 keeps certified identity on
+# canonical `Value::encode` bytes and resolves every digest collision by exact
+# comparison, so this edge cannot reach `ContentIdentity`'s equality, ordering,
+# or storage — `certified_identity_equality_cannot_consult_a_hash` and the
+# collision-injection suite are asserted with adversarial hashers installed and
+# do not mention BLAKE3 at all.
+[dependencies]
+blake3.workspace = true
+
 [lints]
 workspace = true

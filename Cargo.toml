@@ -15,6 +15,34 @@
 resolver = "3"
 members = ["crates/*"]
 
+# --- External dependencies -------------------------------------------------
+#
+# Pinned here rather than in the member manifests so that "which version, which
+# features" has one answer for the whole workspace; a member opts in with
+# `<name>.workspace = true`. Every entry also has a rationale and a TCB class in
+# `tools/governance/dependency-rationale.toml`, which `just check` enforces
+# (GOV-1-07, docs/12 §1).
+#
+# Adding one is the two-step the `lint`/`test` recipes' `--locked` demands: edit
+# this table, run `cargo check` (unlocked) to refresh `Cargo.lock`, commit both.
+[workspace.dependencies]
+# BLAKE3, the cryptographic hash behind `continuum-value`'s `ContentHasher`
+# seam — ADR-0013's "artifact digests use cryptographic hashes" and
+# docs/09 T02's control 3 ("cryptographic digests for artifact identity").
+#
+# `default-features = false` drops `std`, which this crate does not need: the
+# seam is a pure `&[u8] -> [u8; 32]` function and nothing here writes through
+# `io::Write` or maps a file. `pure` is the load-bearing choice — it selects
+# BLAKE3's Rust SIMD implementations and stops `build.rs` from invoking a C
+# compiler on the bundled `.S`/intrinsics sources. A C toolchain in the build
+# graph of a trust-base crate would make the build a function of the host's
+# `cc`, which is exactly what plan §20's "kernel crates build reproducibly from
+# pinned sources" and INV-014's re-derivable build identity forbid. BLAKE3's
+# output is specified, so `pure` changes speed and nothing else: the digests are
+# byte-identical to the assembly path, on every platform, which is what
+# `blake3_matches_the_published_test_vectors` pins.
+blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
+
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
