@@ -117,7 +117,7 @@ Implement:
 - atomic artifact publication (delivered: bn-210);
 - authorization separate from handle possession (delivered: bn-210).
 
-**Exit:** concurrent publication of identical artifacts yields one identity; artificial hash collisions are detected and resolved by canonical comparison in certified lanes.
+**Exit:** concurrent publication of identical artifacts yields one identity; artificial hash collisions are detected and resolved by canonical comparison in certified lanes (delivered: bn-1sh6).
 
 ### PR 3 — Workspace snapshots [G1]
 

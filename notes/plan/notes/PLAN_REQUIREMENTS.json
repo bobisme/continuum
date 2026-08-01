@@ -925,7 +925,7 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Canonical values and CAS primitives [G0 (DX-13), G1]"
     },
     {
@@ -1009,8 +1009,8 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "concurrent publication of identical artifacts yields one identity; artificial hash collisions are detected and resolved by canonical comparison in certified lanes."
+      "status": "satisfied",
+      "summary": "concurrent publication of identical artifacts yields one identity; artificial hash collisions are detected and resolved by canonical comparison in certified lanes (delivered: bn-1sh6)."
     },
     {
       "category": "pr",
