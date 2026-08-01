@@ -4,10 +4,17 @@
   "receipt_id": "receipt_ordering-congruence-0001",
   "claim": {
     "kind": "safety",
-    "text": "smt-proof certificate: the carried propositional skeleton conjoined with the used theory lemmas has no model — every resolution step replayed to the empty clause; 4 atoms, 3 assertions, 2 lemmas carried (2 used), 3 derived, 0 deleted, 4 propagations; assurance TRUSTED_SOLVER; trusted components: envelope-digest-binding, skeleton-model-correspondence, theory-lemma:LIA, theory-lemma:UF",
+    "text": "smt-proof certificate: the carried propositional skeleton conjoined with the used theory lemmas has no model — every resolution step replayed to the empty clause; 4 atoms, 3 assertions, 2 lemmas carried (2 used), 3 derived, 0 deleted, 4 propagations",
     "property_hash": "blake3:ordering-property",
     "verdict": "established"
   },
+  "assurance_class": "TRUSTED_SOLVER",
+  "trusted_components": [
+    "envelope-digest-binding",
+    "skeleton-model-correspondence",
+    "theory-lemma:LIA",
+    "theory-lemma:UF"
+  ],
   "closure": {
     "model_hash": "blake3:ordering-model",
     "assumptions_hash": "blake3:empty-assumptions",

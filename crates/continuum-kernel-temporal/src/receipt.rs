@@ -187,6 +187,8 @@ pub struct Receipt {
     receipt_id: String,
     claim_text: String,
     property_hash: String,
+    assurance_class: &'static str,
+    trusted_components: Vec<String>,
     model_hash: String,
     assumptions_hash: String,
     observers_hash: String,
@@ -239,6 +241,20 @@ impl Receipt {
         &self.claim_text
     }
 
+    /// docs/03 §7's assurance class this receipt carries (RFC 0005 "Proof-producing
+    /// solver policy": no bare "verified" without exposing it).
+    #[must_use]
+    pub const fn assurance_class(&self) -> &'static str {
+        self.assurance_class
+    }
+
+    /// docs/03 §2's `trusted: Vec<TrustedComponent>` this receipt discloses — the
+    /// receipt-typed counterpart of [`CheckedClaim::trusted_components`].
+    #[must_use]
+    pub fn trusted_components(&self) -> &[String] {
+        &self.trusted_components
+    }
+
     /// The seam fields this receipt carries without having derived them.
     ///
     /// The counterpart of [`CheckedClaim::trusted_components`], one layer out: those
@@ -277,6 +293,15 @@ impl Receipt {
         field(&mut out, 2, "property_hash", &self.property_hash, true);
         field(&mut out, 2, "verdict", "established", false);
         out.push_str("  },\n");
+
+        field(&mut out, 1, "assurance_class", self.assurance_class, true);
+        array(
+            &mut out,
+            1,
+            "trusted_components",
+            &self.trusted_components,
+            true,
+        );
 
         out.push_str("  \"closure\": {\n");
         field(&mut out, 2, "model_hash", &self.model_hash, true);
@@ -340,6 +365,12 @@ pub fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptErr
         receipt_id: seam.receipt_id.to_owned(),
         claim_text: claim_text(claim),
         property_hash: envelope.property_digest().as_str().to_owned(),
+        assurance_class: ASSURANCE_CLASS,
+        trusted_components: claim
+            .trusted_components()
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
         model_hash: envelope.model_digest().as_str().to_owned(),
         assumptions_hash: envelope.assumptions_digest().as_str().to_owned(),
         observers_hash: seam.observers_digest.to_owned(),
@@ -373,6 +404,16 @@ fn checker_version() -> String {
     out.push_str(&WIRE_EPOCH.to_string());
     out
 }
+
+/// The docs/03 §7 assurance class every receipt this crate emits carries.
+///
+/// Both families this crate checks re-derive their obligation entirely from the
+/// certificate's own carried table — reachability by BFS, strongly connected
+/// components by Tarjan, ranks by direct re-evaluation — with no solver anywhere in
+/// the loop. ADR-0017's `TRUSTED_SOLVER` arm has nothing to attach to here, so every
+/// verified claim is `CHECKED_CERTIFICATE` — docs/03 §3's "small kernel checked
+/// evidence" — regardless of family or fairness declaration.
+const ASSURANCE_CLASS: &str = "CHECKED_CERTIFICATE";
 
 /// The schema's `certificate.kind` spelling. Both families are members outright.
 const fn schema_certificate_kind(kind: CertificateKind) -> &'static str {
@@ -416,13 +457,6 @@ fn claim_text(claim: &CheckedClaim) -> String {
     ));
     if let Some(bound) = claim.progress_bound() {
         out.push_str(&format!("; progress bound {bound}"));
-    }
-    out.push_str("; trusted components: ");
-    for (index, component) in claim.trusted_components().iter().enumerate() {
-        if index != 0 {
-            out.push_str(", ");
-        }
-        out.push_str(component);
     }
     out
 }
@@ -637,10 +671,46 @@ mod tests {
         assert!(scc.claim_text().contains("Tarjan"));
         assert!(scc.claim_text().contains("fairness weak-fairness"));
         // A fair-SCC certificate that declares fair actions trusts that assumption,
-        // and the claim text has to say so (INV-013).
+        // and the typed `trusted_components` field has to say so (INV-013) — no
+        // longer smuggled into the prose claim text.
         assert!(
-            scc.claim_text()
+            scc.trusted_components()
+                .iter()
+                .any(|c| c == "fairness-assumption-correspondence")
+        );
+        assert!(
+            !scc.claim_text()
                 .contains("fairness-assumption-correspondence")
+        );
+    }
+
+    #[test]
+    fn assurance_class_and_trusted_components_are_typed_not_prose() {
+        let ranking = receipt(&verified(&Plan::drain_ranking()), &SEAM).unwrap();
+        assert_eq!(ranking.assurance_class(), "CHECKED_CERTIFICATE");
+        assert_eq!(
+            ranking.trusted_components(),
+            [
+                "certificate-model-correspondence",
+                "envelope-digest-binding"
+            ]
+        );
+        assert!(!ranking.claim_text().contains("trusted components"));
+        let json = ranking.to_json();
+        assert!(json.contains("\"assurance_class\": \"CHECKED_CERTIFICATE\""));
+        assert!(json.contains("\"trusted_components\": ["));
+        assert!(json.contains("\"certificate-model-correspondence\""));
+        assert!(json.contains("\"envelope-digest-binding\""));
+
+        let scc = receipt(&verified(&Plan::fair_progress_exclusion()), &SEAM).unwrap();
+        assert_eq!(scc.assurance_class(), "CHECKED_CERTIFICATE");
+        assert_eq!(
+            scc.trusted_components(),
+            [
+                "certificate-model-correspondence",
+                "envelope-digest-binding",
+                "fairness-assumption-correspondence"
+            ]
         );
     }
 

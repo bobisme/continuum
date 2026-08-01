@@ -4,10 +4,15 @@
   "receipt_id": "receipt_drain-ranking-0001",
   "claim": {
     "kind": "liveness",
-    "text": "ranking certificate: every non-goal state has a successor of strictly smaller rank and every goal state ranks 0, so progress is unconditional and no fairness assumption is discharged; 9 states (1 initial, 3 goal, 9 reachable) and 12 transitions; property class eventually-state-set; fairness weak-fairness over 0 declared fair actions; progress bound 4; trusted components: certificate-model-correspondence, envelope-digest-binding",
+    "text": "ranking certificate: every non-goal state has a successor of strictly smaller rank and every goal state ranks 0, so progress is unconditional and no fairness assumption is discharged; 9 states (1 initial, 3 goal, 9 reachable) and 12 transitions; property class eventually-state-set; fairness weak-fairness over 0 declared fair actions; progress bound 4",
     "property_hash": "blake3:eventually-goal",
     "verdict": "established"
   },
+  "assurance_class": "CHECKED_CERTIFICATE",
+  "trusted_components": [
+    "certificate-model-correspondence",
+    "envelope-digest-binding"
+  ],
   "closure": {
     "model_hash": "blake3:drain-model",
     "assumptions_hash": "blake3:empty-assumptions",

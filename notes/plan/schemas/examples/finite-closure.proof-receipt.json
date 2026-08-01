@@ -8,6 +8,11 @@
     "property_hash": "blake3:property-placeholder",
     "verdict": "established"
   },
+  "assurance_class": "CHECKED_CERTIFICATE",
+  "trusted_components": [
+    "certificate-model-correspondence",
+    "envelope-digest-binding"
+  ],
   "closure": {
     "model_hash": "blake3:model-placeholder",
     "assumptions_hash": "blake3:empty-assumptions-placeholder",

@@ -58,8 +58,10 @@
 //! [`CheckedClaim::assurance_class`] is a function of which lemmas the refutation
 //! *used*, and the kernel computed that. It is therefore not on the seam: a caller
 //! cannot downgrade a `TRUSTED_SOLVER` result to `CHECKED_CERTIFICATE` by asking
-//! nicely. Both the class and every trusted theory appear in `claim.text`, which is
-//! the only place `proof-receipt.schema.json` leaves for them.
+//! nicely. `proof-receipt.schema.json` now carries both the class and every trusted
+//! theory as typed fields — [`Receipt::assurance_class`] and
+//! [`Receipt::trusted_components`] — rather than folding them into `claim.text`
+//! (bn-ww5ic's second gap); `claim.text` keeps only the human sentence.
 //!
 //! # Only a verified verdict yields a receipt
 //!
@@ -208,6 +210,7 @@ pub struct Receipt {
     receipt_id: String,
     claim_kind: ClaimKind,
     assurance: AssuranceClass,
+    trusted_components: Vec<String>,
     claim_text: String,
     property_hash: String,
     model_hash: String,
@@ -270,6 +273,13 @@ impl Receipt {
         self.assurance
     }
 
+    /// docs/03 §2's `trusted: Vec<TrustedComponent>` this receipt discloses — the
+    /// receipt-typed counterpart of [`CheckedClaim::trusted_components`].
+    #[must_use]
+    pub fn trusted_components(&self) -> &[String] {
+        &self.trusted_components
+    }
+
     /// The prose statement of what was established.
     #[must_use]
     pub fn claim_text(&self) -> &str {
@@ -310,6 +320,21 @@ impl Receipt {
         field(&mut out, 2, "property_hash", &self.property_hash, true);
         field(&mut out, 2, "verdict", "established", false);
         out.push_str("  },\n");
+
+        field(
+            &mut out,
+            1,
+            "assurance_class",
+            self.assurance.as_str(),
+            true,
+        );
+        array(
+            &mut out,
+            1,
+            "trusted_components",
+            &self.trusted_components,
+            true,
+        );
 
         out.push_str("  \"closure\": {\n");
         field(&mut out, 2, "model_hash", &self.model_hash, true);
@@ -373,6 +398,7 @@ pub fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptErr
         receipt_id: seam.receipt_id.to_owned(),
         claim_kind: seam.claim_kind,
         assurance: claim.assurance_class(),
+        trusted_components: claim.trusted_components(),
         claim_text: claim_text(claim),
         property_hash: envelope.property_digest().as_str().to_owned(),
         model_hash: envelope.model_digest().as_str().to_owned(),
@@ -422,7 +448,7 @@ fn claim_text(claim: &CheckedClaim) -> String {
     );
     out.push_str(&format!(
         "; {} atoms, {} assertions, {} lemmas carried ({} used), {} derived, \
-         {} deleted, {} propagations; assurance {}",
+         {} deleted, {} propagations",
         claim.atoms(),
         claim.assertions(),
         claim.lemmas_carried(),
@@ -430,15 +456,7 @@ fn claim_text(claim: &CheckedClaim) -> String {
         claim.derived_clauses(),
         claim.deleted_clauses(),
         claim.propagations(),
-        claim.assurance_class().as_str(),
     ));
-    out.push_str("; trusted components: ");
-    for (index, component) in claim.trusted_components().iter().enumerate() {
-        if index != 0 {
-            out.push_str(", ");
-        }
-        out.push_str(component);
-    }
     out
 }
 
@@ -721,11 +739,23 @@ mod tests {
     #[test]
     fn the_assurance_class_comes_from_lemma_use_and_no_caller_can_change_it() {
         // A used theory lemma is a trusted solver result; the seam has no field for
-        // it, so no caller can publish a receipt that hides it (ADR-0017).
+        // it, so no caller can publish a receipt that hides it (ADR-0017). bn-ww5ic
+        // moves both facts out of `claim.text` into the typed `assurance_class` and
+        // `trusted_components` fields — `claim.text` no longer carries either.
         let trusted = receipt(&verdict(&Plan::ordering_and_congruence()), &SEAM).unwrap();
         assert_eq!(trusted.assurance_class(), AssuranceClass::TrustedSolver);
-        assert!(trusted.claim_text().contains("assurance TRUSTED_SOLVER"));
-        assert!(trusted.claim_text().contains("theory-lemma:"));
+        assert!(
+            trusted
+                .trusted_components()
+                .iter()
+                .any(|c| c.starts_with("theory-lemma:"))
+        );
+        assert!(!trusted.claim_text().contains("assurance"));
+        assert!(!trusted.claim_text().contains("theory-lemma:"));
+        let json = trusted.to_json();
+        assert!(json.contains("\"assurance_class\": \"TRUSTED_SOLVER\""));
+        assert!(json.contains("\"theory-lemma:LIA\""));
+        assert!(json.contains("\"theory-lemma:UF\""));
 
         let checked = receipt(&verdict(&Plan::propositional_conflict()), &SEAM).unwrap();
         assert_eq!(
@@ -733,11 +763,17 @@ mod tests {
             AssuranceClass::CheckedCertificate
         );
         assert!(
-            checked
-                .claim_text()
-                .contains("assurance CHECKED_CERTIFICATE")
+            !checked
+                .trusted_components()
+                .iter()
+                .any(|c| c.starts_with("theory-lemma:"))
         );
         assert!(!checked.claim_text().contains("theory-lemma:"));
+        assert!(
+            checked
+                .to_json()
+                .contains("\"assurance_class\": \"CHECKED_CERTIFICATE\"")
+        );
     }
 
     #[test]

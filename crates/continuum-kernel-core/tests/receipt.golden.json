@@ -4,10 +4,15 @@
   "receipt_id": "receipt_diehard-closure-0001",
   "claim": {
     "kind": "safety",
-    "text": "finite-closure certificate: Init ⊆ S, Post(S) ⊆ S and S ⊆ P re-derived over 16 states (1 initial) and 96 transitions; property class state-domain; trusted components: certificate-model-correspondence, envelope-digest-binding",
+    "text": "finite-closure certificate: Init ⊆ S, Post(S) ⊆ S and S ⊆ P re-derived over 16 states (1 initial) and 96 transitions; property class state-domain",
     "property_hash": "blake3:diehard-typeok",
     "verdict": "established"
   },
+  "assurance_class": "CHECKED_CERTIFICATE",
+  "trusted_components": [
+    "certificate-model-correspondence",
+    "envelope-digest-binding"
+  ],
   "closure": {
     "model_hash": "blake3:diehard-model",
     "assumptions_hash": "blake3:empty-assumptions",

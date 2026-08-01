@@ -179,6 +179,8 @@ pub struct Receipt {
     receipt_id: String,
     claim_text: String,
     property_hash: String,
+    assurance_class: &'static str,
+    trusted_components: Vec<String>,
     model_hash: String,
     assumptions_hash: String,
     observers_hash: String,
@@ -231,6 +233,20 @@ impl Receipt {
         &self.claim_text
     }
 
+    /// docs/03 §7's assurance class this receipt carries (RFC 0005 "Proof-producing
+    /// solver policy": no bare "verified" without exposing it).
+    #[must_use]
+    pub const fn assurance_class(&self) -> &'static str {
+        self.assurance_class
+    }
+
+    /// docs/03 §2's `trusted: Vec<TrustedComponent>` this receipt discloses — the
+    /// receipt-typed counterpart of [`CheckedClaim::trusted_components`].
+    #[must_use]
+    pub fn trusted_components(&self) -> &[String] {
+        &self.trusted_components
+    }
+
     /// The seam fields this receipt carries without having derived them.
     ///
     /// The counterpart of [`CheckedClaim::trusted_components`], one layer out: those
@@ -269,6 +285,15 @@ impl Receipt {
         field(&mut out, 2, "property_hash", &self.property_hash, true);
         field(&mut out, 2, "verdict", "established", false);
         out.push_str("  },\n");
+
+        field(&mut out, 1, "assurance_class", self.assurance_class, true);
+        array(
+            &mut out,
+            1,
+            "trusted_components",
+            &self.trusted_components,
+            true,
+        );
 
         out.push_str("  \"closure\": {\n");
         field(&mut out, 2, "model_hash", &self.model_hash, true);
@@ -332,6 +357,12 @@ pub fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptErr
         receipt_id: seam.receipt_id.to_owned(),
         claim_text: claim_text(claim),
         property_hash: envelope.property_digest().as_str().to_owned(),
+        assurance_class: ASSURANCE_CLASS,
+        trusted_components: claim
+            .trusted_components()
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
         model_hash: envelope.model_digest().as_str().to_owned(),
         assumptions_hash: envelope.assumptions_digest().as_str().to_owned(),
         observers_hash: seam.observers_digest.to_owned(),
@@ -366,17 +397,30 @@ fn checker_version() -> String {
     out
 }
 
+/// The docs/03 §7 assurance class every receipt this crate emits carries.
+///
+/// `continuum-kernel-core` re-derives every obligation of both families entirely
+/// from the certificate's own bytes (RFC 0005 "Closed reachable set"; docs/03 §6.1):
+/// there is no solver in the loop whose output this crate could trust in place of
+/// checking it, so ADR-0017's `TRUSTED_SOLVER` arm never arises here. Every verified
+/// claim is therefore `CHECKED_CERTIFICATE` — docs/03 §3's "small kernel checked
+/// evidence" — for both [`CertificateKind::FiniteClosure`] and
+/// [`CertificateKind::StateType`] alike; the value is a fact about this crate's
+/// checking strategy, not a per-claim computation.
+const ASSURANCE_CLASS: &str = "CHECKED_CERTIFICATE";
+
 /// The schema's `certificate.kind` spelling for a family this crate checks.
 ///
-/// `proof-receipt.schema.json` closes `certificate.kind` at ten members and has no
-/// state-typing member, so both families this crate implements are reported as
-/// `closed-set` — the family they belong to — and the *obligations actually
-/// discharged* are spelled out in `claim.text`, which is where a reader learns that a
-/// state-type certificate carries no transition relation. Widening the enum is a
-/// schema change, not a kernel one.
+/// `proof-receipt.schema.json` used to close `certificate.kind` at ten members with
+/// no state-typing member, so both families this crate implements were reported as
+/// `closed-set` and the distinction lived only in `claim.text` (bn-ww5ic's first
+/// gap). The schema now names the state-typing family `state-type` directly, so each
+/// family gets its own spelling; `claim.text` still carries the informal statement
+/// of what was discharged, for a reader who wants prose alongside the typed field.
 const fn schema_certificate_kind(kind: CertificateKind) -> &'static str {
     match kind {
-        CertificateKind::FiniteClosure | CertificateKind::StateType => "closed-set",
+        CertificateKind::FiniteClosure => "closed-set",
+        CertificateKind::StateType => "state-type",
     }
 }
 
@@ -401,13 +445,6 @@ fn claim_text(claim: &CheckedClaim) -> String {
         claim.transitions(),
         claim.property().as_str(),
     ));
-    out.push_str("; trusted components: ");
-    for (index, component) in claim.trusted_components().iter().enumerate() {
-        if index != 0 {
-            out.push_str(", ");
-        }
-        out.push_str(component);
-    }
     out
 }
 
@@ -608,9 +645,32 @@ mod tests {
     fn a_state_type_receipt_does_not_claim_a_closure_obligation() {
         let verdict = verified(&Plan::diehard_type());
         let built = receipt(&verdict, &SEAM).unwrap();
-        assert_eq!(built.certificate_kind(), "closed-set");
+        // bn-ww5ic: the schema now names this family directly instead of folding it
+        // into `closed-set`.
+        assert_eq!(built.certificate_kind(), "state-type");
         assert!(built.claim_text().starts_with("state-type certificate"));
         assert!(built.claim_text().contains("no closure obligation"));
+    }
+
+    #[test]
+    fn assurance_class_and_trusted_components_are_typed_not_prose() {
+        let verdict = verified(&Plan::diehard_closure());
+        let built = receipt(&verdict, &SEAM).unwrap();
+        assert_eq!(built.assurance_class(), "CHECKED_CERTIFICATE");
+        assert_eq!(
+            built.trusted_components(),
+            [
+                "certificate-model-correspondence",
+                "envelope-digest-binding"
+            ]
+        );
+        // The facts moved out of the prose sentence entirely.
+        assert!(!built.claim_text().contains("trusted components"));
+        let json = built.to_json();
+        assert!(json.contains("\"assurance_class\": \"CHECKED_CERTIFICATE\""));
+        assert!(json.contains("\"trusted_components\": ["));
+        assert!(json.contains("\"certificate-model-correspondence\""));
+        assert!(json.contains("\"envelope-digest-binding\""));
     }
 
     #[test]

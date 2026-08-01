@@ -4,10 +4,15 @@
   "receipt_id": "receipt_three-variable-refutation-0001",
   "claim": {
     "kind": "safety",
-    "text": "lrat certificate: the carried CNF has no model — every derived clause re-derived by unit propagation from its declared antecedents, ending in the empty clause; 3 variables, 8 input clauses, 7 derived, 6 deleted, 7 propagations; trusted components: envelope-digest-binding, formula-model-correspondence",
+    "text": "lrat certificate: the carried CNF has no model — every derived clause re-derived by unit propagation from its declared antecedents, ending in the empty clause; 3 variables, 8 input clauses, 7 derived, 6 deleted, 7 propagations",
     "property_hash": "blake3:unsatisfiable",
     "verdict": "established"
   },
+  "assurance_class": "CHECKED_CERTIFICATE",
+  "trusted_components": [
+    "envelope-digest-binding",
+    "formula-model-correspondence"
+  ],
   "closure": {
     "model_hash": "blake3:three-variable-cnf",
     "assumptions_hash": "blake3:empty-assumptions",

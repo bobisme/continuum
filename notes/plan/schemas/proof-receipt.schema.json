@@ -27,8 +27,9 @@
     }
   },
   "required": [
-    "schema_id", "schema_epoch", "receipt_id", "claim", "closure", "epochs",
-    "transformations", "certificate", "checker", "reproduce"
+    "schema_id", "schema_epoch", "receipt_id", "claim", "assurance_class",
+    "trusted_components", "closure", "epochs", "transformations", "certificate",
+    "checker", "reproduce"
   ],
   "allOf": [
     {
@@ -67,6 +68,20 @@
         "verdict": { "enum": ["established", "refuted"] }
       },
       "additionalProperties": false
+    },
+    "assurance_class": {
+      "description": "docs/03 §7 'Solver trust classes' / ADR-0017, verbatim: whether this verified claim rests on evidence the checker fully re-derived (`CHECKED_CERTIFICATE`, docs/03 §3's 'small kernel checked evidence') or still leans on at least one unchecked solver-produced fact (`TRUSTED_SOLVER`). RFC 0005 'Proof-producing solver policy' forbids a bare \"verified\" that does not expose this alongside `trusted_components`.",
+      "enum": ["CHECKED_CERTIFICATE", "TRUSTED_SOLVER"]
+    },
+    "trusted_components": {
+      "description": "docs/03 §2's `trusted: Vec<TrustedComponent>`: the named facts this checker structurally could not re-derive from the certificate's own bytes and therefore still trusts (e.g. the certificate-model correspondence, an envelope digest binding, or a specific theory lemma a solver supplied). Empty only for a checker with nothing left to trust beyond the encoding itself.",
+      "type": "array",
+      "minItems": 0,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*(:[!-~]+)?$"
+      }
     },
     "closure": {
       "type": "object",
@@ -114,9 +129,11 @@
       "required": ["kind", "hash"],
       "properties": {
         "kind": {
+          "description": "Certificate family (RFC 0005 'Certificate families'). `state-type` is the state-typing half of `closed-set`'s family (docs/16 PO-MOD-003): a table-membership obligation with no transition relation, checked by the same closed-reachable-set family but previously indistinguishable from `closed-set` outside prose.",
           "enum": [
-            "closed-set", "inductive-invariant", "simulation", "fair-scc-exclusion",
-            "ranking", "lrat", "veripb", "smt-proof", "game-strategy", "lean-theorem"
+            "closed-set", "state-type", "inductive-invariant", "simulation",
+            "fair-scc-exclusion", "ranking", "lrat", "veripb", "smt-proof",
+            "game-strategy", "lean-theorem"
           ]
         },
         "hash": { "type": "string" },

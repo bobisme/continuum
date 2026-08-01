@@ -200,6 +200,8 @@ pub struct Receipt {
     claim_kind: ClaimKind,
     claim_text: String,
     property_hash: String,
+    assurance_class: &'static str,
+    trusted_components: Vec<String>,
     model_hash: String,
     assumptions_hash: String,
     observers_hash: String,
@@ -258,6 +260,20 @@ impl Receipt {
         &self.claim_text
     }
 
+    /// docs/03 §7's assurance class this receipt carries (RFC 0005 "Proof-producing
+    /// solver policy": no bare "verified" without exposing it).
+    #[must_use]
+    pub const fn assurance_class(&self) -> &'static str {
+        self.assurance_class
+    }
+
+    /// docs/03 §2's `trusted: Vec<TrustedComponent>` this receipt discloses — the
+    /// receipt-typed counterpart of [`CheckedClaim::trusted_components`].
+    #[must_use]
+    pub fn trusted_components(&self) -> &[String] {
+        &self.trusted_components
+    }
+
     /// The seam fields this receipt carries without having derived them.
     #[must_use]
     pub const fn trusted_inputs(&self) -> &'static [&'static str] {
@@ -292,6 +308,15 @@ impl Receipt {
         field(&mut out, 2, "property_hash", &self.property_hash, true);
         field(&mut out, 2, "verdict", "established", false);
         out.push_str("  },\n");
+
+        field(&mut out, 1, "assurance_class", self.assurance_class, true);
+        array(
+            &mut out,
+            1,
+            "trusted_components",
+            &self.trusted_components,
+            true,
+        );
 
         out.push_str("  \"closure\": {\n");
         field(&mut out, 2, "model_hash", &self.model_hash, true);
@@ -356,6 +381,12 @@ pub fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptErr
         claim_kind: seam.claim_kind,
         claim_text: claim_text(claim),
         property_hash: envelope.property_digest().as_str().to_owned(),
+        assurance_class: ASSURANCE_CLASS,
+        trusted_components: claim
+            .trusted_components()
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
         model_hash: envelope.model_digest().as_str().to_owned(),
         assumptions_hash: envelope.assumptions_digest().as_str().to_owned(),
         observers_hash: seam.observers_digest.to_owned(),
@@ -387,6 +418,17 @@ fn checker_version() -> String {
     out
 }
 
+/// The docs/03 §7 assurance class every receipt this crate emits carries.
+///
+/// A [`Verdict::Verified`] LRAT refutation has already had every derived clause
+/// re-derived by unit propagation from its declared antecedents (see the module
+/// documentation, and [`CheckedClaim::trusted_components`]'s note that "the solver is
+/// deliberately absent from this list"). ADR-0017's `TRUSTED_SOLVER` is precisely the
+/// case where that replay did *not* happen; a receipt only exists once it has, so
+/// every receipt this crate emits is `CHECKED_CERTIFICATE` — docs/03 §3's "small
+/// kernel checked evidence" — by construction.
+const ASSURANCE_CLASS: &str = "CHECKED_CERTIFICATE";
+
 /// The schema's `certificate.kind` spelling. `lrat` is a member of the enum outright.
 const fn schema_certificate_kind(kind: CertificateKind) -> &'static str {
     match kind {
@@ -409,13 +451,6 @@ fn claim_text(claim: &CheckedClaim) -> String {
         claim.deleted_clauses(),
         claim.propagations(),
     ));
-    out.push_str("; trusted components: ");
-    for (index, component) in claim.trusted_components().iter().enumerate() {
-        if index != 0 {
-            out.push_str(", ");
-        }
-        out.push_str(component);
-    }
     out
 }
 
@@ -712,5 +747,23 @@ mod tests {
                 fault: TokenFault::Empty
             })
         );
+    }
+
+    #[test]
+    fn assurance_class_and_trusted_components_are_typed_not_prose() {
+        let verdict = verdict(&Plan::three_variable_refutation());
+        let built = receipt(&verdict, &SEAM).unwrap();
+        assert_eq!(built.assurance_class(), "CHECKED_CERTIFICATE");
+        assert_eq!(
+            built.trusted_components(),
+            ["envelope-digest-binding", "formula-model-correspondence"]
+        );
+        // The facts moved out of the prose sentence entirely.
+        assert!(!built.claim_text().contains("trusted components"));
+        let json = built.to_json();
+        assert!(json.contains("\"assurance_class\": \"CHECKED_CERTIFICATE\""));
+        assert!(json.contains("\"trusted_components\": ["));
+        assert!(json.contains("\"envelope-digest-binding\""));
+        assert!(json.contains("\"formula-model-correspondence\""));
     }
 }
