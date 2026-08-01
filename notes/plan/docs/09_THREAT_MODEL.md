@@ -78,7 +78,7 @@ trusted for certified claim:
 
 ## 5. Threats and controls
 
-### T01 — Parser/decoder memory exhaustion
+### T01 — Parser/decoder memory exhaustion (delivered: bn-3nfy)
 
 Controls:
 

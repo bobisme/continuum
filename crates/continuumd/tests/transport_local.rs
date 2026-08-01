@@ -52,7 +52,9 @@ use continuumd::protocol::spec::{Nullable, Optional};
 use continuumd::protocol::vocabulary::{
     AuthorityLevel, Encoding, ErrorCode, Portfolio, ResultStatus, TargetKind,
 };
-use continuumd::transport::{LocalPair, Server, client_receive, client_send, encode_hello};
+use continuumd::transport::{
+    FrameError, LocalPair, MAX_FRAME_BYTES, Server, client_receive, client_send, encode_hello,
+};
 
 const DIE_HARD_MODEL: &str =
     include_str!("../../../notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm");
@@ -549,6 +551,50 @@ fn a_frame_is_read_only_once_all_of_it_has_arrived() {
         }
     }
     assert!(pair.to_server.is_empty(), "nothing is left over");
+}
+
+// T01 (parser/decoder memory exhaustion): the module doc states the reason for
+// `MAX_FRAME_BYTES` in one sentence — "a length prefix cannot ask an endpoint for an
+// allocation before any of the payload has arrived". The three tests below are that
+// sentence exercised from outside the crate: a four-byte prefix is the entire hostile
+// input, never a multi-gigabyte fixture, because the bound must reject the *declared*
+// count on its own, before a single payload byte is awaited or buffered.
+
+#[test]
+fn a_declared_frame_length_past_the_transport_bound_is_rejected_before_any_wait() {
+    // One byte past MAX_FRAME_BYTES, and nothing else: if the reader ever buffered
+    // waiting for a declared count instead of checking it first, this is the frame
+    // that would ask it to hold slightly more than the transport's own ceiling.
+    let mut pair = LocalPair::new();
+    let declared = u32::try_from(MAX_FRAME_BYTES).expect("the bound fits a u32") + 1;
+    pair.to_server.put_bytes(&declared.to_be_bytes());
+    assert_eq!(pair.to_server.take_frame(), Err(FrameError::TooLarge));
+    // The rejection does not consume the bytes: an endpoint that cannot read a frame
+    // closes the connection rather than resynchronizing (the method's own doc).
+    assert!(!pair.to_server.is_empty());
+}
+
+#[test]
+fn a_maximally_hostile_declared_length_is_rejected_from_four_bytes_alone() {
+    // The worst case a four-byte big-endian prefix can spell: a ~4 GiB declared
+    // payload with zero bytes behind it. Four bytes in, a typed rejection out — this
+    // is the exact shape a memory-exhaustion bug in this transport would take, so the
+    // fixture is the attack, not a stand-in for it.
+    let mut pair = LocalPair::new();
+    pair.to_server.put_bytes(&u32::MAX.to_be_bytes());
+    assert_eq!(pair.to_server.take_frame(), Err(FrameError::TooLarge));
+}
+
+#[test]
+fn a_declared_length_at_the_bound_is_incomplete_not_rejected() {
+    // MAX_FRAME_BYTES itself is admissible, so the check is strictly `>`. Declaring
+    // exactly the bound with no payload yet must read as "not here yet" (`Ok(None)`),
+    // never as `TooLarge` — otherwise the transport would refuse its own largest
+    // legal frame.
+    let mut pair = LocalPair::new();
+    let declared = u32::try_from(MAX_FRAME_BYTES).expect("the bound fits a u32");
+    pair.to_server.put_bytes(&declared.to_be_bytes());
+    assert_eq!(pair.to_server.take_frame(), Ok(None));
 }
 
 #[test]

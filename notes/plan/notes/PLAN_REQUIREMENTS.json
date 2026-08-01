@@ -6074,7 +6074,7 @@
         "line": 81,
         "path": "docs/09_THREAT_MODEL.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Parser/decoder memory exhaustion"
     },
     {
