@@ -72,6 +72,48 @@ Absorbed from plan §4.3 (SD-02):
 - **Mid-flight budget updates.** `task.update_budget(task_*, budget)` adjusts the budget of a running task. Raising a dimension extends the current run. Lowering below committed spend triggers suspension-with-continuation semantics (B18): the task transitions to `Suspended` with committed partial evidence plus a valid continuation — never silent truncation of the campaign (INV-009).
 - **Evidence subscriptions.** `evidence.subscribe` streams typed evidence-graph deltas (node/edge publication and status transitions) for a declared scope. It is distinct from `task.subscribe`: progress events are hints, while evidence deltas reference committed artifacts; the graph itself remains authoritative on reconnect (INV-002 — a dropped subscription changes nothing).
 
+## Operational contract on the wire
+
+Absorbed from plan §4.5 (operational contract), §4.6 (epoch advance) and §4.7 (engine-defect lifecycle) — SD-09. The daemon-side obligations are [docs/35](../docs/35_CONTINUUMD_WORKBENCH_DAEMON.md) and the epoch decision is [ADR-0018](../adr/0018-semantic-versioning-and-replay.md); this section is only what crosses the wire, and where it and plan §4.5–§4.7 disagree this RFC is corrected and becomes normative (plan §25).
+
+### Redacted values
+
+Content can stop being readable in three ways — summarized after promotion, purged by key shred, or lost across a restore — and all three surface identically to a client.
+
+- A value the daemon cannot return in full MUST be returned as the typed `Redacted` stub of the IDL ([`../schemas/redacted.schema.json`](../schemas/redacted.schema.json)): `redacted: true`, `reason`, `commitment`, `original_class`. Omitting the field, returning null, or returning an empty value MUST NOT be used to represent redaction — a client MUST be able to tell "withheld" from "absent" structurally, without inference.
+- `reason` is a closed vocabulary: `summarized | purged | lost`. A daemon MUST NOT extend it; a new way to lose content is a protocol change, not a new string.
+- The plan writes this value `Redacted(reason, commitment)`. That names the semantic pair; the normative wire and schema form carries four fields, and the two extra fields are load-bearing (`redacted` makes a stub structurally recognizable, `original_class` names what class of evidence is missing without a dereference).
+- Every redacted value MUST also appear in the result's `omissions` manifest with reason `redaction` (INV-007), and any claim that required the hidden data MUST downgrade in the `assurance` envelope per plan §18.4. A verdict MUST NOT be reported at full strength over a redacted input on the grounds that the input "would have" supported it.
+- `evidence.verify` over a receipt whose referenced content is redacted MUST return the structural verification result *and* the redaction. It MUST NOT return a bare failure (the receipt is intact) and MUST NOT return a bare success (the claim is no longer fully supported).
+
+### Publication, quotas, and storage failure
+
+- A publication that cannot complete atomically MUST fail with `PublicationAborted` (INV-017). Nothing is published and nothing is truncated; the client MAY retry with the same idempotency key, and the retry is a fresh publication, not a resumption of a partial one.
+- `QuotaExhausted` is a capability's concurrency or resource quota (the `max_concurrent_tasks` of `ServerLimits` and the quotas a grant carries). `BudgetExhausted` is task-budget spend and carries a continuation. The daemon MUST NOT substitute one for the other, and neither is ever a semantic verdict (docs/49).
+- Storage attribution is reported per artifact class (plan §4.5). It is operational telemetry: it MUST NOT appear inside a receipt, an assurance envelope, or an evidence-graph node.
+
+### Existence oracles and cross-principal sharing
+
+Content-addressed identities are derivable by anyone holding the content, so the protocol MUST NOT let identity possession or cache behavior become a channel for learning what another principal holds (plan §4.4, §4.5).
+
+- A read of an artifact the caller is not authorized for MUST return `CapabilityDenied` whether or not the artifact exists. The daemon MUST NOT distinguish "no such artifact" from "not yours" — a distinct not-found *is* the existence oracle.
+- With cross-principal sharing off (the default), a mutation whose content already exists under a different principal MUST produce the same result envelope as a first publication, including the `cost` block. A dedup that is invisible in `artifacts` but visible in reported cost is still an oracle. Timing SHOULD be indistinguishable as well; a deployment that cannot bound the timing signal MUST declare the residual channel rather than imply it has closed it.
+- Cross-principal sharing is enabled only by an explicit sharing policy naming the sharing scope and the artifact classes in scope, carried as a capability property rather than a daemon-global flag.
+- Idempotency keys are scoped per actor. A key MUST NOT be usable to probe or collide with another actor's requests: replaying another actor's key MUST behave as an unused key, never as `IdempotencyKeyReused`.
+
+### Epoch advance
+
+- An epoch advance MUST publish `EpochAdvanceNotice` — the per-artifact-class `Compatibility` map (`Preserved | Revalidate | Incompatible`) and the estimated `blast_radius`, both keyed by plan §4.4 class prefix — **before** the advance is applied.
+- The daemon MAY serve at most two epochs of a kind during a migration; new work defaults to the newest. A continuation resumes only under its pinned epoch and MUST be rejected with `ContinuationEpochMismatch` otherwise; a payload declaring an epoch the daemon does not implement MUST be rejected with `EpochUnsupported`, never best-effort decoded (docs/09 T13).
+- An advance MUST NOT mutate a published artifact and MUST NOT change what a published receipt claims. Re-derived artifacts get new identities linked by `SUPERSEDES` edges.
+- The `epochs` block names all six compatibility epochs plus `engine`. `engine` is engine *identity* (plan §4.7), not a seventh compatibility epoch; it is named here because continuations and defect reports pin it, and ADR-0018 records the correction.
+
+### Engine defects
+
+- A `ReplayDiverged`, a parity mismatch, an engine crash, or an explanation-validation failure MUST cause a `defect_*` artifact to be published, and the result that reports the condition MUST carry that handle in `artifacts`. A client MUST NOT have to reconstruct a defect report from an error string.
+- A `defect_*` pins every input by content identity, the semantic and checker epochs, the engine identity, and a minimized reproduction, under the same redaction policy as Context Packs (plan §18.4).
+- An engine defect is never a semantic verdict about the client's program. The task reports typed inconclusiveness (INV-008) and the `assurance` envelope names the dimensions it could not establish.
+
 ## Pagination
 
 List-returning operations accept `page_size` and an opaque `page_token`, and return `next_page_token`. Ordering MUST be deterministic (content identity or explicitly declared sort key); two identical requests against the same snapshot return identical pages.
@@ -80,7 +122,8 @@ List-returning operations accept `page_size` and an opaque `page_token`, and ret
 
 - Local IPC (unix socket / named pipe) first; authenticated HTTP/QUIC for shared/remote modes.
 - Canonical JSON for debugging; CBOR with the same canonical field order for performance. One encoding per connection, negotiated.
-- Remote mode requires an identity model; capabilities (`cap_*`) are minted, scoped, delegated, and revoked via daemon operations recorded in the audit log (plan §4.5). Possession of an artifact handle never implies authorization (ADR-0037).
+- Remote mode requires an identity model; capabilities (`cap_*`) are minted, scoped, delegated, and revoked via daemon operations, and every such operation MUST be recorded in the audit log with actor, capability, inputs, policy decision, outputs, and evidence identity (plan §4.5, §18.5). What a capability confers is the IDL's `CapabilityDescriptor`. Possession of an artifact handle never implies authorization (ADR-0037): authorization is checked below the adapter, independently of handle possession.
+- `cap_*` is the one plan §4.4 class that is not content-addressed. Capability tokens are minted randomly and do confer authority, so they are secrets: they MUST NOT be logged in request traces, MUST NOT appear in error text or in `next_operations` arguments, and have no content-derived store path (`crates/continuum-workspace/src/artifact_path.rs` refuses to derive one). Revocation, not purge, is how a capability stops being usable.
 
 ## Error taxonomy
 
@@ -103,9 +146,16 @@ The five codes added in review 5:
 ## Open questions
 
 - ~~IDL technology choice (custom vs. an existing schema language)~~ — decided: a custom textual IDL, because three-valued field presence, per-operation authority levels, task-starting/idempotency annotations, closed per-operation error sets, and citable normative rules have no faithful encoding in JSON Schema, OpenAPI, or Protobuf; JSON Schema is a generated artifact of the IDL, not its source (see the IDL's "Notation" section).
-- Capability administration (mint/scope/delegate/revoke, plan §4.5) is named in "Transport, encoding, authentication" below but has no entry in the plan §10.2 registry the IDL implements, so the IDL declares only what such operations would manipulate (`CapabilityDescriptor`). Either the registry gains the entries or the surface is declared out-of-band — before PR 5.
+- Capability administration (mint/scope/delegate/revoke, plan §4.5) is named in "Transport, encoding, authentication" above but has no entry in the plan §10.2 registry the IDL implements, so the IDL declares only what such operations would manipulate (`CapabilityDescriptor`; IDL open item 1). Either the registry gains the entries or the surface is declared out-of-band — before PR 5. What is *not* open, and does not wait on that choice: wherever these operations live, each one is privileged and MUST be recorded in the audit log, and the sharing policy that enables cross-principal reuse is a capability property rather than a daemon-global flag (plan §4.5, absorbed above). Declaring the surface out-of-band would move where the operations are invoked, never whether they are audited.
 - Capability delegation depth and expiry defaults for multi-agent handoff (with RFC 0027).
 
 ## Acceptance
 
 Golden request/response traces pinned per protocol version; malformed-input fuzzing on both encodings; idempotency replay tests; restart/resume with epoch mismatches; cancellation at every instrumented phase; deterministic pagination; adapter parity (same operation through CLI/MCP/LSP yields identical artifacts).
+
+For the operational contract absorbed above:
+
+- redaction round-trips — a summarized, a purged, and a lost artifact each read back as the typed stub with the right `reason`, appear in `omissions`, and downgrade the assurance envelope; `evidence.verify` over the referencing receipt returns structural success plus the redaction;
+- existence-oracle tests — an unauthorized read of an artifact that exists and of one that does not produce byte-identical envelopes, and publishing content already held by another principal produces the same envelope and `cost` as a first publication;
+- epoch-advance ordering — the notice, its per-class compatibility map, and its blast radius are observable before the advance is applied; a resume across it fails `ContinuationEpochMismatch` and an unknown epoch fails `EpochUnsupported`;
+- defect emission — every injected `ReplayDiverged` and parity mismatch yields a result carrying a `defect_*` handle and a typed inconclusive assurance envelope, never a semantic verdict.

@@ -2675,12 +2675,20 @@ projections, and the docs/35/40/41/42/45 corrections) are recorded in
   `schema_version`, and `encoding_version` forms are retired; the
   convention, including what advances an epoch and why it is not a
   seventh epoch, is normative in `schemas/README.md`;
-- SD-09 (open): docs/35, RFC 0026, ADR-0018, and docs/42 absorb the
+- SD-09 (paid, PR 0): docs/35, RFC 0026, ADR-0018, and docs/42 absorb the
   §4.5/§4.6/§4.7 operational contract (purge and `Redacted(reason,
   commitment)`, backup and verified restore, the cross-user dedup
   existence-oracle rule, two-epoch migration,
   `Preserved | Revalidate | Incompatible` compatibility statements,
-  engine-defect artifacts);
+  engine-defect artifacts) — docs/35 takes crash safety, storage
+  lifecycle and attribution, purge, restore, capabilities and
+  cross-principal sharing, and the daemon's migration duties; RFC 0026
+  takes the wire slice (the four-field `Redacted` stub,
+  `PublicationAborted`/`QuotaExhausted`, the existence-oracle rules,
+  `EpochAdvanceNotice`, `defect_*` on divergence); ADR-0018 takes epoch
+  advance; docs/42 takes reuse across an advance, redacted and collected
+  inputs, and parity mismatches as engine defects. Each absorbing
+  document records its corrections with direction;
 - SD-10 (open): docs/41 regenerated around the 12-gate, phase-profile
   repair design (RFC 0032 is normative in the interim);
 - SD-02 (paid, review 5): RFC 0026 absorbs the §4.3 requirements it

@@ -7203,14 +7203,14 @@
       "coverage": "leaf",
       "id": "SD-09",
       "metadata": {
-        "ledger_status": "open"
+        "ledger_status": "paid, PR 0"
       },
       "source": {
         "line": 2678,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "docs/35, RFC 0026, ADR-0018, and docs/42 absorb the \u00a74.5/\u00a74.6/\u00a74.7 operational contract (purge and Redacted(reason, commitment), backup and verified restore, the cross-user dedup existence-oracle rule, two-epoch migration, Preserved | Revalidate | Incompatible compatibility statements, engine-defect artifacts)"
+      "status": "satisfied",
+      "summary": "docs/35, RFC 0026, ADR-0018, and docs/42 absorb the \u00a74.5/\u00a74.6/\u00a74.7 operational contract (purge and Redacted(reason, commitment), backup and verified restore, the cross-user dedup existence-oracle rule, two-epoch migration, Preserved | Revalidate | Incompatible compatibility statements, engine-defect artifacts) \u2014 docs/35 takes crash safety, storage lifecycle and attribution, purge, restore, capabilities and cross-principal sharing, and the daemon's migration duties; RFC 0026 takes the wire slice (the four-field Redacted stub, PublicationAborted/QuotaExhausted, the existence-oracle rules, EpochAdvanceNotice, defect on divergence); ADR-0018 takes epoch advance; docs/42 takes reuse across an advance, redacted and collected inputs, and parity mismatches as engine defects. Each absorbing document records its corrections with direction"
     },
     {
       "category": "spec-debt",
@@ -7220,7 +7220,7 @@
         "ledger_status": "open"
       },
       "source": {
-        "line": 2684,
+        "line": 2692,
         "path": "plan.md"
       },
       "status": "active",
@@ -7234,7 +7234,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2686,
+        "line": 2694,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7248,7 +7248,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2691,
+        "line": 2699,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7262,7 +7262,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2695,
+        "line": 2703,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7276,7 +7276,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2698,
+        "line": 2706,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7290,7 +7290,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2700,
+        "line": 2708,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7304,7 +7304,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2702,
+        "line": 2710,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7318,7 +7318,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2711,
+        "line": 2719,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7332,7 +7332,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2718,
+        "line": 2726,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7346,7 +7346,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2724,
+        "line": 2732,
         "path": "plan.md"
       },
       "status": "satisfied",
