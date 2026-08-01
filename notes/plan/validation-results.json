@@ -13,7 +13,7 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 320
+      "scanned_files": 322
     },
     "g0_matrix_counts": {
       "evidence": 4,
@@ -43,10 +43,10 @@
       "kernel_checked": false
     },
     "markdown_fences": {
-      "files": 218
+      "files": 220
     },
     "markdown_links": {
-      "links": 194
+      "links": 226
     },
     "numbering": {
       "adr": 52,
@@ -58,8 +58,8 @@
     },
     "plan_bones_traceability": {
       "active_bones": 891,
-      "active_edges": 2076,
-      "active_requirements": 809,
+      "active_edges": 2067,
+      "active_requirements": 807,
       "coverage": "complete",
       "dependency_layers": 14,
       "leaf_bones": 784,
@@ -85,7 +85,7 @@
       "rows": 21
     },
     "retired_names": {
-      "files_scanned": 306
+      "files_scanned": 308
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20
@@ -95,7 +95,6 @@
     },
     "spec_debt": {
       "open": [
-        "SD-08",
         "SD-09",
         "SD-10"
       ],
@@ -107,6 +106,7 @@
         "SD-05",
         "SD-06",
         "SD-07",
+        "SD-08",
         "SD-11",
         "SD-12",
         "SD-13",

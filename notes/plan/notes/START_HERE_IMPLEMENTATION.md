@@ -153,7 +153,7 @@ Implement:
 
 - pinned Lean toolchain (`leanprover/lean4:v4.32.1`) (delivered: bn-31mq);
 - kernel-check the existing seed modules under `lean/Continuum/` (delivered: bn-fak5);
-- T0/T1 theorems: transition-system safety, stuttering simulation, finite-closure certificate soundness.
+- T0/T1 theorems: transition-system safety, stuttering simulation, finite-closure certificate soundness (delivered: bn-3qsa).
 
 **Exit:** T0/T1 compile with no `sorry` and empty axiom manifests (RFC 0012 theorem ladder; axiom manifests per ADR-0035). The proof *service* remains PR 28.
 

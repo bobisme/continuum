@@ -1270,8 +1270,8 @@
         "line": 150,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "T0/T1 theorems: transition-system safety, stuttering simulation, finite-closure certificate soundness."
+      "status": "satisfied",
+      "summary": "T0/T1 theorems: transition-system safety, stuttering simulation, finite-closure certificate soundness (delivered: bn-3qsa)."
     },
     {
       "category": "pr-exit",
