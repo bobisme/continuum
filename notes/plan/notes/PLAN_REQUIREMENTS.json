@@ -1554,7 +1554,7 @@
         "line": 209,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Exact finite model service [G1, G2]"
     },
     {
@@ -1626,8 +1626,8 @@
         "line": 209,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "Die Hard returns 16 states and depth-6 solution through the daemon API."
+      "status": "satisfied",
+      "summary": "Die Hard returns 16 states and depth-6 solution through the daemon API (delivered: bn-1jg0)."
     },
     {
       "category": "pr",
