@@ -79,7 +79,15 @@
 //!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
+pub mod assumptions;
+pub mod assurance_policy;
 pub mod ast;
+pub mod bounds;
 pub mod canonical_json;
+pub mod change_policy;
 pub mod cpnf;
+pub mod fairness;
+pub mod faults;
+pub mod observers;
+pub mod optimization;
 pub mod property;
