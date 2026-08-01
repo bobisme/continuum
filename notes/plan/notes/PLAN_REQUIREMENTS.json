@@ -1637,7 +1637,7 @@
         "line": 217,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Trusted kernel crates [G1, G6]"
     },
     {
@@ -1721,8 +1721,8 @@
         "line": 217,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "every single-field certificate mutation in the test suite is rejected, checking wire-form input only."
+      "status": "satisfied",
+      "summary": "every single-field certificate mutation in the test suite is rejected, checking wire-form input only (delivered: bn-19bc)."
     },
     {
       "category": "pr",

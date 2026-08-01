@@ -225,7 +225,7 @@ Implement the trusted checking base as four crates — `continuum-kernel-core`, 
 - receipt generation with checker epoch, build digest, and input hashes (delivered: bn-2he — a `receipt` module in each of the four crates emitting `schemas/proof-receipt.schema.json` instances, with the checker's wire contract carried in its *qualified* spelling (`continuum-kernel-core/CONTCERT/1`) because four crates share the ordinal 1, and carried in `checker.version` rather than `epochs` — RFC 0026 correction 17: there is no checker epoch. The build digest, toolchain identity, input certificate digest, observer digest, proof epoch, receipt id and reproduction command are an explicit `Seam` the caller supplies and the receipt names as trusted inputs; the kernel checks their shape and never invents a digest. KCOV-09 validates each crate's golden receipt against the schema);
 - mutation tests (delivered: bn-2he — `tools/kernel-covenant/mutation-matrix.toml` is a 23-class × 4-crate matrix mapping every mutation class to the tests that own it, enforced fail-closed by KCOV-08: a named test that does not exist, or a cell with neither an owning test nor an explicit waiver, fails the gate. 90 of 92 cells are owned or permanently not-applicable; the two `uncovered` cells — `envelope.digest-relabelling` in `continuum-kernel-smt` and `continuum-kernel-temporal` — are recorded as gaps and reported by `--strict`).
 
-**Exit:** every single-field certificate mutation in the test suite is rejected, checking wire-form input only.
+**Exit:** every single-field certificate mutation in the test suite is rejected, checking wire-form input only (delivered: bn-19bc).
 
 ### PR 10 — Agent client and ACI benchmark harness [G0 (DX-10), G2]
 
