@@ -112,10 +112,10 @@ Implement:
 
 - exact finite values from Revision 2 (delivered: bn-23m);
 - canonical encoding and total order (delivered: bn-23m);
-- content identity per ADR-0013: in certified lanes, canonical content identity is primary and hash collisions are resolved by canonical comparison; 256-bit-hash identity only in explicitly labeled non-certified modes;
-- collision-injection tests;
-- atomic artifact publication;
-- authorization separate from handle possession.
+- content identity per ADR-0013: in certified lanes, canonical content identity is primary and hash collisions are resolved by canonical comparison; 256-bit-hash identity only in explicitly labeled non-certified modes (delivered: bn-277);
+- collision-injection tests (delivered: bn-277);
+- atomic artifact publication (delivered: bn-210);
+- authorization separate from handle possession (delivered: bn-210).
 
 **Exit:** concurrent publication of identical artifacts yields one identity; artificial hash collisions are detected and resolved by canonical comparison in certified lanes.
 

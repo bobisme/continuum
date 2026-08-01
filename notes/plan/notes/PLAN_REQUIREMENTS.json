@@ -961,8 +961,8 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "content identity per ADR-0013: in certified lanes, canonical content identity is primary and hash collisions are resolved by canonical comparison; 256-bit-hash identity only in explicitly labeled non-certified modes"
+      "status": "satisfied",
+      "summary": "content identity per ADR-0013: in certified lanes, canonical content identity is primary and hash collisions are resolved by canonical comparison; 256-bit-hash identity only in explicitly labeled non-certified modes (delivered: bn-277)"
     },
     {
       "category": "pr-deliverable",
@@ -973,8 +973,8 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "collision-injection tests"
+      "status": "satisfied",
+      "summary": "collision-injection tests (delivered: bn-277)"
     },
     {
       "category": "pr-deliverable",
@@ -985,8 +985,8 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "atomic artifact publication"
+      "status": "satisfied",
+      "summary": "atomic artifact publication (delivered: bn-210)"
     },
     {
       "category": "pr-deliverable",
@@ -997,8 +997,8 @@
         "line": 109,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "authorization separate from handle possession."
+      "status": "satisfied",
+      "summary": "authorization separate from handle possession (delivered: bn-210)."
     },
     {
       "category": "pr-exit",
@@ -4548,7 +4548,7 @@
       "metadata": {
         "experiment": "concurrent identical task creation and artifact publication",
         "failure_consequence": "redesign CAS/task transaction",
-        "matrix_status": "Open \u2014 freeze-blocking (Phase A)",
+        "matrix_status": "Evidence (reference implementation)",
         "pass_condition": "one semantic identity; no lost receipts; deterministic result"
       },
       "source": {

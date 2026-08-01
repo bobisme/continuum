@@ -229,8 +229,9 @@ impl AssuranceRequirement {
     /// would let `no-downgrade` pass a contract that dropped its independent checker in
     /// exchange for a nominally higher minimum.
     ///
-    /// [`AssuranceChange::Incomparable`] never arises here, because RFC 0031 makes this
-    /// one field totally ordered — unlike bounds, which are componentwise partial.
+    /// An incomparable outcome never arises here (and [`AssuranceChange`] has no such
+    /// variant), because RFC 0031 makes this one field totally ordered — unlike
+    /// bounds, which are componentwise partial.
     #[must_use]
     pub const fn change_to(self, after: Self) -> AssuranceChange {
         let weakened = (after.minimum as u8) < (self.minimum as u8)
