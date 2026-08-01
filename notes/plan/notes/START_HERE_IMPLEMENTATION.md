@@ -127,7 +127,7 @@ Implement:
 - disk import, editor overlay, fork, seal, and diff;
 - source/dependency/toolchain/config identities (delivered: bn-2xri);
 - stale-snapshot error;
-- deterministic file ordering.
+- deterministic file ordering (delivered: bn-1qhe).
 
 **Exit:** two clients can fork and analyze independently; an old snapshot remains reproducible after the working tree changes.
 

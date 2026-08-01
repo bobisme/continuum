@@ -1080,8 +1080,8 @@
         "line": 122,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "deterministic file ordering."
+      "status": "satisfied",
+      "summary": "deterministic file ordering (delivered: bn-1qhe)."
     },
     {
       "category": "pr-exit",

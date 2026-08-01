@@ -51,10 +51,10 @@
 //!
 //! # The ordering contract
 //!
-//! This module fixes the minimum ordering a Merkle root needs to be well defined. The
-//! full deterministic file-ordering contract is PR 3 / IMPL-05; the rules below are the
-//! seam it formalizes, and are stated precisely so that IMPL-05 either adopts them or
-//! records a decision to change them:
+//! A Merkle root is well defined only when a directory's children have exactly one order.
+//! A *workspace* has exactly one Merkle root only when a name has exactly one spelling.
+//! PR 3 / IMPL-01 fixed the first; PR 3 / IMPL-05 fixes the second, in "the admission
+//! policy" below. The order is:
 //!
 //! 1. A [`WorkspacePath`] is a non-empty sequence of segments. Ordering between paths is
 //!    **segment-wise**, and between segments it is the byte order of their UTF-8
@@ -72,11 +72,199 @@
 //!    volume, and for the same reason: normalizing here would give one workspace two
 //!    spellings, which is the failure ADR-0013 exists to prevent.
 //!
-//! What is deliberately *not* decided here, and is IMPL-05's: Unicode normalization
-//! policy for names that differ only by composition, platform-reserved names, symlink
-//! and hard-link treatment, and whether non-UTF-8 names are rejected or encoded. This
-//! module takes UTF-8 segments and rejects the ones that cannot be ordered or stored
-//! unambiguously ([`PathError`]).
+//! # The admission policy: which names are workspace paths (PR 3 / IMPL-05)
+//!
+//! > Snapshots are content-addressed and immutable […] re-derived artifacts receive new
+//! > identities.
+//! >
+//! > — plan §4.2, `notes/plan/adr/0018-semantic-versioning-and-replay.md`
+//!
+//! The constitutional requirement is that the same workspace content has exactly one
+//! snapshot identity, everywhere, forever. One rule decides every open question below,
+//! and it decides them all the same way. Call it the **byte rule**:
+//!
+//! > A workspace path *is* its bytes. Nothing between the bytes an operating system
+//! > reports and the bytes of a Merkle record may rewrite them, and which names are
+//! > accepted may not be a function of anything that changes over time — not a Unicode
+//! > version, not a locale, not a platform.
+//!
+//! The byte rule is not a preference for simplicity. Every rewrite refused below is
+//! **many-to-one**: it maps two names the operating system distinguishes onto one path.
+//! A many-to-one map is fatal twice over. It gives one identity two workspaces, so the
+//! identity stops determining the content it names; and it forces the importer to pick a
+//! winner between two files that collided, which is a choice made in *input order* —
+//! exactly the nondeterminism a snapshot exists to remove.
+//!
+//! ## Unicode normalization: none
+//!
+//! Two paths that differ only in normalization form are **two distinct paths**. `café`
+//! spelled NFC (`caf\u{e9}`) and NFD (`cafe\u{301}`) are two files, they order by their
+//! bytes like any other two names, and neither is rewritten into the other.
+//!
+//! Beyond the byte rule, normalizing would make snapshot identity a function of *the
+//! Unicode version the importer was built against*. Unicode's stability policy fixes the
+//! canonical decomposition of an already-assigned character, but says nothing about code
+//! points that are unassigned today: a name containing one normalizes to itself now and
+//! may normalize to something else after the next Unicode release. A snapshot identity
+//! that moves when a library is upgraded is not an identity, and INV-006 replay would
+//! fail against artifacts nobody edited.
+//!
+//! An importer that wants normalized names normalizes *the working tree*, which is a
+//! visible, reviewable change to the workspace, and then takes a snapshot of the result.
+//!
+//! ## Case: exact, never folded
+//!
+//! `A.rs` and `a.rs` are two files. The byte rule again, plus two reinforcements: case
+//! folding is locale-dependent (Turkish `I`/`ı`) and Unicode-version-dependent, and full
+//! folding is not even length-preserving (`ß` → `ss`), so it is many-to-one in the most
+//! literal way. This matches [`artifact_path`](crate::artifact_path)'s case-sensitivity
+//! requirement on the store volume, and for the same reason (ADR-0013).
+//!
+//! ## Names that are not UTF-8: rejected, typed
+//!
+//! [`WorkspacePath::from_bytes`] is the boundary an importer crosses, and a segment whose
+//! bytes are not UTF-8 is [`PathError::SegmentEncoding`] — never escaped, never replaced,
+//! never lossily decoded.
+//!
+//! Escaping was the alternative and it is refused on the schemas' authority, not on
+//! taste. INV-003 makes `notes/plan/schemas/` normative for artifact shape, and
+//! `workspace-snapshot.schema.json` types `files[].path` as a JSON string, which is
+//! Unicode text by definition. A byte sequence that is not UTF-8 has no representation
+//! there, so an escaped path would be a name whose *artifact* spells one thing and whose
+//! *filesystem* spells another, with a decoder in between that every consumer — store,
+//! diff, CLI, agent — would have to implement identically forever. One decoder that
+//! disagrees is one workspace with two identities. Rejection has none of that surface:
+//! the failure is loud, typed, and at the boundary, and the fix (rename the file) is in
+//! the user's hands and visible in their working tree.
+//!
+//! Lossy decoding is refused for a sharper reason: `String::from_utf8_lossy` maps every
+//! invalid sequence to `U+FFFD`, so two different unreadable names become one path. That
+//! is the many-to-one failure exactly.
+//!
+//! ## Rejected characters
+//!
+//! [`PathError::SegmentCharacter`] covers ASCII control characters (including NUL), the
+//! separator `/`, and the eight characters no ordinary Win32 path may contain:
+//! `\ < > : " | ? *`. The rule is the byte rule's platform half: a name that a supported
+//! platform cannot hold *at all* would make the workspace unmaterializable there, and a
+//! workspace that exists on one platform and not another has two snapshots — docs/19 §7
+//! makes the OS/architecture matrix a determinism dimension. `:` is also the
+//! path-traversal rejection [`artifact_path`](crate::artifact_path) makes for drive-
+//! relative paths (`c:x`), and `\` is the separator half of it (docs/19 §9, docs/09).
+//!
+//! Each rejected character is a *fixed code point*, and control characters are the fixed
+//! `Cc` ranges `U+0000..=U+001F` and `U+007F..=U+009F`, which Unicode can never extend.
+//! So the accepted set is not a function of the Unicode version — the byte rule's second
+//! clause. That is also why bidirectional-override and other format (`Cf`) characters are
+//! **accepted**: rejecting them would key the accepted set to a general category whose
+//! membership grows with each Unicode release. A name that renders deceptively is a
+//! display concern for whatever shows it, not a licence to make identity unstable.
+//!
+//! ## Reserved segments
+//!
+//! [`PathError::ReservedSegment`], with a [`ReservedReason`] naming which rule fired:
+//!
+//! - **`TrailingDot` / `TrailingSpace`.** Win32 strips a trailing `.` or space when it
+//!   opens a path, so `a.` and `a` are one file there and two files on Linux. Writing out
+//!   such a workspace and reading it back changes its identity, on a platform where
+//!   nothing was edited.
+//! - **`DeviceName`.** `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, matched
+//!   against the stem before the first `.` (Win32 resolves `CON.txt` to the console too),
+//!   under an **ASCII-only** uppercase fold. Opening one of these on Windows reaches a
+//!   device rather than a file, so such a workspace cannot be materialized at all.
+//!
+//!   The fold looks like the case folding decision three headings up refuses, and is not:
+//!   it decides *rejection* only, never identity, and it is ASCII-only, so it is fixed
+//!   forever. No two accepted names are ever compared under it.
+//!
+//! Trailing dots and device names cannot be enabled by any volume option, which is what
+//! separates them from case: see "what is required of the filesystem instead" below.
+//!
+//! ## Segment length
+//!
+//! At most [`MAX_SEGMENT_BYTES`] UTF-8 bytes ([`PathError::SegmentTooLong`]). 255 bytes
+//! is `NAME_MAX` on the filesystems in the supported matrix, and since a UTF-8 sequence
+//! is never shorter than its UTF-16 encoding in code units, 255 bytes also stays inside
+//! NTFS's 255-unit bound. A longer segment names a file no supported filesystem can
+//! hold. The *total* rendered length is deliberately not bounded here: it depends on the
+//! workspace root's own prefix, which this module does not know and IMPL-02 does.
+//!
+//! ## Symbolic links: not content, at this layer
+//!
+//! A symlink is not file content; it is a name that refers to another name. Snapshotting
+//! its target inlines a file that has its own path (so one byte string enters the tree
+//! twice and a later edit desynchronizes the copies), and snapshotting the link's target
+//! *string* stores a path that may point outside the workspace — the traversal
+//! [`WorkspacePath`] rejects at construction, smuggled in as content.
+//!
+//! [`SymlinkPolicy`] is therefore the typed surface IMPL-02 must consult, and
+//! [`SymlinkPolicy::Reject`] — a typed [`AdmissionError::Symlink`] naming the link and
+//! its target — is the only arm this layer implements.
+//! [`SymlinkPolicy::FollowWithCycleDetection`] is named because it is the only *other*
+//! defensible arm and naming it keeps it from being invented ad hoc; selecting it today
+//! is [`AdmissionError::UnsupportedSymlinkPolicy`], so an importer physically cannot
+//! follow a link without coming back to this module. It would have to specify what a
+//! cycle is, what a link escaping the workspace root means, and how the resulting
+//! duplicate content is recorded — three decisions, not a flag.
+//!
+//! **Hard links need no policy.** A hard link is indistinguishable from a regular file,
+//! two paths sharing an inode are simply two files with equal content, and equal content
+//! already shares one identity and one record ([`Snapshot::records`]). Nothing to decide.
+//!
+//! **Everything else is refused.** A FIFO, socket, or device node has no content to
+//! snapshot — reading one yields whatever was in flight, which is ambient nondeterminism
+//! (INV-005) — so [`Candidate::Special`] is [`AdmissionError::Special`]. Directories are
+//! not a candidate kind: a directory exists exactly when it holds a file, and whether an
+//! *empty* directory is workspace content at all is still IMPL-02's question (see "seams
+//! left open on purpose").
+//!
+//! ## What is required of the filesystem instead
+//!
+//! Exactly one requirement, and it is the one the store already makes: **a case-sensitive
+//! volume**. A workspace holding both `A.rs` and `a.rs` is a legal snapshot and cannot be
+//! written to a case-insensitive volume — precisely as
+//! [`artifact_path`](crate::artifact_path) says of `ws_A` and `ws_a`. The line between
+//! "declared requirement" and "typed rejection" is whether a *conforming volume exists*:
+//! case sensitivity is a volume property one can choose (ext4, case-sensitive APFS, NTFS
+//! with the flag set), while no volume option makes Win32 stop swallowing a trailing dot
+//! or stop resolving `NUL`. (The `\\?\` extended-path form does bypass Win32's parser,
+//! but it is a per-call spelling, not a property of the workspace, and the tools a user
+//! points at their own checkout do not use it.)
+//!
+//! ## What reserves nothing, and why that is worth saying
+//!
+//! Neither the record grammar nor the store layout reserves a single name.
+//!
+//! - The directory record is length-prefixed (`u64(name_len) | name | …`), so it is
+//!   injective over arbitrary segment bytes: no name can be confused with a delimiter,
+//!   because there are no delimiters. A name-escaping scheme would be pure liability.
+//! - Store paths are derived from *handles*
+//!   ([`ArtifactPath::for_handle`](crate::artifact_path::ArtifactPath::for_handle)), and a
+//!   handle's identity charset is `[A-Za-z0-9_-]`. No workspace path segment ever appears
+//!   in a store path, so no segment can collide with one.
+//!
+//! Every rejection above is therefore a *materialization* rejection, and IMPL-02 should
+//! read it that way: the tree does not need these rules, round-tripping a workspace
+//! through a filesystem does.
+//!
+//! ## Why [`ENCODING_VERSION`] does not move
+//!
+//! The grammar, the byte layout, and the order are all unchanged; the accepted set
+//! narrowed. Every snapshot that is still representable keeps exactly the identity it
+//! had, so bumping the version would re-derive every artifact in the store to say
+//! nothing. A name this policy now refuses could never have been imported deterministically
+//! in the first place, which is why narrowing is not a semantic change (docs/12 §1,
+//! GOV-1-09).
+//!
+//! ## The entry point
+//!
+//! [`admit`] — pure, total, and order-independent in both directions. It takes candidate
+//! `(name bytes, `[`Candidate`]`)` pairs in any order and returns either the canonical
+//! ordered [`WorkspaceContent`] or the *first* typed rejection, where "first" is by the
+//! candidate's raw name bytes and not by the order the importer happened to walk the
+//! disk in. A rejection that depended on walk order would leave two importers of one
+//! workspace disagreeing about *why* it was refused, which is the same failure as
+//! disagreeing about its identity, one level up.
 //!
 //! # Identity discipline: the tree is the identity, the root is the name
 //!
@@ -157,7 +345,8 @@
 //!   schema's `files` and `root_digest` — and the remaining components (`dependencies`,
 //!   `epochs`, `intent`, and the named-digest lists) attach *beside* the root rather than
 //!   inside it, because they are identities of things that are not files in the tree.
-//! - **Deterministic file ordering is IMPL-05.** See "The ordering contract" above.
+//! - **Deterministic file ordering is IMPL-05, and is here.** See "the ordering contract"
+//!   and "the admission policy" above; [`admit`] is the entry point an importer uses.
 //! - **Empty directories are not representable.** A [`WorkspaceContent`] is a set of
 //!   files, so a directory exists exactly when it contains one. Whether an empty
 //!   directory is workspace content at all is a disk-import question (IMPL-02); if it is,
@@ -252,6 +441,18 @@ pub const ENCODING_VERSION: u8 = 1;
 /// an abort is a panic on adversarial input, which this module does not do.
 pub const MAX_DEPTH: usize = 64;
 
+/// The longest path segment this module accepts, in UTF-8 bytes.
+///
+/// `NAME_MAX` on every filesystem in docs/19 §7's supported matrix: 255 bytes on ext4,
+/// APFS, and XFS, and 255 UTF-16 code units on NTFS — which this bound also respects,
+/// because a character's UTF-16 encoding is never *longer* in code units than its UTF-8
+/// encoding is in bytes. A longer segment names a file no supported filesystem can hold,
+/// so a workspace containing one could not be written out and read back unchanged.
+///
+/// The *rendered path* length is deliberately not bounded here: it depends on the
+/// workspace root's own prefix, which this module does not know (PR 3 / IMPL-02 does).
+pub const MAX_SEGMENT_BYTES: usize = 255;
+
 /// Magic prefix of a whole-tree encoding ([`Snapshot::encode`]).
 const TREE_MAGIC: &[u8] = b"cwsnap";
 
@@ -271,6 +472,54 @@ const TAG_DIRECTORY: u8 = 0x01;
 const FILE_RECORD_HEADER: usize = NODE_MAGIC.len() + 1 + 1 + 8;
 
 // --- paths -----------------------------------------------------------------------------
+
+/// Which reservation rule a segment ran into ([`PathError::ReservedSegment`]).
+///
+/// Every variant is a name a supported platform *mangles or diverts* rather than stores,
+/// so accepting it would let one workspace round-trip through a filesystem into a
+/// different workspace. See the module documentation's "reserved segments".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ReservedReason {
+    /// A Win32 device name: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`,
+    /// matched against the stem before the first `.` under an ASCII-only uppercase fold.
+    ///
+    /// Opening one of these on Windows reaches a device, not a file. The fold decides
+    /// rejection only and never identity: two *accepted* names are never compared under
+    /// it, and being ASCII-only it is fixed forever.
+    DeviceName,
+    /// The segment ends in `.`, which Win32 strips when it opens a path.
+    TrailingDot,
+    /// The segment ends in a space, which Win32 strips when it opens a path.
+    TrailingSpace,
+}
+
+impl ReservedReason {
+    /// The stable machine name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DeviceName => "device-name",
+            Self::TrailingDot => "trailing-dot",
+            Self::TrailingSpace => "trailing-space",
+        }
+    }
+
+    /// Why the platform cannot store a segment under this rule, in one clause.
+    #[must_use]
+    pub const fn explanation(self) -> &'static str {
+        match self {
+            Self::DeviceName => "names a Win32 device rather than a file",
+            Self::TrailingDot => "ends in `.`, which Win32 strips when opening a path",
+            Self::TrailingSpace => "ends in a space, which Win32 strips when opening a path",
+        }
+    }
+}
+
+impl fmt::Display for ReservedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 /// Why a string is not a usable workspace path.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -298,16 +547,58 @@ pub enum PathError {
     },
     /// A segment contained a character that cannot appear in a portable, orderable name.
     ///
-    /// Rejected: ASCII control characters including NUL, and `\`. The backslash is not
-    /// forbidden because it is rare — it is forbidden because a workspace whose paths
-    /// order and nest differently on two platforms has two Merkle trees, and docs/19 §7
-    /// makes the OS/architecture matrix a determinism dimension. `/` cannot reach here:
-    /// it is the separator.
+    /// Rejected: ASCII control characters including NUL, and the eight characters no
+    /// ordinary Win32 path may hold — `\ < > : " | ? *`. The backslash is not forbidden
+    /// because it is rare — it is forbidden because a workspace whose paths order and
+    /// nest differently on two platforms has two Merkle trees, and docs/19 §7 makes the
+    /// OS/architecture matrix a determinism dimension. `:` carries a second reason: it
+    /// spells a drive-relative Win32 path, which is the traversal
+    /// [`artifact_path`](crate::artifact_path) rejects for the same handle (docs/19 §9,
+    /// docs/09). `/` reaches here only from [`WorkspacePath::from_segments`], where a
+    /// separator inside an explicit segment would silently deepen the tree.
+    ///
+    /// Each rejected character is a fixed code point and the control range is Unicode's
+    /// fixed `Cc` block, so the accepted set is not a function of the Unicode version —
+    /// which is also why format (`Cf`) characters are accepted. See the module
+    /// documentation's "rejected characters".
     SegmentCharacter {
         /// Index of the offending segment.
         index: usize,
         /// The first offending character.
         character: char,
+    },
+    /// A segment's bytes are not UTF-8 ([`WorkspacePath::from_bytes`]).
+    ///
+    /// Refused rather than escaped or lossily decoded: `files[].path` is a JSON string in
+    /// `notes/plan/schemas/workspace-snapshot.schema.json`, which INV-003 makes normative,
+    /// so a non-Unicode name has no representation in the artifact that would name it —
+    /// and a lossy decode maps every unreadable name onto `U+FFFD`, merging distinct
+    /// files. See the module documentation's "names that are not UTF-8".
+    SegmentEncoding {
+        /// Index of the offending segment.
+        index: usize,
+        /// Byte offset of the first invalid byte, within the segment.
+        offset: usize,
+        /// The first invalid byte.
+        byte: u8,
+    },
+    /// A segment is a name a supported platform mangles or diverts rather than stores.
+    ReservedSegment {
+        /// Index of the offending segment.
+        index: usize,
+        /// The segment, as written.
+        segment: String,
+        /// Which reservation rule fired.
+        reason: ReservedReason,
+    },
+    /// A segment is longer than [`MAX_SEGMENT_BYTES`] UTF-8 bytes.
+    SegmentTooLong {
+        /// Index of the offending segment.
+        index: usize,
+        /// The segment's length in UTF-8 bytes.
+        bytes: usize,
+        /// The bound, [`MAX_SEGMENT_BYTES`].
+        max: usize,
     },
     /// The path nests deeper than [`MAX_DEPTH`].
     TooDeep {
@@ -335,6 +626,29 @@ impl fmt::Display for PathError {
                 "workspace path segment {index} has a character {character:?} that is not \
                  portable in a path name"
             ),
+            Self::SegmentEncoding {
+                index,
+                offset,
+                byte,
+            } => write!(
+                f,
+                "workspace path segment {index} is not UTF-8: byte {byte:#04x} at offset \
+                 {offset}. A workspace path is Unicode text or it is refused; it is never \
+                 escaped or lossily decoded"
+            ),
+            Self::ReservedSegment {
+                index,
+                segment,
+                reason,
+            } => write!(
+                f,
+                "workspace path segment {index} is {segment:?}, which {}",
+                reason.explanation()
+            ),
+            Self::SegmentTooLong { index, bytes, max } => write!(
+                f,
+                "workspace path segment {index} is {bytes} bytes, past the {max}-byte bound"
+            ),
             Self::TooDeep { depth, max } => {
                 write!(
                     f,
@@ -349,6 +663,29 @@ impl core::error::Error for PathError {}
 
 /// The separator between path segments, in the rendered form.
 const SEPARATOR: char = '/';
+
+/// The separator as one byte, for splitting raw operating-system bytes.
+///
+/// Splitting bytes on `0x2f` agrees with splitting text on `/` because `/` is ASCII and
+/// UTF-8 never uses a byte below `0x80` inside a multi-byte sequence. An *overlong*
+/// encoding of `/` (`0xc0 0xaf`) is therefore not a separator here — it is invalid UTF-8,
+/// and [`PathError::SegmentEncoding`] refuses it before it can be mistaken for one.
+const SEPARATOR_BYTE: u8 = b'/';
+
+/// Characters no ordinary Win32 path may contain, `\` included.
+///
+/// Fixed code points, deliberately: see [`PathError::SegmentCharacter`].
+const NON_PORTABLE_CHARACTERS: [char; 8] = ['\\', '<', '>', ':', '"', '|', '?', '*'];
+
+/// Win32 device names, compared against a segment's stem under an ASCII-only fold.
+///
+/// The historical DOS device set, which every Windows release still resolves ahead of the
+/// filesystem. Spelled in one fixed array so the reserved set is auditable in one glance
+/// and cannot drift.
+const RESERVED_DEVICE_STEMS: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
 
 /// A path to one file inside a workspace, relative to the workspace root.
 ///
@@ -380,6 +717,67 @@ impl WorkspacePath {
             return Err(PathError::Empty);
         }
         Self::from_segments(text.split(SEPARATOR))
+    }
+
+    /// Parse a `/`-separated path from the raw bytes an operating system reported.
+    ///
+    /// The byte-level boundary of the admission policy, and the only place a name that is
+    /// not Unicode text can be met. Pure: the result is a function of `raw` alone.
+    ///
+    /// Injective on the names it accepts — no normalization, no folding, no separator
+    /// collapsing — so two distinct accepted byte strings are two distinct paths, and
+    /// `path.to_string().as_bytes()` is `raw` again. That is what makes the constitutional
+    /// requirement provable rather than hoped for: one workspace, one identity, because
+    /// one name has one spelling.
+    ///
+    /// # Errors
+    ///
+    /// [`PathError::SegmentEncoding`] for a segment that is not UTF-8, and otherwise every
+    /// [`PathError`] [`WorkspacePath::new`] reports.
+    ///
+    /// ```
+    /// use continuum_workspace::snapshot::{PathError, WorkspacePath};
+    ///
+    /// let path = WorkspacePath::from_bytes(b"src/lib.rs")?;
+    /// assert_eq!(path.to_string(), "src/lib.rs");
+    ///
+    /// // An overlong encoding of `/` is not a separator; it is not UTF-8 at all.
+    /// assert!(matches!(
+    ///     WorkspacePath::from_bytes(b"a\xc0\xafb"),
+    ///     Err(PathError::SegmentEncoding { index: 0, .. }),
+    /// ));
+    /// # Ok::<(), PathError>(())
+    /// ```
+    pub fn from_bytes(raw: &[u8]) -> Result<Self, PathError> {
+        if raw.is_empty() {
+            return Err(PathError::Empty);
+        }
+        // Counted before anything is allocated, so an adversarially deep name costs a
+        // scan rather than one `String` per segment.
+        let depth = raw
+            .iter()
+            .filter(|byte| **byte == SEPARATOR_BYTE)
+            .count()
+            .saturating_add(1);
+        if depth > MAX_DEPTH {
+            return Err(PathError::TooDeep {
+                depth,
+                max: MAX_DEPTH,
+            });
+        }
+        let mut segments: Vec<String> = Vec::with_capacity(depth);
+        for (index, chunk) in raw.split(|byte| *byte == SEPARATOR_BYTE).enumerate() {
+            let text = core::str::from_utf8(chunk).map_err(|error| {
+                let offset = error.valid_up_to();
+                PathError::SegmentEncoding {
+                    index,
+                    offset,
+                    byte: chunk.get(offset).copied().unwrap_or_default(),
+                }
+            })?;
+            segments.push(text.to_owned());
+        }
+        Self::from_segments(segments)
     }
 
     /// Build a path from segments that are not `/`-joined.
@@ -465,6 +863,11 @@ impl FromStr for WorkspacePath {
 }
 
 /// Reject every segment that cannot be ordered, stored, or nested unambiguously.
+///
+/// The checks run in a fixed order — empty, relative, character, reserved, length — so a
+/// segment with two defects always reports the same one. "First violation" has to be a
+/// function of the segment and of nothing else, for the same reason [`admit`]'s "first
+/// rejection" does.
 fn validate_segment(segment: &str, index: usize) -> Result<(), PathError> {
     if segment.is_empty() {
         return Err(PathError::EmptySegment { index });
@@ -475,13 +878,56 @@ fn validate_segment(segment: &str, index: usize) -> Result<(), PathError> {
             segment: segment.to_owned(),
         });
     }
-    if let Some(character) = segment
-        .chars()
-        .find(|c| c.is_control() || *c == '\\' || *c == SEPARATOR)
-    {
+    if let Some(character) = segment.chars().find(|c| !is_portable_character(*c)) {
         return Err(PathError::SegmentCharacter { index, character });
     }
+    if let Some(reason) = reserved_reason(segment) {
+        return Err(PathError::ReservedSegment {
+            index,
+            segment: segment.to_owned(),
+            reason,
+        });
+    }
+    if segment.len() > MAX_SEGMENT_BYTES {
+        return Err(PathError::SegmentTooLong {
+            index,
+            bytes: segment.len(),
+            max: MAX_SEGMENT_BYTES,
+        });
+    }
     Ok(())
+}
+
+/// Whether a character may appear in a segment.
+///
+/// A predicate over fixed code points: Unicode's `Cc` block never grows, and the eight
+/// non-portable characters are literals. Nothing here consults a Unicode general category
+/// that a future release could extend, because the set of accepted names must not be a
+/// function of which Unicode version an importer was built against.
+fn is_portable_character(character: char) -> bool {
+    !character.is_control()
+        && character != SEPARATOR
+        && !NON_PORTABLE_CHARACTERS.contains(&character)
+}
+
+/// Which reservation rule a segment runs into, if any.
+///
+/// The ASCII-only fold decides rejection and never identity: no two *accepted* segments
+/// are ever compared through it, so `README.md` and `readme.md` remain two files.
+fn reserved_reason(segment: &str) -> Option<ReservedReason> {
+    if segment.ends_with('.') {
+        return Some(ReservedReason::TrailingDot);
+    }
+    if segment.ends_with(' ') {
+        return Some(ReservedReason::TrailingSpace);
+    }
+    // Win32 resolves `CON.txt` to the console as readily as `CON`, so the stem before the
+    // first `.` is what has to be compared.
+    let stem = segment.split('.').next().unwrap_or(segment);
+    RESERVED_DEVICE_STEMS
+        .iter()
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+        .then_some(ReservedReason::DeviceName)
 }
 
 // --- the explicit content description ---------------------------------------------------
@@ -672,6 +1118,282 @@ fn render(path: Option<&WorkspacePath>) -> String {
         || "the workspace root".to_owned(),
         |path| format!("`{path}`"),
     )
+}
+
+// --- admission: the importer's boundary (PR 3 / IMPL-05) ----------------------------------
+
+/// What an importer found at one candidate path.
+///
+/// Deliberately not a filesystem type: it is the *content model's* reading of one. A
+/// regular file is content; a symbolic link is a name, not content; everything else has
+/// no content to snapshot at all. Directories are absent because a directory exists
+/// exactly when it holds a file, and whether an empty one is workspace content remains
+/// PR 3 / IMPL-02's question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Candidate<'a> {
+    /// A regular file, with its content.
+    File(&'a [u8]),
+    /// A symbolic link, with the bytes of its target exactly as the operating system
+    /// reported them — unresolved, and not assumed to be UTF-8.
+    Symlink(&'a [u8]),
+    /// A FIFO, socket, device node, or anything else that is neither of the above.
+    ///
+    /// Reading one does not yield content; it yields whatever happened to be in flight,
+    /// which is ambient nondeterminism (INV-005) wearing a path.
+    Special,
+}
+
+/// What an importer does when it meets a symbolic link.
+///
+/// A policy *axis*, named so that it cannot be decided ad hoc twice. Exactly one arm is
+/// implemented, so the axis adds no nondeterminism today: see
+/// [`SymlinkPolicy::is_implemented`] and the module documentation's "symbolic links".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SymlinkPolicy {
+    /// Refuse the workspace, naming the link and its target
+    /// ([`AdmissionError::Symlink`]). The default, and the only implemented arm.
+    #[default]
+    Reject,
+    /// Resolve links to the files they name, refusing a cycle.
+    ///
+    /// Named because it is the only other defensible arm and naming it keeps it from
+    /// being invented ad hoc; **not implemented**. Selecting it is
+    /// [`AdmissionError::UnsupportedSymlinkPolicy`], because implementing it means
+    /// answering three questions this layer has not answered — what a cycle is, what a
+    /// link escaping the workspace root means, and how the duplicated content is
+    /// recorded — and a flag is not an answer to any of them.
+    FollowWithCycleDetection,
+}
+
+impl SymlinkPolicy {
+    /// Whether this arm is implemented. Only [`SymlinkPolicy::Reject`] is.
+    #[must_use]
+    pub const fn is_implemented(self) -> bool {
+        matches!(self, Self::Reject)
+    }
+
+    /// The stable machine name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reject => "reject",
+            Self::FollowWithCycleDetection => "follow-with-cycle-detection",
+        }
+    }
+}
+
+impl fmt::Display for SymlinkPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The policy [`admit`] applies, as an explicit value rather than an ambient default.
+///
+/// A policy that varies between two importers of one workspace is a workspace with two
+/// identities, so this type exists to make the axis *visible* and to keep the set of
+/// implementable values a singleton until a decision widens it. When PR 3 / IMPL-03
+/// records the components a snapshot pins, the policy in force belongs beside them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AdmissionPolicy {
+    symlinks: SymlinkPolicy,
+}
+
+impl AdmissionPolicy {
+    /// The policy every implemented arm agrees on: reject symbolic links.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            symlinks: SymlinkPolicy::Reject,
+        }
+    }
+
+    /// Choose the symbolic-link arm.
+    #[must_use]
+    pub const fn with_symlinks(self, symlinks: SymlinkPolicy) -> Self {
+        Self { symlinks }
+    }
+
+    /// The symbolic-link arm in force.
+    #[must_use]
+    pub const fn symlinks(self) -> SymlinkPolicy {
+        self.symlinks
+    }
+}
+
+/// Why a set of candidates is not a workspace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmissionError {
+    /// A candidate's name is not a workspace path.
+    Name {
+        /// The raw name, as the operating system reported it.
+        name: Vec<u8>,
+        /// Why it was refused.
+        error: PathError,
+    },
+    /// A candidate is a symbolic link and the policy is [`SymlinkPolicy::Reject`].
+    Symlink {
+        /// The link's raw name.
+        name: Vec<u8>,
+        /// The link's raw target.
+        target: Vec<u8>,
+    },
+    /// A candidate is neither a regular file nor a symbolic link.
+    Special {
+        /// The entry's raw name.
+        name: Vec<u8>,
+    },
+    /// The requested symbolic-link arm is not implemented.
+    UnsupportedSymlinkPolicy {
+        /// The arm that was asked for.
+        policy: SymlinkPolicy,
+    },
+    /// The candidates name paths that are not a tree: a repeat, or a file another
+    /// candidate needs as a directory.
+    NotATree(SnapshotError),
+}
+
+impl fmt::Display for AdmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Name { name, error } => {
+                write!(f, "candidate `{}`: {error}", render_name(name))
+            }
+            Self::Symlink { name, target } => write!(
+                f,
+                "candidate `{}` is a symbolic link to `{}`; a link is a name, not content, \
+                 and this layer stores content",
+                render_name(name),
+                render_name(target)
+            ),
+            Self::Special { name } => write!(
+                f,
+                "candidate `{}` is neither a regular file nor a symbolic link, so it has \
+                 no content to snapshot",
+                render_name(name)
+            ),
+            Self::UnsupportedSymlinkPolicy { policy } => write!(
+                f,
+                "symbolic-link policy `{policy}` is not implemented; only `{}` is",
+                SymlinkPolicy::Reject
+            ),
+            Self::NotATree(error) => error.fmt(f),
+        }
+    }
+}
+
+impl core::error::Error for AdmissionError {}
+
+impl From<SnapshotError> for AdmissionError {
+    fn from(error: SnapshotError) -> Self {
+        Self::NotATree(error)
+    }
+}
+
+/// Render a raw name for a message only.
+///
+/// Lossy on purpose and *only* here: a message is prose, and the name it quotes has
+/// already been refused. No accepted path is ever produced this way — that is
+/// [`WorkspacePath::from_bytes`], which refuses what this function would flatten.
+fn render_name(name: &[u8]) -> String {
+    String::from_utf8_lossy(name).into_owned()
+}
+
+/// Validate and order candidate entries: the one entry point an importer needs.
+///
+/// Takes `(raw name, `[`Candidate`]`)` pairs in any order and returns the canonical
+/// ordered [`WorkspaceContent`] — the input [`Snapshot::build`] wants — or the first
+/// typed rejection.
+///
+/// Pure, and order-independent **in both directions**. Acceptance is order-independent
+/// because [`WorkspaceContent`] is a [`BTreeMap`]; rejection is order-independent because
+/// candidates are examined in the order of their *raw name bytes*, which is a total order
+/// defined on every input including the ones that are not paths at all. Walking a
+/// directory yields entries in whatever order the filesystem felt like, so a rejection
+/// that depended on that order would have two importers of one workspace disagreeing
+/// about why it was refused — the same failure as disagreeing about its identity, one
+/// level up (INV-005, docs/19 §7).
+///
+/// The examination order is fixed and worth stating, because "first" has to mean
+/// something:
+///
+/// 1. the policy itself, before any candidate is read;
+/// 2. every candidate in raw-name order — name first, then kind;
+/// 3. every accepted path in *path* order, where a repeat or a file-versus-directory
+///    conflict is found. Path order is not raw-name order (`a.b` and `a/b` disagree), so
+///    this pass is sorted again rather than reusing the first pass's order.
+///
+/// # Errors
+///
+/// [`AdmissionError`]: an unimplemented policy, a name that is not a workspace path, a
+/// symbolic link, an entry that is not a regular file, or candidates that are not a tree.
+///
+/// # Example
+///
+/// ```
+/// use continuum_workspace::snapshot::{admit, AdmissionPolicy, Candidate};
+///
+/// // Whatever order the walk produced.
+/// let found = [
+///     (b"src/lib.rs".as_slice(), Candidate::File(b"fn main() {}")),
+///     (b"README.md".as_slice(), Candidate::File(b"hello")),
+/// ];
+/// let content = admit(found, AdmissionPolicy::new())?;
+/// assert_eq!(
+///     content.paths().map(ToString::to_string).collect::<Vec<_>>(),
+///     ["README.md", "src/lib.rs"],
+/// );
+///
+/// // Reversed, it is the same description — and therefore the same snapshot.
+/// let mut reversed = found;
+/// reversed.reverse();
+/// assert_eq!(admit(reversed, AdmissionPolicy::new())?, content);
+/// # Ok::<(), continuum_workspace::snapshot::AdmissionError>(())
+/// ```
+pub fn admit<'a, I>(
+    candidates: I,
+    policy: AdmissionPolicy,
+) -> Result<WorkspaceContent, AdmissionError>
+where
+    I: IntoIterator<Item = (&'a [u8], Candidate<'a>)>,
+{
+    if !policy.symlinks().is_implemented() {
+        return Err(AdmissionError::UnsupportedSymlinkPolicy {
+            policy: policy.symlinks(),
+        });
+    }
+
+    let mut found: Vec<(&[u8], Candidate<'_>)> = candidates.into_iter().collect();
+    found.sort_by(|left, right| left.0.cmp(right.0));
+
+    let mut admitted: Vec<(WorkspacePath, &[u8])> = Vec::with_capacity(found.len());
+    for (name, candidate) in found {
+        let path = WorkspacePath::from_bytes(name).map_err(|error| AdmissionError::Name {
+            name: name.to_vec(),
+            error,
+        })?;
+        match candidate {
+            Candidate::File(content) => admitted.push((path, content)),
+            Candidate::Symlink(target) => {
+                return Err(AdmissionError::Symlink {
+                    name: name.to_vec(),
+                    target: target.to_vec(),
+                });
+            }
+            Candidate::Special => {
+                return Err(AdmissionError::Special {
+                    name: name.to_vec(),
+                });
+            }
+        }
+    }
+
+    admitted.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut content = WorkspaceContent::new();
+    for (path, bytes) in admitted {
+        content.insert(path, bytes.to_vec())?;
+    }
+    Ok(content)
 }
 
 // --- nodes --------------------------------------------------------------------------------
@@ -1940,6 +2662,578 @@ mod tests {
             let parsed = path(text);
             assert_eq!(parsed.to_string(), text);
             assert_eq!(text.parse::<WorkspacePath>(), Ok(parsed));
+        }
+    }
+
+    // --- the admission policy (PR 3 / IMPL-05) --------------------------------------------
+
+    /// A deterministic xorshift. Every permutation these tests try is a function of a
+    /// written-down seed and of nothing else; INV-005 does not stop at `src/`.
+    struct Shuffle(u64);
+
+    impl Shuffle {
+        const fn new(seed: u64) -> Self {
+            // Zero is xorshift's fixed point, and a test whose corpus never moves is a
+            // test that proves nothing.
+            Self(seed | 1)
+        }
+
+        fn step(&mut self) -> u64 {
+            let mut state = self.0;
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            self.0 = state;
+            state
+        }
+
+        fn below(&mut self, bound: usize) -> usize {
+            let bound = u64::try_from(bound).unwrap_or(1).max(1);
+            usize::try_from(self.step() % bound).unwrap_or(0)
+        }
+
+        fn permute<T>(&mut self, items: &mut [T]) {
+            for index in (1..items.len()).rev() {
+                let other = self.below(index + 1);
+                items.swap(index, other);
+            }
+        }
+    }
+
+    /// `café` in NFC: one precomposed `é`.
+    const NFC: &str = "caf\u{e9}";
+    /// `café` in NFD: `e` followed by a combining acute accent.
+    const NFD: &str = "cafe\u{301}";
+
+    #[test]
+    fn the_separator_byte_agrees_with_the_separator_character() {
+        // `from_bytes` splits on the byte and `Display` joins on the character; if these
+        // two ever disagreed, a path would render as something that does not reparse.
+        let mut buffer = [0u8; 4];
+        assert_eq!(
+            SEPARATOR.encode_utf8(&mut buffer).as_bytes(),
+            [SEPARATOR_BYTE]
+        );
+    }
+
+    #[test]
+    fn normalization_forms_are_two_distinct_paths() {
+        // The decision: none. Two spellings of one grapheme cluster are two names, they
+        // order by their bytes, and neither is rewritten into the other.
+        assert_ne!(NFC, NFD);
+        assert_ne!(path(NFC), path(NFD));
+        assert_ne!(
+            WorkspacePath::from_bytes(NFC.as_bytes()),
+            WorkspacePath::from_bytes(NFD.as_bytes())
+        );
+
+        // Both are admissible, in one workspace, as two files.
+        let content = admit(
+            [
+                (NFC.as_bytes(), Candidate::File(b"precomposed")),
+                (NFD.as_bytes(), Candidate::File(b"decomposed")),
+            ],
+            AdmissionPolicy::new(),
+        )
+        .expect("two names, two files");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content.get(&path(NFC)), Some(b"precomposed".as_slice()));
+        assert_eq!(content.get(&path(NFD)), Some(b"decomposed".as_slice()));
+
+        // And they are two snapshots, not one: the identity follows the bytes.
+        assert_ne!(
+            snapshot(&[(NFC, b"same")]).identity(),
+            snapshot(&[(NFD, b"same")]).identity()
+        );
+    }
+
+    #[test]
+    fn case_pairs_are_distinct_however_they_would_fold() {
+        // Simple folding.
+        assert_ne!(path("A.rs"), path("a.rs"));
+        // Locale-dependent folding: Turkish maps `I` to `ı`, every other locale to `i`.
+        assert_ne!(path("\u{131}.rs"), path("i.rs"));
+        assert_ne!(path("I.rs"), path("\u{130}.rs"));
+        // Full folding is not even length-preserving: `ß` folds to `ss`.
+        assert_ne!(path("stra\u{df}e"), path("strasse"));
+        // Three distinct files, in one workspace, under one directory.
+        let content = admit(
+            [
+                ("A.rs".as_bytes(), Candidate::File(b"upper")),
+                ("a.rs".as_bytes(), Candidate::File(b"lower")),
+                ("stra\u{df}e".as_bytes(), Candidate::File(b"sharp s")),
+            ],
+            AdmissionPolicy::new(),
+        )
+        .expect("three names, three files");
+        assert_eq!(content.len(), 3);
+    }
+
+    #[test]
+    fn bytes_that_are_not_utf8_are_a_typed_rejection() {
+        // (raw name, offset of the first invalid byte, that byte)
+        let cases: [(&[u8], usize, u8); 5] = [
+            // An overlong encoding of `/`: the classic separator smuggle.
+            (b"a\xc0\xafb", 1, 0xc0),
+            // A lone surrogate half, which UTF-8 may not encode at all.
+            (b"\xed\xa0\x80", 0, 0xed),
+            // A truncated three-byte sequence.
+            (b"ab\xe2\x82", 2, 0xe2),
+            // A bare continuation byte.
+            (b"\x80x", 0, 0x80),
+            // A byte that begins no sequence.
+            (b"x\xff", 1, 0xff),
+        ];
+        for (raw, offset, byte) in cases {
+            assert_eq!(
+                WorkspacePath::from_bytes(raw),
+                Err(PathError::SegmentEncoding {
+                    index: 0,
+                    offset,
+                    byte
+                }),
+                "{raw:?} was not refused as expected"
+            );
+            assert_eq!(
+                admit([(raw, Candidate::File(b""))], AdmissionPolicy::new()),
+                Err(AdmissionError::Name {
+                    name: raw.to_vec(),
+                    error: PathError::SegmentEncoding {
+                        index: 0,
+                        offset,
+                        byte
+                    }
+                })
+            );
+        }
+
+        // The rejection is per segment, and the index says which.
+        assert_eq!(
+            WorkspacePath::from_bytes(b"ok/\xff"),
+            Err(PathError::SegmentEncoding {
+                index: 1,
+                offset: 0,
+                byte: 0xff
+            })
+        );
+    }
+
+    #[test]
+    fn reserved_segments_are_typed_rejections() {
+        let cases: [(&str, ReservedReason); 8] = [
+            ("CON", ReservedReason::DeviceName),
+            ("con", ReservedReason::DeviceName),
+            ("CoN.txt", ReservedReason::DeviceName),
+            ("NUL", ReservedReason::DeviceName),
+            ("com1", ReservedReason::DeviceName),
+            ("LPT9.tar.gz", ReservedReason::DeviceName),
+            ("trailing.", ReservedReason::TrailingDot),
+            ("trailing ", ReservedReason::TrailingSpace),
+        ];
+        for (segment, reason) in cases {
+            assert_eq!(
+                WorkspacePath::new(segment),
+                Err(PathError::ReservedSegment {
+                    index: 0,
+                    segment: segment.to_owned(),
+                    reason
+                }),
+                "{segment:?} was accepted"
+            );
+            // At depth, too: every segment is a name the platform has to store.
+            assert_eq!(
+                WorkspacePath::new(&format!("src/{segment}")),
+                Err(PathError::ReservedSegment {
+                    index: 1,
+                    segment: segment.to_owned(),
+                    reason
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn names_near_the_reserved_set_are_still_accepted() {
+        // The set is exactly the device names, matched on the stem. Nothing wider: a
+        // reservation that swallowed ordinary names would be its own failure.
+        for segment in [
+            "CONS",
+            "console.txt",
+            "COM0",
+            "COM10",
+            "LPT",
+            "a.CON",
+            "con-fig",
+            ".con",
+            "concon",
+            ".hidden",
+            "a.b.c",
+        ] {
+            assert!(
+                WorkspacePath::new(segment).is_ok(),
+                "{segment:?} was refused"
+            );
+        }
+    }
+
+    #[test]
+    fn non_portable_characters_are_typed_rejections() {
+        for character in NON_PORTABLE_CHARACTERS {
+            let segment = format!("a{character}b");
+            assert_eq!(
+                WorkspacePath::new(&segment),
+                Err(PathError::SegmentCharacter {
+                    index: 0,
+                    character
+                }),
+                "{segment:?} was accepted"
+            );
+        }
+        // Control characters, at both ends of the two `Cc` ranges.
+        for character in ['\u{0}', '\u{1f}', '\u{7f}', '\u{9f}'] {
+            assert_eq!(
+                WorkspacePath::new(&format!("a{character}b")),
+                Err(PathError::SegmentCharacter {
+                    index: 0,
+                    character
+                })
+            );
+        }
+        // Format characters are *accepted*: rejecting them would key the accepted set to
+        // a Unicode general category whose membership grows with every release.
+        for character in ['\u{200e}', '\u{202e}', '\u{200b}', '\u{feff}'] {
+            assert!(
+                WorkspacePath::new(&format!("a{character}b")).is_ok(),
+                "U+{:04X} was refused",
+                u32::from(character)
+            );
+        }
+    }
+
+    #[test]
+    fn a_segment_past_the_byte_bound_is_a_typed_rejection() {
+        let at_bound = "x".repeat(MAX_SEGMENT_BYTES);
+        assert!(WorkspacePath::new(&at_bound).is_ok());
+        let past_bound = "x".repeat(MAX_SEGMENT_BYTES + 1);
+        assert_eq!(
+            WorkspacePath::new(&past_bound),
+            Err(PathError::SegmentTooLong {
+                index: 0,
+                bytes: MAX_SEGMENT_BYTES + 1,
+                max: MAX_SEGMENT_BYTES
+            })
+        );
+        // The bound is bytes, not characters: `é` is two bytes, and a filesystem counts
+        // the same two.
+        let multibyte = "\u{e9}".repeat(MAX_SEGMENT_BYTES / 2 + 1);
+        assert_eq!(
+            WorkspacePath::new(&multibyte),
+            Err(PathError::SegmentTooLong {
+                index: 0,
+                bytes: multibyte.len(),
+                max: MAX_SEGMENT_BYTES
+            })
+        );
+    }
+
+    #[test]
+    fn parsing_bytes_is_injective_and_round_trips() {
+        // No normalization, no folding, no separator collapsing, so the map from accepted
+        // byte strings to paths is injective — and its inverse is `Display`.
+        let names: [&[u8]; 10] = [
+            b"a",
+            b"a/b",
+            b"a.b",
+            b"A",
+            NFC.as_bytes(),
+            NFD.as_bytes(),
+            b"stra\xc3\x9fe",
+            b"strasse",
+            "\u{202e}gpj.exe".as_bytes(),
+            b"a/b/c",
+        ];
+        let mut seen: BTreeSet<WorkspacePath> = BTreeSet::new();
+        for raw in names {
+            let parsed = WorkspacePath::from_bytes(raw).expect("accepted");
+            assert_eq!(parsed.to_string().as_bytes(), raw);
+            assert_eq!(WorkspacePath::from_bytes(raw), Ok(parsed.clone()));
+            assert!(seen.insert(parsed), "{raw:?} collided with another name");
+        }
+        assert_eq!(seen.len(), names.len());
+
+        // And the byte parser agrees with the text parser wherever both accept.
+        for raw in names {
+            let text = core::str::from_utf8(raw).expect("these are all UTF-8");
+            assert_eq!(WorkspacePath::from_bytes(raw), WorkspacePath::new(text));
+        }
+    }
+
+    #[test]
+    fn parsing_bytes_reports_the_same_refusals_as_parsing_text() {
+        assert_eq!(WorkspacePath::from_bytes(b""), Err(PathError::Empty));
+        assert_eq!(
+            WorkspacePath::from_bytes(b"/a"),
+            Err(PathError::EmptySegment { index: 0 })
+        );
+        assert_eq!(
+            WorkspacePath::from_bytes(b"a/../b"),
+            Err(PathError::RelativeSegment {
+                index: 1,
+                segment: "..".to_owned()
+            })
+        );
+        assert_eq!(
+            WorkspacePath::from_bytes(b"a\\b"),
+            Err(PathError::SegmentCharacter {
+                index: 0,
+                character: '\\'
+            })
+        );
+        // Deep enough to be refused before a single segment is allocated.
+        let deep = ["x"; MAX_DEPTH * 2].join("/");
+        assert_eq!(
+            WorkspacePath::from_bytes(deep.as_bytes()),
+            Err(PathError::TooDeep {
+                depth: MAX_DEPTH * 2,
+                max: MAX_DEPTH
+            })
+        );
+    }
+
+    #[test]
+    fn path_order_is_a_total_order() {
+        // Reflexive, antisymmetric, transitive, and total, over exactly the cases that
+        // make a naive implementation wrong: the segment/string divergence, prefixes,
+        // case pairs, and normalization pairs.
+        let corpus: Vec<WorkspacePath> = [
+            "a",
+            "a.b",
+            "a/b",
+            "a/b/c",
+            "a/bb",
+            "ab",
+            "A",
+            "A/b",
+            NFC,
+            NFD,
+            "stra\u{df}e",
+            "strasse",
+            "z",
+            "\u{202e}z",
+        ]
+        .into_iter()
+        .map(path)
+        .collect();
+
+        for left in &corpus {
+            assert_eq!(left.cmp(left), core::cmp::Ordering::Equal);
+            for right in &corpus {
+                // Totality and antisymmetry.
+                assert_eq!(
+                    left.cmp(right),
+                    right.cmp(left).reverse(),
+                    "{left} vs {right}"
+                );
+                assert_eq!(left == right, left.cmp(right) == core::cmp::Ordering::Equal);
+                for third in &corpus {
+                    if left <= right && right <= third {
+                        assert!(left <= third, "{left} <= {right} <= {third}");
+                    }
+                }
+            }
+        }
+
+        // The divergence the module documentation names, pinned once more: string order
+        // and segment order disagree, and only segment order agrees with the tree.
+        assert!("a.b" < "a/b");
+        assert!(path("a/b") < path("a.b"));
+        // A path sorts immediately before its own descendants, which is what
+        // `WorkspaceContent`'s conflict check relies on.
+        assert!(path("a") < path("a/b"));
+        assert!(path("a/b") < path("a/bb"));
+    }
+
+    // --- admission ------------------------------------------------------------------------
+
+    fn files<'a>(names: &[&'a str]) -> Vec<(&'a [u8], Candidate<'a>)> {
+        names
+            .iter()
+            .map(|name| (name.as_bytes(), Candidate::File(b"x")))
+            .collect()
+    }
+
+    #[test]
+    fn admission_yields_the_canonical_order() {
+        let content = admit(
+            files(&["src/lib.rs", "README.md", "src/a.rs", "a.rs"]),
+            AdmissionPolicy::new(),
+        )
+        .expect("a tree");
+        assert_eq!(
+            content.paths().map(ToString::to_string).collect::<Vec<_>>(),
+            ["README.md", "a.rs", "src/a.rs", "src/lib.rs"]
+        );
+    }
+
+    #[test]
+    fn admission_is_invariant_under_permutation() {
+        // Acceptance *and* rejection: a walk order that changed either would be a
+        // workspace with two answers.
+        let accepted = files(&[
+            "Cargo.toml",
+            "a.b",
+            "a/b",
+            "a/b/c",
+            NFC,
+            NFD,
+            "src/lib.rs",
+            "z",
+        ]);
+        let refused = {
+            let mut refused = files(&["ok", "src/lib.rs", "zz"]);
+            refused.push((b"z\\bad".as_slice(), Candidate::File(b"x")));
+            refused.push((b"a\\bad".as_slice(), Candidate::File(b"x")));
+            refused
+        };
+
+        for corpus in [accepted, refused] {
+            let expected = admit(corpus.clone(), AdmissionPolicy::new());
+            let mut shuffle = Shuffle::new(0x9e37_79b9_7f4a_7c15);
+            for _ in 0..64 {
+                let mut permuted = corpus.clone();
+                shuffle.permute(&mut permuted);
+                assert_eq!(admit(permuted, AdmissionPolicy::new()), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn admission_reports_the_least_named_rejection() {
+        // Two bad names: the answer is the one that is least in raw-name order, never the
+        // one the walk happened to reach first.
+        let corpus: Vec<(&[u8], Candidate<'_>)> = vec![
+            (b"z\\bad", Candidate::File(b"x")),
+            (b"a\\bad", Candidate::File(b"x")),
+        ];
+        let expected = Err(AdmissionError::Name {
+            name: b"a\\bad".to_vec(),
+            error: PathError::SegmentCharacter {
+                index: 0,
+                character: '\\',
+            },
+        });
+        assert_eq!(admit(corpus.clone(), AdmissionPolicy::new()), expected);
+        let mut reversed = corpus;
+        reversed.reverse();
+        assert_eq!(admit(reversed, AdmissionPolicy::new()), expected);
+    }
+
+    #[test]
+    fn admission_refuses_a_symbolic_link() {
+        let corpus: Vec<(&[u8], Candidate<'_>)> = vec![
+            (b"src/lib.rs", Candidate::File(b"fn main() {}")),
+            (b"src/link.rs", Candidate::Symlink(b"../../etc/passwd")),
+        ];
+        assert_eq!(
+            admit(corpus, AdmissionPolicy::new()),
+            Err(AdmissionError::Symlink {
+                name: b"src/link.rs".to_vec(),
+                target: b"../../etc/passwd".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn admission_refuses_an_entry_that_is_not_a_file() {
+        let corpus: Vec<(&[u8], Candidate<'_>)> =
+            vec![(b"a", Candidate::File(b"x")), (b"pipe", Candidate::Special)];
+        assert_eq!(
+            admit(corpus, AdmissionPolicy::new()),
+            Err(AdmissionError::Special {
+                name: b"pipe".to_vec()
+            })
+        );
+    }
+
+    #[test]
+    fn admission_refuses_an_unimplemented_symlink_policy() {
+        let policy = AdmissionPolicy::new().with_symlinks(SymlinkPolicy::FollowWithCycleDetection);
+        assert!(!policy.symlinks().is_implemented());
+        // Refused before a single candidate is read: the policy is wrong, not the input.
+        assert_eq!(
+            admit(files(&["a"]), policy),
+            Err(AdmissionError::UnsupportedSymlinkPolicy {
+                policy: SymlinkPolicy::FollowWithCycleDetection
+            })
+        );
+        assert_eq!(
+            admit(Vec::new(), policy),
+            Err(AdmissionError::UnsupportedSymlinkPolicy {
+                policy: SymlinkPolicy::FollowWithCycleDetection
+            })
+        );
+        assert_eq!(AdmissionPolicy::default(), AdmissionPolicy::new());
+        assert_eq!(AdmissionPolicy::new().symlinks(), SymlinkPolicy::Reject);
+    }
+
+    #[test]
+    fn admission_refuses_candidates_that_are_not_a_tree() {
+        // The same raw name twice.
+        let repeated: Vec<(&[u8], Candidate<'_>)> = vec![
+            (b"a/b", Candidate::File(b"one")),
+            (b"a/b", Candidate::File(b"two")),
+        ];
+        assert_eq!(
+            admit(repeated, AdmissionPolicy::new()),
+            Err(AdmissionError::NotATree(SnapshotError::DuplicatePath {
+                path: path("a/b")
+            }))
+        );
+
+        // A file another candidate needs as a directory, reported the same way whichever
+        // order the walk produced them in.
+        let conflicting: Vec<(&[u8], Candidate<'_>)> = vec![
+            (b"a/b/c", Candidate::File(b"deep")),
+            (b"a/b", Candidate::File(b"shallow")),
+        ];
+        let expected = Err(AdmissionError::NotATree(SnapshotError::PathConflict {
+            file: path("a/b"),
+            descendant: path("a/b/c"),
+        }));
+        assert_eq!(admit(conflicting.clone(), AdmissionPolicy::new()), expected);
+        let mut reversed = conflicting;
+        reversed.reverse();
+        assert_eq!(admit(reversed, AdmissionPolicy::new()), expected);
+    }
+
+    #[test]
+    fn an_admitted_workspace_builds_one_snapshot_whatever_the_walk_order() {
+        let corpus = files(&[
+            "Cargo.toml",
+            "README.md",
+            "crates/value/lib.rs",
+            "crates/workspace/lib.rs",
+            "crates/workspace/snapshot.rs",
+            NFC,
+            NFD,
+        ]);
+        let first = Snapshot::build(
+            &admit(corpus.clone(), AdmissionPolicy::new()).expect("a tree"),
+            &HexIdentity,
+        )
+        .expect("named");
+
+        let mut shuffle = Shuffle::new(0xd1b5_4a32_d192_ed03);
+        for _ in 0..32 {
+            let mut permuted = corpus.clone();
+            shuffle.permute(&mut permuted);
+            let other = Snapshot::build(
+                &admit(permuted, AdmissionPolicy::new()).expect("a tree"),
+                &HexIdentity,
+            )
+            .expect("named");
+            assert_eq!(other.identity(), first.identity());
+            assert_eq!(other.encode(), first.encode());
         }
     }
 
