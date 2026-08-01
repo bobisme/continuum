@@ -20,3 +20,13 @@
 1785543578539999	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy2QQ		item.comment	bn-1ee03	{"body":"Additional scope from bn-zr81: scripts/axiom-manifest.sh --check should also join the just check chain alongside lake build (currently nothing prevents silently regressing the manifest); note the script overwrites checked-in artifacts on staleness before exiting 1."}	blake3:tZxQjSyMeOnnnA19s1s8Mttu9OxHnafElPp3F_kNWwA
 1785543593423742	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy2gQ		item.comment	bn-2br	{"body":"License decision recorded: MIT OR Apache-2.0; asupersync rider accepted and disclosed; ADR-0053; just check pass"}	blake3:PPImmbu2JDwokBB7YU4m__A_bXPgCcSRPjj874MwG8Y
 1785543650600359	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy2wQ		item.move	bn-2br	{"state":"done"}	blake3:HvXemspVLLgtWuwhCm2tpt2Lj2718INBZqKQVsSHTU4
+1785543768539951	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy3AQ		item.move	bn-2s6q	{"state":"doing"}	blake3:Rflxmhq_wENOaxj8MIJJ-aze8Dl4WzU3gvEgXb_rdlg
+1785543768543476	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy3QQ		item.assign	bn-2s6q	{"action":"assign","agent":"continuum-dev"}	blake3:Yfd0bLIEApJlZZCwjn_HimTMzQroZegdIAyBdQ_GpPo
+1785543768773155	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy3gQ		item.move	bn-3hkk	{"state":"doing"}	blake3:dTcljWszckJv-WGAMiCsCQ0Ma9Vsx1GBpyn5l8gBv9Q
+1785543768778962	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy3wQ		item.assign	bn-3hkk	{"action":"assign","agent":"continuum-dev"}	blake3:thaB9B5jY-OxqnanPJnsFXg-dHL1CyTfdtCsAhqu7OI
+1785543768999771	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy4AQ		item.move	bn-v1c	{"state":"doing"}	blake3:g1qiybe6EJBfg1qLF6ZUtyf_jf2MjJkvgzIQLnbcHFs
+1785543769003284	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy4QQ		item.assign	bn-v1c	{"action":"assign","agent":"continuum-dev"}	blake3:kkFz8S1ufC70y7HQbX5rkvodcy_L4cKXDzlKe7x5DNc
+1785543769230126	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy4gQ		item.move	bn-23m	{"state":"doing"}	blake3:y8b01JfKjMWWt2zHX9_C-lZugawsxugFFimzx49TQAw
+1785543769235826	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy4wQ		item.assign	bn-23m	{"action":"assign","agent":"continuum-dev"}	blake3:4QvBuC0_2Rw000qIKREZpzctFJVAQRLez7LCum6-l34
+1785543769465913	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy5AQ		item.move	bn-1rxrr	{"state":"doing"}	blake3:DFaGXbbun0TBwTkHpyy5lTMdwvSVWE-nZXncwrVlkR0
+1785543769471649	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy5QQ		item.assign	bn-1rxrr	{"action":"assign","agent":"continuum-dev"}	blake3:v78CDGMgNcd06t7ibzBYTwWGoXT1gvfOg_b3ijYrcww
