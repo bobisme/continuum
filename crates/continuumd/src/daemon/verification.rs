@@ -78,7 +78,9 @@ use continuum_engine_reference::checking::{
 use continuum_engine_reference::model::Model;
 use continuum_task::region::worker::WorkerStep;
 use continuum_workspace::artifact_path::ArtifactClass;
-use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
+use continuum_workspace::publication::{
+    CapabilityToken, ContentIdentifier, PublishRefusal, ReferenceStore,
+};
 use continuum_workspace::snapshot::Snapshot;
 use continuum_workspace::staleness::check_current;
 
@@ -350,15 +352,29 @@ fn run(model: &Model, target: &Target, bounds: Bounds) -> Result<Result<Campaign
 /// function minted and filed, not a live worker. [`region`](super::region) states the RFC
 /// argument for that resolution in full.
 ///
+/// # The durable half (bn-3dr)
+///
+/// The publication this function commits is written **into the store**, through
+/// `continuum-workspace`'s two-phase protocol, before it is committed onto the task. That is
+/// what makes IMPL-02's durability criterion — "committed partial evidence survives daemon
+/// restart; uncommitted partials are absent, never half-visible" — a statement with a
+/// referent: the task table is volatile and does not survive a restart, but the campaign
+/// record does, under the identity the task named it by. See [`publish_record`] for the
+/// ordering and [`recovery`](super::recovery) for what a restart can then say about it.
+///
 /// # Errors
 ///
 /// [`Fault`] when the model can no longer be constructed, when the identity seam refuses to
-/// name a continuation, or when the run itself is not a question about this model.
+/// name a continuation, when the run itself is not a question about this model, or —
+/// [`ErrorCode::PublicationAborted`] — when the durable publication of the campaign record
+/// could not complete atomically (INV-017).
 pub fn advance(
     handle: &TaskHandle,
     bounds: Bounds,
     state: &mut DaemonState,
     services: &Services,
+    store: &ReferenceStore,
+    publisher: &CapabilityToken,
 ) -> Result<(), Fault> {
     let (source, target, snapshot, intent) = {
         let entry = state.tasks().get(handle).ok_or_else(Fault::denied)?;
@@ -386,8 +402,55 @@ pub fn advance(
         state.regions_mut().step(scope, WorkerStep::Begin);
         run_in(
             scope, handle, bounds, &source, &target, &snapshot, &intent, &now, state, services,
+            store, publisher,
         )
     })?;
+    Ok(())
+}
+
+/// Write one campaign record into the store, and check the two identity seams agree.
+///
+/// The store's own protocol, in its own order: stage, commit the content, commit the index.
+/// A crash between the last two — the INV-017 point docs/35 names, injectable through
+/// [`StorageFaults`](continuum_workspace::publication::StorageFaults) — leaves unreachable
+/// content and no index entry, which is the asymmetry docs/35 chose deliberately and which
+/// `crates/continuum-workspace/tests/dx13_falsification.rs` proved for the store. Nothing
+/// here re-proves it; what this function adds is that the *daemon's* name for the record and
+/// the *store's* are checked against each other, the way
+/// [`SealedWorkspace::seal`](continuum_workspace::seal::SealedWorkspace::seal) checks its
+/// own. A disagreement is refused rather than reconciled: adopting the store's name would
+/// rewrite the publication's identity, and adopting the daemon's would file a fetch that
+/// misses.
+///
+/// # Errors
+///
+/// [`ErrorCode::CapabilityDenied`] when the publisher may not publish an `ArtifactClass::Task`
+/// record, and [`ErrorCode::PublicationAborted`] when the publication could not complete
+/// atomically or when the two identity seams disagree. On every error path nothing is
+/// published and nothing is truncated.
+fn publish_record(
+    store: &ReferenceStore,
+    publisher: &CapabilityToken,
+    record: Vec<u8>,
+    named: &Commitment,
+) -> Result<(), Fault> {
+    let aborted = || {
+        Fault::new(
+            ErrorCode::PublicationAborted,
+            "the campaign record's publication aborted; nothing was published and nothing \
+             was truncated",
+        )
+    };
+    let receipt = store
+        .stage(ArtifactClass::Task, record, publisher)
+        .and_then(|staged| Ok(staged.commit_content()?.commit_index()?))
+        .map_err(|refusal| match refusal {
+            PublishRefusal::CapabilityDenied(_) => Fault::denied(),
+            PublishRefusal::Aborted(_) => aborted(),
+        })?;
+    if receipt.handle().to_string() != named.as_str() {
+        return Err(aborted());
+    }
     Ok(())
 }
 
@@ -404,6 +467,8 @@ fn run_in(
     now: &Option<crate::protocol::scalar::Timestamp>,
     state: &mut DaemonState,
     services: &Services,
+    store: &ReferenceStore,
+    publisher: &CapabilityToken,
 ) -> Result<(), Fault> {
     // The model is data — named variables, named actions, an explicit initial-state
     // enumeration — so cloning it out of the catalog costs a copy of that data and buys the
@@ -446,22 +511,22 @@ fn run_in(
     // rather than of the paths below happening to be careful. Every path out of this function
     // from here either commits it or discards it.
     state.regions_mut().step(scope, WorkerStep::Reserve);
-    let staged = {
+    let (staged, record) = {
         let sequence = state
             .tasks()
             .get(handle)
             .ok_or_else(Fault::denied)?
             .publications();
-        match budget::publication_commitment(
-            services.identifier(),
+        let record = budget::publication_record(
             handle,
             sequence,
             snapshot.value().map(|snapshot| snapshot.as_str()),
             campaign.states() as u64,
             campaign.is_closed(),
             &campaign.frontier,
-        ) {
-            Ok(commitment) => commitment,
+        );
+        match budget::commitment_of(services.identifier(), &record) {
+            Ok(commitment) => (commitment, record),
             Err(fault) => {
                 state.regions_mut().fail(scope, fault.code);
                 return Err(fault);
@@ -473,7 +538,22 @@ fn run_in(
         .get_mut(handle)
         .ok_or_else(Fault::denied)?
         .evidence
-        .stage(staged);
+        .stage(staged.clone());
+
+    // The durable write (bn-3dr), and it happens *here*: after the task-side stage, which no
+    // reader can observe, and before anything that makes the publication observable. So the
+    // two ledgers can only disagree in the direction docs/35 chose — the store may hold a
+    // record the task never committed (unreachable content, garbage-collectable), and the
+    // task can never claim a publication the store does not hold.
+    //
+    // An abort discards the staged publication and returns, which is the both-or-neither
+    // direction: no commitment on the task, no continuation minted, no `Suspended` status
+    // claiming committed evidence that is not there.
+    if let Err(fault) = publish_record(store, publisher, record, &staged) {
+        state.regions_mut().fail(scope, fault.code);
+        discard(handle, state);
+        return Err(fault);
+    }
 
     // Park before the status moves, so a `Suspended` task never exists without the
     // continuation `rule task.status_monotonic` says it has by definition.
@@ -668,10 +748,10 @@ impl OperationFamily for VerificationFamily {
         call: &Call<'_>,
         state: &mut DaemonState,
         services: &Services,
-        _store: &ReferenceStore,
+        store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
-            Arguments::VerificationStart(request) => start(call, request, state, services),
+            Arguments::VerificationStart(request) => start(call, request, state, services, store),
             Arguments::VerificationResult(request) => result(&request.task, state, false),
             Arguments::VerificationAwait(request) => result(&request.task, state, true),
             // Unreachable: the dispatcher checked shape agreement against the registry
@@ -713,7 +793,14 @@ fn start(
     request: &VerificationStartRequest,
     state: &mut DaemonState,
     services: &Services,
+    store: &ReferenceStore,
 ) -> Result<Effect, Fault> {
+    // The campaign record is published under the caller's own capability, so the store
+    // decides and audits the write against the identity the wire presented — "authorization
+    // separate from handle possession" (ADR-0037), the same rule `observe.ingest` publishes
+    // a trace under.
+    let publisher = super::identity::capability_to_store(&call.envelope.capability)
+        .map_err(|_| Fault::denied())?;
     let Nullable::Value(snapshot) = &call.envelope.snapshot else {
         return Err(Fault::new(
             ErrorCode::MalformedRequest,
@@ -827,7 +914,7 @@ fn start(
     };
     let bounds = entry.bounds();
     state.tasks_mut().put(entry);
-    advance(&handle, bounds, state, services)?;
+    advance(&handle, bounds, state, services, store, &publisher)?;
 
     let entry = state.tasks().get(&handle).ok_or_else(Fault::denied)?;
     Ok(started(entry))

@@ -511,14 +511,63 @@ impl Publications {
     }
 }
 
-/// The content identity a campaign result commits under.
+/// The canonical record a campaign result *is* — and the bytes the store holds.
 ///
-/// The preimage is the canonical record of what the publication *is* — the task it belongs
-/// to, its position in that task's commit order, the snapshot it ran over, the number of
-/// states it explored, whether the exploration closed, and the queue-ordered frontier it
-/// parked at — so two daemons that ran the same campaign name it identically and a resumed
-/// run, whose walk went further, names a different one. Every part is length-prefixed by
-/// [`Preimage`], so no pair of inputs can produce another pair's bytes by concatenation.
+/// The record is the task it belongs to, its position in that task's commit order, the
+/// snapshot it ran over, the number of states it explored, whether the exploration closed,
+/// and the queue-ordered frontier it parked at — so two daemons that ran the same campaign
+/// build the same record and a resumed run, whose walk went further, builds a different one.
+/// Every part is length-prefixed by [`Preimage`], so no pair of inputs can produce another
+/// pair's bytes by concatenation.
+///
+/// # Why this is a function and not a preimage buried in the identity derivation
+///
+/// It was the latter until bn-3dr. A publication was *named* by hashing these bytes and the
+/// bytes were then thrown away, which made the name unfetchable: the store had never been
+/// given the record the name is of, so "committed partial evidence survives daemon restart"
+/// (IMPL-02) had nothing to survive in. Splitting the record out lets
+/// [`verification::advance`](super::verification::advance) publish it through
+/// `continuum-workspace`'s two-phase protocol under the identity
+/// [`publication_commitment`] derives from exactly these bytes — so the daemon's name and
+/// the store's are one value by construction rather than by agreement.
+#[must_use]
+pub fn publication_record(
+    task: &TaskHandle,
+    sequence: u32,
+    snapshot: Option<&str>,
+    states: u64,
+    closed: bool,
+    frontier: &[State],
+) -> Vec<u8> {
+    let mut preimage = Preimage::new();
+    preimage.text(task.as_str());
+    preimage.push(&sequence.to_be_bytes());
+    preimage.text(snapshot.unwrap_or("-"));
+    preimage.push(&states.to_be_bytes());
+    preimage.text(if closed { "closed" } else { "bounded" });
+    preimage.push(&(frontier.len() as u64).to_be_bytes());
+    for state in frontier {
+        for component in state.as_slice() {
+            preimage.push(&component.to_be_bytes());
+        }
+    }
+    preimage.bytes().to_vec()
+}
+
+/// The content identity a campaign record commits under.
+///
+/// # The epochs are deliberately not in this identity
+///
+/// A publication is *the campaign's content*, and the epochs ride the task record beside it.
+/// bn-3dr revisited the question the routing comment on this bone raised — whether a durable
+/// store binding needs epoch-scoped publication identities — and the answer is no, on the
+/// store's own terms: [`ReferenceStore`](continuum_workspace::publication::ReferenceStore)
+/// derives every identity from the bytes it is handed and from nothing else, so binding the
+/// daemon's name to the store's requires only that the daemon publish the bytes it named,
+/// which [`publication_record`] is. Widening the identity with epochs would make the two
+/// daemons of `two_daemons_name_one_campaigns_publications_identically` disagree whenever
+/// their epoch sets did, for no store-side gain. The function stays the single point where
+/// that decision could be revisited.
 ///
 /// # Errors
 ///
@@ -533,20 +582,28 @@ pub fn publication_commitment(
     closed: bool,
     frontier: &[State],
 ) -> Result<Commitment, Fault> {
-    let mut preimage = Preimage::new();
-    preimage.text(task.as_str());
-    preimage.push(&sequence.to_be_bytes());
-    preimage.text(snapshot.unwrap_or("-"));
-    preimage.push(&states.to_be_bytes());
-    preimage.text(if closed { "closed" } else { "bounded" });
-    preimage.push(&(frontier.len() as u64).to_be_bytes());
-    for state in frontier {
-        for component in state.as_slice() {
-            preimage.push(&component.to_be_bytes());
-        }
-    }
+    let record = publication_record(task, sequence, snapshot, states, closed, frontier);
+    commitment_of(identifier, &record)
+}
+
+/// The commitment a published campaign record carries.
+///
+/// Factored out of [`publication_commitment`] rather than duplicated for the reason
+/// [`DaemonState::commit_of`](super::state::DaemonState::commit_of) gives for the same
+/// split: the value is derived twice — once to *name* a publication and once to check that
+/// the store named the same record the same way — and a second spelling would let the two
+/// agree with each other while both disagreed with the protocol.
+///
+/// # Errors
+///
+/// [`Fault`] carrying [`ErrorCode::PublicationAborted`] when the identity seam cannot name
+/// the record.
+pub fn commitment_of(
+    identifier: &dyn ContentIdentifier,
+    record: &[u8],
+) -> Result<Commitment, Fault> {
     let handle = identifier
-        .identify(ArtifactClass::Task, preimage.bytes())
+        .identify(ArtifactClass::Task, record)
         .map_err(|_| {
             Fault::new(
                 ErrorCode::PublicationAborted,

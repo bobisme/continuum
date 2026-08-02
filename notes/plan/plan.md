@@ -646,7 +646,25 @@ specified, verified, and gated (G1), not left to implementation:
   On restart, `Running` tasks resume from their last committed
   continuation or transition to `Failed` with a typed reason — never to a
   silently reconstructed state. An index verifier (fsck) ships with the
-  daemon.
+  daemon. (delivered: bn-3dr — `crates/continuumd/src/daemon/recovery.rs`
+  states the durable/volatile split this daemon actually has and
+  reconciles a crashed store against it; the evidence is
+  `crates/continuumd/tests/g1_crash_recovery_evidence.rs`, which kills
+  whole daemons at all nine boundaries of the eight-step dispatch and,
+  through the store's own fault seam, between the two commits of a
+  publication inside one of them, then restarts over what survived. What
+  the store holds is reconciled — every index entry resolves, every entry
+  carries its receipts, a composite caught mid-publication is absent under
+  its own name rather than half-visible, residue is quarantined and never
+  deleted, and a task's committed campaign records come back by identity.
+  What `DaemonState` holds does not survive: there is no disk-backed task
+  table in this build, so a restart resolves no `Running` task and the
+  report *declares* each lost fact instead — which is this bullet's own
+  prohibition, since a task state inferred from the store would be exactly
+  the silently reconstructed one. The recovery is itself a typed artifact
+  with a canonical rendering, byte-equal across two recoveries of one
+  crashed state and across two independently crashed daemons. G0-DX-13's
+  row records what this discharges of its deferral and what it does not)
 - **Storage lifecycle.** Artifacts are garbage-collected by reachability
   from named roots, receipts, and retention policy. The daemon reports
   storage attribution by artifact class. Disk exhaustion during

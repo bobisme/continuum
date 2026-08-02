@@ -780,12 +780,12 @@ impl OperationFamily for TaskFamily {
         call: &Call<'_>,
         state: &mut DaemonState,
         services: &Services,
-        _store: &ReferenceStore,
+        store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
             Arguments::TaskStatus(request) => status(request, state),
             Arguments::TaskCancel(request) => cancel(request, state, services),
-            Arguments::TaskResume(request) => resume(call, request, state, services),
+            Arguments::TaskResume(request) => resume(call, request, state, services, store),
             Arguments::TaskSubscribe(request) => subscribe(request, state),
             Arguments::TaskUpdateBudget(request) => update_budget(request, state, services),
             // Unreachable: the dispatcher checked shape agreement against the registry
@@ -1147,7 +1147,12 @@ fn resume(
     request: &TaskResumeRequest,
     state: &mut DaemonState,
     services: &Services,
+    store: &ReferenceStore,
 ) -> Result<Effect, Fault> {
+    // As `verification.start`: the resumed run's campaign record is published under the
+    // caller's own capability, so the store decides and audits the durable write.
+    let publisher = super::identity::capability_to_store(&call.envelope.capability)
+        .map_err(|_| Fault::denied())?;
     let continuation = state
         .tasks()
         .continuation(&request.continuation)
@@ -1254,7 +1259,7 @@ fn resume(
     // The collapse itself stays, for every code still outside the union: a family may not
     // put an undeclared code on the wire, and the check is registry data rather than a list
     // maintained here, so it tracks the IDL by construction.
-    verification::advance(&task, bounds, state, services).map_err(|fault| {
+    verification::advance(&task, bounds, state, services, store, &publisher).map_err(|fault| {
         if super::errors::admits(call.spec, fault.code) {
             fault
         } else {

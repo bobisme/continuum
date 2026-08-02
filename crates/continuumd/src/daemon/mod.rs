@@ -57,6 +57,18 @@
 //!   is state — consulting it before deciding admission would let an unadmitted caller
 //!   probe another actor's keys.
 //!
+//! # The step boundaries are instrumented
+//!
+//! Each of those eight steps is preceded by a [`CrashPoint`], and one more follows the
+//! handler: nine boundaries at which a deployment's [`CrashInjector`] may kill the daemon,
+//! the way [`region`] instruments a worker's phases and the store instruments its
+//! publication's. [`Daemon::dispatch_or_die`] is the entry point that consults them and
+//! [`Daemon::dispatch`] is the same pipeline under [`NoCrash`]. What that buys is a
+//! *falsifiable* statement about this pipeline rather than a decorated one: steps 1–7 are
+//! volatile-side work and step 8 is the only step that reaches the store, so the durable
+//! image after a kill is a step function of the boundary, and a step that grew a durable
+//! side effect would show up as two boundaries disagreeing. See [`recovery`].
+//!
 //! # What the families inherit
 //!
 //! A family writes none of: version negotiation, the admission predicate, the audit
@@ -74,6 +86,7 @@ pub mod identity;
 pub mod intent;
 pub mod obligation;
 pub mod observe;
+pub mod recovery;
 pub mod region;
 pub mod result;
 pub mod state;
@@ -97,6 +110,7 @@ use crate::protocol::vocabulary::{ErrorCode, ResultStatus};
 
 use family::{Arguments, Call, Fault, OperationFamily, Payload, ScopeClaim};
 use identity::{AuditCorrelator, HashedCorrelation};
+use recovery::{CrashInjector, CrashPoint, Killed, NoCrash};
 use state::{AdmissionRecord, DaemonState, Replay, ReplayKey, store_level};
 
 /// A failure of one of the daemon's seams, before any wire code is chosen.
@@ -268,6 +282,8 @@ impl Daemon {
             state: DaemonState::new(),
             families: Vec::new(),
             capabilities: Vec::new(),
+            store_faults: None,
+            durable: None,
         }
     }
 
@@ -350,8 +366,42 @@ impl Daemon {
     ///
     /// See this module's documentation for the eight steps and the reasons for their order.
     /// Total: every path returns an envelope, and no input reaches a panic.
+    ///
+    /// # The one `expect`, and why no input reaches it
+    ///
+    /// This delegates to [`dispatch_or_die`](Daemon::dispatch_or_die) under
+    /// [`NoCrash`], whose [`kills`](CrashInjector::kills) returns `false` for every boundary
+    /// — a checked fact, not a comment
+    /// ([`recovery::tests::no_crash_kills_at_no_boundary`]). So the `Err` arm is unreachable
+    /// for *every* input, and the `expect` is a statement about this function's own argument
+    /// rather than about anything a caller sends. The alternative would be to fabricate a
+    /// wire answer for a daemon that is not there, and the protocol fixes no error code for
+    /// one: see [`Killed`].
+    ///
+    /// [`recovery::tests::no_crash_kills_at_no_boundary`]: recovery
     #[must_use]
     pub fn dispatch(&mut self, request: &OperationRequest) -> OperationOutcome {
+        self.dispatch_or_die(request, &NoCrash)
+            .expect("`NoCrash` kills at no boundary, so this dispatch cannot have died")
+    }
+
+    /// Answer one operation call, under a crash injector — the harness entry point.
+    ///
+    /// [`Ok`] when the daemon survived the whole dispatch, and [`Err`] naming the boundary it
+    /// died at when it did not. There is no envelope on the error path on purpose: a process
+    /// that is gone sends no frame, and a killed daemon's caller is owed nothing this layer
+    /// can build. What the harness does next is take the durable substrate
+    /// ([`Daemon::crash`]) and restart over it.
+    ///
+    /// # Errors
+    ///
+    /// [`Killed`] when `injector` kills at one of the nine boundaries [`CrashPoint`]
+    /// enumerates.
+    pub fn dispatch_or_die(
+        &mut self,
+        request: &OperationRequest,
+        injector: &dyn CrashInjector,
+    ) -> Result<OperationOutcome, Killed> {
         let Self {
             services,
             state,
@@ -364,13 +414,15 @@ impl Daemon {
             .correlator
             .correlate(&envelope.request_id, &envelope.actor);
 
+        kill(injector, CrashPoint::BeforeVersionCheck)?;
+
         // 1. The negotiated version. "Re-negotiation mid-connection is not a protocol
         //    feature", so the comparison is equality, not compatibility.
         if !services
             .negotiated
             .admits_request(envelope.protocol_version)
         {
-            return raise(
+            return Ok(raise(
                 services,
                 envelope,
                 Fault::new(
@@ -379,14 +431,16 @@ impl Daemon {
                 ),
                 &audit,
                 false,
-            );
+            ));
         }
+
+        kill(injector, CrashPoint::BeforeOperationLookup)?;
 
         // 2. The operation. A well-formed name that the registry does not declare is
         //    malformed at a different layer than a name that is not a name at all, and
         //    `OperationName` already drew that line.
         let Some(spec) = registry::operation(envelope.operation.as_str()) else {
-            return raise(
+            return Ok(raise(
                 services,
                 envelope,
                 Fault::new(
@@ -395,15 +449,17 @@ impl Daemon {
                 ),
                 &audit,
                 false,
-            );
+            ));
         };
         let audit_required = obligation::audit_required(spec);
+
+        kill(injector, CrashPoint::BeforeShapeCheck)?;
 
         // 3. Shape agreement. The envelope's `operation` and the decoded body must name one
         //    operation; a request whose two halves disagree does not validate against the
         //    IDL, whichever half is wrong.
         if request.arguments.operation() != spec.name {
-            return raise(
+            return Ok(raise(
                 services,
                 envelope,
                 Fault::new(
@@ -412,8 +468,10 @@ impl Daemon {
                 ),
                 &audit,
                 audit_required,
-            );
+            ));
         }
+
+        kill(injector, CrashPoint::BeforeScopeClaim)?;
 
         // 4. The scope claim, pure in the arguments and consulting no state.
         let family = families
@@ -422,6 +480,8 @@ impl Daemon {
         let claim = family.map_or_else(ScopeClaim::default, |family| {
             family.scope(&request.arguments)
         });
+
+        kill(injector, CrashPoint::BeforeAdmission)?;
 
         // 5. Admission. The single answer, and the audit record that must exist whatever
         //    the answer was (RFC 0027 P5).
@@ -442,16 +502,20 @@ impl Daemon {
             audit: audit.as_str().to_owned(),
         });
         let Ok(grant) = admitted else {
-            return OperationOutcome {
+            return Ok(OperationOutcome {
                 envelope: result::denial(&envelope.request_id, &services.epochs, &audit),
                 payload: Payload::None,
-            };
+            });
         };
+
+        kill(injector, CrashPoint::BeforeObligations)?;
 
         // 6. The annotation obligations, from the registry's own annotation list.
         if let Err(fault) = obligation::check_request(spec, envelope) {
-            return raise(services, envelope, fault, &audit, audit_required);
+            return Ok(raise(services, envelope, fault, &audit, audit_required));
         }
+
+        kill(injector, CrashPoint::BeforeIdempotencyLedger)?;
 
         // 7. The idempotency ledger. Only `@mutation` operations reach it: step 6 has
         //    already refused a key on a `@readonly` one.
@@ -460,9 +524,9 @@ impl Daemon {
         if let Some(key) = key.as_deref() {
             if let Some(previous) = state.replay(envelope.actor.as_str(), key) {
                 if previous.request == replay_key {
-                    return previous.outcome.clone();
+                    return Ok(previous.outcome.clone());
                 }
-                return raise(
+                return Ok(raise(
                     services,
                     envelope,
                     Fault::new(
@@ -471,14 +535,21 @@ impl Daemon {
                     ),
                     &audit,
                     audit_required,
-                );
+                ));
             }
         }
+
+        kill(injector, CrashPoint::BeforeHandler)?;
 
         // 8. The family. An operation registered ahead of its subsystem is a typed refusal,
         //    never a degraded answer (`rule errors.unsupported_surface`).
         let Some(family) = family else {
-            return unsupported_surface(services, envelope, &audit, audit_required);
+            return Ok(unsupported_surface(
+                services,
+                envelope,
+                &audit,
+                audit_required,
+            ));
         };
         let call = Call {
             spec,
@@ -518,6 +589,12 @@ impl Daemon {
             Err(fault) => raise(services, envelope, fault, &audit, audit_required),
         };
 
+        // The last boundary: the handler ran — store writes and all — and the replay record
+        // has not been written. It is the only one of the nine at which the store can have
+        // changed, which is what makes the durable image a step function of the boundary
+        // (see [`CrashPoint`]).
+        kill(injector, CrashPoint::AfterHandler)?;
+
         if let Some(key) = key {
             state.record_replay(
                 envelope.actor.as_str(),
@@ -528,7 +605,59 @@ impl Daemon {
                 },
             );
         }
-        outcome
+        Ok(outcome)
+    }
+
+    /// Kill the process and hand back what the durable layer still holds.
+    ///
+    /// This is the crash, at the grain this daemon has one: the value is consumed, so every
+    /// [`VolatileFact`](recovery::VolatileFact) — the whole of [`DaemonState`] and the region
+    /// tree with it — is dropped, and what comes out is the substrate a restart is built
+    /// over. There is no flush, no checkpoint and no drain, deliberately: a crash that got to
+    /// tidy up is not one.
+    ///
+    /// Hand the result to [`Builder::over`] to restart, and to
+    /// [`recovery::recover`] to reconcile.
+    #[must_use]
+    pub fn crash(self) -> DurableSubstrate {
+        DurableSubstrate {
+            store: self.store,
+            audit: self.store_audit,
+        }
+    }
+}
+
+/// Ask the injector, and turn a kill into the typed absence of an answer.
+fn kill(injector: &dyn CrashInjector, point: CrashPoint) -> Result<(), Killed> {
+    if injector.kills(point) {
+        return Err(Killed { point });
+    }
+    Ok(())
+}
+
+/// Everything that survives a daemon crash.
+///
+/// The publication store and the authorization audit log it writes through — the durable
+/// column of [`recovery`]'s table, as one value. It is deliberately not a `Clone`: two copies
+/// of a store are two stores, and a restart that ran against a copy would be reconciling
+/// something no daemon ever wrote to.
+#[derive(Debug)]
+pub struct DurableSubstrate {
+    store: ReferenceStore,
+    audit: Arc<AuditLog>,
+}
+
+impl DurableSubstrate {
+    /// The store, for a [`recovery::recover`] pass before anything is restarted over it.
+    #[must_use]
+    pub const fn store(&self) -> &ReferenceStore {
+        &self.store
+    }
+
+    /// The authorization audit log (plan §18.5), which the crash did not truncate either.
+    #[must_use]
+    pub fn audit(&self) -> &AuditLog {
+        &self.audit
     }
 }
 
@@ -612,6 +741,8 @@ pub struct Builder {
     state: DaemonState,
     families: Vec<Box<dyn OperationFamily>>,
     capabilities: Vec<(CapabilityDescriptor, Option<CapabilityHandle>)>,
+    store_faults: Option<Box<dyn continuum_workspace::publication::StorageFaults>>,
+    durable: Option<DurableSubstrate>,
 }
 
 impl fmt::Debug for Builder {
@@ -671,6 +802,53 @@ impl Builder {
         self
     }
 
+    /// Supply the storage seam the publication store publishes through.
+    ///
+    /// > docs/35's acceptance list requires "a crash injected between the content commit and
+    /// > the index commit of every publication phase, with fsck run on the survivor". This is
+    /// > where that injection enters.
+    /// >
+    /// > — [`StorageFaults`]
+    ///
+    /// It enters *there*, one crate down, and this is the daemon-side door to it: without
+    /// this, a deployment could not reach the INV-017 instant at all, and the crash-recovery
+    /// evidence would have to injure a store it built itself rather than the one a daemon
+    /// actually publishes into. Ignored by [`over`](Builder::over), which adopts a store that
+    /// already has its own.
+    ///
+    /// [`StorageFaults`]: continuum_workspace::publication::StorageFaults
+    #[must_use]
+    pub fn store_faults(
+        mut self,
+        faults: impl continuum_workspace::publication::StorageFaults + 'static,
+    ) -> Self {
+        self.store_faults = Some(Box::new(faults));
+        self
+    }
+
+    /// Restart over the substrate a crashed daemon left behind.
+    ///
+    /// The other half of [`Daemon::crash`]. The store is adopted whole — its content, index,
+    /// receipt ledger, abort log and *its own capability registry* — because that registry is
+    /// durable state administered through
+    /// [`ReferenceStore::mint`](continuum_workspace::publication::ReferenceStore::mint) and
+    /// [`revoke`](continuum_workspace::publication::ReferenceStore::revoke), not something a
+    /// restart re-derives. So [`capability`](Builder::capability) still provisions the *wire*
+    /// registry that admission reads — [`VolatileFact::WireCapabilityRegistry`], the
+    /// out-of-band surface a deployment restores at startup — and no longer writes the
+    /// store's.
+    ///
+    /// [`VolatileFact::WireCapabilityRegistry`]: recovery::VolatileFact::WireCapabilityRegistry
+    ///
+    /// The direction that omission runs in is the safe one: a capability the deployment stops
+    /// provisioning is denied at admission, before any store call (RFC 0027 A8, X3), so it
+    /// never reaches the store's registry at all.
+    #[must_use]
+    pub fn over(mut self, durable: DurableSubstrate) -> Self {
+        self.durable = Some(durable);
+        self
+    }
+
     /// Assemble the daemon.
     ///
     /// A capability whose handle is not a well-formed `cap_*` store token is registered in
@@ -678,12 +856,31 @@ impl Builder {
     /// which is fail-closed in the only direction that matters.
     #[must_use]
     pub fn build(mut self) -> Daemon {
+        // A restart adopts the surviving store and provisions the wire registry only; a cold
+        // start builds a store and provisions both. The two paths differ in exactly that,
+        // which is the durable/volatile split spelled as control flow.
+        if let Some(durable) = self.durable {
+            for (descriptor, parent) in self.capabilities {
+                self.state.register_capability(descriptor, parent);
+            }
+            return Daemon {
+                services: self.services,
+                state: self.state,
+                store: durable.store,
+                store_audit: durable.audit,
+                families: self.families,
+            };
+        }
+
         let store_audit = Arc::new(AuditLog::new());
         let mut store = ReferenceStore::builder(
             BoxedIdentifier(self.store_identifier),
             Arc::clone(&store_audit),
         )
         .policy(ScopedCapabilityPolicy);
+        if let Some(faults) = self.store_faults {
+            store = store.faults(BoxedFaults(faults));
+        }
         for (descriptor, parent) in self.capabilities {
             if let Ok(token) = identity::capability_to_store(&descriptor.capability) {
                 store = store.capability(
@@ -724,6 +921,19 @@ fn store_classes(
         .iter()
         .filter_map(|token| continuum_workspace::artifact_path::ArtifactClass::from_token(token))
         .collect()
+}
+
+/// Adapts an owned `Box<dyn StorageFaults>` back into the by-value seam the store's builder
+/// takes. The sibling of [`BoxedIdentifier`], for the same reason.
+struct BoxedFaults(Box<dyn continuum_workspace::publication::StorageFaults>);
+
+impl continuum_workspace::publication::StorageFaults for BoxedFaults {
+    fn check(
+        &self,
+        phase: continuum_workspace::publication::PublicationPhase,
+    ) -> Result<(), continuum_workspace::publication::AbortReason> {
+        self.0.check(phase)
+    }
 }
 
 /// Adapts an owned `Box<dyn ContentIdentifier>` back into the by-value seam the store's
