@@ -297,6 +297,20 @@ def _extract_g0_matrix(requirements: list[dict[str, Any]]) -> None:
                 question,
                 path,
                 line_number,
+                # The matrix's own Status column is the living-document
+                # completion record for an experiment, the way "(delivered:
+                # bn-…)" is for a bullet: "Evidence (reference implementation)"
+                # means the campaign ran against production code and its
+                # retained artifacts are named in the Evidence column, so the
+                # requirement no longer needs an active carrier Bone. Spike
+                # evidence and re-homed rows stay active — a finite spike is
+                # explicitly insufficient, and a re-homed row's obligation
+                # lives at its target gate.
+                status=(
+                    "satisfied"
+                    if status.startswith("Evidence (reference implementation)")
+                    else ACTIVE
+                ),
                 metadata={
                     "experiment": experiment,
                     "pass_condition": passed,

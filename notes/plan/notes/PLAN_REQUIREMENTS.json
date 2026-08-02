@@ -4385,7 +4385,7 @@
         "line": 11,
         "path": "notes/G0_SPIKE_MATRIX.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Is all state explicit and resumable?"
     },
     {
@@ -4555,7 +4555,7 @@
         "line": 21,
         "path": "notes/G0_SPIKE_MATRIX.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Does content addressing survive concurrency?"
     },
     {
@@ -4572,7 +4572,7 @@
         "line": 22,
         "path": "notes/G0_SPIKE_MATRIX.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Can cancellation of verification work close correctly?"
     },
     {
