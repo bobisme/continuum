@@ -56,6 +56,23 @@
 //! surface?", which no scripted arm can answer. It is named in the artifact and in this
 //! crate's tests rather than left for a reader to notice.
 //!
+//! # What bn-2c0a's falsification campaign added
+//!
+//! The instrument above is the *system under test* for G0-DX-10's falsification bone, so
+//! that campaign lives here too, and it lives strictly **beside** the landed metrics:
+//!
+//! | Module | What it is |
+//! |---|---|
+//! | [`variants`] | every accounting and instrument choice the landed rule made, restated as a parameter and re-measured |
+//! | [`falsification`] | the campaign's own artifact: per-attack verdicts, the sensitivity table, the surviving-conclusions statement |
+//!
+//! and `tests/dx10_falsification.rs` is the attack catalogue — thirteen attacks from both
+//! directions, four controls, the first of which asserts that every landed figure is
+//! unchanged. The instrumentation the campaign needed
+//! ([`shell::HiddenCost`], [`shell::Disciplines`], the two extra [`shell::Renderer`]s) is
+//! additive: `ShellSurface::new` is the landed baseline, and nothing the campaign records
+//! enters an interface-byte total.
+//!
 //! # Dependency-boundary contract
 //!
 //! - May depend on Forge and on verifier interfaces — it is a harness, not part of the
@@ -68,6 +85,7 @@
 //!   that drives it is wired in `tests/`. [`surface`] states exactly what that costs.
 
 pub mod corpus;
+pub mod falsification;
 pub mod philosophers;
 pub mod policy;
 pub mod report;
@@ -77,6 +95,7 @@ pub mod separation;
 pub mod shell;
 pub mod surface;
 pub mod task;
+pub mod variants;
 
 use continuumd::protocol::envelope::Budget;
 use continuumd::protocol::scalar::{ByteCount, DurationMs};

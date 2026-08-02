@@ -74,6 +74,25 @@
 //!    never need it — a projection that obeys the contract above is scrapable, which is
 //!    itself a finding — so [`Renderer::Flaky`] exists to fire it on purpose in the evidence,
 //!    because an untested recovery path is a decoration.
+//!
+//! # What bn-2c0a's falsification campaign added here, and what it did not change
+//!
+//! The landed constructors are the landed baseline: [`ShellSurface::new`] is
+//! [`Renderer::Standard`] under [`Disciplines::ALL`], and every scheduled run uses it. The
+//! campaign needed three things this module did not have, and all three are additive.
+//!
+//! - [`Disciplines`] makes each of the four a knob, so "how much of the baseline's result is
+//!   the *discipline* rather than the *interface*" can be answered with a number instead of
+//!   an opinion. The answer is in `tests/dx10_falsification.rs`, attack N3: discipline 1
+//!   carries all of it, and disciplines 2 and 4 are inert against the standard projection.
+//! - [`Renderer::Stale`] and [`Renderer::Drifting`] are the two fault classes only a text
+//!   surface can suffer — an answer one beat old, and an output format that moved between
+//!   releases. Neither is in any scheduled run; both are attacks S4 and N2.
+//! - [`HiddenCost`] records what the CLI spent underneath the agent — the frames and the
+//!   per-invocation handshakes the second bullet at the top of this file says are free — so
+//!   that handicap can be *priced* rather than merely named. It enters no
+//!   [`Observation::bytes`], and `control_the_hidden_ledger_never_enters_an_interface_byte_total`
+//!   is the test that holds it out.
 
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::is_mutation;
@@ -97,7 +116,7 @@ use continuumd::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use continuumd::protocol::vocabulary::{
     ErrorCode, Portfolio, ResultStatus, SemanticVerdict, TaskStatus,
 };
-use continuumd::transport::{client_receive, client_send};
+use continuumd::transport::{decode_result, encode_arguments, encode_request};
 
 use crate::policy::{Call, EDITED_MODULE, Step};
 use crate::rig::Rig;
@@ -122,6 +141,136 @@ pub enum Renderer {
         /// The key withheld.
         key: &'static str,
     },
+    /// Answer the `at`th rendering from the *previous* command's answer.
+    ///
+    /// bn-2c0a's staleness attack, and nothing in the scheduled runs uses it. It models
+    /// the subsidy the landed baseline receives by construction: this adapter renders from
+    /// the very wire answer the daemon just produced, while a real CLI process re-derives
+    /// state from a file, a cache, or a replica and can be a beat behind.
+    Stale {
+        /// Which rendering, one-based, answers from the held one.
+        at: u32,
+    },
+    /// Rename `from` to `to` in every rendering.
+    ///
+    /// bn-2c0a's parse-drift attack: the fault class that can only land on the text arm,
+    /// because the typed arm's field names are the schema's.
+    Drifting {
+        /// The key the projection used to print.
+        from: &'static str,
+        /// The key it prints now.
+        to: &'static str,
+    },
+}
+
+/// Which of the four disciplines this baseline is holding to.
+///
+/// [`Disciplines::ALL`] is the landed baseline and the default of every landed
+/// constructor; nothing in the scheduled runs uses anything else. The knobs exist for
+/// bn-2c0a's sensitivity bound: the goal bone's baseline is a *disciplined* scraper, and
+/// "how much of the baseline's result is the discipline rather than the interface" is a
+/// question that can only be answered by running the undisciplined one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Disciplines {
+    /// Discipline 1: match a line whose prefix is exactly `key: `. Off, the agent takes
+    /// the first line that *contains* the key, which is how a scraper written in a hurry
+    /// reads text.
+    pub anchored_lookup: bool,
+    /// Discipline 2: parse through [`ProtocolEnum::from_wire`], so an unrecognized token
+    /// is a miss. Off, an unrecognized token becomes the value the agent expected.
+    pub closed_vocabulary: bool,
+    /// Discipline 3: expand a summarized list by command. Off, the agent assumes the
+    /// declared ceiling was metered instead of paying to find out.
+    pub explicit_expansion: bool,
+    /// Discipline 4: re-read a missing required key, bounded. Off, the agent proceeds.
+    pub bounded_reread: bool,
+}
+
+impl Disciplines {
+    /// All four: the landed baseline.
+    pub const ALL: Self = Self {
+        anchored_lookup: true,
+        closed_vocabulary: true,
+        explicit_expansion: true,
+        bounded_reread: true,
+    };
+
+    /// None: the scraper the goal bone's "disciplined" is a contrast with.
+    pub const NONE: Self = Self {
+        anchored_lookup: false,
+        closed_vocabulary: false,
+        explicit_expansion: false,
+        bounded_reread: false,
+    };
+}
+
+/// What one CLI process spent *underneath* the agent, and was not charged for.
+///
+/// Not an interface cost by this module's own accounting: these frames never reach the
+/// agent, and the deliberate handicap they represent is stated at the top of this file.
+/// They are recorded — and never added to [`Observation::bytes`] — because bn-2c0a's
+/// falsification campaign has to price that handicap, and a handicap nobody measured is a
+/// claim rather than a number. [`crate::variants`] is the only reader.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HiddenCost {
+    /// Request-frame bytes the CLI process wrote to the daemon.
+    pub frames_sent: u64,
+    /// Result-frame bytes the CLI process read from the daemon.
+    pub frames_received: u64,
+    /// How many times a CLI process was invoked — one per command line written, bounded
+    /// re-reads included. A real `continuum` binary handshakes once per invocation, which
+    /// is what makes this number a cost rather than a curiosity.
+    pub invocations: u32,
+    /// Agent-interface bytes spent on discipline 3's expansion commands. Already inside
+    /// [`Observation::bytes`]; broken out so a variant can re-price them.
+    pub expansion_bytes: u64,
+    /// How many expansion commands were issued. Each is a further process invocation a
+    /// real CLI would have to make, and this harness serves it from an envelope it is
+    /// already holding.
+    pub expansions: u32,
+    /// How many bounded re-reads discipline 4 performed.
+    pub rereads: u32,
+    /// [`structural_tokens`] of everything the agent wrote and read.
+    pub agent_tokens: u64,
+    /// [`structural_tokens`] of the CLI's own frames — the same canonical JSON the typed
+    /// arm exchanges, which is what makes it a usable stand-in for the typed arm's density
+    /// under a counting rule that is not affine in bytes.
+    pub frame_tokens: u64,
+}
+
+impl HiddenCost {
+    /// The CLI's own protocol traffic, both directions.
+    #[must_use]
+    pub const fn frame_bytes(&self) -> u64 {
+        self.frames_sent + self.frames_received
+    }
+}
+
+/// A counting rule that is **not** affine in bytes: words and punctuation, separately.
+///
+/// A token is a maximal run of `[A-Za-z0-9_]`, or one non-whitespace character that is not
+/// in that class. Whitespace separates and costs nothing. It is a rule, not a tokenizer —
+/// it has no vocabulary and no model — and its only purpose is to be a counting rule under
+/// which dense canonical JSON and sparse prose do *not* cost the same per byte, so
+/// `bytes/k`'s invariance can be checked against something rather than asserted.
+#[must_use]
+pub fn structural_tokens(text: &str) -> u64 {
+    let mut tokens = 0;
+    let mut in_word = false;
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            if !in_word {
+                tokens += 1;
+                in_word = true;
+            }
+        } else {
+            in_word = false;
+            if !character.is_whitespace() {
+                tokens += 1;
+            }
+        }
+    }
+    tokens
 }
 
 /// The shell baseline: renders commands, reads text, and knows nothing else.
@@ -137,6 +286,40 @@ pub struct ShellSurface {
     rereads: u32,
     /// How many expansion commands discipline 3 has issued.
     expansions: u32,
+    /// What this baseline spent that the agent was not charged for.
+    hidden: HiddenCost,
+    /// Which disciplines it is holding to.
+    disciplines: Disciplines,
+    /// The previous rendering's answer, for [`Renderer::Stale`].
+    previous: Option<(ResultEnvelope, Payload)>,
+    /// Every answer the CLI process received, when recording is on.
+    ///
+    /// Off by default and used only by [`crate::variants`]'s envelope decomposition, which
+    /// needs the daemon's own answers to say which of the native arm's bytes a redesign
+    /// could amortize and which the protocol requires.
+    recorded: Vec<Recorded>,
+    /// Whether to record.
+    recording: bool,
+}
+
+/// One answer a CLI process received, kept for the envelope decomposition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recorded {
+    /// The wire operation.
+    pub operation: &'static str,
+    /// The answer, as decoded from the frame.
+    pub envelope: ResultEnvelope,
+    /// Request-frame bytes.
+    pub sent: u64,
+    /// Result-frame bytes.
+    pub received: u64,
+    /// Bytes of the operation's own request struct inside the envelope's `arguments`.
+    ///
+    /// For `workspace.create` this is `SnapshotComponents` — the ten commitment lists a
+    /// remote client must transmit where a local process names a directory — and it is
+    /// recorded separately because that is the one request-side quantity a redesign could
+    /// act on.
+    pub argument_bytes: u64,
 }
 
 impl Default for ShellSurface {
@@ -149,25 +332,64 @@ impl ShellSurface {
     /// A baseline with the standard projection.
     #[must_use]
     pub const fn new() -> Self {
-        Self {
-            renderer: Renderer::Standard,
-            rendered: 0,
-            bytes: 0,
-            rereads: 0,
-            expansions: 0,
-        }
+        Self::with_renderer(Renderer::Standard)
     }
 
     /// A baseline whose projection withholds `key` from the first rendering of each command.
     #[must_use]
     pub const fn flaky(key: &'static str) -> Self {
+        Self::with_renderer(Renderer::Flaky { key })
+    }
+
+    /// A baseline driving a named renderer, holding all four disciplines.
+    #[must_use]
+    pub const fn with_renderer(renderer: Renderer) -> Self {
+        Self::configured(renderer, Disciplines::ALL)
+    }
+
+    /// A baseline driving a named renderer under a named set of disciplines.
+    #[must_use]
+    pub const fn configured(renderer: Renderer, disciplines: Disciplines) -> Self {
         Self {
-            renderer: Renderer::Flaky { key },
+            renderer,
             rendered: 0,
             bytes: 0,
             rereads: 0,
             expansions: 0,
+            hidden: HiddenCost {
+                frames_sent: 0,
+                frames_received: 0,
+                invocations: 0,
+                expansion_bytes: 0,
+                expansions: 0,
+                rereads: 0,
+                agent_tokens: 0,
+                frame_tokens: 0,
+            },
+            disciplines,
+            previous: None,
+            recorded: Vec::new(),
+            recording: false,
         }
+    }
+
+    /// The same baseline, recording every answer for the envelope decomposition.
+    #[must_use]
+    pub fn recording(mut self) -> Self {
+        self.recording = true;
+        self
+    }
+
+    /// Every answer this baseline's CLI process received, when recording is on.
+    #[must_use]
+    pub fn recorded(&self) -> &[Recorded] {
+        &self.recorded
+    }
+
+    /// Which disciplines this baseline holds to.
+    #[must_use]
+    pub const fn disciplines(&self) -> Disciplines {
+        self.disciplines
     }
 
     /// How many bounded re-reads this baseline has performed.
@@ -182,6 +404,12 @@ impl ShellSurface {
         self.expansions
     }
 
+    /// What this baseline spent that the agent was not charged for.
+    #[must_use]
+    pub const fn hidden(&self) -> HiddenCost {
+        self.hidden
+    }
+
     /// Drive one command: write it, get the daemon's answer, render it, read the text back.
     fn run_command(
         &mut self,
@@ -190,7 +418,20 @@ impl ShellSurface {
         step: &Step,
     ) -> Result<(String, String, ResultEnvelope, Payload), SurfaceError> {
         let command = command_line(task, step);
-        let (envelope, payload) = dispatch(rig, task, step, &command)?;
+        let (envelope, payload, frames) = dispatch(rig, task, step, &command)?;
+        self.hidden.frames_sent += frames.sent;
+        self.hidden.frames_received += frames.received;
+        self.hidden.frame_tokens += frames.tokens;
+        self.hidden.invocations += 1;
+        if self.recording {
+            self.recorded.push(Recorded {
+                operation: step.call.operation(),
+                envelope: envelope.clone(),
+                sent: frames.sent,
+                received: frames.received,
+                argument_bytes: frames.arguments,
+            });
+        }
         let text = self.render(&command, step.call.operation(), &envelope, &payload);
         Ok((command, text, envelope, payload))
     }
@@ -204,12 +445,47 @@ impl ShellSurface {
     ) -> String {
         self.rendered += 1;
         let withheld = match self.renderer {
-            Renderer::Standard => None,
             Renderer::Flaky { key } if self.rendered == 1 => Some(key),
-            Renderer::Flaky { .. } => None,
+            _ => None,
         };
-        render(command, operation, envelope, payload, withheld)
+        // A stale projection answers from the rendering *before* this one — a CLI process
+        // reading a cache, a file, or a replica one operation behind. None of the four
+        // disciplines can see it: every key is present, every token is in the closed
+        // vocabulary, and every value is plausible. That is what the attack is for.
+        let held = self.previous.replace((envelope.clone(), payload.clone()));
+        let (envelope, payload) = match (self.renderer, held) {
+            (Renderer::Stale { at }, Some(previous)) if self.rendered == at => previous,
+            _ => (envelope.clone(), payload.clone()),
+        };
+        let text = render(command, operation, &envelope, &payload, withheld);
+        match self.renderer {
+            Renderer::Drifting { from, to } => drift(&text, from, to),
+            _ => text,
+        }
     }
+}
+
+/// Rename a projected key, as a CLI whose output format moved between releases would.
+///
+/// The value is untouched and the line is the same shape: only the *name* the agent
+/// anchors on moves. A typed surface has no analogue — a field name belongs to the schema,
+/// and a schema change is a protocol version.
+#[must_use]
+pub fn drift(text: &str, from: &str, to: &str) -> String {
+    let prefix = format!("{from}: ");
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        match line.strip_prefix(prefix.as_str()) {
+            Some(value) => {
+                out.push_str(to);
+                out.push_str(": ");
+                out.push_str(value);
+            }
+            None => out.push_str(line),
+        }
+        out.push('\n');
+    }
+    out
 }
 
 impl Surface for ShellSurface {
@@ -234,19 +510,25 @@ impl Surface for ShellSurface {
         let before = self.bytes;
         let (command, mut text, envelope, _payload) = self.run_command(rig, task, step)?;
         self.bytes += command.len() as u64 + text.len() as u64;
+        self.hidden.agent_tokens += structural_tokens(&command) + structural_tokens(&text);
 
         // Discipline 4: bounded re-read. A missing required key is re-read rather than
         // guessed at; the re-issued command and its output are charged like any other.
         let mut attempts = 0;
-        while attempts < MAX_REREADS && missing_required(step.call.operation(), &text).is_some() {
+        while self.disciplines.bounded_reread
+            && attempts < MAX_REREADS
+            && missing_required(step.call.operation(), &text).is_some()
+        {
             attempts += 1;
             self.rereads += 1;
+            self.hidden.rereads += 1;
             let (again, retext, _, _) = self.run_command(rig, task, step)?;
             self.bytes += again.len() as u64 + retext.len() as u64;
+            self.hidden.agent_tokens += structural_tokens(&again) + structural_tokens(&retext);
             text = retext;
         }
 
-        let mut reading = scrape(step.call.operation(), &text);
+        let mut reading = scrape_with(step.call.operation(), &text, self.disciplines);
 
         // Discipline 3: explicit expansion. The count is in the summary; the manifest is not,
         // and the agent needs the manifest to know whether its declared ceiling was metered.
@@ -256,16 +538,35 @@ impl Surface for ShellSurface {
         ) && envelope.status != ResultStatus::Error
             && let Some(count) = reading.omissions
         {
-            let expand = expansion_command(&envelope.request_id);
-            let listing = render_omissions(&envelope);
-            self.bytes += expand.len() as u64 + listing.len() as u64;
-            self.expansions += 1;
-            reading.ceiling_enforced = Some(!listing.lines().any(|line| line == "budget.states"));
-            debug_assert_eq!(
-                count,
-                listing.lines().filter(|line| !line.is_empty()).count(),
-                "the summary's count and the expansion's listing are one field"
-            );
+            if self.disciplines.explicit_expansion {
+                let expand = expansion_command(&envelope.request_id);
+                let listing = render_omissions(&envelope);
+                self.bytes += expand.len() as u64 + listing.len() as u64;
+                self.hidden.agent_tokens +=
+                    structural_tokens(&expand) + structural_tokens(&listing);
+                self.expansions += 1;
+                self.hidden.expansions += 1;
+                self.hidden.expansion_bytes += expand.len() as u64 + listing.len() as u64;
+                reading.ceiling_enforced =
+                    Some(!listing.lines().any(|line| line == "budget.states"));
+                // Under the standard projection the summary and the expansion are one
+                // field and disagreeing would be a defect in this crate. Under
+                // `Renderer::Stale` they are *meant* to disagree — the summary was read
+                // off an answer one beat old and the expansion is served from the current
+                // one, which is precisely the staleness bn-2c0a injects — so the check
+                // holds where it is a check and stands aside where it is the experiment.
+                debug_assert!(
+                    !matches!(self.renderer, Renderer::Standard)
+                        || count == listing.lines().filter(|line| !line.is_empty()).count(),
+                    "the summary's count and the expansion's listing are one field"
+                );
+            } else {
+                // Undisciplined: assume the ceiling was metered rather than pay to find
+                // out. On this subset the assumption is always *correct*, which is the
+                // finding — the disciplined baseline is charged for a datum it could have
+                // guessed right on every task here.
+                reading.ceiling_enforced = Some(true);
+            }
         }
 
         let admitted = envelope.status != ResultStatus::Error;
@@ -426,13 +727,23 @@ pub fn arguments_for(rig: &Rig, task: &BenchmarkTask, step: &Step) -> Arguments 
 /// Drive one step through the wire, as the CLI process would.
 ///
 /// The frames this exchanges are the CLI's own and are not charged to the agent — see the
-/// module documentation. What it returns is what the process has to render from.
+/// module documentation. What it returns is what the process has to render from, plus the
+/// two frame lengths, which enter no interface-byte total and exist so
+/// [`crate::variants`] can price the handicap that choice grants the baseline.
+#[derive(Debug, Clone, Copy)]
+struct FrameCost {
+    sent: u64,
+    received: u64,
+    tokens: u64,
+    arguments: u64,
+}
+
 fn dispatch(
     rig: &mut Rig,
     task: &BenchmarkTask,
     step: &Step,
     command: &str,
-) -> Result<(ResultEnvelope, Payload), SurfaceError> {
+) -> Result<(ResultEnvelope, Payload, FrameCost), SurfaceError> {
     let operation = step.call.operation();
     let arguments = arguments_for(rig, task, step);
     let version = rig.version();
@@ -473,18 +784,32 @@ fn dispatch(
         page: Optional::Absent,
     };
 
-    let (server, pair, _) = rig.boundary();
-    client_send(pair, &envelope, &arguments).map_err(|error| SurfaceError {
+    // The request frame is encoded here rather than inside `client_send` so its length can
+    // be read off the same bytes that go on the wire — a measurement, not an estimate.
+    // `client_send` would encode the identical frame; `sent_bytes_are_the_frame_client_send_
+    // would_have_written` in the falsification evidence holds the two to each other.
+    let frame = encode_request(&envelope, &arguments).map_err(|error| SurfaceError {
         arm: Arm::Shell,
         operation,
         detail: error.to_string(),
     })?;
+    let sent = frame.len() as u64;
+    let (server, pair, _) = rig.boundary();
+    pair.to_server
+        .put_frame(&frame)
+        .map_err(|error| SurfaceError {
+            arm: Arm::Shell,
+            operation,
+            detail: error.to_string(),
+        })?;
     server.serve(pair).map_err(|error| SurfaceError {
         arm: Arm::Shell,
         operation,
         detail: error.to_string(),
     })?;
-    client_receive(pair, operation)
+    let answer = pair
+        .to_client
+        .take_frame()
         .map_err(|error| SurfaceError {
             arm: Arm::Shell,
             operation,
@@ -494,7 +819,26 @@ fn dispatch(
             arm: Arm::Shell,
             operation,
             detail: "the daemon wrote no answer frame".to_owned(),
-        })
+        })?;
+    let received = answer.len() as u64;
+    let tokens = structural_tokens(&String::from_utf8_lossy(&frame))
+        + structural_tokens(&String::from_utf8_lossy(&answer));
+    let (result, payload) = decode_result(operation, &answer).map_err(|error| SurfaceError {
+        arm: Arm::Shell,
+        operation,
+        detail: error.to_string(),
+    })?;
+    let arguments = encode_arguments(&arguments).map_or(0, |opaque| opaque.as_bytes().len() as u64);
+    Ok((
+        result,
+        payload,
+        FrameCost {
+            sent,
+            received,
+            tokens,
+            arguments,
+        },
+    ))
 }
 
 /// A stable 32-bit digest, used only to name a request after the command that produced it.
@@ -769,26 +1113,60 @@ pub fn missing_required(operation: &str, text: &str) -> Option<&'static str> {
 /// Disciplines 1 and 2: recover what the text says, and nothing more.
 #[must_use]
 pub fn scrape(operation: &str, text: &str) -> Reading {
+    scrape_with(operation, text, Disciplines::ALL)
+}
+
+/// Discipline 1, relaxed: the first line that merely *contains* `key`, split at `": "`.
+///
+/// What a scraper written without discipline 1 does, and it is wrong in exactly the way
+/// discipline 1 exists to prevent: a lookup for `task` finds the `task.status:` line, and
+/// a lookup for `code` finds `error.code:`.
+#[must_use]
+pub fn loose_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines()
+        .find(|line| line.contains(key))
+        .and_then(|line| line.split_once(": "))
+        .map(|(_, value)| value)
+}
+
+/// Recover what the text says, under a named set of disciplines.
+#[must_use]
+pub fn scrape_with(operation: &str, text: &str, disciplines: Disciplines) -> Reading {
+    let look = |key: &str| -> Option<&str> {
+        if disciplines.anchored_lookup {
+            field(text, key)
+        } else {
+            loose_field(text, key)
+        }
+    };
     let mut reading = Reading::default();
-    let errored = field(text, "status") == Some("error");
+    let errored = look("status") == Some("error");
 
     if !errored {
-        reading.snapshot =
-            field(text, "snapshot").and_then(|value| WorkspaceHandle::new(value).ok());
-        reading.sealed = match field(text, "sealed") {
+        reading.snapshot = look("snapshot").and_then(|value| WorkspaceHandle::new(value).ok());
+        reading.sealed = match look("sealed") {
             Some("true") => Some(true),
             Some("false") => Some(false),
             _ => None,
         };
-        reading.task = field(text, "task")
+        reading.task = look("task")
             .filter(|value| *value != "none")
             .and_then(|value| TaskHandle::new(value).ok());
-        reading.status =
-            field(text, "task.status").and_then(|value| TaskStatus::from_wire(value).ok());
-        reading.states = field(text, "cost.states").and_then(|value| value.parse::<u64>().ok());
-        reading.verdict =
-            field(text, "verdict").and_then(|value| SemanticVerdict::from_wire(value).ok());
-        if let Some(value) = field(text, "continuation") {
+        reading.status = look("task.status").and_then(|value| {
+            TaskStatus::from_wire(value)
+                .ok()
+                // Discipline 2, relaxed: a token the closed vocabulary does not know
+                // becomes the value the agent was expecting. A miss and a plausible wrong
+                // answer are the same length in a transcript and are not the same fact.
+                .or_else(|| (!disciplines.closed_vocabulary).then_some(TaskStatus::Completed))
+        });
+        reading.states = look("cost.states").and_then(|value| value.parse::<u64>().ok());
+        reading.verdict = look("verdict").and_then(|value| {
+            SemanticVerdict::from_wire(value)
+                .ok()
+                .or_else(|| (!disciplines.closed_vocabulary).then_some(SemanticVerdict::Refuted))
+        });
+        if let Some(value) = look("continuation") {
             reading.continuation_known = true;
             reading.continuation = (value != "none")
                 .then(|| ContinuationHandle::new(value).ok())
@@ -803,7 +1181,7 @@ pub fn scrape(operation: &str, text: &str) -> Reading {
     }
     // The summary line's count is scrapable whether or not the answer errored; the manifest
     // behind it is not, which is what the expansion command is for.
-    reading.omissions = field(text, "omissions").and_then(|value| {
+    reading.omissions = look("omissions").and_then(|value| {
         value
             .split_whitespace()
             .next()
