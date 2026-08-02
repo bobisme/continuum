@@ -324,7 +324,7 @@ Search code does not check its own strongest claims. Certificates cross an indep
 
 Controlled code accesses scheduling, time, entropy, I/O, faults, and cancellation through explicit capabilities.
 
-### INV-006 — Replay stability
+### INV-006 — Replay stability (delivered: bn-i4aem — `crates/continuumd/tests/inv006_replay_stability_evidence.rs`: replay under a pinned protocol epoch is byte-stable across two fresh daemons; carried as a label by bn-3dr until its crash-recovery delivery separated §4.5 recovery semantics from this invariant, per bn-3dr's own concern 6)
 
 A failure advertised as replayable must reproduce under its pinned semantic epoch or be downgraded to an engine defect.
 
