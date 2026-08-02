@@ -332,7 +332,7 @@ A failure advertised as replayable must reproduce under its pinned semantic epoc
 
 Any bounded Context Pack, explanation, slice, or visualization names what was omitted and how to retrieve it.
 
-### INV-008 — Typed inconclusiveness
+### INV-008 — Typed inconclusiveness (delivered: bn-n9a1 — `crates/continuum-kernel-core/tests/inv008_unsupported_vs_rejected_evidence.rs` (kernel: cross-crate Unsupported-vs-Rejected sweep) and `crates/continuumd/tests/inv008_typed_inconclusiveness_evidence.rs` (engine/task/daemon: five-kind audit, never-a-pass restated live, no-boolean-verdict sweep); abstraction ambiguity and incomplete proof search honestly pinned as unlanded, Phase-D-adjacent boundaries)
 
 Timeout, unsupported semantics, insufficient telemetry, abstraction ambiguity, and incomplete proof search are distinct outcomes.
 

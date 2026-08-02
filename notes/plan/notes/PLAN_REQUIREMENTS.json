@@ -4701,8 +4701,8 @@
         "line": 335,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "Typed inconclusiveness"
+      "status": "satisfied",
+      "summary": "Typed inconclusiveness and crates/continuumd/tests/inv008typedinconclusivenessevidence.rs (engine/task/daemon: five-kind audit, never-a-pass restated live, no-boolean-verdict sweep); abstraction ambiguity and incomplete proof search honestly pinned as unlanded, Phase-D-adjacent boundaries)"
     },
     {
       "category": "invariant",
