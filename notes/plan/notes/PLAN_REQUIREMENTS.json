@@ -4659,7 +4659,7 @@
         "line": 323,
         "path": "plan.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "No ambient nondeterminism"
     },
     {

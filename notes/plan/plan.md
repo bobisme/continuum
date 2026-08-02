@@ -320,7 +320,7 @@ Human text may accompany a result, but agents and integrations consume versioned
 
 Search code does not check its own strongest claims. Certificates cross an independent checker; foundational theorems cross Lean.
 
-### INV-005 — No ambient nondeterminism
+### INV-005 — No ambient nondeterminism (delivered: bn-jme9 — crates/continuumd/tests/inv005_ambient_nondeterminism_evidence.rs: six-ambient audit against declared capability seams, live re-run of GOV-1-04/check_crate_boundaries.py pinning named fixtures, behavioral evidence for cancellation/scheduling/faults/entropy, and an anti-drift mutant; a new cross-crate byte-identical regression in crates/continuum-engine-reference/tests/certificate_kernel_differential.rs)
 
 Controlled code accesses scheduling, time, entropy, I/O, faults, and cancellation through explicit capabilities.
 

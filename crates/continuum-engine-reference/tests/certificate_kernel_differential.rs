@@ -128,6 +128,40 @@ fn the_engines_die_hard_certificate_is_verified_by_the_independent_checker() {
     );
 }
 
+/// `INV-005` ("no ambient nondeterminism") at exactly the seam this file exists to
+/// exercise, and a comparison the rest of the file does not make. Every test above either
+/// runs the pipeline once (the test just above) or attacks a mutation of *one* run's bytes
+/// (`every_single_byte_mutation_of_the_state_table_is_rejected` and its neighbors); none
+/// compares two independently produced runs against each other. That is the gap this test
+/// closes, and it is the gap `tools/governance/check_code_policy.py`'s GOV-1-04 source scan
+/// cannot close no matter how it is extended: a scan proves no clock or RNG is *named* in
+/// this crate's source, never that two runs of the composition it names actually agree.
+/// Sharing no value between the two runs (fresh `model()`, fresh `bfs::explore`, fresh
+/// `ClosedSet`, fresh emission, fresh independent check — `certificate` and
+/// `check_certificate` are called twice, each time from nothing) is what makes agreement
+/// evidence rather than a tautology.
+#[test]
+fn two_independent_pipelines_from_a_declared_model_to_a_checked_certificate_are_byte_identical() {
+    let bytes_a = certificate(&model());
+    let bytes_b = certificate(&model());
+    assert_eq!(
+        bytes_a, bytes_b,
+        "two independent explore-then-emit runs of the same declared Die Hard model produced \
+         different certificate bytes; INV-005 requires this pipeline to carry no ambient state \
+         between one run and the next"
+    );
+
+    // The independent checker, run once per independent pipeline — not once against both.
+    let verdict_a = check_certificate(&bytes_a);
+    let verdict_b = check_certificate(&bytes_b);
+    assert_eq!(
+        verdict_a, verdict_b,
+        "two byte-identical certificates, checked independently, produced different verdicts; \
+         the checker itself (continuum-kernel-core, which this file's own header notes shares no \
+         code with the encoder) must be as free of ambient state as the engine it audits"
+    );
+}
+
 #[test]
 fn the_decoded_body_is_the_die_hard_transition_relation() {
     let model = model();
