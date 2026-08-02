@@ -4378,7 +4378,7 @@
       "metadata": {
         "experiment": "create snapshot, start bounded task, resume continuation, mutate workspace, reuse old handle",
         "failure_consequence": "reject daemon protocol",
-        "matrix_status": "Evidence (finite spike)",
+        "matrix_status": "Evidence (finite spike) \u2014 **pass condition falsified at the production grain**",
         "pass_condition": "idempotence, stale snapshot rejection, deterministic resume"
       },
       "source": {
