@@ -364,7 +364,7 @@ Lean version, library closure, theorem hashes, axioms, certificate schema, and c
 
 Agents cannot alter evidence status, sign receipts, access ungranted production traces, or execute unrestricted host effects.
 
-### INV-016 — Source is untrusted data
+### INV-016 — Source is untrusted data (delivered: bn-1604 — crates/continuumd/tests/inv016_untrusted_source_evidence.rs: IDL-derived free-text inventory + hostile-payload dispatch + mutant anti-vacuity)
 
 Comments, logs, docs, model strings, and production payloads cannot issue instructions to the workbench or proof service.
 
