@@ -348,7 +348,7 @@ An incremental result claiming exactness must match clean evaluation for the sam
 
 A repair transaction cannot be promoted if it changes protected intent unless explicitly reclassified as an intent revision.
 
-### INV-012 — Non-vacuous synthesis
+### INV-012 — Non-vacuous synthesis (delivered: bn-2z0b — crates/continuum-intent/tests/inv012_nonvacuity_evidence.rs)
 
 Forge objectives include required progress/availability behaviors and mutation challenges. Safety by disabling the system is rejected.
 
