@@ -162,7 +162,14 @@
 //!   `ReferenceStore` is the daemon's join.
 //! - **G0-DX-14.** This module is one input to that campaign, not the campaign. The
 //!   matrix row requires cancelling *DPOR, solver, proof and synthesis* tasks at every
-//!   phase; three of those four engines do not exist yet. The row stays open.
+//!   phase; three of those four engines do not exist yet, so the campaign
+//!   (`crates/continuum-task/tests/dx14_cancellation_matrix.rs`, bn-2zy) runs the four as
+//!   publication/suspension **profiles** rather than engines — which is enough because
+//!   [`RegionTree::cancel_outcome`] is a function of committed evidence and declared
+//!   resumability and of nothing else. That file, its daemon-grain half
+//!   (`crates/continuumd/tests/dx14_cancellation_matrix.rs`), and the sweeps in
+//!   `tests/region_no_orphan.rs` and `tests/budget_partial_evidence.rs` are what the row's
+//!   Evidence column now names. Nothing in this module changed to make it pass.
 
 pub mod obligation;
 pub mod schedule;

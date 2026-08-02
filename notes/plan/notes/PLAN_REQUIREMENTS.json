@@ -4565,7 +4565,7 @@
       "metadata": {
         "experiment": "cancel DPOR, solver, proof, and synthesis tasks at every phase",
         "failure_consequence": "integrate deeper with asupersync",
-        "matrix_status": "Open \u2014 freeze-blocking (Phase A)",
+        "matrix_status": "Evidence (reference implementation)",
         "pass_condition": "no leaked obligations; resumable artifacts either committed or absent"
       },
       "source": {

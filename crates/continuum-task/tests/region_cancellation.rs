@@ -29,6 +29,13 @@
 //! cancellation can arrive in, the typed outcome each one produces, and a check of both
 //! pass-condition conjuncts at every row.
 //!
+//! The campaign itself is `tests/dx14_cancellation_matrix.rs` (bn-2zy), which took this
+//! shape and ran it per task lane — the four engines as publication/suspension profiles,
+//! every phase of each, across placements, teardown arrivals, a request window, and an
+//! interleaved four-lane portfolio — with `crates/continuumd/tests/dx14_cancellation_matrix.rs`
+//! as its daemon-grain half. This file stays as the single-worker table it always was: it is
+//! the readable statement of the rule, and the campaign is the sweep.
+//!
 //! The table is the artifact. Each row is a `(phase, expected outcome)` pair written as
 //! data, so a change to the calculus that silently reclassified one of them fails here
 //! with the phase named rather than passing with a different meaning.

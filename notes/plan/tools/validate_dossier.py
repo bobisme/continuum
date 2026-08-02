@@ -804,7 +804,12 @@ def check_g0_matrix_counts() -> dict[str, Any]:
     assert plan_evidence == evidence, (
         f"plan evidence set {sorted(plan_evidence)} != matrix {sorted(evidence)}"
     )
-    open_match = re.search(r"carry spike evidence\. (.*?) are open and freeze-blocking", norm)
+    # `is`/`are` because the open freeze-blocking set shrinks as G0 items close and
+    # English does not let the verb stay plural for one item: G0-DX-14's flip to
+    # Evidence (bn-2zy) left DX-10 alone in that sentence. The tolerance is exactly the
+    # verb — the item list, the sentence order, and the equality against the matrix are
+    # untouched, so this loosens the grammar and enforces the same fact.
+    open_match = re.search(r"carry spike evidence\. (.*?) (?:are|is) open and freeze-blocking", norm)
     assert open_match, "plan section 0.3 open/freeze-blocking sentence not found"
     plan_open = set(re.findall(r"DX-\d+", open_match.group(1)))
     assert plan_open == open_blocking, f"plan open set {sorted(plan_open)} != matrix {sorted(open_blocking)}"
