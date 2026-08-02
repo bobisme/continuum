@@ -1,0 +1,183 @@
+# Dependency vet / advisory-scanning posture (docs/09 T12, control 3:
+# "cargo-vet/advisory scanning").
+#
+# `tools/governance/check_dependency_audit.py` reads this file and fails closed
+# unless every externally-sourced package `cargo` resolves in `Cargo.lock` has
+# exactly one matching `[[audits.<name>]]` entry, for the *exact* version and
+# the *exact* checksum Cargo.lock pins. A dependency that is new, or whose
+# version or checksum changed since it was last vetted, has no matching entry
+# and fails the check until a human adds one — the fail-closed property T12
+# asks for. An entry for a version or checksum `Cargo.lock` no longer resolves
+# is a stale entry and also fails, so a superseded audit cannot linger and be
+# mistaken for coverage of what actually ships today.
+#
+# This is deliberately a smaller shape than upstream `cargo-vet`'s own
+# `audits.toml`: no delta audits (every entry is a full audit of the exact
+# version named, never a diff from a prior version — stricter than upstream,
+# not weaker, and simpler to check mechanically), no imported third-party audit
+# sets, and no `criteria.toml` — the two criteria this file uses are defined
+# once, here:
+#
+#   safe-to-deploy
+#       Reviewed against upstream cargo-vet's own "safe-to-deploy": no obvious
+#       backdoor, no unreviewed unsafe that isn't inherent to the crate's
+#       documented purpose, no ambient network or filesystem access outside
+#       what the dependency-rationale entry describes. Required for anything
+#       that reaches the shipped artifact (kind `normal`).
+#   safe-to-run
+#       The weaker bar: safe to *execute* during the build (a build script may
+#       shell out or read the filesystem) but never linked into a shipped
+#       artifact. Required for `build`/`dev`-only edges.
+#
+# Why a `checksum` field upstream `cargo-vet` does not have: upstream trusts
+# its own imported/vendored source tree, hashed independently of `Cargo.lock`.
+# This workspace vendors nothing and fetches nothing at check time (a gate
+# that phones home is nondeterministic — see README-gov1.md and this file's
+# own checker's module docstring), so the only artifact identity available to
+# bind an audit to is the one `Cargo.lock` itself already pins: the package's
+# registry checksum. Recording it here and checking it against `Cargo.lock`
+# means a same-version, different-bytes substitution — the checksum changing
+# under an unchanged version string — is caught exactly as loudly as a version
+# bump is. It is *not* an independent re-hash of the crate; it certifies that
+# whoever performed the audit saw the same bytes `cargo` will fetch, nothing
+# more.
+#
+# Refreshing this file is a human action, never a gate action: bump a
+# dependency, then before `Cargo.lock`'s new version/checksum can pass this
+# check, someone has to read what changed and add a new full-audit entry
+# recording who did that and what they found. That friction is the point.
+#
+# `who`: every entry so far was reviewed by `continuum-dev` from the published
+# crate documentation and source characteristics (no live network fetch was
+# used to write this file, consistent with the checker's own no-network rule);
+# a future refresh is free to name a different reviewer.
+
+[[audits.arrayref]]
+version = "0.3.9"
+checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Three-macro crate (`array_ref!`, `array_refs!`, `mut_array_refs!`) turning a
+slice into a reference to a fixed-size array without copying. The unsafe it
+contains is exactly its documented purpose — a bounds-checked-length pointer
+cast to `&[T; N]` — with no I/O, no build script, and no platform-conditional
+code path. blake3 uses it in its internal buffer plumbing; nothing here reads
+the environment, the network, or the filesystem.
+"""
+
+[[audits.arrayvec]]
+version = "0.7.8"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Fixed-capacity, stack-allocated `Vec`/`String` substitutes. One of the more
+heavily used and reviewed small crates in the ecosystem; its unsafe is
+uninitialized-memory management inherent to a no-alloc growable buffer, scoped
+to its own internal representation. No build script, no I/O, no ambient state.
+Used here with default features off per the workspace's blake3 pin.
+"""
+
+[[audits.blake3]]
+version = "1.8.5"
+checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
+who = "continuum-dev"
+criteria = ["totally-trusted"]
+notes = """
+The cryptographic hash behind continuum-value's ContentHasher seam
+(dependency-rationale.toml has the full TCB rationale; this entry is the vet
+half). Pinned with `default-features = false, features = ["pure"]`, which
+drops `std` and keeps the vendored `cc` build-time edge dormant (blake3's own
+build.rs never invokes a C compiler under `pure`). `blake3_matches_the_
+published_test_vectors` in continuum-value pins the specification's own test
+vectors as literals, so a future version that changed the function's output
+would fail that test independently of this entry.
+"""
+
+[[audits.cc]]
+version = "1.4.0"
+checksum = "5add81bb678e6cb321aff7fa0dc7689ad82b112dbc032cea19f91d6b8e3582b9"
+who = "continuum-dev"
+criteria = ["safe-to-run"]
+notes = """
+Build-only edge (blake3 declares it unconditionally; the workspace's `pure`
+feature choice means its C-compiler-invoking path is never exercised — see the
+`blake3` entry and dependency-rationale.toml). `cc` genuinely can shell out to
+a C toolchain and is one of the largest crates in this closure, which is why
+it gets `safe-to-run` rather than a blanket pass: it never links into a
+shipped artifact of this workspace, so the bar is "safe to execute at build
+time," not "safe to ship."
+"""
+
+[[audits.cfg-if]]
+version = "1.0.4"
+checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+A single `cfg_if!` macro expanding to ordinary `cfg`-gated item selection, from
+the rust-lang project itself. No unsafe, no build script, no runtime behavior
+of its own — it exists at compile time and disappears.
+"""
+
+[[audits.constant_time_eq]]
+version = "0.4.2"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Constant-time byte-slice comparison, used by blake3 to avoid a timing side
+channel in its own internal comparisons. Small, single-purpose, no build
+script, no I/O; a defect here would weaken a timing property blake3 relies on
+but cannot change what bytes continuum-value's hash seam produces.
+"""
+
+[[audits.cpufeatures]]
+version = "0.3.0"
+checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto runtime CPU-feature detection, reached only on aarch64/loongarch
+targets per dependency-rationale.toml's `cargo tree` note; on the x86-64
+target this workspace is built and gated on, blake3 dispatches through
+`std::arch` feature detection instead and this crate contributes no code to
+the build. Reviewed for the platforms it does apply to: no build script, no
+network, and its own `libc` edge is read-only `/proc`-style feature probing.
+"""
+
+[[audits.find-msvc-tools]]
+version = "0.1.9"
+checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+who = "continuum-dev"
+criteria = ["safe-to-run"]
+notes = """
+Windows-only MSVC toolchain path discovery, spun out of `cc`'s own internals
+and reached only through `cc`'s build-time closure. `safe-to-run`, matching
+`cc`: it never ships in an artifact of this workspace and this workspace does
+not target MSVC today, so it contributes nothing to a non-Windows build.
+"""
+
+[[audits.libc]]
+version = "0.2.189"
+checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The canonical low-level FFI declaration crate maintained by the rust-lang
+project, reached here only through `cpufeatures` on aarch64/loongarch. It is
+almost entirely `extern "C"` type and constant declarations with no logic of
+its own to review; the unsafety lives at each crate's call sites, not here.
+"""
+
+[[audits.shlex]]
+version = "2.0.1"
+checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+who = "continuum-dev"
+criteria = ["safe-to-run"]
+notes = """
+Shell-token quoting/splitting used by `cc` to parse compiler flag environment
+variables at build time. `safe-to-run`, matching `cc`: build-time only, no
+network, no unsafe, never linked into a shipped artifact of this workspace.
+"""

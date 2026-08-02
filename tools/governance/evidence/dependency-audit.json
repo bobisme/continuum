@@ -1,0 +1,90 @@
+{
+  "artifact": "continuum.governance.evidence/dependency-audit",
+  "authority": {
+    "manifest": "tools/governance/dependency-audits.toml",
+    "threat_model": "notes/plan/docs/09_THREAT_MODEL.md T12, control 3 (cargo-vet/advisory scanning)"
+  },
+  "boundary": "Manifest-vs-lockfile only. This does not query a live advisory database \u2014 doing so from a gate would be nondeterministic (network- and time-dependent), so it is out of scope by design; see the module docstring. It proves a human recorded a review of the exact version and checksum Cargo.lock resolves today, and that nothing changed under it unnoticed \u2014 not that the reviewed crate is free of a since-published CVE.",
+  "checks": [
+    "manifest-present",
+    "manifest-well-formed",
+    "no-duplicate-entries",
+    "every-external-dependency-is-audited",
+    "no-stale-entries",
+    "who-is-stated",
+    "notes-are-stated",
+    "criteria-is-recognized",
+    "checksum-matches-lockfile"
+  ],
+  "determinism": "This file records no timestamp, commit id, or absolute path: it is a function of the repository contents alone, so an unchanged tree reproduces it byte-for-byte. It makes no network access.",
+  "produced_by": "tools/governance/check_dependency_audit.py",
+  "real_run": {
+    "status": "pass",
+    "violations": []
+  },
+  "reproduce": "python3 tools/governance/check_dependency_audit.py --evidence tools/governance/evidence/dependency-audit.json",
+  "rule": "dependency-audit-posture",
+  "scope": {
+    "externally_sourced_packages": [
+      "arrayref 0.3.9",
+      "arrayvec 0.7.8",
+      "blake3 1.8.5",
+      "cc 1.4.0",
+      "cfg-if 1.0.4",
+      "constant_time_eq 0.4.2",
+      "cpufeatures 0.3.0",
+      "find-msvc-tools 0.1.9",
+      "libc 0.2.189",
+      "shlex 2.0.1"
+    ],
+    "in_scope": "Cargo.lock packages carrying a `source` (externally fetched)",
+    "out_of_scope": "workspace-internal crates (no `source`); GOV-1-07 covers those"
+  },
+  "self_test": {
+    "checks_covered": [
+      "checksum-matches-lockfile",
+      "criteria-is-recognized",
+      "every-external-dependency-is-audited",
+      "manifest-present",
+      "manifest-well-formed",
+      "no-duplicate-entries",
+      "no-stale-entries",
+      "notes-are-stated",
+      "who-is-stated"
+    ],
+    "failures": [],
+    "fixtures": 10,
+    "fixtures_by_check": {
+      "checksum-matches-lockfile": [
+        "checksum-tampered"
+      ],
+      "criteria-is-recognized": [
+        "criteria-not-recognized"
+      ],
+      "every-external-dependency-is-audited": [
+        "unaudited-new-dependency",
+        "upgraded-dependency-without-reaudit"
+      ],
+      "manifest-present": [
+        "missing-manifest"
+      ],
+      "manifest-well-formed": [
+        "not-array-of-tables"
+      ],
+      "no-duplicate-entries": [
+        "duplicate-version-entry"
+      ],
+      "no-stale-entries": [
+        "removed-dependency-stale-entry"
+      ],
+      "notes-are-stated": [
+        "notes-too-short"
+      ],
+      "who-is-stated": [
+        "who-not-stated"
+      ]
+    },
+    "status": "pass"
+  },
+  "status": "pass"
+}

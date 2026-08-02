@@ -1,0 +1,8 @@
+{
+  "check": "every-external-dependency-is-audited",
+  "description": "A brand-new external dependency is added to Cargo.lock with no matching audit entry.",
+  "id": "unaudited-new-dependency",
+  "overlay": {
+    "Cargo.lock": "Cargo.lock.fixture"
+  }
+}

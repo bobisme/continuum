@@ -1,0 +1,8 @@
+{
+  "check": "no-duplicate-entries",
+  "description": "The same (package, version) pair is audited twice.",
+  "id": "duplicate-version-entry",
+  "overlay": {
+    "tools/governance/dependency-audits.toml": "dependency-audits.toml.fixture"
+  }
+}

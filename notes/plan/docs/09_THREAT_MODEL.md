@@ -192,7 +192,7 @@ Controls:
 - crashpack scrubber;
 - property declared against redacted observations where possible.
 
-### T12 — Dependency/unsafe compromise
+### T12 — Dependency/unsafe compromise (delivered: bn-nio3 — dependency vet/advisory-scanning gap closed, six controls bound in tools/governance/evidence/t12.json)
 
 Controls:
 

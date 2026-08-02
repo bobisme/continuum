@@ -1,0 +1,8 @@
+{
+  "check": "notes-are-stated",
+  "description": "blake3's audit entry has no usable review notes.",
+  "id": "notes-too-short",
+  "overlay": {
+    "tools/governance/dependency-audits.toml": "dependency-audits.toml.fixture"
+  }
+}

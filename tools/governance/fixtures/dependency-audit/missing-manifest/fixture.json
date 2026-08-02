@@ -1,0 +1,8 @@
+{
+  "check": "manifest-present",
+  "description": "The audit manifest is deleted; every external dependency loses its vetted record at once.",
+  "id": "missing-manifest",
+  "remove": [
+    "tools/governance/dependency-audits.toml"
+  ]
+}

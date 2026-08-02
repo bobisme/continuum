@@ -1,0 +1,8 @@
+{
+  "check": "manifest-well-formed",
+  "description": "audits.blake3 is declared as a single table instead of an array of tables.",
+  "id": "not-array-of-tables",
+  "overlay": {
+    "tools/governance/dependency-audits.toml": "dependency-audits.toml.fixture"
+  }
+}

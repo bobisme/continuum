@@ -1,0 +1,8 @@
+{
+  "check": "every-external-dependency-is-audited",
+  "description": "blake3 is bumped to a new version and checksum in Cargo.lock without a new audit entry, so the upgraded bytes are untrusted until vetted.",
+  "id": "upgraded-dependency-without-reaudit",
+  "overlay": {
+    "Cargo.lock": "Cargo.lock.fixture"
+  }
+}

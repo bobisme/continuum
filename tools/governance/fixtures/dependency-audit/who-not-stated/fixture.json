@@ -1,0 +1,8 @@
+{
+  "check": "who-is-stated",
+  "description": "blake3's audit entry names no usable reviewer.",
+  "id": "who-not-stated",
+  "overlay": {
+    "tools/governance/dependency-audits.toml": "dependency-audits.toml.fixture"
+  }
+}

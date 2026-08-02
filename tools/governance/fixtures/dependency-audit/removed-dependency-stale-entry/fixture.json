@@ -1,0 +1,8 @@
+{
+  "check": "no-stale-entries",
+  "description": "The manifest records a dependency Cargo.lock no longer resolves from an external source.",
+  "id": "removed-dependency-stale-entry",
+  "overlay": {
+    "tools/governance/dependency-audits.toml": "dependency-audits.toml.fixture"
+  }
+}

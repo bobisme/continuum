@@ -6309,7 +6309,7 @@
         "line": 195,
         "path": "docs/09_THREAT_MODEL.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Dependency/unsafe compromise"
     },
     {

@@ -1,0 +1,146 @@
+{
+  "artifact": "continuum.governance.evidence/t12",
+  "authority": "notes/plan/docs/09_THREAT_MODEL.md T12 (Dependency/unsafe compromise)",
+  "boundary": "Composite citation, not a single mechanical rule of this file's own: 'pinned lockfile' and 'reproducible build metadata' each bind more than one existing id plus two narrow direct checks (locked-gates, overflow-checks) that no other requirement id owns. This file does not query git for whether Cargo.lock is tracked; see the module docstring.",
+  "controls": {
+    "cargo-vet/advisory scanning": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_dependency_audit.py",
+          "enforces": "every externally-sourced dependency has a version- and checksum-matched vet entry",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "dependency allowlist": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-07",
+          "enforces": "every dependency has exactly one rationale + TCB class entry",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "minimal kernel dependencies": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-06",
+          "enforces": "no network-capable crate or dependency in the certificate-checking closure",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_kernel_covenant.py KCOV-06",
+          "enforces": "the four continuum-kernel-* crates admit zero dependencies",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_crate_boundaries.py",
+          "enforces": "certificate-checker-not-search and kernel-is-synchronous hold",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "pinned lockfile": {
+      "citations": [
+        {
+          "artifact": "Cargo.lock",
+          "enforces": "the lockfile is present",
+          "status": "pass"
+        },
+        {
+          "artifact": "Justfile",
+          "enforces": "every non-fmt cargo gate carries --locked",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-01",
+          "enforces": "toolchain/edition pinned exactly",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "reproducible build metadata": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-01",
+          "enforces": "toolchain identity is an exact, committed pin",
+          "status": "pass"
+        },
+        {
+          "artifact": "Justfile",
+          "enforces": "every non-fmt cargo gate carries --locked",
+          "status": "pass"
+        },
+        {
+          "artifact": "Cargo.toml [profile.release]",
+          "enforces": "overflow-checks = true, so debug/release agree on the determinism matrix",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_kernel_covenant.py KCOV-09",
+          "enforces": "kernel receipts name checker build/epoch identity per INV-014",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "unsafe boundary audit": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-02",
+          "enforces": "unsafe_code = forbid, workspace-wide, no relaxation",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    }
+  },
+  "delegates": [
+    "tools/check_crate_boundaries.py",
+    "tools/check_kernel_covenant.py",
+    "tools/governance/check_code_policy.py",
+    "tools/governance/check_dependency_audit.py"
+  ],
+  "determinism": "This file records no timestamp, commit id, or absolute path: it is a function of the repository contents and the delegate checkers' own outputs alone, so an unchanged tree reproduces it byte-for-byte. The only subprocesses run are the delegate checkers listed below, invoked exactly as Justfile invokes them; none makes a network access.",
+  "produced_by": "tools/governance/check_t12_evidence.py",
+  "reproduce": "python3 tools/governance/check_t12_evidence.py --evidence tools/governance/evidence/t12.json",
+  "self_test": {
+    "delegates": {
+      "delegates": {
+        "check_code_policy": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_crate_boundaries": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_dependency_audit": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_kernel_covenant": {
+          "exit_code": 0,
+          "status": "pass"
+        }
+      },
+      "failures": [],
+      "status": "pass"
+    },
+    "direct": {
+      "checks_caught": [
+        "cargo-lock-present",
+        "locked-gates",
+        "overflow-checks"
+      ],
+      "failures": [],
+      "status": "pass"
+    },
+    "status": "pass"
+  },
+  "status": "pass"
+}

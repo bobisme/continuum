@@ -1,0 +1,8 @@
+{
+  "check": "criteria-is-recognized",
+  "description": "blake3's audit entry claims a criteria value outside the closed vocabulary.",
+  "id": "criteria-not-recognized",
+  "overlay": {
+    "tools/governance/dependency-audits.toml": "dependency-audits.toml.fixture"
+  }
+}

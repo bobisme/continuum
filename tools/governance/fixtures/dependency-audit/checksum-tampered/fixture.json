@@ -1,0 +1,8 @@
+{
+  "check": "checksum-matches-lockfile",
+  "description": "The exploit mutant: blake3's audited checksum is swapped for different bytes while the version string is left unchanged, simulating a same-version supply-chain substitution.",
+  "id": "checksum-tampered",
+  "overlay": {
+    "tools/governance/dependency-audits.toml": "dependency-audits.toml.fixture"
+  }
+}

@@ -59,9 +59,11 @@ covenant:
     python3 tools/check_kernel_covenant.py
 
 # Enforce the docs/12 executable policy obligations (GOV §1 code/semantic
-# policy, GOV §2 ADR process, GOV §3 claim governance). Each checker runs its
-# self-test first — every violating fixture must be caught — so none of the
-# three can pass vacuously. Evidence lands in tools/governance/evidence/.
+# policy, GOV §2 ADR process, GOV §3 claim governance), the docs/09 T12
+# dependency vet/advisory-scanning posture, and the T12 six-control binding
+# over all of the above. Each checker runs its self-test first — every
+# violating fixture must be caught — so none of the five can pass vacuously.
+# Evidence lands in tools/governance/evidence/.
 governance:
     python3 tools/governance/check_code_policy.py --self-test
     python3 tools/governance/check_code_policy.py
@@ -69,6 +71,10 @@ governance:
     python3 tools/governance/check_adr_process.py
     python3 tools/governance/check_claim_governance.py --self-test
     python3 tools/governance/check_claim_governance.py
+    python3 tools/governance/check_dependency_audit.py --self-test
+    python3 tools/governance/check_dependency_audit.py
+    python3 tools/governance/check_t12_evidence.py --self-test
+    python3 tools/governance/check_t12_evidence.py
 
 # Mechanical validation of the architecture/research dossier.
 dossier:
