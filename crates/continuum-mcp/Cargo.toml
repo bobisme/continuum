@@ -6,5 +6,34 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# One workspace edge, and PR 10 is the reason it exists.
+#
+# `continuumd` owns the native protocol — "there is no `continuum-protocol` crate; the
+# native protocol lives in `continuumd`" (`START_HERE_IMPLEMENTATION.md`, "Dependency
+# islands") — so the envelope, the operation registry, the codec, and the local transport
+# are all that crate's types. A client that restated any of them would be the second
+# spelling ADR-0013 forbids: two declarations of one wire, free to disagree. This crate
+# therefore *speaks* that wire rather than re-describing it, and every request struct,
+# response struct, error code and handle on its surface is `continuumd`'s own.
+#
+# The edge runs in the only direction plan §20 allows. `continuum-mcp` is an **adapter**,
+# and adapters are sinks in the workspace graph: no Continuum crate may depend on this one
+# (`tools/check_crate_boundaries.py`, RULE adapters-are-sinks). Nothing here is depended
+# upon, and nothing here owns semantic state — every fact on this surface was answered by a
+# daemon and is held only for the duration of a call.
+[dependencies]
+continuumd = { path = "../continuumd" }
+
+# Integration tests in `tests/` are separate crates and do not inherit the library's
+# dependencies. The four extra edges are fixture material — the Die Hard corpus model, the
+# intent contract, the content-identity seam, and the protocol window — all of which a
+# *deployment* provisions out of band and none of which the client itself needs.
+[dev-dependencies]
+continuum-engine-reference = { path = "../continuum-engine-reference" }
+continuum-intent = { path = "../continuum-intent" }
+continuum-value = { path = "../continuum-value" }
+continuum-workspace = { path = "../continuum-workspace" }
+continuumd = { path = "../continuumd" }
+
 [lints]
 workspace = true

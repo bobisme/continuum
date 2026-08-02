@@ -57,6 +57,14 @@ version = "0.0.0"
 [[package]]
 name = "continuum-benchmark"
 version = "0.0.0"
+dependencies = [
+ "continuum-engine-reference",
+ "continuum-intent",
+ "continuum-mcp",
+ "continuum-value",
+ "continuum-workspace",
+ "continuumd",
+]
 
 [[package]]
 name = "continuum-certificate"
@@ -178,6 +186,13 @@ version = "0.0.0"
 [[package]]
 name = "continuum-mcp"
 version = "0.0.0"
+dependencies = [
+ "continuum-engine-reference",
+ "continuum-intent",
+ "continuum-value",
+ "continuum-workspace",
+ "continuumd",
+]
 
 [[package]]
 name = "continuum-model-core"
