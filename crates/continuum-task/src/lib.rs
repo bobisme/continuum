@@ -57,6 +57,14 @@
 //!   the RFC 0026 request → drain → finalize teardown, and an obligation ledger that
 //!   makes "no orphan workers" a checked post-condition rather than a convention
 //!   (PR-6 / IMPL-01, IMPL-05, IMPL-06).
+//! - [`budget`] — the accounting beside it: a typed ledger over the nine SD-12 budget/cost
+//!   dimensions with charge, reserve/settle/release and checkpoint semantics, RFC 0026's
+//!   `task.update_budget` legality table as a value, exhaustion as a typed outcome naming
+//!   its dimension, and the INV-007 rule that a declared ceiling with no meter behind it
+//!   is an omission and never a silent pass. [`budget::partial`] binds those checkpoints
+//!   to the region layer's commitment counts, which is what makes docs/35's *committed
+//!   partial evidence* a value that says both what a task spent and what it published
+//!   (PR-6 / IMPL-02, IMPL-03).
 //!
 //! [`region`] is deliberately *not* an asupersync integration. plan §21 puts
 //! "task/continuation lifecycle" in Phase A and the "asupersync semantic adapter" in
@@ -66,10 +74,15 @@
 //! redefine model behavior." The region module is those normative semantics, written so
 //! the substrate slots behind the same seam later. Its own header says the rest.
 //!
-//! Still owed by this crate under PR 6: committed partial evidence as artifacts
-//! (IMPL-02), budget accounting (IMPL-03), and suspension/continuation as `cont_*`
-//! handles (IMPL-04). `tools/check_crate_boundaries.py` enforces the forbidden edges
-//! mechanically.
+//! Still owed by this crate under PR 6: suspension/continuation as `cont_*` handles
+//! (IMPL-04) — [`budget::Suspension`] and [`region::worker::Continuation`] are the
+//! region- and cost-side facts a real handle is minted *from*, and RFC 0026's pinning
+//! obligation (snapshot, intent, six epochs, engine identity) is `continuumd`'s.
+//! Binding either ledger to a real artifact store is the daemon's join as well: this
+//! crate declares no `continuum-workspace` edge, and both ledgers count publications
+//! rather than naming them. `tools/check_crate_boundaries.py` enforces the forbidden
+//! edges mechanically.
 
+pub mod budget;
 pub mod region;
 pub mod result;
