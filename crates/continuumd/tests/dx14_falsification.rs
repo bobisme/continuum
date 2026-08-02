@@ -32,7 +32,7 @@
 //!
 //! | # | Attack | Test | Result |
 //! |---|---|---|---|
-//! | A1 | cancel, then `task.resume` the dead task's continuation **carrying a budget** | [`falsification_a_cancelled_task_is_still_writable_through_task_resume`] | **FALSIFIED (closure, not the ledger)** — the terminal task's budget and milestones are rewritten after it closed |
+//! | A1 | cancel, then `task.resume` the dead task's continuation **carrying a budget** | [`regression_a_cancelled_task_is_not_writable_through_task_resume`] | **FALSIFIED (closure, not the ledger)**, then **FIXED** by bn-10093 — now a regression guard |
 //! | A2 | the same, with no budget on the request | [`negative_a_resume_without_a_budget_leaves_a_cancelled_task_untouched`] | held — the write is the budget arm's, and only that arm's |
 //! | A3 | every reachable residual profile: the region arm and the task's continuation, compared on the wire | [`negative_the_two_readings_of_resumability_agree_on_every_reachable_profile`] | held |
 //! | A4 | reach "committed evidence and no continuation" as an *observable* wire state | [`negative_no_wire_sequence_reaches_a_dangling_continuation_or_a_pointerless_resume`] | held |
@@ -46,32 +46,42 @@
 //! | A12 | re-issue the identical `verification.start` after the cancel | [`negative_a_cancelled_identity_is_reported_as_cancelled_and_never_re_run`] | held, with a concern recorded in the test |
 //! | A13 | the whole attack programme on two fresh daemons | [`negative_the_attack_programme_renders_byte_identically_on_two_fresh_daemons`] | held |
 //!
-//! # The one that landed
+//! # The one that landed, and the fix that closed it
 //!
-//! [`falsification_a_cancelled_task_is_still_writable_through_task_resume`] is labelled
-//! FALSIFICATION and says what should hold and what actually happens. In one sentence:
-//! `task.update_budget` refuses to rewrite a terminal task's ledger *and says why* —
-//! "a terminal task's budget is a historical fact, and rewriting it would make its recorded
-//! cost unreadable" — while `task.resume` applies the request's budget to the ledger
-//! **before** it checks terminality, so the sequence `cancel` → `resume(continuation,
-//! budget)` rewrites the ceilings of a task that is already `Cancelled` and appends
-//! `task.budget_suspended` to its milestone list.
+//! [`regression_a_cancelled_task_is_not_writable_through_task_resume`] ran as A1's
+//! FALSIFICATION when bn-3p32 wrote it. In one sentence: `task.update_budget` refuses to
+//! rewrite a terminal task's ledger *and says why* — "a terminal task's budget is a
+//! historical fact, and rewriting it would make its recorded cost unreadable" — while
+//! `task.resume` applied the request's budget to the ledger **before** it checked
+//! terminality, so the sequence `cancel` → `resume(continuation, budget)` rewrote the
+//! ceilings of a task that was already `Cancelled` and appended `task.budget_suspended` to
+//! its milestone list.
 //!
-//! What broke and what did not, stated as precisely as the campaign can state it:
+//! What broke and what did not, stated as precisely as the campaign could state it:
 //!
 //! - the pass condition's two named conjuncts **held** under all thirteen attacks. No
 //!   obligation leaks — `TaskRegions::is_total` is asserted after every beat of every attack,
 //!   including all 120 orderings of A11 — and no artifact is left neither committed nor
 //!   absent;
 //! - what broke is the **closure** the row's own question presupposes: "can cancellation of
-//!   verification work close *correctly*". A cancelled task is still writable, so its record
-//!   is not final, and the specific invariant broken is one the code states and enforces in
-//!   one operation and does not enforce in the other. A cancelled task ends up reporting a
+//!   verification work close *correctly*". A cancelled task was still writable, so its record
+//!   was not final, and the specific invariant broken was one the code states and enforces in
+//!   one operation and did not enforce in the other. A cancelled task ended up reporting a
 //!   budget it never ran under, a cost above that budget, and a milestone saying it parked.
 //!
-//! So this is a defect in what a cancellation leaves *readable*, not in what it leaves
-//! *outstanding*. The matrix row's Status is challenged, not edited here: the lead decides the
-//! row.
+//! **bn-10093 fixed it**, in `daemon::task::resume`, by moving the terminal check above the
+//! ledger write: the budget arm of a resume now produces `task.update_budget`'s own
+//! observable for a terminal task — nothing written, the terminal status answered, the record
+//! byte-identical. A1's test is unchanged as a *sequence* and flipped as an *assertion*: it
+//! now asserts the record is byte-identical across the resume, which is A2's shape, so the
+//! two tests state one behaviour. bn-1kp6's attack 18 pins the same fix from the DX-03 side
+//! (`crates/continuumd/tests/dx03_falsification.rs`), and the disposition on the continuation
+//! table — a terminal task's continuations are **kept**, guarded by the refusal rather than
+//! pruned — is recorded in `daemon::task`'s `TaskTable` documentation, where the table is.
+//!
+//! So this was a defect in what a cancellation leaves *readable*, not in what it leaves
+//! *outstanding*, and the row records the falsification-and-fix cycle rather than a bare
+//! pass.
 //!
 //! # OOM hygiene
 //!
@@ -702,9 +712,10 @@ fn parked(fixture: &mut Fixture, request: &str) -> (TaskHandle, ContinuationHand
 
 // --- A1: the attack that landed ------------------------------------------------------------
 
-/// **FALSIFICATION — a cancelled task is still writable through `task.resume`.**
+/// **REGRESSION GUARD (was A1's FALSIFICATION) — a cancelled task is not writable through
+/// `task.resume`.**
 ///
-/// # What should hold
+/// # What must hold
 ///
 /// A cancelled task is closed. `rule task.status_monotonic` makes its status permanent, and
 /// `task.update_budget` extends that to the ledger *explicitly*, refusing a terminal task and
@@ -716,44 +727,44 @@ fn parked(fixture: &mut Fixture, request: &str) -> (TaskHandle, ContinuationHand
 /// >
 /// > — `crates/continuumd/src/daemon/task.rs`, `update_budget`
 ///
-/// So after `task.cancel`, no operation should be able to change what the task's record says
-/// it was allowed to spend, and no operation should be able to append a milestone claiming
-/// the dead task did something.
+/// So after `task.cancel`, no operation may change what the task's record says it was
+/// allowed to spend, and no operation may append a milestone claiming the dead task did
+/// something.
 ///
-/// # What actually happens
+/// # What this test found, and what fixed it
 ///
-/// `task.resume` applies the request's optional budget to the task's `BudgetLedger` **before**
-/// it checks terminality — the ledger write is at the top of the function and the
-/// `entry.is_terminal()` early return is below it. The continuation of a cancelled task is
-/// still held (nothing prunes the continuation table), so the sequence
+/// As bn-3p32 ran it, this was a FALSIFICATION: `task.resume` applied the request's optional
+/// budget to the task's `BudgetLedger` **before** it checked terminality — the ledger write
+/// was at the top of the function and the `entry.is_terminal()` early return below it — so
+/// the sequence
 ///
 /// ```text
 /// verification.start (parks)  →  task.cancel  →  task.resume(continuation, budget)
 /// ```
 ///
-/// reaches that write on a task whose status is already `Cancelled`, and:
+/// reached that write on a task whose status was already `Cancelled`: `TaskRecord.budget`
+/// changed after the task closed, and with the new ceiling below recorded spend the B18 arm
+/// fired and appended `task.budget_suspended` — and a `TaskEvent` for it — to a **cancelled**
+/// task's record.
 ///
-/// - `TaskRecord.budget` changes after the task closed — the exact rewrite
-///   `task.update_budget` refuses, reached by a different door;
-/// - when the new ceiling is below recorded spend, the B18 arm fires and
-///   `task.budget_suspended` is appended to a **cancelled** task's `milestones`, a claim that
-///   a terminal task parked;
-/// - a `TaskEvent` is appended for it too, so a subscriber sees a cancelled task emit a new
-///   milestone event.
+/// bn-10093 moved the terminal check above the ledger write, so the budget arm produces
+/// `task.update_budget`'s own observable for a terminal task: nothing is written and the
+/// terminal status is the answer. The two operations no longer disagree about one rule.
 ///
-/// # What is *not* broken, stated as precisely as the break
+/// # What the assertions are now
 ///
-/// No obligation leaks and no artifact is left neither committed nor absent. The resume
-/// returns before `verification::advance`, so it opens no region, runs no work, publishes
-/// nothing and mints no continuation; `TaskRegions::is_total` holds throughout, the status
-/// stays `Cancelled`, and `publications` does not move. The damage is confined to the record
-/// a cancelled task leaves behind — which is what "cancellation closes correctly" has to mean
-/// for a client whose only view of the task is `task.status`.
+/// The same wire sequence, and the record compared **byte for byte** across it — A2's shape,
+/// which is the point: with the budget arm refused, a resume carrying a budget and a resume
+/// carrying none are one behaviour. The ceiling, the milestone list, the recorded spend, the
+/// publication count and the continuation are each asserted individually as well, so a
+/// regression says *which* of them moved rather than only that the bytes differ.
 ///
-/// This test pins the behaviour as it is. The system under test is frozen; the fix is the
-/// lead's to schedule.
+/// What was never broken is still checked here, because a repair that bought closure by
+/// leaking an obligation would be a worse defect than the one it fixed: the resume returns
+/// before `verification::advance`, so it opens no region, runs no work, publishes nothing and
+/// mints no continuation, and `TaskRegions::is_total` holds throughout.
 #[test]
-fn falsification_a_cancelled_task_is_still_writable_through_task_resume() {
+fn regression_a_cancelled_task_is_not_writable_through_task_resume() {
     let mut fixture = fixture();
     let (task, continuation) = parked(&mut fixture, "req_a1");
 
@@ -761,7 +772,8 @@ fn falsification_a_cancelled_task_is_still_writable_through_task_resume() {
     assert_eq!(cancelled.envelope.status, ResultStatus::Ok);
     assert_total(&fixture, "after the cancel");
 
-    let before = record(&read(&mut fixture, &task, "req_a1_before"));
+    let before_bytes = wire_bytes(&read(&mut fixture, &task, "req_a1_read"));
+    let before = record(&read(&mut fixture, &task, "req_a1_read"));
     assert_eq!(before.status, TaskStatus::Cancelled);
     let spent = *before
         .cost
@@ -778,53 +790,54 @@ fn falsification_a_cancelled_task_is_still_writable_through_task_resume() {
         "the attack needs a ceiling strictly below recorded spend to reach the B18 arm"
     );
 
-    // The attack: resume the dead task's continuation, carrying a budget below its spend.
+    // The attack, unchanged: resume the dead task's continuation, carrying a budget below
+    // its spend — the one request that used to reach the ledger.
     let resumed = resume(&mut fixture, &continuation, 1, "req_a1_resume");
     assert_eq!(
         resumed.envelope.status,
         ResultStatus::Ok,
-        "the resume itself is answered — {:?}",
+        "the resume itself is still answered rather than refused — {:?}",
         resumed.envelope.error
     );
 
-    let after = record(&read(&mut fixture, &task, "req_a1_after"));
+    let after_bytes = wire_bytes(&read(&mut fixture, &task, "req_a1_read"));
+    let after = record(&read(&mut fixture, &task, "req_a1_read"));
 
-    // --- the violation, pinned -------------------------------------------------------------
+    // --- the guard ---------------------------------------------------------------------
+    assert_eq!(
+        after_bytes, before_bytes,
+        "a cancelled task's record must be byte-identical across a resume carrying a budget \
+         — the same thing A2 asserts for a resume carrying none"
+    );
     assert_eq!(
         after.status,
         TaskStatus::Cancelled,
-        "the status is monotone, and that half holds"
-    );
-    assert_ne!(
-        after.budget.states.value().copied(),
-        Some(ceiling),
-        "FALSIFIED: a cancelled task's declared budget was rewritten by task.resume, which is \
-         the rewrite task.update_budget refuses for the stated reason that a terminal task's \
-         budget is a historical fact"
+        "the status is monotone"
     );
     assert_eq!(
         after.budget.states.value().copied(),
-        Some(1),
-        "and the value it was rewritten to is the one the caller sent"
+        Some(ceiling),
+        "a cancelled task keeps the budget it ran under: the rewrite task.update_budget \
+         refuses is refused here too, for the same stated reason"
+    );
+    assert_eq!(
+        after.milestones.len(),
+        before.milestones.len(),
+        "a cancelled task gains no milestone after it closed"
     );
     assert!(
-        after.milestones.len() > before.milestones.len(),
-        "FALSIFIED: a cancelled task gained milestones after it closed"
-    );
-    assert!(
-        after
+        !after
             .milestones
             .iter()
             .any(|milestone| milestone.name == "task.budget_suspended"),
-        "FALSIFIED: a cancelled task records `task.budget_suspended`, claiming a terminal task \
-         parked — B18's arm fired on a task that can never resume"
+        "B18's arm does not fire on a task that can never resume"
     );
     assert!(
-        after.budget.states.value().copied() < Some(spent),
-        "the record now reports a task that spent more than it was ever allowed to"
+        after.budget.states.value().copied() >= Some(spent),
+        "the record never reports a task that spent more than it was allowed to"
     );
 
-    // --- what the attack did *not* break ---------------------------------------------------
+    // --- what was never broken, still checked ------------------------------------------
     assert_eq!(
         after.cost.states.value().copied(),
         Some(spent),
@@ -833,7 +846,7 @@ fn falsification_a_cancelled_task_is_still_writable_through_task_resume() {
     assert_eq!(
         entry(&fixture, &task).publications(),
         1,
-        "no publication was added or removed by the write"
+        "no publication was added or removed"
     );
     assert_eq!(
         after.continuation, before.continuation,

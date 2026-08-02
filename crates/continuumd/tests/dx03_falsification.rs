@@ -18,15 +18,23 @@
 //! not touched: a falsification campaign that edits the thing it is falsifying proves
 //! nothing (the bn-21dd precedent, `dx13_falsification.rs`'s own house rule).
 //!
-//! # Result of the campaign
+//! # Result of the campaign, and the fixes that closed it
 //!
 //! **Two of the three conjuncts were falsified.** Twenty-two attacks ran across four axes,
 //! on top of the five baseline scenarios below — twenty-seven tests. Seventeen attacks held;
 //! five landed, on three independent defects, all three of them in the *daemon* and none of
 //! them in `continuum-workspace`'s snapshot/lineage layer, which refused every stale handle
-//! it was shown:
+//! it was shown.
 //!
-//! - **DEFECT 1 — a replayed `workspace.create` rewinds a lineage.**
+//! **All three defects have since been fixed, and all five reproductions have flipped**:
+//! they are the same wire sequences, asserting the behaviour the rules require instead of
+//! the behaviour the daemon had, and they run un-ignored in the default suite as regression
+//! guards. DEFECT 1 by bn-n1xou, DEFECT 2 by bn-10093, DEFECT 3 by bn-h1zqz. Each defect is
+//! described below as the campaign found it, followed by what the repair was; the tests
+//! themselves carry the same two halves. The seventeen attacks that held are unchanged and
+//! still hold.
+//!
+//! - **DEFECT 1 (fixed, bn-n1xou) — a replayed `workspace.create` rewinds a lineage.**
 //!   `daemon::workspace::create` derives the lineage's [`ForkName`] from the *content
 //!   identity* of the snapshot it creates and then calls `DaemonState::put_lineage`, which
 //!   is an unconditional `BTreeMap::insert`. So a second `workspace.create` naming the same
@@ -38,44 +46,59 @@
 //!   superseded snapshot, refused with `StaleSnapshot` one request earlier, runs a campaign;
 //!   and the snapshot that *was* the lineage head becomes unsealable, refused with
 //!   `CapabilityDenied` — the `LineageError::Unknown` arm — so the mutation is stranded.
-//!   Pinned by [`falsification_a_replayed_create_rewinds_the_lineage_and_un_stales_the_old_snapshot`],
-//!   [`falsification_a_rewound_lineage_strands_the_snapshot_that_was_current`], and
-//!   [`falsification_an_unsealed_re_create_revokes_a_valid_continuation`].
-//!   The idempotency ledger is the *only* thing standing between the daemon and this
+//!   Pinned by [`regression_a_replayed_create_converges_and_leaves_the_old_snapshot_stale`],
+//!   [`regression_a_converged_create_does_not_strand_the_snapshot_that_is_current`], and
+//!   [`regression_an_unsealed_re_create_does_not_revoke_a_valid_continuation`].
+//!   The idempotency ledger was the *only* thing standing between the daemon and this
 //!   rewind, which is what [`attack_staleness_the_same_create_under_the_same_key_changes_nothing`]
 //!   shows: replay the create under the key it already used and the dispatch returns the
 //!   recorded outcome at step 7, before the family handler at step 8 runs at all, so the
-//!   lineage is untouched and the stale handle stays refused. A caller only has to arrive
+//!   lineage is untouched and the stale handle stays refused. A caller only had to arrive
 //!   with a fresh key — which `rule idempotency.replay` explicitly contemplates, since a key
 //!   is honoured for "at least the retention window the daemon declares" and not forever —
 //!   or to be a second actor, since keys are scoped per actor.
+//!   **Fixed (bn-n1xou):** an identical create *converges*. `DaemonState::open_lineage` is
+//!   put-if-absent, so a lineage this daemon already holds keeps its advances; the held
+//!   workspace record is not replaced; and `sealed` is monotone, so `seal: false` means "do
+//!   not seal it" and never "un-seal it". The design is the G0-DX-13 disposition for
+//!   identical creation — one semantic identity, nothing lost — read at the lineage.
 //!
-//! - **DEFECT 2 — `task.resume` writes a terminal task's budget that `task.update_budget`
-//!   refuses to write.** `daemon::task::resume` applies the request's optional budget to the
-//!   task's [`BudgetLedger`] *before* it tests whether the task is terminal, and
-//!   `daemon::task::update_budget` tests first. So the same ceiling, on the same cancelled
-//!   task, in the same daemon, is refused through one operation and accepted through the
-//!   other. `resume`'s own documentation calls the terminal path "a no-op", and it is not
-//!   one: `TaskRecord.budget` afterwards reports a ceiling the task never ran under.
-//!   Pinned by [`falsification_resume_rewrites_a_terminal_tasks_budget_update_budget_refuses`].
+//! - **DEFECT 2 (fixed, bn-10093) — `task.resume` writes a terminal task's budget that
+//!   `task.update_budget` refuses to write.** `daemon::task::resume` applied the request's
+//!   optional budget to the task's [`BudgetLedger`] *before* it tested whether the task is
+//!   terminal, and `daemon::task::update_budget` tested first. So the same ceiling, on the
+//!   same cancelled task, in the same daemon, was refused through one operation and accepted
+//!   through the other. `resume`'s own documentation calls the terminal path "a no-op", and
+//!   it was not one: `TaskRecord.budget` afterwards reported a ceiling the task never ran
+//!   under. Pinned by
+//!   [`regression_resume_refuses_the_terminal_budget_write_update_budget_refuses`].
+//!   **Fixed (bn-10093):** the terminal check moved above the ledger write, so the budget arm
+//!   of a resume produces `update_budget`'s own observable for a terminal task — nothing
+//!   written, the terminal status answered. bn-3p32's A1 is the same fix from the DX-14 side.
 //!
-//! - **DEFECT 3 — the idempotency ledger's replay key omits `RequestEnvelope.budget`.**
-//!   `rule idempotency.replay` requires the same key with "a different request" to be
-//!   rejected with `IdempotencyKeyReused`, and `budget` is a field of `RequestEnvelope`. It
-//!   is also *semantically load-bearing*: `verification::start_handle` writes
-//!   `budget_preimage` into the `task_*` content identity, so two budgets are two tasks. A
-//!   `verification.start` replayed under one key with a larger budget is neither rejected nor
-//!   honoured — it returns the first budget's task verbatim, so a caller that asked for a
-//!   64-state campaign is answered with a 4-state one and cannot tell.
-//!   Pinned by [`falsification_the_replay_key_omits_the_envelope_budget`].
+//! - **DEFECT 3 (fixed, bn-h1zqz) — the idempotency ledger's replay key omits
+//!   `RequestEnvelope.budget`.** `rule idempotency.replay` requires the same key with "a
+//!   different request" to be rejected with `IdempotencyKeyReused`, and `budget` is a field
+//!   of `RequestEnvelope`. It is also *semantically load-bearing*:
+//!   `verification::start_handle` writes `budget_preimage` into the `task_*` content
+//!   identity, so two budgets are two tasks. A `verification.start` replayed under one key
+//!   with a larger budget was neither rejected nor honoured — it returned the first budget's
+//!   task verbatim, so a caller that asked for a 64-state campaign was answered with a
+//!   4-state one and could not tell.
+//!   Pinned by [`regression_the_replay_key_covers_the_envelope_budget`].
+//!   **Fixed (bn-h1zqz):** `ReplayKey` carries the whole canonical request — `budget`,
+//!   `output_policy` and `page` beside the four fields it already had — and its
+//!   documentation carries the field-by-field audit of what is deliberately left out
+//!   (`request_id` and `trace` are per-attempt; `actor` is the ledger's other map key).
 //!
-//! All five `falsification_*` tests are **green**: they assert what the daemon *actually
-//! does* today, and each carries a doc comment saying what should hold instead. That is the
-//! shape `dx13_falsification.rs` settled on — a defect's reproduction belongs in the default
-//! suite, not behind an `#[ignore]` — with one difference stated plainly: those three were
-//! retained *red* until bn-2siid fixed them, and these five are green because they pin
-//! behaviour nobody has fixed yet. They must not be deleted or weakened; when the defects are
-//! fixed, they are the tests that flip, and each one names the assertion that will.
+//! All five reproductions are **green in both directions of the cycle**: they were green as
+//! pins, asserting what the daemon actually did, and they are green as guards, asserting what
+//! the rules require. The sequences are unchanged — the same requests, in the same order —
+//! and only the assertions flipped, which is what makes them evidence that the repair fixed
+//! *this* defect rather than evidence that some test now passes. That is the shape
+//! `dx13_falsification.rs` settled on and bn-2siid completed: a defect's reproduction belongs
+//! in the default suite, not behind an `#[ignore]`, and it becomes the regression guard.
+//! They must not be deleted or weakened.
 //!
 //! # The baseline this campaign had to cover first
 //!
@@ -98,12 +121,12 @@
 //! | 2 | idempotence | keyed replay on a reconnected daemon (INV-002's transplant device) | [`attack_idempotence_a_keyed_replay_on_a_reconnected_daemon_is_byte_identical`] | held |
 //! | 3 | idempotence | keyed replay *across* a supersession — does the ledger re-run or re-admit? | [`attack_idempotence_a_keyed_replay_across_a_supersession_neither_reruns_nor_readmits`] | held |
 //! | 4 | idempotence | a fresh key on an identical start (the IDL's cached-result lane) | [`attack_idempotence_two_fresh_keys_on_one_campaign_agree_byte_for_byte`] | held |
-//! | 5 | idempotence | **the same key with a different envelope budget** | [`falsification_the_replay_key_omits_the_envelope_budget`] | **FALSIFIED** |
+//! | 5 | idempotence | **the same key with a different envelope budget** | [`regression_the_replay_key_covers_the_envelope_budget`] | **FALSIFIED**, fixed by bn-h1zqz — now a guard |
 //! | 6 | staleness | every snapshot-consuming operation against a superseded handle | [`attack_staleness_every_snapshot_consuming_operation_refuses_a_superseded_handle`] | held |
 //! | 7 | staleness | a snapshot superseded twice over — the `LineageError::Unknown` arm | [`attack_staleness_a_snapshot_the_fork_can_no_longer_place_is_still_refused`] | held (with a mapping inconsistency, recorded) |
-//! | 8 | staleness | **replay `workspace.create` under a fresh key, then reuse the old handle** | [`falsification_a_replayed_create_rewinds_the_lineage_and_un_stales_the_old_snapshot`] | **FALSIFIED** |
-//! | 9 | staleness | the same rewind, seen from the snapshot that *was* current | [`falsification_a_rewound_lineage_strands_the_snapshot_that_was_current`] | **FALSIFIED** |
-//! | 10 | staleness | the same rewind with `seal: false` — a live continuation is revoked | [`falsification_an_unsealed_re_create_revokes_a_valid_continuation`] | **FALSIFIED** (fails closed) |
+//! | 8 | staleness | **replay `workspace.create` under a fresh key, then reuse the old handle** | [`regression_a_replayed_create_converges_and_leaves_the_old_snapshot_stale`] | **FALSIFIED**, fixed by bn-n1xou — now a guard |
+//! | 9 | staleness | the same rewind, seen from the snapshot that *was* current | [`regression_a_converged_create_does_not_strand_the_snapshot_that_is_current`] | **FALSIFIED**, fixed by bn-n1xou — now a guard |
+//! | 10 | staleness | the same rewind with `seal: false` — a live continuation is revoked | [`regression_an_unsealed_re_create_does_not_revoke_a_valid_continuation`] | **FALSIFIED** (fails closed), fixed by bn-n1xou — now a guard |
 //! | 11 | staleness | anti-vacuity: the same create under the *same* key changes nothing | [`attack_staleness_the_same_create_under_the_same_key_changes_nothing`] | held |
 //! | 12 | resume | two fresh daemons, the whole DX-03 script, frame for frame | [`attack_determinism_two_fresh_daemons_produce_byte_identical_transcripts`] | held |
 //! | 13 | resume | a hostile suite spliced at every position of the resume script (31 runs) | [`attack_determinism_a_resume_is_byte_identical_at_every_placement_of_a_hostile_suite`] | held |
@@ -111,7 +134,7 @@
 //! | 15 | resume | double-resume one continuation — two campaigns, or one? | [`attack_reuse_double_resuming_one_continuation_is_one_task_and_one_campaign`] | held |
 //! | 16 | resume | resume a continuation a *newer* continuation has superseded | [`attack_reuse_a_superseded_continuation_advances_the_same_task_not_a_second_one`] | held (with a recorded concern) |
 //! | 17 | handle reuse | a completed task handle, on every observing operation, twice | [`attack_reuse_a_completed_task_answers_idempotently_on_every_observing_operation`] | held |
-//! | 18 | handle reuse | **a continuation reused after cancellation, carrying a budget** | [`falsification_resume_rewrites_a_terminal_tasks_budget_update_budget_refuses`] | **FALSIFIED** |
+//! | 18 | handle reuse | **a continuation reused after cancellation, carrying a budget** | [`regression_resume_refuses_the_terminal_budget_write_update_budget_refuses`] | **FALSIFIED**, fixed by bn-10093 — now a guard |
 //! | 19 | handle reuse | the same reuse *without* a budget — a genuine no-op? | [`attack_reuse_a_cancelled_continuation_without_a_budget_is_a_true_no_op`] | held |
 //! | 20 | handle reuse | cancelling twice | [`attack_reuse_cancelling_twice_changes_nothing_the_second_time`] | held |
 //! | 21 | handle reuse | an unheld handle vs. a lookalike daemon's denial (RFC 0027 X2) | [`attack_reuse_an_unheld_handle_is_byte_identical_with_a_lookalike_daemons_denial`] | held |
@@ -796,6 +819,15 @@ fn snapshot_of(payload: &Payload) -> WorkspaceHandle {
     }
 }
 
+/// `WorkspaceCreateResponse.sealed` — "whether the snapshot is sealed", the field a
+/// converging create answers the `seal` divergence through.
+fn sealed_of(payload: &Payload) -> bool {
+    match payload {
+        Payload::WorkspaceCreate(response) => response.sealed,
+        other => panic!("expected a workspace.create payload, got {other:?}"),
+    }
+}
+
 fn task_of(outcome: &OperationOutcome) -> TaskHandle {
     outcome
         .envelope
@@ -1211,9 +1243,9 @@ fn attack_idempotence_two_fresh_keys_on_one_campaign_agree_byte_for_byte() {
     );
 }
 
-/// **Attack 5 — FALSIFICATION.**
+/// **Attack 5 — was FALSIFICATION, now a regression guard (DEFECT 3, fixed by bn-h1zqz).**
 ///
-/// *What should hold.* `rule idempotency.replay`:
+/// *What must hold.* `rule idempotency.replay`:
 ///
 /// > A mutation replayed with the same `idempotency_key` and a byte-identical canonical
 /// > request MUST return the same task or artifact identity. The same key with a different
@@ -1225,17 +1257,25 @@ fn attack_idempotence_two_fresh_keys_on_one_campaign_agree_byte_for_byte() {
 /// identity, which is why the two campaigns below have distinct handles when they are run
 /// under distinct keys.
 ///
-/// *What actually happens.* `daemon::state::ReplayKey` carries the operation name, the
+/// *What this attack found.* `daemon::state::ReplayKey` carried the operation name, the
 /// envelope's `snapshot`, the envelope's `intent`, and the decoded arguments — and not the
-/// envelope's `budget`. So a caller that asks for a 64-state campaign under a key it already
-/// used for a 4-state one is neither refused nor served: it is handed the 4-state task's
-/// recorded answer, whose `status` is `task_suspended` and whose task handle is the *other*
-/// campaign's. No error, no new task, and nothing in the answer says the budget was ignored.
+/// envelope's `budget`. So a caller that asked for a 64-state campaign under a key it had
+/// already used for a 4-state one was neither refused nor served: it was handed the 4-state
+/// task's recorded answer, whose `status` is `task_suspended` and whose task handle is the
+/// *other* campaign's. No error, no new task, and nothing in the answer said the budget was
+/// ignored.
 ///
-/// The control below shows the same two requests under two keys really are two campaigns,
-/// so this is a collapse of two distinct requests and not two spellings of one.
+/// *What the fix did.* bn-h1zqz put the whole canonical request in the key — `budget`,
+/// `output_policy`, and `page` beside the four already there — so the same key with a
+/// different budget is the refusal the rule's own text requires. `ReplayKey`'s documentation
+/// carries the field-by-field audit, including the fields deliberately left out (`request_id`
+/// and `trace` are per-attempt; `actor` is the ledger's other map key).
+///
+/// The control below is unchanged and is what keeps this from being vacuous: under two
+/// *different* keys these two requests really are two campaigns with two identities, so the
+/// refusal above is a distinction the daemon makes rather than one it invents.
 #[test]
-fn falsification_the_replay_key_omits_the_envelope_budget() {
+fn regression_the_replay_key_covers_the_envelope_budget() {
     let mut fixture = bootstrap();
     let parked = start(
         &mut fixture.daemon,
@@ -1257,26 +1297,39 @@ fn falsification_the_replay_key_omits_the_envelope_budget() {
         "idem-shared",
     );
 
-    assert_ne!(
+    assert_eq!(
         larger.error_code(),
         Some(ErrorCode::IdempotencyKeyReused),
-        "FALSIFICATION: `rule idempotency.replay` requires this refusal and it does not happen"
+        "`rule idempotency.replay` requires this refusal: {:?}",
+        larger.envelope.error
     );
-    assert_eq!(
-        wire_bytes(&larger),
-        wire_bytes(&parked),
-        "FALSIFICATION: the 64-state request is answered with the 4-state campaign's recorded \
-         outcome, verbatim — including its `task_suspended` status and its task handle"
-    );
+    assert_eq!(larger.payload, Payload::None, "no partial effect");
     assert_eq!(
         fixture.daemon.state().tasks().handles().len(),
         1,
-        "FALSIFICATION: the 64-state campaign the caller asked for never ran"
+        "the refused request started nothing, and the recorded campaign is untouched"
+    );
+
+    // And the *true* replay — the identical canonical request under the identical key — is
+    // still answered from the ledger, byte for byte. A key that refused this would have
+    // repaired the rule's second sentence by breaking its first.
+    let replay = start(
+        &mut fixture.daemon,
+        &fixture.snapshot,
+        PARK_BUDGET,
+        "req_start",
+        "idem-shared",
+    );
+    assert_eq!(
+        wire_bytes(&replay),
+        wire_bytes(&parked),
+        "an identical canonical request under the same key returns the recorded outcome \
+         verbatim"
     );
 
     // Control: under two *different* keys the same two requests are two campaigns with two
-    // identities, so the collapse above is a genuine loss of a distinction the daemon
-    // otherwise makes.
+    // identities, so the refusal above separates two requests the daemon really does
+    // distinguish.
     let mut control = bootstrap();
     let small_control = start(
         &mut control.daemon,
@@ -1478,32 +1531,41 @@ fn attack_staleness_a_snapshot_the_fork_can_no_longer_place_is_still_refused() {
     );
 }
 
-/// **Attack 8 — FALSIFICATION.** The DX-03 experiment's own sentence, run to its end:
-/// create a snapshot, start a bounded task, mutate the workspace, reuse the old handle.
+/// **Attack 8 — was FALSIFICATION, now a regression guard (DEFECT 1, fixed by bn-n1xou).**
+/// The DX-03 experiment's own sentence, run to its end: create a snapshot, start a bounded
+/// task, mutate the workspace, reuse the old handle.
 ///
-/// *What should hold.* RFC 0026: "the pinned snapshot is no longer the current sealed
+/// *What must hold.* RFC 0026: "the pinned snapshot is no longer the current sealed
 /// snapshot" is `StaleSnapshot`, and `notes/plan/notes/G0_SPIKE_MATRIX.md` makes stale
 /// snapshot rejection one third of DX-03's pass condition. `continuum-workspace`'s own
 /// `staleness` module states the property it implements: "an old snapshot remains
 /// reproducible after the working tree changes; **using a stale one is a typed error, never
 /// a silent re-read**."
 ///
-/// *What actually happens.* `daemon::workspace::create` derives the lineage's `ForkName`
-/// from the created snapshot's content-addressed `ws_*` handle and then calls
+/// *What this attack found.* `daemon::workspace::create` derived the lineage's `ForkName`
+/// from the created snapshot's content-addressed `ws_*` handle and then called
 /// `DaemonState::put_lineage`, an unconditional insert. A second `workspace.create` naming
-/// the same components therefore replaces the live `Fork` — whose head had advanced — with
-/// a fresh `Fork::diverge` rooted at the original snapshot. The mutation is forgotten, and
-/// the superseded handle is accepted again: the same `verification.start` that was refused
-/// `StaleSnapshot` one request earlier runs a full campaign, against a tree the lineage had
-/// already moved past. `task.resume` of the continuation pinned to that snapshot is
+/// the same components therefore replaced the live `Fork` — whose head had advanced — with
+/// a fresh `Fork::diverge` rooted at the original snapshot. The mutation was forgotten, and
+/// the superseded handle was accepted again: the same `verification.start` that was refused
+/// `StaleSnapshot` one request earlier ran a full campaign, against a tree the lineage had
+/// already moved past, and `task.resume` of the continuation pinned to that snapshot was
 /// un-refused by the same step.
 ///
-/// A `@mutation` requires an idempotency key, so this needs a *fresh* key — which is not a
-/// hurdle: `rule idempotency.replay` honours a key only "for at least the retention window"
-/// the daemon declares, and keys are scoped per actor, so a retry after the window or a
-/// second agent creating the same workspace both land here.
+/// A `@mutation` requires an idempotency key, so this needs a *fresh* key — which was never
+/// a hurdle: `rule idempotency.replay` honours a key only "for at least the retention
+/// window" the daemon declares, and keys are scoped per actor, so a retry after the window
+/// or a second agent creating the same workspace both landed here.
+///
+/// *What the fix did.* bn-n1xou made an identical create **converge**: the lineage is opened
+/// if absent and otherwise left exactly as it is (`DaemonState::open_lineage` is
+/// put-if-absent), and the held workspace record is not replaced. The re-create still
+/// answers with the snapshot it names — the identity is content-addressed and really does
+/// already exist — and every refusal that stood one request before it stands one request
+/// after it. That is the G0-DX-13 precedent read at the lineage: identical creation
+/// converges on one semantic identity and nothing is lost.
 #[test]
-fn falsification_a_replayed_create_rewinds_the_lineage_and_un_stales_the_old_snapshot() {
+fn regression_a_replayed_create_converges_and_leaves_the_old_snapshot_stale() {
     let mut parked = drive_to_park();
     let old = parked.fixture.snapshot.clone();
 
@@ -1564,7 +1626,7 @@ fn falsification_a_replayed_create_rewinds_the_lineage_and_un_stales_the_old_sna
          lineage, and is the whole mechanism"
     );
 
-    // FALSIFICATION: the superseded handle is current again.
+    // The guard: the superseded handle is still superseded.
     let after = start(
         &mut parked.fixture.daemon,
         &old,
@@ -1574,14 +1636,14 @@ fn falsification_a_replayed_create_rewinds_the_lineage_and_un_stales_the_old_sna
     );
     assert_eq!(
         after.error_code(),
-        None,
-        "FALSIFICATION: `verification.start` over the superseded snapshot is admitted after \
-         the re-create — the stale handle is a silent re-read, not a typed error: {:?}",
+        Some(ErrorCode::StaleSnapshot),
+        "`verification.start` over the superseded snapshot is refused after the re-create \
+         exactly as it was before it — a stale handle is a typed error, never a silent \
+         re-read: {:?}",
         after.envelope.error
     );
-    assert_eq!(after.envelope.status, ResultStatus::TaskStarted);
 
-    // FALSIFICATION: and so is the continuation pinned to it.
+    // And so is the continuation pinned to it.
     let resumed = resume(
         &mut parked.fixture.daemon,
         &parked.continuation,
@@ -1592,8 +1654,8 @@ fn falsification_a_replayed_create_rewinds_the_lineage_and_un_stales_the_old_sna
     );
     assert_eq!(
         resumed.error_code(),
-        None,
-        "FALSIFICATION: the continuation pinned to the superseded snapshot resumes: {:?}",
+        Some(ErrorCode::StaleSnapshot),
+        "the continuation pinned to the superseded snapshot stays refused: {:?}",
         resumed.envelope.error
     );
     let record = record_of(&status(
@@ -1603,22 +1665,59 @@ fn falsification_a_replayed_create_rewinds_the_lineage_and_un_stales_the_old_sna
     ));
     assert_eq!(
         record.status,
-        TaskStatus::Completed,
-        "FALSIFICATION: it did not merely return — it ran the campaign to completion over a \
-         snapshot the lineage had superseded"
+        TaskStatus::Suspended,
+        "no campaign ran over a snapshot the lineage had superseded"
     );
-    assert_eq!(record.cost.states, Optional::Present(FROZEN_STATES));
+    assert_eq!(
+        record.cost.states,
+        Optional::Present(3),
+        "the parked campaign is where the park left it"
+    );
+
+    // Anti-vacuity, so this is a claim about the lineage rather than about the daemon
+    // having forgotten how to run: the *current* head is still sealable and still serves a
+    // campaign, after the re-create as before it.
+    let head = snapshot_of(&forked.payload);
+    assert_eq!(
+        seal(
+            &mut parked.fixture.daemon,
+            &head,
+            "req_seal_head",
+            "idem-seal-head",
+        )
+        .error_code(),
+        None,
+        "the head the fork advanced to is still the head"
+    );
+    let served = start(
+        &mut parked.fixture.daemon,
+        &head,
+        CLOSING_BUDGET,
+        "req_start_head",
+        "idem-start-head",
+    );
+    assert_eq!(
+        served.error_code(),
+        None,
+        "and a campaign over it is admitted: {:?}",
+        served.envelope.error
+    );
 }
 
-/// **Attack 9 — FALSIFICATION (the same defect, seen from the other side).** The snapshot
-/// that *was* the lineage head when the re-create landed is now an identity the rewound
-/// `Fork` cannot place at all. So the mutation a caller just made becomes unsealable and
-/// unforkable — answered `CapabilityDenied`, byte-identically with a request for an artifact
-/// that does not exist (RFC 0027 X2) — while the snapshot it replaced is served. The
-/// workspace's real head is stranded and the daemon offers the caller no recovery: nothing
-/// in the refusal says a lineage was rewound.
+/// **Attack 9 — was FALSIFICATION, now a regression guard (the same defect, seen from the
+/// other side).** The snapshot that *was* the lineage head when the re-create landed used to
+/// become an identity the rewound `Fork` could not place at all: the mutation a caller had
+/// just made was unsealable and unforkable — answered `CapabilityDenied`, byte-identically
+/// with a request for an artifact that does not exist (RFC 0027 X2) — while the snapshot it
+/// replaced was served. The workspace's real head was stranded and the daemon offered no
+/// recovery, because nothing in the refusal said a lineage had been rewound.
+///
+/// With the convergent create, the re-create is not an event in the lineage's life: the head
+/// seals and forks afterwards exactly as it does in the control daemon that never saw one.
+/// The control is the comparison that makes that a claim about the head rather than about
+/// this fixture.
 #[test]
-fn falsification_a_rewound_lineage_strands_the_snapshot_that_was_current() {
+fn regression_a_converged_create_does_not_strand_the_snapshot_that_is_current() {
     let mut fixture = bootstrap();
     let old = fixture.snapshot.clone();
     let derived = snapshot_of(
@@ -1632,7 +1731,7 @@ fn falsification_a_rewound_lineage_strands_the_snapshot_that_was_current() {
         .payload,
     );
 
-    // Before the rewind: the derived snapshot is the head and seals normally.
+    // The control: the same daemon, the same fork, and no re-create at all.
     let mut control = bootstrap();
     let control_derived = snapshot_of(
         &fork(
@@ -1644,36 +1743,50 @@ fn falsification_a_rewound_lineage_strands_the_snapshot_that_was_current() {
         )
         .payload,
     );
+    let control_seal = seal(
+        &mut control.daemon,
+        &control_derived,
+        "req_seal",
+        "idem-seal",
+    );
     assert_eq!(
-        seal(
-            &mut control.daemon,
-            &control_derived,
-            "req_seal",
-            "idem-seal"
-        )
-        .envelope
-        .status,
+        control_seal.envelope.status,
         ResultStatus::Ok,
-        "without the rewind, the head seals"
+        "the head seals"
     );
 
-    create(
+    let recreated = create(
         &mut fixture.daemon,
         &fixture.components,
         true,
         "req_recreate",
         "idem-recreate",
     );
-
-    let stranded = seal(&mut fixture.daemon, &derived, "req_seal", "idem-seal");
     assert_eq!(
-        stranded.error_code(),
-        Some(ErrorCode::CapabilityDenied),
-        "FALSIFICATION: the snapshot that was the lineage head is now unplaceable and is \
-         refused indistinguishably from one that never existed: {:?}",
-        stranded.envelope.error
+        recreated.envelope.status,
+        ResultStatus::Ok,
+        "the re-create is admitted — it converges rather than being refused: {:?}",
+        recreated.envelope.error
     );
-    let unforkable = fork(
+    assert_eq!(
+        snapshot_of(&recreated.payload),
+        old,
+        "and names the snapshot that already exists"
+    );
+
+    let still_the_head = seal(&mut fixture.daemon, &derived, "req_seal", "idem-seal");
+    assert_eq!(
+        still_the_head.error_code(),
+        None,
+        "the snapshot that is the lineage head is still placeable and still seals: {:?}",
+        still_the_head.envelope.error
+    );
+    assert_eq!(
+        wire_bytes(&still_the_head),
+        wire_bytes(&control_seal),
+        "byte-identically with the daemon that never saw a re-create"
+    );
+    let forkable = fork(
         &mut fixture.daemon,
         &derived,
         b"# onward\n",
@@ -1681,25 +1794,33 @@ fn falsification_a_rewound_lineage_strands_the_snapshot_that_was_current() {
         "idem-fork-2",
     );
     assert_eq!(
-        unforkable.error_code(),
-        Some(ErrorCode::CapabilityDenied),
-        "FALSIFICATION: and cannot be advanced either"
+        forkable.error_code(),
+        None,
+        "and can still be advanced: {:?}",
+        forkable.envelope.error
     );
 }
 
-/// **Attack 10 — FALSIFICATION (the same defect, failing closed).** `workspace.create`
-/// replaces the *workspace record* as well as the lineage, so re-creating identical
-/// components with `seal: false` flips an already-sealed snapshot back to unsealed. A
-/// continuation that resumed one request earlier is then refused `StaleSnapshot` — "the
-/// snapshot the continuation pinned is not the current sealed snapshot" — for a snapshot
-/// nobody changed, by an operation that created nothing new.
+/// **Attack 10 — was FALSIFICATION, now a regression guard (the same defect, failing
+/// closed).** `workspace.create` replaced the *workspace record* as well as the lineage, so
+/// re-creating identical components with `seal: false` flipped an already-sealed snapshot
+/// back to unsealed. A continuation that resumed one request earlier was then refused
+/// `StaleSnapshot` — "the snapshot the continuation pinned is not the current sealed
+/// snapshot" — for a snapshot nobody changed, by an operation that created nothing new.
 ///
-/// This direction errs closed rather than open, which is why it is the least severe of the
-/// three faces of DEFECT 1. It is pinned anyway because it is the same line of code, and
+/// That direction erred closed rather than open, which is why it was the least severe of the
+/// three faces of DEFECT 1. It was pinned anyway because it is the same line of code, and
 /// because "a durable continuation can be revoked by an unrelated caller's idempotent-looking
 /// create" is not a property `rule task.resume` grants anyone.
+///
+/// The fix makes the seal **monotone**: `seal: false` means "do not seal it", never "un-seal
+/// it", so the held record keeps the seal it has and the create reports the state the daemon
+/// is actually in. The continuation survives, which is what this test now asserts — together
+/// with the response field that says so, because the divergence between the request's `seal`
+/// and the record's is the one thing an identical create can legitimately disagree about and
+/// the caller is told the answer rather than left to infer it.
 #[test]
-fn falsification_an_unsealed_re_create_revokes_a_valid_continuation() {
+fn regression_an_unsealed_re_create_does_not_revoke_a_valid_continuation() {
     let mut parked = drive_to_park();
 
     let allowed = resume(
@@ -1722,15 +1843,26 @@ fn falsification_an_unsealed_re_create_revokes_a_valid_continuation() {
         "req_s1",
     )));
 
-    create(
+    let recreated = create(
         &mut parked.fixture.daemon,
         &parked.fixture.components,
         false,
         "req_recreate",
         "idem-recreate",
     );
+    assert_eq!(
+        recreated.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        recreated.envelope.error
+    );
+    assert!(
+        sealed_of(&recreated.payload),
+        "the response reports the seal the snapshot has, not the one the request asked for: \
+         a create never un-seals"
+    );
 
-    let revoked = resume(
+    let survived = resume(
         &mut parked.fixture.daemon,
         &live,
         Some(CLOSING_BUDGET),
@@ -1739,19 +1871,25 @@ fn falsification_an_unsealed_re_create_revokes_a_valid_continuation() {
         "idem-resume-after",
     );
     assert_eq!(
-        revoked.error_code(),
-        Some(ErrorCode::StaleSnapshot),
-        "FALSIFICATION: an unrelated create with `seal: false` un-seals the record the \
-         continuation pinned and revokes it"
+        survived.error_code(),
+        None,
+        "a create with `seal: false` does not un-seal the record the continuation pinned, \
+         and does not revoke it: {:?}",
+        survived.envelope.error
     );
+    let record = record_of(&status(&mut parked.fixture.daemon, &parked.task, "req_s2"));
+    assert_eq!(record.status, TaskStatus::Completed);
+    assert_eq!(record.cost.states, Optional::Present(FROZEN_STATES));
 }
 
 /// **Attack 11, anti-vacuity for attacks 8–10.** The *same* create replayed under the key it
 /// already used is short-circuited by the idempotency ledger at step 7 of the dispatch, so
 /// the family handler never runs, the lineage is untouched, and the superseded handle stays
-/// refused. That is what makes attacks 8–10 findings about `workspace.create` rather than
-/// about the fixture: swapping only the idempotency key — nothing else about the request —
-/// flips the outcome from "refused, as required" to "admitted".
+/// refused. That is what made attacks 8–10 findings about `workspace.create` rather than
+/// about the fixture: before the bn-n1xou fix, swapping only the idempotency key — nothing
+/// else about the request — flipped the outcome from "refused, as required" to "admitted".
+/// Post-fix an identical create converges either way; this test still isolates the ledger's
+/// short-circuit as a distinct guard from `open_lineage`'s put-if-absent.
 #[test]
 fn attack_staleness_the_same_create_under_the_same_key_changes_nothing() {
     let mut fixture = bootstrap();
@@ -2283,10 +2421,11 @@ fn attack_reuse_a_completed_task_answers_idempotently_on_every_observing_operati
     );
 }
 
-/// **Attack 18 — FALSIFICATION.** A continuation handle reused after the task it names was
-/// cancelled, carrying the optional budget `task.resume` accepts.
+/// **Attack 18 — was FALSIFICATION, now a regression guard (DEFECT 2, fixed by bn-10093).**
+/// A continuation handle reused after the task it names was cancelled, carrying the optional
+/// budget `task.resume` accepts.
 ///
-/// *What should hold.* `daemon::task::update_budget` states the rule and enforces it:
+/// *What must hold.* `daemon::task::update_budget` states the rule and enforces it:
 ///
 /// > A terminal task keeps the budget it ran under and answers `Unchanged`: a terminal
 /// > task's budget is a historical fact, and rewriting it would make its recorded cost
@@ -2297,14 +2436,20 @@ fn attack_reuse_a_completed_task_answers_idempotently_on_every_observing_operati
 /// > A terminal task is not resumed. […] a no-op does neither, and returning the terminal
 /// > status is the honest answer to "resume this".
 ///
-/// *What actually happens.* `resume` applies the request's budget to the task's
-/// `BudgetLedger` **before** it tests `is_terminal`, and `update_budget` tests first. So the
-/// identical ceiling, on the identical cancelled task, in the identical daemon, is refused
-/// through one operation and written through the other — and `TaskRecord.budget` afterwards
-/// reports a ceiling this task never ran under, while `TaskRecord.cost` still reports the
-/// spend of the campaign that did run. The "no-op" is not one.
+/// *What this attack found.* `resume` applied the request's budget to the task's
+/// `BudgetLedger` **before** it tested `is_terminal`, and `update_budget` tested first. So
+/// the identical ceiling, on the identical cancelled task, in the identical daemon, was
+/// refused through one operation and written through the other — and `TaskRecord.budget`
+/// afterwards reported a ceiling the task never ran under, while `TaskRecord.cost` still
+/// reported the spend of the campaign that did run. The "no-op" was not one.
+///
+/// *What the fix did.* bn-10093 moved the terminal check above the ledger write. The
+/// assertion below is now the one this test named when it was a pin: **the two operations
+/// produce one observable**, compared here on the same record, through the two doors, in one
+/// dispatch sequence. bn-3p32's A1 pins the same fix from the DX-14 side, byte-for-byte on
+/// the whole record; this one is the DX-03 reading — a *handle reuse* that writes nothing.
 #[test]
-fn falsification_resume_rewrites_a_terminal_tasks_budget_update_budget_refuses() {
+fn regression_resume_refuses_the_terminal_budget_write_update_budget_refuses() {
     let mut parked = drive_to_park();
     let before = record_of(&status(&mut parked.fixture.daemon, &parked.task, "req_s0"));
     assert_eq!(before.budget.states, Optional::Present(PARK_BUDGET));
@@ -2317,7 +2462,7 @@ fn falsification_resume_rewrites_a_terminal_tasks_budget_update_budget_refuses()
     );
     assert_eq!(cancelled.envelope.status, ResultStatus::Ok);
 
-    // The guard, through the operation that has it.
+    // The guard, through the operation that always had it.
     let refused = update_budget(
         &mut parked.fixture.daemon,
         &parked.task,
@@ -2326,14 +2471,16 @@ fn falsification_resume_rewrites_a_terminal_tasks_budget_update_budget_refuses()
         "idem-budget",
     );
     assert_eq!(refused.envelope.status, ResultStatus::Ok);
-    let after_update = record_of(&status(&mut parked.fixture.daemon, &parked.task, "req_s1"));
+    let after_update = wire_bytes(&status(&mut parked.fixture.daemon, &parked.task, "req_s1"));
     assert_eq!(
-        after_update.budget.states,
+        record_of(&status(&mut parked.fixture.daemon, &parked.task, "req_s1"))
+            .budget
+            .states,
         Optional::Present(PARK_BUDGET),
         "`task.update_budget` keeps a terminal task's budget, as it documents"
     );
 
-    // The same write, through the operation that does not.
+    // The same write, through the operation that used not to have it.
     let resumed = resume(
         &mut parked.fixture.daemon,
         &parked.continuation,
@@ -2348,7 +2495,7 @@ fn falsification_resume_rewrites_a_terminal_tasks_budget_update_budget_refuses()
         "the resume reports the terminal status rather than refusing: {:?}",
         resumed.envelope.error
     );
-    let after_resume = record_of(&status(&mut parked.fixture.daemon, &parked.task, "req_s2"));
+    let after_resume = record_of(&status(&mut parked.fixture.daemon, &parked.task, "req_s1"));
     assert_eq!(
         after_resume.status,
         TaskStatus::Cancelled,
@@ -2356,13 +2503,19 @@ fn falsification_resume_rewrites_a_terminal_tasks_budget_update_budget_refuses()
     );
     assert_eq!(
         after_resume.budget.states,
-        Optional::Present(4096),
-        "FALSIFICATION: `task.resume` wrote the terminal task's budget that \
-         `task.update_budget` had just refused to write — the documented no-op is not one"
+        Optional::Present(PARK_BUDGET),
+        "`task.resume` refuses the terminal task's budget write that `task.update_budget` \
+         had just refused: the documented no-op is one"
+    );
+    assert_eq!(
+        wire_bytes(&status(&mut parked.fixture.daemon, &parked.task, "req_s1")),
+        after_update,
+        "the two operations produce one observable for one ceiling on one terminal task — \
+         the record is byte-identical across the resume"
     );
     assert_eq!(
         after_resume.cost.states, before.cost.states,
-        "and the recorded spend is now priced against a ceiling the campaign never ran under"
+        "and the recorded spend is still priced against the ceiling the campaign ran under"
     );
 }
 

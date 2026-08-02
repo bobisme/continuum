@@ -536,6 +536,31 @@ impl TaskEntry {
 ///
 /// Both maps are [`BTreeMap`]s: iteration order is a function of the keys present and of
 /// nothing else, which is what `rule ordering.deterministic` needs from the container layer.
+///
+/// # A terminal task's continuations are kept, not pruned
+///
+/// Nothing removes from `continuations`, and that is the ratified disposition rather than an
+/// omission. bn-3p32's A1 reached a cancelled task's ledger *through* a continuation this
+/// table still held, so "prune the continuations of a terminal task" was the other candidate
+/// repair; it was not taken, for two reasons stated here because this is where the table is:
+///
+/// - **Handle validity is a protocol-major property.** RFC 0026 makes a `cont_*` a durable
+///   artifact identity, not a live scope — "a continuation is a durable artifact, not a live
+///   worker" — and an identity minted under a protocol major stays resolvable for that major.
+///   Pruning would turn a resume of a cancelled task's continuation into
+///   [`Fault::denied`] — RFC 0027 X2's undistinguished denial — which says *nothing about
+///   this daemon* and is byte-identical with "never existed". The caller would lose the one
+///   honest answer: the task is terminal, and here is its status.
+/// - **The guard belongs at the write, not at the lookup.** `task.resume` refuses every write
+///   to a terminal task before it touches the ledger (see its terminal check), so holding
+///   the handle confers nothing a terminal task should not grant. Pruning would defend the
+///   same property one layer away from the thing it protects, and would leave the ledger
+///   write unguarded for any *other* door that resolves a continuation.
+///
+/// So a cancelled task's continuation still resolves, still names its task, and still
+/// answers "this task is `Cancelled`" — and cannot write it. `TaskRecord.continuation` is a
+/// separate reading: it reports what the *record* holds, and a cancel that published nothing
+/// clears it there without this table forgetting the identity.
 #[derive(Debug, Default)]
 pub struct TaskTable {
     tasks: BTreeMap<TaskHandle, TaskEntry>,
@@ -1007,6 +1032,12 @@ impl Residual {
 /// A terminal task keeps the budget it ran under and answers
 /// [`StructuralOutcome::Unchanged`]: a terminal task's budget is a historical fact, and
 /// rewriting it would make its recorded cost unreadable.
+///
+/// **`task.resume`'s optional budget is held to the same rule by the same reading** — its
+/// terminal check sits above its ledger write, so the two operations produce one observable
+/// for one ceiling on one terminal task: the ledger untouched, no milestone appended, no
+/// event emitted, the record byte-identical. They disagreed until bn-10093; the disagreement
+/// is what bn-3p32's A1 and bn-1kp6's attack 18 pinned, and both now guard the agreement.
 fn update_budget(
     request: &TaskUpdateBudgetRequest,
     state: &mut DaemonState,
@@ -1084,6 +1115,11 @@ fn update_budget(
 /// | the pinned engine identity disagrees with the daemon's (P2) | `ContinuationEpochMismatch` |
 /// | the model the continuation names is no longer one this daemon can construct | `UnsupportedSemanticFeature` (3.2; see the comment at the call) |
 ///
+/// A continuation whose *task* is terminal is not in that table, because it is not a
+/// refusal: it is answered, with the terminal status, and nothing is written. That answer is
+/// produced **before** the request's optional budget reaches the ledger, so a terminal task's
+/// budget arm is the no-op [`update_budget`] states it is — see the terminal check below.
+///
 /// **Both epoch predicates are checked, and neither implies the other** (RFC 0026, "The
 /// two-predicate obligation"): P1 alone would admit a resume onto a different engine build,
 /// which is the case plan §4.7's defect lifecycle exists to catch, and P2 alone a resume
@@ -1138,6 +1174,43 @@ fn resume(
     admissible_epochs(&continuation.pinned, services.epochs())?;
 
     let task = continuation.task.clone();
+
+    // A terminal task is not resumed, and — **this test is above the budget write, not below
+    // it** — a terminal task is not re-budgeted either. `rule task.status_monotonic` says a
+    // terminal status never changes and `rule task.resume` says a resume "MUST NOT replace
+    // prior artifacts under the same identity"; a no-op does neither, and returning the
+    // terminal status is the honest answer to "resume this". There is no code in this
+    // operation's union for "already terminal", and pressing one of the common five into
+    // that service would name something false.
+    //
+    // The order is the whole of bn-10093 (bn-3p32's A1, bn-1kp6's attack 18). With the
+    // ledger write above this return, `task.resume` performed the exact rewrite
+    // [`update_budget`] refuses for a stated reason — "a terminal task's budget is a
+    // historical fact, and rewriting it would make its recorded cost unreadable" — so one
+    // ceiling, one cancelled task and one daemon were refused through one operation and
+    // accepted through the other, and a `Cancelled` record could gain a
+    // `task.budget_suspended` milestone claiming a dead task parked. Two operations that
+    // disagree about one rule are two rules; this return is what makes them one.
+    //
+    // The refusal produces **`update_budget`'s own observable**, not a new one: the ledger
+    // is untouched, no milestone and no `TaskEvent` is appended, and the answer is the
+    // terminal status. So `cancel` → `resume(continuation, budget)` now leaves the record
+    // byte-identical, which is exactly what `cancel` → `resume(continuation, no budget)`
+    // always did (bn-3p32's A2, the localising control this repair must not step past).
+    {
+        let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
+        if entry.is_terminal() {
+            return Ok(reported(
+                Payload::TaskResume(TaskResumeResponse {
+                    task: entry.handle.clone(),
+                    status: entry.status,
+                }),
+                Nullable::Null,
+                entry,
+            ));
+        }
+    }
+
     if let Optional::Present(budget) = &request.budget {
         if let Some(entry) = state.tasks_mut().get_mut(&task) {
             // `task.resume` carries an optional budget and RFC 0026 gives it the same
@@ -1158,27 +1231,10 @@ fn resume(
             }
         }
     }
-
-    // A terminal task is not resumed. `rule task.status_monotonic` says a terminal status
-    // never changes and `rule task.resume` says a resume "MUST NOT replace prior artifacts
-    // under the same identity"; a no-op does neither, and returning the terminal status is
-    // the honest answer to "resume this". There is no code in this operation's union for
-    // "already terminal", and pressing one of the common five into that service would name
-    // something false.
-    let bounds = {
-        let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
-        if entry.is_terminal() {
-            return Ok(reported(
-                Payload::TaskResume(TaskResumeResponse {
-                    task: entry.handle.clone(),
-                    status: entry.status,
-                }),
-                Nullable::Null,
-                entry,
-            ));
-        }
-        entry.bounds()
-    };
+    // Read *after* the write, so a raised ceiling extends this resume rather than the next
+    // one — the order the budget arm always had, and the reason the terminal test above it
+    // is a reordering of two guards rather than of the run itself.
+    let bounds = state.tasks().get(&task).ok_or_else(Fault::denied)?.bounds();
 
     // The run's own refusals are the `verification` family's, and `task.resume` declares a
     // narrower `errors` clause than `verification.start` does. Until protocol 3.2 that

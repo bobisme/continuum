@@ -40,12 +40,12 @@ use continuum_workspace::snapshot::WorkspacePath;
 
 use super::family::Arguments;
 use super::{OperationOutcome, ServiceError};
-use crate::protocol::envelope::{Redacted, RequestEnvelope};
+use crate::protocol::envelope::{Budget, OutputPolicy, Page, Redacted, RequestEnvelope};
 use crate::protocol::handshake::CapabilityDescriptor;
 use crate::protocol::scalar::{
     ActorId, CapabilityHandle, Commitment, EvidenceHandle, IntentHandle, Timestamp, WorkspaceHandle,
 };
-use crate::protocol::spec::Nullable;
+use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::task::EvidenceEvent;
 use crate::protocol::vocabulary::{
     AuthorityLevel, EvidenceKind, EvidenceNodeKind, InconclusiveReason,
@@ -291,6 +291,50 @@ pub struct Replay {
 }
 
 /// The typed stand-in for `rule idempotency.replay`'s canonical request bytes.
+///
+/// # What the canonical request is, field by field
+///
+/// > A mutation replayed with the same `idempotency_key` and a byte-identical canonical
+/// > request MUST return the same task or artifact identity. The same key with a different
+/// > request MUST be rejected with `IdempotencyKeyReused`.
+/// >
+/// > — `rule idempotency.replay`
+///
+/// The rule names the *request*, so this type has to be the whole of it and nothing besides.
+/// [`RequestEnvelope`]'s thirteen fields, audited one at a time (bn-h1zqz, bn-1kp6's
+/// DEFECT 3) — the five carried here, and the eight that are deliberately not:
+///
+/// | field | in the key? | why |
+/// |---|---|---|
+/// | `operation` | **yes** | two operations are two requests, whatever else agrees |
+/// | `snapshot` | **yes** | the artifact the request is *about* |
+/// | `intent` | **yes** | likewise |
+/// | `arguments` | **yes** | the operation's own request struct, decoded |
+/// | `budget` | **yes** | see below — it is load-bearing, not decoration |
+/// | `output_policy` | **yes** | it bounds what the daemon returns, so two policies are two answers to compare |
+/// | `page` | **yes** | a page request selects *which* elements come back; one key must not answer two pages |
+/// | `request_id` | no | the per-*attempt* identity. A retry carries a fresh one by construction, so including it would make every genuine replay a conflict — it is what the rule exists to let differ |
+/// | `idempotency_key` | no | the key the ledger files this under, not part of what is compared under it |
+/// | `actor` | no | already the other half of the ledger's map key ("keys are scoped per actor"), so it cannot differ between a record and a hit |
+/// | `capability` | no | RFC 0027 S5 keeps a `cap_*` out of every derived value, and the actor it is bound to (T4) is already the scope. Two delegations of one actor's authority are one caller retrying, not two requests |
+/// | `protocol_version` | no | a request naming a version other than the negotiated one is refused at step 2 of the dispatch, so every request that reaches the ledger carries the same value and it can only add a constant |
+/// | `trace` | no | W3C propagation metadata, per-attempt like `request_id`: a retry carries a new `traceparent`, and a replay that conflicted on it would be unusable by any traced client |
+///
+/// # Why `budget`, `output_policy`, and `page` are here
+///
+/// They were omitted until bn-h1zqz, and the omission was reachable: `budget` is
+/// *semantically load-bearing* as well as declared — `verification::start_handle` writes
+/// `budget_preimage` into the `task_*` content identity, so **two budgets are two tasks** —
+/// and a `verification.start` replayed under one key with a larger budget was neither
+/// refused with `IdempotencyKeyReused` nor honoured. It returned the first budget's task
+/// verbatim, so a caller that asked for a 64-state campaign was answered with a 4-state one
+/// and could not tell. `output_policy` and `page` are the same shape of omission: each is a
+/// declared field of the request that changes the answer, so a key that ignores it answers
+/// two different questions with one recorded reply.
+///
+/// The direction of the repair is the rule's own: a *different* canonical request under a
+/// used key is refused, never silently served. A true replay — every field above equal — is
+/// unaffected and still returns the recorded outcome verbatim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayKey {
     /// `RequestEnvelope.operation`.
@@ -301,6 +345,13 @@ pub struct ReplayKey {
     pub intent: Nullable<IntentHandle>,
     /// The operation's decoded request struct.
     pub arguments: Arguments,
+    /// `RequestEnvelope.budget` — REQUIRED for `@task_starting` operations, and in the
+    /// `task_*` preimage, so two budgets are two tasks.
+    pub budget: Optional<Budget>,
+    /// `RequestEnvelope.output_policy` — the bound on what the daemon returns.
+    pub output_policy: Optional<OutputPolicy>,
+    /// `RequestEnvelope.page` — which elements a `@paginated` answer carries.
+    pub page: Optional<Page>,
 }
 
 impl ReplayKey {
@@ -312,6 +363,9 @@ impl ReplayKey {
             snapshot: envelope.snapshot.clone(),
             intent: envelope.intent.clone(),
             arguments: arguments.clone(),
+            budget: envelope.budget.clone(),
+            output_policy: envelope.output_policy.clone(),
+            page: envelope.page.clone(),
         }
     }
 }
@@ -623,9 +677,37 @@ impl DaemonState {
         self.workspaces.get_mut(handle)
     }
 
-    /// Insert or replace a lineage.
+    /// Replace a lineage with an advanced one — **the advance, not the opening**.
+    ///
+    /// `workspace.fork` is the only caller: it computes the next `Fork` from the current one
+    /// through [`advance_current`](continuum_workspace::staleness::advance_current), which is
+    /// a compare-and-set against the remembered head, so the value written here is always the
+    /// value already held plus one step. That is why an unconditional insert is the right
+    /// shape *here* — the guard is upstream, in the compare-and-set that produced the
+    /// argument.
+    ///
+    /// [`open_lineage`](DaemonState::open_lineage) is the other half, and the distinction is
+    /// bn-n1xou: `workspace.create` used this method, whose insert is unconditional, on a
+    /// lineage it named from the *content identity* of the snapshot it built. So a second
+    /// create of identical components rewound the live lineage to its origin. An opening is
+    /// not an advance and no longer spells itself as one.
     pub fn put_lineage(&mut self, fork: Fork) {
         self.lineages.insert(fork.name().clone(), fork);
+    }
+
+    /// Open a lineage — **put-if-absent**: a name this daemon already holds keeps the
+    /// lineage it has, advances and all.
+    ///
+    /// The convergent half of the pair above, and `workspace.create`'s only door to the
+    /// lineage map. A `ForkName` here is derived from a content-addressed `ws_*` handle, so
+    /// two creates naming the same components name the same lineage *by construction*; the
+    /// question is only what the second one does to the first one's history, and the answer
+    /// is nothing. That is the G0-DX-13 disposition for identical creation — "one semantic
+    /// identity; no lost receipts" — read at the lineage: identical creation converges on the
+    /// identity that exists, and the state it accumulated survives.
+    pub fn open_lineage(&mut self, fork: Fork) {
+        let name = fork.name().clone();
+        self.lineages.entry(name).or_insert(fork);
     }
 
     /// The lineage `name` labels, or [`None`].

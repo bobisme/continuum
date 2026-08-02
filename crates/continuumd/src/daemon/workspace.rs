@@ -29,6 +29,73 @@
 //! So forking twice from one base refuses the second with `StaleSnapshot`, and sealing a
 //! superseded descriptor refuses with the same code. Neither refusal spends the work first.
 //!
+//! # Creating a workspace this daemon already holds
+//!
+//! A `ws_*` handle is the *content identity* of the descriptor, and the lineage is named by
+//! that handle, so two `workspace.create` requests naming the same components name the same
+//! snapshot **and the same lineage** — by construction, not by coincidence. What the second
+//! one does is therefore a design decision, and it is this one:
+//!
+//! > **An identical create converges. It opens nothing that exists, replaces nothing that
+//! > exists, and un-seals nothing.**
+//!
+//! This is G0-DX-13's disposition for identical creation — "one semantic identity; no lost
+//! receipts", the pass condition `continuum-workspace`'s publication layer already meets
+//! under 48-thread contention — applied to the daemon's own maps. It is also
+//! [`DaemonState::append_evidence`](super::state::DaemonState::append_evidence)'s rule, in
+//! the same words that module uses: a second write under a held identity is a *convergence*,
+//! not an overwrite and not an error, and the stored value is returned untouched "even when
+//! the two appends disagree about everything else".
+//!
+//! ## What it was before, and what that cost (bn-n1xou, bn-1kp6 DEFECT 1)
+//!
+//! `create` derived the `ForkName` from the handle and then called `put_lineage`, an
+//! unconditional insert, so a second create of identical components **replaced the live
+//! `Fork` with a fresh `Fork::diverge` rooted at the original snapshot**. Three consequences
+//! were pinned as falsifications, all from that one line:
+//!
+//! - a superseded snapshot — refused `StaleSnapshot` one request earlier — was served again
+//!   by `verification.start` and `task.resume`, which is the DX-03 experiment's own sentence
+//!   ("mutate workspace, reuse old handle") coming out the wrong way;
+//! - the snapshot that *was* the head became an identity the rewound `Fork` could not place,
+//!   so the caller's own mutation was stranded: `CapabilityDenied` on seal and on fork, with
+//!   nothing in the refusal saying a lineage had been rewound;
+//! - `put_workspace` replaced the record too, so a `seal: false` re-create flipped a sealed
+//!   snapshot back to unsealed and *revoked a live continuation* pinned to it.
+//!
+//! The idempotency ledger was the only guard, and `rule idempotency.replay` honours a key
+//! only "for at least the retention window the daemon declares" and scopes keys per actor —
+//! so a retry after the window, or a second agent, reached the rewind with no rule broken.
+//!
+//! ## The `seal` divergence, stated explicitly
+//!
+//! Convergence leaves one field that two identical creates can legitimately disagree about,
+//! because it is not part of the identity they converge on: `seal`. The rule is
+//! **monotone** — `sealed` after the create is `held.sealed || request.seal` — and each
+//! direction is chosen rather than fallen into:
+//!
+//! | held | `seal` | result | why |
+//! |---|---|---|---|
+//! | unsealed | `true` | **sealed**, `sealed: true` | exactly `workspace.seal`'s effect on the same snapshot, through the operation that also asked for it. Nothing is lost by doing it here |
+//! | sealed | `true` | stays sealed, `sealed: true` | already true; the publication is convergent in the store (DX-13), so re-publishing names the same records |
+//! | sealed | `false` | **stays sealed**, `sealed: true` | `seal: false` is "do not seal it", not "un-seal it". There is no un-seal operation in this protocol, and a seal is what a continuation's staleness predicate reads: letting a create revoke one would let any caller revoke any continuation by re-creating components it can already name |
+//! | unsealed | `false` | stays unsealed, `sealed: false` | nothing to do; identical to the first create |
+//!
+//! Row three is the only one whose *response* differs from the pre-fix daemon's: it reports
+//! `sealed: true` where the old code reported `sealed: false` and made it true by making the
+//! record false. `sealed` is a `required` field of `WorkspaceCreateResponse` declared as
+//! whether the snapshot is sealed, so reporting the state the daemon is actually in is
+//! conformance to what the field already says, not a new wire fact. Every other row answers
+//! byte-identically with what the same request produced before.
+//!
+//! The rest of the record — the descriptor, the governing intent, the lineage name — is the
+//! held one, untouched. That is `append_evidence`'s "disagree about everything else" clause
+//! and it has one concrete consequence worth naming: two creates whose `files` agree but
+//! whose `components.intent` differs converge on the *first* intent, because the intent is
+//! not in the snapshot's content identity. A re-create cannot re-govern a snapshot that
+//! exists; a caller wanting a differently governed workspace is naming a different workspace
+//! and has to say so in the content.
+//!
 //! # The two lineage answers, and the one that must not be distinguishable
 //!
 //! [`staleness::check_current`] returns two distinct refusals, and INV-008 is why they are
@@ -279,23 +346,39 @@ fn create(
 
     let handle = wire_handle(&descriptor)?;
     let lineage = lineage_name(&handle)?;
-    let sealed = if matches!(request.seal, Optional::Present(true)) {
+    let requested_seal = matches!(request.seal, Optional::Present(true));
+    if requested_seal {
         publish(call, &descriptor, store)?;
-        true
-    } else {
-        false
-    };
+    }
 
-    state.put_lineage(Fork::diverge(lineage.clone(), descriptor.source()));
-    state.put_workspace(
-        handle.clone(),
-        WorkspaceRecord {
-            descriptor,
-            intent: request.components.intent.clone(),
-            lineage,
-            sealed,
-        },
-    );
+    // A create is convergent, not destructive. See "Creating a workspace this daemon
+    // already holds" in this module's documentation for the whole reading; the three lines
+    // are: the lineage is *opened* if absent and otherwise left exactly as it is
+    // (`open_lineage` is put-if-absent), the held record is not replaced, and `sealed` is
+    // monotone — a create can seal an unsealed snapshot, and no create un-seals one.
+    state.open_lineage(Fork::diverge(lineage.clone(), descriptor.source()));
+    let sealed = match state.workspace(&handle).map(|held| held.sealed) {
+        Some(already) => {
+            if requested_seal && !already {
+                if let Some(held) = state.workspace_mut(&handle) {
+                    held.sealed = true;
+                }
+            }
+            already || requested_seal
+        }
+        None => {
+            state.put_workspace(
+                handle.clone(),
+                WorkspaceRecord {
+                    descriptor,
+                    intent: request.components.intent.clone(),
+                    lineage,
+                    sealed: requested_seal,
+                },
+            );
+            requested_seal
+        }
+    };
 
     Ok(Effect::new(
         Payload::WorkspaceCreate(WorkspaceCreateResponse {
