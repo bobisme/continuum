@@ -312,7 +312,7 @@ Ordinary tasks may not mutate intent. Intent changes require a new Intent Contra
 
 Every stateful workflow uses explicit handles. A dropped connection or restarted client does not change meaning.
 
-### INV-003 — No prose-only machine interfaces
+### INV-003 — No prose-only machine interfaces (delivered: bn-1eqt — crates/continuumd/tests/inv003_no_prose_only_evidence.rs: schema-closure Rust regression + daemon-emission schema resolution + wire-bytes/typed-enum citations + anti-drift artifact-class table + mutant anti-vacuity)
 
 Human text may accompany a result, but agents and integrations consume versioned schemas and enums.
 
