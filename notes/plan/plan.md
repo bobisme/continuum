@@ -308,7 +308,7 @@ Once the trust loop is closed, Continuum should search beyond known implementati
 
 Ordinary tasks may not mutate intent. Intent changes require a new Intent Contract, semantic diff, policy decision, and invalidation of dependent evidence.
 
-### INV-002 — No hidden semantic state
+### INV-002 — No hidden semantic state (delivered: bn-1aqq — crates/continuumd/tests/inv002_no_hidden_state_evidence.rs)
 
 Every stateful workflow uses explicit handles. A dropped connection or restarted client does not change meaning.
 
