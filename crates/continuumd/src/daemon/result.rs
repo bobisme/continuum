@@ -37,7 +37,7 @@ use crate::protocol::scalar::{AuditCorrelationId, RequestId};
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::vocabulary::{ErrorCode, ResultStatus};
 
-use super::family::{Effect, Fault};
+use super::family::{Effect, Fault, Resumption};
 
 /// The detail every `CapabilityDenied` carries, whatever the failing test was.
 ///
@@ -145,6 +145,18 @@ pub fn success(
 }
 
 /// The result envelope of a failed call.
+///
+/// # The two fields a `BudgetExhausted` may not leave absent
+///
+/// > `BudgetExhausted` […] carries `continuation`, or a typed `non_resumable_reason`.
+/// >
+/// > — RFC 0026 §10.3 taxonomy; `schemas/verification-task.schema.json`'s SD-13 `oneOf`
+///
+/// Both were hard-coded absent here, so every `BudgetExhausted` this daemon raised was the
+/// silent dead end that rule forbids. They are now written from the fault's own
+/// [`Resumption`], which the code is chosen alongside rather than remembered afterwards —
+/// [`Fault::exhausted`] and [`Fault::exhausted_from`] are the two constructors, and neither
+/// can produce the code without one of the two answers.
 #[must_use]
 pub fn failure(
     request_id: &RequestId,
@@ -152,6 +164,19 @@ pub fn failure(
     epochs: &EpochSet,
     audit: Option<&AuditCorrelationId>,
 ) -> ResultEnvelope {
+    let (continuation, non_resumable_reason) = match &fault.resumption {
+        Resumption::NotApplicable => (Optional::Absent, Optional::Absent),
+        Resumption::From(handle) => (Optional::Present(handle.clone()), Optional::Absent),
+        Resumption::NonResumable(reason) => {
+            (Optional::Absent, Optional::Present((*reason).to_owned()))
+        }
+    };
+    debug_assert!(
+        fault.code != ErrorCode::BudgetExhausted
+            || !continuation.is_absent()
+            || !non_resumable_reason.is_absent(),
+        "SD-13: a BudgetExhausted failure carries a continuation or a non_resumable_reason"
+    );
     ResultEnvelope {
         request_id: request_id.clone(),
         status: ResultStatus::Error,
@@ -161,8 +186,8 @@ pub fn failure(
             detail: fault.detail.to_owned(),
             data: Optional::Absent,
             recovery: Vec::new(),
-            continuation: Optional::Absent,
-            non_resumable_reason: Optional::Absent,
+            continuation,
+            non_resumable_reason,
             retryable: fault.retryable,
         }),
         assurance: Optional::Absent,

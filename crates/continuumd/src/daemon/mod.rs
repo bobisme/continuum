@@ -65,6 +65,7 @@
 //! handler. See [`family`] for the four-step seam.
 
 pub mod admission;
+pub mod budget;
 pub mod capability;
 pub mod errors;
 pub mod evidence;

@@ -952,7 +952,7 @@ fn positive_the_daemon_cancellation_matrix_is_the_declared_table_at_every_phase(
                 "{context}: the lane did not reach the phase the row names"
             );
             assert_eq!(
-                entry(&fixture, &task).publications,
+                entry(&fixture, &task).publications(),
                 row.publications,
                 "{context}: the lane published a different number of artifacts"
             );
@@ -1015,7 +1015,7 @@ fn positive_the_daemon_cancellation_matrix_is_the_declared_table_at_every_phase(
 
             // INV-009: the cancel published nothing and replaced nothing.
             assert_eq!(
-                entry(&fixture, &task).publications,
+                entry(&fixture, &task).publications(),
                 row.publications,
                 "{context}: the cancel changed what the task had published"
             );
@@ -1075,7 +1075,7 @@ fn positive_no_lane_runs_work_after_it_was_cancelled_at_any_phase() {
 
             let answer = cancel_answer(&mut fixture, &task, "req_cancel");
             let opened = regions(&fixture).opened();
-            let published = entry(&fixture, &task).publications;
+            let published = entry(&fixture, &task).publications();
 
             if let Some(continuation) = held {
                 assert_eq!(
@@ -1107,7 +1107,7 @@ fn positive_no_lane_runs_work_after_it_was_cancelled_at_any_phase() {
                 "{context}: a refused resume opens no scope, because it runs nothing"
             );
             assert_eq!(
-                entry(&fixture, &task).publications,
+                entry(&fixture, &task).publications(),
                 published,
                 "{context}: and publishes nothing"
             );
@@ -1201,7 +1201,7 @@ fn positive_a_run_that_faulted_leaves_a_cancellable_task_and_no_open_scope() {
         .first()
         .map(|handle| (*handle).clone())
         .expect("the faulted run left its task in the table");
-    assert_eq!(entry(&fixture, &stranded).publications, 0);
+    assert_eq!(entry(&fixture, &stranded).publications(), 0);
     assert!(entry(&fixture, &stranded).continuation.is_none());
 
     let answer = cancel_answer(&mut fixture, &stranded, "req_cancel");

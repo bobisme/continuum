@@ -524,13 +524,48 @@ impl Effect {
     }
 }
 
-/// A typed failure: the wire code and the stable explanation of it in context.
+/// What a failure offers a caller instead of a dead end.
+///
+/// > `BudgetExhausted` | resource | task-budget spend was exhausted; carries
+/// > `continuation`, or a typed `non_resumable_reason` | no — resume with a larger budget
+/// >
+/// > — `notes/plan/rfcs/0026-continuumd-native-protocol.md`, §10.3 taxonomy
+///
+/// The `Error` struct has carried `continuation` and `non_resumable_reason` since 3.0 and
+/// this daemon wrote `Absent` into both, so a `BudgetExhausted` reaching a caller was the
+/// silent dead end SD-13's `oneOf` — "a `BudgetExhausted` failure carries a non-null
+/// continuation or a typed `non_resumable_reason`" — exists to forbid. bn-23j7s makes the
+/// choice a value the fault carries, so the two wire fields are written from something
+/// rather than defaulted away.
+///
+/// Three arms, and the first is not a placeholder for the other two: most codes in the
+/// §10.3 taxonomy are not about resumption at all, and offering a resumption question on a
+/// `MalformedRequest` would invent one nobody asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resumption {
+    /// This code says nothing about resuming, so the two wire fields stay absent.
+    NotApplicable,
+    /// Resume from this continuation. The `cont_*` artifact is already filed.
+    From(ContinuationHandle),
+    /// There is no continuation, and this is the typed reason there is none.
+    ///
+    /// `&'static str` for the reason [`Fault::detail`] is one: `rule envelope.no_prose`
+    /// forbids interpolating source, logs, model text, or production payloads into a wire
+    /// string, and a static string cannot carry any of them.
+    NonResumable(&'static str),
+}
+
+/// A typed failure: the wire code, the stable explanation of it in context, and what the
+/// caller can resume from.
 ///
 /// `detail` is `&'static str` rather than `String` by construction, because
 /// `rule envelope.no_prose` forbids interpolating source, logs, model text, or production
 /// payloads into it and a static string cannot carry any of them. A caller needing the
 /// specifics reads them from `code` and, once the codec lands, from `Error.data`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Not [`Copy`] as of bn-23j7s: [`Resumption::From`] carries a handle, and a fault that
+/// could be duplicated silently would be two answers to "where does this resume".
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fault {
     /// The plan §10.3 code.
     pub code: ErrorCode,
@@ -538,6 +573,8 @@ pub struct Fault {
     pub detail: &'static str,
     /// Whether an identical retry can succeed without any change by the caller.
     pub retryable: bool,
+    /// What the caller can resume from, for the codes RFC 0026 requires it of.
+    pub resumption: Resumption,
 }
 
 impl Fault {
@@ -549,6 +586,43 @@ impl Fault {
             code,
             detail,
             retryable: false,
+            resumption: Resumption::NotApplicable,
+        }
+    }
+
+    /// A `BudgetExhausted` with no continuation, whose typed `non_resumable_reason` is its
+    /// own detail.
+    ///
+    /// The constructor exists so that the SD-13 obligation is discharged where the code is
+    /// *chosen* rather than remembered at the envelope: a `BudgetExhausted` built by
+    /// [`Self::new`] would reach `result::failure` with both fields absent, and
+    /// `tests/pr6_impl02_budget_evidence.rs` holds every one this daemon can raise to
+    /// carrying one of the two.
+    ///
+    /// One string, deliberately. [`region::NO_CONTINUATION`](super::region::NO_CONTINUATION)
+    /// already records the design — RFC 0026's `non_resumable_reason` "is a *wire* field of
+    /// the task record and is written from the daemon's own fault detail" — so the reason a
+    /// `task.status` reader sees and the reason the failing call's envelope carries are the
+    /// same value and cannot drift apart. A condition whose reason is genuinely not its
+    /// detail builds [`Resumption::NonResumable`] directly.
+    #[must_use]
+    pub const fn exhausted(detail: &'static str) -> Self {
+        Self {
+            code: ErrorCode::BudgetExhausted,
+            detail,
+            retryable: false,
+            resumption: Resumption::NonResumable(detail),
+        }
+    }
+
+    /// A `BudgetExhausted` the caller can resume from.
+    #[must_use]
+    pub fn exhausted_from(detail: &'static str, continuation: ContinuationHandle) -> Self {
+        Self {
+            code: ErrorCode::BudgetExhausted,
+            detail,
+            retryable: false,
+            resumption: Resumption::From(continuation),
         }
     }
 

@@ -681,7 +681,7 @@ fn positive_a_closed_campaign_runs_in_a_region_finalized_before_the_dispatch_ret
 
     let entry = entry(&fixture, &task);
     assert_eq!(entry.status, TaskStatus::Completed);
-    assert_eq!(entry.publications, 1, "one campaign committed");
+    assert_eq!(entry.publications(), 1, "one campaign committed");
     let region = entry.region.expect("the run recorded the scope it ran in");
     assert_eq!(
         regions(&fixture).tree().state(region),
@@ -720,7 +720,7 @@ fn positive_a_parked_campaign_settles_its_worker_and_the_wire_continuation_survi
         Some(&continuation),
         "`TaskRecord.continuation` is REQUIRED when `status = suspended`"
     );
-    assert_eq!(entry.publications, 1);
+    assert_eq!(entry.publications(), 1);
 
     let region = entry.region.expect("the run recorded the scope it ran in");
     assert_eq!(
@@ -781,7 +781,8 @@ fn positive_resume_spawns_a_new_worker_in_a_new_region() {
     );
     assert_eq!(entry.status, TaskStatus::Completed);
     assert_eq!(
-        entry.publications, 2,
+        entry.publications(),
+        2,
         "resume MAY add evidence; it MUST NOT replace prior artifacts (INV-009)"
     );
     assert_eq!(regions(&fixture).opened(), 2);
@@ -1058,7 +1059,7 @@ fn negative_resume_after_a_cancel_runs_no_work_and_reports_the_terminal_status()
     assert_eq!(cancelled.envelope.status, ResultStatus::Ok);
 
     let opened = regions(&fixture).opened();
-    let published = entry(&fixture, &task).publications;
+    let published = entry(&fixture, &task).publications();
     let refused = resume(&mut fixture, &continuation, None, "req_resume");
     assert_eq!(refused.envelope.status, ResultStatus::Ok);
     match &refused.payload {
@@ -1075,7 +1076,7 @@ fn negative_resume_after_a_cancel_runs_no_work_and_reports_the_terminal_status()
         "a refused resume opens no scope, because it runs nothing"
     );
     assert_eq!(
-        entry(&fixture, &task).publications,
+        entry(&fixture, &task).publications(),
         published,
         "and publishes nothing"
     );
@@ -1400,7 +1401,7 @@ fn positive_a_valid_resume_is_deterministic_across_two_fresh_daemons() {
             resumed,
             bytes,
             regions(&fixture).render(),
-            entry(&fixture, &task).publications,
+            entry(&fixture, &task).publications(),
         )
     };
     let first = run();

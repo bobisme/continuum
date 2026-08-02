@@ -58,6 +58,16 @@
 //! left out — silently ignoring a declared ceiling is exactly the failure that rule exists
 //! to prevent. The engine's depth and transition bounds have no wire dimension at all and
 //! are taken from `Bounds::CERTIFIABLE`, the kernel wire form's own ceilings.
+//!
+//! That paragraph is now a *value* rather than a claim (bn-23j7s). It is
+//! [`budget::METERS`](super::budget::METERS), one `MeterSet` naming the single meter this
+//! daemon has, and the omission manifest is derived from it by
+//! [`budget::omissions_of`](super::budget::omissions_of). The eight-name `unenforced` array
+//! this module used to carry is gone: it said the same thing, but a deployment that grew a
+//! clock would have kept reporting `budget.wall_ms` as unenforced until somebody remembered
+//! to delete a line. `bounds_of` moved with it, to
+//! [`budget::bounds_of`](super::budget::bounds_of), where it is a projection of the ledger's
+//! `states` ceiling instead of a second read of the same wire field.
 
 use std::collections::BTreeMap;
 
@@ -73,6 +83,7 @@ use continuum_workspace::snapshot::Snapshot;
 use continuum_workspace::staleness::check_current;
 
 use super::Services;
+use super::budget::{self, Publications};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 // `Scope` is `continuum_engine_reference::checking::Scope` in this module — the exploration's
 // completeness — so the region scope is imported under a name that says which of the two it
@@ -81,7 +92,7 @@ use super::region::{self, Scope as RegionScope};
 use super::state::DaemonState;
 use super::task::{
     Campaign, Continuation, PinnedEpochs, Preimage, TaskEntry, budget_preimage,
-    continuation_handle, epochs_preimage, task_handle, unsupported,
+    continuation_handle, epochs_preimage, published, task_handle, unsupported,
 };
 use crate::protocol::envelope::{
     AssuranceEnvelope, Budget, EnvelopeDimension, Omission, ProducedDimension,
@@ -209,46 +220,10 @@ fn snapshot_modules(snapshot: &Snapshot) -> Vec<(String, Vec<u8>)> {
 // budget → bounds
 // ---------------------------------------------------------------------------
 
-/// The engine bounds a wire budget declares.
-///
-/// `states` is the one dimension with an enforcement path; depth and transitions have no
-/// wire dimension and take the kernel wire form's own ceilings through `Bounds::CERTIFIABLE`.
-/// A budget declaring no `states` therefore runs at the certifiable ceiling rather than at a
-/// default nobody reviewed — the ceiling is *declared*, in `bfs`'s own constants, which is
-/// what that module's "no silent caps" rule asks for.
-#[must_use]
-pub fn bounds_of(budget: &Budget) -> Bounds {
-    match budget.states.value() {
-        Some(states) => {
-            Bounds::CERTIFIABLE.with_states(usize::try_from(*states).unwrap_or(usize::MAX))
-        }
-        None => Bounds::CERTIFIABLE,
-    }
-}
-
 /// Which bound a partial exploration tripped.
 #[must_use]
 pub fn tripped(partial: &Partial) -> bfs::Bound {
     partial.tripped()
-}
-
-/// The budget dimensions a caller declared and this daemon does not enforce (INV-007).
-fn unenforced(budget: &Budget) -> Vec<Omission> {
-    let declared: [(&str, bool); 8] = [
-        ("budget.wall_ms", budget.wall_ms.value().is_some()),
-        ("budget.cpu_ms", budget.cpu_ms.value().is_some()),
-        ("budget.memory_bytes", budget.memory_bytes.value().is_some()),
-        ("budget.solver_ms", budget.solver_ms.value().is_some()),
-        ("budget.proof_ms", budget.proof_ms.value().is_some()),
-        ("budget.tokens", budget.tokens.value().is_some()),
-        ("budget.candidates", budget.candidates.value().is_some()),
-        ("budget.bytes", budget.bytes.value().is_some()),
-    ];
-    declared
-        .into_iter()
-        .filter(|(_, present)| *present)
-        .map(|(subject, _)| unsupported(subject))
-        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -321,8 +296,7 @@ fn run(model: &Model, target: &Target, bounds: Bounds) -> Result<Result<Campaign
             // report, because initial states are what exploration starts *from*. This is the
             // `failed_reason = BudgetExhausted` with no continuation that RFC 0026 requires a
             // `non_resumable_reason` beside.
-            return Ok(Err(Fault::new(
-                ErrorCode::BudgetExhausted,
+            return Ok(Err(Fault::exhausted(
                 "the declared state budget cannot hold the model's own initial states",
             )));
         }
@@ -464,7 +438,42 @@ fn run_in(
 
     // The result exists and nothing a reader can observe does. The store-side counterpart is
     // `StagedPublication`, whose phase says outright: "nothing is stored".
+    //
+    // The publication is *named* here and committed below (bn-23j7s). Between the two lines
+    // it is staged: `TaskEntry::evidence` holds a commitment nothing can read it through —
+    // `Publications::committed` does not see it and `Publications::artifacts` cannot name it
+    // — which is G0-DX-14's "artifacts either committed or absent" as a property of the type
+    // rather than of the paths below happening to be careful. Every path out of this function
+    // from here either commits it or discards it.
     state.regions_mut().step(scope, WorkerStep::Reserve);
+    let staged = {
+        let sequence = state
+            .tasks()
+            .get(handle)
+            .ok_or_else(Fault::denied)?
+            .publications();
+        match budget::publication_commitment(
+            services.identifier(),
+            handle,
+            sequence,
+            snapshot.value().map(|snapshot| snapshot.as_str()),
+            campaign.states() as u64,
+            campaign.is_closed(),
+            &campaign.frontier,
+        ) {
+            Ok(commitment) => commitment,
+            Err(fault) => {
+                state.regions_mut().fail(scope, fault.code);
+                return Err(fault);
+            }
+        }
+    };
+    state
+        .tasks_mut()
+        .get_mut(handle)
+        .ok_or_else(Fault::denied)?
+        .evidence
+        .stage(staged);
 
     // Park before the status moves, so a `Suspended` task never exists without the
     // continuation `rule task.status_monotonic` says it has by definition.
@@ -476,6 +485,7 @@ fn run_in(
             // Unreachable, and it discards the staged publication rather than leaving it in
             // flight: a campaign without a snapshot could not have been started.
             state.regions_mut().fail(scope, ErrorCode::CapabilityDenied);
+            discard(handle, state);
             return Err(Fault::denied());
         };
         let mut preimage = Preimage::new();
@@ -493,6 +503,7 @@ fn run_in(
             Ok(named) => named,
             Err(fault) => {
                 state.regions_mut().fail(scope, fault.code);
+                discard(handle, state);
                 return Err(fault);
             }
         };
@@ -515,9 +526,45 @@ fn run_in(
             .tasks_mut()
             .get_mut(handle)
             .ok_or_else(Fault::denied)?;
+        // The one meter this daemon has, read (bn-23j7s). The charge is the *difference*
+        // against what is already recorded, because `bfs::explore` has no partial-state
+        // entry point and a resumed walk re-explores the parked prefix: charging the whole
+        // count on every run would report a Die Hard campaign that parked at 3 and closed at
+        // 16 as having cost 19. See `budget::charge_states`.
+        //
+        // A charge that could not land would be a defect in this wiring rather than an answer
+        // to the caller — `bfs` refuses the expansion that would carry the explored set past
+        // `Bounds::states`, and `budget::bounds_of` never sets that bound below the ceiling —
+        // so an exhaustion here is recorded on the ledger, where `BudgetLedger::exhaustion`
+        // makes it readable, and never raised.
+        let charged = budget::charge_states(&mut entry.ledger, campaign.states() as u64);
+        debug_assert!(
+            charged.is_some_and(|outcome| outcome.is_admitted()),
+            "a campaign explored more states than its own bound admitted"
+        );
         entry.campaign = Some(campaign);
         entry.continuation = continuation;
-        entry.publications += 1;
+        // The checkpoint binds this commit's *count* to the spend that produced it, and the
+        // publication carries the *identity*. bn-1gc's `Checkpoint` is the first half and
+        // could not be the second: `continuum-task` declares no `continuum-workspace` edge,
+        // so nothing there can name an artifact.
+        let committed = entry.publications() + 1;
+        match entry.ledger.checkpoint(committed) {
+            Ok(checkpoint) => {
+                let named = entry.evidence.commit(checkpoint);
+                debug_assert!(
+                    named.is_some(),
+                    "the publication staged before the park is the one committed here"
+                );
+            }
+            Err(_) => {
+                // Unreachable: this daemon holds no reservation at rest and
+                // `committed` is monotone by construction. Recorded as a discard rather than
+                // raised — an accounting that cannot price a commit does not get to publish
+                // it, which is the both-or-neither direction.
+                entry.evidence.discard();
+            }
+        }
         entry.reach(
             if closed {
                 MILESTONE_CLOSED
@@ -548,6 +595,23 @@ fn run_in(
         },
     );
     Ok(())
+}
+
+/// Drop the publication this run staged, on a path that will not commit it.
+///
+/// > While it is open, the artifact is neither committed nor absent — the state G0-DX-14's
+/// > second conjunct forbids at rest.
+/// >
+/// > — `ObligationKind::ProvisionalPublication`
+///
+/// So every path out of [`run_in`] past the `Reserve` step resolves the staged publication
+/// exactly once: this on the two refusals, and `Publications::commit` on the one success.
+/// Nothing here reports a failure, because a task the daemon no longer holds has no staged
+/// publication to leak.
+fn discard(handle: &TaskHandle, state: &mut DaemonState) {
+    if let Some(entry) = state.tasks_mut().get_mut(handle) {
+        entry.evidence.discard();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -726,12 +790,14 @@ fn start(
             // The cached lane answers with a *result*, not a task, so its status is `ok`;
             // the envelope still names the task the result is about, which is the second
             // clause of the `task` presence rule.
-            let mut effect = Effect::new(payload, verdict.0).observing(entry.handle.clone());
+            let mut effect = Effect::new(payload, verdict.0)
+                .observing(entry.handle.clone())
+                .with_artifacts(published(entry));
             effect.assurance = verdict.1;
             effect.omissions = omissions;
             return Ok(effect);
         }
-        return Ok(started(entry, &budget));
+        return Ok(started(entry));
     }
 
     let entry = TaskEntry {
@@ -743,8 +809,7 @@ fn start(
         target: request.target.clone(),
         portfolio: request.portfolio,
         priority_class,
-        bounds: bounds_of(&budget),
-        budget: budget.clone(),
+        ledger: budget::ledger_of(&budget),
         epochs: services.epochs().clone(),
         model: source,
         milestones: Vec::new(),
@@ -758,14 +823,14 @@ fn start(
         // `advance` writes all three, inside the scope it opens.
         region: None,
         worker: None,
-        publications: 0,
+        evidence: Publications::new(),
     };
-    let bounds = entry.bounds;
+    let bounds = entry.bounds();
     state.tasks_mut().put(entry);
     advance(&handle, bounds, state, services)?;
 
     let entry = state.tasks().get(&handle).ok_or_else(Fault::denied)?;
-    Ok(started(entry, &budget))
+    Ok(started(entry))
 }
 
 /// The `verification.start` answer that names a task.
@@ -777,15 +842,21 @@ fn start(
 /// operation because it is `@task_starting`, and until bn-i4aem item 9 neither was
 /// reachable: `result::success` hard-coded `ok` with both handles absent, so a parked
 /// campaign's continuation was reachable only by a second `task.status` call.
-fn started(entry: &TaskEntry, budget: &Budget) -> Effect {
+fn started(entry: &TaskEntry) -> Effect {
     let mut effect = Effect::new(
         Payload::VerificationStart(VerificationStartResponse {
             task: Optional::Present(entry.handle.clone()),
             result: Optional::Absent,
         }),
         Nullable::Null,
-    );
-    effect.omissions = [entry.omissions(), unenforced(budget)].concat();
+    )
+    .with_artifacts(published(entry));
+    // The declared ceilings this daemon cannot enforce, *derived* from the task's own ledger
+    // (bn-23j7s). It was `unenforced(budget)`, an eight-name array walked against the
+    // request's budget; the subjects, the reason token and their order are unchanged,
+    // because `DimensionOmission` emits the spelling that array emitted and
+    // `CostDimension::ALL` is the IDL's declaration order.
+    effect.omissions = [entry.omissions(), budget::omissions_of(&entry.ledger)].concat();
     match (entry.status, &entry.continuation) {
         (TaskStatus::Suspended, Some(continuation)) => {
             effect.suspended(entry.handle.clone(), continuation.clone())
@@ -864,8 +935,11 @@ fn verification_result(
     entry: &TaskEntry,
 ) -> Result<(VerificationResult, SemanticVerdictValue), Fault> {
     let Some(campaign) = &entry.campaign else {
-        return Err(Fault::new(
-            ErrorCode::BudgetExhausted,
+        // SD-13: never a silent dead end. This task holds no continuation — initial states
+        // are what exploration starts *from*, so there is no prefix of the walk to resume —
+        // and the typed reason says exactly that rather than leaving a caller to infer it
+        // from an absent field.
+        return Err(Fault::exhausted(
             "the declared state budget cannot hold the model's own initial states",
         ));
     };

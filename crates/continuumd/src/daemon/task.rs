@@ -81,18 +81,20 @@ use continuum_engine_reference::checking::{
     CheckOutcome, CheckReport, DeadlockOutcome, Unresolved,
 };
 use continuum_engine_reference::model::State;
+use continuum_task::budget::BudgetLedger;
 use continuum_task::region::RegionId;
 use continuum_task::region::worker::{WorkerId, WorkerStep};
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
 use continuum_workspace::staleness::check_current;
 
+use super::budget::{self, Publications};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 use super::region::{self, Scope, TaskRegions};
 use super::state::DaemonState;
 use super::{Services, verification};
 use crate::protocol::envelope::{
-    Budget, Cost, EpochSet, Omission, StructuralVerdictValue, Verdict,
+    ArtifactRef, Budget, Cost, EpochSet, Omission, StructuralVerdictValue, Verdict,
 };
 use crate::protocol::operations::task::{
     TaskCancelRequest, TaskCancelResponse, TaskResumeRequest, TaskResumeResponse,
@@ -292,7 +294,14 @@ pub struct Continuation {
 // ---------------------------------------------------------------------------
 
 /// One task, as the daemon holds it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Deliberately not [`Clone`], [`PartialEq`] or [`Eq`] as of bn-23j7s: it holds a
+/// [`BudgetLedger`], which is not `Clone` for the reason
+/// [`Ledger`](continuum_task::region::obligation::Ledger) is not — "a ledger is one task's
+/// single accounting, and a second copy of it is a second answer to what this cost". The
+/// three derives were unused; a task is compared through [`Self::record`], which is the
+/// wire value and *is* comparable.
+#[derive(Debug)]
 pub struct TaskEntry {
     /// The task's content identity.
     pub handle: TaskHandle,
@@ -311,10 +320,20 @@ pub struct TaskEntry {
     pub portfolio: Portfolio,
     /// The declared priority class.
     pub priority_class: PriorityClass,
-    /// The budget in force. `task.update_budget` replaces it; the identity does not change.
-    pub budget: Budget,
-    /// The engine bounds `budget` declares, after `verification::bounds_of`.
-    pub bounds: Bounds,
+    /// This task's budget accounting: what it may spend, what it has spent, and every
+    /// checkpoint it has bound committed evidence to.
+    ///
+    /// The seam `crates/continuum-task/src/budget.rs` designed and bn-23j7s wired. It
+    /// replaces two fields that were second readings of it — a `budget: Budget` and the
+    /// `bounds: Bounds` derived from that budget — because two fields carrying one fact are
+    /// two answers to what a task may spend. Both are still available and are now
+    /// *projections*: [`Self::budget`] is the wire spelling of the ledger's ceilings and
+    /// [`Self::bounds`] is its `states` ceiling as an engine bound.
+    ///
+    /// `task.update_budget` writes it through [`budget::update`], which returns
+    /// `rule task.update_budget`'s five-arm legality table per dimension; the identity does
+    /// not change, because a `task_*` handle's preimage is fixed at creation.
+    pub ledger: BudgetLedger,
     /// The epochs the task was created under, copied onto its record.
     pub epochs: EpochSet,
     /// The content identity of the model source the campaign runs against.
@@ -344,22 +363,29 @@ pub struct TaskEntry {
     pub region: Option<RegionId>,
     /// The worker that most recent run *was*, or [`None`] before anything ran.
     pub worker: Option<WorkerId>,
-    /// How many artifacts this task has committed — the daemon-side mirror of the region
-    /// layer's evidence ledger.
+    /// What this task has committed — **named**, not counted (bn-23j7s).
     ///
-    /// It counts *campaign results*: a run that produced one wrote it onto
+    /// It holds *campaign results*: a run that produced one wrote it onto
     /// [`Self::campaign`], where `verification.result` reads it, and that is what a reader
     /// can observe of this task today. The evidence-graph handles in
     /// [`Self::committed_evidence`] are PR 7's, and a task that commits none says so
     /// through [`Self::omissions`] rather than reporting a zero it did not measure.
     ///
+    /// This was a `publications: u32` counter, and the difference is IMPL-02's own
+    /// acceptance criterion: "committed partial evidence survives daemon restart;
+    /// uncommitted partials are absent, never half-visible" is not a claim a counter can be
+    /// held to, because a count that came back as 2 says nothing about *which* two. Each
+    /// publication now carries the content identity of what was committed, and
+    /// [`Publications`] is a linear typestate in which a staged publication is
+    /// unobservable. [`Self::publications`] is the count, derived.
+    ///
     /// Monotone: `task.resume` adds to it and nothing subtracts, which is INV-009's
     /// "resuming a task may add evidence … it may not silently replace prior artifacts" at
-    /// the counter. The invariant `continuation.is_some() ⇒ publications > 0` is what makes
+    /// the list. The invariant `continuation.is_some() ⇒ publications > 0` is what makes
     /// the cancellation table's both-or-neither arms unconstructable wrong, and it holds by
     /// construction: [`verification::advance`](super::verification::advance) is the one
-    /// writer of both, and it writes the campaign before it mints the continuation.
-    pub publications: u32,
+    /// writer of both, and it commits the publication before it mints the continuation.
+    pub evidence: Publications,
 }
 
 impl TaskEntry {
@@ -418,24 +444,54 @@ impl TaskEntry {
         });
     }
 
+    /// The budget in force, in the wire's spelling.
+    ///
+    /// A projection of [`Self::ledger`]'s ceilings rather than a field beside them
+    /// (bn-23j7s). `task.update_budget` records a ceiling on every arm of its legality
+    /// table, including the one that parks the task, so this reports what the caller most
+    /// recently declared — never a bound the caller has withdrawn.
+    #[must_use]
+    pub fn budget(&self) -> Budget {
+        budget::wire_budget(&self.ledger)
+    }
+
+    /// The engine bounds this task's budget declares.
+    ///
+    /// A projection of the ledger's `states` ceiling, floored at recorded spend — see
+    /// [`budget::bounds_of`] for why the floor is what keeps a lowered ceiling from
+    /// un-exploring a campaign INV-009 forbids truncating.
+    #[must_use]
+    pub fn bounds(&self) -> Bounds {
+        budget::bounds_of(&self.ledger)
+    }
+
+    /// How many publications are durable.
+    #[must_use]
+    pub fn publications(&self) -> u32 {
+        self.evidence.count()
+    }
+
     /// What this task spent, in the dimensions the engine measures.
     ///
     /// > A dimension the engine does not measure is absent, never zero.
     /// >
     /// > — `Cost`, IDL §6
     ///
-    /// The reference engine counts states and labelled transitions; RFC 0026's `Cost`
-    /// declares a dimension for the first and none for the second, so `states` is reported
-    /// and every other dimension is absent. Nothing here reads a clock, so `wall_ms` is
+    /// A projection of [`BudgetLedger::spend`] (bn-23j7s), where it was a second reading of
+    /// `campaign.states()`. The reference engine counts states and labelled transitions;
+    /// RFC 0026's `Cost` declares a dimension for the first and none for the second, and
+    /// [`budget::METERS`] says so — `states` is reported and every other dimension is
+    /// absent because nothing measures it. Nothing here reads a clock, so `wall_ms` is
     /// absent on every task — absent as a missing *measurement*, which is also what keeps
     /// `rule ordering.deterministic`'s byte-identical repeat true of a wall clock's output.
+    ///
+    /// The campaign has not stopped being where the number comes from; it has stopped being
+    /// where the number is *kept*. A campaign is what gives this daemon's one meter a
+    /// reading, so a task that produced none reports absent rather than the ledger's
+    /// `Some(0)` starting point.
     #[must_use]
     pub fn cost(&self) -> Cost {
-        let mut cost = super::result::unmeasured();
-        if let Some(campaign) = &self.campaign {
-            cost.states = Optional::Present(campaign.states() as u64);
-        }
-        cost
+        budget::cost_of(&self.ledger, self.campaign.is_some())
     }
 
     /// The wire record for this task.
@@ -450,7 +506,7 @@ impl TaskEntry {
             failed_reason: optional(self.failed_reason),
             continuation: optional(self.continuation.clone()),
             non_resumable_reason: optional(self.non_resumable_reason.clone()),
-            budget: self.budget.clone(),
+            budget: self.budget(),
             cost: self.cost(),
             epochs: self.epochs.clone(),
             priority_class: self.priority_class,
@@ -815,7 +871,7 @@ fn cancel(
     let residual = {
         let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
         Residual {
-            publications: entry.publications,
+            publications: entry.publications(),
             resumable: entry.continuation.is_some(),
         }
     };
@@ -861,8 +917,11 @@ fn cancel(
         committed_evidence: entry.committed_evidence.clone(),
     });
     let omissions = entry.omissions();
+    let artifacts = published(entry);
     let handle = entry.handle.clone();
-    let mut effect = Effect::new(payload, structural(outcome)).observing(handle);
+    let mut effect = Effect::new(payload, structural(outcome))
+        .observing(handle)
+        .with_artifacts(artifacts);
     effect.omissions = omissions;
     Ok(effect)
 }
@@ -913,6 +972,38 @@ impl Residual {
 /// re-runs under it. **The task identity does not change**, which is the PR 5 exit's second
 /// clause: the budget is a field of the entry and never re-enters the handle's preimage.
 ///
+/// # The five arms, and the one that could not be computed before
+///
+/// [`budget::update`] applies the request's ceilings to the task's [`BudgetLedger`] one
+/// dimension at a time and returns [`UpdateOutcome`] for each — `rule task.update_budget`'s
+/// legality table as nine values in SD-12 declaration order:
+///
+/// | outcome | what it means here |
+/// |---|---|
+/// | `Raised` | the ceiling rose or was removed; the next `task.resume` runs under it |
+/// | `Unchanged` | a re-sent update changes nothing (INV-002) |
+/// | `Tightened` | the ceiling fell and still admits the spend already recorded |
+/// | `Suspend` | it fell **below** committed spend: park with committed partial evidence plus a continuation (B18) |
+/// | `Unenforced` | nothing meters the dimension, so the ceiling is recorded and stays a typed omission |
+///
+/// The fourth arm is the one bn-1gc wrote down as unreachable from here: the handler had no
+/// committed-spend figure to compare a lowered ceiling against, so a lowering was applied as
+/// if it were a tightening, the engine bound shrank below what the parked run had already
+/// explored, and the next `task.resume` came back with a *smaller* campaign — the silent
+/// truncation INV-009 prohibits, arriving as a monotone `cost.states` going down. The
+/// ledger supplies the figure now, so the arm is computed, and what it does is documented
+/// where it is enforced: [`budget::bounds_of`] floors the engine's state bound at recorded
+/// spend, so the withdrawn ceiling is *recorded and not a bound*. Nothing is un-explored and
+/// nothing is published that was not published before.
+///
+/// A parked task is already `Suspended` with its continuation, which is what makes the arm
+/// expressible without a status transition: B18's "transitions to `Suspended` with committed
+/// partial evidence plus a valid continuation" is a state this task is already in, and
+/// `rule task.status_monotonic` is not disturbed by an operation that re-states it. The
+/// response's `continuation` field — "present when lowering the budget suspended the task" —
+/// is where the caller reads it, and on this arm it is exactly what the field was declared
+/// for.
+///
 /// A terminal task keeps the budget it ran under and answers
 /// [`StructuralOutcome::Unchanged`]: a terminal task's budget is a historical fact, and
 /// rewriting it would make its recorded cost unreadable.
@@ -929,28 +1020,50 @@ fn update_budget(
     let outcome = if entry.is_terminal() {
         StructuralOutcome::Unchanged
     } else {
-        entry.budget = request.budget.clone();
-        entry.bounds = verification::bounds_of(&request.budget);
+        let outcomes = budget::update(&mut entry.ledger, &request.budget);
         entry.reach(MILESTONE_BUDGET_UPDATED, now.as_ref());
+        if outcomes
+            .iter()
+            .any(|outcome| outcome.suspension().is_some())
+        {
+            // B18. The park is a fact about the *run*, not a transition: the task is
+            // already `Suspended` and holds the continuation the response reports, and the
+            // committed partial evidence it parks from is `entry.evidence`, unchanged and
+            // still named. The milestone is what makes the arm legible in
+            // `TaskRecord.milestones` rather than only in the response's `continuation`.
+            entry.reach(MILESTONE_BUDGET_SUSPENDED, now.as_ref());
+            debug_assert!(
+                entry.status == TaskStatus::Suspended || entry.evidence.count() == 0,
+                "a lowering below committed spend parks a task that has committed something"
+            );
+        }
         StructuralOutcome::Updated
     };
     let payload = Payload::TaskUpdateBudget(TaskUpdateBudgetResponse {
         task: entry.handle.clone(),
         status: entry.status,
-        budget: entry.budget.clone(),
+        budget: entry.budget(),
         // "Present when lowering the budget suspended the task." A task that is not terminal
         // here is already suspended-with-continuation, so the field reports the continuation
         // that makes the suspension resumable — never an absent field standing in for one.
         continuation: optional(entry.continuation.clone()),
     });
-    let omissions = entry.omissions();
+    // The `Unenforced` arm's wire surface (bn-23j7s). An operation that *accepts* a budget
+    // owes INV-007's manifest for it — which is what `verification.start` has always done —
+    // and this operation accepting a ceiling nothing meters, then saying nothing, was the
+    // arm with no way to be seen. Derived from the ledger, so the two operations report one
+    // list computed one way.
+    let omissions = [entry.omissions(), budget::omissions_of(&entry.ledger)].concat();
     // `task.update_budget` is `@mutation` and NOT `@task_starting`, so it never lands on
     // the `task_suspended` lane however the task is parked: only a `@task_starting`
     // operation MAY report that status. A task that parked again under the new budget is
     // reported through this operation's own `continuation` response field, and the
     // dispatcher's check on the lane is what keeps the two readings from drifting.
+    let artifacts = published(entry);
     let handle = entry.handle.clone();
-    let mut effect = Effect::new(payload, structural(outcome)).observing(handle);
+    let mut effect = Effect::new(payload, structural(outcome))
+        .observing(handle)
+        .with_artifacts(artifacts);
     effect.omissions = omissions;
     Ok(effect)
 }
@@ -1026,10 +1139,23 @@ fn resume(
 
     let task = continuation.task.clone();
     if let Optional::Present(budget) = &request.budget {
-        let bounds = verification::bounds_of(budget);
         if let Some(entry) = state.tasks_mut().get_mut(&task) {
-            entry.budget = budget.clone();
-            entry.bounds = bounds;
+            // `task.resume` carries an optional budget and RFC 0026 gives it the same
+            // legality table `task.update_budget` has, so it goes through the same ledger
+            // call rather than through a second write of the two fields the ledger replaced.
+            //
+            // The outcomes are not read here, and that is not a shortcut: this operation's
+            // answer is the *run*, not the update, so the arm a dimension landed on has no
+            // field on `TaskResumeResponse` to reach. What the `Suspend` arm does is enforced
+            // where it has to be — [`budget::bounds_of`] floors the engine's state bound at
+            // recorded spend, so a resume under a withdrawn ceiling makes no further progress
+            // and un-explores nothing, rather than quietly re-running the campaign smaller.
+            let suspended = budget::update(&mut entry.ledger, budget)
+                .iter()
+                .any(|outcome| outcome.suspension().is_some());
+            if suspended {
+                entry.reach(MILESTONE_BUDGET_SUSPENDED, services.now());
+            }
         }
     }
 
@@ -1051,7 +1177,7 @@ fn resume(
                 entry,
             ));
         }
-        entry.bounds
+        entry.bounds()
     };
 
     // The run's own refusals are the `verification` family's, and `task.resume` declares a
@@ -1080,7 +1206,7 @@ fn resume(
         }
     })?;
     let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
-    let effect = reported(
+    let mut effect = reported(
         Payload::TaskResume(TaskResumeResponse {
             task: entry.handle.clone(),
             status: entry.status,
@@ -1088,6 +1214,9 @@ fn resume(
         Nullable::Null,
         entry,
     );
+    // `task.resume` is the second operation that accepts a budget, so it owes the same
+    // INV-007 manifest `verification.start` and `task.update_budget` do (bn-23j7s).
+    effect.omissions = [effect.omissions, budget::omissions_of(&entry.ledger)].concat();
     // A resumed run that parked again lands on the `task_suspended` lane, which is what
     // `@task_starting` licenses this operation to report and what makes the second
     // continuation reachable without a second read. bn-18z recorded the absence of any
@@ -1152,6 +1281,12 @@ pub fn admissible_epochs(pinned: &PinnedEpochs, current: &EpochSet) -> Result<()
 pub const MILESTONE_CANCELLED: &str = "task.cancelled";
 /// The milestone a budget update records.
 pub const MILESTONE_BUDGET_UPDATED: &str = "task.budget_updated";
+/// The milestone a budget update that lowered a ceiling below committed spend records.
+///
+/// B18's park, named. It is recorded *beside* [`MILESTONE_BUDGET_UPDATED`] rather than
+/// instead of it, because both facts are true: the ceiling was recorded, and it cannot bind
+/// the current run.
+pub const MILESTONE_BUDGET_SUSPENDED: &str = "task.budget_suspended";
 
 fn stale() -> Fault {
     Fault::new(
@@ -1160,15 +1295,40 @@ fn stale() -> Fault {
     )
 }
 
-/// One answer about a task, carrying the task's own omission manifest.
+/// One answer about a task, carrying the task's own omission manifest and the publications
+/// it has committed.
 ///
 /// The envelope names the task, which is the second clause of the IDL's `task` presence
 /// rule — "and on results of task-observing operations". Every operation in this family
 /// observes one, so every answer it builds names it.
+///
+/// It also names what the task *published* (bn-23j7s). `ResultEnvelope.artifacts` is
+/// RFC 0026's list of "typed refs (`kind`, `handle`, `commitment?`, `redacted?`), not bare
+/// handles", and it is where a result says which artifacts it is about — the same field the
+/// `workspace` and `observe` families already answer with, and the field RFC 0026 reasons
+/// about when it says "a dedup that is invisible in `artifacts` but visible in reported cost
+/// is still an oracle". A task's committed publications belong there; an *uncommitted* one
+/// cannot reach it, because [`Publications::artifacts`] reads the committed list and a
+/// staged publication is not in it.
 fn reported(payload: Payload, verdict: Nullable<Verdict>, entry: &TaskEntry) -> Effect {
     let mut effect = Effect::new(payload, verdict).observing(entry.handle.clone());
     effect.omissions = entry.omissions();
+    effect.artifacts = published(entry);
     effect
+}
+
+/// The wire references naming a task's committed publications.
+///
+/// A refusal to name one is recorded as an empty list rather than raised: the identity of a
+/// publication this daemon already committed is not something a caller can be at fault for,
+/// and `rule envelope.no_prose` leaves no room to explain it on an answer that otherwise
+/// succeeded. It is unreachable — a `task_*` handle is a well-formed artifact handle by
+/// construction — and the branch is pinned by a unit test rather than left to be believed.
+pub(super) fn published(entry: &TaskEntry) -> Vec<ArtifactRef> {
+    entry
+        .evidence
+        .artifacts(&entry.handle)
+        .unwrap_or_else(|_| Vec::new())
 }
 
 /// A typed "this daemon does not produce that" omission (INV-007).
