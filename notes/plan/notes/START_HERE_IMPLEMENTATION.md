@@ -300,6 +300,55 @@ continuum context expand
 continuum task status/resume/cancel
 ```
 
+Four Bones carry this PR: `snapshot`/`check`/`explain` (bn-3rqvm, open);
+`debug`/`repair`/`evidence show` (bn-1g7e4, open); the shared `--json` output contract
+(bn-ybh1z, open); and the third command group, `context expand` and
+`task status/resume/cancel` (delivered: bn-3tz60 —
+`crates/continuum-cli/src/{wire,render,context,task,cli,format,error}.rs` plus
+`src/bin/continuum.rs`, the crate's first real command implementations since the
+PR-1/IMPL-01 scaffold. `task status`/`task resume`/`task cancel` drive the full PR-6
+lifecycle over a real `Daemon`/`Server`/`LocalPair` boundary through a `wire::Connection`
+that mirrors `continuum-mcp::AgentClient`'s shape — the negotiated version and the speaking
+principal, nothing else, plan §20's "adapters do not own semantic state" as the struct's
+field list — without depending on `continuum-mcp` itself, which is an adapter and therefore
+a forbidden edge under `RULE adapters-are-sinks`. `task resume` refuses a continuation
+whose pinned snapshot the lineage has superseded with the typed `StaleSnapshot` reason,
+reproducing `dx03_falsification.rs`'s attack-6 recipe against the CLI's own render path
+rather than `Daemon::dispatch` directly; `task cancel` renders `rule task.cancel_correct`'s
+own three-way disjunction
+(`task::CancelOutcome::{ValidContinuation, NothingPublished, ClosedAndComplete}`, the same
+reading `pr6_exit_evidence.rs`'s `ExitSide` gives the identical contract) with the
+continuation handle printed in full on the left-hand side and the clean absence stated by
+name, never by silence, on the right. The INV-007 omission manifest
+(`render::omission_lines`/`omissions_json`) is unabridged and non-suppressible in every one
+of the three cli-conventions.md output formats — there is no flag anywhere in `cli.rs`'s
+parser that removes it, and the JSON envelope always carries the `omissions` key, empty
+array or not. `context expand` is delivered honestly short of a live round trip:
+PR-11/IMPL-04 (bn-28jj, omissions and expansion handles) is open, `context.expand` has no
+`OperationFamily` and no `Arguments`/`Payload` enum variant, so
+`wire::Connection::context_expand` builds the real `ContextExpandRequest` by hand with
+`codec::to_opaque` and sends it over a real frame, and every call today decodes the real
+refusal `codec::operations::decode_arguments` raises before dispatch even begins
+(`CodecError::UnknownOperation`, `ErrorCode::UnsupportedSemanticFeature`) — proven against a
+real `Daemon` in `tests/context_expand.rs`. The success-path renderer (the expanded pack's
+own two handles, `pack` embedded verbatim as canonical JSON per RFC 0037 ID5 rather than
+paraphrased, and the full manifest beside it) is written and unit-tested against the real
+wire types directly, so it is proven correct before bn-28jj lands rather than left untested
+until then. What this bone declines, honestly: a real transport for `bin/continuum.rs` to
+dial — `continuumd` ships no socket or process boundary yet (`transport::LocalPair`'s own
+documentation: "not a stand-in for a real transport, it is the grain the rest of the daemon
+is built at"), so the binary's `NullTransport` answers every call with a typed
+`LinkError::NoTransportConfigured` at exit code 2, honestly, rather than fabricating an
+ephemeral in-process daemon that would forget every task the moment the process exited; and
+the other two command groups and the shared output-contract Bone (bn-3rqvm, bn-1g7e4,
+bn-ybh1z, all open), whose flags this crate's hand-rolled `cli::Scan` parser does not yet
+recognize. Evidence: `crates/continuum-cli/src/{format,render,cli,error}.rs`'s 15 unit
+tests plus `tests/context_expand.rs` (4) and `tests/task_lifecycle.rs` (5), 24 in total,
+the latter two driven over a real `LocalPair` boundary against a real provisioned `Daemon`
+exactly as `continuum-mcp/tests/typed_surface.rs` and `continuum-benchmark::rig` drive
+theirs, with each fixture duplicated locally rather than imported for the reason
+`typed_surface.rs`'s own comment gives).
+
 Support `--json`; prose is a projection.
 
 **Exit:** golden tests pin JSON, exit codes, and concise terminal output.

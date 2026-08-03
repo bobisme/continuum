@@ -83,6 +83,13 @@ version = "0.0.0"
 [[package]]
 name = "continuum-cli"
 version = "0.0.0"
+dependencies = [
+ "continuum-engine-reference",
+ "continuum-intent",
+ "continuum-value",
+ "continuum-workspace",
+ "continuumd",
+]
 
 [[package]]
 name = "continuum-cml-elab"
