@@ -1970,8 +1970,8 @@
         "line": 273,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "observer event change"
+      "status": "satisfied",
+      "summary": "observer event change (delivered: bn-1sdp \u2014 crates/continuum-semantic-diff/src/observers.rs: RFC 0031's observers field classification over continuum-intent's Observer/ObserverSet, componentwise across the four projection sets into unchanged/refined/coarsened plus added/removed membership for units present on one side only, closed over continuum-intent::changepolicy::Relation rather than a second vocabulary. unknown/unsupported are never emitted: observer comparison is decidable outright (plain finite set inclusion, no solver), and observers[] carries no fragment member to fall outside of, pinned against the live schema rather than assumed. Evidence: tests/pr12impl05observereventchangeevidence.rs \u2014 a real-corpus (replicated-register-contract.json) coarsening of the \"hide observer events\" attack (plan \u00a719.5) closed all the way into PolicyTable::verdict's review outcome under the fixture's own policy; an adversarial disguise sweep (same-size event swap, rename, coarsen-then-rename) proving a dropped element never classifies unchanged/refined/silent added; and two anti-vacuity mutants showing the positive assertions are not vacuously true. Library-level classifier only: the wire intentchanges[]/diff artifact assembly, the impact set, and the other five PR-12 bullets \u2014 exact equality, property AST edit, assumption add/remove, bound change, fault/fairness/assurance change \u2014 remain open, each its own bone)"
     },
     {
       "category": "pr-deliverable",

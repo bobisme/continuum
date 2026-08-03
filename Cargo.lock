@@ -228,6 +228,9 @@ version = "0.0.0"
 [[package]]
 name = "continuum-semantic-diff"
 version = "0.0.0"
+dependencies = [
+ "continuum-intent",
+]
 
 [[package]]
 name = "continuum-task"

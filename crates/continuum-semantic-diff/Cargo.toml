@@ -6,5 +6,20 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# One workspace edge, plan §20's "semantic and intent diff" row: the diff classifies
+# Intent Contract field changes, and `continuum-intent` owns the closed vocabulary it
+# classifies into (`change_policy::Relation`, `PolicyField`, `ClassificationRecord`)
+# and the field-group types it classifies from (`observers::{Observer, ObserverSet}`,
+# and the fourteen siblings PR-12's other bullets land against). Downward-only: intent
+# does not, and per `tools/check_crate_boundaries.py`'s plan-§20 rules may not, depend
+# back on this crate.
+[dependencies]
+continuum-intent = { path = "../continuum-intent" }
+
+# Repeated because integration tests in `tests/` are separate crates and do not
+# inherit the library's dependencies (`continuum-benchmark/Cargo.toml`'s precedent).
+[dev-dependencies]
+continuum-intent = { path = "../continuum-intent" }
+
 [lints]
 workspace = true

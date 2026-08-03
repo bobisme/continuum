@@ -278,7 +278,7 @@ Classify supported changes:
 - property AST edit;
 - assumption add/remove;
 - bound change;
-- observer event change;
+- observer event change (delivered: bn-1sdp — `crates/continuum-semantic-diff/src/observers.rs`: RFC 0031's `observers` field classification over `continuum-intent`'s `Observer`/`ObserverSet`, componentwise across the four projection sets into `unchanged`/`refined`/`coarsened` plus `added`/`removed` membership for units present on one side only, closed over `continuum-intent::change_policy::Relation` rather than a second vocabulary. `unknown`/`unsupported` are never emitted: observer comparison is decidable outright (plain finite set inclusion, no solver), and `observers[]` carries no `fragment` member to fall outside of, pinned against the live schema rather than assumed. Evidence: `tests/pr12_impl05_observer_event_change_evidence.rs` — a real-corpus (`replicated-register-contract.json`) coarsening of the "hide observer events" attack (plan §19.5) closed all the way into `PolicyTable::verdict`'s `review` outcome under the fixture's own policy; an adversarial disguise sweep (same-size event swap, rename, coarsen-then-rename) proving a dropped element never classifies `unchanged`/`refined`/silent `added`; and two anti-vacuity mutants showing the positive assertions are not vacuously true. Library-level classifier only: the wire `intent_changes[]`/`diff_*` artifact assembly, the impact set, and the other five PR-12 bullets — exact equality, property AST edit, assumption add/remove, bound change, fault/fairness/assurance change — remain open, each its own bone);
 - fault/fairness/assurance change.
 
 Add solver-based implication only where sound and bounded.
