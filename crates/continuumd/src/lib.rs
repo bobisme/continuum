@@ -41,8 +41,11 @@
 //! [`codec`] — the canonical codec over that type layer: `rule encoding.canonical_form`'s
 //! code-point field order, `rule encoding.union_tagging`'s externally tagged unions, and
 //! `rule encoding.opaque_payloads`'s per-operation resolution of the envelope's `Opaque`
-//! fields. It is the byte spelling the IDL's two encodings share; `canonical_json` is
-//! implemented, and `canonical_cbor` is the same value model under a different writer.
+//! fields. Both encodings the IDL fixes are implemented, and they share more than a byte
+//! spelling: one `ProtocolValue` implementation, generic over a `codec::Document`, decides
+//! every key and every position, and the two document models differ only in the two leaf
+//! spellings IDL §3 says differ (`Bytes` and a large `U64`). "Identical canonical field
+//! order" is therefore structural rather than maintained.
 //!
 //! [`transport`] — the byte boundary: a pair of connected endpoints exchanging
 //! length-prefixed canonical frames, driving a [`daemon::Daemon`] end to end. Bytes in,

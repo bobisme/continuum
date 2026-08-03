@@ -151,25 +151,68 @@ pub trait ProtocolStruct {
     const FIELDS: &'static [FieldSpec];
 }
 
-/// A named struct and its fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A named struct, its fields, and its codec in each encoding.
+///
+/// # Why the two closures are here
+///
+/// The registry names every struct the protocol declares, once, as `StructSpec::of::<T>()`
+/// — and that is the only place in the workspace where the *whole* set of declared shapes
+/// is enumerated. A conformance sweep over all of them ("every operation's request and
+/// response body decodes and re-encodes to itself, in both encodings") therefore has a
+/// description of each shape and no way to reach the Rust type it describes, because
+/// [`fields`](Self::fields) is data and `T` is not. Restating the 146 type names in a test
+/// would answer that with a second list to keep in step, which is the thing this whole
+/// module exists to avoid.
+///
+/// So `of::<T>()` captures `T`'s codec at the same point it captures `T`'s field list:
+/// one token, three outputs. A struct that is in the registry is swept, and a struct that
+/// is not, is not — there is no way to add one and forget the other.
+///
+/// [`PartialEq`] deliberately compares only [`name`](Self::name) and
+/// [`fields`](Self::fields): the closures are *derived* from the type rather than part of
+/// the description, and two descriptions that agree on the declaration agree.
+#[derive(Debug, Clone, Copy)]
 pub struct StructSpec {
     /// The struct name.
     pub name: &'static str,
     /// The fields, in IDL declaration order.
     pub fields: &'static [FieldSpec],
+    /// Decode a canonical JSON document as this struct and re-encode it.
+    pub json_round_trip: fn(&crate::codec::json::Json) -> RoundTrip<crate::codec::json::Json>,
+    /// Decode a canonical CBOR document as this struct and re-encode it.
+    pub cbor_round_trip: fn(&crate::codec::cbor::Cbor) -> RoundTrip<crate::codec::cbor::Cbor>,
+}
+
+/// What a [`StructSpec`] round trip answers: the re-encoded document, or why not.
+pub type RoundTrip<D> = Result<D, crate::codec::CodecError>;
+
+/// Decode `value` as `T` and encode the result back, in the same encoding.
+fn round_trip<D: crate::codec::Document, T: crate::codec::ProtocolValue>(
+    value: &D,
+) -> RoundTrip<D> {
+    T::decode(value)?.encode()
 }
 
 impl StructSpec {
-    /// The description of `T`.
+    /// The description of `T`, and its codec in each encoding.
     #[must_use]
-    pub const fn of<T: ProtocolStruct>() -> Self {
+    pub const fn of<T: ProtocolStruct + crate::codec::ProtocolValue>() -> Self {
         Self {
             name: T::STRUCT_NAME,
             fields: T::FIELDS,
+            json_round_trip: round_trip::<crate::codec::json::Json, T>,
+            cbor_round_trip: round_trip::<crate::codec::cbor::Cbor, T>,
         }
     }
 }
+
+impl PartialEq for StructSpec {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.fields == other.fields
+    }
+}
+
+impl Eq for StructSpec {}
 
 // --- enum description -------------------------------------------------------------
 
@@ -570,20 +613,17 @@ macro_rules! protocol_struct {
         }
 
         impl $crate::codec::ProtocolValue for $name {
-            fn encode(
+            fn encode<D: $crate::codec::Document>(
                 &self,
-            ) -> ::core::result::Result<
-                $crate::codec::json::Json,
-                $crate::codec::CodecError,
-            > {
+            ) -> ::core::result::Result<D, $crate::codec::CodecError> {
                 let mut into = ::std::collections::BTreeMap::new();
                 $($crate::__protocol_put!(
                     $mode, into, stringify!($member), &self.$member);)*
-                ::core::result::Result::Ok($crate::codec::json::Json::Object(into))
+                ::core::result::Result::Ok(<D as $crate::codec::Document>::from_entries(into))
             }
 
-            fn decode(
-                value: &$crate::codec::json::Json,
+            fn decode<D: $crate::codec::Document>(
+                value: &D,
             ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
                 let from = $crate::codec::object_of(value, stringify!($name))?;
                 // Unknown keys are ignored rather than rejected: "a daemon MUST ignore
@@ -860,24 +900,23 @@ macro_rules! protocol_enum {
         }
 
         impl $crate::codec::ProtocolValue for $name {
-            fn encode(
+            fn encode<D: $crate::codec::Document>(
                 &self,
-            ) -> ::core::result::Result<
-                $crate::codec::json::Json,
-                $crate::codec::CodecError,
-            > {
-                ::core::result::Result::Ok($crate::codec::json::Json::String(
-                    <Self as $crate::protocol::spec::ProtocolEnum>::as_wire(*self).to_owned(),
+            ) -> ::core::result::Result<D, $crate::codec::CodecError> {
+                ::core::result::Result::Ok(<D as $crate::codec::Document>::from_text(
+                    <Self as $crate::protocol::spec::ProtocolEnum>::as_wire(*self),
                 ))
             }
 
-            fn decode(
-                value: &$crate::codec::json::Json,
+            fn decode<D: $crate::codec::Document>(
+                value: &D,
             ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
-                let token = value.as_str().ok_or($crate::codec::CodecError::TypeMismatch {
-                    expected: stringify!($name),
-                    found: value.kind(),
-                })?;
+                let token = <D as $crate::codec::Document>::as_text(value).ok_or(
+                    $crate::codec::CodecError::TypeMismatch {
+                        expected: stringify!($name),
+                        found: <D as $crate::codec::Document>::kind(value),
+                    },
+                )?;
                 // A closed enum fails closed and an `@open` one surfaces the token
                 // verbatim — the two halves of `rule versioning.enums`, decided from the
                 // `@open` annotation the declaration already carries rather than from a
@@ -930,12 +969,9 @@ macro_rules! protocol_union {
         }
 
         impl $crate::codec::ProtocolValue for $name {
-            fn encode(
+            fn encode<D: $crate::codec::Document>(
                 &self,
-            ) -> ::core::result::Result<
-                $crate::codec::json::Json,
-                $crate::codec::CodecError,
-            > {
+            ) -> ::core::result::Result<D, $crate::codec::CodecError> {
                 // `rule encoding.union_tagging`: externally tagged, one key, the variant
                 // identifier the IDL declares.
                 let mut object = ::std::collections::BTreeMap::new();
@@ -943,15 +979,15 @@ macro_rules! protocol_union {
                     $(Self::$variant(inner) => {
                         object.insert(
                             stringify!($member).to_owned(),
-                            $crate::codec::ProtocolValue::encode(inner)?,
+                            $crate::codec::ProtocolValue::encode::<D>(inner)?,
                         );
                     })*
                 }
-                ::core::result::Result::Ok($crate::codec::json::Json::Object(object))
+                ::core::result::Result::Ok(<D as $crate::codec::Document>::from_entries(object))
             }
 
-            fn decode(
-                value: &$crate::codec::json::Json,
+            fn decode<D: $crate::codec::Document>(
+                value: &D,
             ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
                 let object = $crate::codec::object_of(value, stringify!($name))?;
                 let mut entries = object.iter();

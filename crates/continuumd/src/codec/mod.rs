@@ -59,77 +59,502 @@
 //! `UnsupportedSemanticFeature` — "the request needs a semantic feature this daemon does
 //! not implement", which is exactly true of an unknown `TargetKind` or
 //! `ExplorationStrategy` and is not a claim that the message was malformed.
+//!
+//! # Two encodings, one type layer
+//!
+//! The IDL fixes `canonical_json` **and** `canonical_cbor`, and requires them to carry
+//! "identical canonical field order". The way that identity is made structural here rather
+//! than maintained is [`Document`]: the trait a *document model* implements, with one
+//! implementation per encoding ([`json::Json`], [`cbor::Cbor`]). [`ProtocolValue::encode`]
+//! is generic over it, so the code that decides which key a field is written under, in
+//! what order, and under which presence rule exists **once** and both encodings run it.
+//!
+//! That is stronger than emitting two encoders from one declaration, which was the other
+//! way to spend the same discipline. Two encoders generated from one text can still
+//! diverge if the two generators are edited apart; one encoder parameterized by its output
+//! model cannot diverge at all, because there is nothing to edit apart. A field's key, its
+//! position in the sequence, and its presence discipline are properties of
+//! [`protocol_struct!`](crate::protocol_struct)'s expansion, and the encoding contributes
+//! only the *spelling of the leaves*.
+//!
+//! Exactly two leaves are spelled differently, and the IDL is where both are fixed
+//! (IDL §3): `Bytes` is base64url text in JSON and a byte string in CBOR, and a `U64`
+//! beyond exact JSON representation is a decimal string there and an ordinary unsigned
+//! integer here. Both live in the [`Document`] implementations —
+//! [`from_byte_string`](Document::from_byte_string), [`from_unsigned`](Document::from_unsigned),
+//! and their readers — which is why the type layer never mentions an encoding.
+//!
+//! An [`Opaque`] is the one value that carries *bytes* across this boundary, and it
+//! carries them in the negotiated encoding by definition ("carried verbatim as a canonical
+//! value of the negotiated encoding"). So [`ProtocolValue`] for `Opaque` reads and writes
+//! through the same `Document` the enclosing message is being read or written through, and
+//! a message containing an `Opaque` therefore has *different* `Opaque` bytes in the two
+//! encodings while having the same field sequence. That is the contract, not a defect: the
+//! payload is a canonical value of the connection's encoding.
 
+pub mod cbor;
 pub mod json;
 pub mod operations;
 
 use std::collections::BTreeMap;
 
-use json::{Json, JsonError, base64url, from_base64url};
+use cbor::{Cbor, CborError};
+use json::{Json, JsonError};
 
 use crate::protocol::scalar::{
     ActorId, ArtifactHandle, AuditCorrelationId, ByteCount, Bytes, Commitment, DurationMs,
     EpochIdentity, Opaque, OperationName, PageToken, ProtocolVersion, RequestId, Timestamp,
 };
 use crate::protocol::spec::{Nullable, Optional};
-use crate::protocol::vocabulary::ErrorCode;
+use crate::protocol::vocabulary::{Encoding, ErrorCode};
 
-/// A value the wire declares, and the two directions it travels.
+/// The canonical document model of one encoding.
+///
+/// One implementation per encoding the IDL fixes, and the seam that lets a single
+/// [`ProtocolValue`] implementation serve both. Everything structural — which keys, in
+/// what order, present or absent — belongs to the caller; everything below is this
+/// trait's, and there are exactly two places where the two implementations disagree
+/// (`Bytes` and a large `U64`), both because IDL §3 says they disagree.
+///
+/// The accessors return [`CodecError`] rather than [`Option`] wherever the two encodings
+/// have different *reasons* for refusing a value, so that a refusal reads the same
+/// whichever encoding produced it.
+pub trait Document: Sized + Clone + PartialEq + core::fmt::Debug {
+    /// The IDL vocabulary member naming this encoding.
+    const ENCODING: Encoding;
+
+    /// The `null` literal: a *named* absence (INV-007), never an omission.
+    fn from_null() -> Self;
+
+    /// A boolean.
+    fn from_bool(value: bool) -> Self;
+
+    /// An unsigned integer, in whichever spelling this encoding gives that magnitude.
+    fn from_unsigned(value: u64) -> Self;
+
+    /// A UTF-8 string.
+    fn from_text(value: &str) -> Self;
+
+    /// A `Bytes` value, in this encoding's spelling of one.
+    fn from_byte_string(value: &[u8]) -> Self;
+
+    /// An array, in order.
+    fn from_items(items: Vec<Self>) -> Self;
+
+    /// A map, in canonical key order by construction.
+    fn from_entries(entries: BTreeMap<String, Self>) -> Self;
+
+    /// Whether this is the null literal.
+    fn is_null(&self) -> bool;
+
+    /// The boolean this value denotes, when it is one.
+    fn as_bool(&self) -> Option<bool>;
+
+    /// The unsigned integer this value denotes in the encoding's *number* spelling.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError::TypeMismatch`] when the value is not a number.
+    fn as_integer(&self, expected: &'static str) -> Result<u64, CodecError>;
+
+    /// The `U64` this value denotes, in every spelling the IDL gives `U64` here.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError::IntegerRange`] for a spelling this encoding does not admit for the
+    /// magnitude, and [`CodecError::TypeMismatch`] for a value of another kind.
+    fn as_u64(&self, expected: &'static str) -> Result<u64, CodecError>;
+
+    /// The string, when this is one.
+    fn as_text(&self) -> Option<&str>;
+
+    /// The `Bytes` this value denotes, in this encoding's spelling of one.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError::Bytes`] when the spelling is not canonical, and
+    /// [`CodecError::TypeMismatch`] for a value of another kind.
+    fn as_byte_string(&self, expected: &'static str) -> Result<Vec<u8>, CodecError>;
+
+    /// The array's items, when this is an array.
+    fn as_items(&self) -> Option<&[Self]>;
+
+    /// The map's entries, when this is a map.
+    fn as_entries(&self) -> Option<&BTreeMap<String, Self>>;
+
+    /// The name of this value's kind, for a typed mismatch report.
+    fn kind(&self) -> &'static str;
+
+    /// Read a canonical document.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError`] when the bytes are not a canonical document of this encoding.
+    fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CodecError>;
+
+    /// The canonical encoding of this document.
+    fn to_canonical_bytes(&self) -> Vec<u8>;
+}
+
+/// The `canonical_json` document model.
+///
+/// Every method is a plain match rather than a call to the same-named inherent method:
+/// [`Json`] has inherent `is_null`, `kind`, and `to_canonical_bytes` of its own, and
+/// spelling the bodies out here keeps "which one is this" from being a question about
+/// method-resolution order.
+impl Document for Json {
+    const ENCODING: Encoding = Encoding::CanonicalJson;
+
+    fn from_null() -> Self {
+        Self::Null
+    }
+
+    fn from_bool(value: bool) -> Self {
+        Self::Bool(value)
+    }
+
+    /// The IDL's `U64` rule, writer side: a number while the value is exactly
+    /// representable, a decimal string beyond that. A writer that chose per *call site*
+    /// would give one number two spellings depending on where it was written from.
+    fn from_unsigned(value: u64) -> Self {
+        if value <= json::MAX_EXACT_INTEGER {
+            Self::Integer(value)
+        } else {
+            Self::String(value.to_string())
+        }
+    }
+
+    fn from_text(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+
+    fn from_byte_string(value: &[u8]) -> Self {
+        Self::String(json::base64url(value))
+    }
+
+    fn from_items(items: Vec<Self>) -> Self {
+        Self::Array(items)
+    }
+
+    fn from_entries(entries: BTreeMap<String, Self>) -> Self {
+        Self::Object(entries)
+    }
+
+    fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        match self {
+            Self::Bool(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    fn as_integer(&self, expected: &'static str) -> Result<u64, CodecError> {
+        match self {
+            Self::Integer(value) => Ok(*value),
+            other => Err(CodecError::TypeMismatch {
+                expected,
+                found: Json::kind(other),
+            }),
+        }
+    }
+
+    /// The IDL's `U64` rule, reader side. A decimal string inside the exactly-
+    /// representable range is rejected because the value already has a spelling there,
+    /// and a non-shortest decimal string (`"0100…"`) is rejected for the same reason. A
+    /// *number* beyond the range never reaches here: [`Json::parse`] refuses it.
+    fn as_u64(&self, expected: &'static str) -> Result<u64, CodecError> {
+        match self {
+            Self::Integer(value) => Ok(*value),
+            Self::String(text) => {
+                let parsed: u64 = text
+                    .parse()
+                    .map_err(|_| CodecError::IntegerRange { expected })?;
+                if parsed <= json::MAX_EXACT_INTEGER || text != &parsed.to_string() {
+                    return Err(CodecError::IntegerRange { expected });
+                }
+                Ok(parsed)
+            }
+            other => Err(CodecError::TypeMismatch {
+                expected,
+                found: Json::kind(other),
+            }),
+        }
+    }
+
+    fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::String(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    fn as_byte_string(&self, expected: &'static str) -> Result<Vec<u8>, CodecError> {
+        match self {
+            Self::String(text) => json::from_base64url(text).map_err(|_| CodecError::Bytes),
+            other => Err(CodecError::TypeMismatch {
+                expected,
+                found: Json::kind(other),
+            }),
+        }
+    }
+
+    fn as_items(&self) -> Option<&[Self]> {
+        match self {
+            Self::Array(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    fn as_entries(&self) -> Option<&BTreeMap<String, Self>> {
+        match self {
+            Self::Object(fields) => Some(fields),
+            _ => None,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        Json::kind(self)
+    }
+
+    fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CodecError> {
+        Ok(Self::parse(bytes)?)
+    }
+
+    fn to_canonical_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.write_canonical(&mut out);
+        out
+    }
+}
+
+/// The `canonical_cbor` document model.
+///
+/// The two rows where this differs from the JSON model are
+/// [`from_unsigned`](Document::from_unsigned) and
+/// [`from_byte_string`](Document::from_byte_string) with their readers, and both
+/// differences are IDL §3's: "CBOR uses an unsigned integer" and "CBOR uses a byte
+/// string". Everything else is the same match against a different value model, which is
+/// what makes "identical canonical field order" structural rather than maintained.
+impl Document for Cbor {
+    const ENCODING: Encoding = Encoding::CanonicalCbor;
+
+    fn from_null() -> Self {
+        Self::Null
+    }
+
+    fn from_bool(value: bool) -> Self {
+        Self::Bool(value)
+    }
+
+    /// One spelling for every magnitude: major type 0 carries the whole `u64` range
+    /// exactly, so CBOR has no `2^53 − 1` boundary and no second spelling beyond it.
+    fn from_unsigned(value: u64) -> Self {
+        Self::Unsigned(value)
+    }
+
+    fn from_text(value: &str) -> Self {
+        Self::Text(value.to_owned())
+    }
+
+    fn from_byte_string(value: &[u8]) -> Self {
+        Self::Bytes(value.to_vec())
+    }
+
+    fn from_items(items: Vec<Self>) -> Self {
+        Self::Array(items)
+    }
+
+    fn from_entries(entries: BTreeMap<String, Self>) -> Self {
+        Self::Map(entries)
+    }
+
+    fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        match self {
+            Self::Bool(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    fn as_integer(&self, expected: &'static str) -> Result<u64, CodecError> {
+        match self {
+            Self::Unsigned(value) => Ok(*value),
+            other => Err(CodecError::TypeMismatch {
+                expected,
+                found: Cbor::kind(other),
+            }),
+        }
+    }
+
+    /// A `U64` is major type 0 and nothing else. A decimal *text* string is refused as a
+    /// [`TypeMismatch`](CodecError::TypeMismatch) rather than parsed, because in this
+    /// encoding it is not a second spelling of the number — it is a string.
+    fn as_u64(&self, expected: &'static str) -> Result<u64, CodecError> {
+        self.as_integer(expected)
+    }
+
+    fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    fn as_byte_string(&self, expected: &'static str) -> Result<Vec<u8>, CodecError> {
+        match self {
+            Self::Bytes(bytes) => Ok(bytes.clone()),
+            other => Err(CodecError::TypeMismatch {
+                expected,
+                found: Cbor::kind(other),
+            }),
+        }
+    }
+
+    fn as_items(&self) -> Option<&[Self]> {
+        match self {
+            Self::Array(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    fn as_entries(&self) -> Option<&BTreeMap<String, Self>> {
+        match self {
+            Self::Map(fields) => Some(fields),
+            _ => None,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        Cbor::kind(self)
+    }
+
+    fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CodecError> {
+        Ok(Self::parse(bytes)?)
+    }
+
+    fn to_canonical_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.write_canonical(&mut out);
+        out
+    }
+}
+
+/// A value the wire declares, and the two directions it travels — in either encoding.
 ///
 /// `encode` is fallible because [`Opaque`] is: it carries bytes that must already be a
 /// canonical value of the negotiated encoding, and a daemon that staged something else
 /// into one has produced a value the wire cannot carry. Reporting that is better than
 /// emitting bytes no reader can parse.
 pub trait ProtocolValue: Sized {
-    /// This value as a canonical document.
+    /// This value as a canonical document of `D`.
     ///
     /// # Errors
     ///
     /// [`CodecError`] when a carried `Opaque` is not itself canonical.
-    fn encode(&self) -> Result<Json, CodecError>;
+    fn encode<D: Document>(&self) -> Result<D, CodecError>;
 
-    /// Read this value from a canonical document.
+    /// Read this value from a canonical document of `D`.
     ///
     /// # Errors
     ///
     /// [`CodecError`] when the document is not this value's declared shape.
-    fn decode(value: &Json) -> Result<Self, CodecError>;
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError>;
 }
 
-/// Encode a protocol value to canonical bytes.
+/// Encode a protocol value to canonical bytes of `D`.
+///
+/// # Errors
+///
+/// [`CodecError`] when a carried `Opaque` is not canonical.
+pub fn write_in<D: Document, T: ProtocolValue>(value: &T) -> Result<Vec<u8>, CodecError> {
+    Ok(value.encode::<D>()?.to_canonical_bytes())
+}
+
+/// Decode a protocol value from canonical bytes of `D`.
+///
+/// # Errors
+///
+/// [`CodecError`] when the bytes are not a canonical document, or not this value's shape.
+pub fn read_in<D: Document, T: ProtocolValue>(bytes: &[u8]) -> Result<T, CodecError> {
+    T::decode(&D::from_canonical_bytes(bytes)?)
+}
+
+/// Carry a protocol value in an `Opaque` field, in the encoding `D`.
+///
+/// # Errors
+///
+/// [`CodecError`] when the value carries a non-canonical `Opaque` of its own.
+pub fn to_opaque_in<D: Document, T: ProtocolValue>(value: &T) -> Result<Opaque, CodecError> {
+    Ok(Opaque::from_bytes(write_in::<D, T>(value)?))
+}
+
+/// Read a protocol value out of an `Opaque` field carrying the encoding `D`.
+///
+/// # Errors
+///
+/// [`CodecError`] when the carried bytes are not a canonical document of that shape.
+pub fn from_opaque_in<D: Document, T: ProtocolValue>(opaque: &Opaque) -> Result<T, CodecError> {
+    read_in::<D, T>(opaque.as_bytes())
+}
+
+/// Encode a protocol value to canonical JSON bytes.
 ///
 /// # Errors
 ///
 /// [`CodecError`] when a carried `Opaque` is not canonical.
 pub fn to_bytes<T: ProtocolValue>(value: &T) -> Result<Vec<u8>, CodecError> {
-    Ok(value.encode()?.to_canonical_bytes())
+    write_in::<Json, T>(value)
 }
 
-/// Decode a protocol value from canonical bytes.
+/// Decode a protocol value from canonical JSON bytes.
 ///
 /// # Errors
 ///
 /// [`CodecError`] when the bytes are not a canonical document, or not this value's shape.
 pub fn from_bytes<T: ProtocolValue>(bytes: &[u8]) -> Result<T, CodecError> {
-    T::decode(&Json::parse(bytes)?)
+    read_in::<Json, T>(bytes)
 }
 
-/// Carry a protocol value in an `Opaque` field.
+/// Encode a protocol value to canonical CBOR bytes.
+///
+/// # Errors
+///
+/// [`CodecError`] when a carried `Opaque` is not canonical.
+pub fn to_cbor_bytes<T: ProtocolValue>(value: &T) -> Result<Vec<u8>, CodecError> {
+    write_in::<Cbor, T>(value)
+}
+
+/// Decode a protocol value from canonical CBOR bytes.
+///
+/// # Errors
+///
+/// [`CodecError`] when the bytes are not a canonical document, or not this value's shape.
+pub fn from_cbor_bytes<T: ProtocolValue>(bytes: &[u8]) -> Result<T, CodecError> {
+    read_in::<Cbor, T>(bytes)
+}
+
+/// Carry a protocol value in an `Opaque` field, in canonical JSON.
 ///
 /// # Errors
 ///
 /// [`CodecError`] when the value carries a non-canonical `Opaque` of its own.
 pub fn to_opaque<T: ProtocolValue>(value: &T) -> Result<Opaque, CodecError> {
-    Ok(Opaque::from_bytes(to_bytes(value)?))
+    to_opaque_in::<Json, T>(value)
 }
 
-/// Read a protocol value out of an `Opaque` field.
+/// Read a protocol value out of an `Opaque` field carrying canonical JSON.
 ///
 /// # Errors
 ///
 /// [`CodecError`] when the carried bytes are not a canonical document of that shape.
 pub fn from_opaque<T: ProtocolValue>(opaque: &Opaque) -> Result<T, CodecError> {
-    from_bytes(opaque.as_bytes())
+    from_opaque_in::<Json, T>(opaque)
 }
 
 // --- errors -------------------------------------------------------------------------
@@ -144,8 +569,10 @@ pub fn from_opaque<T: ProtocolValue>(opaque: &Opaque) -> Result<T, CodecError> {
 /// field for a caller to switch on, and MUST NOT be interpolated into prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodecError {
-    /// The bytes are not a canonical document.
+    /// The bytes are not a canonical JSON document.
     Json(JsonError),
+    /// The bytes are not a canonical CBOR document.
+    Cbor(CborError),
     /// A `required` or `nullable` field is absent.
     MissingField {
         /// The struct that declares it.
@@ -240,10 +667,17 @@ impl From<JsonError> for CodecError {
     }
 }
 
+impl From<CborError> for CodecError {
+    fn from(error: CborError) -> Self {
+        Self::Cbor(error)
+    }
+}
+
 impl core::fmt::Display for CodecError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Json(error) => write!(f, "{error}"),
+            Self::Cbor(error) => write!(f, "{error}"),
             Self::MissingField { declared_by, field } => {
                 write!(f, "`{declared_by}.{field}` is absent and is not `optional`")
             }
@@ -294,11 +728,11 @@ impl core::error::Error for CodecError {}
 /// # Errors
 ///
 /// [`CodecError::TypeMismatch`] when it is anything else.
-pub fn object_of<'a>(
-    value: &'a Json,
+pub fn object_of<'a, D: Document>(
+    value: &'a D,
     expected: &'static str,
-) -> Result<&'a BTreeMap<String, Json>, CodecError> {
-    value.as_object().ok_or(CodecError::TypeMismatch {
+) -> Result<&'a BTreeMap<String, D>, CodecError> {
+    value.as_entries().ok_or(CodecError::TypeMismatch {
         expected,
         found: value.kind(),
     })
@@ -309,12 +743,12 @@ pub fn object_of<'a>(
 /// # Errors
 ///
 /// [`CodecError`] when the value cannot be encoded.
-pub fn put_required<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_required<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &T,
 ) -> Result<(), CodecError> {
-    into.insert(name.to_owned(), value.encode()?);
+    into.insert(name.to_owned(), value.encode::<D>()?);
     Ok(())
 }
 
@@ -323,14 +757,14 @@ pub fn put_required<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when the value cannot be encoded.
-pub fn put_nullable<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_nullable<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &Nullable<T>,
 ) -> Result<(), CodecError> {
     let encoded = match value {
-        Nullable::Null => Json::Null,
-        Nullable::Value(inner) => inner.encode()?,
+        Nullable::Null => D::from_null(),
+        Nullable::Value(inner) => inner.encode::<D>()?,
     };
     into.insert(name.to_owned(), encoded);
     Ok(())
@@ -341,27 +775,27 @@ pub fn put_nullable<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when the value cannot be encoded.
-pub fn put_optional<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_optional<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &Optional<T>,
 ) -> Result<(), CodecError> {
     if let Optional::Present(inner) = value {
-        into.insert(name.to_owned(), inner.encode()?);
+        into.insert(name.to_owned(), inner.encode::<D>()?);
     }
     Ok(())
 }
 
-fn encode_list<T: ProtocolValue>(items: &[T]) -> Result<Json, CodecError> {
+fn encode_list<D: Document, T: ProtocolValue>(items: &[T]) -> Result<D, CodecError> {
     let mut out = Vec::with_capacity(items.len());
     for item in items {
-        out.push(item.encode()?);
+        out.push(item.encode::<D>()?);
     }
-    Ok(Json::Array(out))
+    Ok(D::from_items(out))
 }
 
-fn decode_list<T: ProtocolValue>(value: &Json) -> Result<Vec<T>, CodecError> {
-    let items = value.as_array().ok_or(CodecError::TypeMismatch {
+fn decode_list<D: Document, T: ProtocolValue>(value: &D) -> Result<Vec<T>, CodecError> {
+    let items = value.as_items().ok_or(CodecError::TypeMismatch {
         expected: "list",
         found: value.kind(),
     })?;
@@ -372,15 +806,17 @@ fn decode_list<T: ProtocolValue>(value: &Json) -> Result<Vec<T>, CodecError> {
     Ok(out)
 }
 
-fn encode_map<T: ProtocolValue>(entries: &BTreeMap<String, T>) -> Result<Json, CodecError> {
+fn encode_map<D: Document, T: ProtocolValue>(
+    entries: &BTreeMap<String, T>,
+) -> Result<D, CodecError> {
     let mut out = BTreeMap::new();
     for (key, value) in entries {
-        out.insert(key.clone(), value.encode()?);
+        out.insert(key.clone(), value.encode::<D>()?);
     }
-    Ok(Json::Object(out))
+    Ok(D::from_entries(out))
 }
 
-fn decode_map<T: ProtocolValue>(value: &Json) -> Result<BTreeMap<String, T>, CodecError> {
+fn decode_map<D: Document, T: ProtocolValue>(value: &D) -> Result<BTreeMap<String, T>, CodecError> {
     let entries = object_of(value, "map")?;
     let mut out = BTreeMap::new();
     for (key, item) in entries {
@@ -394,8 +830,8 @@ fn decode_map<T: ProtocolValue>(value: &Json) -> Result<BTreeMap<String, T>, Cod
 /// # Errors
 ///
 /// [`CodecError`] when an item cannot be encoded.
-pub fn put_required_list<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_required_list<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &[T],
 ) -> Result<(), CodecError> {
@@ -408,13 +844,13 @@ pub fn put_required_list<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when an item cannot be encoded.
-pub fn put_nullable_list<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_nullable_list<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &Nullable<Vec<T>>,
 ) -> Result<(), CodecError> {
     let encoded = match value {
-        Nullable::Null => Json::Null,
+        Nullable::Null => D::from_null(),
         Nullable::Value(items) => encode_list(items)?,
     };
     into.insert(name.to_owned(), encoded);
@@ -426,8 +862,8 @@ pub fn put_nullable_list<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when an item cannot be encoded.
-pub fn put_optional_list<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_optional_list<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &Optional<Vec<T>>,
 ) -> Result<(), CodecError> {
@@ -442,8 +878,8 @@ pub fn put_optional_list<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when a value cannot be encoded.
-pub fn put_required_map<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_required_map<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &BTreeMap<String, T>,
 ) -> Result<(), CodecError> {
@@ -456,13 +892,13 @@ pub fn put_required_map<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when a value cannot be encoded.
-pub fn put_nullable_map<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_nullable_map<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &Nullable<BTreeMap<String, T>>,
 ) -> Result<(), CodecError> {
     let encoded = match value {
-        Nullable::Null => Json::Null,
+        Nullable::Null => D::from_null(),
         Nullable::Value(entries) => encode_map(entries)?,
     };
     into.insert(name.to_owned(), encoded);
@@ -474,8 +910,8 @@ pub fn put_nullable_map<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when a value cannot be encoded.
-pub fn put_optional_map<T: ProtocolValue>(
-    into: &mut BTreeMap<String, Json>,
+pub fn put_optional_map<D: Document, T: ProtocolValue>(
+    into: &mut BTreeMap<String, D>,
     name: &str,
     value: &Optional<BTreeMap<String, T>>,
 ) -> Result<(), CodecError> {
@@ -485,11 +921,11 @@ pub fn put_optional_map<T: ProtocolValue>(
     Ok(())
 }
 
-fn present<'a>(
-    fields: &'a BTreeMap<String, Json>,
+fn present<'a, D: Document>(
+    fields: &'a BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
-) -> Result<&'a Json, CodecError> {
+) -> Result<&'a D, CodecError> {
     fields
         .get(field)
         .ok_or(CodecError::MissingField { declared_by, field })
@@ -500,8 +936,8 @@ fn present<'a>(
 /// # Errors
 ///
 /// [`CodecError::MissingField`], [`CodecError::UnexpectedNull`], or a shape mismatch.
-pub fn take_required<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_required<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<T, CodecError> {
@@ -518,8 +954,8 @@ pub fn take_required<T: ProtocolValue>(
 ///
 /// [`CodecError::MissingField`] when it is absent — omitting a `nullable` field is
 /// malformed — or a shape mismatch.
-pub fn take_nullable<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_nullable<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<Nullable<T>, CodecError> {
@@ -535,8 +971,8 @@ pub fn take_nullable<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError::UnexpectedNull`] when it is present and null, or a shape mismatch.
-pub fn take_optional<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_optional<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<Optional<T>, CodecError> {
@@ -554,8 +990,8 @@ pub fn take_optional<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when absent, null, or not a list of that item shape.
-pub fn take_required_list<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_required_list<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<Vec<T>, CodecError> {
@@ -571,8 +1007,8 @@ pub fn take_required_list<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when absent, or not a list of that item shape.
-pub fn take_nullable_list<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_nullable_list<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<Nullable<Vec<T>>, CodecError> {
@@ -588,8 +1024,8 @@ pub fn take_nullable_list<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when present and null, or not a list of that item shape.
-pub fn take_optional_list<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_optional_list<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<Optional<Vec<T>>, CodecError> {
@@ -607,8 +1043,8 @@ pub fn take_optional_list<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when absent, null, or not a map of that value shape.
-pub fn take_required_map<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_required_map<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<BTreeMap<String, T>, CodecError> {
@@ -624,8 +1060,8 @@ pub fn take_required_map<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when absent, or not a map of that value shape.
-pub fn take_nullable_map<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_nullable_map<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<Nullable<BTreeMap<String, T>>, CodecError> {
@@ -641,8 +1077,8 @@ pub fn take_nullable_map<T: ProtocolValue>(
 /// # Errors
 ///
 /// [`CodecError`] when present and null, or not a map of that value shape.
-pub fn take_optional_map<T: ProtocolValue>(
-    fields: &BTreeMap<String, Json>,
+pub fn take_optional_map<D: Document, T: ProtocolValue>(
+    fields: &BTreeMap<String, D>,
     declared_by: &'static str,
     field: &'static str,
 ) -> Result<Optional<BTreeMap<String, T>>, CodecError> {
@@ -658,86 +1094,61 @@ pub fn take_optional_map<T: ProtocolValue>(
 // --- the leaf types -----------------------------------------------------------------
 
 impl ProtocolValue for bool {
-    fn encode(&self) -> Result<Json, CodecError> {
-        Ok(Json::Bool(*self))
+    fn encode<D: Document>(&self) -> Result<D, CodecError> {
+        Ok(D::from_bool(*self))
     }
 
-    fn decode(value: &Json) -> Result<Self, CodecError> {
-        match value {
-            Json::Bool(inner) => Ok(*inner),
-            other => Err(CodecError::TypeMismatch {
-                expected: "Bool",
-                found: other.kind(),
-            }),
-        }
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
+        value.as_bool().ok_or(CodecError::TypeMismatch {
+            expected: "Bool",
+            found: value.kind(),
+        })
     }
 }
 
 impl ProtocolValue for u32 {
-    fn encode(&self) -> Result<Json, CodecError> {
-        Ok(Json::Integer(u64::from(*self)))
+    fn encode<D: Document>(&self) -> Result<D, CodecError> {
+        Ok(D::from_unsigned(u64::from(*self)))
     }
 
-    fn decode(value: &Json) -> Result<Self, CodecError> {
-        match value {
-            Json::Integer(inner) => {
-                Self::try_from(*inner).map_err(|_| CodecError::IntegerRange { expected: "U32" })
-            }
-            other => Err(CodecError::TypeMismatch {
-                expected: "U32",
-                found: other.kind(),
-            }),
-        }
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
+        // `U32` takes the encoding's plain number spelling and no other: a `U32` is always
+        // inside the exactly-representable range, so the second spelling `U64` has in JSON
+        // is not one this type ever needs.
+        Self::try_from(value.as_integer("U32")?)
+            .map_err(|_| CodecError::IntegerRange { expected: "U32" })
     }
 }
 
-/// `U64` has two spellings and the *magnitude* picks which.
+/// `U64`'s spelling is the encoding's business, and IDL §3 gives each encoding one.
 ///
 /// > `U64`. JSON encodes it as a number only when it is exactly representable; otherwise
-/// > as a decimal string.
+/// > as a decimal string. CBOR uses an unsigned integer.
 /// >
 /// > — IDL §3
 ///
-/// Both directions are strict: a decimal string inside the exactly-representable range is
-/// rejected, because it would be a second spelling of a value that already has one, and a
-/// number beyond the range is rejected by the parser before it reaches here.
+/// Both directions are strict in both encodings: JSON rejects a decimal string inside the
+/// exactly-representable range and a number beyond it, and CBOR rejects a decimal string
+/// altogether, because each would be a second spelling of a value that already has one.
+/// Which rejection applies is [`Document::as_u64`]'s to decide.
 impl ProtocolValue for u64 {
-    fn encode(&self) -> Result<Json, CodecError> {
-        if *self <= json::MAX_EXACT_INTEGER {
-            Ok(Json::Integer(*self))
-        } else {
-            Ok(Json::String(self.to_string()))
-        }
+    fn encode<D: Document>(&self) -> Result<D, CodecError> {
+        Ok(D::from_unsigned(*self))
     }
 
-    fn decode(value: &Json) -> Result<Self, CodecError> {
-        match value {
-            Json::Integer(inner) => Ok(*inner),
-            Json::String(text) => {
-                let parsed: Self = text
-                    .parse()
-                    .map_err(|_| CodecError::IntegerRange { expected: "U64" })?;
-                if parsed <= json::MAX_EXACT_INTEGER || text != &parsed.to_string() {
-                    return Err(CodecError::IntegerRange { expected: "U64" });
-                }
-                Ok(parsed)
-            }
-            other => Err(CodecError::TypeMismatch {
-                expected: "U64",
-                found: other.kind(),
-            }),
-        }
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
+        value.as_u64("U64")
     }
 }
 
 impl ProtocolValue for String {
-    fn encode(&self) -> Result<Json, CodecError> {
-        Ok(Json::String(self.clone()))
+    fn encode<D: Document>(&self) -> Result<D, CodecError> {
+        Ok(D::from_text(self))
     }
 
-    fn decode(value: &Json) -> Result<Self, CodecError> {
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
         value
-            .as_str()
+            .as_text()
             .map(ToOwned::to_owned)
             .ok_or(CodecError::TypeMismatch {
                 expected: "String",
@@ -748,27 +1159,28 @@ impl ProtocolValue for String {
 
 /// `Bytes` is base64url without padding in JSON, and a byte string in CBOR.
 impl ProtocolValue for Bytes {
-    fn encode(&self) -> Result<Json, CodecError> {
-        Ok(Json::String(base64url(self)))
+    fn encode<D: Document>(&self) -> Result<D, CodecError> {
+        Ok(D::from_byte_string(self))
     }
 
-    fn decode(value: &Json) -> Result<Self, CodecError> {
-        let text = value.as_str().ok_or(CodecError::TypeMismatch {
-            expected: "Bytes",
-            found: value.kind(),
-        })?;
-        from_base64url(text).map_err(|_| CodecError::Bytes)
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
+        value.as_byte_string("Bytes")
     }
 }
 
 /// An `Opaque` is a canonical value carried verbatim: the codec neither interprets it nor
 /// re-shapes it (`rule encoding.opaque_payloads`).
+///
+/// "Carried verbatim as a canonical value of the **negotiated encoding**" is why this is
+/// the one leaf that reads and writes bytes: the payload's bytes are a document of
+/// whatever encoding the enclosing message is in, so it is parsed and re-written through
+/// the same [`Document`] and never translated between the two.
 impl ProtocolValue for Opaque {
-    fn encode(&self) -> Result<Json, CodecError> {
-        Ok(Json::parse(self.as_bytes())?)
+    fn encode<D: Document>(&self) -> Result<D, CodecError> {
+        D::from_canonical_bytes(self.as_bytes())
     }
 
-    fn decode(value: &Json) -> Result<Self, CodecError> {
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
         Ok(Self::from_bytes(value.to_canonical_bytes()))
     }
 }
@@ -777,12 +1189,12 @@ impl ProtocolValue for Opaque {
 macro_rules! string_value {
     ($name:ty, $declared:literal, $read:ident, $write:ident) => {
         impl ProtocolValue for $name {
-            fn encode(&self) -> Result<Json, CodecError> {
-                Ok(Json::String(self.$write().to_owned()))
+            fn encode<D: Document>(&self) -> Result<D, CodecError> {
+                Ok(D::from_text(self.$write()))
             }
 
-            fn decode(value: &Json) -> Result<Self, CodecError> {
-                let text = value.as_str().ok_or(CodecError::TypeMismatch {
+            fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
+                let text = value.as_text().ok_or(CodecError::TypeMismatch {
                     expected: $declared,
                     found: value.kind(),
                 })?;
@@ -808,12 +1220,12 @@ string_value!(EpochIdentity, "EpochIdentity", new, as_str);
 macro_rules! unconstrained_string_value {
     ($name:ty, $declared:literal) => {
         impl ProtocolValue for $name {
-            fn encode(&self) -> Result<Json, CodecError> {
-                Ok(Json::String(self.as_str().to_owned()))
+            fn encode<D: Document>(&self) -> Result<D, CodecError> {
+                Ok(D::from_text(self.as_str()))
             }
 
-            fn decode(value: &Json) -> Result<Self, CodecError> {
-                let text = value.as_str().ok_or(CodecError::TypeMismatch {
+            fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
+                let text = value.as_text().ok_or(CodecError::TypeMismatch {
                     expected: $declared,
                     found: value.kind(),
                 })?;
@@ -830,12 +1242,12 @@ unconstrained_string_value!(PageToken, "PageToken");
 /// round-trip *is* the IDL's `@pattern`. Restating the pattern here would be the second
 /// spelling ADR-0013 forbids.
 impl ProtocolValue for ProtocolVersion {
-    fn encode(&self) -> Result<Json, CodecError> {
-        Ok(Json::String(self.to_string()))
+    fn encode<D: Document>(&self) -> Result<D, CodecError> {
+        Ok(D::from_text(&self.to_string()))
     }
 
-    fn decode(value: &Json) -> Result<Self, CodecError> {
-        let text = value.as_str().ok_or(CodecError::TypeMismatch {
+    fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
+        let text = value.as_text().ok_or(CodecError::TypeMismatch {
             expected: "ProtocolVersion",
             found: value.kind(),
         })?;
@@ -849,11 +1261,11 @@ impl ProtocolValue for ProtocolVersion {
 macro_rules! integer_value {
     ($name:ty, $write:ident) => {
         impl ProtocolValue for $name {
-            fn encode(&self) -> Result<Json, CodecError> {
+            fn encode<D: Document>(&self) -> Result<D, CodecError> {
                 ProtocolValue::encode(&self.$write())
             }
 
-            fn decode(value: &Json) -> Result<Self, CodecError> {
+            fn decode<D: Document>(value: &D) -> Result<Self, CodecError> {
                 Ok(Self::new(<u64 as ProtocolValue>::decode(value)?))
             }
         }

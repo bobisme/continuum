@@ -56,10 +56,28 @@
 //! field before writing the frame, so a client reads one message with the response inside
 //! it rather than a message plus an out-of-band value. `payload` is `null` on the wire
 //! exactly where the IDL says it must be — on `status = error`.
+//!
+//! # Which frames the negotiated encoding governs
+//!
+//! "Exactly one [encoding] is negotiated per connection" (IDL §2), so [`Server::answer`]
+//! reads a request frame and writes a result frame in [`Negotiated::encoding`] — that is
+//! what having negotiated one means, and it is why the encoding is on the connection
+//! rather than on the message.
+//!
+//! The *handshake* frames are the exception, and deliberately so rather than by omission.
+//! A `ClientHello` is the frame that offers the encodings, so it cannot already be in the
+//! one the offer has not yet selected, and the IDL fixes no bootstrap encoding for it —
+//! `rule handshake.negotiation` says which encoding is chosen and not which encoding the
+//! choosing is spelled in. [`encode_hello`] and [`Server::open`] therefore stay in
+//! `canonical_json`, and picking that rather than inventing a rule is the same discipline
+//! `codec` took with the three decisions it refused to make until the IDL made them. The
+//! gap is a real one and belongs in the IDL, not here.
 
 use std::collections::VecDeque;
 
-use crate::codec::{self, CodecError, from_bytes, to_bytes};
+use crate::codec::cbor::Cbor;
+use crate::codec::json::Json;
+use crate::codec::{self, CodecError, Document, read_in, to_bytes, write_in};
 use crate::daemon::family::{Arguments, Payload};
 use crate::daemon::{Daemon, OperationRequest};
 use crate::protocol::envelope::{RequestEnvelope, ResultEnvelope};
@@ -67,6 +85,7 @@ use crate::protocol::handshake::{
     ClientHello, Negotiated, NegotiationError, ServerReject, ServerWelcome,
 };
 use crate::protocol::spec::Nullable;
+use crate::protocol::vocabulary::Encoding;
 
 /// The largest frame an endpoint will accept.
 ///
@@ -251,9 +270,21 @@ pub fn encode_request(
     envelope: &RequestEnvelope,
     arguments: &Arguments,
 ) -> Result<Vec<u8>, CodecError> {
+    encode_request_in::<Json>(envelope, arguments)
+}
+
+/// Encode a request in the encoding `D`.
+///
+/// # Errors
+///
+/// [`CodecError`] when the arguments or the envelope cannot be encoded.
+pub fn encode_request_in<D: Document>(
+    envelope: &RequestEnvelope,
+    arguments: &Arguments,
+) -> Result<Vec<u8>, CodecError> {
     let mut envelope = envelope.clone();
-    envelope.arguments = encode_arguments(arguments)?;
-    to_bytes(&envelope)
+    envelope.arguments = encode_arguments_in::<D>(arguments)?;
+    write_in::<D, _>(&envelope)
 }
 
 /// Encode a typed request body into the `Opaque` the envelope carries.
@@ -264,33 +295,45 @@ pub fn encode_request(
 pub fn encode_arguments(
     arguments: &Arguments,
 ) -> Result<crate::protocol::scalar::Opaque, CodecError> {
+    encode_arguments_in::<Json>(arguments)
+}
+
+/// Encode a typed request body into the `Opaque` the envelope carries, in the encoding
+/// `D`.
+///
+/// # Errors
+///
+/// [`CodecError`] when the body cannot be encoded.
+pub fn encode_arguments_in<D: Document>(
+    arguments: &Arguments,
+) -> Result<crate::protocol::scalar::Opaque, CodecError> {
     match arguments {
-        Arguments::WorkspaceCreate(body) => codec::to_opaque(body),
-        Arguments::WorkspaceFork(body) => codec::to_opaque(body),
-        Arguments::WorkspaceDiff(body) => codec::to_opaque(body),
-        Arguments::WorkspaceSeal(body) => codec::to_opaque(body),
-        Arguments::IntentGet(body) => codec::to_opaque(body),
-        Arguments::IntentDiff(body) => codec::to_opaque(body),
-        Arguments::IntentProposeRevision(body) => codec::to_opaque(body),
-        Arguments::IntentAccept(body) => codec::to_opaque(body),
-        Arguments::IntentReject(body) => codec::to_opaque(body),
-        Arguments::IntentLock(body) => codec::to_opaque(body),
-        Arguments::EvidenceGet(body) => codec::to_opaque(body),
-        Arguments::EvidenceQuery(body) => codec::to_opaque(body),
-        Arguments::EvidenceVerify(body) => codec::to_opaque(body),
-        Arguments::EvidenceSubscribe(body) => codec::to_opaque(body),
-        Arguments::EvidenceLink(body) => codec::to_opaque(body),
-        Arguments::ObserveIngest(body) => codec::to_opaque(body),
-        Arguments::ObserveClassify(body) => codec::to_opaque(body),
-        Arguments::ObserveResult(body) => codec::to_opaque(body),
-        Arguments::VerificationStart(body) => codec::to_opaque(body),
-        Arguments::VerificationResult(body) => codec::to_opaque(body),
-        Arguments::VerificationAwait(body) => codec::to_opaque(body),
-        Arguments::TaskStatus(body) => codec::to_opaque(body),
-        Arguments::TaskCancel(body) => codec::to_opaque(body),
-        Arguments::TaskResume(body) => codec::to_opaque(body),
-        Arguments::TaskSubscribe(body) => codec::to_opaque(body),
-        Arguments::TaskUpdateBudget(body) => codec::to_opaque(body),
+        Arguments::WorkspaceCreate(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::WorkspaceFork(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::WorkspaceDiff(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::WorkspaceSeal(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentGet(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentDiff(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentProposeRevision(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentAccept(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentReject(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentLock(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::EvidenceGet(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::EvidenceQuery(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::EvidenceVerify(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::EvidenceSubscribe(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::EvidenceLink(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::ObserveIngest(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::ObserveClassify(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::ObserveResult(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::VerificationStart(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::VerificationResult(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::VerificationAwait(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::TaskStatus(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::TaskCancel(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::TaskResume(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::TaskSubscribe(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::TaskUpdateBudget(body) => codec::to_opaque_in::<D, _>(body),
     }
 }
 
@@ -309,10 +352,23 @@ pub fn decode_result(
     operation: &str,
     frame: &[u8],
 ) -> Result<(ResultEnvelope, Payload), CodecError> {
-    let envelope: ResultEnvelope = from_bytes(frame)?;
+    decode_result_in::<Json>(operation, frame)
+}
+
+/// Decode a result frame in the encoding `D`.
+///
+/// # Errors
+///
+/// [`CodecError`] when the frame is not a result envelope, or its payload is not that
+/// operation's response struct.
+pub fn decode_result_in<D: Document>(
+    operation: &str,
+    frame: &[u8],
+) -> Result<(ResultEnvelope, Payload), CodecError> {
+    let envelope: ResultEnvelope = read_in::<D, _>(frame)?;
     let payload = match &envelope.payload {
         Nullable::Null => Payload::None,
-        Nullable::Value(opaque) => codec::operations::decode_payload(operation, opaque)?,
+        Nullable::Value(opaque) => codec::operations::decode_payload_in::<D>(operation, opaque)?,
     };
     Ok((envelope, payload))
 }
@@ -409,20 +465,30 @@ impl Server {
     ///
     /// [`TransportError`] when the result cannot be encoded.
     pub fn answer(&mut self, frame: &[u8]) -> Result<Vec<u8>, TransportError> {
+        // The connection negotiated an encoding, and this is where having negotiated one
+        // means something: the same frame is read and written in it, with no per-message
+        // choice and no sniffing of the bytes.
+        match self.negotiated.encoding() {
+            Encoding::CanonicalJson => self.answer_in::<Json>(frame),
+            Encoding::CanonicalCbor => self.answer_in::<Cbor>(frame),
+        }
+    }
+
+    fn answer_in<D: Document>(&mut self, frame: &[u8]) -> Result<Vec<u8>, TransportError> {
         // The envelope itself not decoding is the one failure with no answer: there is no
         // `request_id` to echo and no operation to check a code against, and inventing a
         // correlation identity for a message that never carried one would be inventing the
         // echo the field exists to make truthful. RFC 0026 leaves a frame a reader cannot
         // parse at the transport level, and so does this.
-        let envelope: RequestEnvelope = from_bytes(frame)?;
-        let arguments = match codec::operations::decode_arguments(
+        let envelope: RequestEnvelope = read_in::<D, _>(frame)?;
+        let arguments = match codec::operations::decode_arguments_in::<D>(
             envelope.operation.as_str(),
             &envelope.arguments,
         ) {
             Ok(arguments) => arguments,
             Err(error) => {
                 let outcome = self.daemon.refuse(&envelope, error.code());
-                return Ok(to_bytes(&outcome)?);
+                return Ok(write_in::<D, _>(&outcome)?);
             }
         };
         let outcome = self.daemon.dispatch(&OperationRequest {
@@ -433,11 +499,11 @@ impl Server {
         // the payload is `Payload::None` and the field stays `null`, which is what the
         // IDL declares for that status.
         let mut result = outcome.envelope;
-        result.payload = match codec::operations::encode_payload(&outcome.payload)? {
+        result.payload = match codec::operations::encode_payload_in::<D>(&outcome.payload)? {
             Some(opaque) => Nullable::Value(opaque),
             None => Nullable::Null,
         };
-        Ok(to_bytes(&result)?)
+        Ok(write_in::<D, _>(&result)?)
     }
 }
 
@@ -450,10 +516,22 @@ pub fn client_receive(
     pair: &mut LocalPair,
     operation: &str,
 ) -> Result<Option<(ResultEnvelope, Payload)>, TransportError> {
+    client_receive_in::<Json>(pair, operation)
+}
+
+/// Read the next result frame a client has been sent, decoded in the encoding `D`.
+///
+/// # Errors
+///
+/// [`TransportError`] when the frame cannot be read or decoded.
+pub fn client_receive_in<D: Document>(
+    pair: &mut LocalPair,
+    operation: &str,
+) -> Result<Option<(ResultEnvelope, Payload)>, TransportError> {
     let Some(frame) = pair.to_client.take_frame()? else {
         return Ok(None);
     };
-    Ok(Some(decode_result(operation, &frame)?))
+    Ok(Some(decode_result_in::<D>(operation, &frame)?))
 }
 
 /// Write a request onto the wire, as a client.
@@ -466,7 +544,20 @@ pub fn client_send(
     envelope: &RequestEnvelope,
     arguments: &Arguments,
 ) -> Result<(), TransportError> {
-    let frame = encode_request(envelope, arguments)?;
+    client_send_in::<Json>(pair, envelope, arguments)
+}
+
+/// Write a request onto the wire, as a client, in the encoding `D`.
+///
+/// # Errors
+///
+/// [`TransportError`] when the request cannot be encoded or framed.
+pub fn client_send_in<D: Document>(
+    pair: &mut LocalPair,
+    envelope: &RequestEnvelope,
+    arguments: &Arguments,
+) -> Result<(), TransportError> {
+    let frame = encode_request_in::<D>(envelope, arguments)?;
     pair.to_server.put_frame(&frame)?;
     Ok(())
 }

@@ -588,24 +588,23 @@ macro_rules! protocol_handle {
         }
 
         impl $crate::codec::ProtocolValue for $name {
-            fn encode(
+            fn encode<D: $crate::codec::Document>(
                 &self,
-            ) -> ::core::result::Result<
-                $crate::codec::json::Json,
-                $crate::codec::CodecError,
-            > {
-                ::core::result::Result::Ok($crate::codec::json::Json::String(
-                    self.as_str().to_owned(),
-                ))
+            ) -> ::core::result::Result<D, $crate::codec::CodecError> {
+                ::core::result::Result::Ok(
+                    <D as $crate::codec::Document>::from_text(self.as_str()),
+                )
             }
 
-            fn decode(
-                value: &$crate::codec::json::Json,
+            fn decode<D: $crate::codec::Document>(
+                value: &D,
             ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
-                let text = value.as_str().ok_or($crate::codec::CodecError::TypeMismatch {
-                    expected: stringify!($name),
-                    found: value.kind(),
-                })?;
+                let text = <D as $crate::codec::Document>::as_text(value).ok_or(
+                    $crate::codec::CodecError::TypeMismatch {
+                        expected: stringify!($name),
+                        found: <D as $crate::codec::Document>::kind(value),
+                    },
+                )?;
                 // The prefix rule is the constructor's, not a second copy of it here.
                 Self::new(text).map_err(|_| $crate::codec::CodecError::Pattern {
                     declared: stringify!($name),
