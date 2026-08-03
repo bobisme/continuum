@@ -75,7 +75,7 @@ use continuum_engine_reference::bfs::{self, Bounds, ExplorationError, Partial};
 use continuum_engine_reference::checking::{
     self, DeadlockPolicy, Obligations, Scope, Verdict as EngineVerdict,
 };
-use continuum_engine_reference::model::Model;
+use continuum_engine_reference::model::{Model, State};
 use continuum_task::region::worker::WorkerStep;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{
@@ -279,6 +279,23 @@ fn obligations(model: &Model, target: &Target) -> Result<Obligations, Fault> {
 
 /// One bounded run: explore, then check.
 ///
+/// # `prior_frontier`, and what it guards
+///
+/// The parked continuation's own frontier — empty on a fresh `verification.start`, and the
+/// resumed continuation's `Continuation::frontier` on a `task.resume`. Nothing downstream of
+/// this function reads it as a search seed: `bfs::explore` has no partial-state entry point,
+/// and this call always re-explores `model` from its initial states under `bounds`. That is
+/// RFC 0026's "cont_* semantics" disposition ("Continuations and resume admissibility") —
+/// `bounds`/`frontier` are pinned as *provenance*, not fed back in as a resume instruction —
+/// and it is sound today only because canonical breadth-first exploration is a deterministic
+/// function of `(model, bounds)`: a larger bound's reachable set is provably a superset of a
+/// smaller bound's, so the parked frontier is always rediscovered. `prior_frontier` is here so
+/// that fact is *checked*, not trusted: a future engine binding — a real partial-state resume,
+/// a non-canonical search order, a portfolio solver — that broke the superset property while
+/// `Continuation::frontier` stayed unread would otherwise fail silently, which is exactly the
+/// concern the disposition names. See `tests/daemon_task_operations.rs` for the same property
+/// re-derived independently, and `tests/dx03_falsification.rs`'s attack 16.
+///
 /// # Errors
 ///
 /// [`ErrorCode::UnsupportedSemanticFeature`] when the model's transition relation is
@@ -289,7 +306,12 @@ fn obligations(model: &Model, target: &Target) -> Result<Obligations, Fault> {
 /// [`Ok(Err(..))`] is not a shape here: a bound that trips is a *result*
 /// ([`Exploration::Exhausted`]), never an error, which is the whole reason a parked
 /// continuation exists.
-fn run(model: &Model, target: &Target, bounds: Bounds) -> Result<Result<Campaign, Fault>, Fault> {
+fn run(
+    model: &Model,
+    target: &Target,
+    bounds: Bounds,
+    prior_frontier: &[State],
+) -> Result<Result<Campaign, Fault>, Fault> {
     let obligations = obligations(model, target)?;
     let exploration = match bfs::explore(model, bounds) {
         Ok(exploration) => exploration,
@@ -309,6 +331,21 @@ fn run(model: &Model, target: &Target, bounds: Bounds) -> Result<Result<Campaign
             ));
         }
     };
+    // The non-prefix guard bn-10wdo's disposition requires: every state the parked
+    // continuation left on its frontier MUST be rediscovered by this run. Debug-only because
+    // it is a property of the *engine binding*, checked on every run rather than sampled, and
+    // this daemon has exactly one engine to check it against; a future non-BFS engine that
+    // needs this to be a hard, release-mode refusal is the moment to promote it, not remove
+    // it, per the same disposition.
+    debug_assert!(
+        prior_frontier
+            .iter()
+            .all(|state| exploration.reachable().contains(state)),
+        "a resumed run's exploration did not rediscover a state the parked continuation's \
+         frontier named — RFC 0026's cont_* semantics disposition holds only while every \
+         engine's resume is a full re-exploration that provably extends the parked one; a \
+         partial-state or non-canonical engine breaks that silently unless this fires"
+    );
     let report = checking::check(model, &exploration, &obligations).map_err(|_| {
         Fault::new(
             ErrorCode::MalformedRequest,
@@ -362,15 +399,21 @@ fn run(model: &Model, target: &Target, bounds: Bounds) -> Result<Result<Campaign
 /// record does, under the identity the task named it by. See [`publish_record`] for the
 /// ordering and [`recovery`](super::recovery) for what a restart can then say about it.
 ///
+/// `prior_frontier` is the parked continuation's frontier on a `task.resume`, and empty on a
+/// fresh `verification.start` — see [`run`]'s doc for what it guards (bn-10wdo's cont_*
+/// semantics disposition).
+///
 /// # Errors
 ///
 /// [`Fault`] when the model can no longer be constructed, when the identity seam refuses to
 /// name a continuation, when the run itself is not a question about this model, or —
 /// [`ErrorCode::PublicationAborted`] — when the durable publication of the campaign record
 /// could not complete atomically (INV-017).
+#[allow(clippy::too_many_arguments)]
 pub fn advance(
     handle: &TaskHandle,
     bounds: Bounds,
+    prior_frontier: &[State],
     state: &mut DaemonState,
     services: &Services,
     store: &ReferenceStore,
@@ -401,8 +444,19 @@ pub fn advance(
         }
         state.regions_mut().step(scope, WorkerStep::Begin);
         run_in(
-            scope, handle, bounds, &source, &target, &snapshot, &intent, &now, state, services,
-            store, publisher,
+            scope,
+            handle,
+            bounds,
+            prior_frontier,
+            &source,
+            &target,
+            &snapshot,
+            &intent,
+            &now,
+            state,
+            services,
+            store,
+            publisher,
         )
     })?;
     Ok(())
@@ -455,11 +509,15 @@ fn publish_record(
 }
 
 /// One run, inside the scope that owns it. See [`advance`] for the step table.
+///
+/// `prior_frontier` is the parked continuation's frontier on a resume, and empty on a fresh
+/// `verification.start` — see [`run`]'s doc for what it guards.
 #[allow(clippy::too_many_arguments)]
 fn run_in(
     scope: RegionScope,
     handle: &TaskHandle,
     bounds: Bounds,
+    prior_frontier: &[State],
     source: &Commitment,
     target: &Target,
     snapshot: &Nullable<crate::protocol::scalar::WorkspaceHandle>,
@@ -479,7 +537,7 @@ fn run_in(
         return Err(fault);
     };
 
-    let outcome = match run(&model, target, bounds) {
+    let outcome = match run(&model, target, bounds, prior_frontier) {
         Ok(outcome) => outcome,
         Err(fault) => {
             state.regions_mut().fail(scope, fault.code);
@@ -836,6 +894,11 @@ fn start(
     let head = record.descriptor.source().identity().clone();
     let modules = snapshot_modules(record.descriptor.source());
     let lineage = state.lineage(&lineage_name).ok_or_else(Fault::denied)?;
+    // Both `LineageError` arms collapse to `StaleSnapshot` here, deliberately including
+    // `Unknown`: `record` above is already a snapshot this daemon fully resolved, so there is
+    // no existence-oracle question left to protect, only a currency one — RFC 0026's "An
+    // unplaceable lineage identity" disposition (bn-10wdo), which also documents why
+    // `daemon::workspace`'s guarded writes answer the same `Unknown` arm `CapabilityDenied`.
     check_current(lineage, &head).map_err(|_| {
         Fault::new(
             ErrorCode::StaleSnapshot,
@@ -914,7 +977,8 @@ fn start(
     };
     let bounds = entry.bounds();
     state.tasks_mut().put(entry);
-    advance(&handle, bounds, state, services, store, &publisher)?;
+    // A fresh task has no parked continuation, so there is no prior frontier to rediscover.
+    advance(&handle, bounds, &[], state, services, store, &publisher)?;
 
     let entry = state.tasks().get(&handle).ok_or_else(Fault::denied)?;
     Ok(started(entry))

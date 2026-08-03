@@ -304,6 +304,69 @@ This composition is stated identically in RFC 0030's "Resume decision" and close
 - **Continuations are forked across an epoch advance, never migrated in place** (plan §4.6). A fork produces a new continuation with a new identity; the original remains valid for the epochs it pinned.
 - `rule task.resume` governs `repair.resume` identically. The two differ only in what they return, not in what they validate. `StaleSnapshot` is admissible for both even though neither operation's `errors` clause lists it and neither takes a non-null envelope `snapshot`; this is an internal IDL contradiction and `rule task.resume` governs.
 
+#### What a `cont_*` handle means, and what `bounds`/`frontier` are pinned for
+
+**A `cont_*` handle means "advance this task", not "resume execution from this exact point".**
+bn-1kp6's DX-03 campaign recorded, without being able to call it a defect, that
+`Continuation::bounds` and `Continuation::frontier` are pinned at creation and read by
+*nothing* on the admissibility predicate above or on the run it gates: `daemon::task::resume`
+re-derives the engine bound from the task's own ledger (`TaskEntry::bounds()`) and the run
+re-explores the model from its initial states, never from the pinned frontier. bn-10wdo's
+disposition, decided against this RFC's own text rather than assumed from the campaign's
+framing:
+
+- **`bounds` and `frontier` are pinned as *provenance*, per RFC 0030's budget rule, not as a
+  resume instruction.** RFC 0030 §"Budget rule": "for budget-truncated searches … the
+  committed **frontier** is part of output identity: the committed artifact records the budget
+  actually consumed and its coverage frontier, and two runs of the same key with different
+  budgets produce *comparable, monotone* artifacts related by frontier inclusion". That is a
+  claim about what the *parked artifact identifies*, not about how a future run is seeded. The
+  pinning obligation above ("the committed frontier and search state, in the frontier form RFC
+  0030's budget rule requires") is satisfied by recording the fact, not by any commitment that
+  an engine must resume *from* it.
+- **The monotonicity obligation already stated in this section — "the frontier after resume
+  MUST include the frontier before it" — is the real content of "resume", and it is a fact
+  about the produced artifact, not an instruction consumed on the way to producing it.** RFC
+  0030 makes this checkable by construction: "Frontier inclusion is checkable. A
+  budget-sensitive definition MUST carry its frontier in a form for which inclusion between two
+  artifacts of the same key is decidable by the daemon without re-running the engine." The
+  obligation is that inclusion **hold** and be **decidable**, not that the later run be seeded
+  by the earlier frontier.
+- **This is sound today only because the one engine that exists has a stronger property than
+  the obligation requires: it is a deterministic, canonical re-exploration of the whole model
+  under a bound.** `bfs::explore` has no partial-state entry point; `daemon::task::resume`
+  passes it the same model and a bound no smaller than the parked one (`budget::bounds_of`
+  floors a lowered ceiling at recorded spend, per B18). Canonical breadth-first order makes the
+  larger bound's reachable set a deterministic superset of the smaller bound's, so the parked
+  frontier is always rediscovered — a *stronger* guarantee (full re-derivation) than frontier
+  inclusion asks for, which is why nothing needs to read `bounds`/`frontier` to satisfy it.
+- **That strength is an accident of the one engine, not a property of the wire contract or of
+  `Continuation`'s type, and a future engine can lose it silently.** A genuinely incremental
+  engine binding — real partial-state resume, a non-canonical or nondeterministic search
+  order, a portfolio solver — could produce a resumed artifact whose frontier does *not*
+  include the parked one, and nothing on the admissibility predicate or the run path would
+  notice, because neither reads `bounds`/`frontier` today. This is the silent-break the
+  campaign's concern names.
+- **The guard this disposition requires: an engine binding used for resume MUST enforce or
+  verify frontier inclusion at the point it commits a resumed run's result**, rather than rely
+  on a structural argument that happens to hold for one engine. `daemon::verification::run`
+  carries the reference implementation of this requirement — a `debug_assert` checking that
+  every state the parked frontier named is in the resumed exploration's reachable set,
+  threaded from the continuation being resumed (empty on a fresh `verification.start`, where
+  there is nothing to check). It is `debug_assert`, not a release-mode typed refusal, because
+  today's single engine binding makes the property a re-derivable fact rather than a risk; a
+  future non-BFS engine binding is where this obligation becomes a release-mode check rather
+  than a debug one, not where it is removed. `tests/daemon_task_operations.rs`
+  independently re-derives the same inclusion property outside the daemon, and
+  `tests/dx03_falsification.rs`'s attack 16 exercises a superseded-continuation resume through
+  the actual code path the assertion now covers.
+- **`bounds` remains pinned for a reason this disposition does not change**: it is what a
+  reader needs to know *what the parked run had already committed to spending*, the same
+  provenance role `frontier` plays for what it had already discovered — neither is a ceiling
+  the resume enforces, because `rule task.update_budget`'s legality table is what a resumed
+  run's *actual* bound is computed from, floored at recorded spend rather than reread from the
+  continuation.
+
 ### Epoch advance
 
 - An epoch advance MUST publish `EpochAdvanceNotice` — the per-artifact-class `Compatibility` map (`Preserved | Revalidate | Incompatible`) and the estimated `blast_radius`, both keyed by plan §4.4 class prefix — **before** the advance is applied. A client reads pending notices from `ServerWelcome.pending_advances`; a notice that first becomes observable after the advance has been applied violates this rule, and is not merely a late notification.
@@ -367,6 +430,54 @@ Fifty of the seventy-two also *declare* `UnsupportedSemanticFeature` in their ow
 - **`EpochUnsupported` is not `ContinuationEpochMismatch`.** The first says "I cannot read this at all"; the second says "I read it and it does not apply here". Collapsing them destroys the distinction between an unreadable artifact and an inapplicable one.
 - **`CapabilityDenied` is not a not-found.** See "Existence oracles and cross-principal sharing".
 - **An engine defect is never a semantic verdict.** See "Engine defects".
+
+### An unplaceable lineage identity: one condition, two codes, and why that is a decision
+
+`continuum_workspace::staleness::check_current` (crate-internal to `continuum-workspace`, which
+takes no protocol dependency of its own) returns one of two typed refusals for an identity a
+`Fork` is asked to place: `Stale` when the identity is provably a real, earlier point — the
+fork's own `origin` or its immediate `parent` — and `Unknown` when the fork's three-identity
+memory cannot place it at all, "an honest statement about what *this* `Fork` value can prove,
+never a false claim that the identity was never part of any lineage" (the crate's own module
+doc). bn-1kp6's DX-03 campaign found the daemon spelling `Unknown` two different ways
+(attack 7, `tests/dx03_falsification.rs`) and could not call it a defect; bn-10wdo's audit of
+the asymmetry found both readings textually defensible against a *different call shape*, never
+the same question asked twice:
+
+- **`daemon::workspace`'s `lineage_fault`** maps `Unknown` to `CapabilityDenied`, for
+  `workspace.fork` and `workspace.seal`. Both check a *caller-declared* `expected_head`
+  immediately before spending a **write** on it — advancing the lineage, publishing a
+  descriptor — the compare-and-set shape `advance_to_current`'s own doc names: "the
+  crate-level shape of 'the named snapshot is not current'". `Unknown` here is reasoned from
+  X2: "inventing a distinguishable not-found is precisely the existence oracle [RFC 0027 X2]
+  forbids".
+- **`daemon::task::resume` and `daemon::verification::start`** map `Unknown` to
+  `StaleSnapshot`, collapsed with `Stale`. Both check an identity the daemon has *already*
+  fully resolved: `state.workspace(..).ok_or_else(Fault::denied)?` refuses a wholly unheld
+  handle one line earlier in both functions, so `check_current`'s `Unknown` arm is reached
+  only for a handle the daemon holds a complete `WorkspaceRecord` for — the same handle a
+  continuation pinned, or the same handle the envelope named. There is no existence-oracle
+  question left open at that point: the caller already knows the record exists, and the only
+  open question is whether it is still current — this RFC's own `StaleSnapshot` definition,
+  "the named snapshot is not current, or is not sealed where sealing is required", which does
+  not distinguish a snapshot the daemon can *prove* stale from one it can only *fail to prove*
+  current.
+
+**Disposition: ratified as two rules, keyed to call shape, not aligned to one spelling.** "May
+this write proceed on the caller's word about a snapshot's position" and "does an
+already-known snapshot remain eligible to be read or run over" are different questions, and
+each family answers the one it is actually asking. Aligning either direction would move a wire
+byte a falsification test already exercises deliberately: attack 7 resumes, starts, and seals
+against the identical superseded-past-the-fork's-memory snapshot in one run and pins
+`StaleSnapshot` for `task.resume`/`verification.start` and `CapabilityDenied` for
+`workspace.seal` in the same test. The mapping is therefore unchanged, and the rule a *future*
+operation follows is stated here instead of left to be rediscovered: an `Unknown` lineage arm
+reached while validating a caller-declared identity about to be spent on a lineage-advancing or
+lineage-publishing write is `CapabilityDenied`; one reached while checking whether an
+already-resolved, already-pinned identity remains eligible for a read or a run is
+`StaleSnapshot` alongside `Stale`. `rule errors.common` admits both codes to every operation
+that takes a non-null `snapshot`, so no operation's declared `errors` clause blocks either
+reading.
 
 ## Operational contract on the wire
 

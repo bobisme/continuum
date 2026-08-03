@@ -1109,11 +1109,27 @@ fn update_budget(
 /// |---|---|
 /// | the continuation is not one this daemon holds | `CapabilityDenied` (X2: no distinguishable not-found) |
 /// | the envelope names a snapshot other than the one the continuation pinned | `StaleSnapshot` |
-/// | the pinned snapshot is not held, is not sealed, or has been superseded in its lineage | `StaleSnapshot` |
+/// | the pinned snapshot is not held at all | `CapabilityDenied` (X2 — see below) |
+/// | the pinned snapshot is held but is not sealed, or has been superseded in its lineage | `StaleSnapshot` |
 /// | a pinned epoch names a kind the daemon pins no identity for | `EpochUnsupported` |
 /// | a pinned epoch disagrees with the daemon's current epoch of that kind (P1) | `ContinuationEpochMismatch` |
 /// | the pinned engine identity disagrees with the daemon's (P2) | `ContinuationEpochMismatch` |
 /// | the model the continuation names is no longer one this daemon can construct | `UnsupportedSemanticFeature` (3.2; see the comment at the call) |
+///
+/// **The third row is bn-10wdo's disposition of a doc/code disagreement the table itself
+/// used to carry**, and the row above is the aligned reading, not a behaviour change: the
+/// code has always looked the pinned snapshot up with `state.workspace(..).ok_or_else(
+/// Fault::denied)?`, the same "a handle this daemon does not hold is `Fault::denied`, not a
+/// not-found" rule `daemon::workspace`'s module documentation states and every family
+/// applies to a wholly unheld handle. A prior revision of this table folded "not held" into
+/// the same row as "not sealed" and "superseded", both of which *are* `StaleSnapshot` because
+/// both presuppose a record the daemon actually has — RFC 0026's own definition, "the named
+/// snapshot is not current, or is not sealed where sealing is required", is a statement about
+/// a snapshot the daemon can name, not one it cannot find at all. The path is unreachable via
+/// wire today (no operation in the registry deletes or evicts a `WorkspaceRecord` once a
+/// continuation has pinned it, so a resume can find its pinned snapshot missing only if a
+/// future admin surface adds one), so no wire audit exercises either row and this correction
+/// is doc-only.
 ///
 /// A continuation whose *task* is terminal is not in that table, because it is not a
 /// refusal: it is answered, with the terminal status, and nothing is written. That answer is
@@ -1141,7 +1157,15 @@ fn update_budget(
 /// parked explored set is a **prefix** of the resumed one and every parked frontier state is
 /// discovered again. The run is under the *pinned* epochs, because the predicate above has
 /// already refused every case where the daemon's differ. `tests/daemon_task_operations.rs`
-/// asserts the prefix property instead of trusting it.
+/// asserts the prefix property instead of trusting it, and so, on the production path itself,
+/// does [`verification::run`](super::verification::run)'s `debug_assert` — `resume` passes
+/// this `continuation`'s pinned `frontier` through to it rather than reading it here, which is
+/// bn-10wdo's disposition of a DX-03 concern: a `cont_*` handle means "advance this task", not
+/// "resume from this point", `Continuation::bounds`/`frontier` are pinned **provenance**
+/// (RFC 0030's budget rule), and this daemon's one engine happens to re-derive them rather than
+/// consume them as instructions. See RFC 0026, "What a `cont_*` handle means, and what
+/// `bounds`/`frontier` are pinned for", for the full disposition and the non-prefix guard it
+/// requires of any future engine binding.
 fn resume(
     call: &Call<'_>,
     request: &TaskResumeRequest,
@@ -1174,6 +1198,12 @@ fn resume(
     let lineage_name = record.lineage.clone();
     let head = record.descriptor.source().identity().clone();
     let lineage = state.lineage(&lineage_name).ok_or_else(Fault::denied)?;
+    // Both `LineageError` arms collapse to `stale()` here, deliberately including `Unknown`:
+    // `record` above is already a snapshot this daemon fully resolved, so there is no
+    // existence-oracle question left, only a currency one — RFC 0026's "An unplaceable lineage
+    // identity" disposition (bn-10wdo). See `daemon::workspace`'s module doc for the paired
+    // half: the same `Unknown` arm reached validating a caller-declared identity about to be
+    // spent on a write answers `CapabilityDenied` there, and both are ratified, not aligned.
     check_current(lineage, &head).map_err(|_| stale())?;
 
     admissible_epochs(&continuation.pinned, services.epochs())?;
@@ -1259,7 +1289,22 @@ fn resume(
     // The collapse itself stays, for every code still outside the union: a family may not
     // put an undeclared code on the wire, and the check is registry data rather than a list
     // maintained here, so it tracks the IDL by construction.
-    verification::advance(&task, bounds, state, services, store, &publisher).map_err(|fault| {
+    //
+    // `continuation.frontier` is passed through unread by anything that decides whether this
+    // resume is *admissible* — bn-10wdo's cont_* semantics disposition (RFC 0026,
+    // "Continuations and resume admissibility") keeps it that way, `bounds`/`frontier` are
+    // pinned provenance, not a resume instruction. It reaches `verification::advance` only so
+    // `run` can check, rather than trust, that this run rediscovers it.
+    verification::advance(
+        &task,
+        bounds,
+        &continuation.frontier,
+        state,
+        services,
+        store,
+        &publisher,
+    )
+    .map_err(|fault| {
         if super::errors::admits(call.spec, fault.code) {
             fault
         } else {

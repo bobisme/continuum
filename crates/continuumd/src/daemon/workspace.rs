@@ -114,6 +114,16 @@
 //! The same reading governs every handle this family resolves: a workspace the daemon does
 //! not hold is [`Fault::denied`], not a not-found.
 //!
+//! **`daemon::task::resume` and `daemon::verification::start` map `LineageError::Unknown` to
+//! `StaleSnapshot` instead** (collapsed with `Stale`), for a snapshot their own
+//! `state.workspace(..)` lookup has already resolved — bn-1kp6's DX-03 attack 7 recorded the
+//! asymmetry, and bn-10wdo's disposition ratifies both readings, keyed to *why* `check_current`
+//! is being asked: this family asks it of a caller-declared identity about to be spent on a
+//! **write** (a compare-and-set guard, X2's existence-oracle reasoning applies); the other two
+//! ask it of an identity already fully resolved, where the only open question is currency, not
+//! existence. See RFC 0026, "An unplaceable lineage identity: one condition, two codes, and why
+//! that is a decision", for the full disposition and the rule a future operation follows.
+//!
 //! # The diff lane
 //!
 //! `workspace.diff` returns [`ErrorCode::UnsupportedSemanticFeature`] — the code its own

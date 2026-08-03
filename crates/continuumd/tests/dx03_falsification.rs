@@ -140,24 +140,42 @@
 //! | 21 | handle reuse | an unheld handle vs. a lookalike daemon's denial (RFC 0027 X2) | [`attack_reuse_an_unheld_handle_is_byte_identical_with_a_lookalike_daemons_denial`] | held |
 //! | 22 | resume | resume after the daemon's epochs advanced under it | [`attack_reuse_a_continuation_is_refused_when_the_daemons_epochs_moved`] | held |
 //!
-//! # Two concerns this campaign recorded without being able to call them defects
+//! # Two concerns this campaign recorded, since dispositioned (bn-10wdo)
 //!
-//! - **`LineageError::Unknown` maps to two different wire codes.** `daemon::workspace`
-//!   documents its choice at length — `Unknown` → `CapabilityDenied`, because "inventing a
-//!   distinguishable not-found is precisely the existence oracle RFC 0027 X2 forbids" —
-//!   while `daemon::task::resume` and `daemon::verification::start` map *both* lineage arms
-//!   to `StaleSnapshot`. Every path refuses, so the pass condition is not touched; but one
-//!   verdict answering to two codes is how the two readings come to disagree later. Recorded
-//!   by attack 7.
-//! - **`Continuation::bounds` and `Continuation::frontier` are pinned and never read on the
-//!   resume path.** RFC 0026 requires a continuation to pin the committed frontier at
-//!   creation, and `daemon::verification::run_in` does pin it; but `daemon::task::resume`
-//!   re-derives the bound from `TaskEntry::bounds()` and the engine re-explores from the
-//!   start, so the pinned frontier constrains nothing. That is *why* attack 16 finds a
-//!   superseded continuation admitted rather than refused: at this grain a `cont_*` handle
-//!   means "advance this task", not "resume from this point". It is sound today only because
-//!   breadth-first exploration makes the parked set a prefix of the resumed one; a real
-//!   partial-state engine would make it a defect.
+//! Neither was a defect, and neither test below changed as a result — the two dispositions
+//! are recorded in RFC 0026 and cited from here and from the daemon's own module docs, per
+//! bn-10wdo's instruction to update a campaign test that pinned a concern to cite its
+//! disposition rather than to weaken what it asserts.
+//!
+//! - **`LineageError::Unknown` maps to two different wire codes, and it stays that way.**
+//!   `daemon::workspace` documents its choice at length — `Unknown` → `CapabilityDenied`,
+//!   because "inventing a distinguishable not-found is precisely the existence oracle RFC
+//!   0027 X2 forbids" — while `daemon::task::resume` and `daemon::verification::start` map
+//!   *both* lineage arms to `StaleSnapshot`. RFC 0026's "An unplaceable lineage identity: one
+//!   condition, two codes, and why that is a decision" ratifies both readings rather than
+//!   aligning them: `daemon::workspace`'s two operations check a caller-declared identity
+//!   about to be spent on a write (X2's compare-and-set shape); `task.resume` and
+//!   `verification.start` check an identity their own `state.workspace(..)` lookup has
+//!   already resolved, where no existence-oracle question remains open, only a currency one.
+//!   Every path still refuses, so the pass condition is not touched. Recorded by attack 7.
+//! - **`Continuation::bounds` and `Continuation::frontier` are pinned and read by nothing
+//!   that decides whether a resume is admissible or that seeds the run it gates.** RFC 0026's
+//!   "What a `cont_*` handle means, and what `bounds`/`frontier` are pinned for" dispositions
+//!   this: a `cont_*` handle means "advance this task", not "resume from this point", and
+//!   `bounds`/`frontier` are pinned as *provenance* (RFC 0030's budget rule) against which the
+//!   monotonicity obligation — "the frontier after resume MUST include the frontier before
+//!   it" — is checked, not instructions an engine consumes. `daemon::task::resume` re-derives
+//!   the bound from `TaskEntry::bounds()` and the engine re-explores from the start, so the
+//!   pinned frontier constrains nothing *by being read*; it is sound today only because
+//!   breadth-first exploration makes the parked set a provable superset of the resumed one.
+//!   That is *why* attack 16 finds a superseded continuation admitted rather than refused. The
+//!   silent-break the concern named — a future non-prefix engine breaking this while
+//!   `bounds`/`frontier` stay unread — now has a guard: `daemon::verification::run` carries a
+//!   `debug_assert` that every state the resumed continuation's frontier named is in the new
+//!   exploration's reachable set, fed `continuation.frontier` from `task::resume` itself. It
+//!   fires on the same path attack 16 exercises, and on the resume in
+//!   `tests/daemon_task_operations.rs`'s `budget_exhaustion_parks_a_continuation_…` test, which
+//!   independently re-derives the same inclusion property from outside the daemon.
 //!
 //! # House rules
 //!
@@ -1436,12 +1454,16 @@ fn attack_staleness_every_snapshot_consuming_operation_refuses_a_superseded_hand
 /// advances. Every path still refuses; nothing is silently accepted because the lineage
 /// forgot it.
 ///
-/// It also records the concern the campaign could not call a defect: the two lineage arms
-/// map to two different wire codes depending on which family asks. `daemon::workspace`
-/// argues its choice from RFC 0027 X2 ("inventing a distinguishable not-found is precisely
-/// the existence oracle") and answers `CapabilityDenied`; `daemon::task::resume` collapses
-/// both arms to `StaleSnapshot`. Both refuse, so DX-03's pass condition is untouched — but
-/// one verdict with two spellings is how two readings come to disagree later.
+/// It also exercises the concern the campaign recorded and bn-10wdo dispositioned: the two
+/// lineage arms map to two different wire codes depending on which family asks, and RFC
+/// 0026's "An unplaceable lineage identity" ratifies both rather than aligning them.
+/// `daemon::workspace` argues its choice from RFC 0027 X2 ("inventing a distinguishable
+/// not-found is precisely the existence oracle") for a caller-declared identity about to be
+/// spent on a write, and answers `CapabilityDenied`; `daemon::task::resume` and
+/// `daemon::verification::start` collapse both arms to `StaleSnapshot`, for an identity their
+/// own lookup has already resolved, where no existence-oracle question remains open. Both
+/// refuse, so DX-03's pass condition is untouched — the two spellings are the decision, not a
+/// disagreement still to be resolved.
 #[test]
 fn attack_staleness_a_snapshot_the_fork_can_no_longer_place_is_still_refused() {
     let mut fixture = bootstrap();
@@ -1526,8 +1548,10 @@ fn attack_staleness_a_snapshot_the_fork_can_no_longer_place_is_still_refused() {
     assert_eq!(
         seal(&mut fixture.daemon, &second, "req_seal_x", "idem-seal-x").error_code(),
         Some(ErrorCode::CapabilityDenied),
-        "recorded concern: `workspace.seal` answers the *same* lineage verdict with a \
-         different code, by RFC 0027 X2's reasoning — a refusal either way, two spellings"
+        "dispositioned (RFC 0026, \"An unplaceable lineage identity\"): `workspace.seal` \
+         checks the same lineage verdict as a compare-and-set guard on a write, and answers \
+         `CapabilityDenied` by RFC 0027 X2's reasoning — a refusal either way, two codes by \
+         design, not a disagreement still open"
     );
 }
 
@@ -2310,13 +2334,19 @@ fn attack_reuse_double_resuming_one_continuation_is_one_task_and_one_campaign() 
 /// ledger, to the same place a resume of the current continuation would reach. One task, a
 /// monotone cost, no second campaign.
 ///
-/// This is where the campaign's second recorded concern is visible. `Continuation` pins
-/// `bounds` and `frontier` at creation — RFC 0026 requires it — and
-/// `daemon::task::resume` reads neither: it re-derives the bound from `TaskEntry::bounds()`
-/// and the engine re-explores from the start. So a `cont_*` handle means "advance this task"
-/// rather than "resume from this point", which is why an older one is not a second meaning
-/// and cannot be refused as one. It is sound today only because breadth-first exploration
-/// makes the parked explored set a prefix of the resumed one.
+/// This is where the campaign's second recorded concern is visible, since dispositioned in
+/// RFC 0026 ("What a `cont_*` handle means, and what `bounds`/`frontier` are pinned for",
+/// bn-10wdo). `Continuation` pins `bounds` and `frontier` at creation — RFC 0026 requires it,
+/// as *provenance* — and `daemon::task::resume` reads neither to decide admissibility or to
+/// seed the run: it re-derives the bound from `TaskEntry::bounds()` and the engine
+/// re-explores from the start. So a `cont_*` handle means "advance this task" rather than
+/// "resume from this point", which is why an older one is not a second meaning and cannot be
+/// refused as one. It is sound today only because breadth-first exploration makes the parked
+/// explored set a provable superset of the resumed one — and this test now runs that
+/// exploration under `daemon::verification::run`'s `debug_assert` guard, fed the *old*
+/// continuation's frontier through `resume`'s own `verification::advance` call, so a future
+/// engine that broke the superset property would fail loudly here rather than silently admit
+/// a stale continuation.
 #[test]
 fn attack_reuse_a_superseded_continuation_advances_the_same_task_not_a_second_one() {
     let mut parked = drive_to_park();
