@@ -515,7 +515,14 @@ mod idl {
                         name: format!("{namespace}.{verb}"),
                         namespace,
                         verb,
-                        annotations,
+                        // `@since` dates a declaration; it is not one of the seven
+                        // behavioural annotations the IDL's §1 catalogue lists and RFC
+                        // 0027's registry column reproduces. The first operation to carry
+                        // one is `evidence.link` at 3.3 (bn-3sypm).
+                        annotations: annotations
+                            .into_iter()
+                            .filter(|annotation| annotation != "since")
+                            .collect(),
                         authority: authority.expect("an operation declares its authority"),
                         request: request.expect("an operation declares a request"),
                         response: response.expect("an operation declares a response"),
@@ -943,7 +950,7 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     let document = document();
     // The IDL's §10 header states the registry's size in prose; if the parser silently
     // dropped a declaration, every comparison below would pass vacuously for it.
-    assert_eq!(document.operations.len(), 72, "operations");
+    assert_eq!(document.operations.len(), 73, "operations");
     assert_eq!(document.scalars.len(), 9, "scalars");
     assert_eq!(document.handles.len(), 19, "handles");
     // Protocol 3.1 (IDL 1.2) adds one alias (`AuditCorrelationId`), one enum
@@ -960,11 +967,21 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // unmoved: no defect was paid with a new verb, and one that needs one
     // (`bn-i4aem` item 4, an evidence-edge append) is deferred to a registry edit in
     // plan §10.2, RFC 0027's table, and this file together.
+    //
+    // Protocol 3.3 (IDL 1.4) is that deferred registry edit, taken (bn-3sypm): the
+    // operation count moves for the first time in this protocol's life, 72 -> 73, and
+    // one rule arrives with it (`evidence.edge_identity`). `evidence.link` is RFC
+    // 0038's F14 decision on the wire — the only operation that appends an
+    // evidence-graph edge, and therefore the first artifact INV-004's `CHECKED_BY`
+    // requirement has ever had. Its request and response bodies are anonymous, so the
+    // named-struct count is unmoved. **These two numbers are the visibility the count
+    // assertions exist for**: an operation cannot enter the protocol without moving
+    // them here, in RFC 0027's distribution table, and in RFC 0026's verdict table.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 45, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 37, "rules");
+    assert_eq!(document.rules.len(), 38, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
@@ -988,7 +1005,7 @@ fn the_operation_set_is_exactly_the_idl_registry() {
         .map(|operation| operation.name.as_str())
         .collect();
     assert_eq!(mine, theirs);
-    assert_eq!(OPERATION_COUNT, 72);
+    assert_eq!(OPERATION_COUNT, 73);
 }
 
 #[test]
@@ -1293,12 +1310,12 @@ fn a_removed_operation_is_reported() {
     mutated.push_str(&source[end..]);
 
     let document = idl::parse(&mutated);
-    assert_eq!(document.operations.len(), 71);
+    assert_eq!(document.operations.len(), 72);
     let found = all_mismatches(&document);
     assert!(
         found
             .iter()
-            .any(|item| item.contains("workspace.seal") || item.contains("71")),
+            .any(|item| item.contains("workspace.seal") || item.contains("72")),
         "removing an operation must be reported, got {found:?}"
     );
 }

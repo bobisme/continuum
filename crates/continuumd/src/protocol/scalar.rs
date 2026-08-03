@@ -416,7 +416,7 @@ impl OperationName {
     /// # Errors
     ///
     /// [`PatternMismatch`] when the text is not a well-formed name, and [`None`] through
-    /// the [`Option`] when it is well-formed but not one of the 72 declared operations.
+    /// the [`Option`] when it is well-formed but not one of the 73 declared operations.
     pub fn registered(text: &str) -> Result<Option<Self>, PatternMismatch> {
         let name = Self::new(text)?;
         Ok(crate::protocol::registry::operation(name.as_str()).map(|_| name))

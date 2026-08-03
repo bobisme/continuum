@@ -1,4 +1,4 @@
-//! The `evidence` namespace: request and response structs for its 4 operations.
+//! The `evidence` namespace: request and response structs for its 5 operations.
 //!
 //! Each struct is the IDL's anonymous body under the generated-name rule of the
 //! IDL header: the operation name in PascalCase with the `Request`/`Response`
@@ -93,5 +93,39 @@ protocol_struct! {
     struct EvidenceSubscribeResponse {
         /// The scope's current frontier at subscription time.
         frontier: list<EvidenceHandle> required;
+    }
+}
+
+protocol_struct! {
+    /// The `request` body of `evidence.link` (protocol 3.3).
+    ///
+    /// Three fields, and the one that is *not* here is the point: there is no
+    /// `checker` field. The checker is the admitted capability's actor
+    /// (RFC 0038 "Authority"), for the same reason `evidence.verify` has no
+    /// status field — a field a caller can fill is a field a caller can lie in.
+    struct EvidenceLinkRequest {
+        /// The evidence node the check was performed over — the edge's `from`.
+        subject: EvidenceHandle required;
+        /// Content identity of the proof receipt the checker produced (RFC
+        /// 0024). The daemon MUST already hold it; the `receipt` node this
+        /// operation appends is the edge's `to` (RFC 0038 D1).
+        receipt: Commitment required;
+        /// The checker's tool identity, recorded as the receipt node's
+        /// `provenance.tool` and inside its identity, so one receipt checked
+        /// under two checker versions is two nodes.
+        checker_profile: String required;
+    }
+}
+
+protocol_struct! {
+    /// The `response` body of `evidence.link` (protocol 3.3).
+    struct EvidenceLinkResponse {
+        /// The `CHECKED_BY` edge, named under `rule evidence.edge_identity`.
+        edge: EvidenceHandle required;
+        /// The `receipt` node the edge points at.
+        receipt: EvidenceHandle required;
+        /// The checker's service identity (INV-004), from the admitted
+        /// capability and never from the request.
+        checker: String required;
     }
 }

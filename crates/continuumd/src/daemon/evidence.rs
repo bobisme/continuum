@@ -1,6 +1,7 @@
-//! The `evidence` family: `get`, `query`, `verify`, `subscribe` — and the daemon's
+//! The `evidence` family: `get`, `query`, `verify`, `subscribe`, `link` — the daemon's
 //! verification service, which is the only thing in this workspace that may advance a
-//! claim's status.
+//! claim's status, and the one operation in the protocol that appends an evidence-graph
+//! edge.
 //!
 //! # INV-004, and why it is a property of the module graph
 //!
@@ -109,29 +110,33 @@
 
 use std::collections::BTreeMap;
 
+use continuum_evidence::actor::ServiceIdentity;
 use continuum_evidence::claim_status::{ClaimStatus, PromotionRejected, StatusTransition};
+use continuum_evidence::edge::{CHECKED_BY_TARGET, CheckTargetRule, CheckerBinding, EdgeRelation};
+use continuum_evidence::node::NodeKind;
 use continuum_intent::canonical_json::Json;
 use continuum_value::assurance::ValidationBasis;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::ReferenceStore;
 
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
-use super::state::{DaemonState, EvidenceNode, StatusWrite};
+use super::state::{DaemonState, EvidenceEdge, EvidenceNode, StatusWrite};
 use super::{Services, identity};
 use crate::protocol::envelope::{
     AssuranceEnvelope, EnvelopeDimension, Omission, ProducedDimension, Redacted,
     SemanticVerdictValue, UnsupportedDimension, Verdict,
 };
 use crate::protocol::operations::evidence::{
-    EvidenceGetRequest, EvidenceGetResponse, EvidenceQueryRequest, EvidenceQueryResponse,
-    EvidenceSubscribeRequest, EvidenceVerifyRequest, EvidenceVerifyResponse,
+    EvidenceGetRequest, EvidenceGetResponse, EvidenceLinkRequest, EvidenceLinkResponse,
+    EvidenceQueryRequest, EvidenceQueryResponse, EvidenceSubscribeRequest, EvidenceVerifyRequest,
+    EvidenceVerifyResponse,
 };
 use crate::protocol::scalar::{ActorId, EvidenceHandle, Opaque};
 use crate::protocol::shared::EvidenceQuery;
 use crate::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use crate::protocol::vocabulary::{
-    AssuranceClass, ErrorCode, EvidenceKind, EvidenceNodeKind, EvidenceStatus, InconclusiveReason,
-    OmissionReason, SemanticVerdict,
+    AssuranceClass, ErrorCode, EvidenceEdgeKind, EvidenceEventKind, EvidenceKind, EvidenceNodeKind,
+    EvidenceStatus, InconclusiveReason, OmissionReason, SemanticVerdict, StructuralOutcome,
 };
 
 /// The `evidence` namespace's four operations, answering as one verification service.
@@ -223,6 +228,10 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("evidence.verify", ErrorCode::CertificateRejected),
     ("evidence.verify", ErrorCode::InsufficientEvidence),
     ("evidence.subscribe", ErrorCode::UnsupportedSemanticFeature),
+    ("evidence.link", ErrorCode::CapabilityDenied),
+    ("evidence.link", ErrorCode::InsufficientEvidence),
+    ("evidence.link", ErrorCode::UnsupportedSemanticFeature),
+    ("evidence.link", ErrorCode::PublicationAborted),
 ];
 
 /// The `$id` of the governing schema, with the `v<schema_epoch>/` segment removed
@@ -231,6 +240,22 @@ const NODE_SCHEMA_ID: &str = "https://continuum.dev/schema/evidence-graph-node.j
 
 /// The schema epoch this daemon writes evidence-graph nodes at.
 const NODE_SCHEMA_EPOCH: i64 = 1;
+
+/// The `$id` of the governing edge schema, with the `v<schema_epoch>/` segment removed.
+const EDGE_SCHEMA_ID: &str = "https://continuum.dev/schema/evidence-graph-edge.json";
+
+/// The schema epoch this daemon writes evidence-graph edges at.
+const EDGE_SCHEMA_EPOCH: i64 = 1;
+
+/// The domain tag that separates an edge preimage from a node preimage
+/// (`rule evidence.edge_identity`).
+///
+/// It carries a `/`, which is outside the artifact-handle character class
+/// `^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$` that every `Commitment` this daemon derives belongs
+/// to. A node preimage's first part is such a commitment, so no node preimage can spell an
+/// edge preimage's first part — which is what makes the two derivations disjoint rather
+/// than merely unlikely to collide.
+pub const EDGE_IDENTITY_DOMAIN: &str = "evidence-graph-edge/v1";
 
 impl Default for EvidenceFamily {
     fn default() -> Self {
@@ -279,7 +304,9 @@ impl OperationFamily for EvidenceFamily {
         };
         let evidence = ArtifactClass::Evidence.token();
         match arguments {
-            Arguments::EvidenceGet(_) | Arguments::EvidenceVerify(_) => claim(vec![evidence]),
+            Arguments::EvidenceGet(_)
+            | Arguments::EvidenceVerify(_)
+            | Arguments::EvidenceLink(_) => claim(vec![evidence]),
             // A query names no instance it is authorized *against* — its `roots` are where
             // a traversal starts, not artifacts it is entitled to — so the class is the
             // whole scope claim, and every node it would return is filtered against the
@@ -294,13 +321,14 @@ impl OperationFamily for EvidenceFamily {
         call: &Call<'_>,
         state: &mut DaemonState,
         services: &Services,
-        _store: &ReferenceStore,
+        store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
             Arguments::EvidenceGet(request) => get(request, state),
             Arguments::EvidenceQuery(request) => query(request, state),
             Arguments::EvidenceVerify(request) => self.verify(request, state, services),
             Arguments::EvidenceSubscribe(request) => subscribe(request),
+            Arguments::EvidenceLink(request) => link(call, request, state, services, store),
             // Unreachable: the dispatcher checked shape agreement against the registry
             // before routing. A typed refusal rather than an `unreachable!`, because a
             // daemon does not abort on its own invariant.
@@ -315,6 +343,24 @@ impl OperationFamily for EvidenceFamily {
 // --- evidence.get -----------------------------------------------------------------------
 
 fn get(request: &EvidenceGetRequest, state: &DaemonState) -> Result<Effect, Fault> {
+    // One handle class names both halves of the graph (`^ev_[A-Za-z0-9_-]+$` is the pattern
+    // of `node_id` *and* `edge_id`), so this operation resolves either. The edge arm is
+    // reachable as of protocol 3.3, when `evidence.link` gave the graph its first edges.
+    if let Some(edge) = state.evidence_edge(&request.evidence) {
+        return Ok(Effect::new(
+            Payload::EvidenceGet(EvidenceGetResponse {
+                node: Nullable::Null,
+                edge: Nullable::Value(Opaque::from_bytes(
+                    edge_record(&request.evidence, edge).to_canonical_bytes(),
+                )),
+                // A redaction is a property of content a *node* references; an edge
+                // references none.
+                redacted: Optional::Absent,
+            }),
+            Nullable::Null,
+        ));
+    }
+
     // A node the graph does not hold is a denial, not a not-found: "a read of an artifact
     // the caller is not authorized for MUST return `CapabilityDenied` whether or not the
     // artifact exists; a distinct not-found *is* an existence oracle" (RFC 0027 X2).
@@ -363,9 +409,10 @@ fn get(request: &EvidenceGetRequest, state: &DaemonState) -> Result<Effect, Faul
             node: Nullable::Value(Opaque::from_bytes(
                 node_record(&request.evidence, node).to_canonical_bytes(),
             )),
-            // This daemon's graph holds nodes and no edges: no operation in the 72 appends
-            // one. `null` is the declared reading of "this handle does not name an edge",
-            // and inventing an edge record would be inventing an artifact.
+            // The handle named a node, so it does not name an edge: `null` is the
+            // declared reading of "this handle does not name one", and the two arms are
+            // exclusive because one map is keyed by node handles and the other by edge
+            // handles.
             edge: Nullable::Null,
             redacted,
         }),
@@ -470,17 +517,52 @@ fn query(request: &EvidenceQueryRequest, state: &DaemonState) -> Result<Effect, 
         .filter(|(handle, node)| matches(&request.query, handle, node))
         .map(|(handle, _)| handle.clone())
         .collect();
+    let edges: Vec<EvidenceHandle> = state
+        .evidence_edges()
+        .filter(|(handle, edge)| matches_edge(&request.query, handle, edge))
+        .map(|(handle, _)| handle.clone())
+        .collect();
 
     Ok(Effect::new(
-        Payload::EvidenceQuery(EvidenceQueryResponse {
-            nodes,
-            // No operation in the 72 appends an edge, so the graph holds none. An empty
-            // list is the truthful answer to "which edges match", and it stays truthful
-            // whatever `edge_kinds` asked for.
-            edges: Vec::new(),
-        }),
+        Payload::EvidenceQuery(EvidenceQueryResponse { nodes, edges }),
         Nullable::Null,
     ))
+}
+
+/// Whether one edge satisfies an [`EvidenceQuery`].
+///
+/// The clauses that name *node* properties — `node_kinds`, `statuses`, `claim_id` — select
+/// no edge when they are present, because an edge has none of them and answering "matches"
+/// would be answering a question that was not asked. `edge_kinds` and `roots` are the two
+/// that apply, and `roots` matches an edge whose own handle or either endpoint is named,
+/// which is the reading "roots to traverse from" has for a relation.
+fn matches_edge(query: &EvidenceQuery, handle: &EvidenceHandle, edge: &EvidenceEdge) -> bool {
+    for absent in [
+        query.node_kinds.value().map(|kinds| kinds.is_empty()),
+        query.statuses.value().map(|statuses| statuses.is_empty()),
+    ] {
+        if absent == Some(false) {
+            return false;
+        }
+    }
+    if query.claim_id.value().is_some() {
+        return false;
+    }
+    if let Optional::Present(kinds) = &query.edge_kinds {
+        if !kinds.is_empty() && !kinds.contains(&wire_edge_kind(edge.relation.kind())) {
+            return false;
+        }
+    }
+    if let Optional::Present(roots) = &query.roots {
+        if !roots.is_empty()
+            && !roots.contains(handle)
+            && !roots.contains(&edge.from)
+            && !roots.contains(&edge.to)
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// Whether one node satisfies an [`EvidenceQuery`].
@@ -746,6 +828,363 @@ impl EvidenceFamily {
             ValidationBasis::CheckedCertificate,
         ))
     }
+}
+
+// --- evidence.link ----------------------------------------------------------------------
+
+/// Record that an independent checker checked an evidence node (RFC 0038 D1–D3).
+///
+/// # Why this appends two artifacts and not one
+///
+/// RFC 0026 F14's decisive objection was that a `CHECKED_BY` edge "would have nothing to
+/// point at". RFC 0038 D1 answered which kind it points at — a `receipt` — and an operation
+/// that could only *reference* a receipt would have re-created the objection one level
+/// down, because no verb creates one. So the receipt node arrives with the edge, and that is
+/// the stronger design rather than the convenient one: a `receipt` reachable by any other
+/// producer would be a forgeable check artifact, and here the node and the edge naming its
+/// checker are appended together or not at all.
+///
+/// # The order of the refusals, and why it is this order
+///
+/// | # | Refusal | Code | Source |
+/// |---|---|---|---|
+/// | 1 | the caller is not a `service:` actor | `CapabilityDenied` | RFC 0038 "Authority": a checker is a service identity (RFC 0027 P3) |
+/// | 2 | the graph does not hold the subject | `CapabilityDenied` | RFC 0027 X2 — never a distinguishable not-found |
+/// | 3 | the checker is the subject's own producer | `InsufficientEvidence` | INV-004, no self-certification |
+/// | 4 | the daemon holds no clock | `UnsupportedSemanticFeature` | INV-005: a provenance record names a time, and none is invented |
+/// | 5 | the daemon holds no receipt content | `CapabilityDenied` | RFC 0038's "rejects nonexistent references", at the write layer |
+/// | 6 | the receipt identity already names a non-`receipt` node | `InsufficientEvidence` | RFC 0038 D1, through `CheckTargetRule` |
+/// | 7 | the edge would relate an artifact to itself | `InsufficientEvidence` | INV-004: an artifact that checks itself asserts nothing |
+///
+/// Three is checked before four, five, six, and seven deliberately: a service that is the
+/// claim's own producer has established nothing whatever the receipt says, and a refusal
+/// that depended on the receipt would be a refusal that leaked something about it. That is
+/// the order `evidence.verify` uses, for the same reason.
+///
+/// The checker is **never** a request field. It is `call.grant.actor` — the identity T4
+/// bound to the admitted capability — so a caller cannot name someone else as the checker,
+/// exactly as `observe.ingest`'s producer cannot name someone else as the author of its
+/// append. `ServiceIdentity::parse` is what enforces the scheme, and it is
+/// `continuum-evidence`'s type rather than a local check, so the daemon and the graph agree
+/// on what a checker is by construction.
+fn link(
+    call: &Call<'_>,
+    request: &EvidenceLinkRequest,
+    state: &mut DaemonState,
+    services: &Services,
+    store: &ReferenceStore,
+) -> Result<Effect, Fault> {
+    // 1. The checker is the admitted actor, and it must be a service. `ServiceIdentity`
+    //    refuses `agent:`, `human:`, and `ci:`, so an agent capability cannot append a
+    //    check edge at any authority level — the gate is the scheme, not the ladder.
+    let checker = ServiceIdentity::parse(call.grant.actor.as_str())
+        .map(CheckerBinding::new)
+        .map_err(|_| Fault::denied())?;
+
+    // 2. A subject the graph does not hold is a denial (RFC 0027 X2).
+    let subject = state
+        .evidence(&request.subject)
+        .ok_or_else(Fault::denied)?
+        .clone();
+
+    // 3. INV-004 at the edge: the thing being checked cannot mint its own checked-by.
+    if subject.producer.as_str() == checker.checker().as_str() {
+        return Err(Fault::new(
+            ErrorCode::InsufficientEvidence,
+            "a checker may not record a check of its own production: the appending service \
+             is this node's producer",
+        ));
+    }
+
+    // 4. Time is an explicit effect (INV-005, ADR-0003); a provenance record names one.
+    let created_at = services.now().cloned().ok_or_else(|| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "this daemon holds no time reading, and a provenance record names a check time",
+        )
+    })?;
+
+    // 5. The receipt's content must be held. Same rule as `observe.ingest`: a reference the
+    //    daemon cannot resolve is a denial, not a node it invents.
+    let staged = state
+        .staged(&request.receipt)
+        .ok_or_else(Fault::denied)?
+        .clone();
+
+    // 6. Both identities, through the one seam `rule evidence.edge_identity` names. The
+    //    receipt node is derived by the same function `observe.ingest` names its appends
+    //    with, so a check recorded twice converges rather than forking the graph.
+    let receipt_handle = node_identity(services, &request.receipt, &request.checker_profile)
+        .map_err(|_| identity_unavailable())?;
+    if let Some(held) = state.evidence(&receipt_handle) {
+        // The identity is a function of (content, profile) and nothing else, so it can
+        // already name a node of another kind. RFC 0038 D1 says what a check edge may point
+        // at, and the rule that decides is `continuum-evidence`'s, consulted rather than
+        // restated.
+        let kind = library_kind(held.kind);
+        if kind != Some(CHECKED_BY_TARGET) || !CheckTargetRule::default().admits(CHECKED_BY_TARGET)
+        {
+            return Err(Fault::new(
+                ErrorCode::InsufficientEvidence,
+                "a CHECKED_BY edge names a receipt, and this identity already names an \
+                 evidence node of another kind",
+            ));
+        }
+    }
+    let relation = EdgeRelation::CheckedBy(checker.clone());
+    if receipt_handle == request.subject {
+        return Err(Fault::new(
+            ErrorCode::InsufficientEvidence,
+            "a check edge relates two artifacts; the receipt and the subject are one \
+             identity",
+        ));
+    }
+    let edge_handle = edge_identity(services, &relation, &request.subject, &receipt_handle)
+        .map_err(|_| identity_unavailable())?;
+
+    // 7. Publish the receipt under the caller's own capability, so the store decides and
+    //    audits the write against the identity the wire presented (ADR-0037).
+    let token =
+        identity::capability_to_store(&call.envelope.capability).map_err(|_| Fault::denied())?;
+    store
+        .publish(ArtifactClass::Evidence, staged.content.clone(), &token)
+        .map_err(|refusal| match refusal {
+            continuum_workspace::publication::PublishRefusal::CapabilityDenied(_) => {
+                Fault::denied()
+            }
+            continuum_workspace::publication::PublishRefusal::Aborted(_) => Fault::new(
+                ErrorCode::PublicationAborted,
+                "the publication aborted; nothing was published and nothing was truncated",
+            ),
+        })?;
+
+    let key = call
+        .envelope
+        .idempotency_key
+        .value()
+        .cloned()
+        .unwrap_or_default();
+
+    // 8. The receipt node. It lands at the lattice's bottom like every other append: this
+    //    operation writes no status, mints no `Promotion`, and cannot reach the
+    //    compare-and-set. An edge is evidence that a check ran; what it licenses is
+    //    `evidence.verify`'s separate decision (RFC 0038 "Authority").
+    let receipt_node = EvidenceNode {
+        kind: EvidenceNodeKind::Receipt,
+        evidence_kind: subject.evidence_kind,
+        claim_id: subject.claim_id.clone(),
+        artifact: request.receipt.clone(),
+        producer: call.grant.actor.clone(),
+        tool: request.checker_profile.clone(),
+        created_at: created_at.clone(),
+        inputs: vec![request.receipt.as_str().to_owned()],
+        idempotency_key: key.clone(),
+        history: vec![StatusWrite {
+            status: ClaimStatus::BOTTOM,
+            service_identity: None,
+            validation_basis: None,
+            inconclusive_reason: None,
+        }],
+        redaction: None,
+    };
+    let (_, node_appended) = state.append_evidence(receipt_handle.clone(), receipt_node);
+    if node_appended {
+        state.record_evidence_event(crate::protocol::task::EvidenceEvent {
+            at: created_at.clone(),
+            kind: EvidenceEventKind::NodePublished,
+            node: Optional::Present(receipt_handle.clone()),
+            edge: Optional::Absent,
+            status: Optional::Absent,
+            claim_id: Optional::Present(subject.claim_id.clone()),
+        });
+    }
+
+    // 9. The edge.
+    let edge = EvidenceEdge {
+        relation,
+        from: request.subject.clone(),
+        to: receipt_handle.clone(),
+        producer: call.grant.actor.clone(),
+        tool: request.checker_profile.clone(),
+        created_at: created_at.clone(),
+        inputs: vec![
+            request.subject.as_str().to_owned(),
+            receipt_handle.as_str().to_owned(),
+        ],
+        idempotency_key: key,
+    };
+    let (_, edge_appended) = state.append_edge(edge_handle.clone(), edge);
+    if edge_appended {
+        state.record_evidence_event(crate::protocol::task::EvidenceEvent {
+            at: created_at,
+            kind: EvidenceEventKind::EdgePublished,
+            node: Optional::Absent,
+            edge: Optional::Present(edge_handle.clone()),
+            status: Optional::Absent,
+            claim_id: Optional::Present(subject.claim_id.clone()),
+        });
+    }
+
+    Ok(Effect::new(
+        Payload::EvidenceLink(EvidenceLinkResponse {
+            edge: edge_handle.clone(),
+            receipt: receipt_handle.clone(),
+            // The checker is the daemon-admitted actor, reported back so a client can see
+            // what was recorded rather than what it asked for.
+            checker: checker.checker().as_str().to_owned(),
+        }),
+        Nullable::Value(Verdict::Structural(
+            crate::protocol::envelope::StructuralVerdictValue {
+                outcome: StructuralOutcome::Created,
+            },
+        )),
+    )
+    .with_artifacts(vec![
+        edge_artifact(&receipt_handle)?,
+        edge_artifact(&edge_handle)?,
+    ]))
+}
+
+/// One evidence edge as `schemas/evidence-graph-edge.schema.json` writes it.
+///
+/// `checker` is emitted exactly for `CHECKED_BY` — the schema's one `if`/`then` — and here
+/// that is not a branch anyone had to remember: [`EdgeRelation::checker`] is [`Some`] for
+/// that variant and [`None`] for the other twelve, by the shape of the type.
+fn edge_record(handle: &EvidenceHandle, edge: &EvidenceEdge) -> Json {
+    let mut fields: BTreeMap<String, Json> = BTreeMap::new();
+    fields.insert(
+        "schema_id".to_owned(),
+        Json::String(EDGE_SCHEMA_ID.to_owned()),
+    );
+    fields.insert("schema_epoch".to_owned(), Json::Integer(EDGE_SCHEMA_EPOCH));
+    fields.insert(
+        "edge_id".to_owned(),
+        Json::String(handle.as_str().to_owned()),
+    );
+    fields.insert(
+        "kind".to_owned(),
+        Json::String(edge.relation.kind().as_str().to_owned()),
+    );
+    fields.insert(
+        "from".to_owned(),
+        Json::String(edge.from.as_str().to_owned()),
+    );
+    fields.insert("to".to_owned(), Json::String(edge.to.as_str().to_owned()));
+    if let Some(service) = edge.relation.checker() {
+        fields.insert(
+            "checker".to_owned(),
+            Json::String(service.as_str().to_owned()),
+        );
+    }
+    let mut provenance: BTreeMap<String, Json> = BTreeMap::new();
+    provenance.insert(
+        "actor".to_owned(),
+        Json::String(edge.producer.as_str().to_owned()),
+    );
+    provenance.insert(
+        "created_at".to_owned(),
+        Json::String(edge.created_at.as_str().to_owned()),
+    );
+    provenance.insert(
+        "inputs".to_owned(),
+        Json::Array(
+            edge.inputs
+                .iter()
+                .map(|input| Json::String(input.clone()))
+                .collect(),
+        ),
+    );
+    provenance.insert("tool".to_owned(), Json::String(edge.tool.clone()));
+    fields.insert("provenance".to_owned(), Json::Object(provenance));
+    Json::Object(fields)
+}
+
+fn edge_artifact(handle: &EvidenceHandle) -> Result<crate::protocol::envelope::ArtifactRef, Fault> {
+    Ok(crate::protocol::envelope::ArtifactRef {
+        kind: ArtifactClass::Evidence.token().to_owned(),
+        handle: crate::protocol::scalar::ArtifactHandle::new(handle.as_str()).map_err(|_| {
+            Fault::new(
+                ErrorCode::PublicationAborted,
+                "the derived evidence identity is not a well-formed artifact handle",
+            )
+        })?,
+        commitment: Optional::Present(crate::protocol::scalar::Commitment::new(handle.as_str())),
+        redacted: Optional::Absent,
+    })
+}
+
+/// The identity of an evidence edge: a function of what the edge *asserts*
+/// (`rule evidence.edge_identity`, RFC 0038 D2).
+///
+/// Five length-framed parts through the same [`ContentIdentifier`] seam and the same
+/// artifact class that name a node, so one identity kernel names every evidence artifact
+/// and a deployment cannot end up with two. The parts are the domain tag, the edge kind,
+/// both endpoint handles, and the checker — everything the edge says and nothing else.
+///
+/// `provenance` is deliberately outside it, which is the same decision RFC 0038 D4 takes
+/// for a node and for the same reason: a checker's retry must converge on one edge, and an
+/// identity carrying a clock cannot. Note this differs from `continuum-evidence`'s *edge*
+/// content key, which keeps provenance inside so that two agents asserting one relation
+/// keep two credits — that key is a within-graph key and never reaches the wire (RFC 0038
+/// D4), and the wire's rule is convergence.
+///
+/// # Errors
+///
+/// [`ServiceError::Identity`](super::ServiceError::Identity) when the identity seam cannot
+/// name the preimage, or when the derived token is not a well-formed `ev_` handle.
+///
+/// [`ContentIdentifier`]: continuum_workspace::publication::ContentIdentifier
+pub fn edge_identity(
+    services: &Services,
+    relation: &EdgeRelation,
+    from: &EvidenceHandle,
+    to: &EvidenceHandle,
+) -> Result<EvidenceHandle, super::ServiceError> {
+    let checker = relation.checker().map_or("", ServiceIdentity::as_str);
+    let mut preimage = Vec::new();
+    for part in [
+        EDGE_IDENTITY_DOMAIN.as_bytes(),
+        relation.kind().as_str().as_bytes(),
+        from.as_str().as_bytes(),
+        to.as_str().as_bytes(),
+        checker.as_bytes(),
+    ] {
+        preimage.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        preimage.extend_from_slice(part);
+    }
+    let stored = services
+        .identifier()
+        .identify(ArtifactClass::Evidence, &preimage)
+        .map_err(|_| super::ServiceError::Identity)?;
+    EvidenceHandle::new(&stored.to_string()).map_err(|_| super::ServiceError::Handle)
+}
+
+/// The `continuum-evidence` node kind a wire node kind names.
+///
+/// Both vocabularies transcribe `evidence-graph-node.schema.json`'s `kind` enum, token for
+/// token, so the bridge is the token itself rather than a second twenty-row table that
+/// could disagree with either side.
+#[must_use]
+pub fn library_kind(kind: EvidenceNodeKind) -> Option<NodeKind> {
+    NodeKind::from_token(kind.as_wire())
+}
+
+/// The wire edge kind a `continuum-evidence` edge kind names, by the same bridge.
+#[must_use]
+pub fn wire_edge_kind(kind: continuum_evidence::edge::EdgeKind) -> EvidenceEdgeKind {
+    EvidenceEdgeKind::ALL
+        .iter()
+        .copied()
+        .find(|member| member.as_wire() == kind.as_str())
+        .unwrap_or(EvidenceEdgeKind::CheckedBy)
+}
+
+/// The one answer a failed identity derivation gets on the append path.
+fn identity_unavailable() -> Fault {
+    Fault::new(
+        ErrorCode::PublicationAborted,
+        "no well-formed content identity could be derived for the evidence artifact",
+    )
 }
 
 /// The identity of an evidence node: a function of what the node is *about*.

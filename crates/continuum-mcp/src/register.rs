@@ -253,7 +253,7 @@ pub fn rule(operation: &str) -> Option<&'static OperationRule> {
 /// Whether `operation` may be called from `context`.
 ///
 /// An operation the register does not name is admitted: this client's surface is a curated
-/// subset of the protocol's seventy-two operations, and a grammar that refused everything
+/// subset of the protocol's seventy-three operations, and a grammar that refused everything
 /// it had not been told about would be an authority rather than an aid.
 ///
 /// # Errors

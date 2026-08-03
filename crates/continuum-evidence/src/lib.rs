@@ -41,13 +41,19 @@
 //! RFC 0038 says "This RFC summarizes; the schemas decide", so
 //! `notes/plan/schemas/evidence-graph-{node,edge}.schema.json` are what every vocabulary
 //! here is transcribed from, token for token. What this crate deliberately does **not** do
-//! is add an operation to the native protocol: appending an edge is a 73rd operation and a
-//! plan §10.2 + RFC 0027 registry + IDL change together, and RFC 0038's OPEN F14 — which
-//! node kind a `CHECKED_BY` edge's to-handle names, how `edge_id` is derived, and who may
-//! create an edge — is **bn-3sypm's** decision, not this crate's. Where that decision would
-//! otherwise have been pre-empted, the type is parameterized so any of the candidate answers
-//! fits: see [`identity::EvidenceNaming`] (`edge_id` derivation) and
-//! [`edge::CheckTargetRule`] (the to-handle's node kind).
+//! is serve the wire: appending an edge is `evidence.link`, the protocol's 73rd operation
+//! (plan §10.2 + RFC 0027's registry + the IDL, at protocol 3.3, bn-3sypm).
+//!
+//! RFC 0038's F14 was open when this crate landed and the types were parameterized so that
+//! no candidate answer was pre-empted. It is now decided, and each answer arrived as a value
+//! rather than as a rewrite:
+//!
+//! | RFC 0038 | Decision | Where it lives here |
+//! |---|---|---|
+//! | D1 | a `CHECKED_BY` edge's to-handle names a `receipt` | [`edge::CheckTargetRule`]'s [`Default`], enforced by [`graph::EvidenceGraph`] |
+//! | D2 | `edge_id` is the content identity, named by the deployment's identity kernel | [`identity::EvidenceNaming`], the seam the wire fills |
+//! | D3 | only the checker appends a check edge, only a `service:` actor, never over its own production | the daemon's — this crate still mints no edge-creation capability |
+//! | D4 | a node's wire identity is what it is *about*; this crate's is a within-graph content key | [`identity`]'s module docs, `a_records_wire_name_is_a_parameter_not_a_derivation` |
 //!
 //! # Dependency-boundary contract
 //!

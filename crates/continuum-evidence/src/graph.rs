@@ -20,14 +20,16 @@
 //! | Refusal | Source |
 //! |---|---|
 //! | an edge endpoint the graph does not hold | RFC 0038's whiteboard compiler "rejects nonexistent references"; docs/44 "references must resolve" |
-//! | a `CHECKED_BY` to-handle outside the configured rule | the graph's [`CheckTargetRule`] policy; **not** an RFC rule — see below |
+//! | a `CHECKED_BY` to-handle outside the configured rule | RFC 0038 D1, carried as the graph's [`CheckTargetRule`] — see below |
 //! | an edge relating an artifact to itself | [`crate::edge::EvidenceEdge::new`], INV-004 |
 //!
-//! The second is a *policy*, and the type says so. RFC 0038 has not decided which node kind
-//! a `CHECKED_BY` edge's to-handle names — that is bn-3sypm's F14 — so
-//! [`CheckTargetRule::Undecided`] is the default and admits every kind. A deployment that
-//! wants the eventual answer early sets [`EvidenceGraph::with_check_target_rule`]; the graph
-//! then enforces it and names it in the refusal. Nothing here decides it.
+//! The second was a placeholder and is now a rule. RFC 0038 decided (D1, bn-3sypm) that a
+//! `CHECKED_BY` edge's to-handle names a `receipt` and nothing else, so
+//! [`CheckTargetRule`]'s default is that decision and a graph nobody configured enforces
+//! it. It stays a *value* rather than a branch —
+//! [`EvidenceGraph::with_check_target_rule`] still takes any set — because a deployment
+//! ahead of or behind the RFC must be able to say so in the type; what changed is which
+//! answer a caller gets for free.
 //!
 //! # Provenance is not checked, it is required
 //!
@@ -64,7 +66,7 @@
 //! | a replayed write returns the original identity | RFC 0038 | `an_identical_write_converges_and_changes_nothing` |
 //! | references must resolve | docs/44, RFC 0038 | `an_edge_to_an_unheld_node_is_refused` |
 //! | provenance is structural | PR-7 / IMPL-02 | `nothing_enters_the_graph_without_a_producer` |
-//! | F14 is a policy, not a rule | bn-3sypm | `the_check_target_rule_is_undecided_by_default`, `a_decided_check_target_rule_is_enforced` |
+//! | a check edge points at a receipt | RFC 0038 D1 (bn-3sypm) | `a_check_edge_points_at_a_receipt_by_default`, `a_decided_check_target_rule_is_enforced` |
 //! | deterministic iteration | GOV-1-03, INV-005 | `iteration_order_is_content_order` |
 //! | promotion is a compare-and-set | plan §11.7 | `a_lost_compare_and_set_is_a_status_conflict`, `a_downgrade_is_refused` |
 //! | a producer may not promote its own claim | INV-004 | `a_service_cannot_promote_its_own_production` |
@@ -199,8 +201,7 @@ pub enum GraphRefusal {
     /// A `CHECKED_BY` edge's to-handle names a node kind the configured
     /// [`CheckTargetRule`] does not admit.
     ///
-    /// Never returned under the default rule, which is [`CheckTargetRule::Undecided`]
-    /// because RFC 0038 has not decided (bn-3sypm, F14).
+    /// Under the default rule — RFC 0038 D1 — that is every kind but `receipt`.
     CheckTargetRefused {
         /// The kind the to-handle named.
         kind: NodeKind,
@@ -269,16 +270,16 @@ pub struct EvidenceGraph {
 }
 
 impl EvidenceGraph {
-    /// An empty graph, with the `CHECKED_BY` target question left open (F14).
+    /// An empty graph, enforcing RFC 0038 D1: a `CHECKED_BY` edge points at a `receipt`.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The same graph under a decided [`CheckTargetRule`].
+    /// The same graph under a different [`CheckTargetRule`].
     ///
-    /// The day RFC 0038 answers F14, this is where the answer goes; until then the default
-    /// admits every kind and the type name says why.
+    /// The RFC's answer is the default; this is for a deployment that must run ahead of it
+    /// or behind it, and it exists so that saying so is a value rather than a patch.
     #[must_use]
     pub fn with_check_target_rule(mut self, rule: CheckTargetRule) -> Self {
         self.check_target_rule = rule;
@@ -739,22 +740,26 @@ mod tests {
     }
 
     #[test]
-    fn the_check_target_rule_is_undecided_by_default() {
-        // bn-3sypm owns F14; the default answers none of the three candidates, so a check
-        // edge to any node kind lands.
+    fn a_check_edge_points_at_a_receipt_by_default() {
+        // RFC 0038 D1, at the layer that enforces it: a graph nobody configured admits a
+        // check edge to a `receipt` and refuses one to each of the other nineteen kinds —
+        // including the two candidates the RFC weighed and rejected.
         for kind in NodeKind::ALL {
-            let claim = node(kind, "prop_9f", "claim-1");
-            let run = node(NodeKind::Run, "trace_9f", "claim-1");
+            let target = node(kind, "prop_9f", "claim-1");
+            let subject = node(NodeKind::Certificate, "cert_9f", "claim-1");
             let mut graph = EvidenceGraph::new();
-            graph.add_node(claim.clone());
-            graph.add_node(run.clone());
-            assert!(graph.check_target_rule().is_undecided());
+            graph.add_node(target.clone());
+            graph.add_node(subject.clone());
             let asserted = graph.add_edge(edge(
                 EdgeRelation::CheckedBy(checker("service:kernel-core")),
-                &run,
-                &claim,
+                &subject,
+                &target,
             ));
-            assert!(asserted.is_ok(), "{kind}");
+            if kind == NodeKind::Receipt {
+                assert!(asserted.is_ok(), "{kind}");
+            } else {
+                assert_eq!(asserted, Err(GraphRefusal::CheckTargetRefused { kind }));
+            }
         }
     }
 

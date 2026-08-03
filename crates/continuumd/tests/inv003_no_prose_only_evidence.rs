@@ -58,7 +58,7 @@
 //!
 //! | class | binding | checker / evidence |
 //! |---|---|---|
-//! | wire envelopes/operations (72, IDL) | typed wire — `continuumd-native-protocol.idl` | `idl_conformance.rs` (cited) |
+//! | wire envelopes/operations (73, IDL) | typed wire — `continuumd-native-protocol.idl` | `idl_conformance.rs` (cited) |
 //! | CONTCERT certificates (4 kernel crates) | typed wire — `wire.rs`'s byte grammar, `check_certificate(bytes: &[u8])` | `certificate_wire.rs`, `wire_form_boundary.rs` ×4 (cited); `wire_bytes_not_prose` below |
 //! | the 19 `notes/plan/schemas/*.schema.json` instance classes | schema, `additionalProperties: false` + const-pinned identity | `schema_closure` below; GOV-1-12 (cited) |
 //! | intent registry record (representative) | schema, daemon-emitted | `schema_resolution` below |
@@ -1302,7 +1302,7 @@ mod recovery_reports_are_typed {
 mod dispatch_reads_structure_not_prose {
     //! `inv016_untrusted_source_evidence.rs`'s structural leg already proves, mechanically,
     //! that `Daemon::dispatch` keys on the operation *name* (a closed registry lookup)
-    //! across all 25 landed operations, and that the other 47 are inert for *any* payload —
+    //! across all 26 landed operations, and that the other 47 are inert for *any* payload —
     //! "the IDL has no operation whose dispatch reads free text", the fact this file's audit
     //! asserts rather than re-derives. This module does not re-run that proof; it is the
     //! tripwire that the citation stays true if the cited file is ever renamed or gutted
@@ -1313,7 +1313,7 @@ mod dispatch_reads_structure_not_prose {
         for needle in [
             "fn the_free_text_inventory_reachable_from_every_landed_request_is_exactly_this_list",
             "fn every_unlanded_operation_is_inert_for_any_payload_whatsoever",
-            "fn exactly_twenty_five_of_the_seventy_two_operations_are_landed",
+            "fn exactly_twenty_six_of_the_seventy_three_operations_are_landed",
             "never against anything a free-text field carries",
         ] {
             assert!(

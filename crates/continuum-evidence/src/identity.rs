@@ -32,21 +32,40 @@
 //! this crate can *detect* (the identities differ) and never a silent merge. `EvidenceGraph`
 //! keys on the identity, not the handle.
 //!
-//! # The open question this module refuses to close
+//! # The question this split was built for, and the answer it received
 //!
-//! > RFC 0038 must first decide: which node kind a `CHECKED_BY` edge's to-handle names
-//! > (run/certificate/receipt), **`edge_id` derivation**, and edge-creation authority.
+//! > **D2 — `edge_id` is the content identity of what the edge asserts, named through one
+//! > seam.** […] The wire's naming is the deployment's `ContentIdentifier` seam at
+//! > `ArtifactClass::Evidence` — the same seam and the same class that names nodes, so one
+//! > identity kernel names every evidence artifact.
 //! >
-//! > — bn-3sypm (RFC 0038 OPEN F14)
+//! > — RFC 0038, "Edges: what a `CHECKED_BY` edge names" (bn-3sypm, F14)
 //!
-//! `edge_id` derivation is therefore **not** decided here, and the split above is what makes
-//! that possible without leaving edges unnamed. What this crate commits to is the
-//! *preimage*: the canonical encoding of the edge record, which is a statement about what an
-//! edge **is** and is the same statement under any naming function. What it does not commit
-//! to is the preimage → `ev_…` token function, which is [`EvidenceNaming`] — a seam, with
-//! one implementation supplied for use and tests. When bn-3sypm decides the wire derivation,
-//! it is a new [`EvidenceNaming`] implementation and no change to any identity, edge, or
-//! graph type. See [`crate::edge`] for the other two F14 questions.
+//! The split is what made that answer cheap. This crate commits to the *preimage*: the
+//! canonical encoding of the record, which is a statement about what an artifact **is** and
+//! is the same statement under any naming function. It does not commit to the preimage →
+//! `ev_…` token function, which is [`EvidenceNaming`] — a seam, with one implementation
+//! supplied here for use and tests. RFC 0038 filled that seam with the daemon's identity
+//! kernel, and no identity, edge, or graph type moved.
+//!
+//! # The library's identity is not the wire's name (RFC 0038 D4)
+//!
+//! Two derivations existed for a *node*, and RFC 0038 chose between them:
+//!
+//! | | preimage | consequence |
+//! |---|---|---|
+//! | `continuumd` (**normative on the wire**) | the referenced artifact commitment and the capture profile | two ingests of one trace under one profile converge, in any process, by any producer, at any time |
+//! | this crate | the whole record minus status and idempotency key — which includes [`crate::provenance::Provenance`], and so the actor and the wall clock | two producers of the identical observation are two records |
+//!
+//! The daemon's won, on this RFC's own sentence: "a replayed write returns the original node
+//! identity" is a claim *across* processes and producers, and an identity containing a clock
+//! cannot support it. So [`EvidenceIdentity`] is a **within-graph content key** — what
+//! [`crate::graph::EvidenceGraph`] files records under and decides sameness by — and it is
+//! deliberately never rendered as a handle: [`fmt::Display`] is hexadecimal, and
+//! [`crate::node::EvidenceNode::to_record`] and [`crate::edge::EvidenceEdge::to_record`]
+//! take the `ev_` handle as a **parameter**. A graph joined to the wire therefore *supplies*
+//! the wire's names rather than deriving them, which is the reconciliation: the two
+//! derivations do not compete, because only one of them ever reaches a schema instance.
 //!
 //! # Clause → test
 //!
@@ -56,7 +75,8 @@
 //! | a digest name is a labeled non-certified index | ADR-0013 | `a_handle_is_a_labeled_non_certified_name` |
 //! | handles match `^ev_[A-Za-z0-9_-]+$` | both schemas | `handles_match_the_schema_pattern` |
 //! | naming is a pure function of the identity | INV-005, INV-006 | `naming_is_deterministic_across_calls` |
-//! | the naming function is replaceable | bn-3sypm F14 | `a_second_naming_scheme_renames_without_re_identifying` |
+//! | the naming function is replaceable | RFC 0038 D2 (bn-3sypm) | `a_second_naming_scheme_renames_without_re_identifying` |
+//! | the wire's name is supplied, not derived | RFC 0038 D4 (bn-3sypm) | `a_records_wire_name_is_a_parameter_not_a_derivation` |
 
 use core::fmt;
 
@@ -208,11 +228,12 @@ impl core::error::Error for HandleError {}
 
 /// How an [`EvidenceIdentity`] is given an `ev_` name.
 ///
-/// A seam rather than a function, because the wire derivation for `edge_id` is RFC 0038's
-/// OPEN F14 and is bn-3sypm's to decide (see the module docs). An implementation must be
-/// **pure**: two calls with equal identities, in any process, return equal handles
-/// (INV-005, INV-006) — the same contract `continuum-workspace`'s `ContentIdentifier`
-/// states for artifact publication.
+/// A seam rather than a function, because the wire's naming is a deployment's identity
+/// kernel and not this crate's digest: RFC 0038 D2 fixes `edge_id` as that kernel's answer
+/// over the edge's canonical preimage, at `ArtifactClass::Evidence`, so one seam names every
+/// evidence artifact. An implementation must be **pure**: two calls with equal identities,
+/// in any process, return equal handles (INV-005, INV-006) — the same contract
+/// `continuum-workspace`'s `ContentIdentifier` states for artifact publication.
 pub trait EvidenceNaming {
     /// Name an identity.
     fn name(&self, identity: &EvidenceIdentity) -> EvidenceHandle;
@@ -226,8 +247,9 @@ pub trait EvidenceNaming {
 /// comment. `DigestNaming<Blake3Hasher>` is the default because BLAKE3 is the workspace's
 /// one declared digest (`tools/governance/dependency-rationale.toml`, GOV-1-07).
 ///
-/// This is **not** a claim that the wire's `edge_id` is derived this way. It is a naming
-/// that is available, deterministic, and replaceable; bn-3sypm decides the wire's.
+/// This is **not** the wire's naming. RFC 0038 D2 put that in the deployment's
+/// `ContentIdentifier` seam, so this implementation is what a library-only caller gets:
+/// available, deterministic, and replaceable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DigestNaming<H: ContentHasher> {
     hasher: core::marker::PhantomData<H>,
@@ -388,8 +410,59 @@ mod tests {
     }
 
     #[test]
+    fn a_records_wire_name_is_a_parameter_not_a_derivation() {
+        // RFC 0038 D4. Two nodes that say the same thing about the same artifact but were
+        // written by two producers have two *library* identities, because provenance is in
+        // this crate's preimage. The wire's identity excludes provenance, so on the wire
+        // they are one node — and that disagreement is harmless for exactly one reason:
+        // nothing here renders an identity as a handle. `to_record` takes the handle.
+        use crate::node::{ClaimId, EvidenceNode, IdempotencyKey, NodeKind};
+        use crate::provenance::{ArtifactRef, Provenance, Timestamp};
+
+        let propose = |actor: &str, at: &str| {
+            EvidenceNode::propose(
+                NodeKind::Run,
+                ArtifactRef::new("ev_trace9f").expect("well formed"),
+                ClaimId::new("claim-1").expect("non-empty"),
+                IdempotencyKey::new("key-1").expect("non-empty"),
+                Provenance::new(
+                    crate::actor::ActorId::new(actor).expect("well formed"),
+                    Timestamp::new(at).expect("well formed"),
+                    [],
+                ),
+            )
+        };
+        let first = propose("agent:swarm-1", "2026-08-01T12:00:00.000Z");
+        let second = propose("agent:swarm-2", "2026-08-01T12:00:01.000Z");
+        assert_ne!(
+            first.identity(),
+            second.identity(),
+            "provenance is inside this crate's content key"
+        );
+
+        // The wire's name is whatever the daemon's identity kernel said, and both records
+        // render under it without either one deriving it. That is the join RFC 0038 D4
+        // names: the library accepts the wire's name as input.
+        let wire = EvidenceHandle::new("ev_daemonderived").expect("well formed");
+        let rendered = |node: &EvidenceNode| match node.to_record(&wire) {
+            Value::Record(fields) => fields
+                .get(&crate::actor::field("node_id"))
+                .cloned()
+                .expect("the schema's node_id"),
+            other => panic!("expected a record, got {other:?}"),
+        };
+        assert_eq!(rendered(&first), Value::text(wire.as_str()));
+        assert_eq!(rendered(&second), Value::text(wire.as_str()));
+
+        // …and the identity is never spelled as a handle: `Display` is hexadecimal, so a
+        // log line cannot be mistaken for a wire name.
+        assert!(!first.identity().to_string().starts_with(HANDLE_PREFIX));
+    }
+
+    #[test]
     fn a_second_naming_scheme_renames_without_re_identifying() {
-        // The F14 seam: bn-3sypm's decision is a new `EvidenceNaming`, not a new identity.
+        // The F14 seam: RFC 0038 D2's decision is a new `EvidenceNaming`, not a new
+        // identity.
         struct Ordinal;
         impl EvidenceNaming for Ordinal {
             fn name(&self, identity: &EvidenceIdentity) -> EvidenceHandle {

@@ -1,6 +1,6 @@
 //! Request and response structs, one module per IDL namespace.
 //!
-//! The IDL declares 72 operations in 18 namespaces (IDL §10); this module has one
+//! The IDL declares 73 operations in 18 namespaces (IDL §10); this module has one
 //! child per namespace, in the IDL's declaration order.
 
 pub mod benchmark;

@@ -31,7 +31,7 @@ use continuum_evidence::edge::{
     CHECKED_BY_TARGET_CANDIDATES, CheckTargetRule, CheckerBinding, EdgeKind, EdgeRef, EdgeRelation,
     EvidenceEdge, PR7_BULLET_WORDS,
 };
-use continuum_evidence::graph::{EvidenceGraph, PromotionRefusal, ResolutionRefusal};
+use continuum_evidence::graph::{EvidenceGraph, GraphRefusal, PromotionRefusal, ResolutionRefusal};
 use continuum_evidence::identity::{DefaultNaming, EvidenceIdentity, EvidenceNaming};
 use continuum_evidence::node::{ClaimId, EvidenceNode, IdempotencyKey, Label, NodeKind, NodeRef};
 use continuum_evidence::provenance::{ArtifactRef, Provenance, Timestamp, Tool};
@@ -84,13 +84,19 @@ fn checker(name: &str) -> CheckerBinding {
 /// docs/44's conflict scenario, as a populated graph.
 ///
 /// Two abstraction maps for one claim, a run that observed the system, a certificate the
-/// run produced, and a review decision waiting to be used.
+/// run produced, the receipt an independent kernel emitted over that certificate, and a
+/// review decision waiting to be used.
+///
+/// The receipt is here because RFC 0038 D1 decided what a `CHECKED_BY` edge points at, and
+/// the canonical sentence is `certificate CHECKED_BY receipt` — the certificate crosses the
+/// checker, and the receipt is the record that it did.
 struct Scenario {
     graph: EvidenceGraph,
     map_a: EvidenceNode,
     map_b: EvidenceNode,
     run: EvidenceNode,
     certificate: EvidenceNode,
+    receipt: EvidenceNode,
     decision: EvidenceNode,
 }
 
@@ -114,9 +120,15 @@ fn scenario() -> Scenario {
         "claim-ack",
         "agent:runner",
     );
+    let receipt = node(
+        NodeKind::Receipt,
+        "receipt_9f",
+        "claim-ack",
+        "service:kernel-core",
+    );
     let decision = node(NodeKind::Decision, "decision_9f", "claim-ack", "human:ada");
     let mut graph = EvidenceGraph::new();
-    for member in [&map_a, &map_b, &run, &certificate, &decision] {
+    for member in [&map_a, &map_b, &run, &certificate, &receipt, &decision] {
         graph.add_node(member.clone());
     }
     Scenario {
@@ -125,6 +137,7 @@ fn scenario() -> Scenario {
         map_b,
         run,
         certificate,
+        receipt,
         decision,
     }
 }
@@ -154,9 +167,16 @@ fn the_seven_bullet_edges_are_typed_kinds_a_graph_accepts() {
     for ((expected, relation), (word, named)) in built.into_iter().zip(PR7_BULLET_WORDS) {
         assert_eq!(expected, named, "the bullet word `{word}`");
         assert_eq!(relation.kind(), expected);
+        // Twelve relations may point anywhere; a check edge points at a receipt and only a
+        // receipt (RFC 0038 D1), which is the graph's own rule and not this test's.
+        let target = if expected == EdgeKind::CheckedBy {
+            &scene.receipt
+        } else {
+            &scene.map_a
+        };
         let appended = scene
             .graph
-            .add_edge(edge(relation, &scene.run, &scene.map_a))
+            .add_edge(edge(relation, &scene.run, target))
             .unwrap_or_else(|refusal| panic!("{word}: {refusal}"));
         assert!(appended.is_fresh(), "{word}");
     }
@@ -185,30 +205,49 @@ fn the_vocabulary_is_closed_and_carries_no_strings() {
 }
 
 #[test]
-fn a_check_edge_names_its_checker_and_the_wire_question_stays_open() {
+fn a_check_edge_names_its_checker_and_points_at_a_receipt() {
     let mut scene = scenario();
     let relation = EdgeRelation::CheckedBy(checker("service:kernel-core"));
-    let checked = edge(relation, &scene.run, &scene.certificate);
+    // The canonical sentence: the certificate crossed the kernel, and the receipt is the
+    // record that it did (INV-004, "certificates cross an independent checker").
+    let checked = edge(relation, &scene.certificate, &scene.receipt);
     assert_eq!(
         checked.checker().map(ServiceIdentity::as_str),
         Some("service:kernel-core")
     );
     scene.graph.add_edge(checked).expect("endpoints held");
 
-    // bn-3sypm owns F14. The default graph decides none of the three candidate answers…
-    assert!(scene.graph.check_target_rule().is_undecided());
-    // …and each candidate answer is expressible, and refuses the other two, so the
-    // parameterization is not a placeholder that admits everything forever.
+    // RFC 0038 D1 (bn-3sypm), enforced by a graph nobody configured: the run and the
+    // certificate — the two candidates the RFC weighed and rejected — are refused as
+    // targets, and the refusal names the kind.
+    for rejected in [&scene.run, &scene.certificate] {
+        assert_eq!(
+            scene.graph.add_edge(edge(
+                EdgeRelation::CheckedBy(checker("service:kernel-core")),
+                &scene.map_a,
+                rejected,
+            )),
+            Err(GraphRefusal::CheckTargetRefused {
+                kind: rejected.kind()
+            })
+        );
+    }
+    // The three candidates are still recorded, and the rule is still a value a deployment
+    // can set, so the decision is a default rather than a branch nobody can move.
     for candidate in CHECKED_BY_TARGET_CANDIDATES {
         let rule = CheckTargetRule::one_of([candidate]);
         for other in CHECKED_BY_TARGET_CANDIDATES {
             assert_eq!(rule.admits(other), other == candidate);
         }
     }
-    let decided = EvidenceGraph::new()
+    assert!(
+        CheckTargetRule::default().admits(NodeKind::Receipt),
+        "RFC 0038 D1"
+    );
+    let widened = EvidenceGraph::new()
         .with_check_target_rule(CheckTargetRule::one_of([NodeKind::Certificate]));
-    assert!(decided.check_target_rule().admits(NodeKind::Certificate));
-    assert!(!decided.check_target_rule().admits(NodeKind::Patch));
+    assert!(widened.check_target_rule().admits(NodeKind::Certificate));
+    assert!(!widened.check_target_rule().admits(NodeKind::Patch));
 }
 
 #[test]
@@ -251,7 +290,7 @@ fn every_record_in_a_populated_graph_names_a_producer() {
         .graph
         .add_edge(edge(EdgeRelation::Supports, &scene.run, &scene.map_a))
         .expect("endpoints held");
-    assert_eq!(scene.graph.node_count(), 5);
+    assert_eq!(scene.graph.node_count(), 6);
     assert_eq!(scene.graph.edge_count(), 1);
 
     let mut producers = Vec::new();
@@ -266,9 +305,10 @@ fn every_record_in_a_populated_graph_names_a_producer() {
     }
     producers.sort();
     producers.dedup();
-    // Five nodes from four distinct producers: the graph keeps credit rather than
-    // collapsing it (docs/44, "Credit and provenance").
-    assert_eq!(producers.len(), 4);
+    // Six nodes from five distinct producers — one of them the kernel service that emitted
+    // the receipt: the graph keeps credit rather than collapsing it (docs/44, "Credit and
+    // provenance").
+    assert_eq!(producers.len(), 5);
     assert_eq!(
         scene
             .graph
@@ -680,8 +720,8 @@ fn two_independently_built_graphs_agree_byte_for_byte() {
             edge(EdgeRelation::Refutes, &scene.run, &scene.map_b),
             edge(
                 EdgeRelation::CheckedBy(checker("service:kernel-core")),
-                &scene.run,
                 &scene.certificate,
+                &scene.receipt,
             ),
         ];
         if reverse {
@@ -713,7 +753,7 @@ fn two_independently_built_graphs_agree_byte_for_byte() {
     let backward = build(true);
     assert_eq!(forward, backward);
     // Not vacuous: the rendering is non-trivial and covers every held record.
-    assert_eq!(forward.len(), (5 + 3) * 2);
+    assert_eq!(forward.len(), (6 + 3) * 2);
     assert!(forward.iter().all(|bytes| !bytes.is_empty()));
 }
 
@@ -835,7 +875,7 @@ fn a_handle_is_a_name_and_never_the_identity() {
         handles.push(naming.name(identity).as_str().to_owned());
         identities.push(identity.clone());
     }
-    assert_eq!(handles.len(), 5);
+    assert_eq!(handles.len(), 6);
     let mut unique = handles.clone();
     unique.sort();
     unique.dedup();

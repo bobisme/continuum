@@ -53,9 +53,9 @@ use crate::protocol::envelope::{
 };
 use crate::protocol::handshake::CapabilityDescriptor;
 use crate::protocol::operations::evidence::{
-    EvidenceGetRequest, EvidenceGetResponse, EvidenceQueryRequest, EvidenceQueryResponse,
-    EvidenceSubscribeRequest, EvidenceSubscribeResponse, EvidenceVerifyRequest,
-    EvidenceVerifyResponse,
+    EvidenceGetRequest, EvidenceGetResponse, EvidenceLinkRequest, EvidenceLinkResponse,
+    EvidenceQueryRequest, EvidenceQueryResponse, EvidenceSubscribeRequest,
+    EvidenceSubscribeResponse, EvidenceVerifyRequest, EvidenceVerifyResponse,
 };
 use crate::protocol::operations::intent::{
     IntentAcceptRequest, IntentAcceptResponse, IntentDiffRequest, IntentDiffResponse,
@@ -137,6 +137,8 @@ pub enum Arguments {
     EvidenceVerify(EvidenceVerifyRequest),
     /// `evidence.subscribe`.
     EvidenceSubscribe(EvidenceSubscribeRequest),
+    /// `evidence.link`.
+    EvidenceLink(EvidenceLinkRequest),
     /// `observe.ingest`.
     ObserveIngest(ObserveIngestRequest),
     /// `observe.classify`.
@@ -180,6 +182,7 @@ impl Arguments {
             Self::EvidenceQuery(_) => "evidence.query",
             Self::EvidenceVerify(_) => "evidence.verify",
             Self::EvidenceSubscribe(_) => "evidence.subscribe",
+            Self::EvidenceLink(_) => "evidence.link",
             Self::ObserveIngest(_) => "observe.ingest",
             Self::ObserveClassify(_) => "observe.classify",
             Self::ObserveResult(_) => "observe.result",
@@ -235,6 +238,8 @@ pub enum Payload {
     EvidenceVerify(EvidenceVerifyResponse),
     /// `evidence.subscribe`.
     EvidenceSubscribe(EvidenceSubscribeResponse),
+    /// `evidence.link`.
+    EvidenceLink(EvidenceLinkResponse),
     /// `observe.ingest`.
     ObserveIngest(ObserveIngestResponse),
     /// `observe.classify`.
@@ -283,6 +288,7 @@ impl Payload {
             Self::EvidenceQuery(_) => Some("evidence.query"),
             Self::EvidenceVerify(_) => Some("evidence.verify"),
             Self::EvidenceSubscribe(_) => Some("evidence.subscribe"),
+            Self::EvidenceLink(_) => Some("evidence.link"),
             Self::ObserveIngest(_) => Some("observe.ingest"),
             Self::ObserveClassify(_) => Some("observe.classify"),
             Self::ObserveResult(_) => Some("observe.result"),

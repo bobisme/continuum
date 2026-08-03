@@ -53,7 +53,7 @@
 //! `daemon::family::Arguments` variant exists for `program.replay` (`family.rs`'s own
 //! 25-variant enum, one per operation whose family has landed), so
 //! `codec::operations::decode_arguments` cannot produce one: its own doc comment states
-//! plainly that this is one of "the 47 of the 72 whose families have not landed". `git grep`
+//! plainly that this is one of "the 47 of the 73 whose families have not landed". `git grep`
 //! confirms `ErrorCode::ReplayDiverged` is constructed nowhere in `src/` — only declared, in
 //! the vocabulary token table and this one registry row. This is PR 11 (Context Pack
 //! `ReplayPreserving`, `crates/continuum-context` — a PR-1/IMPL-01 scaffold today, see its
@@ -601,7 +601,7 @@ fn positive_an_engine_evaluation_failure_reaches_the_wire_as_a_typed_engine_erro
 /// (`crate::transport::mod.rs`'s own use of `decode_arguments`) — refuses to decode one at
 /// all. This is PR 11 / PR 14-15 territory, not a regression in anything PR 8 shipped, and
 /// the citation inside `codec::operations::decode_arguments`'s own doc comment ("the 47 of
-/// the 72 whose families have not landed") is the mechanical fact this test pins so a
+/// the 73 whose families have not landed") is the mechanical fact this test pins so a
 /// future family landing silently narrows what this test protects rather than leaving the
 /// claim to prose alone.
 #[test]

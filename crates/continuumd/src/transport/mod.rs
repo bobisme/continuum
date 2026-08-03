@@ -279,6 +279,7 @@ pub fn encode_arguments(
         Arguments::EvidenceQuery(body) => codec::to_opaque(body),
         Arguments::EvidenceVerify(body) => codec::to_opaque(body),
         Arguments::EvidenceSubscribe(body) => codec::to_opaque(body),
+        Arguments::EvidenceLink(body) => codec::to_opaque(body),
         Arguments::ObserveIngest(body) => codec::to_opaque(body),
         Arguments::ObserveClassify(body) => codec::to_opaque(body),
         Arguments::ObserveResult(body) => codec::to_opaque(body),

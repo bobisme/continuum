@@ -29,7 +29,9 @@
 use continuum_evidence::claim_status::{ClaimStatus, verify_promotion_history};
 use continuum_value::epoch::ProtocolWindow;
 use continuumd::daemon::capability::{ConnectionPolicy, Refusal};
-use continuumd::daemon::evidence::{DEFAULT_SERVICE, EvidenceFamily, lattice_status, wire_status};
+use continuumd::daemon::evidence::{
+    DEFAULT_SERVICE, EDGE_IDENTITY_DOMAIN, EvidenceFamily, lattice_status, wire_status,
+};
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::observe::ObserveFamily;
@@ -43,7 +45,8 @@ use continuumd::protocol::handshake::{
     negotiate,
 };
 use continuumd::protocol::operations::evidence::{
-    EvidenceGetRequest, EvidenceQueryRequest, EvidenceSubscribeRequest, EvidenceVerifyRequest,
+    EvidenceGetRequest, EvidenceLinkRequest, EvidenceQueryRequest, EvidenceSubscribeRequest,
+    EvidenceVerifyRequest,
 };
 use continuumd::protocol::operations::observe::{
     ObserveClassifyRequest, ObserveIngestRequest, ObserveResultRequest,
@@ -56,9 +59,9 @@ use continuumd::protocol::scalar::{
 use continuumd::protocol::shared::EvidenceQuery;
 use continuumd::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use continuumd::protocol::vocabulary::{
-    AuthorityLevel, DataGrant, Encoding, ErrorCode, EvidenceEventKind, EvidenceKind,
-    EvidenceNodeKind, EvidenceStatus, InconclusiveReason, OmissionReason, RedactionReason,
-    ResultStatus, SemanticVerdict,
+    AuthorityLevel, DataGrant, Encoding, ErrorCode, EvidenceEdgeKind, EvidenceEventKind,
+    EvidenceKind, EvidenceNodeKind, EvidenceStatus, InconclusiveReason, OmissionReason,
+    RedactionReason, ResultStatus, SemanticVerdict,
 };
 
 use continuum_workspace::snapshot::WorkspacePath;
@@ -229,6 +232,19 @@ fn daemon_with(clock: Option<Timestamp>) -> Daemon {
             grant(
                 "cap_service",
                 DEFAULT_SERVICE,
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            root.clone(),
+        )
+        // A checker: a `service:` actor at `execute`, for `evidence.link`. RFC 0038
+        // "Authority" gates a check edge on the actor *scheme*, not on the ladder, so this
+        // capability differs from `cap_observer` in exactly the thing under test.
+        .capability(
+            grant(
+                "cap_checker",
+                "service:kernel-core",
                 AuthorityLevel::Execute,
                 3,
                 Optional::Present(traced(&[DataGrant::ProductionTrace])),
@@ -1224,8 +1240,8 @@ fn a_read_returns_the_node_record_the_schema_declares_and_no_edge() {
     // `additionalProperties` is false and the schema admits `service_identity` only on the
     // four assurance-bearing statuses, so a `proposed` node must not carry one.
     assert!(!text.contains("\"service_identity\""));
-    // No operation in the 72 appends an edge, so `edge` reads null rather than inventing
-    // an artifact.
+    // The handle named a node, so it does not name an edge. `evidence.link` gave the
+    // graph edges at 3.3; the two arms stay exclusive because they are two maps.
     assert_eq!(response.edge, Nullable::Null);
 }
 
@@ -1867,4 +1883,319 @@ fn a_daemon_with_no_clock_refuses_to_stamp_a_provenance_record_it_cannot_derive(
     );
     assert_eq!(code(&refused), ErrorCode::UnsupportedSemanticFeature);
     assert_eq!(fixture.daemon.state().evidence_nodes().count(), 0);
+}
+
+// =========================================================================================
+// INV-004's edge dimension: `evidence.link` (protocol 3.3, RFC 0038 D1-D3, bn-3sypm)
+// =========================================================================================
+
+fn link_as(
+    fixture: &mut Fixture,
+    actor: &str,
+    capability: &str,
+    subject: &EvidenceHandle,
+    receipt: &Commitment,
+    request: &str,
+    key: &str,
+) -> OperationOutcome {
+    let mut envelope = envelope("evidence.link", actor, capability, request);
+    envelope.idempotency_key = Optional::Present(key.to_owned());
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope,
+        arguments: Arguments::EvidenceLink(EvidenceLinkRequest {
+            subject: subject.clone(),
+            receipt: receipt.clone(),
+            checker_profile: "kernel-core/1".to_owned(),
+        }),
+    })
+}
+
+/// The green path, and every INV-004 property the edge surface is supposed to carry.
+#[test]
+fn a_checker_appends_a_receipt_and_the_check_edge_that_names_it() {
+    let mut fixture = fixture();
+    let subject = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let receipt_content = fixture.other.clone();
+
+    let linked = link_as(
+        &mut fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &subject,
+        &receipt_content,
+        "req_link",
+        "idem-link",
+    );
+    assert_eq!(
+        linked.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        linked.envelope.error
+    );
+    let (edge_handle, receipt_handle, checker) = match &linked.payload {
+        Payload::EvidenceLink(response) => (
+            response.edge.clone(),
+            response.receipt.clone(),
+            response.checker.clone(),
+        ),
+        other => panic!("expected an evidence.link payload, got {other:?}"),
+    };
+    // The checker is the admitted actor. There is no request field it could have come from.
+    assert_eq!(checker, "service:kernel-core");
+
+    // RFC 0038 D1: the edge's `to` is a `receipt`, and the node landed at the bottom of the
+    // lattice — this operation writes no status.
+    let receipt = node(&fixture, &receipt_handle);
+    assert_eq!(receipt.kind, EvidenceNodeKind::Receipt);
+    assert_eq!(receipt.status(), ClaimStatus::BOTTOM);
+    assert_eq!(receipt.producer.as_str(), "service:kernel-core");
+
+    // The edge is readable through `evidence.get`, and its record carries `checker` —
+    // which, until 3.3, `evidence.get`'s `edge` field could only ever read null.
+    let fetched = get(&mut fixture, &edge_handle, "req_get_edge");
+    assert_eq!(fetched.envelope.status, ResultStatus::Ok);
+    let edge_text = match &fetched.payload {
+        Payload::EvidenceGet(response) => match &response.edge {
+            Nullable::Value(bytes) => {
+                String::from_utf8(bytes.as_bytes().to_vec()).expect("canonical JSON is UTF-8")
+            }
+            Nullable::Null => panic!("the edge record is not null for an edge the graph holds"),
+        },
+        other => panic!("expected an evidence.get payload, got {other:?}"),
+    };
+    for needle in [
+        "\"kind\":\"CHECKED_BY\"",
+        "\"checker\":\"service:kernel-core\"",
+        "\"schema_id\":\"https://continuum.dev/schema/evidence-graph-edge.json\"",
+    ] {
+        assert!(edge_text.contains(needle), "{needle} in {edge_text}");
+    }
+    assert!(edge_text.contains(&format!("\"from\":\"{}\"", subject.as_str())));
+    assert!(edge_text.contains(&format!("\"to\":\"{}\"", receipt_handle.as_str())));
+
+    // `evidence.query` reports the edge, which it also could not do before 3.3.
+    let queried = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope(
+            "evidence.query",
+            "agent:reader",
+            "cap_reader",
+            "req_query_edges",
+        ),
+        arguments: Arguments::EvidenceQuery(EvidenceQueryRequest {
+            query: EvidenceQuery {
+                node_kinds: Optional::Absent,
+                edge_kinds: Optional::Present(vec![EvidenceEdgeKind::CheckedBy]),
+                statuses: Optional::Absent,
+                claim_id: Optional::Absent,
+                roots: Optional::Absent,
+                max_depth: Optional::Absent,
+            },
+        }),
+    });
+    match &queried.payload {
+        Payload::EvidenceQuery(response) => assert_eq!(response.edges, vec![edge_handle.clone()]),
+        other => panic!("expected an evidence.query payload, got {other:?}"),
+    }
+
+    // A committed delta was recorded for each artifact, the edge one naming the edge.
+    let kinds: Vec<EvidenceEventKind> = fixture
+        .daemon
+        .state()
+        .evidence_events()
+        .iter()
+        .map(|event| event.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            EvidenceEventKind::NodePublished,
+            EvidenceEventKind::NodePublished,
+            EvidenceEventKind::EdgePublished
+        ]
+    );
+}
+
+/// INV-004, the edge half: the thing being checked cannot mint its own checked-by.
+#[test]
+fn a_checker_may_not_record_a_check_of_its_own_production() {
+    let mut fixture = fixture();
+    // The subject is produced by `service:kernel-core` itself.
+    let trace = fixture.trace.clone();
+    let subject = ingested_handle(&ingest_with(
+        &mut fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &trace,
+        "req_ingest",
+        "idem-ingest",
+    ));
+    let receipt_content = fixture.other.clone();
+
+    let refused = link_as(
+        &mut fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &subject,
+        &receipt_content,
+        "req_link",
+        "idem-link",
+    );
+    assert_eq!(code(&refused), ErrorCode::InsufficientEvidence);
+    // Nothing was written: no receipt node, and no edge.
+    assert_eq!(fixture.daemon.state().evidence_nodes().count(), 1);
+    assert_eq!(fixture.daemon.state().evidence_edges().count(), 0);
+
+    // The control: the identical call from a *different* service is admitted, so the
+    // refusal is about who checked and not about the request.
+    let admitted = link_as(
+        &mut fixture,
+        "service:continuumd",
+        "cap_root",
+        &subject,
+        &receipt_content,
+        "req_link_other",
+        "idem-link-other",
+    );
+    assert_eq!(
+        admitted.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        admitted.envelope.error
+    );
+    assert_eq!(fixture.daemon.state().evidence_edges().count(), 1);
+}
+
+/// An untrusted agent cannot append a check edge at any authority level.
+#[test]
+fn only_a_service_actor_may_append_a_check_edge() {
+    let mut fixture = fixture();
+    let subject = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let receipt_content = fixture.other.clone();
+
+    // `cap_observer` is `execute` — the same level `cap_checker` holds — and carries the
+    // production-trace grant besides. The only thing it lacks is the `service:` scheme.
+    let refused = link_as(
+        &mut fixture,
+        "agent:observer",
+        "cap_observer",
+        &subject,
+        &receipt_content,
+        "req_link",
+        "idem-link",
+    );
+    assert_eq!(code(&refused), ErrorCode::CapabilityDenied);
+    assert_eq!(fixture.daemon.state().evidence_edges().count(), 0);
+
+    // …and the denial is byte-identical to the one a caller gets for a subject the graph
+    // does not hold, so the refusal is not an oracle for either fact (RFC 0027 X1/X2).
+    let unknown = EvidenceHandle::new("ev_absent").expect("a well-formed handle");
+    let missing = link_as(
+        &mut fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &unknown,
+        &receipt_content,
+        "req_link_missing",
+        "idem-link-missing",
+    );
+    assert_eq!(code(&missing), ErrorCode::CapabilityDenied);
+    assert_eq!(refused.envelope.error, missing.envelope.error);
+}
+
+/// A replayed check converges on one edge: `rule evidence.edge_identity` keeps provenance
+/// out of an edge's identity, so a checker's retry is idempotent by content.
+#[test]
+fn a_second_identical_check_converges_on_the_edge_already_held() {
+    let mut fixture = fixture();
+    let subject = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let receipt_content = fixture.other.clone();
+
+    let first = link_as(
+        &mut fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &subject,
+        &receipt_content,
+        "req_link",
+        "idem-link",
+    );
+    // A *different* idempotency key, so the ledger does not answer this one — the
+    // convergence has to come from the identity rule.
+    let second = link_as(
+        &mut fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &subject,
+        &receipt_content,
+        "req_link_again",
+        "idem-link-again",
+    );
+    assert_eq!(
+        second.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        second.envelope.error
+    );
+    let handles = |outcome: &OperationOutcome| match &outcome.payload {
+        Payload::EvidenceLink(response) => (response.edge.clone(), response.receipt.clone()),
+        other => panic!("expected an evidence.link payload, got {other:?}"),
+    };
+    assert_eq!(handles(&first), handles(&second));
+    assert_eq!(fixture.daemon.state().evidence_edges().count(), 1);
+    // Exactly one `edge_published` delta: the second append wrote nothing.
+    assert_eq!(
+        fixture
+            .daemon
+            .state()
+            .evidence_events()
+            .iter()
+            .filter(|event| event.kind == EvidenceEventKind::EdgePublished)
+            .count(),
+        1
+    );
+}
+
+/// A node identity and an edge identity are drawn from one seam and cannot collide
+/// (`rule evidence.edge_identity`), and `evidence.link` writes no status (INV-004).
+#[test]
+fn an_edge_identity_is_domain_separated_from_a_node_identity() {
+    // The domain tag carries a `/`, which is outside the artifact-handle character class
+    // every `Commitment` this daemon derives belongs to — so no node preimage can spell an
+    // edge preimage's first part. That is a fact about the tag, checkable here.
+    assert!(EDGE_IDENTITY_DOMAIN.contains('/'));
+    assert!(
+        continuumd::protocol::scalar::ArtifactHandle::new(EDGE_IDENTITY_DOMAIN).is_err(),
+        "the domain tag must not be a well-formed artifact handle"
+    );
+
+    let mut fixture = fixture();
+    let subject = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+    let before = node(&fixture, &subject).status();
+    let receipt_content = fixture.other.clone();
+    let linked = link_as(
+        &mut fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &subject,
+        &receipt_content,
+        "req_link",
+        "idem-link",
+    );
+    let (edge_handle, receipt_handle) = match &linked.payload {
+        Payload::EvidenceLink(response) => (response.edge.clone(), response.receipt.clone()),
+        other => panic!("expected an evidence.link payload, got {other:?}"),
+    };
+    assert_ne!(edge_handle, receipt_handle);
+    assert_ne!(edge_handle, subject);
+    // The edge handle names an edge and never a node, and vice versa.
+    assert!(fixture.daemon.state().evidence(&edge_handle).is_none());
+    assert!(
+        fixture
+            .daemon
+            .state()
+            .evidence_edge(&receipt_handle)
+            .is_none()
+    );
+    // The subject's status is exactly what it was: an edge is not a promotion.
+    assert_eq!(node(&fixture, &subject).status(), before);
 }

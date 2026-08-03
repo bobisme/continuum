@@ -32,7 +32,7 @@ use crate::protocol::scalar::Opaque;
 /// # Errors
 ///
 /// [`CodecError::UnknownOperation`] when this daemon declares no request shape for the
-/// named operation — the 47 of the 72 whose families have not landed — and any decode
+/// named operation — the 47 of the 73 whose families have not landed — and any decode
 /// failure of the named struct otherwise.
 pub fn decode_arguments(operation: &str, arguments: &Opaque) -> Result<Arguments, CodecError> {
     Ok(match operation {
@@ -76,6 +76,9 @@ pub fn decode_arguments(operation: &str, arguments: &Opaque) -> Result<Arguments
         "evidence.subscribe" => Arguments::EvidenceSubscribe(from_opaque::<
             evidence::EvidenceSubscribeRequest,
         >(arguments)?),
+        "evidence.link" => {
+            Arguments::EvidenceLink(from_opaque::<evidence::EvidenceLinkRequest>(arguments)?)
+        }
         "observe.ingest" => {
             Arguments::ObserveIngest(from_opaque::<observe::ObserveIngestRequest>(arguments)?)
         }
@@ -132,6 +135,7 @@ pub fn encode_payload(payload: &Payload) -> Result<Option<Opaque>, CodecError> {
         Payload::EvidenceQuery(body) => to_opaque(body)?,
         Payload::EvidenceVerify(body) => to_opaque(body)?,
         Payload::EvidenceSubscribe(body) => to_opaque(body)?,
+        Payload::EvidenceLink(body) => to_opaque(body)?,
         Payload::ObserveIngest(body) => to_opaque(body)?,
         Payload::ObserveClassify(body) => to_opaque(body)?,
         Payload::ObserveResult(body) => to_opaque(body)?,
@@ -171,6 +175,7 @@ pub fn decode_payload(operation: &str, payload: &Opaque) -> Result<Payload, Code
         "evidence.query" => Payload::EvidenceQuery(from_opaque(payload)?),
         "evidence.verify" => Payload::EvidenceVerify(from_opaque(payload)?),
         "evidence.subscribe" => Payload::EvidenceSubscribe(from_opaque(payload)?),
+        "evidence.link" => Payload::EvidenceLink(from_opaque(payload)?),
         "observe.ingest" => Payload::ObserveIngest(from_opaque(payload)?),
         "observe.classify" => Payload::ObserveClassify(from_opaque(payload)?),
         "observe.result" => Payload::ObserveResult(from_opaque(payload)?),

@@ -9,7 +9,7 @@
 //!
 //! # The architectural guard this file holds to a fact
 //!
-//! `continuumd` dispatches its 72 operations as *data*: [`registry::OPERATIONS`] is a table
+//! `continuumd` dispatches its 73 operations as *data*: [`registry::OPERATIONS`] is a table
 //! the daemon reads, never a program the wire writes, and
 //! [`Daemon::dispatch`](continuumd::daemon::Daemon::dispatch)'s eight steps — named in that
 //! function's own module documentation — key on exactly four things: the negotiated
@@ -39,9 +39,9 @@
 //!    identity (deterministic, and not "interpretation") or a byte-for-byte echo of the
 //!    field itself, never anything else.
 //! 2. **structural** — an IDL-derived enumeration, in `idl_conformance.rs`'s own style,
-//!    walks every one of the registry's 72 request bodies through
+//!    walks every one of the registry's 73 request bodies through
 //!    [`registry::NAMED_STRUCTS`] and every [`FieldSpec`] it reaches, mechanically rather
-//!    than by this file's say-so, and restricts the result to the 25 *landed* operations
+//!    than by this file's say-so, and restricts the result to the 26 *landed* operations
 //!    (themselves derived mechanically, from `codec::operations::decode_arguments` rather
 //!    than copied off its doc comment). That inventory is checked against a hand-maintained
 //!    list — the anti-drift device `budget_dimensions.rs` uses for SD-12 — so a future
@@ -54,20 +54,20 @@
 //!
 //! # The landed/unlanded boundary, and why it bounds leg 1's scope honestly
 //!
-//! Only 25 of the registry's 72 operations have a family wired up today:
+//! Only 26 of the registry's 73 operations have a family wired up today:
 //! `codec::operations::decode_arguments`'s own documentation states it plainly — "the 47 of
-//! the 72 whose families have not landed" answer `CodecError::UnknownOperation` — and that
+//! the 73 whose families have not landed" answer `CodecError::UnknownOperation` — and that
 //! function's match is on the operation *name* alone, never on the argument bytes, so an
 //! unlanded operation is inert for **any** payload, hostile or not, before a single byte of
 //! it is parsed. `structural_every_unlanded_operation_is_inert_for_any_payload_whatsoever`
 //! below proves this at the mechanical grain — including for payloads that are not even
-//! valid JSON — which is why leg 1 spends its fixtures on the 25 operations a hostile string
+//! valid JSON — which is why leg 1 spends its fixtures on the 26 operations a hostile string
 //! could otherwise reach a real handler through, and leg 2 accounts for the other 47 by
 //! construction rather than by omission.
 //!
 //! # The three ways a field turns out to be inert, honestly distinguished
 //!
-//! Walking the 25 landed operations' free-text fields turns up exactly three shapes of
+//! Walking the 26 landed operations' free-text fields turns up exactly three shapes of
 //! "never instructs", and this file names which one each probe demonstrates rather than
 //! blurring them together:
 //!
@@ -86,7 +86,8 @@
 //!   would — same code, same static detail text — which this file asserts by comparing the
 //!   whole [`Fault`](continuumd::daemon::family::Fault), not only its code.
 //! - **content-addressed and/or echoed verbatim** — `FileOverlay.content`,
-//!   `ObserveIngestRequest.instrumentation_profile`, and `Target.id` under
+//!   `ObserveIngestRequest.instrumentation_profile`,
+//!   `EvidenceLinkRequest.checker_profile`, and `Target.id` under
 //!   `TargetKind::AllClaims` each participate in a deterministic identity (two dispatches of
 //!   the *same* hostile bytes name the *same* handle; two different hostile shapes name
 //!   different handles) and, where the wire has a read path back to them
@@ -141,7 +142,9 @@ use continuumd::protocol::envelope::{Budget, EpochSet, RequestEnvelope, Verdict}
 use continuumd::protocol::handshake::{
     CapabilityDescriptor, CapabilityProfile, ClientHello, Negotiated, VersionRange, negotiate,
 };
-use continuumd::protocol::operations::evidence::{EvidenceGetRequest, EvidenceQueryRequest};
+use continuumd::protocol::operations::evidence::{
+    EvidenceGetRequest, EvidenceLinkRequest, EvidenceQueryRequest,
+};
 use continuumd::protocol::operations::intent::{
     IntentAcceptRequest, IntentLockRequest, IntentProposeRevisionRequest, IntentRejectRequest,
 };
@@ -352,9 +355,9 @@ mod structural {
         found
     }
 
-    /// Every free-text position reachable from *any* of the registry's 72 requests — the
+    /// Every free-text position reachable from *any* of the registry's 73 requests — the
     /// full IDL surface, landed or not. Used only for the sanity check that restricting to
-    /// the 25 landed operations below is a genuine narrowing, not a no-op.
+    /// the 26 landed operations below is a genuine narrowing, not a no-op.
     fn free_text_positions_reachable_from_every_request() -> BTreeSet<Position> {
         let table = struct_table();
         let mut found = BTreeSet::new();
@@ -364,7 +367,7 @@ mod structural {
         found
     }
 
-    /// The same walk, restricted to the 25 operations a hostile payload can actually reach
+    /// The same walk, restricted to the 26 operations a hostile payload can actually reach
     /// a family handler through (`landed_operations`, derived mechanically below). This is
     /// the set leg 1's probes are obliged to cover.
     fn free_text_positions_reachable_from_landed_requests() -> BTreeSet<Position> {
@@ -380,7 +383,7 @@ mod structural {
     }
 
     /// The hand-maintained inventory leg 1 is obliged to cover — every position the
-    /// mechanical walk above finds among the 25 *landed* operations. A field found by the
+    /// mechanical walk above finds among the 26 *landed* operations. A field found by the
     /// walk but missing from this list is a gap this test reports; a field on this list the
     /// walk no longer finds is a stale entry the same assertion reports the other way.
     const LANDED_FREE_TEXT: &[&str] = &[
@@ -393,6 +396,7 @@ mod structural {
         "IntentLockRequest.policy",
         "EvidenceQuery.claim_id",
         "ObserveIngestRequest.instrumentation_profile",
+        "EvidenceLinkRequest.checker_profile",
         "Target.id",
     ];
 
@@ -411,9 +415,9 @@ mod structural {
 
     #[test]
     fn restricting_to_landed_operations_is_a_genuine_narrowing() {
-        // The whole point of separating the two walks: the full-72 surface is much larger
+        // The whole point of separating the two walks: the full-73 surface is much larger
         // (it includes `hypothesis`, `obligation`, `objectives`, and two dozen more, none of
-        // which a hostile caller can reach a handler through today) than the 25-operation
+        // which a hostile caller can reach a handler through today) than the 26-operation
         // one leg 1 actually probes. If this ever failed, the landed/unlanded split above
         // would not be doing any work.
         let all = free_text_positions_reachable_from_every_request();
@@ -455,7 +459,7 @@ mod structural {
 
     // --- the landed/unlanded boundary, mechanically ------------------------------------
 
-    /// The 25 operations `codec::operations::decode_arguments` actually decodes, derived by
+    /// The 26 operations `codec::operations::decode_arguments` actually decodes, derived by
     /// probing every registry operation rather than copied from that module's doc comment.
     fn landed_operations() -> BTreeSet<&'static str> {
         OPERATIONS
@@ -471,10 +475,12 @@ mod structural {
     }
 
     #[test]
-    fn exactly_twenty_five_of_the_seventy_two_operations_are_landed() {
-        assert_eq!(OPERATION_COUNT, 72);
+    fn exactly_twenty_six_of_the_seventy_three_operations_are_landed() {
+        // 25 of 72 through protocol 3.2; `evidence.link` is the 26th and the 73rd, and it
+        // lands with its family rather than ahead of it (bn-3sypm).
+        assert_eq!(OPERATION_COUNT, 73);
         let landed = landed_operations();
-        assert_eq!(landed.len(), 25, "landed operations: {landed:?}");
+        assert_eq!(landed.len(), 26, "landed operations: {landed:?}");
         let expected: BTreeSet<&str> = [
             "workspace.create",
             "workspace.fork",
@@ -490,6 +496,7 @@ mod structural {
             "evidence.query",
             "evidence.verify",
             "evidence.subscribe",
+            "evidence.link",
             "observe.ingest",
             "observe.classify",
             "observe.result",
@@ -709,6 +716,19 @@ fn daemon() -> Daemon {
                 "cap_reader",
                 "agent:reader",
                 AuthorityLevel::Read,
+                3,
+                Optional::Absent,
+            ),
+            root.clone(),
+        )
+        // The checker: a `service:` actor at `execute`, for `evidence.link`. The scheme
+        // is the gate RFC 0038 "Authority" puts on a check edge, not the level, so this
+        // capability differs from `cap_runner` in exactly one thing that matters.
+        .capability(
+            grant(
+                "cap_checker",
+                "service:kernel-core",
+                AuthorityLevel::Execute,
                 3,
                 Optional::Absent,
             ),
@@ -1561,6 +1581,160 @@ fn positive_observe_ingest_instrumentation_profile_is_echoed_verbatim_never_inte
         "re-ingesting the same (trace, profile) pair must converge on the same node, never \
          mint a second one"
     );
+}
+
+// --- evidence.link -> evidence.get: `checker_profile` echoed byte-for-byte --------------
+
+/// The `evidence.link` counterpart of the ingest probe.
+///
+/// `EvidenceLinkRequest.checker_profile` is the checker's own tool identity — free text by
+/// declaration — and it reaches two artifacts: the appended `receipt` node's
+/// `provenance.tool` and the `CHECKED_BY` edge's. Both are read back through a second,
+/// independently dispatched `evidence.get`, and both must carry the value **verbatim**. The
+/// field also participates in the receipt node's identity, so distinct profiles name
+/// distinct receipts and a replay of one converges — the same content-addressed shape the
+/// instrumentation profile has, for the same reason (`rule evidence.edge_identity`).
+///
+/// What must *not* move is anything the profile could plausibly be read as an instruction
+/// to move: the edge's `kind` stays `CHECKED_BY`, its `checker` stays the admitted
+/// `service:` actor rather than anything the request said, and the receipt's `status` stays
+/// at the lattice's bottom (INV-004: this operation writes no status).
+#[test]
+fn positive_evidence_link_checker_profile_is_echoed_verbatim_never_interpreted() {
+    let mut fixture = fixture();
+    let trace = fixture.trace.clone();
+    let receipt_content = fixture.other_trace.clone();
+
+    // A subject node produced by somebody who is not the checker (INV-004).
+    let subject = ingested_evidence(&ingest_with_profile(
+        &mut fixture,
+        "req_link_subject",
+        "idem-link-subject",
+        &trace,
+        "an ordinary capture profile",
+    ));
+
+    let mut receipts = Vec::new();
+    for (index, profile) in std::iter::once(hostile::BENIGN)
+        .chain(hostile::ALL.iter().copied())
+        .enumerate()
+    {
+        let outcome = fixture.daemon.dispatch(&OperationRequest {
+            envelope: mutating(
+                envelope(
+                    "evidence.link",
+                    "service:kernel-core",
+                    "cap_checker",
+                    &format!("req_link_{index}"),
+                ),
+                &format!("idem-link-{index}"),
+                None,
+            ),
+            arguments: Arguments::EvidenceLink(EvidenceLinkRequest {
+                subject: subject.clone(),
+                receipt: receipt_content.clone(),
+                checker_profile: profile.to_owned(),
+            }),
+        });
+        assert_eq!(
+            outcome.envelope.status,
+            ResultStatus::Ok,
+            "profile {profile:?} must not change whether the call succeeds: {:?}",
+            outcome.envelope.error
+        );
+        let (edge, receipt, checker) = match &outcome.payload {
+            Payload::EvidenceLink(response) => (
+                response.edge.clone(),
+                response.receipt.clone(),
+                response.checker.clone(),
+            ),
+            other => panic!("expected an evidence.link payload, got {other:?}"),
+        };
+        assert_eq!(
+            checker, "service:kernel-core",
+            "the checker is the admitted capability's actor, whatever the request says"
+        );
+
+        let escaped = String::from_utf8(wire_string(profile)).expect("a JSON string is UTF-8 text");
+        let needle = format!("\"tool\":{escaped}");
+
+        // The receipt node: kind and status unmoved, the profile echoed verbatim.
+        let node_text = String::from_utf8(get_node_bytes(
+            &mut fixture,
+            &receipt,
+            &format!("req_link_get_node_{index}"),
+        ))
+        .expect("canonical JSON is UTF-8");
+        assert!(
+            node_text.contains("\"kind\":\"receipt\""),
+            "profile {profile:?} must not change the node's kind"
+        );
+        assert!(
+            node_text.contains("\"status\":\"proposed\""),
+            "profile {profile:?} must not change the node's status (INV-004)"
+        );
+        assert!(
+            node_text.contains(&needle),
+            "profile {profile:?} must be echoed verbatim as the receipt's `provenance.tool`; \
+             node was {node_text:?}"
+        );
+
+        // The edge: kind and checker unmoved, the profile echoed verbatim.
+        let edge_text = String::from_utf8(get_edge_bytes(
+            &mut fixture,
+            &edge,
+            &format!("req_link_get_edge_{index}"),
+        ))
+        .expect("canonical JSON is UTF-8");
+        assert!(
+            edge_text.contains("\"kind\":\"CHECKED_BY\""),
+            "profile {profile:?} must not change the edge's kind"
+        );
+        assert!(
+            edge_text.contains("\"checker\":\"service:kernel-core\""),
+            "profile {profile:?} must not change who the edge names as checker"
+        );
+        assert!(
+            edge_text.contains(&needle),
+            "profile {profile:?} must be echoed verbatim as the edge's `provenance.tool`; \
+             edge was {edge_text:?}"
+        );
+        receipts.push(receipt);
+    }
+
+    // Content-addressed: distinct profiles name distinct receipts, and a replay of one
+    // converges on the receipt already held rather than growing the graph.
+    let mut sorted = receipts.clone();
+    sorted.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    sorted.dedup_by(|a, b| a.as_str() == b.as_str());
+    assert_eq!(
+        sorted.len(),
+        receipts.len(),
+        "every distinct checker profile must name a distinct receipt node"
+    );
+}
+
+fn get_edge_bytes(fixture: &mut Fixture, handle: &EvidenceHandle, request: &str) -> Vec<u8> {
+    let outcome = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope("evidence.get", "agent:reader", "cap_reader", request),
+        arguments: Arguments::EvidenceGet(EvidenceGetRequest {
+            evidence: handle.clone(),
+            inline: Optional::Absent,
+        }),
+    });
+    assert_eq!(
+        outcome.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        outcome.envelope.error
+    );
+    match &outcome.payload {
+        Payload::EvidenceGet(response) => match &response.edge {
+            Nullable::Value(edge) => edge.as_bytes().to_vec(),
+            Nullable::Null => panic!("the edge record is not null for an edge the graph holds"),
+        },
+        other => panic!("expected an evidence.get payload, got {other:?}"),
+    }
 }
 
 // --- evidence.query: `claim_id` (closed equality filter, not a keyword search) ----------

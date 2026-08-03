@@ -37,26 +37,34 @@
 //! every actor scheme but `service:`. **There is no constructor for a check edge that does
 //! not name a checker**, and there is no `Option` anywhere on the path.
 //!
-//! # What this module deliberately leaves open: RFC 0038's F14
+//! # What a `CHECKED_BY` edge points at: RFC 0038's F14, decided
 //!
-//! > bn-i4aem deferred inventing the surface as F14 because RFC 0038 must first decide:
-//! > which node kind a `CHECKED_BY` edge's to-handle names (run/certificate/receipt),
-//! > `edge_id` derivation, and edge-creation authority (RFC 0038's Authority section covers
-//! > only node creation and status promotion). A 73rd operation is a plan §10.2 + RFC 0027
-//! > registry + IDL change together.
+//! > **D1 — the `to`-handle names a `receipt`, and only a `receipt`.** […] a `run` is
+//! > search's own output, so an edge pointing at one would let the search machinery be its
+//! > own check; a `certificate` is what *crosses* a checker, not the crossing.
 //! >
-//! > — bn-3sypm
+//! > — RFC 0038, "Edges: what a `CHECKED_BY` edge names"
 //!
-//! That bone owns the **wire surface**, and this module owns the library type. The three
-//! questions are handled as follows, none of them answered here:
+//! The question this module was written to leave open is closed, and the answer lands here
+//! as [`CheckTargetRule`]'s [`Default`] rather than as prose: `CHECKED_BY_TARGET` is
+//! [`NodeKind::Receipt`], a fresh [`crate::graph::EvidenceGraph`] enforces it, and the two
+//! rejected candidates are kept as [`CHECKED_BY_TARGET_CANDIDATES`] with the reason each
+//! lost, so a later reader finds the decision and not just its result. The rule stays a
+//! *value* — `CheckTargetRule::one_of` still admits any set — because a deployment ahead of
+//! the RFC must be able to say so in the type rather than by patching it.
 //!
-//! | F14 question | How this module leaves it open |
+//! The other three F14 questions are decided elsewhere, and this module's shape is why they
+//! could be:
+//!
+//! | F14 question | Where it is decided |
 //! |---|---|
-//! | which node kind the to-handle names | [`CheckTargetRule`], a graph-level policy whose default admits any kind; [`CHECKED_BY_TARGET_CANDIDATES`] records the three the bone lists, and each of them is expressible as `CheckTargetRule::one_of` |
-//! | `edge_id` derivation | [`crate::identity::EvidenceNaming`] — the identity is the canonical preimage, and the preimage → `ev_…` function is a seam |
-//! | edge-creation authority | not modelled: this crate mints no capability for edge creation, and [`crate::authority`] covers exactly what RFC 0038's Authority section covers — node creation and status promotion |
+//! | which node kind the to-handle names | here — [`CheckTargetRule::default`] |
+//! | `edge_id` derivation | [`crate::identity::EvidenceNaming`]: the identity is the canonical preimage and the preimage → `ev_…` function is the seam the wire fills (RFC 0038 D2) |
+//! | edge-creation authority | the wire's, not this crate's: RFC 0038's Authority section now covers edge creation, and its three rules — the checker is the caller, a checker is a `service:` actor, and no self-certification — are `continuumd`'s `evidence.link` (RFC 0038 D3) |
+//! | a node's wire identity | `continuumd`'s derivation is normative (RFC 0038 D4); [`crate::identity::EvidenceIdentity`] is this crate's within-graph content key and never appears on the wire |
 //!
-//! Nothing here adds an operation to the IDL, the RFC 0027 registry, or the daemon.
+//! Nothing here adds an operation to the IDL, the RFC 0027 registry, or the daemon; what
+//! changed is that the graph now refuses a check edge pointing anywhere but at a receipt.
 //!
 //! # Content identity, and why the checker and the provenance are in it
 //!
@@ -113,7 +121,7 @@
 //! | the checker is a service | plan §11.3, RFC 0027 P3 | `a_checker_is_a_service_identity` |
 //! | no stringly edges | GOV-1-12 | `the_kind_set_is_exactly_the_schema_enum`, `an_unknown_token_does_not_parse` |
 //! | edges are content-identified | docs/44, ADR-0013 | `what_an_edge_asserts_is_in_its_identity` |
-//! | F14's to-handle question stays open | bn-3sypm | `every_candidate_answer_to_f14_is_expressible` |
+//! | a check edge points at a receipt | RFC 0038 D1 (bn-3sypm) | `the_check_target_is_a_receipt_and_the_alternatives_are_refused` |
 //! | an edge relates two artifacts | INV-004 | `a_self_edge_is_refused` |
 
 use core::fmt;
@@ -340,28 +348,43 @@ impl fmt::Display for EdgeRelation {
     }
 }
 
-/// The node kinds RFC 0038 has not chosen between for a `CHECKED_BY` edge's to-handle.
+/// The node kind a `CHECKED_BY` edge's to-handle names (RFC 0038 D1).
 ///
-/// bn-3sypm lists them: `run`, `certificate`, `receipt`. Recorded here as the *candidates*
-/// of an open question, never as a rule — [`CheckTargetRule::Undecided`] is the default and
-/// admits any node kind, and each candidate answer is expressible with
-/// [`CheckTargetRule::one_of`] the day the RFC decides.
+/// plan §11.2's `ProofReceipt`, whose format is RFC 0024: the artifact a checker emits to
+/// record that it checked something. RFC 0026 F14 said "there is no node kind for a check";
+/// this is it.
+pub const CHECKED_BY_TARGET: NodeKind = NodeKind::Receipt;
+
+/// The three node kinds RFC 0038 weighed for the to-handle, and why two lost.
+///
+/// Kept as data after the decision rather than deleted, because the reasons are INV-004's
+/// own words and a later reader is owed them:
+///
+/// | Candidate | Disposition |
+/// |---|---|
+/// | `run` | rejected — search's own output, so a check edge pointing at one lets the search machinery be its own check |
+/// | `certificate` | rejected — what *crosses* a checker, not the crossing; it belongs on the edge's `from` (`certificate CHECKED_BY receipt`), and an artifact offered *toward* a claim is `SUPPORTS` |
+/// | `receipt` | **decided** — [`CHECKED_BY_TARGET`] |
 pub const CHECKED_BY_TARGET_CANDIDATES: [NodeKind; 3] =
     [NodeKind::Run, NodeKind::Certificate, NodeKind::Receipt];
 
 /// Which node kinds a `CHECKED_BY` edge's to-handle may name.
 ///
-/// A deployment policy rather than a property of the edge type, because RFC 0038 states no
-/// rule and inventing one would answer F14 on bn-3sypm's behalf. The default is
-/// [`Undecided`](Self::Undecided): the graph admits any kind and says, in this type's name,
-/// that the question is open.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// A value rather than a hard-coded branch, and it stays one after RFC 0038 decided: a
+/// deployment that must run ahead of the RFC — or behind it — says so in the type instead of
+/// patching the graph. What the decision changed is the [`Default`], which is now exactly
+/// [`CHECKED_BY_TARGET`] where it was once a placeholder admitting every kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckTargetRule {
-    /// RFC 0038 has not decided (F14). Any node kind is admitted.
-    #[default]
-    Undecided,
-    /// The decision, once made: a `CHECKED_BY` edge's to-handle names one of these kinds.
+    /// A `CHECKED_BY` edge's to-handle names one of these kinds.
     OneOf(BTreeSet<NodeKind>),
+}
+
+impl Default for CheckTargetRule {
+    /// RFC 0038 D1: exactly [`CHECKED_BY_TARGET`].
+    fn default() -> Self {
+        Self::one_of([CHECKED_BY_TARGET])
+    }
 }
 
 impl CheckTargetRule {
@@ -375,15 +398,15 @@ impl CheckTargetRule {
     #[must_use]
     pub fn admits(&self, kind: NodeKind) -> bool {
         match self {
-            Self::Undecided => true,
             Self::OneOf(kinds) => kinds.contains(&kind),
         }
     }
 
-    /// Whether the rule is still the open question's placeholder.
-    #[must_use]
-    pub const fn is_undecided(&self) -> bool {
-        matches!(self, Self::Undecided)
+    /// The kinds this rule admits, in canonical order.
+    pub fn kinds(&self) -> impl ExactSizeIterator<Item = &NodeKind> {
+        match self {
+            Self::OneOf(kinds) => kinds.iter(),
+        }
     }
 }
 
@@ -855,29 +878,38 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn every_candidate_answer_to_f14_is_expressible() {
-        // bn-3sypm's three candidates for the CHECKED_BY to-handle's node kind. The default
-        // answers none of them.
+    fn the_check_target_is_a_receipt_and_the_alternatives_are_refused() {
+        // RFC 0038 D1. The three candidates are still recorded — the reasons two lost are
+        // INV-004's own — and exactly one of them is the decision.
         assert_eq!(
             CHECKED_BY_TARGET_CANDIDATES,
             [NodeKind::Run, NodeKind::Certificate, NodeKind::Receipt]
         );
-        let undecided = CheckTargetRule::default();
-        assert!(undecided.is_undecided());
+        assert_eq!(CHECKED_BY_TARGET, NodeKind::Receipt);
+
+        // The default *is* the decision, so a graph built without saying anything enforces
+        // it. Nineteen of the twenty kinds are refused, which is what makes it a rule.
+        let decided = CheckTargetRule::default();
+        assert_eq!(
+            decided.kinds().copied().collect::<Vec<NodeKind>>(),
+            [CHECKED_BY_TARGET]
+        );
         for kind in NodeKind::ALL {
-            assert!(undecided.admits(kind), "{kind}");
+            assert_eq!(decided.admits(kind), kind == NodeKind::Receipt, "{kind}");
         }
-        // Each candidate answer, once RFC 0038 makes it, is one value of this type — and
-        // each of them refuses the other two, so the rule is not vacuous.
+        // The two rejected candidates by name, so a silent widening of the default is a
+        // failure here rather than a surprise at the wire.
+        assert!(!decided.admits(NodeKind::Run));
+        assert!(!decided.admits(NodeKind::Certificate));
+
+        // The rule stays a value: a deployment can still say something else, and each
+        // alternative refuses the others, so `one_of` is not vacuous.
         for candidate in CHECKED_BY_TARGET_CANDIDATES {
             let rule = CheckTargetRule::one_of([candidate]);
-            assert!(!rule.is_undecided());
-            assert!(rule.admits(candidate));
             for other in CHECKED_BY_TARGET_CANDIDATES {
                 assert_eq!(rule.admits(other), other == candidate);
             }
         }
-        // …as is the union, if that is what the RFC decides.
         let union = CheckTargetRule::one_of(CHECKED_BY_TARGET_CANDIDATES);
         for kind in NodeKind::ALL {
             assert_eq!(

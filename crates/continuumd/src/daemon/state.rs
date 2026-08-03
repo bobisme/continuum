@@ -32,6 +32,7 @@ use std::collections::BTreeMap;
 use continuum_evidence::claim_status::{
     ClaimStatus, PromotionRejected, StatusConflict, compare_and_set,
 };
+use continuum_evidence::edge::EdgeRelation;
 use continuum_intent::contract::IntentContract;
 use continuum_value::assurance::ValidationBasis;
 use continuum_workspace::components::WorkspaceDescriptor;
@@ -275,6 +276,40 @@ impl EvidenceNode {
     }
 }
 
+/// One evidence-graph edge as the daemon holds it.
+///
+/// The relation is [`EdgeRelation`] — `continuum-evidence`'s closed thirteen-kind
+/// vocabulary — rather than a local enum or a string, so the schema's one conditional
+/// arrives with the type: `EdgeRelation::CheckedBy` *carries* its checker, there is no
+/// `Option` on the path to it, and a check edge with no checker is a value this daemon
+/// cannot construct. That is `evidence-graph-edge.schema.json`'s `if`/`then` and plan §2
+/// SD-11's "`evidence-graph-edge` requires `checker` on `CHECKED_BY`" (INV-004) as a
+/// property of what compiles.
+///
+/// Only `CHECKED_BY` edges exist here today, because `evidence.link` is the only operation
+/// that appends one; the field is the whole vocabulary anyway, so the next verb needs no
+/// new type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvidenceEdge {
+    /// `kind`, and — for `CHECKED_BY` — the `checker` the schema requires with it.
+    pub relation: EdgeRelation,
+    /// `from` — the checked subject.
+    pub from: EvidenceHandle,
+    /// `to` — the receipt recording the check (RFC 0038 D1).
+    pub to: EvidenceHandle,
+    /// `provenance.actor` — the identity that appended the edge, from the admitted
+    /// capability rather than from the request.
+    pub producer: ActorId,
+    /// `provenance.tool`.
+    pub tool: String,
+    /// `provenance.created_at`.
+    pub created_at: Timestamp,
+    /// `provenance.inputs`.
+    pub inputs: Vec<String>,
+    /// The key the ledger filed this append under.
+    pub idempotency_key: String,
+}
+
 /// A replayed mutation: the request it was produced for, and the result it produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Replay {
@@ -379,6 +414,7 @@ pub struct DaemonState {
     content: BTreeMap<Commitment, StagedFile>,
     intents: BTreeMap<IntentHandle, IntentRecord>,
     evidence: BTreeMap<EvidenceHandle, EvidenceNode>,
+    edges: BTreeMap<EvidenceHandle, EvidenceEdge>,
     evidence_events: Vec<EvidenceEvent>,
     idempotency: BTreeMap<(String, String), Replay>,
     admissions: Vec<AdmissionRecord>,
@@ -587,6 +623,37 @@ impl DaemonState {
     /// needs from a query that returns a page of it.
     pub fn evidence_nodes(&self) -> impl Iterator<Item = (&EvidenceHandle, &EvidenceNode)> {
         self.evidence.iter()
+    }
+
+    /// Append one edge to the evidence graph, or return the edge already filed under
+    /// `handle`.
+    ///
+    /// Put-if-absent, for the same sentence [`append_evidence`](Self::append_evidence)
+    /// implements it for: the graph is append-only and a replayed write returns the
+    /// original identity (RFC 0038). A checker that retries its own `evidence.link`
+    /// converges on one edge, because `rule evidence.edge_identity` keeps `provenance`
+    /// outside an edge's identity.
+    pub fn append_edge(
+        &mut self,
+        handle: EvidenceHandle,
+        edge: EvidenceEdge,
+    ) -> (&EvidenceEdge, bool) {
+        use std::collections::btree_map::Entry;
+        match self.edges.entry(handle) {
+            Entry::Occupied(occupied) => (occupied.into_mut(), false),
+            Entry::Vacant(vacant) => (vacant.insert(edge), true),
+        }
+    }
+
+    /// The edge `handle` names, or [`None`].
+    #[must_use]
+    pub fn evidence_edge(&self, handle: &EvidenceHandle) -> Option<&EvidenceEdge> {
+        self.edges.get(handle)
+    }
+
+    /// Every edge in the graph, in handle order.
+    pub fn evidence_edges(&self) -> impl Iterator<Item = (&EvidenceHandle, &EvidenceEdge)> {
+        self.edges.iter()
     }
 
     /// Record that a node's referenced content has stopped being readable.
