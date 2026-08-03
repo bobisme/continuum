@@ -162,6 +162,33 @@
 //! classification later"). Likewise W9 with no minted handle is
 //! [`ContractFinding::DeclaredIdentityUnverified`], never a pass.
 //!
+//! ## What a verdict does not decide
+//!
+//! A clean verdict says the document is well formed. It does not say a lane should act
+//! on the contract, and the difference is normative:
+//!
+//! > W1–W10 decide whether a document can be read as a contract. They do not decide
+//! > whether a particular lane should act on it, and the two answers MUST stay
+//! > distinguishable […]
+//! >
+//! > **AO3 — A well-formedness verdict is not an acceptance decision and MUST NOT be
+//! > read as one.** The verdict names the rules it decided; a caller that needs both
+//! > answers makes both calls.
+//! >
+//! > — RFC 0037, "Acceptance obligations that are not well-formedness"
+//!
+//! INV-012's non-vacuity obligation is the one such obligation this crate carries, and
+//! it is deliberately **not** a rule here: an empty `optimization.non_vacuity` is well
+//! formed (AO1), and the lane that assembles a synthesis task against the contract is
+//! the caller that must additionally invoke
+//! [`Optimization::require_non_vacuity`](crate::optimization::Optimization::require_non_vacuity)
+//! (AO2). That is the two-call contract, ratified by RFC 0037 correction 17 against the
+//! alternative of a sixth rule here; `tests/inv012_nonvacuity_evidence.rs` pins it, and
+//! `src/optimization.rs`'s module documentation carries the reasoning. AO3 also rules
+//! out the compromise: a per-caller flag that switched the obligation on would give
+//! [`CheckEnvironment`] the "skip this rule" spelling the paragraph above says it does
+//! not have.
+//!
 //! ## Why the group errors are wrapped one-for-one
 //!
 //! `bn-3lfmi` left a sketch for a `FieldDecodeError` trait that would let
@@ -1596,6 +1623,14 @@ impl IntentContract {
     /// constructors and by [`IntentContract::decode`]; a contract in hand already
     /// satisfies them. W5 (bound variables are bound) quantifies over the model's
     /// declared free variables, which is not a fact this crate holds.
+    ///
+    /// These five are the whole surface. In particular a clean verdict does **not**
+    /// discharge INV-012's non-vacuity obligation: an empty `optimization.non_vacuity`
+    /// is well formed (RFC 0037 AO1), and the lane that assembles a synthesis task
+    /// against this contract makes the second call,
+    /// [`Optimization::require_non_vacuity`](crate::optimization::Optimization::require_non_vacuity)
+    /// (AO2, correction 17). See "What a verdict does not decide" in this module's
+    /// documentation.
     #[must_use]
     pub fn check(&self, environment: &CheckEnvironment) -> ContractVerdict {
         let mut findings = Vec::new();
@@ -2037,6 +2072,12 @@ pub struct ContractVerdict {
 
 impl ContractVerdict {
     /// Whether every checked rule holds.
+    ///
+    /// "Well formed" is not "acceptable": the five rules are the document's, and an
+    /// obligation a lane owes on top of them — INV-012's non-vacuity for a lane
+    /// assembling a synthesis task — is a separate call and is not folded in here
+    /// (RFC 0037 AO1–AO3). A caller that treats this as full acceptance accepts a
+    /// contract that requires no behavior to remain possible.
     #[must_use]
     pub fn is_well_formed(&self) -> bool {
         self.findings.is_empty()

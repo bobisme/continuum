@@ -75,13 +75,25 @@
 //!   syntactically-present but semantically trivial behavior discharges the obligation
 //!   exactly as a genuine one does; the module doc calls this open, and real triviality
 //!   detection is plan §14.5's "property mutation and hidden semantic variants",
-//!   i.e. Forge's territory, not this crate's) and
-//!   [`negative_the_cross_field_checker_alone_would_accept_the_disabled_contract`] (an
-//!   important **concern for the report**: `IntentContract::check`'s `ContractVerdict`
-//!   carries no non-vacuity rule at all — by design, per `src/optimization.rs`'s own
-//!   flag against RFC 0037 — so a caller who trusts `check().is_well_formed()` alone,
-//!   without separately invoking `require_non_vacuity`, would accept a "safety by
-//!   disabling" contract without any indication anything is wrong).
+//!   i.e. Forge's territory, not this crate's).
+//! - **the two-call contract, ratified** — bn-2z0b reported as a concern that
+//!   `IntentContract::check`'s `ContractVerdict` carries no non-vacuity rule, so a
+//!   caller trusting `check().is_well_formed()` alone would accept a "safety by
+//!   disabling" contract with no signal. `bn-32kpe` decided it: RFC 0037 gains
+//!   "Acceptance obligations that are not well-formedness" (AO1–AO4) and correction 17,
+//!   ratifying the two-call contract rather than adding a sixth rule. The three tests
+//!   below now pin the *decision* rather than reporting an open concern —
+//!   [`ratified_the_cross_field_checker_decides_five_rules_and_non_vacuity_is_the_second_call`]
+//!   (the fixture and its emptied mutant produce the identical verdict; the obligation
+//!   still catches it),
+//!   [`ratified_a_vacuous_contract_can_be_wholly_well_formed_and_the_verdict_names_the_rules_it_decided`]
+//!   (the sharper form: a contract that is clean on all five rules stays clean with its
+//!   non-vacuity set emptied, and the verdict's own rendering enumerates the rules it
+//!   decided — so a sixth rule joining the surface breaks this test rather than
+//!   arriving unnoticed), and
+//!   [`ratified_a_directional_verb_over_an_empty_set_is_dormant_not_ill_formed`] (the
+//!   corpus evidence for AO4, which is what decided against the narrower candidate rule
+//!   that would have flagged only the `no-removal`-over-empty-`non_vacuity` pair).
 //! - **the schema does not itself enforce non-emptiness** —
 //!   [`schema_does_not_encode_inv_012s_non_emptiness_constraint`]. Confirmed by exact
 //!   text match against the live schema, so this reports rather than edits it (schema
@@ -94,10 +106,21 @@
 //!   one source and re-running the same extractor, per docs/03 §8 and the
 //!   `crates/continuum-task/tests/budget_dimensions.rs` precedent this borrows its name
 //!   from.
+//! - **the citation itself, held to its source** —
+//!   [`the_disposition_this_file_pins_is_the_one_rfc_0037_records`]. The three
+//!   `ratified_*` tests quote RFC 0037's AO section; this one reads the live RFC and
+//!   proves each anchor is really there and really capable of going missing, so a
+//!   withdrawn or reworded disposition breaks the tests that rest on it rather than
+//!   leaving them citing prose that no longer exists.
 //!
 //! # House rules, inherited from the PR-4/INV-006/INV-014 evidence precedent
 //!
-//! - `src/` is untouched, and no existing test in any crate is touched.
+//! - `src/` carries no behavior change from this file's bones. bn-2z0b touched nothing;
+//!   bn-32kpe changed documentation only (`src/optimization.rs`'s flag became a
+//!   citation of the RFC 0037 disposition it asked for, and `src/contract.rs` states
+//!   what its verdict does not decide). No rule was added to or removed from the
+//!   cross-field surface, which is the decision itself. No test outside this file is
+//!   touched by either bone.
 //! - Every fixture here is a real, already-reviewed corpus file
 //!   (`tests/fixtures/die-hard-contract.json`,
 //!   `tests/fixtures/replicated-register-contract.json`, both already used by
@@ -141,6 +164,13 @@ const REPLICATED_REGISTER_FIXTURE: &str =
 /// `intent-contract.schema.json`, the shape authority (INV-003).
 const SCHEMA: &str = include_str!("../../../notes/plan/schemas/intent-contract.schema.json");
 
+/// The dossier's own validated example contract — the one document in the tree that
+/// `tests/pr4_exit_evidence.rs` shows produces a *clean* verdict (all five rules hold),
+/// which is what makes it the right subject for the sharp form of the two-call pin: an
+/// otherwise-clean contract stays clean when its non-vacuity set is emptied.
+const SCHEMA_EXAMPLE: &str =
+    include_str!("../../../notes/plan/schemas/examples/intent-contract.example.json");
+
 /// The dossier's plan document — the primary source of INV-012's contract sentence.
 const PLAN_MD: &str = include_str!("../../../notes/plan/plan.md");
 
@@ -149,6 +179,12 @@ const PLAN_MD: &str = include_str!("../../../notes/plan/plan.md");
 /// §8's "independent paths" applied to documents rather than to a checker).
 const PLAN_REQUIREMENTS_JSON: &str =
     include_str!("../../../notes/plan/notes/PLAN_REQUIREMENTS.json");
+
+/// RFC 0037 — the normative home of the disposition the three `ratified_*` tests pin.
+/// Read at compile time so the citation is checked rather than asserted: a deleted or
+/// reworded AO section breaks the tests that quote it instead of leaving them citing
+/// prose that no longer exists.
+const RFC_0037: &str = include_str!("../../../notes/plan/rfcs/0037-intent-contract.md");
 
 /// `continuum-forge`'s own crate documentation — still a PR-1/IMPL-01 scaffold, cited
 /// so the "mutation challenges" deferral is checked against real text rather than
@@ -186,11 +222,45 @@ fn vacuous_die_hard() -> String {
     mutated
 }
 
+/// `SCHEMA_EXAMPLE` with its one non-vacuity behavior emptied — the same "safety by
+/// disabling the system" mutation as [`vacuous_die_hard`], applied to the document that
+/// is otherwise clean on all five cross-field rules. The example is pretty-printed, so
+/// the substring is the three-line block rather than the canonical one-liner; it is
+/// still one bounded, linear `replacen` on a 4.5 KiB input.
+fn vacuous_schema_example() -> String {
+    let mutated = SCHEMA_EXAMPLE.replacen(
+        "\"non_vacuity\": [\n      \"synced request eventually acknowledged\"\n    ],",
+        "\"non_vacuity\": [],",
+        1,
+    );
+    assert_ne!(
+        mutated, SCHEMA_EXAMPLE,
+        "the mutation must actually remove the behavior, not merely copy the example"
+    );
+    mutated
+}
+
 /// The `CheckEnvironment` a contract's own canonical encoding mints — the same
 /// construction `tests/pr4_exit_evidence.rs`'s `die_hard_environment` uses, rebuilt
 /// here because a `tests/*.rs` file is its own crate and cannot `use` a sibling one.
 fn minted_environment(contract: &IntentContract) -> CheckEnvironment {
     CheckEnvironment::new().with_minted_intent_id(contract.mint_intent_id::<Fnv1aPlaceholder>())
+}
+
+/// The environment under which `SCHEMA_EXAMPLE` is clean — the same three facts
+/// `tests/pr4_exit_evidence.rs`'s `the_schemas_example_is_schema_valid_and_well_formed`
+/// supplies, rebuilt here because a `tests/*.rs` file is its own crate.
+///
+/// The minted handle is the example's own declared `in_ack_v1` *as a literal*, exactly
+/// as that test supplies it. That is what holds W9 fixed across the mutation, so the
+/// only variable between the two verdicts below is the non-vacuity set: a mint
+/// recomputed from the mutated bytes would move W9 and confound the comparison this
+/// test exists to make.
+fn schema_example_environment() -> CheckEnvironment {
+    CheckEnvironment::new()
+        .with_domain_pack_profiles(["storage-posix-v1".to_owned()])
+        .with_correspondence_maps(["map_register_abs_v1".to_owned()])
+        .with_minted_intent_id("in_ack_v1")
 }
 
 /// Whether `bytes` decodes to a contract whose non-vacuity obligation holds. `false`
@@ -250,6 +320,8 @@ fn fixture_sizes_stay_well_under_the_len_guard() {
         REPLICATED_REGISTER_FIXTURE.len()
     );
     assert!(vacuous_die_hard().len() < 8192);
+    assert!(SCHEMA_EXAMPLE.len() < 8192, "{}", SCHEMA_EXAMPLE.len());
+    assert!(vacuous_schema_example().len() < 8192);
 }
 
 // --- positive: required progress/availability behaviors -------------------------------------
@@ -379,15 +451,26 @@ fn negative_a_repair_that_removes_the_progress_behavior_is_exactly_the_relation_
 }
 
 #[test]
-fn negative_the_cross_field_checker_alone_would_accept_the_disabled_contract() {
-    // A documented, mechanically-pinned concern rather than a defect fixed here:
-    // `src/optimization.rs`'s own module documentation raises this as a flag against
-    // RFC 0037 ("a contract whose policy.non_vacuity is no-removal while
-    // optimization.non_vacuity is empty carries a lock over nothing"), and
-    // `IntentContract::check`'s five rules (W2, W3, W7, W8, W9) do not include one for
-    // non-vacuity. This test proves the consequence: a caller who calls only `check`
-    // and treats an empty `ContractVerdict` as full acceptance would accept a "safety
-    // by disabling" contract with no signal that anything changed.
+fn ratified_the_cross_field_checker_decides_five_rules_and_non_vacuity_is_the_second_call() {
+    // bn-2z0b pinned this as an open concern; bn-32kpe decided it, and the behavior
+    // below is now the ratified design rather than a reported gap:
+    //
+    // > **AO1 — An empty `optimization.non_vacuity` is well formed.** […] No W-rule
+    // > rejects it, and a checker MUST NOT add one.
+    // >
+    // > **AO3 — A well-formedness verdict is not an acceptance decision and MUST NOT
+    // > be read as one.** The verdict names the rules it decided; a caller that needs
+    // > both answers makes both calls.
+    // >
+    // > — RFC 0037, "Acceptance obligations that are not well-formedness"
+    //   (correction 17)
+    //
+    // `IntentContract::check`'s five rules (W2, W3, W7, W8, W9) carry none for
+    // non-vacuity, so the fixture and its emptied mutant are indistinguishable to it —
+    // and a caller who treats a verdict as full acceptance accepts a "safety by
+    // disabling" contract. The remedy RFC 0037 chose is that the caller with standing
+    // makes the second call, not that the surface grows a sixth rule; the alternatives
+    // and why each lost are in that RFC's "Rejected alternatives".
     let good = IntentContract::decode(DIE_HARD_FIXTURE.trim_end().as_bytes())
         .expect("the fixture decodes");
     let mutant = vacuous_die_hard();
@@ -413,12 +496,114 @@ fn negative_the_cross_field_checker_alone_would_accept_the_disabled_contract() {
         ContractFinding::DeclaredIdentityMismatch { declared, .. } if declared == "in_die_hard_v1"
     ));
     // The obligation itself still catches it — the point is that `check` alone does
-    // not, so the caller with standing (a synthesis task assembled against this
-    // contract, per `src/optimization.rs`'s module doc) must invoke it explicitly.
+    // not, so the caller with standing (the lane that assembles a synthesis task
+    // against this contract — RFC 0037 AO2) must invoke it explicitly. The two calls
+    // together are the acceptance decision; neither alone is.
     assert_eq!(
         vacuous.optimization().require_non_vacuity(),
         Err(OptimizationError::NoNonVacuityObligation)
     );
+    assert_eq!(good.optimization().require_non_vacuity(), Ok(()));
+}
+
+#[test]
+fn ratified_a_vacuous_contract_can_be_wholly_well_formed_and_the_verdict_names_the_rules_it_decided()
+ {
+    // The sharp form. The die-hard fixture fails W9 (the corpus assigns it no handle),
+    // so the test above compares two *one-finding* verdicts and cannot show that a
+    // vacuous contract reaches a fully clean one. The dossier's own validated example
+    // can: `tests/pr4_exit_evidence.rs` establishes it is clean on all five rules.
+    let good = IntentContract::decode(SCHEMA_EXAMPLE.as_bytes()).expect("the example decodes");
+    assert_eq!(good.optimization().non_vacuity_len(), 1);
+    let good_verdict = good.check(&schema_example_environment());
+    assert!(good_verdict.is_well_formed(), "{good_verdict}");
+
+    let mutant = vacuous_schema_example();
+    let vacuous = IntentContract::decode(mutant.as_bytes()).expect("the mutant still decodes");
+    assert_eq!(vacuous.optimization().non_vacuity_len(), 0);
+    // Nothing else moved: the mutation is the non-vacuity set and only it.
+    assert_eq!(vacuous.optimization().hard().count(), 1);
+    assert_eq!(vacuous.optimization().soft().count(), 1);
+    assert_eq!(vacuous.policy(), good.policy());
+
+    // AO1: an empty non-vacuity set is well formed. A contract that requires no
+    // behavior to remain possible passes every rule the surface carries.
+    let vacuous_verdict = vacuous.check(&schema_example_environment());
+    assert!(vacuous_verdict.is_well_formed(), "{vacuous_verdict}");
+    assert_eq!(vacuous_verdict, good_verdict);
+
+    // AO3: the verdict states which rules it decided, in its own words. This is the
+    // tripwire for the disposition — a sixth rule joining the surface, or a rule
+    // leaving it, changes this rendering and lands a reader back on bn-32kpe's
+    // reasoning instead of letting the surface's meaning drift silently.
+    assert_eq!(
+        vacuous_verdict.to_string(),
+        "the contract satisfies W2, W3, W7, W8, and W9"
+    );
+
+    // And the second call is where INV-012 is answered.
+    assert_eq!(
+        vacuous.optimization().require_non_vacuity(),
+        Err(OptimizationError::NoNonVacuityObligation)
+    );
+    assert_eq!(good.optimization().require_non_vacuity(), Ok(()));
+}
+
+#[test]
+fn ratified_a_directional_verb_over_an_empty_set_is_dormant_not_ill_formed() {
+    // The corpus evidence behind RFC 0037 AO4 — the fact that decided against the
+    // narrower candidate rule (flag the `no-removal`-over-empty-`non_vacuity` pair as
+    // an unenforceable block, the W7 analogy `src/optimization.rs` used to raise).
+    //
+    // > `no-removal` on `non_vacuity` governs *revisions* […]. It says nothing about
+    // > the set's size, and an empty set does not make it ill-formed — the verb
+    // > governs whatever the set comes to hold, which is the same dormant shape
+    // > `no-removal` has on `faults` over an empty `fault_model.enabled` and on
+    // > `optimization` over empty `hard`/`soft` sets, both of which the corpus carries
+    // > today.
+    // >
+    // > — RFC 0037, AO4
+    //
+    // Both halves of that sentence are checked against the real document rather than
+    // asserted, because the whole argument rests on the shape being ordinary.
+    let die_hard = IntentContract::decode(DIE_HARD_FIXTURE.trim_end().as_bytes())
+        .expect("the fixture decodes");
+
+    // `faults: no-removal` over a fault model with nothing in it.
+    assert_eq!(
+        die_hard.policy().verb(PolicyField::Faults),
+        PolicyVerb::NoRemoval
+    );
+    assert!(die_hard.fault_model().enabled().is_empty());
+    assert!(die_hard.fault_model().profiles().is_empty());
+    assert_eq!(die_hard.fault_model().units().count(), 0);
+
+    // `optimization: no-removal` over empty `hard` and `soft` sets.
+    assert_eq!(
+        die_hard.policy().verb(PolicyField::Optimization),
+        PolicyVerb::NoRemoval
+    );
+    assert_eq!(die_hard.optimization().hard().count(), 0);
+    assert_eq!(die_hard.optimization().soft().count(), 0);
+
+    // Both verbs deny `removed`, and neither can fire today — exactly the shape the
+    // candidate rule would have called ill-formed on `non_vacuity`. The fixture is a
+    // reviewed corpus document, so the shape is ordinary rather than defective, and
+    // the surface reports nothing against either of them.
+    assert!(PolicyVerb::NoRemoval.denies(Relation::Removed));
+    let verdict = die_hard.check(&minted_environment(&die_hard));
+    assert_eq!(verdict.findings().len(), 1, "{verdict}");
+    assert_eq!(verdict.findings()[0].rule(), WellFormednessRule::W9);
+
+    // The third `no-removal` verb on the same document — `non_vacuity` — is the one
+    // whose set is non-empty, so on this contract it is the only one of the three that
+    // is live. That asymmetry is a fact about the contract's content, not about its
+    // governance, which is why AO1 puts the content question on the lane with standing.
+    assert_eq!(
+        die_hard.policy().verb(PolicyField::NonVacuity),
+        PolicyVerb::NoRemoval
+    );
+    assert_eq!(die_hard.optimization().non_vacuity_len(), 1);
 }
 
 // --- boundary: the guard counts behaviors, it does not judge their content ------------------
@@ -506,6 +691,49 @@ fn schema_does_not_encode_inv_012s_non_emptiness_constraint() {
          bone's fence — schema edits are epoch-governed) or the non-emptiness constraint has \
          moved into the schema, and Optimization::require_non_vacuity's caller-invoked design \
          should be revisited"
+    );
+}
+
+// --- the disposition itself, held to its normative source -------------------------------------
+
+#[test]
+fn the_disposition_this_file_pins_is_the_one_rfc_0037_records() {
+    // The three `ratified_*` tests above quote RFC 0037's AO section. A citation that
+    // is only prose rots silently, so the section's own anchors are matched against the
+    // live document — and, per this file's anti-drift discipline, each match is then
+    // shown capable of failing.
+    const ANCHORS: [&str; 4] = [
+        "### Acceptance obligations that are not well-formedness",
+        "**AO1 — An empty `optimization.non_vacuity` is well formed.**",
+        "**AO3 — A well-formedness verdict is not an acceptance decision and MUST NOT be read as \
+         one.**",
+        "17. **Non-vacuity is absent from the cross-field verdict surface, and that absence is \
+         the design.**",
+    ];
+    for anchor in ANCHORS {
+        assert!(
+            RFC_0037.contains(anchor),
+            "RFC 0037 no longer carries {anchor:?}; the disposition this file pins has moved or \
+             been withdrawn, and the tests citing it must be revisited rather than left standing"
+        );
+        let mutated = RFC_0037.replacen(anchor, "", 1);
+        assert_ne!(mutated, RFC_0037);
+        assert!(!mutated.contains(anchor));
+    }
+
+    // The decision is a *decline*, not a deferral: the RFC records the alternative it
+    // rejected, so a future reader finds the reasoning rather than an open question.
+    assert!(
+        RFC_0037.contains(
+            "**A W-rule making a non-empty `optimization.non_vacuity` a well-formedness \
+             condition**"
+        ),
+        "the rejected W-rule must stay recorded under RFC 0037's \"Rejected alternatives\""
+    );
+    // And the obligation's caller is named as unlanded rather than assumed present.
+    assert!(
+        RFC_0037.contains("**F12 — No landed lane discharges the non-vacuity obligation.**"),
+        "AO2's caller with standing has not shipped; the flag says so"
     );
 }
 

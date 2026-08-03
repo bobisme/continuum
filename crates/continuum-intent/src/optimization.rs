@@ -49,11 +49,40 @@
 //! callers with standing to invoke it are the ones INV-012 names — a synthesis task
 //! assembled against this contract — and they are PR 22's, not this bone's.
 //!
-//! *Raised as a flag against RFC 0037: a contract whose `policy.non_vacuity` is
-//! `no-removal` while `optimization.non_vacuity` is empty carries a lock over nothing,
-//! which is the same unenforceable-block shape W7 rejects for a `review` verb naming
-//! no reviewer. W7 has no non-vacuity sibling, so the case is reported here rather
-//! than rejected.*
+//! # The two-call contract, and the flag this module used to raise
+//!
+//! This module previously raised a flag against RFC 0037: a contract whose
+//! `policy.non_vacuity` is `no-removal` while `optimization.non_vacuity` is empty
+//! carries a lock over nothing, which looked like the unenforceable-block shape W7
+//! rejects for a `review` verb naming no reviewer. RFC 0037 has now decided it, and the
+//! flag is a citation rather than an open question:
+//!
+//! > **AO1 — An empty `optimization.non_vacuity` is well formed.** […] No W-rule
+//! > rejects it, and a checker MUST NOT add one.
+//! >
+//! > **AO2 — The obligation belongs to the caller with standing, and that caller is
+//! > named.** […] A lane that assembles a synthesis task against a contract MUST
+//! > require `optimization.non_vacuity` to be non-empty and MUST refuse the task
+//! > otherwise […]. A lane that assembles no synthesis task MUST NOT impose it.
+//! >
+//! > — RFC 0037, "Acceptance obligations that are not well-formedness" (correction 17)
+//!
+//! So the split this module already implements is the ratified design, not an omission:
+//! [`crate::contract::IntentContract::check`] decides the document's cross-field rules
+//! and [`Optimization::require_non_vacuity`] is the second call, made by the lane whose
+//! task INV-012 is about.
+//!
+//! The W7 analogy does not survive, and the reason is worth keeping: a `review` verb
+//! naming no reviewer is a block that *fires on the first change and cannot be
+//! discharged*, while `no-removal` over an empty set is a block with *nothing to guard
+//! yet* — it governs whatever the set comes to hold. That dormant shape is ordinary,
+//! not defective: `tests/fixtures/die-hard-contract.json` carries it twice over, on
+//! `faults: no-removal` with an empty `fault_model.enabled` and on `optimization:
+//! no-removal` with empty `hard` and `soft` sets (RFC 0037 AO4, pinned by
+//! `tests/inv012_nonvacuity_evidence.rs`). A W-rule firing on the `non_vacuity` pair
+//! alone would name INV-012's concern by a governance coincidence, and an author who
+//! wrote `non_vacuity: unlocked` beside an empty set would pass it — rewarding the
+//! removal of the lock along with the obligation.
 //!
 //! # Strings, sets, and what the diff does with them
 //!
@@ -396,6 +425,13 @@ impl Optimization {
     /// the decoder: the schema admits an empty set, so rejecting one at decode time
     /// would reject artifacts the shape authority accepts (INV-003). See the module
     /// documentation.
+    ///
+    /// It is not decided by [`IntentContract::check`] either, and that is ratified
+    /// rather than pending: RFC 0037 AO1–AO3 fix the two-call contract, so a lane with
+    /// standing calls `check` for the document's well-formedness and this method for
+    /// INV-012's obligation, and neither answer stands in for the other.
+    ///
+    /// [`IntentContract::check`]: crate::contract::IntentContract::check
     ///
     /// # Errors
     ///
