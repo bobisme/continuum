@@ -87,10 +87,25 @@ publish = false
 #   that crate has no thread, clock, executor, or interior mutability, and its two edges are
 #   `continuum-value` and `continuum-evidence`.
 #
+# A sixth arrived with PR-11 / IMPL-04's `context` family (`src/daemon/context.rs`):
+#
+# - `continuum-context` owns the Context Pack — RFC 0028's omission manifest, the closed
+#   `ExpansionRelation` and `OmissionReason` vocabularies, the content-derived expansion
+#   handle, and the child-document derivation an expansion answers with. `context.expand`
+#   projects that crate's answers onto the wire and re-decides none of them: the manifest
+#   the envelope carries is the child pack's own, the `ctx_*` the response names is the
+#   handle that crate derives from the question, and the closed accounting that makes
+#   INV-007 checkable lives there rather than here. The direction is the islands' —
+#   `continuum-context` declares no `continuumd` edge and mints no wire vocabulary; its
+#   eleven relation tokens and five omission reasons are transcribed from the IDL and the
+#   schema, and `tests/daemon_context_operations.rs` holds the two spellings token for
+#   token from this side, which is the only side that sees both.
+#
 # Repeated under [dev-dependencies] because integration tests in `tests/` are separate
 # crates and do not inherit the library's dependencies.
 [dependencies]
 continuum-certificate = { path = "../continuum-certificate" }
+continuum-context = { path = "../continuum-context" }
 continuum-evidence = { path = "../continuum-evidence" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
@@ -100,6 +115,7 @@ continuum-workspace = { path = "../continuum-workspace" }
 
 [dev-dependencies]
 continuum-certificate = { path = "../continuum-certificate" }
+continuum-context = { path = "../continuum-context" }
 continuum-evidence = { path = "../continuum-evidence" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }

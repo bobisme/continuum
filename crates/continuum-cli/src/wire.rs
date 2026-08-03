@@ -22,13 +22,18 @@
 //!
 //! `task.status`/`task.resume`/`task.cancel` decode through `continuumd`'s own
 //! [`Arguments`]/[`Payload`] tables, so [`Connection::task_status`] and its two siblings
-//! return [`Outcome<Payload>`]. `context.expand` has no entry in either table — see the
-//! crate root doc — so [`Connection::context_expand`] builds and decodes the frame by hand,
-//! against the real [`ContextExpandRequest`]/[`ContextExpandResponse`] structs the IDL and
-//! `continuumd::protocol::operations::context` declare, and returns
-//! [`Outcome<ContextExpandResponse>`]. Both outcomes share one [`Refusal`] shape, because a
-//! daemon's typed refusal is the same three fields (`code`, `detail`, `retryable`) plus the
-//! two resumability fields whichever operation it answers.
+//! return [`Outcome<Payload>`]. [`Connection::context_expand`] returns
+//! [`Outcome<ContextExpandResponse>`] — the *typed body*, not the enum — because a command
+//! that has already chosen its operation has nothing to gain from re-matching a
+//! twenty-eight-variant enum to find the shape it asked for. It builds and decodes the
+//! frame against the real [`ContextExpandRequest`]/[`ContextExpandResponse`] structs the
+//! IDL and `continuumd::protocol::operations::context` declare, with the same
+//! `codec::to_opaque`/`from_opaque` pair `continuumd::transport::encode_request` uses per
+//! `Arguments` variant. Until bn-28jj (PR-11/IMPL-04) there was no variant to dispatch
+//! through at all; there is one now, and this method's shape is unchanged because the
+//! reason for it was never the missing variant. Both outcomes share one [`Refusal`] shape,
+//! because a daemon's typed refusal is the same three fields (`code`, `detail`,
+//! `retryable`) plus the two resumability fields whichever operation it answers.
 
 use core::fmt;
 
@@ -391,19 +396,14 @@ impl Connection {
 
     /// `context.expand` — follow a PR-11 expansion handle along a relation.
     ///
-    /// Built and decoded by hand: `context.expand` has no
-    /// [`continuumd::daemon::family::Arguments`]/`Payload` variant yet (see the crate root
-    /// doc), so this method encodes the real [`ContextExpandRequest`] into the envelope's
-    /// `arguments` opaque field directly, with `continuumd::codec::to_opaque` — the same
-    /// function `continuumd::transport::encode_request` uses per `Arguments` variant, just
-    /// invoked for one there is no variant to dispatch through. `context.expand` is
-    /// `@mutation` and `@task_starting` per the registry, so the envelope always carries an
-    /// idempotency key and a budget, exactly as a landed handler would require, even though
-    /// nothing today reads either: `codec::operations::decode_arguments` refuses the
-    /// operation before any annotation is checked (`CodecError::UnknownOperation`, which
-    /// carries `ErrorCode::UnsupportedSemanticFeature` — see
-    /// `continuumd::codec::CodecError::code`), and that refusal is what every call to this
-    /// method observes today.
+    /// Encodes the real [`ContextExpandRequest`] into the envelope's `arguments` opaque
+    /// field with `continuumd::codec::to_opaque` and decodes the answer's payload as the
+    /// real [`ContextExpandResponse`] — see this module's doc for why the typed body rather
+    /// than the `Payload` enum. `context.expand` is `@mutation` and `@task_starting` per the
+    /// registry, so the envelope always carries an idempotency key and a budget; both are
+    /// read now that the family has landed (bn-28jj), by the dispatcher's obligation step
+    /// and by the expansion's own byte ceiling respectively, where before bn-28jj the call
+    /// was refused at `codec::operations::decode_arguments` before either was consulted.
     ///
     /// # Errors
     ///

@@ -52,6 +52,9 @@ use crate::protocol::envelope::{
     ArtifactRef, AssuranceEnvelope, Omission, RequestEnvelope, Verdict, Warning,
 };
 use crate::protocol::handshake::CapabilityDescriptor;
+use crate::protocol::operations::context::{
+    ContextCompileRequest, ContextCompileResponse, ContextExpandRequest, ContextExpandResponse,
+};
 use crate::protocol::operations::evidence::{
     EvidenceGetRequest, EvidenceGetResponse, EvidenceLinkRequest, EvidenceLinkResponse,
     EvidenceQueryRequest, EvidenceQueryResponse, EvidenceSubscribeRequest,
@@ -161,6 +164,10 @@ pub enum Arguments {
     TaskSubscribe(TaskSubscribeRequest),
     /// `task.update_budget`.
     TaskUpdateBudget(TaskUpdateBudgetRequest),
+    /// `context.compile`.
+    ContextCompile(ContextCompileRequest),
+    /// `context.expand`.
+    ContextExpand(ContextExpandRequest),
 }
 
 impl Arguments {
@@ -194,6 +201,8 @@ impl Arguments {
             Self::TaskResume(_) => "task.resume",
             Self::TaskSubscribe(_) => "task.subscribe",
             Self::TaskUpdateBudget(_) => "task.update_budget",
+            Self::ContextCompile(_) => "context.compile",
+            Self::ContextExpand(_) => "context.expand",
         }
     }
 }
@@ -265,6 +274,12 @@ pub enum Payload {
     TaskSubscribe(TaskSubscribeResponse),
     /// `task.update_budget`.
     TaskUpdateBudget(TaskUpdateBudgetResponse),
+    /// `context.compile`. Declared beside its request because the codec's two tables and
+    /// these two enums are one seam — see this module's four-step list — even though the
+    /// `context` family answers this operation with a typed refusal rather than a body.
+    ContextCompile(ContextCompileResponse),
+    /// `context.expand`.
+    ContextExpand(ContextExpandResponse),
 }
 
 impl Payload {
@@ -300,6 +315,8 @@ impl Payload {
             Self::TaskResume(_) => Some("task.resume"),
             Self::TaskSubscribe(_) => Some("task.subscribe"),
             Self::TaskUpdateBudget(_) => Some("task.update_budget"),
+            Self::ContextCompile(_) => Some("context.compile"),
+            Self::ContextExpand(_) => Some("context.expand"),
         }
     }
 }

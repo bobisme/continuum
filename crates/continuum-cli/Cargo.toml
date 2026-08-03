@@ -29,7 +29,14 @@ continuumd = { path = "../continuumd" }
 # comment gives the reason this crate's tests give too — the fixture is duplicated locally
 # because the crate that would supply a shared rig is the benchmark harness, and depending on
 # it from here to save fixture lines would be a dev-dependency edge with no reciprocal one.
+#
+# A fifth arrived with bn-28jj (PR-11 / IMPL-04): `continuum-context` supplies the Context
+# Pack a `context expand` fixture registers — the omission record, the expansion payload,
+# and the source reference the payload retrieves. There is one Context Pack vocabulary in
+# this workspace and a fixture that spelled a second one would be testing the renderer
+# against a shape no daemon produces.
 [dev-dependencies]
+continuum-context = { path = "../continuum-context" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
 continuum-value = { path = "../continuum-value" }

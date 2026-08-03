@@ -34,7 +34,9 @@ use crate::codec::cbor::Cbor;
 use crate::codec::json::Json;
 use crate::codec::{CodecError, Document, from_opaque_in, to_opaque_in};
 use crate::daemon::family::{Arguments, Payload};
-use crate::protocol::operations::{evidence, intent, observe, task, verification, workspace};
+use crate::protocol::operations::{
+    context, evidence, intent, observe, task, verification, workspace,
+};
 use crate::protocol::scalar::Opaque;
 
 /// Decode an envelope's `arguments` into the typed request body its operation declares.
@@ -42,7 +44,7 @@ use crate::protocol::scalar::Opaque;
 /// # Errors
 ///
 /// [`CodecError::UnknownOperation`] when this daemon declares no request shape for the
-/// named operation — the 47 of the 73 whose families have not landed — and any decode
+/// named operation — the 45 of the 73 whose families have not landed — and any decode
 /// failure of the named struct otherwise.
 pub fn decode_arguments_in<D: Document>(
     operation: &str,
@@ -143,6 +145,14 @@ pub fn decode_arguments_in<D: Document>(
             D,
             task::TaskUpdateBudgetRequest,
         >(arguments)?),
+        "context.compile" => Arguments::ContextCompile(from_opaque_in::<
+            D,
+            context::ContextCompileRequest,
+        >(arguments)?),
+        "context.expand" => Arguments::ContextExpand(from_opaque_in::<
+            D,
+            context::ContextExpandRequest,
+        >(arguments)?),
         _ => return Err(CodecError::UnknownOperation),
     })
 }
@@ -184,6 +194,8 @@ pub fn encode_payload_in<D: Document>(payload: &Payload) -> Result<Option<Opaque
         Payload::TaskResume(body) => to_opaque_in::<D, _>(body)?,
         Payload::TaskSubscribe(body) => to_opaque_in::<D, _>(body)?,
         Payload::TaskUpdateBudget(body) => to_opaque_in::<D, _>(body)?,
+        Payload::ContextCompile(body) => to_opaque_in::<D, _>(body)?,
+        Payload::ContextExpand(body) => to_opaque_in::<D, _>(body)?,
     }))
 }
 
@@ -229,6 +241,8 @@ pub fn decode_payload_in<D: Document>(
         "task.resume" => Payload::TaskResume(from_opaque_in::<D, _>(payload)?),
         "task.subscribe" => Payload::TaskSubscribe(from_opaque_in::<D, _>(payload)?),
         "task.update_budget" => Payload::TaskUpdateBudget(from_opaque_in::<D, _>(payload)?),
+        "context.compile" => Payload::ContextCompile(from_opaque_in::<D, _>(payload)?),
+        "context.expand" => Payload::ContextExpand(from_opaque_in::<D, _>(payload)?),
         _ => return Err(CodecError::UnknownOperation),
     })
 }

@@ -997,10 +997,14 @@ fn every_operation_the_families_serve_round_trips_through_the_codec() {
             Err(error) => panic!("`{}` failed to decode: {error}", operation.name),
         }
     }
-    // The split `codec::operations::decode_arguments` documents: 26 served, 47 whose
-    // families have not landed.
-    assert_eq!(served, 26, "the operations the landed families serve");
-    assert_eq!(unserved, OPERATION_COUNT - 26);
+    // The split `codec::operations::decode_arguments` documents: 28 served, 45 whose
+    // families have not landed. It was 26/47 until bn-28jj (PR-11 / IMPL-04) landed the
+    // `context` family, which serves `context.expand` and answers `context.compile` with
+    // the typed refusal `rule errors.unsupported_surface` requires — both decode, so both
+    // are served here. A count that moves when a family lands is the point: it forces the
+    // landing to be visible in a file nobody editing a family would otherwise open.
+    assert_eq!(served, 28, "the operations the landed families serve");
+    assert_eq!(unserved, OPERATION_COUNT - 28);
 }
 
 #[test]

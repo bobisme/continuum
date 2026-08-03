@@ -84,6 +84,7 @@ version = "0.0.0"
 name = "continuum-cli"
 version = "0.0.0"
 dependencies = [
+ "continuum-context",
  "continuum-engine-reference",
  "continuum-intent",
  "continuum-value",
@@ -274,6 +275,7 @@ name = "continuumd"
 version = "0.0.0"
 dependencies = [
  "continuum-certificate",
+ "continuum-context",
  "continuum-engine-reference",
  "continuum-evidence",
  "continuum-intent",

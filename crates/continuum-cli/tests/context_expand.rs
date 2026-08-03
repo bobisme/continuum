@@ -1,35 +1,70 @@
-//! Evidence for `continuum context expand` (bn-3tz60, PR-13 third command group).
+//! Evidence for `continuum context expand` (bn-3tz60, PR-13 third command group; flipped to
+//! the live path by bn-28jj, PR-11 / IMPL-04).
+//!
+//! # What changed with bn-28jj, and why these tests moved
+//!
+//! When bn-3tz60 landed, `continuumd` served no `context` namespace: every call reached
+//! `codec::operations::decode_arguments`, found no arm for `context.expand`, and came back
+//! `UnsupportedSemanticFeature`. Three tests here asserted exactly that, and the fourth —
+//! the success-path renderer — was proven at unit level against the real wire types because
+//! "a renderer that only handled the refusal it happens to see today would be untested on
+//! the day the family lands".
+//!
+//! bn-28jj is that day. `continuumd::daemon::context::ContextFamily` serves the namespace,
+//! so the refusal those three tests pinned no longer exists to pin: a `context.expand`
+//! against a registered pack is *admitted*. They are replaced here by their live
+//! counterparts, which assert the same three properties over a real frame and a real
+//! answer — the typed reason is still the protocol's own token where a refusal is still
+//! reachable, the `omissions` key is still present in machine output on both arms, and the
+//! renderer still prints the expanded pack beside the full manifest. The unit-level success
+//! test is unchanged and kept: it is the one that proves the renderer against a
+//! hand-built answer rather than against whatever this fixture happens to produce.
 //!
 //! # Clause → test
 //!
 //! - **"surfaces the omission manifest (INV-007) alongside the expanded slice"** →
-//!   [`the_success_renderer_prints_the_expanded_pack_beside_the_full_omission_manifest`],
-//!   unit-level against the real wire types directly (see the crate root doc: no live
-//!   daemon can answer this call successfully today, since PR-11/IMPL-04, bn-28jj, is
-//!   open).
+//!   [`the_live_success_path_prints_the_expanded_pack_beside_the_full_omission_manifest`]
+//!   (over a real daemon) and
+//!   [`the_success_renderer_prints_the_expanded_pack_beside_the_full_omission_manifest`]
+//!   (unit-level, against the real wire types).
 //! - **"non-suppressible in machine output"** →
 //!   [`the_json_envelope_always_carries_the_omissions_key`] — the key is present on both
 //!   arms, refused or admitted, and there is no flag anywhere in `cli::run`'s parser that
 //!   removes it (`cli.rs` has no `--no-omissions`/`--quiet` flag at all).
-//! - **the real, wire-reachable behavior today** →
-//!   [`a_real_daemon_refuses_context_expand_with_a_typed_unsupported_semantic_feature`] —
-//!   a real frame, a real `Daemon::dispatch`-adjacent `Server::answer`, and the crate's own
-//!   `Connection::context_expand` decoding the real refusal.
+//! - **a typed refusal is still a rendered answer** →
+//!   [`the_cli_renders_a_refusal_with_the_typed_reason_in_every_format`], driven now by an
+//!   anchor the pack does not carry rather than by an unserved namespace.
 //!
 //! # The fixture
 //!
-//! Deliberately minimal, unlike `task_lifecycle.rs`'s: `context.expand` refuses at
-//! `codec::operations::decode_arguments` — before family lookup, before admission, before
-//! any capability is checked (`continuumd::transport::Server::answer`'s own control flow) —
-//! so no corpus, no intent, and no operation family is staged here. Duplicated locally
-//! rather than imported, for the reason `continuum-mcp/tests/typed_surface.rs`'s identical
-//! comment gives: a `tests/*.rs` file is its own crate.
+//! One in-process deployment: a real `Daemon` with the `context` family registered and one
+//! Context Pack registered out of band (`DaemonState::put_context_pack`, the surface a
+//! deployment uses because pack *compilation* is not an operation — see
+//! `continuumd::daemon::context`). Duplicated locally rather than imported, for the reason
+//! `continuum-mcp/tests/typed_surface.rs`'s identical comment gives: a `tests/*.rs` file is
+//! its own crate.
+//!
+//! The pack's expansion payload carries `source` items because those are the items this
+//! workspace can build — `SelectedItem`'s typed constructors are `SourceRef`'s and
+//! `ModelActionRef`'s (PR-11 / IMPL-03) — so the relation the CLI drives here is
+//! `source_span`. bn-3tz60's fixture named `causal_predecessors`, which no landed
+//! constructor can supply items for; the request shape it exercises is identical either way.
 
 use continuum_cli::format::Format;
 use continuum_cli::wire::{Connection, LocalLink, Outcome};
 use continuum_cli::{context, render};
+use continuum_context::expansion::{
+    ExpansionPayload, ExpansionQuery, ExpansionRelation as PackRelation,
+};
+use continuum_context::omission::{OmissionReason as PackReason, OmissionRecord};
+use continuum_context::selection::SelectionKind;
+use continuum_context::source::{SourceRef, SourceSpan};
+use continuum_intent::canonical_json::Json;
 use continuum_value::epoch::ProtocolWindow;
+use continuum_value::value::Name;
+use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::Daemon;
+use continuumd::daemon::context::{ContextFamily, ContextPackRecord};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::protocol::envelope::{ArtifactRef, Cost, EpochSet, NextOperation, Omission};
 use continuumd::protocol::handshake::{
@@ -39,13 +74,39 @@ use continuumd::protocol::operations::context::ContextExpandRequest;
 use continuumd::protocol::registry::ENCODINGS;
 use continuumd::protocol::scalar::{
     ActorId, CapabilityHandle, ContextHandle, EpochIdentity, Opaque, ProtocolVersion, RequestId,
-    Timestamp,
+    Timestamp, WorkspaceHandle,
 };
 use continuumd::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use continuumd::protocol::vocabulary::{Encoding, ErrorCode, ExpansionRelation, ResultStatus};
 use continuumd::transport::{LocalPair, Server};
 
 const NOW: &str = "2026-08-01T00:00:00.000Z";
+const PARENT: &str = "ctx_abc123def456";
+
+/// A conforming parent pack advertising the one anchor this deployment holds a group for.
+const PARENT_PACK: &str = r#"{
+  "assurance": {"class": "bounded", "envelope": {}},
+  "content_budget": {"bytes": 16384},
+  "content_hash": "blake3-256:parentplaceholder",
+  "context_id": "ctx_abc123def456",
+  "evidence": ["ev_failure1"],
+  "expansions": [{"anchor": "node-42", "relation": "source_span"}],
+  "guarantees": ["ReplayPreserving"],
+  "intent": "in_ack_v1",
+  "omissions": [{"count": 2, "expandable": true,
+                 "expansion": {"anchor": "node-42", "relation": "source_span"},
+                 "kind": "source", "reason": "budget"}],
+  "parent": null,
+  "question": "why did AckImpliesDurable fail?",
+  "replay": "crash_demo1",
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/context-pack.json",
+  "selected": [{"artifact": "ev_ack1", "id": "node-42", "kind": "event",
+                "summary": "reply published before stable write"}],
+  "semantic_epoch": "sem3-r3-demo",
+  "snapshot": "ws_demo1",
+  "verdict": "refuted"
+}"#;
 
 fn version() -> ProtocolVersion {
     ProtocolVersion::new(3, 2)
@@ -108,8 +169,42 @@ fn root_grant() -> CapabilityDescriptor {
     }
 }
 
-/// A minimal deployment: no operation family registered — none is needed, since
-/// `context.expand` refuses before family lookup (see this file's module doc).
+fn name(text: &str) -> Name {
+    Name::new(text).expect("a canonical identifier")
+}
+
+fn source_item(id: &str, line: u32) -> continuum_context::selection::SelectedItem {
+    let span = SourceSpan::new(
+        WorkspacePath::new("src/ack.rs").expect("a repo-relative path"),
+        line,
+        1,
+        line,
+        40,
+    )
+    .expect("a well-formed span");
+    SourceRef::new(span).into_selected_item(name(id))
+}
+
+fn pack_record() -> ContextPackRecord {
+    let group = ExpansionPayload::new(
+        OmissionRecord::expandable(
+            SelectionKind::Source,
+            2,
+            PackReason::Budget,
+            ExpansionQuery::new(PackRelation::SourceSpan, name("node-42")),
+        ),
+        vec![source_item("span_1", 10), source_item("span_2", 20)],
+    )
+    .expect("two items for a count of two");
+    ContextPackRecord::new(
+        Json::parse(PARENT_PACK.as_bytes()).expect("the fixture is admissible JSON"),
+        WorkspaceHandle::new("ws_demo1").expect("a workspace handle"),
+        [group],
+    )
+    .expect("a conforming pack and a well-formed expansion graph")
+}
+
+/// A deployment serving the `context` namespace over one registered pack.
 struct Fixture {
     server: Server,
     pair: LocalPair,
@@ -129,11 +224,16 @@ impl Fixture {
             &hello,
         )
         .expect("3.2 is served");
-        let daemon = Daemon::builder(Blake3Identity, negotiated, capability("cap_root"))
+        let mut daemon = Daemon::builder(Blake3Identity, negotiated, capability("cap_root"))
             .epochs(epochs())
             .now(Timestamp::new(NOW).expect("a timestamp"))
             .capability(root_grant(), None)
+            .family(ContextFamily)
             .build();
+        daemon.state_mut().put_context_pack(
+            ContextHandle::new(PARENT).expect("a context handle"),
+            pack_record(),
+        );
         Self {
             server: Server::new(daemon, negotiated),
             pair: LocalPair::new(),
@@ -153,62 +253,108 @@ fn connection() -> Connection {
     )
 }
 
-fn request() -> ContextExpandRequest {
+fn request(anchor: &str) -> ContextExpandRequest {
     ContextExpandRequest {
-        context: ContextHandle::new("ctx_abc123def456").expect("a well-formed context handle"),
-        anchor: "node-42".to_owned(),
-        relation: ExpansionRelation::CausalPredecessors,
-        depth: Optional::Present(2),
+        context: ContextHandle::new(PARENT).expect("a well-formed context handle"),
+        anchor: anchor.to_owned(),
+        relation: ExpansionRelation::SourceSpan,
+        depth: Optional::Present(1),
     }
+}
+
+fn args(anchor: &str) -> context::ExpandArgs {
+    context::ExpandArgs {
+        context: request(anchor).context,
+        anchor: request(anchor).anchor,
+        relation: request(anchor).relation,
+        depth: request(anchor).depth,
+        states: Optional::Present(0),
+    }
+}
+
+fn call(
+    fixture: &mut Fixture,
+    anchor: &str,
+) -> Outcome<continuumd::protocol::operations::context::ContextExpandResponse> {
+    let mut connection = connection();
+    let mut link = fixture.link();
+    connection
+        .context_expand(&mut link, &request(anchor), Optional::Present(0))
+        .expect("the call reaches a real frame and a real answer")
 }
 
 // --- the evidence -------------------------------------------------------------------------
 
 #[test]
-fn a_real_daemon_refuses_context_expand_with_a_typed_unsupported_semantic_feature() {
+fn a_real_daemon_admits_context_expand_and_answers_with_a_child_pack() {
+    // The flip. Before bn-28jj this call could only be refused
+    // `UnsupportedSemanticFeature`, because `codec::operations::decode_arguments` had no arm
+    // for the operation; the family has landed, so the same frame is admitted and the answer
+    // carries a pack whose parent is the one the request named.
     let mut fixture = Fixture::fresh();
-    let mut connection = connection();
-    let outcome = {
-        let mut link = fixture.link();
-        connection
-            .context_expand(&mut link, &request(), Optional::Present(0))
-            .expect("the call reaches a real frame and a real answer")
+    let outcome = call(&mut fixture, "node-42");
+    let Outcome::Admitted(admitted) = outcome else {
+        panic!("context.expand is served now and must be admitted: {outcome:?}");
     };
-    let Outcome::Refused(refusal) = outcome else {
-        panic!("context.expand has no family yet and must refuse: {outcome:?}");
+    assert_eq!(admitted.status, ResultStatus::Ok);
+    assert_eq!(admitted.payload.parent.as_str(), PARENT);
+    assert!(admitted.payload.context.as_str().starts_with("ctx_"));
+    assert_ne!(admitted.payload.context.as_str(), PARENT);
+    assert!(
+        !admitted.payload.pack.as_bytes().is_empty(),
+        "the answer carries the child pack itself, not a reference to one"
+    );
+}
+
+#[test]
+fn the_live_success_path_prints_the_expanded_pack_beside_the_full_omission_manifest() {
+    let mut fixture = Fixture::fresh();
+    let outcome = call(&mut fixture, "node-42");
+    let expanded = match &outcome {
+        Outcome::Admitted(admitted) => admitted.payload.context.as_str().to_owned(),
+        other => panic!("expected an admitted answer: {other:?}"),
     };
-    assert_eq!(refusal.code, ErrorCode::UnsupportedSemanticFeature);
+
+    for format in [Format::Text, Format::Pretty] {
+        let rendered = context::render(&args("node-42"), &outcome, format);
+        assert_eq!(rendered.exit_code, 0, "an admitted answer exits zero");
+        assert!(rendered.text.contains(&expanded));
+        assert!(
+            rendered.text.contains("omissions"),
+            "the manifest line is present in {format:?}:\n{}",
+            rendered.text
+        );
+    }
+
+    let json = context::render(&args("node-42"), &outcome, Format::Json);
+    assert_eq!(json.exit_code, 0);
+    assert!(json.text.contains(&format!("\"expanded\":\"{expanded}\"")));
+    // The pack is embedded verbatim, so the child's own two selected spans are readable in
+    // the machine output without a second call.
+    assert!(json.text.contains("\"span_1\""), "{}", json.text);
+    assert!(json.text.contains("\"span_2\""), "{}", json.text);
+    // …and so is the child's own manifest, which here asserts completeness: the group the
+    // parent named is exactly what came back, and nothing further is outstanding.
+    assert!(json.text.contains("\"omissions\":[]"), "{}", json.text);
+}
+
+#[test]
+fn the_cli_renders_a_refusal_with_the_typed_reason_in_every_format() {
+    // A refusal is still a rendered answer rather than an error, and the reason is still the
+    // protocol's own wire token. What produces it has changed: an anchor the pack does not
+    // carry, rather than a namespace nothing served.
+    let mut fixture = Fixture::fresh();
+    let outcome = call(&mut fixture, "node-99");
+    let Outcome::Refused(ref refusal) = outcome else {
+        panic!("an anchor the pack does not carry must be refused: {outcome:?}");
+    };
+    assert_eq!(refusal.code, ErrorCode::MalformedRequest);
     assert!(
         !refusal.detail.is_empty(),
         "RFC 0026 requires a non-empty detail"
     );
-    // Not asserted: `retryable`. Two different call sites reach this refusal — the
-    // dispatcher's own `unsupported_surface` and the codec's `decode_arguments` miss — and
-    // nothing in this bone's scope requires them to agree on that flag; only the code does.
-}
-
-#[test]
-fn the_cli_renders_the_refusal_with_the_typed_reason_in_every_format() {
-    let mut fixture = Fixture::fresh();
-    let mut connection = connection();
-    let outcome = {
-        let mut link = fixture.link();
-        connection
-            .context_expand(&mut link, &request(), Optional::Present(0))
-            .expect("the call is answered")
-    };
     for format in [Format::Text, Format::Pretty, Format::Json] {
-        let rendered = context::render(
-            &continuum_cli::context::ExpandArgs {
-                context: request().context,
-                anchor: request().anchor,
-                relation: request().relation,
-                depth: request().depth,
-                states: Optional::Present(0),
-            },
-            &outcome,
-            format,
-        );
+        let rendered = context::render(&args("node-99"), &outcome, format);
         assert_eq!(
             rendered.exit_code, 1,
             "a refusal exits non-zero: {format:?}"
@@ -216,7 +362,7 @@ fn the_cli_renders_the_refusal_with_the_typed_reason_in_every_format() {
         assert!(
             rendered
                 .text
-                .contains(ErrorCode::UnsupportedSemanticFeature.as_wire()),
+                .contains(ErrorCode::MalformedRequest.as_wire()),
             "the typed reason is the protocol's own wire token, not a synonym, in {format:?}:\n{}",
             rendered.text
         );
@@ -225,35 +371,25 @@ fn the_cli_renders_the_refusal_with_the_typed_reason_in_every_format() {
 
 #[test]
 fn the_json_envelope_always_carries_the_omissions_key() {
+    // Both arms, non-suppressibly: there is no flag anywhere in `cli.rs`'s parser that
+    // removes it.
     let mut fixture = Fixture::fresh();
-    let mut connection = connection();
-    let outcome = {
-        let mut link = fixture.link();
-        connection
-            .context_expand(&mut link, &request(), Optional::Present(0))
-            .expect("the call is answered")
-    };
-    let rendered = context::render(
-        &continuum_cli::context::ExpandArgs {
-            context: request().context,
-            anchor: request().anchor,
-            relation: request().relation,
-            depth: request().depth,
-            states: Optional::Present(0),
-        },
-        &outcome,
-        Format::Json,
-    );
-    assert!(
-        rendered.text.contains("\"omissions\":[]"),
-        "the manifest key is present even when empty, non-suppressibly:\n{}",
-        rendered.text
-    );
+    for anchor in ["node-42", "node-99"] {
+        let outcome = call(&mut fixture, anchor);
+        let rendered = context::render(&args(anchor), &outcome, Format::Json);
+        assert!(
+            rendered.text.contains("\"omissions\":["),
+            "the manifest key is present on every arm:\n{}",
+            rendered.text
+        );
+    }
 }
 
-/// Unit-level, against the real wire types directly (see the module doc): the day
-/// PR-11/IMPL-04 lands and a `context.expand` answer can be admitted, this is the renderer
-/// that will run, and it is proven correct now rather than left untested until then.
+/// Unit-level, against the real wire types directly. Kept unchanged from bn-3tz60: the live
+/// test above renders whatever this deployment's pack happens to hold, and this one renders
+/// an answer built to exercise both an expandable and an irretrievable omission — including
+/// the `recoverable_by` handle the live fixture's completed expansion has no occasion to
+/// carry.
 #[test]
 fn the_success_renderer_prints_the_expanded_pack_beside_the_full_omission_manifest() {
     use continuum_cli::wire::Admitted;

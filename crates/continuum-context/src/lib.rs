@@ -37,17 +37,41 @@
 //! typed reference to a named model action, optionally inside a real `model_*` elaborated
 //! model artifact.
 //!
+//! [`omission`] (PR-11 / IMPL-04) — the INV-007 manifest: the closed five-member reason
+//! vocabulary, and a record shape in which the schema's two conditionals on `expandable`
+//! are unrepresentable rather than validated.
+//!
+//! [`expansion`] (PR-11 / IMPL-04) — the expansion protocol: the closed eleven-member
+//! `ExpansionRelation`, the `{relation, anchor}` query an omission points at, the depth it
+//! is asked to, the **content-derived** [`expansion::ExpansionHandle`] that query resolves
+//! to, and the payload pairing a record with the items it accounts for.
+//!
+//! [`accounting`] (PR-11 / IMPL-04) — closed accounting: a compile's selection and its
+//! manifest are read off one ledger over the candidate set, so "candidate set = selection +
+//! Σ manifest counts" holds by construction and an undispositioned candidate cannot be
+//! published at all.
+//!
+//! [`pack`] (PR-11 / IMPL-04) — the expansion *child document*: a parent pack's own bytes
+//! with the nine keys an expansion decides replaced and the rest inherited verbatim. It
+//! derives; it does not compile.
+//!
 //! Declined here, and left to their own bones: typed construction for the other nine
 //! `SelectionKind` members (`event`, `state_delta`, `proof`, `assumption`,
-//! `counterfactual`, `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`);
-//! the expansion protocol (`ExpansionRelation`, `expansions[]`, the omission manifest —
-//! IMPL-04); target/verdict/assurance, the replay reference, and byte/token budgets
-//! (IMPL-01, IMPL-05, IMPL-06); and whole-pack assembly, identity, and JSON-schema
-//! validation (no IMPL bullet is that seam by itself; see `selection`'s module
-//! documentation).
+//! `counterfactual`, `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
+//! IMPL-04 carries items of any kind through an expansion and constructs items of none,
+//! because `SelectedItem`'s two typed constructors are IMPL-03's and the rest are
+//! IMPL-01/02/05/06's; target/verdict/assurance, the replay reference, and byte/token
+//! budgets (IMPL-01, IMPL-05, IMPL-06), which an expansion child inherits from its parent
+//! rather than computing; and whole-pack *compilation* — the ten-stage pipeline that turns
+//! evidence into a first pack — which no IMPL bullet is by itself (see `selection`'s module
+//! documentation) and which `pack`'s own documentation is careful not to claim.
 //!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
+pub mod accounting;
+pub mod expansion;
 pub mod model;
+pub mod omission;
+pub mod pack;
 pub mod selection;
 pub mod source;

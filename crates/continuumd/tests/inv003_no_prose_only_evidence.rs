@@ -42,7 +42,7 @@
 //!   response body, enum, and union is held to it field-for-field. Cited, not re-derived.
 //! - **`inv016_untrusted_source_evidence.rs`** already proved the complementary half of this
 //!   invariant: `Daemon::dispatch` keys on the operation *name* (a closed registry lookup),
-//!   never on a free-text field's contents, across all 25 landed operations. INV-016 is
+//!   never on a free-text field's contents, across all 28 landed operations. INV-016 is
 //!   "text cannot COMMAND"; INV-003 is "text cannot DEFINE". Where INV-016 proves dispatch
 //!   *reads* structure, not prose, this file proves the *artifacts* dispatch reads and
 //!   writes *are* structure, not prose — schema-closed or type-closed, every one.
@@ -1302,7 +1302,7 @@ mod recovery_reports_are_typed {
 mod dispatch_reads_structure_not_prose {
     //! `inv016_untrusted_source_evidence.rs`'s structural leg already proves, mechanically,
     //! that `Daemon::dispatch` keys on the operation *name* (a closed registry lookup)
-    //! across all 26 landed operations, and that the other 47 are inert for *any* payload —
+    //! across all 28 landed operations, and that the other 45 are inert for *any* payload —
     //! "the IDL has no operation whose dispatch reads free text", the fact this file's audit
     //! asserts rather than re-derives. This module does not re-run that proof; it is the
     //! tripwire that the citation stays true if the cited file is ever renamed or gutted
@@ -1313,7 +1313,7 @@ mod dispatch_reads_structure_not_prose {
         for needle in [
             "fn the_free_text_inventory_reachable_from_every_landed_request_is_exactly_this_list",
             "fn every_unlanded_operation_is_inert_for_any_payload_whatsoever",
-            "fn exactly_twenty_six_of_the_seventy_three_operations_are_landed",
+            "fn exactly_twenty_eight_of_the_seventy_three_operations_are_landed",
             "never against anything a free-text field carries",
         ] {
             assert!(

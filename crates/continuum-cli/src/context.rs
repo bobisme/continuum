@@ -1,12 +1,13 @@
 //! `continuum context expand` — follow a PR-11 expansion handle and print the omitted
 //! detail beside the INV-007 manifest that names it.
 //!
-//! See the crate root doc for why every call this module makes is refused
-//! `UnsupportedSemanticFeature` today: `context.expand` is registered on the wire
-//! (`continuumd::protocol::registry`) but no `OperationFamily` serves the `context`
-//! namespace yet (bn-28jj, PR-11/IMPL-04, open). [`render`] is written and tested against
-//! both arms regardless, because a renderer that only handled the refusal it happens to see
-//! today would be untested on the day the family lands.
+//! Live as of bn-28jj (PR-11/IMPL-04): `continuumd::daemon::context::ContextFamily` serves
+//! the `context` namespace, so the success arm of [`render`] is the arm a real daemon
+//! reaches. It was written and tested against both arms before that family existed —
+//! "a renderer that only handled the refusal it happens to see today would be untested on
+//! the day the family lands" — and this bone is that day: `tests/context_expand.rs` now
+//! drives the same renderer over a real frame and a real answer, and the unit-level
+//! success test it was proven with is unchanged beside it.
 
 use continuumd::protocol::operations::context::{ContextExpandRequest, ContextExpandResponse};
 use continuumd::protocol::scalar::ContextHandle;

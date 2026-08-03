@@ -44,7 +44,8 @@ use super::{OperationOutcome, ServiceError};
 use crate::protocol::envelope::{Budget, OutputPolicy, Page, Redacted, RequestEnvelope};
 use crate::protocol::handshake::CapabilityDescriptor;
 use crate::protocol::scalar::{
-    ActorId, CapabilityHandle, Commitment, EvidenceHandle, IntentHandle, Timestamp, WorkspaceHandle,
+    ActorId, CapabilityHandle, Commitment, ContextHandle, EvidenceHandle, IntentHandle, Timestamp,
+    WorkspaceHandle,
 };
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::task::EvidenceEvent;
@@ -421,6 +422,7 @@ pub struct DaemonState {
     tasks: super::task::TaskTable,
     regions: super::region::TaskRegions,
     models: super::verification::ModelCatalog,
+    context_packs: BTreeMap<ContextHandle, super::context::ContextPackRecord>,
 }
 
 impl DaemonState {
@@ -555,6 +557,33 @@ impl DaemonState {
     #[must_use]
     pub fn staged(&self, commitment: &Commitment) -> Option<&StagedFile> {
         self.content.get(commitment)
+    }
+
+    // --- Context Packs (out-of-band administration) ---------------------------------
+
+    /// Register a published Context Pack this daemon can expand.
+    ///
+    /// Compiling a pack is not an operation this protocol version serves — `context.compile`
+    /// is refused `UnsupportedSemanticFeature` — so a deployment registers the packs it
+    /// holds here, exactly as it stages content and provisions capabilities: out of band,
+    /// through [`Daemon::state_mut`](super::Daemon::state_mut) (IDL §7). The record's own
+    /// constructor is what refuses a pack this daemon could not navigate, so nothing
+    /// unexpandable can be registered.
+    pub fn put_context_pack(
+        &mut self,
+        handle: ContextHandle,
+        record: super::context::ContextPackRecord,
+    ) {
+        self.context_packs.insert(handle, record);
+    }
+
+    /// The Context Pack `handle` names, or [`None`].
+    #[must_use]
+    pub fn context_pack(
+        &self,
+        handle: &ContextHandle,
+    ) -> Option<&super::context::ContextPackRecord> {
+        self.context_packs.get(handle)
     }
 
     // --- intents -------------------------------------------------------------------

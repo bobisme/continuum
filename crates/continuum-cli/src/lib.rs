@@ -20,16 +20,15 @@
 //!
 //! - [`context`] — `context expand` follows a PR-11 expansion handle
 //!   (`continuumd::protocol::operations::context::ContextExpandRequest`) and renders the
-//!   INV-007 omission manifest alongside the expanded slice, non-suppressibly. The wire
-//!   request/response shapes and the `context.expand` registry entry exist
-//!   (`continuumd::protocol::registry`), but no `OperationFamily` serves the `context`
-//!   namespace yet (PR-11/IMPL-04, bn-28jj, is open) and `context.expand` has no
-//!   [`continuumd::daemon::family::Arguments`] variant — so every call this module makes
-//!   reaches a real daemon over a real frame and is refused
-//!   `UnsupportedSemanticFeature` (`continuumd::protocol::vocabulary::ErrorCode`), honestly,
-//!   rather than a fabricated success. The success-path renderer is implemented and
-//!   unit-tested against the real wire types directly; it cannot be exercised over a live
-//!   round trip until bn-28jj lands.
+//!   INV-007 omission manifest alongside the expanded slice, non-suppressibly. **Live as of
+//!   bn-28jj** (PR-11/IMPL-04): `continuumd::daemon::context::ContextFamily` serves the
+//!   `context` namespace and `context.expand` has an
+//!   [`continuumd::daemon::family::Arguments`] variant, so the success path this crate
+//!   shipped renderer-first now runs end to end against a real daemon over a real frame —
+//!   `tests/context_expand.rs` drives it. What it renders is the child pack embedded
+//!   verbatim and the child's own residual manifest, and a refusal is still a rendered
+//!   answer rather than an error: `context.compile` remains typed-refused
+//!   (`UnsupportedSemanticFeature`), because the pack *compiler* is PR-11's other bullets.
 //! - [`task`] — `task status`, `task resume`, `task cancel` drive the PR-6 lifecycle
 //!   through `continuumd`'s real `task.status`/`task.resume`/`task.cancel` operations,
 //!   which are fully implemented and wire-tested here against an in-process daemon.
