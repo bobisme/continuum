@@ -11,12 +11,16 @@
 //! > `knowledge_projection`, `security_projection` componentwise. All four supersets,
 //! > at least one strict, is `refined`; all four subsets, at least one strict, is
 //! > `coarsened`; equal on all four is `unchanged`; any mixed movement is
-//! > `incomparable`. Dropping an event family or a projection element is the "hide
-//! > observer events" attack (plan §19.5) and MUST classify `coarsened` even when
-//! > other components grow — the mixed case blocks under the fail-closed rule
-//! > regardless.
+//! > `incomparable` — the componentwise rule admits no exception for this case.
+//! > Dropping an event family or a projection element, with no other component growing
+//! > in the same comparison, is the "hide observer events" attack (plan §19.5) and
+//! > classifies `coarsened` under the rule just stated. If another component grows in
+//! > the same comparison, the movement is mixed: it classifies `incomparable`, not
+//! > `coarsened`, and still blocks ordinary promotion under the fail-closed rule,
+//! > exactly as every other non-affirmative relation does.
 //! >
-//! > — `notes/plan/rfcs/0031-semantic-and-intent-diff.md`, "`observers`"
+//! > — `notes/plan/rfcs/0031-semantic-and-intent-diff.md`, "`observers`" (correction 15,
+//! > bn-13nlo)
 //!
 //! and the general per-unit membership rule that section inherits from "Field-by-field
 //! classification rules": a unit key present on one side only classifies `added` or
@@ -69,33 +73,22 @@
 //! [`continuum_intent::change_policy::PolicyTable::verdict`], which only needs
 //! `{field, relation}` per record and accepts several records for one field.
 //!
-//! # Reading "MUST classify `coarsened` even when other components grow"
+//! # Why the mixed case is `incomparable`, not `coarsened`
 //!
-//! Taken as a literal amendment to the four-way rule stated one sentence earlier, this
-//! clause would be self-contradictory: "all four subsets" cannot be true of a
-//! component that grew, so a case with growth elsewhere cannot be *both* `coarsened`
-//! (per the amendment) *and* the componentwise rule's own `coarsened` clause, which
-//! requires *all four* to be non-growing. Read instead as two sentences doing two
-//! jobs — which the em dash and "regardless" support — there is no contradiction:
-//! the first half restates the plain case ("dropping [a set element, nothing else
-//! moving,] MUST classify `coarsened`" — already true by the rule stated just above
-//! it); "even when other components grow" concedes the mixed case exists and is
-//! covered elsewhere; and "the mixed case blocks under the fail-closed rule
-//! regardless" is the actual normative content for that case — it blocks *whichever*
-//! non-affirmative-or-`coarsened` token it gets, not specifically `coarsened`. This
-//! module therefore implements the componentwise rule exactly as stated
-//! (`classify_pair`, below), with no special case that forces `coarsened` over
-//! `incomparable` when the two disagree. The choice is not merely a defensible
-//! reading, it is the *safer* one: [`Relation::Incomparable`] is non-affirmative, and
+//! RFC 0031's `observers` rule (quoted above) now states the componentwise rule
+//! without exception: a comparison with growth in one component and shrinkage in
+//! another classifies `incomparable`, never `coarsened`. This module implements that
+//! reading exactly (`classify_pair`, below), with no special case that forces
+//! `coarsened` over `incomparable` when the two could disagree. The RFC text used to
+//! read as self-contradictory here — a literal "MUST classify `coarsened` even when
+//! other components grow" clause conflicting with the componentwise rule one sentence
+//! earlier — and was corrected to the text quoted above (RFC 0031 correction 15,
+//! bn-13nlo) to match the reading this module already implemented (bn-1sdp). The
+//! reading is also the *safer* one: [`Relation::Incomparable`] is non-affirmative, and
 //! `PolicyTable::verdict`'s P2 makes every non-affirmative relation contribute at
 //! least `review` **on every field under every verb, including `unlocked`**; a bare
 //! [`Relation::Coarsened`] only blocks under a verb whose denied set names it, which
-//! the closed verb set does not do for `observers` (`PolicyField::admissible_verbs`'s
-//! own doc: the base row's gaming directions — including observer `coarsened` — have
-//! no verb naming them and are "protected through `review` or `locked` instead", a
-//! governance choice this module cannot make for a caller). So on the one input where
-//! the two readings differ, this module's answer is the one that blocks unconditionally
-//! rather than the one that blocks only if the field happens to be locked down.
+//! the closed verb set does not do for `observers`.
 //!
 //! # What never arises here, and why that is not evasion
 //!

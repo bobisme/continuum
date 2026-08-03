@@ -1,5 +1,5 @@
 {
-  "after_intent": "in_ack_v1",
+  "after_intent": "in_ack_v2",
   "after_snapshot": "ws_demo2",
   "before_intent": "in_ack_v1",
   "before_snapshot": "ws_demo1",
@@ -20,6 +20,12 @@
   "intent_changes": [
     {
       "evidence": null,
+      "field": "bounds",
+      "protected": true,
+      "relation": "expanded"
+    },
+    {
+      "evidence": null,
       "field": "properties",
       "protected": true,
       "relation": "unchanged",
@@ -29,7 +35,8 @@
   "policy": {
     "decision": "allow",
     "reasons": [
-      "protected intent unchanged"
+      "bounds expanded: permitted under no-decrease",
+      "properties unchanged: AckImpliesDurable"
     ]
   },
   "schema_epoch": 1,
