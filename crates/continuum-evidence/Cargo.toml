@@ -6,5 +6,38 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# The one workspace edge this crate declares, and it is to the only leaf crate
+# (`continuum-value` imports nothing). Three vocabularies the evidence graph is
+# obliged to render come from there rather than being restated here:
+#
+# - ADR-0013 content identity (`identity::ContentIdentity`), which is what
+#   "typed immutable candidates … connected by edges" means once a node or an
+#   edge has to be *named*: the exact identity is the canonical encoding, and a
+#   digest is only an index. A second implementation of that rule in this crate
+#   would be a second answer to "are these the same artifact";
+# - the assurance payloads plan §11.4 attaches to two statuses —
+#   `ValidationBasis` on `validated`, `InconclusiveReason` (INV-008) on
+#   `inconclusive`. `src/claim_status.rs` has named them as this crate's missing
+#   half since PR-1 / IMPL-06 ("the payload types are `InconclusiveReason` and
+#   `ValidationBasis` in `continuum-value`'s assurance vocabulary … whose own
+#   seam note asks this lattice to reference them rather than duplicate them");
+# - the six compatibility epochs (`epoch::EpochSet`), because plan §4.6 makes
+#   evidence epoch-scoped — "a receipt remains verifiable under its pinned epoch
+#   indefinitely" — and a provenance record that cannot say which epochs a write
+#   happened under cannot support that sentence.
+#
+# plan §20's dependency rules forbid nothing this edge reaches: `continuum-value`
+# is not an engine, not Forge, not an adapter, and not asupersync.
+# `tools/check_crate_boundaries.py` enforces that mechanically.
+[dependencies]
+continuum-value = { path = "../continuum-value" }
+
+# The integration suite links the crate under test as a *separate* crate, which is what
+# makes `tests/pr7_evidence_graph.rs` evidence about the client's view rather than about
+# the crate's interior. It renders canonical bytes and reads the assurance and epoch
+# vocabularies, so it needs the same edge declared again here.
+[dev-dependencies]
+continuum-value = { path = "../continuum-value" }
+
 [lints]
 workspace = true
