@@ -73,8 +73,7 @@
 //! someone else's identity, or retarget it at other content — and both attempts are refused
 //! with `CertificateRejected` in `tests/daemon_evidence.rs`.
 //!
-//! It is also *all* this daemon can confirm today, and the promotion says so. The lattice
-//! chain is
+//! The lattice chain is
 //!
 //! ```text
 //! Proposed ⋖ Inconclusive ⋖ Observed ⋖ Sampled ⋖ Bounded ⋖ Validated ⋖ Proved ⋖ Refuted ⋖ Superseded
@@ -82,11 +81,25 @@
 //!
 //! and a re-derived reference to a captured execution supports `Observed` — "one or more
 //! concrete executions" — and no more. `Sampled` and `Bounded` name a producing engine
-//! this daemon does not run; `Validated` needs the independent certificate checker, which
-//! is `crates/continuum-certificate`, a scaffold; `Proved` needs the Lean kernel, which is
-//! out of this process. Asked to verify a node whose class needs one of those, the family
-//! answers [`ErrorCode::InsufficientEvidence`] rather than promoting on the strength of a
-//! check it did not run. Refusing to overstate *is* INV-004 at the level below authority.
+//! this daemon does not run and `Proved` needs the Lean kernel, which is out of this
+//! process. Asked to verify a node whose class needs one of those, the family answers
+//! [`ErrorCode::InsufficientEvidence`] rather than promoting on the strength of a check it
+//! did not run. Refusing to overstate *is* INV-004 at the level below authority.
+//!
+//! # The certificate lane, and what makes `Validated` reachable
+//!
+//! `Validated` needs the independent certificate checker, and as of bn-dtg61 this daemon
+//! reaches one: a node whose `evidence_kind` is `certificate` has its referenced bytes
+//! handed to [`continuum_certificate::check_certificate`], which reads the leading
+//! eight-byte magic, routes to the `continuum-kernel-*` crate that owns that wire contract,
+//! and returns *that kernel's* verdict. Nothing here decodes a certificate, mints a
+//! `Verified`, or has a second opinion to offer: `CheckedClaim::new` is `pub(crate)` in
+//! each kernel, so this process could not fabricate one if it tried. That is INV-004
+//! structurally — the promoting service and the checking code are different crates, and the
+//! checking crate cannot link search (`RULE certificate-checker-not-search`).
+//!
+//! Four outcomes come back, and [`certificate_check`] keeps all four apart on the wire.
+//! Their reasoning is written there, beside the `match` that performs it.
 //!
 //! # Redaction is reported beside the result, never instead of it
 //!
@@ -110,6 +123,10 @@
 
 use std::collections::BTreeMap;
 
+use continuum_certificate::{
+    Family as CertificateFamily, KernelVerdict, Outcome, RoutingFault, continuum_kernel_core,
+    continuum_kernel_sat, continuum_kernel_smt, continuum_kernel_temporal,
+};
 use continuum_evidence::actor::ServiceIdentity;
 use continuum_evidence::claim_status::{ClaimStatus, PromotionRejected, StatusTransition};
 use continuum_evidence::edge::{CHECKED_BY_TARGET, CheckTargetRule, CheckerBinding, EdgeRelation};
@@ -227,6 +244,10 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("evidence.verify", ErrorCode::StatusConflict),
     ("evidence.verify", ErrorCode::CertificateRejected),
     ("evidence.verify", ErrorCode::InsufficientEvidence),
+    // The routing failure of the certificate lane. Declared by the operation's own `errors`
+    // clause since protocol 3.0 and unreachable until bn-dtg61 gave the daemon a certificate
+    // checker to route to; see [`certificate_check`].
+    ("evidence.verify", ErrorCode::EpochUnsupported),
     ("evidence.subscribe", ErrorCode::UnsupportedSemanticFeature),
     ("evidence.link", ErrorCode::CapabilityDenied),
     ("evidence.link", ErrorCode::InsufficientEvidence),
@@ -623,11 +644,22 @@ fn subscribe(_request: &EvidenceSubscribeRequest) -> Result<Effect, Fault> {
 /// What the daemon's independent check established about one node.
 enum Checked {
     /// The reference re-derived, and the check supports this status.
-    Establishes(ClaimStatus, ValidationBasis),
+    ///
+    /// The third member names the trusted checker that answered, when one did. `None` is the
+    /// observation lane, where the daemon's own re-derivation is the whole check; `Some` is
+    /// the certificate lane, and the `proof_status` dimension of the assurance envelope
+    /// names that kernel rather than this service.
+    Establishes(ClaimStatus, ValidationBasis, Option<CertificateFamily>),
     /// The referenced content is redacted: the receipt is intact and the claim is no longer
     /// fully supported, so nothing is promoted and the redaction is reported beside the
     /// structural result.
     Redacted(Redacted),
+    /// The routed kernel read the artifact and named a feature it does not implement.
+    ///
+    /// A verdict, not a failure: the checker ran and answered. Nothing is promoted, and the
+    /// answer carries INV-008's typed `Unsupported` reason rather than a rejection — see
+    /// [`certificate_check`].
+    Unsupported(CertificateFamily),
 }
 
 impl EvidenceFamily {
@@ -667,7 +699,7 @@ impl EvidenceFamily {
         };
 
         let (status, basis, verdict, assurance, redacted, omissions) = match checked {
-            Checked::Establishes(establishes, basis) => {
+            Checked::Establishes(establishes, basis, checker) => {
                 let promotion = Promotion {
                     status: establishes,
                     service: self.service.as_str().to_owned(),
@@ -691,11 +723,56 @@ impl EvidenceFamily {
                     settled,
                     basis,
                     semantic(SemanticVerdict::Established, None, assurance_class(settled)),
-                    established_envelope(self.service.as_str(), settled),
+                    verify_envelope(
+                        self.service.as_str(),
+                        // A promotion that landed where the check pointed says what the check
+                        // did; a reassertion that settled at a higher status the claim
+                        // already held says that instead, because the re-derivation is not
+                        // what the status now rests on.
+                        match settled {
+                            ClaimStatus::Observed | ClaimStatus::Validated => {
+                                "reference re-derived from held content"
+                            }
+                            _ => "status settled by compare-and-set",
+                        },
+                        checked_proof_status(checker),
+                    ),
                     Optional::Absent,
                     Vec::new(),
                 )
             }
+            // The routed kernel answered `Unsupported`. Nothing is promoted — an artifact
+            // naming a contract its own checker does not implement supports no status — and
+            // the answer is a *result* rather than an error, because `verdict` is null on
+            // `status = error` (`ResultEnvelope`) and `SemanticVerdictValue`'s
+            // `inconclusive_reason` is the only channel INV-008's typed reason has. An error
+            // here would carry the fact that something was inconclusive and lose which of the
+            // six reasons it was.
+            //
+            // Promoting to `Inconclusive` instead was considered and declined: the lattice
+            // puts `Inconclusive` below `Observed`, so an honest "I cannot answer" over a node
+            // that already holds anything higher would come back as `StatusConflict` — a
+            // failure to write, reported in place of the verdict the checker actually gave.
+            Checked::Unsupported(family) => (
+                node.status(),
+                // No certificate was checked, so the stronger of the two bases would be a
+                // claim nothing backs (plan §11.4: "the two never render identically").
+                ValidationBasis::TrustedSolver,
+                semantic(
+                    SemanticVerdict::Inconclusive,
+                    Some(InconclusiveReason::Unsupported),
+                    // The class the node's evidence is supported at, which this answer did
+                    // not raise.
+                    AssuranceClass::Observed,
+                ),
+                verify_envelope(
+                    self.service.as_str(),
+                    "reference re-derived from held content",
+                    unsupported_dimension(unsupported_feature(family)),
+                ),
+                Optional::Absent,
+                Vec::new(),
+            ),
             Checked::Redacted(redaction) => (
                 // Nothing is promoted: the daemon cannot re-derive what it cannot read.
                 node.status(),
@@ -739,15 +816,24 @@ impl EvidenceFamily {
         .with_omissions(omissions))
     }
 
-    /// Run the independent check this daemon ships, in three steps.
+    /// Run the independent check this daemon ships, in four steps.
     ///
     /// The steps close a chain, and each link is *re-derived* rather than read back:
     ///
     /// | # | Link | Refusal |
     /// |---|---|---|
-    /// | 1 | the class of checker this evidence needs is one this daemon runs | `InsufficientEvidence` |
+    /// | 1 | the class of checker this evidence needs is one this daemon can reach | `InsufficientEvidence` |
     /// | 2 | the reference resolves — the daemon holds content under the identity the node names | `InsufficientEvidence` |
     /// | 3 | the bytes it holds re-derive to that identity, and the node re-derives to the identity it is *filed under* | `CertificateRejected` |
+    /// | 4 | for the certificate lane only: the trusted checking base's answer on those bytes | [`certificate_check`] |
+    ///
+    /// Steps 2 and 3 run in **both** lanes, and deliberately run *before* the kernel. They
+    /// are what stops a certificate node from being filed under someone else's identity or
+    /// retargeted at other content — an attack the kernel cannot see, because a
+    /// well-formed certificate is well-formed wherever it is filed. So a caller that
+    /// reaches step 4 at all has already had its reference confirmed, and the `values`
+    /// dimension of the assurance envelope is produced on the certificate lane for exactly
+    /// that reason.
     ///
     /// Step 3's second half is the one that makes this a check rather than a formality. A
     /// node's identity is a function of what it is about — the referenced commitment and the
@@ -771,12 +857,14 @@ impl EvidenceFamily {
             return Ok(Checked::Redacted(redaction.clone()));
         }
 
-        // 1. The class of check this node's evidence would need. Everything outside the
-        //    observation lane needs a checker this process does not run, and saying so is
-        //    not a limitation to hide: promoting to `validated` on the strength of a
-        //    re-derived reference would be precisely the self-certification INV-004 forbids.
-        let establishes = match node.evidence_kind {
-            EvidenceKind::ProductionObservation | EvidenceKind::Example => ClaimStatus::Observed,
+        // 1. The class of check this node's evidence would need, and which of the two lanes
+        //    can supply it. Everything outside them needs a checker this process cannot
+        //    reach, and saying so is not a limitation to hide: promoting to `validated` on
+        //    the strength of a re-derived reference would be precisely the
+        //    self-certification INV-004 forbids.
+        let lane = match node.evidence_kind {
+            EvidenceKind::ProductionObservation | EvidenceKind::Example => Lane::Observation,
+            EvidenceKind::Certificate => Lane::Certificate,
             _ => {
                 return Err(Fault::new(
                     ErrorCode::InsufficientEvidence,
@@ -818,15 +906,219 @@ impl EvidenceFamily {
             return Err(identity_rejected());
         }
 
+        match lane {
+            Lane::Observation => Ok(Checked::Establishes(
+                ClaimStatus::Observed,
+                // The re-derivation was performed by the daemon's own identity kernel, not by
+                // a solver whose verdict is taken on trust. `checked-certificate` is the
+                // nearer of the two members the wire admits; the vocabulary has no member for
+                // "reference re-derivation", and inventing one is a schema change, not a
+                // string.
+                ValidationBasis::CheckedCertificate,
+                None,
+            )),
+            // 4. The bytes go to the trusted checking base exactly as they are held. The
+            //    daemon reads none of them: not the magic, not a length, not an epoch.
+            Lane::Certificate => certificate_check(&staged.content),
+        }
+    }
+}
+
+/// Which of the two checks `evidence.verify` can run this node needs.
+///
+/// A closed pair rather than a `bool`, because a third lane is a thing this daemon may gain
+/// (`sampled` and `bounded` name producing engines; `proved` names Lean) and a boolean would
+/// have to be rewritten rather than extended when it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lane {
+    /// A captured execution, re-derived through the [`ContentIdentifier`] seam.
+    ///
+    /// [`ContentIdentifier`]: continuum_workspace::publication::ContentIdentifier
+    Observation,
+    /// A certificate an untrusted producer wrote, checked by the kernel that owns its
+    /// family.
+    Certificate,
+}
+
+// --- the certificate lane ------------------------------------------------------------------
+
+/// Route one certificate-class artifact through `continuum-certificate`, and keep the four
+/// outcomes it can answer with apart on the wire.
+///
+/// > A caller that wants a boolean has to write the collapse itself, where a reader can see
+/// > it.
+/// >
+/// > — `continuum_certificate::verdict::Outcome`
+///
+/// This is that place, and there is no collapse in it. The four outcomes, and the four wire
+/// answers they get:
+///
+/// | outcome | wire | why this one |
+/// |---|---|---|
+/// | `Checked(Verified)` | `ok`, promoted to `validated`, `verdict = established` | the kernel re-derived every obligation from the bytes |
+/// | `Checked(Rejected)` | `error CertificateRejected` | "An independent checker rejected a certificate or proof artifact" — the code's own sentence, and this is the only place in the daemon that can raise it truthfully |
+/// | `Checked(Unsupported)` | `ok`, nothing promoted, `verdict = inconclusive`, `inconclusive_reason = Unsupported` | the checker ran and answered; INV-008's typed reason has no channel on an error, because `verdict` is null there |
+/// | `Unroutable` | `error EpochUnsupported` | "An artifact […] declares a schema or semantic epoch unknown or incompatible with this daemon. Typed rejection, never best-effort decoding (docs/09 T13)" |
+///
+/// The fourth row is the one worth defending, because it is the row a shortcut would ruin.
+/// A byte string whose leading magic names no family could be a corrupted `CONTCERT`, a
+/// family a later kernel will own, or a JPEG, and *nothing decoded it*: answering
+/// `CertificateRejected` would call a possibly-valid artifact invalid, and answering
+/// `UnsupportedSemanticFeature` — the code for a lane this deployment has not shipped —
+/// would say the daemon lacks a checker it may well have. `EpochUnsupported` is the code for
+/// an artifact that declares a contract this daemon cannot read, it is declared by
+/// `evidence.verify`'s own `errors` clause, and docs/09 T13's control is *"no 'best effort'
+/// decode for evidence"*, which is precisely why `continuum-certificate` has no decoder to
+/// guess with.
+///
+/// The `Verified` row carries one more distinction that a composition must not flatten:
+/// `continuum-kernel-smt`'s claim reports its own [`AssuranceClass`], because a refutation
+/// leaning on unchecked theory lemmas is `TRUSTED_SOLVER` and not `CHECKED_CERTIFICATE`
+/// (ADR-0017, docs/03 §6.2). The wire's `validation_basis` has exactly those two members, so
+/// it is read from the claim rather than assumed — the one arm below that does not hard-code
+/// `checked-certificate`.
+///
+/// [`AssuranceClass`]: continuum_kernel_smt::verdict::AssuranceClass
+fn certificate_check(bytes: &[u8]) -> Result<Checked, Fault> {
+    let verdict = match continuum_certificate::check_certificate(bytes) {
+        Outcome::Unroutable(fault) => return Err(unroutable(fault)),
+        Outcome::Checked(verdict) => verdict,
+    };
+    let family = verdict.family();
+    // Twelve arms rather than a helper that reduces the four kernels to one three-valued
+    // enum: the reduction would be a fifth vocabulary, and the crate that composes these
+    // checkers declines to define one for the same reason ("there is no unified claim
+    // accessor"). Written out, the match is total by the compiler's own reading, and a fifth
+    // kernel or a fourth verdict arm is a compile error here rather than a silent default.
+    let checked = |basis| {
         Ok(Checked::Establishes(
-            establishes,
-            // The re-derivation was performed by the daemon's own identity kernel, not by a
-            // solver whose verdict is taken on trust. `checked-certificate` is the nearer
-            // of the two members the wire admits; the vocabulary has no member for
-            // "reference re-derivation", and inventing one is a schema change, not a
-            // string.
-            ValidationBasis::CheckedCertificate,
+            ClaimStatus::Validated,
+            basis,
+            Some(family),
         ))
+    };
+    match &verdict {
+        KernelVerdict::Core(verdict) => match verdict {
+            continuum_kernel_core::Verdict::Verified(_) => {
+                checked(ValidationBasis::CheckedCertificate)
+            }
+            continuum_kernel_core::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_core::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
+        },
+        KernelVerdict::Sat(verdict) => match verdict {
+            continuum_kernel_sat::Verdict::Verified(_) => {
+                checked(ValidationBasis::CheckedCertificate)
+            }
+            continuum_kernel_sat::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_sat::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
+        },
+        KernelVerdict::Smt(verdict) => match verdict {
+            continuum_kernel_smt::Verdict::Verified(claim) => checked(smt_basis(claim)),
+            continuum_kernel_smt::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_smt::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
+        },
+        KernelVerdict::Temporal(verdict) => match verdict {
+            continuum_kernel_temporal::Verdict::Verified(_) => {
+                checked(ValidationBasis::CheckedCertificate)
+            }
+            continuum_kernel_temporal::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_temporal::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
+        },
+    }
+}
+
+/// The wire's `validation_basis` for an SMT refutation, read from the kernel's own claim.
+///
+/// > `Validated` records whether solver evidence is `CHECKED_CERTIFICATE` or
+/// > `TRUSTED_SOLVER`; the two never render identically.
+/// >
+/// > — plan §11.4
+///
+/// The kernel decides which it is — `CheckedCertificate` exactly when the refutation used no
+/// theory lemma — and this function transcribes that answer into the wire's two-member
+/// vocabulary. It does not consult the theories itself: a second rule for "was anything
+/// trusted" is a second answer to the question ADR-0017 exists to keep single.
+fn smt_basis(claim: &continuum_kernel_smt::verdict::CheckedClaim) -> ValidationBasis {
+    match claim.assurance_class() {
+        continuum_kernel_smt::verdict::AssuranceClass::CheckedCertificate => {
+            ValidationBasis::CheckedCertificate
+        }
+        continuum_kernel_smt::verdict::AssuranceClass::TrustedSolver => {
+            ValidationBasis::TrustedSolver
+        }
+    }
+}
+
+/// The `CertificateRejected` a routed kernel's own `Rejected` arm produces.
+///
+/// One detail per family, so the answer names the trusted checker that spoke rather than
+/// leaving the caller to infer it. The kernel's *reason within* `Rejected` — which field ran
+/// out of bytes, at which offset, against which declared count — does not travel: `detail` is
+/// a non-interpolated `&'static str` by `rule envelope.no_prose`, and transcribing four
+/// kernels' `Rejection` enums into static strings here would put a second authority over
+/// vocabularies those crates own. What the wire carries is which of the four outcomes
+/// occurred and which checker reached it; recovering the reason is a matter of running that
+/// kernel over the same bytes, which is a thing any holder of the artifact can do and which
+/// this daemon's own tests do.
+const fn certificate_rejected(family: CertificateFamily) -> Fault {
+    Fault::new(
+        ErrorCode::CertificateRejected,
+        match family {
+            CertificateFamily::Core => {
+                "continuum-kernel-core rejected this certificate: the verdict is that \
+                 kernel's own, over the bytes the daemon holds"
+            }
+            CertificateFamily::Sat => {
+                "continuum-kernel-sat rejected this refutation: the verdict is that \
+                 kernel's own, over the bytes the daemon holds"
+            }
+            CertificateFamily::Smt => {
+                "continuum-kernel-smt rejected this refutation: the verdict is that \
+                 kernel's own, over the bytes the daemon holds"
+            }
+            CertificateFamily::Temporal => {
+                "continuum-kernel-temporal rejected this witness: the verdict is that \
+                 kernel's own, over the bytes the daemon holds"
+            }
+        },
+    )
+}
+
+/// The `EpochUnsupported` a routing failure produces, one detail per [`RoutingFault`].
+///
+/// Two details under one code, because the two faults are one fact to a caller — no member
+/// of the trusted checking base owns these bytes — while still saying which way the bytes
+/// failed to name one. Neither is a rejection and neither is an unsupported feature: no
+/// checker ran, so no checker is in a position to say why.
+const fn unroutable(fault: RoutingFault) -> Fault {
+    Fault::new(
+        ErrorCode::EpochUnsupported,
+        match fault {
+            RoutingFault::TooShortForMagic { .. } => {
+                "the artifact this node references is too short to carry a certificate \
+                 family magic, so it declares no wire contract this daemon's trusted \
+                 checking base implements"
+            }
+            RoutingFault::UnknownFamily { .. } => {
+                "the artifact this node references declares a certificate family no checker \
+                 in this build owns; nothing decoded it, so nothing is in a position to \
+                 call it invalid either"
+            }
+        },
+    )
+}
+
+/// The `proof_status` reason when the routed kernel declined the artifact's feature.
+///
+/// A static token per family rather than one shared token: "unsupported" is a fact about a
+/// particular checker's implemented surface, and a client deciding whether to re-check later
+/// needs to know whose surface it was.
+const fn unsupported_feature(family: CertificateFamily) -> &'static str {
+    match family {
+        CertificateFamily::Core => "feature-unsupported-by-continuum-kernel-core",
+        CertificateFamily::Sat => "feature-unsupported-by-continuum-kernel-sat",
+        CertificateFamily::Smt => "feature-unsupported-by-continuum-kernel-smt",
+        CertificateFamily::Temporal => "feature-unsupported-by-continuum-kernel-temporal",
     }
 }
 
@@ -1285,38 +1577,61 @@ const fn assurance_class(status: ClaimStatus) -> AssuranceClass {
     }
 }
 
-/// The nine dimensions of a promotion this daemon actually performed.
+/// The nine dimensions of an `evidence.verify` answer over content the daemon could read.
 ///
-/// One dimension names the engine that produced it — the reference re-derivation — and the
-/// other eight carry a typed `Unsupported(reason)`. That asymmetry is the honest shape:
-/// "every dimension MUST name a producing engine or carry a typed `Unsupported(reason)`
-/// […] Hiding uncertainty to save tokens is prohibited" (`rule envelope.assurance_required`).
-fn established_envelope(service: &str, status: ClaimStatus) -> AssuranceEnvelope {
+/// Two of them move and seven never do. `values` is produced in every answer this builder
+/// serves, because the reference re-derivation is the one check that runs on both lanes and
+/// has already completed by the time an envelope exists; `proof_status` is the certificate
+/// lane's dimension and is passed in. The other seven carry a typed `Unsupported(reason)`,
+/// which is the honest shape: "every dimension MUST name a producing engine or carry a typed
+/// `Unsupported(reason)` […] Hiding uncertainty to save tokens is prohibited"
+/// (`rule envelope.assurance_required`).
+fn verify_envelope(
+    service: &str,
+    values: &'static str,
+    proof_status: EnvelopeDimension,
+) -> AssuranceEnvelope {
     let produced = EnvelopeDimension::Produced(ProducedDimension {
         engine: service.to_owned(),
-        summary: match status {
-            ClaimStatus::Observed => "reference re-derived from held content",
-            _ => "status settled by compare-and-set",
-        }
-        .to_owned(),
+        summary: values.to_owned(),
     });
-    let unsupported = |reason: &str| {
-        EnvelopeDimension::Unsupported(UnsupportedDimension {
-            reason: reason.to_owned(),
-        })
-    };
     AssuranceEnvelope {
-        bounds: unsupported("no-exploration-engine"),
-        faults: unsupported("no-fault-model"),
-        fairness: unsupported("no-fairness-obligation"),
-        // The one dimension this check does establish: the values the node references are
+        bounds: unsupported_dimension("no-exploration-engine"),
+        faults: unsupported_dimension("no-fault-model"),
+        fairness: unsupported_dimension("no-fairness-obligation"),
+        // The dimension every answer here establishes: the values the node references are
         // exactly the ones the daemon re-derived.
         values: produced,
-        schedules: unsupported("no-schedule-exploration"),
-        memory_model: unsupported("sequential-consistency-only"),
-        observer: unsupported("no-observer-projection"),
-        proof_status: unsupported("no-proof-obligation-discharged"),
-        unknowns: unsupported("not-enumerated"),
+        schedules: unsupported_dimension("no-schedule-exploration"),
+        memory_model: unsupported_dimension("sequential-consistency-only"),
+        observer: unsupported_dimension("no-observer-projection"),
+        proof_status,
+        unknowns: unsupported_dimension("not-enumerated"),
+    }
+}
+
+/// One dimension nothing established, with the typed reason it did not.
+fn unsupported_dimension(reason: &str) -> EnvelopeDimension {
+    EnvelopeDimension::Unsupported(UnsupportedDimension {
+        reason: reason.to_owned(),
+    })
+}
+
+/// What `proof_status` reads when a check succeeded.
+///
+/// The observation lane discharges no proof obligation and says so. The certificate lane
+/// does discharge one, and the engine that discharged it is **the kernel, not this service**
+/// — naming `service:continuumd-verifier` there would credit the daemon with a check it
+/// routed rather than ran, which is the one thing INV-004 is about.
+fn checked_proof_status(checker: Option<CertificateFamily>) -> EnvelopeDimension {
+    match checker {
+        None => unsupported_dimension("no-proof-obligation-discharged"),
+        Some(family) => EnvelopeDimension::Produced(ProducedDimension {
+            engine: family.checker_crate().to_owned(),
+            summary: "certificate re-checked from its wire form by the kernel that owns its \
+                      family"
+                .to_owned(),
+        }),
     }
 }
 
@@ -1330,11 +1645,7 @@ fn established_envelope(service: &str, status: ClaimStatus) -> AssuranceEnvelope
 /// A downgrade from "one dimension produced" is "no dimension produced", and every reason
 /// says why in one word the client can branch on.
 fn withheld_envelope() -> AssuranceEnvelope {
-    let withheld = || {
-        EnvelopeDimension::Unsupported(UnsupportedDimension {
-            reason: "referenced-content-redacted".to_owned(),
-        })
-    };
+    let withheld = || unsupported_dimension("referenced-content-redacted");
     AssuranceEnvelope {
         bounds: withheld(),
         faults: withheld(),

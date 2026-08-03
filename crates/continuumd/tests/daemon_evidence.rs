@@ -19,13 +19,16 @@
 //!    ([`the_status_written_is_what_the_checker_established_not_what_the_caller_named`]);
 //! 3. a service that produced a claim may not verify it
 //!    ([`a_verification_service_may_not_promote_a_claim_it_produced_itself`]);
-//! 4. `validated` and `proved` are unreachable without the checkers that establish them
-//!    ([`a_class_whose_independent_checker_has_not_shipped_is_never_promoted`]).
+//! 4. a class whose checker this process cannot reach is never promoted
+//!    ([`a_class_whose_independent_checker_has_not_shipped_is_never_promoted`]), and the one
+//!    class it *can* reach is promoted by the kernel's verdict rather than by this daemon's
+//!    opinion of it (the certificate lane below, bn-dtg61).
 //!
 //! A fifth is not a test at all and is stronger than any of them: `daemon::observe` cannot
 //! construct a `daemon::evidence::Promotion`, so the producer-side code *cannot be written*
 //! to promote. That is checked by the compiler on every build.
 
+use continuum_certificate::{KernelVerdict, Outcome, continuum_kernel_core};
 use continuum_evidence::claim_status::{ClaimStatus, verify_promotion_history};
 use continuum_value::epoch::ProtocolWindow;
 use continuumd::daemon::capability::{ConnectionPolicy, Refusal};
@@ -35,7 +38,7 @@ use continuumd::daemon::evidence::{
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::observe::ObserveFamily;
-use continuumd::daemon::state::EvidenceNode;
+use continuumd::daemon::state::{EvidenceNode, StatusWrite};
 use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest, errors, evidence, observe};
 use continuumd::protocol::envelope::{
     Budget, EnvelopeDimension, Redacted, RequestEnvelope, Verdict,
@@ -59,9 +62,9 @@ use continuumd::protocol::scalar::{
 use continuumd::protocol::shared::EvidenceQuery;
 use continuumd::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use continuumd::protocol::vocabulary::{
-    AuthorityLevel, DataGrant, Encoding, ErrorCode, EvidenceEdgeKind, EvidenceEventKind,
-    EvidenceKind, EvidenceNodeKind, EvidenceStatus, InconclusiveReason, OmissionReason,
-    RedactionReason, ResultStatus, SemanticVerdict,
+    AssuranceClass, AuthorityLevel, DataGrant, Encoding, ErrorCode, EvidenceEdgeKind,
+    EvidenceEventKind, EvidenceKind, EvidenceNodeKind, EvidenceStatus, InconclusiveReason,
+    OmissionReason, RedactionReason, ResultStatus, SemanticVerdict,
 };
 
 use continuum_workspace::snapshot::WorkspacePath;
@@ -766,27 +769,442 @@ fn a_deployments_own_service_identity_is_what_the_refusal_compares_against() {
 
 #[test]
 fn a_class_whose_independent_checker_has_not_shipped_is_never_promoted() {
-    // `validated` needs the independent certificate checker and `proved` needs the Lean
-    // kernel; neither runs in this process. A node offering certificate evidence is
-    // therefore refused rather than promoted on the strength of a check that did not run —
-    // which is INV-004 one level below authority.
+    // `proved` needs the Lean kernel, which is out of this process, and `sampled`/`bounded`
+    // name producing engines this daemon does not run. A node offering one of those classes
+    // is refused rather than promoted on the strength of a check that did not run — which is
+    // INV-004 one level below authority.
+    //
+    // The class this test used to carry was `certificate`, and bn-dtg61 moved it: that lane
+    // now reaches a checker (`continuum-certificate`), so asserting it is unreachable would
+    // be asserting something false. `inductive` is one of the ten classes still without a
+    // checker here — the thirteen `EvidenceKind` members less `example`,
+    // `production-observation` and `certificate` — and the claim the test makes is unchanged.
     let mut fixture = fixture();
     let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
-    let mut certificate = node(&fixture, &handle);
-    certificate.evidence_kind = EvidenceKind::Certificate;
-    let certificate_handle =
-        EvidenceHandle::new("ev_certificate-fixture").expect("a well-formed handle");
+    let mut inductive = node(&fixture, &handle);
+    inductive.evidence_kind = EvidenceKind::Inductive;
+    let inductive_handle =
+        EvidenceHandle::new("ev_inductive-fixture").expect("a well-formed handle");
     fixture
         .daemon
         .state_mut()
-        .append_evidence(certificate_handle.clone(), certificate);
+        .append_evidence(inductive_handle.clone(), inductive);
 
-    let refused = verify(&mut fixture, &certificate_handle, "req_cert", "idem-cert");
+    let refused = verify(&mut fixture, &inductive_handle, "req_cert", "idem-cert");
     assert_eq!(code(&refused), ErrorCode::InsufficientEvidence);
     assert_eq!(
-        node(&fixture, &certificate_handle).status(),
+        node(&fixture, &inductive_handle).status(),
         ClaimStatus::Proposed
     );
+}
+
+// --- the certificate lane (bn-dtg61) ------------------------------------------------------
+//
+// `evidence.verify` over a certificate-class node hands the referenced bytes to
+// `continuum-certificate`, which routes them by their leading magic to the
+// `continuum-kernel-*` crate that owns the format and returns that kernel's own verdict.
+// Four outcomes come back — `Verified`, `Rejected`, `Unsupported`, and a routing failure —
+// and the tests below hold all four to reaching the caller as four different wire answers.
+//
+// Every certificate here is a *real* one: `continuum-engine-reference` explores Die Hard and
+// emits the `CONTCERT` wire form, exactly as `certificate_kernel_differential.rs` does. The
+// engine and the kernel share no code, so what the daemon relays is an agreement between two
+// independent implementations rather than a fixture agreeing with itself.
+
+/// The instrumentation profile a certificate node is filed under.
+const CERTIFICATE_PROFILE: &str = "continuum-engine-reference/finite-closure";
+
+/// A real `CONTCERT` artifact: Die Hard explored, closed, and emitted as wire bytes.
+fn certificate_bytes() -> Vec<u8> {
+    use continuum_engine_reference::bfs::{self, Bounds};
+    use continuum_engine_reference::certificate::{self, ClaimEnvelope, ClosedSet, PRODUCER};
+    use continuum_engine_reference::diehard;
+
+    let model = diehard::model().expect("the Die Hard transcription is a valid model");
+    let exploration = bfs::explore(&model, Bounds::CERTIFIABLE).expect("Die Hard evaluates");
+    let closed = ClosedSet::of(&exploration).expect("Die Hard's exploration completes");
+    certificate::emit_finite_closure(
+        &model,
+        closed,
+        &ClaimEnvelope {
+            model_digest: "blake3:diehard-model",
+            semantic_epoch: "continuum-semantics-1",
+            property_digest: "blake3:diehard-typeok",
+            scope_digest: "blake3:diehard-scope",
+            assumptions_digest: "blake3:empty-assumptions",
+            producer: PRODUCER,
+            domain_pack_digests: &[],
+        },
+    )
+    .expect("a closed exploration of a declared model emits")
+}
+
+/// Stage `bytes` and file a certificate-class node over them, under the identity it derives.
+///
+/// Filed under `node_identity(commitment, profile)` deliberately: steps 3a and 3b of the
+/// daemon's check run on this lane too, so a node filed anywhere else would be refused for
+/// the misfiling and never reach a kernel at all.
+fn certificate_node(fixture: &mut Fixture, path: &str, bytes: Vec<u8>) -> EvidenceHandle {
+    let artifact = fixture
+        .daemon
+        .state_mut()
+        .stage(
+            &Blake3Identity,
+            WorkspacePath::new(path).expect("a workspace path"),
+            bytes,
+        )
+        .expect("staging names its content");
+    let handle = evidence::node_identity(fixture.daemon.services(), &artifact, CERTIFICATE_PROFILE)
+        .expect("the identity seam names the node");
+    let record = EvidenceNode {
+        kind: EvidenceNodeKind::Certificate,
+        evidence_kind: EvidenceKind::Certificate,
+        claim_id: "claim:die-hard-closure".to_owned(),
+        artifact,
+        // Not the verification service: INV-004's fourth dimension refuses a producer that
+        // verifies its own claim before any byte is read, and that refusal is tested above.
+        producer: who("agent:observer"),
+        tool: CERTIFICATE_PROFILE.to_owned(),
+        created_at: now(),
+        inputs: Vec::new(),
+        idempotency_key: "idem-certificate-append".to_owned(),
+        history: vec![StatusWrite {
+            status: ClaimStatus::BOTTOM,
+            service_identity: None,
+            validation_basis: None,
+            inconclusive_reason: None,
+        }],
+        redaction: None,
+    };
+    fixture
+        .daemon
+        .state_mut()
+        .append_evidence(handle.clone(), record);
+    handle
+}
+
+/// The nine dimensions, keyed by name, so a test can name the one it means.
+fn produced_engine(outcome: &OperationOutcome, dimension: &str) -> Option<String> {
+    let assurance = match &outcome.envelope.assurance {
+        Optional::Present(envelope) => envelope,
+        Optional::Absent => panic!("a semantic verdict carries the nine-dimension envelope"),
+    };
+    let selected = match dimension {
+        "values" => &assurance.values,
+        "proof_status" => &assurance.proof_status,
+        other => panic!("no such dimension: {other}"),
+    };
+    match selected {
+        EnvelopeDimension::Produced(value) => Some(value.engine.clone()),
+        EnvelopeDimension::Unsupported(_) => None,
+    }
+}
+
+fn unsupported_reason(outcome: &OperationOutcome, dimension: &str) -> Option<String> {
+    let assurance = match &outcome.envelope.assurance {
+        Optional::Present(envelope) => envelope,
+        Optional::Absent => panic!("a semantic verdict carries the nine-dimension envelope"),
+    };
+    let selected = match dimension {
+        "proof_status" => &assurance.proof_status,
+        other => panic!("no such dimension: {other}"),
+    };
+    match selected {
+        EnvelopeDimension::Unsupported(value) => Some(value.reason.clone()),
+        EnvelopeDimension::Produced(_) => None,
+    }
+}
+
+#[test]
+fn a_real_certificate_is_validated_by_the_kernel_that_owns_its_family() {
+    let mut fixture = fixture();
+    let bytes = certificate_bytes();
+
+    // What the composition says about these bytes, read here so the daemon's answer is held
+    // against the checker's rather than against this test's expectation of it.
+    assert!(matches!(
+        continuum_certificate::check_certificate(&bytes),
+        Outcome::Checked(KernelVerdict::Core(
+            continuum_kernel_core::Verdict::Verified(_)
+        ))
+    ));
+
+    let handle = certificate_node(&mut fixture, "certs/die-hard.cert", bytes);
+    let verified = verify(&mut fixture, &handle, "req_cert", "idem-cert");
+    assert_eq!(
+        verified.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        verified.envelope.error
+    );
+
+    // The status the checker established, and the basis it rests on. `validated` is
+    // unreachable in this daemon by any other path.
+    let response = verify_response(&verified);
+    assert_eq!(response.status, EvidenceStatus::Validated);
+    assert_eq!(response.evidence_kind, EvidenceKind::Certificate);
+    assert_eq!(response.validation_basis, "checked-certificate");
+    assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Validated);
+
+    // The written history records the basis, which the node schema requires of `validated`.
+    let written = node(&fixture, &handle);
+    let last = written.history.last().expect("history is never empty");
+    assert_eq!(last.status, ClaimStatus::Validated);
+    assert_eq!(last.service_identity.as_deref(), Some(DEFAULT_SERVICE));
+    assert_eq!(
+        last.validation_basis,
+        Some(continuum_value::assurance::ValidationBasis::CheckedCertificate)
+    );
+
+    match &verified.envelope.verdict {
+        Nullable::Value(Verdict::Semantic(value)) => {
+            assert_eq!(value.verdict, SemanticVerdict::Established);
+            assert_eq!(value.inconclusive_reason, Optional::Absent);
+            assert_eq!(value.assurance_class, AssuranceClass::Validated);
+        }
+        other => panic!("expected a semantic verdict, got {other:?}"),
+    }
+
+    // The engine credited with the proof obligation is the kernel, not this daemon. A
+    // service that named itself here would be claiming a check it routed rather than ran.
+    assert_eq!(
+        produced_engine(&verified, "proof_status").as_deref(),
+        Some("continuum-kernel-core")
+    );
+    assert_eq!(
+        produced_engine(&verified, "values").as_deref(),
+        Some(DEFAULT_SERVICE),
+        "the reference re-derivation is still the daemon's own"
+    );
+}
+
+#[test]
+fn a_mutated_certificate_is_rejected_because_the_kernel_rejected_it() {
+    let mut fixture = fixture();
+    // One trailing byte. The magic is untouched, so routing succeeds and a kernel really
+    // does answer — which is what makes this a rejection rather than a routing failure.
+    let mut mutated = certificate_bytes();
+    mutated.push(0x00);
+    assert!(matches!(
+        continuum_certificate::check_certificate(&mutated),
+        Outcome::Checked(KernelVerdict::Core(
+            continuum_kernel_core::Verdict::Rejected(_)
+        ))
+    ));
+
+    let handle = certificate_node(&mut fixture, "certs/mutated.cert", mutated);
+    let rejected = verify(&mut fixture, &handle, "req_mutated", "idem-mutated");
+    assert_eq!(code(&rejected), ErrorCode::CertificateRejected);
+    // The detail names the checker that spoke, so the answer is traceable to a kernel rather
+    // than to this daemon's opinion of the bytes.
+    let error = rejected
+        .envelope
+        .error
+        .value()
+        .expect("an error result carries one");
+    assert!(
+        error.detail.contains("continuum-kernel-core"),
+        "the rejection names the trusted checker that reached it: {}",
+        error.detail
+    );
+    assert!(!error.retryable);
+    // Nothing is promoted, and the refusal is not the identity re-derivation's: the node is
+    // filed under the identity it derives and its bytes hash to the commitment it names.
+    assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Proposed);
+
+    // The same node with a *green* certificate verifies, so the refusal is about the bytes
+    // and about nothing else.
+    let green = certificate_node(&mut fixture, "certs/green.cert", certificate_bytes());
+    let verified = verify(&mut fixture, &green, "req_green", "idem-green");
+    assert_eq!(verified.envelope.status, ResultStatus::Ok);
+}
+
+#[test]
+fn a_certificate_naming_a_contract_the_kernel_does_not_implement_is_typed_inconclusive() {
+    let mut fixture = fixture();
+    // The wire epoch. A certificate may be perfectly valid under a contract this build does
+    // not implement, so the kernel answers `Unsupported` rather than `Rejected` — and the
+    // daemon must not weaken that into "invalid".
+    let mut other_epoch = certificate_bytes();
+    *other_epoch
+        .get_mut(9)
+        .expect("the epoch is inside the header") = 2;
+    assert!(matches!(
+        continuum_certificate::check_certificate(&other_epoch),
+        Outcome::Checked(KernelVerdict::Core(
+            continuum_kernel_core::Verdict::Unsupported(_)
+        ))
+    ));
+
+    let handle = certificate_node(&mut fixture, "certs/other-epoch.cert", other_epoch);
+    let answered = verify(&mut fixture, &handle, "req_epoch", "idem-epoch");
+
+    // A result, not an error: `verdict` is null on `status = error`, and INV-008's typed
+    // reason has no other channel on the wire.
+    assert_eq!(
+        answered.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        answered.envelope.error
+    );
+    match &answered.envelope.verdict {
+        Nullable::Value(Verdict::Semantic(value)) => {
+            assert_eq!(value.verdict, SemanticVerdict::Inconclusive);
+            assert_eq!(
+                value.inconclusive_reason,
+                Optional::Present(InconclusiveReason::Unsupported),
+                "INV-008: inconclusive is never untyped, and this reason is not \
+                 `InsufficientTelemetry`, which is the redaction lane's"
+            );
+        }
+        other => panic!("expected a semantic verdict, got {other:?}"),
+    }
+    // Nothing is promoted: an artifact naming a contract its own checker does not implement
+    // supports no status.
+    assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Proposed);
+    assert_eq!(verify_response(&answered).status, EvidenceStatus::Proposed);
+    // …and the basis is the weaker of the two the wire admits, because no certificate was
+    // checked (plan §11.4: "the two never render identically").
+    assert_eq!(
+        verify_response(&answered).validation_basis,
+        "trusted-solver"
+    );
+    // The dimension that did not move names the checker whose surface it was.
+    assert_eq!(
+        unsupported_reason(&answered, "proof_status").as_deref(),
+        Some("feature-unsupported-by-continuum-kernel-core")
+    );
+}
+
+#[test]
+fn bytes_no_checker_owns_are_typed_as_unroutable_and_never_as_a_verdict() {
+    // The distinction the composition exists to protect: an unrecognised magic could be a
+    // corrupted `CONTCERT`, a family a later kernel will own, or a JPEG, and *nothing
+    // decoded it*. `CertificateRejected` would call a possibly-valid artifact invalid;
+    // `inconclusive` with a semantic reason would credit a checker that never ran.
+    for (index, bytes) in [
+        b"NOTMAGIC and then some certificate-shaped bytes".to_vec(),
+        b"CONT".to_vec(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut fixture = fixture();
+        assert!(matches!(
+            continuum_certificate::check_certificate(&bytes),
+            Outcome::Unroutable(_)
+        ));
+
+        let handle = certificate_node(&mut fixture, "certs/unroutable.bin", bytes);
+        let refused = verify(&mut fixture, &handle, "req_unroutable", "idem-unroutable");
+        assert_eq!(
+            code(&refused),
+            ErrorCode::EpochUnsupported,
+            "case {index}: a routing failure is neither a rejection nor an unsupported \
+             feature"
+        );
+        assert_ne!(code(&refused), ErrorCode::CertificateRejected);
+        assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Proposed);
+        // `verdict` is null on an error, so no semantic claim rides along with it.
+        assert_eq!(refused.envelope.verdict, Nullable::Null);
+    }
+}
+
+#[test]
+fn the_two_routing_faults_are_one_code_and_two_details() {
+    // `TooShortForMagic` and `UnknownFamily` are one fact to a caller — no member of the
+    // trusted checking base owns these bytes — and the recovery is identical, so they share
+    // a code. They are still two different things about the artifact, so they do not share a
+    // detail.
+    let mut fixture = fixture();
+    let short = certificate_node(&mut fixture, "certs/short.bin", b"CONT".to_vec());
+    let unknown = certificate_node(
+        &mut fixture,
+        "certs/unknown.bin",
+        b"NOTMAGIC and then some more".to_vec(),
+    );
+    let short = verify(&mut fixture, &short, "req_short", "idem-short");
+    let unknown = verify(&mut fixture, &unknown, "req_unknown", "idem-unknown");
+    assert_eq!(code(&short), code(&unknown));
+    assert_ne!(
+        short
+            .envelope
+            .error
+            .value()
+            .expect("an error result carries one")
+            .detail,
+        unknown
+            .envelope
+            .error
+            .value()
+            .expect("an error result carries one")
+            .detail
+    );
+}
+
+#[test]
+fn a_certificate_class_node_whose_artifact_is_absent_is_still_insufficient_evidence() {
+    // The arm the certificate lane must not swallow. A node the daemon holds no bytes for
+    // reaches no kernel at all, and answering `EpochUnsupported` would say something about
+    // an artifact nobody has.
+    let mut fixture = fixture();
+    let handle = certificate_node(&mut fixture, "certs/present.cert", certificate_bytes());
+    let mut dangling = node(&fixture, &handle);
+    dangling.artifact = Commitment::new("ws_nothing-is-staged-here");
+    let dangling_handle =
+        EvidenceHandle::new("ev_dangling-certificate").expect("a well-formed handle");
+    fixture
+        .daemon
+        .state_mut()
+        .append_evidence(dangling_handle.clone(), dangling);
+
+    let refused = verify(&mut fixture, &dangling_handle, "req_absent", "idem-absent");
+    assert_eq!(code(&refused), ErrorCode::InsufficientEvidence);
+    assert_eq!(
+        node(&fixture, &dangling_handle).status(),
+        ClaimStatus::Proposed
+    );
+}
+
+#[test]
+fn verifying_a_certificate_appends_no_edge_of_its_own() {
+    // bn-3sypm's recorded negative, held live against the lane that could most plausibly
+    // break it: a successful certificate check is exactly the thing a `CHECKED_BY` edge
+    // records, and `evidence.verify` still does not append one. RFC 0038 keeps the two
+    // apart — an edge is evidence that a check ran, and what it licenses is `evidence.verify`'s
+    // separate decision — so a verify that minted its own edge would be a checker recording
+    // its own check with no `evidence.link` call and no receipt to point at.
+    let mut fixture = fixture();
+    let handle = certificate_node(&mut fixture, "certs/die-hard.cert", certificate_bytes());
+    assert_eq!(fixture.daemon.state().evidence_edges().count(), 0);
+    let nodes_before = fixture.daemon.state().evidence_nodes().count();
+
+    let verified = verify(&mut fixture, &handle, "req_no_edge", "idem-no-edge");
+    assert_eq!(verified.envelope.status, ResultStatus::Ok);
+    assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Validated);
+
+    assert_eq!(
+        fixture.daemon.state().evidence_edges().count(),
+        0,
+        "evidence.verify appends no evidence-graph edge"
+    );
+    assert_eq!(
+        fixture.daemon.state().evidence_nodes().count(),
+        nodes_before,
+        "and no receipt node either: nothing is created by a check that only reads"
+    );
+    // The one delta it does commit is the status transition it just performed.
+    let kinds: Vec<EvidenceEventKind> = fixture
+        .daemon
+        .state()
+        .evidence_events()
+        .iter()
+        .map(|event| event.kind)
+        .collect();
+    assert!(!kinds.contains(&EvidenceEventKind::EdgePublished));
+    assert!(kinds.contains(&EvidenceEventKind::StatusTransition));
+    // The response carries no artifact: `evidence.verify` publishes nothing.
+    assert!(verified.envelope.artifacts.is_empty());
 }
 
 #[test]

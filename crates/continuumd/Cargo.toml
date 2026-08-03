@@ -55,7 +55,24 @@ publish = false
 #   (START_HERE, enforced as RULE certificate-checker-not-search) — and the daemon is on the
 #   other side of it.
 #
-# A fifth arrived with PR 6's task-lifecycle rewiring (`src/daemon/region.rs`):
+# A fifth arrived with the `evidence` family's certificate lane
+# (`src/daemon/evidence.rs`, bn-dtg61):
+#
+# - `continuum-certificate` is the caller-facing certificate surface plan §20 declares, and
+#   `evidence.verify` is the caller. A certificate-class evidence node references bytes an
+#   untrusted producer wrote; the daemon hands them to `check_certificate` and reports the
+#   routed kernel's own verdict, so `validated` is reachable only through a checker this
+#   process does not implement and cannot influence (INV-004). The direction is the only one
+#   plan §20 admits: its single rule about this crate constrains what *it* may depend on
+#   ("proof/certificate checker does not depend on search engines"), and a consumer edge adds
+#   nothing to its closure — `RULE certificate-checker-not-search` walks outward from
+#   `continuum-certificate` and the four kernels, so `continuumd -> continuum-certificate`
+#   cannot reach it. The daemon's own `continuum-engine-reference` edge stays on the far side
+#   of that boundary for the same reason it always did: the forbidden edge is the checker's.
+#   No decoder is duplicated here — the whole byte string, magic included, is passed through,
+#   and this crate names no kernel wire type.
+#
+# A sixth arrived with PR 6's task-lifecycle rewiring (`src/daemon/region.rs`):
 #
 # - `continuum-task` owns the region calculus plan §20 gives it — "task lifecycle,
 #   committed partial evidence, budget accounting, suspension/continuation, drain and
@@ -73,6 +90,7 @@ publish = false
 # Repeated under [dev-dependencies] because integration tests in `tests/` are separate
 # crates and do not inherit the library's dependencies.
 [dependencies]
+continuum-certificate = { path = "../continuum-certificate" }
 continuum-evidence = { path = "../continuum-evidence" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
@@ -81,6 +99,7 @@ continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 
 [dev-dependencies]
+continuum-certificate = { path = "../continuum-certificate" }
 continuum-evidence = { path = "../continuum-evidence" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
