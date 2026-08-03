@@ -18,17 +18,18 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.4";
+pub const IDL_VERSION: &str = "1.5";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
-/// `"3.3"` as of IDL 1.4. The 3.0 -> 3.1 minor bump covered IDL 1.1's compatible
-/// fixes and IDL 1.2's RFC 0027 F1-F8 sweep together, ratified by the user on
-/// 2026-07-31 and taken once by bn-3ayom on 2026-08-01 — the deferral recorded
-/// here at IDL 1.1 (`notes/plan/notes/PR0_EXIT_EVIDENCE.md` §6) is discharged,
-/// not carried. The 3.1 -> 3.2 bump covers IDL 1.3 — the bn-i4aem defect
-/// reconciliation, the `file_components` addition, and the three encoding rules
-/// — and is taken once at the end of that revision on the same precedent.
+/// `"3.3"` as of IDL 1.4, and still `"3.3"` at IDL 1.5. The 3.0 -> 3.1 minor
+/// bump covered IDL 1.1's compatible fixes and IDL 1.2's RFC 0027 F1-F8 sweep
+/// together, ratified by the user on 2026-07-31 and taken once by bn-3ayom on
+/// 2026-08-01 — the deferral recorded here at IDL 1.1
+/// (`notes/plan/notes/PR0_EXIT_EVIDENCE.md` §6) is discharged, not carried. The
+/// 3.1 -> 3.2 bump covers IDL 1.3 — the bn-i4aem defect reconciliation, the
+/// `file_components` addition, and the three encoding rules — and is taken
+/// once at the end of that revision on the same precedent.
 ///
 /// The 3.2 -> 3.3 bump covers IDL 1.4 (bn-3sypm) and is the first one that
 /// **adds an operation**: `evidence.link`, RFC 0038's F14 decision on the wire.
@@ -39,6 +40,17 @@ pub const IDL_VERSION: &str = "1.4";
 /// the F13 discipline: the row exists in plan §10.2, in RFC 0027's authority
 /// table, and in the IDL, or it exists nowhere
 /// (`rule conformance.registry_agreement`, `tests/registry_agreement.rs`).
+///
+/// IDL 1.5 (`rule handshake.bootstrap_encoding`, bn-1h158) does **not** bump
+/// this value. It declares that `ClientHello`, `ServerWelcome`, and
+/// `ServerReject` are `canonical_json` unconditionally and that the negotiated
+/// encoding governs from the first `RequestEnvelope` onward — a fact
+/// [`crate::transport::encode_hello`], [`crate::transport::Server::open`], and
+/// [`crate::transport::Server::answer`] already implement (bn-1mhcr's
+/// canonical_cbor delivery left it as an unwritten, deliberately un-invented
+/// rule). None of `rule versioning.compatible_change`'s five triggers fires —
+/// no operation, field, enum member, or relaxed constraint — so no wire byte
+/// moves and no flag is raised (the bn-23j7s no-F-flag precedent).
 pub const PROTOCOL_VERSION: &str = "3.3";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1

@@ -480,6 +480,135 @@ fn the_handshake_is_two_frames_and_the_second_is_a_welcome_or_a_reject() {
 }
 
 #[test]
+fn the_bootstrap_frames_are_canonical_json_however_the_connection_negotiates() {
+    // `rule handshake.bootstrap_encoding` (IDL 1.5, bn-1h158): `ClientHello`,
+    // `ServerWelcome`, and `ServerReject` are `canonical_json` unconditionally,
+    // independent of `ClientHello.encodings` and of what negotiation selects. This is
+    // the pin bn-1mhcr's canonical_cbor delivery left owed — the codec's own golden set
+    // (`tests/codec_canonical_cbor.rs`) shows `ClientHello` and `ServerReject` *can* be
+    // spelled in canonical_cbor; this test is evidence for the narrower and different
+    // claim that the transport never does, even when the offer prefers CBOR and even
+    // once CBOR is what gets negotiated.
+    use continuumd::codec::cbor::Cbor;
+    use continuumd::codec::json::Json;
+
+    // The hello offers `canonical_cbor` first — the strongest case for the rule, since a
+    // transport that sniffed the offer's preference would pick CBOR here.
+    let hello = ClientHello {
+        protocol_versions: VersionRange {
+            low: ProtocolVersion::new(3, 0),
+            high: version(),
+        },
+        encodings: vec![Encoding::CanonicalCbor, Encoding::CanonicalJson],
+        client: "continuumd-transport-test".to_owned(),
+        actor: who("service:continuumd"),
+        capability: cap("cap_root"),
+        features: Optional::Absent,
+    };
+
+    let hello_frame = encode_hello(&hello).expect("the hello encodes");
+    assert_eq!(
+        hello_frame,
+        br#"{"actor":"service:continuumd","capability":"cap_root","client":"continuumd-transport-test","encodings":["canonical_cbor","canonical_json"],"protocol_versions":{"high":"3.2","low":"3.0"}}"#,
+        "the pinned bootstrap bytes: canonical_json, field order ascending, despite the CBOR-first offer"
+    );
+    assert!(
+        Json::parse(&hello_frame).is_ok(),
+        "the hello frame is canonical JSON"
+    );
+    assert!(
+        Cbor::parse(&hello_frame).is_err(),
+        "the hello frame is not canonical CBOR, though `ClientHello` offers it first"
+    );
+
+    // Negotiate CBOR — the encoding the hello prefers — so the welcome and reject below
+    // are built against a connection whose *negotiated* encoding is CBOR.
+    let outcome = negotiate(&implemented(), ProtocolWindow::new(3), ENCODINGS, &hello);
+    let settled = outcome.expect("3.2 is common");
+    assert_eq!(
+        settled.encoding(),
+        Encoding::CanonicalCbor,
+        "the hello's first preference is what negotiation selects"
+    );
+
+    let welcome = ServerWelcome {
+        protocol_version: settled.protocol_version(),
+        encoding: settled.encoding(),
+        majors_served: vec![3, 2],
+        server: "continuumd/0".to_owned(),
+        grant: root_grant(),
+        limits: continuumd::protocol::handshake::ServerLimits {
+            idempotency_retention_ms: continuumd::protocol::scalar::DurationMs::new(86_400_000),
+            max_page_size: 100,
+            max_result_bytes: continuumd::protocol::scalar::ByteCount::new(1_048_576),
+            max_concurrent_tasks: 4,
+        },
+        features: Vec::new(),
+        epochs: epochs(),
+        pending_advances: Vec::new(),
+    };
+    let welcome_frame = Server::open(&welcome, None, Ok(settled))
+        .expect("the welcome encodes")
+        .expect("a welcome frame is sent");
+    assert!(
+        Json::parse(&welcome_frame).is_ok(),
+        "`ServerWelcome` is canonical JSON even though the connection just negotiated CBOR"
+    );
+    assert!(
+        Cbor::parse(&welcome_frame).is_err(),
+        "`ServerWelcome` is not spelled in the encoding it announces"
+    );
+    let read_welcome: ServerWelcome = from_bytes(&welcome_frame).expect("the welcome decodes");
+    assert_eq!(read_welcome, welcome);
+    assert_eq!(
+        read_welcome.encoding,
+        Encoding::CanonicalCbor,
+        "the frame's own bytes are JSON; the value it carries names CBOR as what comes next"
+    );
+
+    // A reject frame answers the same way: the connection has nothing negotiated yet, so
+    // there is no encoding to have inherited, but a version-outside-the-window rejection
+    // still cannot ride the CBOR the client offered.
+    let narrow_hello = ClientHello {
+        protocol_versions: VersionRange {
+            low: ProtocolVersion::new(1, 0),
+            high: version(),
+        },
+        ..hello.clone()
+    };
+    let mut narrow_implemented = implemented();
+    narrow_implemented.retain(|entry| entry.major() == 9);
+    let error = negotiate(
+        &narrow_implemented,
+        ProtocolWindow::new(3),
+        ENCODINGS,
+        &narrow_hello,
+    )
+    .expect_err("nothing is common");
+    let reject = ServerReject::for_negotiation(error, &narrow_hello, &[3, 2], &error.to_string())
+        .expect("the offer reaches 3.1, so the frame is sent");
+    let reject_frame = Server::open(&welcome, Some(&reject), Err(error))
+        .expect("the reject encodes")
+        .expect("a reject frame is sent");
+    assert!(
+        Json::parse(&reject_frame).is_ok(),
+        "`ServerReject` is canonical JSON too, sent before anything is negotiated"
+    );
+    assert!(
+        Cbor::parse(&reject_frame).is_err(),
+        "`ServerReject` is not spelled in canonical CBOR, though the offer preferred it"
+    );
+
+    // The other half of the rule — the negotiated encoding governs from the first
+    // post-negotiation frame onward — is pinned at the transport already, in CBOR
+    // specifically: `a_cbor_connection_serves_a_whole_exchange_in_cbor`
+    // (`tests/codec_canonical_cbor.rs`) drives a real `evidence.link` exchange over a
+    // CBOR-negotiated connection and asserts both the request and the result frame are
+    // CBOR maps that do not parse as canonical JSON. That test and this one are the same
+    // claim from opposite ends of one connection.
+}
+
+#[test]
 fn a_refused_connection_is_a_typed_frame_before_anything_is_negotiated() {
     // RFC 0026 correction 38 / `rule handshake.rejection`. The client offers only a major
     // this daemon no longer serves, so there is no negotiated version — and the refusal is

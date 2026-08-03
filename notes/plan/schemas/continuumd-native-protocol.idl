@@ -157,6 +157,32 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.5 — the handshake bootstrap-encoding rule (bn-1h158), closing
+  ///         the gap bn-1mhcr's canonical_cbor delivery found and
+  ///         declined to paper over: `ClientHello` is the frame that
+  ///         OFFERS the encodings, so it cannot already be spelled in
+  ///         the one the offer has not yet selected, and `rule
+  ///         handshake.negotiation` says which encoding is CHOSEN, not
+  ///         which encoding the choosing itself is spelled in. Until
+  ///         this revision that was true and unwritten — recorded only
+  ///         as a comment in `crates/continuumd/src/transport/mod.rs`.
+  ///         `rule handshake.bootstrap_encoding` is declared:
+  ///         `ClientHello`, `ServerWelcome`, and `ServerReject` are
+  ///         `canonical_json` unconditionally, independent of
+  ///         `ClientHello.encodings` and of the negotiation outcome; the
+  ///         negotiated encoding governs every frame from the first
+  ///         `RequestEnvelope` onward. This is a doc-grade clarification
+  ///         of behavior every conforming daemon already has —
+  ///         `encode_hello` and `Server::open` have written
+  ///         `canonical_json` unconditionally since the transport was
+  ///         first built, and `Server::answer` has read and written the
+  ///         negotiated encoding since bn-1mhcr — so no wire byte moves
+  ///         and no field, operation, or enum member is added. `rule
+  ///         versioning.compatible_change` names what raises the
+  ///         protocol minor, and none of its five triggers fires here,
+  ///         so `version` stays `"3.3"`: a declared rule over an
+  ///         already-conforming wire is conformance, not a flag (the
+  ///         bn-23j7s precedent).
   ///   1.4 — the RFC 0038 F14 disposition (bn-3sypm) and the single
   ///         protocol-minor bump 3.2 → 3.3 that covers it. This is the
   ///         first revision that moves the registry: RFC 0038 decided
@@ -241,8 +267,16 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.4";
+  idl_version = "1.5";
   /// The protocol version this document defines.
+  ///
+  /// IDL 1.5 (`rule handshake.bootstrap_encoding`, bn-1h158) does not
+  /// move this value. It states a rule about which encoding a frame
+  /// already sent in `canonical_json` is spelled in, not a wire shape a
+  /// version negotiates — `rule versioning.compatible_change` lists
+  /// what raises the minor and this revision does none of it, so a 3.3
+  /// client and daemon are unaffected by the revision that documents
+  /// what they already do.
   ///
   /// 3.1 was the single minor bump for IDL 1.1's compatible fixes and
   /// IDL 1.2's F1–F8 sweep together, ratified by the user on
@@ -1629,6 +1663,30 @@ rule handshake.negotiation {
   outside the client's range. The daemon MUST serve majors N and N−1; a
   client on the previous major is rejected only when it falls outside
   this window. One encoding is selected for the life of the connection.
+  """
+}
+
+rule handshake.bootstrap_encoding {
+  """
+  `ClientHello`, `ServerWelcome`, and `ServerReject` MUST be encoded in
+  `canonical_json`, regardless of `ClientHello.encodings` and regardless
+  of which encoding negotiation selects. `ClientHello` is the frame that
+  OFFERS the encodings, so it cannot already be spelled in the one the
+  offer has not yet selected; `ServerWelcome` and `ServerReject` are the
+  frames that carry the negotiation's own outcome, sent before that
+  outcome has anywhere else to apply. `rule handshake.negotiation` fixes
+  which encoding is CHOSEN — this rule fixes which encoding the choosing
+  itself is spelled in, and the two are independent: a connection that
+  negotiates `canonical_cbor` still exchanged its hello, welcome, and any
+  reject in `canonical_json`.
+
+  The negotiated encoding governs every frame from the first one that
+  follows the handshake onward — the first `RequestEnvelope` and every
+  `RequestEnvelope` or `ResultEnvelope` after it, in both directions, for
+  the life of the connection. There is no third, mixed state: a
+  connection is bootstrapping (three frames, `canonical_json`, at most)
+  or negotiated (every frame thereafter, the one encoding `ServerWelcome`
+  named).
   """
 }
 

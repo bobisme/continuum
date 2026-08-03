@@ -64,14 +64,15 @@
 //! what having negotiated one means, and it is why the encoding is on the connection
 //! rather than on the message.
 //!
-//! The *handshake* frames are the exception, and deliberately so rather than by omission.
-//! A `ClientHello` is the frame that offers the encodings, so it cannot already be in the
-//! one the offer has not yet selected, and the IDL fixes no bootstrap encoding for it —
-//! `rule handshake.negotiation` says which encoding is chosen and not which encoding the
-//! choosing is spelled in. [`encode_hello`] and [`Server::open`] therefore stay in
-//! `canonical_json`, and picking that rather than inventing a rule is the same discipline
-//! `codec` took with the three decisions it refused to make until the IDL made them. The
-//! gap is a real one and belongs in the IDL, not here.
+//! The *handshake* frames are the exception, and `rule handshake.bootstrap_encoding` (IDL
+//! 1.5) is why: `ClientHello`, `ServerWelcome`, and `ServerReject` are `canonical_json`
+//! unconditionally, independent of `ClientHello.encodings` and of what negotiation
+//! selects — a `ClientHello` is the frame that offers the encodings, so it cannot already
+//! be in the one the offer has not yet selected, and `ServerWelcome`/`ServerReject` carry
+//! the negotiation's own outcome before that outcome has anywhere else to apply.
+//! [`encode_hello`] and [`Server::open`] therefore stay in `canonical_json`, and the
+//! negotiated encoding governs only from the first `RequestEnvelope` onward, which is
+//! where [`Server::answer`]'s dispatch on [`Negotiated::encoding`] above picks up.
 
 use std::collections::VecDeque;
 

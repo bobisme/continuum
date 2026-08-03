@@ -977,11 +977,18 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // named-struct count is unmoved. **These two numbers are the visibility the count
     // assertions exist for**: an operation cannot enter the protocol without moving
     // them here, in RFC 0027's distribution table, and in RFC 0026's verdict table.
+    //
+    // IDL 1.5 (bn-1h158) adds one rule, `handshake.bootstrap_encoding`, and nothing
+    // else: no operation, alias, enum, struct, or union moves, because the rule
+    // documents behavior every conforming daemon already has rather than declaring a
+    // wire shape. `version` stays "3.3" with it — see `rule
+    // versioning.compatible_change`'s five triggers, none of which this revision
+    // pulls.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 45, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 38, "rules");
+    assert_eq!(document.rules.len(), 39, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
