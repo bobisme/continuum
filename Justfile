@@ -92,6 +92,14 @@ dossier:
 # `axiom-manifest.sh --check` is read-only with respect to `lean/artifacts/`: it
 # generates into a scratch directory and diffs, so a stale manifest fails the
 # gate instead of being silently rewritten under it.
+#
+# It then asserts the manifest is *empty*. The two are different obligations and
+# the diff does not imply the assertion: ADR-0035 requires axioms to be
+# documented, which the diff enforces, while START_HERE's PR-4a exit and plan §21
+# Phase A require T0/T1 to compile "with no `sorry` and empty axiom manifests",
+# which the diff cannot see — a `sorry` landed together with a regenerated
+# manifest documents its own `sorryAx` and diffs clean. The script's header states
+# the reading in full (bn-bou09).
 lean:
     @export PATH="$HOME/.elan/bin:$PATH"; \
     command -v lake >/dev/null 2>&1 || { \

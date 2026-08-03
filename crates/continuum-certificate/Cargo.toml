@@ -6,5 +6,22 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# Plan §20 lists this crate immediately above the four `continuum-kernel-*` crates
+# and states one dependency rule about it: "proof/certificate checker does not
+# depend on search engines". The four kernel crates are not search, and the edge
+# can only run in this direction: `tools/check_kernel_covenant.py`'s KCOV-06
+# admits *no* dependency for a kernel manifest (`ADMITTED_KERNEL_DEPENDENCIES` is
+# empty), so no kernel crate may depend on this one. This crate composes them;
+# they do not compose it.
+#
+# Nothing else is declared, and nothing external is. Each edge is classified
+# `trusted-checking-base` in `tools/governance/dependency-rationale.toml`, which
+# GOV-1-07 enforces for anything the certificate checker links.
+[dependencies]
+continuum-kernel-core = { path = "../continuum-kernel-core" }
+continuum-kernel-sat = { path = "../continuum-kernel-sat" }
+continuum-kernel-smt = { path = "../continuum-kernel-smt" }
+continuum-kernel-temporal = { path = "../continuum-kernel-temporal" }
+
 [lints]
 workspace = true

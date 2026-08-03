@@ -316,7 +316,7 @@ Every stateful workflow uses explicit handles. A dropped connection or restarted
 
 Human text may accompany a result, but agents and integrations consume versioned schemas and enums.
 
-### INV-004 — No self-certification
+### INV-004 — No self-certification (delivered: bn-11yx, bn-24i, bn-3sypm, bn-bou09 — bn-11yx pinned the certificate crate's forbidden-dependency boundary against its own tracked manifest, independently of the three tools that walk the closure; bn-24i made the promotion boundary a type in `continuumd` — a producer cannot name a status, the `Promotion` witness is unreachable from the producer family's module, and a service that verifies its own production is refused `InsufficientEvidence`; bn-3sypm landed `evidence.link` and protocol 3.3, the CHECKED_BY edge whose checker is the admitted caller rather than a request field, refused when it equals the subject's own actor and refused outright for non-`service:` actors; bn-bou09 delivered `crates/continuum-certificate` — the four `continuum-kernel-*` checkers composed behind one entry point that takes `&[u8]` and nothing else, routed by family magic taken from the kernels themselves, each verdict relayed as the kernel's own value with `Unsupported` never weakened into `Rejected` and a routing failure never dressed as either, evidenced in `tests/family_routing.rs` and `tests/inv004_no_self_certification.rs` — and closed the Lean half by asserting the T0/T1 axiom manifest is *empty* in `lean/scripts/axiom-manifest.sh`, which the staleness diff alone never did)
 
 Search code does not check its own strongest claims. Certificates cross an independent checker; foundational theorems cross Lean.
 

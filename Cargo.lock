@@ -69,6 +69,12 @@ dependencies = [
 [[package]]
 name = "continuum-certificate"
 version = "0.0.0"
+dependencies = [
+ "continuum-kernel-core",
+ "continuum-kernel-sat",
+ "continuum-kernel-smt",
+ "continuum-kernel-temporal",
+]
 
 [[package]]
 name = "continuum-cir"

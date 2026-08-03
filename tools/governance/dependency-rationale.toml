@@ -139,10 +139,34 @@ rationale = "The exact finite model service PR 8 wraps behind the native protoco
 [[dependency]]
 name = "continuum-kernel-core"
 origin = "workspace"
-tcb_class = "dev-only"
-kinds = ["dev"]
-used_by = ["continuum-engine-reference"]
-rationale = "The differential itself, and dev-position only. crates/continuum-engine-reference/tests/certificate_kernel_differential.rs feeds the finite-closure certificate the reference engine emits to check_certificate and asserts the verdict — the fourth frozen TV-009 fact, 'certificate accepted by an independent checker'. The library edge does not exist and must not: plan §20 puts a serialization boundary between every engine and the kernel, and src/certificate.rs writes the wire form from the documented grammar so producer and checker share no codec (docs/03 §8, 'certificate decoding' is an axis independent paths must differ along). The class is dev-only because that is what the edge is — the checker is never in a shipped artifact of this crate — and because tools/check_crate_boundaries.py:37-39 admits exactly this case: 'dev-dependencies are reported but not enforced, because a differential test may legitimately link an engine it would never ship against'. A bug in the kernel here can only make this test wrong, never a claim believable: the kernel's own trust class is established where the kernel is checked (tools/check_kernel_covenant.py), not by this edge."
+tcb_class = "trusted-checking-base"
+kinds = ["dev", "normal"]
+used_by = ["continuum-certificate", "continuum-engine-reference"]
+rationale = "Two edges with opposite classes, and the stronger one decides. The normal edge is continuum-certificate's: plan §20 names that crate as the caller-facing certificate surface and KCOV-06 admits no dependency for a kernel manifest, so the composition can only run certificate -> kernel, and continuum-certificate routes CONTCERT bytes to this crate's check_certificate and relays its Verdict verbatim — a defect here makes an unsound claim believable with nothing downstream to re-check it, which is what trusted-checking-base means, and GOV-1-07's checker-dependencies-are-tcb enforces the class rather than leaving it a self-assessment. The dev edge is the differential: crates/continuum-engine-reference/tests/certificate_kernel_differential.rs feeds the finite-closure certificate the reference engine emits to check_certificate and asserts the verdict — the fourth frozen TV-009 fact, 'certificate accepted by an independent checker'. That engine's library edge does not exist and must not: plan §20 puts a serialization boundary between every engine and the kernel, and src/certificate.rs writes the wire form from the documented grammar so producer and checker share no codec (docs/03 §8, 'certificate decoding' is an axis independent paths must differ along); tools/check_crate_boundaries.py:37-39 admits exactly the dev-position case, 'a differential test may legitimately link an engine it would never ship against'."
+
+[[dependency]]
+name = "continuum-kernel-sat"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["normal"]
+used_by = ["continuum-certificate"]
+rationale = "One of the four checkers continuum-certificate composes: CONTSATC bytes are routed to this crate's check_certificate and its LRAT Verdict is relayed verbatim, never re-encoded, so this crate's vocabulary is what a caller of the certificate surface actually sees. Classed trusted-checking-base because that is what the edge makes it — anything the certificate checker links is in the trust base whether or not anyone wants it to be (docs/03 §5, GOV-1-07 checker-dependencies-are-tcb) — and because a defect in a refutation checker makes an unsound UNSAT claim believable with nothing downstream re-checking it. The edge runs this way and can only run this way: KCOV-06's ADMITTED_KERNEL_DEPENDENCIES is empty, so no kernel crate may depend on continuum-certificate. Cost of trusting it: a crate that depends on nothing at all, with its own decoder, arithmetic and clause representation, under the <15,000-non-test-line covenant tools/check_kernel_covenant.py measures."
+
+[[dependency]]
+name = "continuum-kernel-smt"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["normal"]
+used_by = ["continuum-certificate"]
+rationale = "One of the four checkers continuum-certificate composes: CONTSMTC bytes are routed to this crate's check_certificate and its Verdict is relayed verbatim — including CheckedClaim::assurance_class, which is the one thing a composition must not flatten, since ADR-0017 and docs/03 keep CHECKED_CERTIFICATE and TRUSTED_SOLVER apart precisely so a theory-lemma-backed refutation is not rendered as a fully replayed one. Classed trusted-checking-base for the same reason as its three siblings: anything the certificate checker links is in the trust base whether or not anyone wants it to be (docs/03 §5, GOV-1-07 checker-dependencies-are-tcb). The edge runs certificate -> kernel and can only run that way, because KCOV-06 admits no dependency for a kernel manifest."
+
+[[dependency]]
+name = "continuum-kernel-temporal"
+origin = "workspace"
+tcb_class = "trusted-checking-base"
+kinds = ["normal"]
+used_by = ["continuum-certificate"]
+rationale = "One of the four checkers continuum-certificate composes: CONTTMPC bytes are routed to this crate's check_certificate and its ranking / fair-SCC-exclusion Verdict is relayed verbatim, with the fairness class and property class the kernel reported intact. Classed trusted-checking-base because anything the certificate checker links is in the trust base whether or not anyone wants it to be (docs/03 §5, GOV-1-07 checker-dependencies-are-tcb), and because a liveness witness accepted in error is an unsound claim no later stage re-checks. The edge runs certificate -> kernel and can only run that way, because KCOV-06's ADMITTED_KERNEL_DEPENDENCIES is empty; the cost of trusting it is a dependency-free crate whose SCC search carries its own heap stack rather than recursing."
 
 [[dependency]]
 name = "continuumd"
