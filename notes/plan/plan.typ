@@ -2721,10 +2721,20 @@ validator checks register↔note quote identity. Until then a row is
     table.hline(),
     [General context compilation (§6)], [research/25, research/32,
     research/33], [ablation design per research/25 (raw trace vs pack on
-    the agent benchmark); win margin fixed at ratification --- draft;
-    kill (research/32): compact packs repeatedly induce incorrect
-    repairs despite preservation checks], [plain causal slice +
-    expansion],
+    the agent benchmark); ratified win margin,
+    quote-id=context-compilation-win-margin "The Context Pack condition
+    wins the general context-compilation ablation only if, on the
+    held-out ContinuumBench diagnosis-and-repair split graded by the
+    independent grader of research/33 with model, scaffold, and token
+    budget held equal, it beats the raw-trace baseline by at least 10
+    percentage points of absolute task success with a 95 percent
+    bootstrap confidence interval on the paired difference excluding
+    zero, while delivering at least a 10x median per-task reduction in
+    context bytes counting every expansion and staying within 2
+    percentage points of the raw-trace baseline on hidden-variant
+    generalization."; kill (research/32): compact packs repeatedly
+    induce incorrect repairs despite preservation checks], [plain causal
+    slice + expansion],
     [Exploration reduction (§9, INV-013)], [research/01;
     docs/31], [research/01 (stated there as a kill): ≥10× reduction in
     explored classes on a non-artificial corpus subset without a
@@ -2739,13 +2749,28 @@ validator checks register↔note quote identity. Until then a row is
     disabled; speedup target and liveness corpus subset fixed at lane
     opening --- draft], [unreduced liveness with explicit cost banner;
     batch expectations stated in the Phase D exit],
-    [Causal minimization (§6, §12)], [research/26], [replay-preserving
-    core ≤10% of trace length on real (non-synthetic) failures ---
-    draft, pending ratification; kill if minimization cost dominates
-    verification], [1-minimal delta debugging only],
-    [Neighborhood adequacy (§8.3)], [research/33 --- lane to be
-    opened], [hidden-variant catch rate of the §8.3 neighborhood on the
-    docs/50 gaming corpus; target fixed at lane opening --- draft; kill
+    [Causal minimization (§6, §12)], [research/26], [ratified
+    (research/26) quote-id=causal-minimization-core-ratio "On the
+    research/26 experiment corpus of real failures --- traces produced
+    by an actual defect, excluding any trace padded with semantically
+    inert events (plan §25) --- the replay-preserving causal core must
+    be ≤10% of trace length at the corpus median."; kill if minimization
+    cost dominates verification], [1-minimal delta debugging only],
+    [Neighborhood adequacy (§8.3)], [research/33], [ratified
+    (research/33) quote-id=neighborhood-adequacy-catch-rate "On the
+    docs/50-classified gaming corpus --- at least 20 hidden mutations
+    for each of the five docs/50 attack classes (intent,
+    instrumentation, evidence, overfitting, resource), so at least 100
+    mutations in total --- the §8.3 neighborhood is adequate only if it
+    catches at least 90 percent of the mutations overall with the
+    one-sided 95 percent exact binomial lower bound on that rate above
+    80 percent and no single attack class below 75 percent, counting a
+    mutation as caught only when property-directed neighboring
+    exploration surfaces a neighbor on which the gaming patch fails and
+    the receipt discloses that neighbor, with every mutation drawn from
+    a family-level held-out split and graded by the independent grader
+    of research/33."; the corpus is a Phase B G3 deliverable and does
+    not exist today, so the ratified threshold binds when it lands; kill
     (research/33): hidden variants are too easy to leak or too hard to
     grade independently], [fixed strategy-list neighborhood with
     per-receipt coverage disclosure and no adequacy claim],
@@ -2808,6 +2833,71 @@ validator checks register↔note quote identity. Until then a row is
     opened], [per-ADR staging; until shipped, timing fields in Intent
     Contracts remain declarative assumptions (B11); defer:
     post-1.0], [declarative assumptions only],
+    [Agent–computer interface (B2, §10)], [research/25], [native ACI vs
+    a disciplined-shell baseline (harness per research/25) on the agent
+    benchmark: success-rate, cost, and invalid-action margins ratified
+    --- quote-id=aci-benchmark-margins "On the agent benchmark, with an
+    identical base model, task set, and per-task budget, native ACI must
+    beat the disciplined-shell baseline by at least 10 percentage points
+    of absolute task success, at least 30% fewer interface bytes per
+    solved task (bytes, not tokens, are the graded cost denominator per
+    RFC 0027), and at least a 50% relative reduction in invalid-action
+    rate, with every metric paired per task over at least 3 seeds and
+    the success margin's one-sided 95% lower bound above zero; missing
+    any one of the three margins fails G0-DX-10 and forces protocol
+    redesign before freeze."; kills (research/25): typed surface loses
+    to disciplined shell; schema churn dominates agent cost; handles do
+    not reduce invalid-action rate], [protocol redesign before freeze
+    (G0-DX-10); MCP-only surface],
+    [Workbench security (§18)], [research/35], [ratified promotion gate
+    (research/35) --- quote-id=workbench-security-promotion-gate
+    "Autonomous promotion stays disabled until a single red-team corpus
+    run against the current build and dependency epoch clears every
+    case, where the corpus contains at least three cases for each of the
+    ten red-team classes of research/35, one per prohibited outcome
+    named in its kill criterion (unprivileged intent-status alteration,
+    unprivileged evidence-status alteration, isolation escape), plus one
+    case for each of the seven intent-policy blocks and one escape
+    attempt against each of the eight worker-isolation controls of
+    docs/49, for at least 45 cases in total; the run clears only if
+    every case is refused by a trusted authority check and recorded in
+    the append-only audit log, with zero unprivileged intent-status or
+    evidence-status alterations and zero isolation escapes, and any
+    later case that succeeds re-locks autonomous promotion until the
+    corpus, enlarged with that case and its regression test, clears
+    again in full, leaving human-approved promotion as the standing
+    fallback."; no project kill for an individual vulnerability
+    (research/35): a successful case re-locks autonomous promotion and
+    falls back to human approval], [human-approved promotion only],
+    [Multi-agent evidence graph enforcement (§11.7)], [RFC 0038 (§25
+    debt); research/08; docs/53 boundary], [concurrent authority
+    enforcement validated beyond the finite spike (docs/53: "authority
+    table only, not enforcement") --- ratified (research/08)
+    quote-id=evidence-graph-enforcement "Multi-agent evidence-graph
+    enforcement is validated only when four §11.7 properties ---
+    promotion restricted to trusted service identities, per-claim
+    linearized compare-and-set with no lattice regression and no lost
+    promotion, deterministic conflict materialization, and idempotent
+    retry --- hold with zero counterexamples under both exhaustive
+    exploration of a bounded model of the §11.7 write protocol at 3
+    concurrent writers over 2 claim identities and an adversarial
+    campaign against a persistent continuumd of at least 1,000 distinct
+    seeded schedules per configuration across the docs/19 §7 determinism
+    matrix (writer counts 1, 2, 8, and 32 contending on a single claim
+    identity, debug and release, with process restarts), in which every
+    losing promotion returns the typed StatusConflict of plan §10.3
+    rather than a generic error, every replayed idempotency key returns
+    the original node identity, every injected contradictory claim pair
+    materializes exactly one Conflict node whose content identity is
+    byte-identical across all schedules, seeds, worker counts, and
+    restarts, and every recorded per-claim promotion history is accepted
+    by an independent linearizability checker against the §11.4 lattice,
+    one violation in one trial failing the lane."; kill (research/08):
+    the four properties hold only by serializing every writer behind one
+    global lock, or conflict artifacts cannot be made deterministic;
+    fallback below applies if enforcement cannot be validated],
+    [single-writer evidence graph; agents coordinate through one
+    integrator role],
   )]
   , kind: table
   )
