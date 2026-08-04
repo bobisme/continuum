@@ -56,6 +56,10 @@
 //! inherited verbatim, and `content_budget.bytes` carrying the child's own measured
 //! canonical size (RFC 0028 correction 17). It derives; it does not compile.
 //!
+//! [`replay`] (PR-11 / IMPL-05) — the pack's top-level `replay` field, not a
+//! `selected[].kind` member: [`replay::ReplayRef`], a typed, class-checked reference to a
+//! `crash_*` crashpack.
+//!
 //! [`budget`] (PR-11 / IMPL-06) — byte budgets: RFC 0028's second branch for a ceiling the
 //! answer exceeds. A smaller child is packed — a prefix of the declared item order, the
 //! manifest reserved before any of it — and every candidate the ceiling dropped is recorded
@@ -86,5 +90,6 @@ pub mod expansion;
 pub mod model;
 pub mod omission;
 pub mod pack;
+pub mod replay;
 pub mod selection;
 pub mod source;
