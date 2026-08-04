@@ -37,6 +37,13 @@
 //! typed reference to a named model action, optionally inside a real `model_*` elaborated
 //! model artifact.
 //!
+//! [`target`], [`verdict`], [`assurance`] (PR-11 / IMPL-01) — the pack's answer header:
+//! the class-checked `in_*` contract and the typed `question` a pack was compiled for, the
+//! closed four-member `verdict` whose `inconclusive` arm carries its INV-008 reason so an
+//! untyped one has no spelling, and the `{class, envelope}` block reusing
+//! `continuum_value::assurance`'s RFC 0031-ordered class and its nine-dimension B11
+//! envelope.
+//!
 //! [`omission`] (PR-11 / IMPL-04) — the INV-007 manifest: the closed five-member reason
 //! vocabulary, and a record shape in which the schema's two conditionals on `expandable`
 //! are unrepresentable rather than validated.
@@ -72,7 +79,7 @@
 //! `counterfactual`, `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
 //! IMPL-04 carries items of any kind through an expansion and constructs items of none,
 //! because `SelectedItem`'s two typed constructors are IMPL-03's and the rest are
-//! IMPL-01/02/05's; target/verdict/assurance and the replay reference (IMPL-01, IMPL-05),
+//! IMPL-01/02/05's; the replay reference (IMPL-05),
 //! which an expansion child inherits from its parent rather than computing; a **token**
 //! count, which is advisory, model-relative, and owed a tokenizer identity this workspace
 //! does not have, so `content_budget.tokens` is absent rather than invented (`pack`'s module
@@ -85,6 +92,7 @@
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod accounting;
+pub mod assurance;
 pub mod budget;
 pub mod expansion;
 pub mod model;
@@ -93,3 +101,5 @@ pub mod pack;
 pub mod replay;
 pub mod selection;
 pub mod source;
+pub mod target;
+pub mod verdict;
