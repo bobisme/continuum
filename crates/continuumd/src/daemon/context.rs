@@ -53,12 +53,17 @@
 //! | the relation is undefined for the anchor, or the engine cannot compute it | `UnsupportedSemanticFeature` | [`expand`] |
 //! | the target content is redacted, purged, summarized, or lost | **success**, with a `redaction` omission and the parent's own `redactions[]` stub | [`expand`] |
 //! | the relation is defined and yields no items | **success**, empty selection and empty manifest | [`expand`] |
-//! | the budget is exhausted before the expansion completes | `BudgetExhausted`, nothing published | [`expand`] |
+//! | the budget is exhausted before the expansion completes | **success** with a smaller child whose manifest records the shortfall, or — below the smallest conforming child — `BudgetExhausted` with nothing published | [`continuum_context::budget`], called from [`expand`] |
 //!
-//! The last row takes the first of RFC 0028's two branches — "either nothing is published,
-//! or a child pack is published whose manifest records the shortfall with reason `budget`"
-//! — because the second needs the byte packer that is PR-11/IMPL-06's bullet. The refusal
-//! carries a typed `non_resumable_reason` (SD-13) rather than a bare code.
+//! The last row has both of RFC 0028's branches since PR-11/IMPL-06 (bn-38p2) — "either
+//! nothing is published, or a child pack is published whose manifest records the shortfall
+//! with reason `budget`". Which one a call gets is decided by the packer and not by this
+//! module: it packs a smaller child while one exists, and the branch flips where even the
+//! complete manifest beside an empty selection is larger than the ceiling, because the
+//! manifest is "never the thing a budget squeezes out (INV-007)". That refusal carries a
+//! typed `non_resumable_reason` (SD-13) rather than a bare code; the packed answer carries
+//! the shortfall as an ordinary `budget` omission on the pack *and* on the envelope, which
+//! is how a caller tells the two apart without reading a status code twice.
 //!
 //! `depth` of zero is `MalformedRequest`: the IDL types it `U32 optional`, absence means 1,
 //! and neither RFC gives zero a meaning — a value inside the type and outside the
@@ -93,6 +98,7 @@
 //! pack assembly. Nothing about the answer is weaker for it: the pack is
 //! self-describing, carries its own `content_hash`, and names its parent.
 
+use continuum_context::budget::{BudgetError, BudgetPacker};
 use continuum_context::expansion::{
     Depth, ExpansionHandle, ExpansionPayload, ExpansionQuery, ExpansionRelation as PackRelation,
 };
@@ -473,26 +479,25 @@ fn expand(
     let identity = ExpansionHandle::derive::<Blake3Hasher>(&parent_id, &query, depth)
         .map_err(|_| malformed_pack(PackError::NotAPackHandle))?;
     let question = continuum_context::expansion::ExpansionQuestion::of(&query, depth);
-    let budget_bytes = ceiling(&record, envelope).map_err(malformed_pack)?;
+    let ceiling = ceiling(&record, envelope).map_err(malformed_pack)?;
 
-    let child = ChildPack {
-        parent: record.document(),
-        identity: &identity,
-        question: &question,
-        selected: &selected,
-        manifest: &manifest,
-        budget_bytes,
-    };
-    let document = child.to_json::<Blake3Hasher>().map_err(malformed_pack)?;
-    if !child.within(&document) {
-        // RFC 0028's budget row, first branch: nothing is published. The typed
-        // `non_resumable_reason` is the detail itself (SD-13), so a caller reading the
-        // failure and a caller reading a later task record see one reason.
-        return Err(Fault::exhausted(
-            "the expanded pack is larger than the byte budget this call ran under, and \
-             packing an expansion to a byte ceiling is not served by this daemon",
-        ));
+    // RFC 0028's budget row, both branches, decided by the packer: a smaller child whose
+    // manifest records the shortfall where one fits, and nothing published where none does.
+    // The child this daemon hands to it is the *whole* answer — packing is the only thing
+    // that may shrink it, and it may not shrink the manifest.
+    let packed = BudgetPacker {
+        full: ChildPack {
+            parent: record.document(),
+            identity: &identity,
+            question: &question,
+            selected: &selected,
+            manifest: &manifest,
+            ceiling,
+        },
+        shortfall: &query,
     }
+    .pack::<Blake3Hasher>()
+    .map_err(budget_fault)?;
 
     let context = ContextHandle::new(&identity.to_string()).map_err(|_| {
         Fault::new(
@@ -500,13 +505,15 @@ fn expand(
             "the derived pack identity is not a well-formed context handle",
         )
     })?;
-    let omissions = project(&manifest, &parent_id);
+    // The manifest the *published* child carries, which is the pre-packing one plus whatever
+    // the ceiling cost: "the wire projection of the same facts", record for record.
+    let omissions = project(packed.manifest(), &parent_id);
 
     Ok(Effect::new(
         Payload::ContextExpand(ContextExpandResponse {
             context,
             parent: request.context.clone(),
-            pack: Opaque::from_bytes(document.to_canonical_bytes()),
+            pack: Opaque::from_bytes(packed.document().to_canonical_bytes()),
         }),
         // `context.expand` declares no `verdict` clause — "consistent with returning a child
         // of an already-decided question" — and the dispatcher checks the agreement.
@@ -604,11 +611,19 @@ fn project(
 }
 
 /// The byte ceiling this expansion runs under: the request's, when it names one, and the
-/// parent's otherwise.
+/// parent's own recorded size otherwise.
 ///
 /// The envelope's `budget` is required on a `@task_starting` operation, so there is always
 /// one to read; `bytes` inside it is optional, and its absence means the caller stated no
 /// ceiling of its own rather than a ceiling of zero.
+///
+/// The fallback reads a *measurement* as a ceiling, and that is deliberate rather than
+/// left over. Since RFC 0028 correction 17 a pack's `content_budget.bytes` is what that pack
+/// spent, so the default this resolves to is "an expansion may not cost more than the pack
+/// it expands, unless the caller asks for more" — a bound a deployment can reason about,
+/// which a requested ceiling copied down a family could not be. Nothing about the *child's*
+/// own recorded value comes from here: what a child records is its own measurement
+/// (`ChildPack::to_json`), and this number only decides what it is admitted against.
 fn ceiling(record: &ContextPackRecord, envelope: &RequestEnvelope) -> Result<u64, PackError> {
     let stated = envelope
         .budget
@@ -703,4 +718,26 @@ fn malformed_pack(_error: PackError) -> Fault {
         ErrorCode::UnsupportedSemanticFeature,
         "this daemon holds no expandable form of the named pack",
     )
+}
+
+/// The wire answer to a ceiling the packer could not pack to.
+///
+/// One arm is a protocol outcome and the rest are not: [`BudgetError::Exhausted`] is RFC
+/// 0028's budget row taking its first branch, and the three others say the registered pack
+/// or its groups are not something a child can be derived from at *any* ceiling, which is
+/// the same fact [`malformed_pack`] answers. The detail is a `&'static str` by `Fault`'s own
+/// type, so neither carries a number a caller supplied.
+fn budget_fault(error: BudgetError) -> Fault {
+    match error {
+        // The typed `non_resumable_reason` is the detail itself (SD-13), so a caller reading
+        // the failure and a caller reading a later task record see one reason.
+        BudgetError::Exhausted { .. } => Fault::exhausted(
+            "the smallest conforming child of this expansion — its complete omission \
+             manifest beside an empty selection — is larger than the byte budget this call \
+             ran under, and a manifest is never what a budget squeezes out",
+        ),
+        BudgetError::Pack(_) | BudgetError::Accounting(_) | BudgetError::Manifest(_) => {
+            malformed_pack(PackError::NotAPackHandle)
+        }
+    }
 }

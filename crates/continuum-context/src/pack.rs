@@ -37,20 +37,53 @@
 //!   already-decided question" is the IDL's own reason for `context.expand` declaring no
 //!   verdict. Inheriting is equal, never stronger, so "a pack MUST NOT report an envelope
 //!   stronger than the result's" is preserved by construction.
-//! - **`content_budget.bytes` is, ratified, a measurement, and this module still threads a
-//!   ceiling through it.** RFC 0028 correction 17 reads the field as the pack's own
-//!   measured byte size — the counterpart of the IDL's `Cost.bytes`, not `Budget.bytes` or
-//!   `OutputPolicy.max_bytes` — because the ratified FR-01 sentence is graded by *summing*
-//!   `content_budget.bytes` over a pack family, which only measures anything if each
-//!   member's value is what that member actually spent. This module does not yet compute
-//!   that: assembling the true post-packing size is IMPL-06's bullet (byte packing), not
-//!   this one's, so [`ChildPack`]'s `budget_bytes` field carries the byte ceiling this
-//!   expansion runs under — the caller's request, or the parent's own recorded value
-//!   where the caller names none — and [`ChildPack::to_json`] writes that ceiling into
-//!   `content_budget.bytes` as an interim placeholder. [`ChildPack::within`] is the
-//!   admission check this makes necessary: a caller that names a ceiling is obliged to run
-//!   it against the result and refuse rather than over-run it. The gap closes when IMPL-06
-//!   lands and this key is populated from the child's own encoded length instead.
+//! - **`content_budget.bytes` is this child's own measured byte size** (PR-11 / IMPL-06).
+//!   RFC 0028 correction 17 reads the field as a measurement — "the pack's counterpart of
+//!   the IDL's `Cost.bytes`, not `Budget.bytes`/`OutputPolicy.max_bytes`" — because the
+//!   ratified FR-01 sentence is graded by *summing* `content_budget.bytes` over a pack
+//!   family, which measures nothing unless each member's value is what that member actually
+//!   spent. Until IMPL-06 landed this module wrote the *ceiling* there as a documented
+//!   interim placeholder; it now writes the measurement, and the ceiling lives on
+//!   [`ChildPack::ceiling`] where admission — [`ChildPack::within`], and
+//!   [`crate::budget`]'s packer — is the only thing that reads it. **The reading this
+//!   module fixes, once, here:** *measured* is the byte length of the child's own canonical
+//!   encoding — the whole published document, the bytes a caller receives and the bytes
+//!   ADR-0013 compares ("Two packs are the same pack iff their canonical encodings are
+//!   byte-equal") — not the identity preimage, not the payload minus its framing, and not
+//!   any subset of the keys. That is the only reading under which RFC 0028's "Expansion
+//!   accounting" sums to the number it says it sums to: the context bytes a pack family
+//!   actually cost.
+//! - **`content_budget.tokens` is absent, and its absence is the honest answer.** Tokens
+//!   are "advisory and model-relative", and the schema requires `tokenizer_id` "whenever
+//!   `tokens` is present; a token count with no tokenizer is not a measurement" (RFC 0028
+//!   F4, the IDL's `Cost.tokenizer_id`). No tokenizer exists in this workspace — `continuumd`
+//!   declines the same field for the same reason ("this daemon meters no tokens, so it stays
+//!   absent — never a placeholder beside an absent count", `daemon::budget`) — so a count
+//!   written here would be either fabricated or non-conforming. This module writes neither
+//!   key. When a tokenizer lands, both keys land together or neither does.
+//!
+//! # `content_budget.bytes` is a fixed point, and which one
+//!
+//! The measurement is a key of the document it measures, so recording it changes the number
+//! it records. That is the same self-reference `content_hash` has (next section), and it is
+//! closed the same way: by stating which of the readings the written token came from rather
+//! than leaving a reader to guess.
+//!
+//! A child's canonical encoding is `C + digits(N)` bytes long, where `N` is the value at
+//! `content_budget.bytes` and `C` is everything else. `C` is a constant of the document:
+//! changing `N` changes `content_hash`'s *value* and not its length, because a digest token
+//! is fixed-width. A truthful measurement is therefore a solution of `N = C + digits(N)`,
+//! and [`ChildPack::to_json`] finds one by iterating from zero — build, measure, write the
+//! measurement back, repeat until the number stops moving.
+//!
+//! That iteration converges to the **least** solution, and least is a choice rather than an
+//! accident: `N ↦ C + digits(N)` is monotone and the iteration starts below every solution,
+//! so it climbs to the smallest one. It has to be pinned, because a solution is not always
+//! unique — at a decimal boundary two are self-consistent (with `C = 8`, a nine-byte
+//! document saying `9` and a ten-byte one saying `10` are both telling the truth about
+//! themselves), and a packer free to publish either would have two encodings for one answer
+//! and therefore two `content_hash`es, which is the identity defect RFC 0028's determinism
+//! clause exists to forbid.
 //!
 //! # `content_hash`, and the self-reference every content-addressed document has
 //!
@@ -76,6 +109,10 @@
 //! | a parent missing an inherited key is refused | this module's no-fabrication rule | `a_parent_missing_an_inherited_key_is_refused` |
 //! | an anchor resolves in the parent | RFC 0028, "Expansion protocol" | `anchors_are_the_parents_own_ids_and_queries` |
 //! | the document is deterministic | `rule ordering.deterministic`, docs/19 §7 | `two_builds_of_one_child_are_byte_identical` |
+//! | `content_budget.bytes` is the child's own canonical length | RFC 0028 correction 17 | `the_recorded_size_is_the_documents_own_canonical_length` |
+//! | it is the *least* self-consistent length | this module's fixed-point reading | `the_recorded_size_is_the_least_self_consistent_one` |
+//! | the ceiling is not the measurement | RFC 0028 correction 17 | `the_ceiling_is_not_what_the_child_records` |
+//! | no token count is written without a tokenizer | RFC 0028 F4; the schema's conditional | `no_child_claims_a_token_count` |
 
 use core::fmt;
 use core::str::FromStr;
@@ -186,12 +223,16 @@ pub fn required_keys_present(document: &Json) -> Result<(), PackError> {
     Ok(())
 }
 
-/// The value the parent recorded under `content_budget.bytes`.
+/// The value the parent recorded under `content_budget.bytes`: per RFC 0028 correction 17,
+/// **the parent's own measured byte size**, never a ceiling.
 ///
-/// Ratified, per RFC 0028 correction 17, as the parent's own measured byte size, not a
-/// ceiling — but a caller of this function (see [`ChildPack`]'s documentation) uses the
-/// value as an inherited ceiling today, because IMPL-06 has not landed the packing step
-/// that would let this crate write the child's true measurement instead.
+/// A caller may still choose to *use* it as a ceiling for a child — `continuumd`'s
+/// `context.expand` does, where the request names none — and that is a reading about the
+/// caller's default, not about the field: "an expansion may not cost more than the pack it
+/// expands unless the caller asks for more" is a defensible default precisely because the
+/// number is what the parent spent. What this function does not do is let that reading back
+/// into the artifact: what a child *records* is its own measurement ([`ChildPack::to_json`]),
+/// and what it is *admitted against* is [`ChildPack::ceiling`].
 ///
 /// # Errors
 ///
@@ -257,21 +298,61 @@ pub struct ChildPack<'a> {
     pub selected: &'a [SelectedItem],
     /// What this child, in turn, leaves out — the residual manifest.
     pub manifest: &'a Manifest,
-    /// The byte ceiling this expansion runs under. Recorded into `content_budget.bytes` as
-    /// an interim placeholder — see this module's documentation, "The three keys the
-    /// expansion decides" — and checked, not enforced, here: see [`ChildPack::within`].
-    pub budget_bytes: u64,
+    /// The byte ceiling this expansion runs under — the caller's stated `max_bytes`, or
+    /// whatever default the caller resolved for it.
+    ///
+    /// **Not** what the child records: `content_budget.bytes` is the child's own measured
+    /// size (RFC 0028 correction 17; this module's documentation). The ceiling is what
+    /// admission is decided against — [`ChildPack::within`] for the one-shot check, and
+    /// [`crate::budget::BudgetPacker`] for RFC 0028's second branch, which packs a smaller
+    /// child rather than refusing.
+    pub ceiling: u64,
 }
 
+/// How many times [`ChildPack::to_json`] will build a document before refusing to measure it.
+///
+/// The measurement iteration converges in two or three rounds for every hasher this
+/// workspace has (see the module documentation's fixed-point section: the digit count is
+/// non-decreasing, and `u64::MAX` has twenty digits). The bound exists so that a hasher
+/// whose token *width* varied with its input would fail typed rather than spin.
+pub(crate) const MEASUREMENT_ROUNDS: usize = 24;
+
 impl ChildPack<'_> {
-    /// Write the child document.
+    /// Write the child document, measured.
+    ///
+    /// `content_budget.bytes` carries the byte length of the returned document's own
+    /// canonical encoding — the least self-consistent one, see the module documentation.
     ///
     /// # Errors
     ///
     /// [`PackError`] when the parent is not a conforming pack this child can be derived
     /// from: not an object, missing an inherited key, or carrying a `context_id` that is
-    /// not a `ctx_*` handle.
+    /// not a `ctx_*` handle; and [`PackError::UnmeasurableSize`] if the measurement does not
+    /// settle, which no hasher in this workspace can cause.
     pub fn to_json<H: ContentHasher>(&self) -> Result<Json, PackError> {
+        let mut measured: u64 = 0;
+        for _ in 0..MEASUREMENT_ROUNDS {
+            let document = self.document_with::<H>(measured)?;
+            let length = document.to_canonical_bytes().len() as u64;
+            if length == measured {
+                return Ok(document);
+            }
+            measured = length;
+        }
+        Err(PackError::UnmeasurableSize)
+    }
+
+    /// The child document with `bytes` written at `content_budget.bytes`, whatever `bytes`
+    /// is.
+    ///
+    /// The building block [`ChildPack::to_json`] iterates to a fixed point, and the one
+    /// [`crate::budget`] measures a document's fixed part with. Deliberately not public: a
+    /// pack whose recorded size is not its size is not a pack this crate publishes.
+    ///
+    /// # Errors
+    ///
+    /// As [`ChildPack::to_json`], less the measurement failure.
+    pub(crate) fn document_with<H: ContentHasher>(&self, bytes: u64) -> Result<Json, PackError> {
         let parent_id = identity_of(self.parent)?;
         let mut fields: BTreeMap<String, Json> = BTreeMap::new();
 
@@ -304,11 +385,15 @@ impl ChildPack<'_> {
         fields.insert("expansions".to_owned(), self.manifest.expansions_json());
         // C5/C1: a guarantee is a checked claim, and this bullet checked none.
         fields.insert("guarantees".to_owned(), Json::Array(Vec::new()));
+        // One key, and one key only: `tokens`/`tokenizer_id` are absent because no
+        // tokenizer exists to count under, and `nodes` is `OutputPolicy.max_nodes`'s
+        // ceiling, which no expansion in this workspace is given. See the module
+        // documentation.
         fields.insert(
             "content_budget".to_owned(),
             Json::object([(
                 "bytes".to_owned(),
-                Json::Integer(i64::try_from(self.budget_bytes).unwrap_or(i64::MAX)),
+                Json::Integer(i64::try_from(bytes).unwrap_or(i64::MAX)),
             )])
             .expect("one key"),
         );
@@ -330,15 +415,19 @@ impl ChildPack<'_> {
     /// Whether a written child fits the ceiling this expansion ran under.
     ///
     /// Separate from [`ChildPack::to_json`] because the two answers are different kinds of
-    /// thing: the document is what the expansion found, and this is whether the caller's
-    /// budget admits it. RFC 0028's typed-outcome table gives a daemon both branches for a
-    /// budget it cannot meet — "either nothing is published, or a child pack is published
-    /// whose manifest records the shortfall with reason `budget`" — and the second branch
-    /// needs the byte packer that is IMPL-06's bullet, so a caller of this function takes
-    /// the first and refuses.
+    /// thing: the document is what the expansion found and what it measured, and this is
+    /// whether the caller's budget admits it. The comparison is between the two numbers
+    /// RFC 0028 correction 17 separates — the document's measured size, which is exactly
+    /// what `content_budget.bytes` records, against [`ChildPack::ceiling`].
+    ///
+    /// RFC 0028's typed-outcome table gives a daemon both branches for a budget it cannot
+    /// meet — "either nothing is published, or a child pack is published whose manifest
+    /// records the shortfall with reason `budget`". This function decides the *first*
+    /// question only ("does the whole answer fit"); [`crate::budget::BudgetPacker`] owns
+    /// the second branch and calls this to decide when it is needed.
     #[must_use]
     pub fn within(&self, document: &Json) -> bool {
-        document.to_canonical_bytes().len() as u64 <= self.budget_bytes
+        document.to_canonical_bytes().len() as u64 <= self.ceiling
     }
 }
 
@@ -369,6 +458,13 @@ pub enum PackError {
         /// The value read.
         bytes: i64,
     },
+    /// The child's own byte size did not settle to a self-consistent value.
+    ///
+    /// Unreachable for a fixed-width digest token, which every hasher in this workspace
+    /// has; a typed refusal rather than a panic because a pack whose recorded size is not
+    /// its size is not a pack this crate publishes. See the module documentation's
+    /// fixed-point section.
+    UnmeasurableSize,
     /// An anchor is not spellable as a canonical [`Name`].
     UnnameableAnchor {
         /// The offending text's length, never the text: it came off an artifact and a
@@ -398,6 +494,10 @@ impl fmt::Display for PackError {
                     "`content_budget.bytes` is {bytes}; a byte budget is not negative"
                 )
             }
+            Self::UnmeasurableSize => f.write_str(
+                "the child's own byte size does not settle: no value of `content_budget.bytes` \
+                 is the length of the document that records it",
+            ),
             Self::UnnameableAnchor { length } => write!(
                 f,
                 "an anchor of {length} bytes is not a canonical identifier, so nothing in \
@@ -499,7 +599,7 @@ mod tests {
             question: &question,
             selected: &[],
             manifest,
-            budget_bytes: 16384,
+            ceiling: 16384,
         }
         .to_json::<Blake3Hasher>()
         .expect("the parent is conforming")
@@ -615,7 +715,7 @@ mod tests {
                 question: &question,
                 selected: &[],
                 manifest: &manifest,
-                budget_bytes: 16384,
+                ceiling: 16384,
             }
             .to_json::<Blake3Hasher>();
             assert_eq!(
@@ -656,7 +756,7 @@ mod tests {
             question: &question,
             selected: &[],
             manifest: &manifest,
-            budget_bytes: 16384,
+            ceiling: 16384,
         }
         .to_json::<Blake3Hasher>()
         .expect("conforming")
@@ -689,6 +789,113 @@ mod tests {
     fn the_budget_the_parent_recorded_is_readable() {
         assert_eq!(budget_bytes_of(&parent()), Ok(16384));
         let document = child(&parent(), &Manifest::empty());
-        assert_eq!(budget_bytes_of(&document), Ok(16384));
+        // The child's own value is *its* measurement, not the parent's — correction 17.
+        assert_eq!(
+            budget_bytes_of(&document),
+            Ok(document.to_canonical_bytes().len() as u64)
+        );
+    }
+
+    #[test]
+    fn the_recorded_size_is_the_documents_own_canonical_length() {
+        // RFC 0028 correction 17: "the field is a measurement, the pack's counterpart of the
+        // IDL's `Cost.bytes`". This module's reading of *measured*: the byte length of the
+        // published canonical encoding, which is checkable against the document itself.
+        for manifest in [
+            Manifest::empty(),
+            Manifest::new([OmissionRecord::expandable(
+                SelectionKind::Event,
+                196,
+                OmissionReason::Budget,
+                ExpansionQuery::new(ExpansionRelation::CausalPredecessors, name("e_ack")),
+            )])
+            .expect("one cell"),
+        ] {
+            let document = child(&parent(), &manifest);
+            let recorded = budget_bytes_of(&document).expect("a measured child");
+            assert_eq!(
+                recorded,
+                document.to_canonical_bytes().len() as u64,
+                "the recorded size is the size of the document that records it"
+            );
+        }
+    }
+
+    #[test]
+    fn the_recorded_size_is_the_least_self_consistent_one() {
+        // Anti-vacuity for the fixed-point reading. A neighbouring value is either not a
+        // length at all (the usual case) or is a *larger* self-consistent one at a decimal
+        // boundary; neither may be what the child publishes, so no smaller value than the
+        // recorded one is self-consistent and the recorded one is.
+        let document = child(&parent(), &Manifest::empty());
+        let recorded = budget_bytes_of(&document).expect("a measured child");
+        let mut fields = document.as_object().cloned().expect("object");
+        for candidate in (0..recorded).rev().take(64) {
+            fields.insert(
+                "content_budget".to_owned(),
+                Json::object([("bytes".to_owned(), Json::Integer(candidate as i64))])
+                    .expect("one key"),
+            );
+            // The `content_hash` of the perturbed document is stale, but its *length* is
+            // fixed-width, so the comparison below is about the only thing that moves.
+            let length = Json::Object(fields.clone()).to_canonical_bytes().len() as u64;
+            assert_ne!(
+                length, candidate,
+                "{candidate} is self-consistent and smaller than the recorded {recorded}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ceiling_is_not_what_the_child_records() {
+        // The correction-17 flip, as a difference rather than as prose: two children of one
+        // question under two ceilings record one number — their own size — and neither
+        // records the ceiling it ran under.
+        let parent = parent();
+        let manifest = Manifest::empty();
+        let identity = ExpansionHandle::derive::<Blake3Hasher>(
+            &identity_of(&parent).expect("a pack handle"),
+            &query(),
+            Depth::DEFAULT,
+        )
+        .expect("derives");
+        let question = ExpansionQuestion::of(&query(), Depth::DEFAULT);
+        let build = |ceiling: u64| {
+            ChildPack {
+                parent: &parent,
+                identity: &identity,
+                question: &question,
+                selected: &[],
+                manifest: &manifest,
+                ceiling,
+            }
+            .to_json::<Blake3Hasher>()
+            .expect("conforming")
+        };
+        let narrow = build(16384);
+        let wide = build(1 << 20);
+        assert_eq!(narrow.to_canonical_bytes(), wide.to_canonical_bytes());
+        let recorded = budget_bytes_of(&narrow).expect("measured");
+        assert_ne!(recorded, 16384);
+        assert_ne!(recorded, 1 << 20);
+        assert!(
+            recorded < 16384,
+            "the fixture's child is under both ceilings"
+        );
+    }
+
+    #[test]
+    fn no_child_claims_a_token_count() {
+        // RFC 0028 F4 and the schema's conditional: a token count owes a tokenizer identity,
+        // and this workspace has no tokenizer. `content_budget` therefore carries exactly
+        // one key.
+        let document = child(&parent(), &Manifest::empty());
+        let budget = document.as_object().expect("object")["content_budget"]
+            .as_object()
+            .expect("object");
+        assert_eq!(
+            budget.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["bytes"]
+        );
     }
 }

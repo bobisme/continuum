@@ -24,7 +24,10 @@
 //!   property, checked over the wire rather than only inside `continuum-context`.
 //! - **every row of RFC 0028's typed-outcome table is the code it says.** Including the two
 //!   that are successes: a redacted anchor expands to a child carrying the stub, and a
-//!   relation that yields nothing expands to an empty pack with an empty manifest.
+//!   relation that yields nothing expands to an empty pack with an empty manifest. The budget
+//!   row's second branch — a smaller child recording the shortfall, PR-11/IMPL-06 (bn-38p2) —
+//!   has a fixture wide enough to pack in `daemon_context_budget.rs`; what stays here is the
+//!   boundary below which nothing is published.
 //!
 //! # The fixture, and why it is this fixture
 //!
@@ -818,10 +821,15 @@ fn a_purged_anchor_expands_to_a_success_carrying_the_stub_and_the_redaction_reco
 }
 
 #[test]
-fn a_budget_smaller_than_the_answer_refuses_rather_than_truncating() {
-    // RFC 0028's budget row, first branch: nothing is published. The alternative — a smaller
-    // pack with a larger manifest — needs the byte packer PR-11/IMPL-06 owns, and truncating
-    // silently is the one thing the row forbids outright.
+fn a_budget_below_the_minimal_child_refuses_rather_than_truncating() {
+    // RFC 0028's budget row, first branch: nothing is published. The *other* branch — a
+    // smaller pack with a larger manifest — landed with PR-11/IMPL-06 (bn-38p2) and is
+    // evidenced in `daemon_context_budget.rs`; this pin did not move with it, and the reason
+    // is the boundary between them. Sixty-four bytes is below the smallest conforming child
+    // of this fixture — its complete manifest beside an empty selection, plus the keys every
+    // child inherits — so there is nothing to pack down to and the refusal is still the
+    // whole answer. Truncating silently is the one thing the row forbids outright at every
+    // ceiling.
     let mut daemon = daemon();
     let mut request_envelope = envelope("context.expand", "req_1");
     request_envelope.budget = Optional::Present(budget(Optional::Present(ByteCount::new(64))));
