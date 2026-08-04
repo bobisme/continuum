@@ -53,10 +53,13 @@
 //! PR-12 / IMPL-06 (`bn-3vxp`) adds [`faults`], [`fairness`], and [`assurance`] — RFC 0031's `faults` (fault-model set membership), `fairness` (per-unit membership, the `kind` movement, and the antitone `condition` rule), and `assurance` (the requirement triple's total order, closed over `continuum_intent::assurance_policy` and never emitting `incomparable`) field classifications; see each module's doc for scope.
 //!
 //! PR-12 / IMPL-03 (`bn-7vg7`) adds [`assumptions`] — RFC 0031's `assumptions` field classification: per-unit `added`/`removed` membership keyed by `id`, `unchanged`/`incomparable` for declaredness moves on `classification`/`fidelity_profile` with the expression held fixed, and `unknown` for an unequal expression (no Finite-fragment inclusion oracle exists yet to discharge `strengthened`/`weakened`); the dangerous direction is `strengthened`, the mirror image of `properties`' `weakened` — see the module doc for scope and the recorded RFC 0031 table gap.
+//!
+//! PR-12 / IMPL-01 (`bn-b8ru`) adds [`equality`] — RFC 0031's whole-contract `unchanged` shortcut: `classify` decides whether two Intent Contract identities agree, licensing all fifteen fields `unchanged` without inspecting any of them; see its module doc for scope and for why it answers plan §5.3's "unchanged intent", the bullet's normative text rather than its two-word title.
 
 pub mod assumptions;
 pub mod assurance;
 pub mod bounds;
+pub mod equality;
 pub mod fairness;
 pub mod faults;
 pub mod observers;
