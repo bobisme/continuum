@@ -130,6 +130,89 @@ lean:
 traceability:
     cd notes/plan && uv run --with jsonschema python3 tools/generate_traceability.py
 
+# ASan/TSan lanes over the daemon and publication paths (PHASE-A-DEL-03, bn-cho5).
+#
+# Deliberately NOT part of `just check`: `-Zsanitizer` is nightly-only, and the
+# workspace toolchain is pinned to 1.97.0 (rust-toolchain.toml, INV-014) — the
+# default gate must stay green on the pinned toolchain. This lane needs a nightly
+# toolchain with the `rust-src` component (`-Zbuild-std` instruments std itself,
+# without which TSan reports false positives against uninstrumented std sync
+# primitives): `rustup toolchain install nightly && rustup component add
+# rust-src --toolchain nightly`. Pass a dated nightly to pin the lane's identity:
+# `just sanitizers nightly-2026-04-29`.
+#
+# What the lane is, and is not: sanitizer output is *testing evidence, never
+# proof* (docs/29 §"assurance stack", research/20) — the deterministic schedule
+# matrices (`task_lifecycle_schedule_matrix.rs`, `publication_schedule_matrix.rs`,
+# the DX-13/DX-14 campaigns) carry the semantic claims; this lane checks the
+# memory-model residual those single-threaded enumerations cannot reach: that the
+# store's `Mutex` really does make its critical sections atomic under real
+# threads (the `continuum-workspace` threaded suites), and that the daemon and
+# publication paths are free of UB the pinned-toolchain gate cannot see.
+#
+# Anti-vacuity: each sanitizer first proves it is ARMED by compiling and running
+# a canary with a known defect (a heap overflow for ASan, a data race for TSan)
+# and requiring a non-zero exit — a mis-spelled RUSTFLAGS would otherwise turn
+# the whole lane into a green no-op. Doctests are excluded (`--tests`): they run
+# under the pinned gate, and rustdoc's build-std interaction is not this lane's
+# claim.
+sanitizers toolchain="nightly":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! rustup run "{{toolchain}}" rustc --version >/dev/null 2>&1; then
+        echo "continuum: toolchain '{{toolchain}}' is not installed." >&2
+        echo "  rustup toolchain install {{toolchain}}" >&2
+        exit 1
+    fi
+    if ! rustup component list --toolchain "{{toolchain}}" 2>/dev/null | grep -q '^rust-src.*(installed)'; then
+        echo "continuum: '{{toolchain}}' lacks rust-src (needed by -Zbuild-std)." >&2
+        echo "  rustup component add rust-src --toolchain {{toolchain}}" >&2
+        exit 1
+    fi
+    host="$(rustup run "{{toolchain}}" rustc -vV | awk '/^host:/ {print $2}')"
+    echo "== sanitizer lane: {{toolchain}} ($(rustup run "{{toolchain}}" rustc --version)), target ${host}"
+    canary_dir="$(mktemp -d)"
+    trap 'rm -rf "${canary_dir}"' EXIT
+    printf '%s\n' \
+        'fn main() {' \
+        '    let v = vec![0u8; 4];' \
+        '    let p = v.as_ptr();' \
+        '    unsafe { std::ptr::read_volatile(p.add(4)); }' \
+        '}' > "${canary_dir}/asan_canary.rs"
+    printf '%s\n' \
+        'static mut RACER: u64 = 0;' \
+        'fn main() {' \
+        '    let t = std::thread::spawn(|| unsafe { RACER += 1 });' \
+        '    unsafe { RACER += 1 };' \
+        '    t.join().unwrap();' \
+        '}' > "${canary_dir}/tsan_canary.rs"
+    for lane in address thread; do
+        case "${lane}" in
+            address) canary="asan_canary" ;;
+            thread)  canary="tsan_canary" ;;
+        esac
+        echo "== ${lane}: arming check (the canary's defect must be caught)"
+        # `-Cunsafe-allow-abi-mismatch=sanitizer` is sound for the CANARY only: its
+        # defect lives entirely in its own (instrumented) crate, and the waiver merely
+        # lets it link the prebuilt std without a per-canary `-Zbuild-std`. The suites
+        # below never use the waiver — they get a fully instrumented std.
+        rustup run "{{toolchain}}" rustc --edition 2021 -Zsanitizer="${lane}" \
+            -Cunsafe-allow-abi-mismatch=sanitizer \
+            --target "${host}" -o "${canary_dir}/${canary}" "${canary_dir}/${canary}.rs" \
+            2> "${canary_dir}/${canary}.compile.log" \
+            || { cat "${canary_dir}/${canary}.compile.log" >&2; exit 1; }
+        if "${canary_dir}/${canary}" > "${canary_dir}/${canary}.log" 2>&1; then
+            echo "continuum: the ${lane} sanitizer did NOT catch its canary — the lane is disarmed." >&2
+            exit 1
+        fi
+        echo "== ${lane}: armed; running the daemon and publication suites"
+        export RUSTFLAGS="-Zsanitizer=${lane}"
+        cargo +{{toolchain}} test --locked -Zbuild-std --target "${host}" --tests \
+            -p continuum-workspace -p continuumd -p continuum-task
+        unset RUSTFLAGS
+    done
+    echo "== sanitizer lane: both lanes green (evidence, never proof — docs/29)"
+
 # Install Continuum binaries.
 #
 # Honest as of PR-1 / IMPL-01: no crate declares a [[bin]] target yet. Plan §20

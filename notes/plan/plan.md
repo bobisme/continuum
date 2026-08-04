@@ -2103,7 +2103,22 @@ Deliver:
 
 - immutable workspace and intent schemas; (delivered: bn-15gj, bn-1qhe, bn-2xri, bn-1hrk, bn-u8z2, bn-136f, bn-1tgp, bn-7f23, bn-111k, bn-14w6, bn-fp0g, bn-1fc0, bn-185wn, bn-ces7)
 - native daemon protocol;
-- task/continuation lifecycle;
+- task/continuation lifecycle; (delivered: bn-3tz60, bn-cho5 — the lifecycle machinery
+  itself landed through the PR 6 campaign (task table, budget ledger, regions,
+  continuations, cancellation, recovery); bn-3tz60 closed the client half, the
+  `continuum context expand` / `task status|resume|cancel` continuation command family;
+  bn-cho5 closed the concurrency half: deterministic schedule matrices at both grains —
+  `crates/continuumd/tests/task_lifecycle_schedule_matrix.rs` (two-lane dispatch
+  interleavings commute; `task.cancel` and a duplicate `verification.start` spliced at
+  every position; a crash at every one of bn-3dr's nine boundaries at every lifecycle
+  position, restarting to the byte-identical record) and
+  `crates/continuum-workspace/tests/publication_schedule_matrix.rs` (the CAS two-phase
+  machine stepped through every enumerated interleaving: convergence, INV-017 visibility,
+  GC-vs-pin, collision); the seeded-defect campaign
+  `crates/continuumd/tests/task_lifecycle_mutation_campaign.rs` proving the suite catches
+  lost-update, orphan-worker and half-publication defects mutation-style; and the
+  `just sanitizers` ASan/TSan lane over the daemon and publication paths, nightly-gated
+  outside `just check`, with armed-canary anti-vacuity)
 - evidence graph;
 - Context Pack v0;
 - semantic diff v0;
