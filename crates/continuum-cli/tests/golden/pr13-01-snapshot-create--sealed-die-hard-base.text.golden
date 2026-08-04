@@ -1,0 +1,11 @@
+operation  workspace.create
+depth  served
+components_intent  in_7c579d67c260f5b9f3739359cb76941aed0fa533568b317d5a173844c1267b42
+components_files  2
+overlay  0
+seal  true
+snapshot  ws_127abf3ab6f4942c519f0b28a56b83a5bdb5f3c1e9a9c3e4b1f377c9fe62fe87
+sealed  true
+diagnostics  0
+omissions  0
+next_operations  0

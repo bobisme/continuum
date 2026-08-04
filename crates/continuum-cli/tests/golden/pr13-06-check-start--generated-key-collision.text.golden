@@ -1,0 +1,16 @@
+operation  verification.start
+depth  refused
+snapshot  ws_3bb5468fea316619b5f223c42bb17e6c32c6e7cd1688d9a889a6750efc1990c2
+target_kind  all_claims
+target_id  DieHard
+portfolio  interactive
+priority_class  none
+budget_states  4
+error.code  IdempotencyKeyReused
+error.detail  this idempotency key was used for a different request
+error.retryable  false
+error.recovery  0
+error.continuation  none
+error.non_resumable_reason  none
+omissions  0
+next_operations  0

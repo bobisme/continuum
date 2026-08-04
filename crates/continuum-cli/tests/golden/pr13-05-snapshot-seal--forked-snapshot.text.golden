@@ -1,0 +1,7 @@
+operation  workspace.seal
+depth  served
+snapshot  ws_3bb5468fea316619b5f223c42bb17e6c32c6e7cd1688d9a889a6750efc1990c2
+sealed  ws_3bb5468fea316619b5f223c42bb17e6c32c6e7cd1688d9a889a6750efc1990c2
+root_digest  ws_0c785da8661c167217ace761a168074673c07f91d952cae671f7d88b46b6a290
+omissions  0
+next_operations  0

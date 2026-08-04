@@ -1,0 +1,11 @@
+operation  context.expand
+depth  served
+context  ctx_abc123def456
+anchor  node-42
+relation  source_span
+expand_depth  1
+expanded  ctx_d67f9e453a38c302059930d118f3c088b536724aaaf5a9b475414599bd815ecb
+parent  ctx_abc123def456
+pack_bytes  809
+omissions  0
+next_operations  0

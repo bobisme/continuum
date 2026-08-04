@@ -1,0 +1,13 @@
+operation  task.cancel
+depth  served
+task  task_578cfc118311a41524a01c2a508fdc036800b70587bcb87af235539cdaf06df3
+outcome  valid-continuation
+record  3
+record.status  cancelled
+record.continuation  cont_04bb84561094e761bbfa0fa9b8e5506dc2936cfb836bc7624af7ab75ccf29cf3
+record.committed_evidence  0
+omissions  1
+omissions[0].reason  unsupported
+omissions[0].subject  task.committed_evidence
+omissions[0].recoverable_by  none
+next_operations  0

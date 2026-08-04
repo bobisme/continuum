@@ -1,0 +1,12 @@
+operation  debug.state
+depth  unsupported
+branch  dbg_branch01
+observer  none
+error.code  UnsupportedSemanticFeature
+error.detail  the request body is not the shape this operation declares
+error.retryable  false
+error.recovery  0
+error.continuation  none
+error.non_resumable_reason  none
+omissions  0
+next_operations  0

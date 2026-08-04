@@ -1,0 +1,1 @@
+Error: the connection failed: no daemon transport is configured: continuumd ships no socket or process transport yet, so this binary has no deployment to dial

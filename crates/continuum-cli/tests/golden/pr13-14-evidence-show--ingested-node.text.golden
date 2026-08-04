@@ -1,0 +1,13 @@
+operation  evidence.get
+depth  served
+evidence  ev_15ec6c1a3ba1bc95f61afdea33c92d607ecca1cfb8eebb71af07d4bc8cc857cb
+inline  false
+node_bytes  584
+edge_bytes  none
+redacted  none
+redacted.redacted  none
+redacted.reason  none
+redacted.commitment  none
+redacted.original_class  none
+omissions  0
+next_operations  0

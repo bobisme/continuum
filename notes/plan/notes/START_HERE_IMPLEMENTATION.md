@@ -351,7 +351,40 @@ theirs, with each fixture duplicated locally rather than imported for the reason
 
 Support `--json`; prose is a projection.
 
-**Exit:** golden tests pin JSON, exit codes, and concise terminal output.
+**Exit:** golden tests pin JSON, exit codes, and concise terminal output (delivered:
+bn-2hmk — `crates/continuum-cli/tests/pr13_exit_evidence.rs` plus 42 committed golden
+artifacts under `crates/continuum-cli/tests/golden/` and the machine-readable summary
+`crates/continuum-cli/tests/evidence/pr13-exit.json`: the independent exit layer over the
+four landed command bones, touching none of their tests and none of `src/`. Twenty-two
+scenarios drive every stable §13.4 command through `cli::run` itself — real argv, the
+`Scan` parser, a real encoded frame over a real `LocalPair` boundary against one
+provisioned daemon serving every family the commands need — and every `--format json`
+document and `--format text` body is retained under a stable artifact ID and compared byte
+for byte with **no normalization anywhere**; `pretty` is pinned as text plus exactly one
+label line. The five-class taxonomy is reached by scenarios that genuinely produce each
+class, none mocked: the engine's own Die Hard refutation exits 3; its typed
+`ResourceExhausted` inconclusiveness under a real four-state budget exits 4, read twice
+(`check result` and the bounded `check await`); the daemon's own `StaleSnapshot` after the
+lineage really moved past the pinned snapshot, its own `IdempotencyKeyReused` after a real
+generated-key collision, and its own `UnsupportedSemanticFeature` over the really-unserved
+`explain compile`/`debug`/`repair` surfaces all exit 1 beside their typed depth; and
+`NullTransport` — the transport `bin/continuum.rs` actually runs today — exits 2 with no
+machine document to render, which is the honest shape of a fault. INV-003 is held over the
+pinned set itself: `contract::divergence` is empty between the two channels of every
+scenario, and the suite mutation-checks its own teeth — a single flipped byte of any of
+the 42 goldens is detected by the same comparison the pinning test uses, a changed value
+and an invented key in a real terminal body each fail the projection check by name, a
+dropped line fails the byte comparison, and the check distinguishes all 380 cross-scenario
+pairs. INV-005 by construction rather than by regex: two independently provisioned daemons
+render byte-identical artifacts, the only timestamps in any golden are the fixture's
+declared `now`, and no path, clock, or map-order reaches any pinned byte; regeneration
+(`PR13_EXIT_BLESS=1`) rewrites and then always panics, so new bytes are always reviewed as
+a contract change rather than self-certified (INV-004). One residual pinned, not
+certified: scenario `pr13-06-check-start--generated-key-collision` retains bn-jmx97's
+generated-idempotency-key content collision — a second `verification.start` with a
+different body under the same generated key is refused `IdempotencyKeyReused` — annotated
+in the suite, the summary's `residuals`, and here, so the golden fails visibly on the day
+the derivation is fixed).
 
 ### PR 14 — Asupersync semantic journal [G4]
 

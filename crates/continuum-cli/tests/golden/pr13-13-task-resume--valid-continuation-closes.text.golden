@@ -1,0 +1,12 @@
+operation  task.resume
+depth  served
+continuation  cont_f7e97cc9796b7afa9c5baf3926bf6f95f80f86004edd2ed9ba87d15211bfb6ec
+budget_states  64
+record  2
+record.task  task_3a30538b7e46df954e70356ac9c5085d72cfe3c73fcee7a49f96914fd469bebd
+record.status  completed
+omissions  1
+omissions[0].reason  unsupported
+omissions[0].subject  task.committed_evidence
+omissions[0].recoverable_by  none
+next_operations  0

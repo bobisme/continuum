@@ -1,0 +1,12 @@
+operation  task.resume
+depth  refused
+continuation  cont_04bb84561094e761bbfa0fa9b8e5506dc2936cfb836bc7624af7ab75ccf29cf3
+budget_states  64
+error.code  StaleSnapshot
+error.detail  the snapshot the continuation pinned is not the current sealed snapshot
+error.retryable  false
+error.recovery  0
+error.continuation  none
+error.non_resumable_reason  none
+omissions  0
+next_operations  0

@@ -1,0 +1,16 @@
+operation  context.compile
+depth  unsupported
+evidence_root  ev_failure1
+question  why did AckImpliesDurable fail?
+audience  none
+budget_bytes  4096
+guarantees  1
+guarantees[0]  ReplayPreserving
+error.code  UnsupportedSemanticFeature
+error.detail  no Context Pack compiler is served by this daemon; a pack is compiled from the evidence graph, the property automaton and the correspondence graph, and none of those is wired here
+error.retryable  false
+error.recovery  0
+error.continuation  none
+error.non_resumable_reason  none
+omissions  0
+next_operations  0

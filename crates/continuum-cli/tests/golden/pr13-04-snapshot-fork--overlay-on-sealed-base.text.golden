@@ -1,0 +1,11 @@
+operation  workspace.fork
+depth  served
+base  ws_127abf3ab6f4942c519f0b28a56b83a5bdb5f3c1e9a9c3e4b1f377c9fe62fe87
+overlay  1
+patches  0
+snapshot  ws_3bb5468fea316619b5f223c42bb17e6c32c6e7cd1688d9a889a6750efc1990c2
+intent  in_7c579d67c260f5b9f3739359cb76941aed0fa533568b317d5a173844c1267b42
+pre_diff  none
+diagnostics  0
+omissions  0
+next_operations  0
