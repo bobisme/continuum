@@ -101,11 +101,12 @@
 //!   Unsupported/EngineError (INV-008)." Likewise "Budget exhaustion is never a verdict
 //!   (plan §11.4); it is the `BudgetExhausted` error with a continuation" — that error and
 //!   its continuation belong to `continuumd` (PR 5).
-//! - **`docs/03`'s fifth claim dimension, `ObservationCoverage`, is absent.** The
-//!   conceptual `AssuranceClaim` struct names it, but docs/03 §3 tabulates only four
-//!   dimensions and no other dossier source enumerates its levels. Inventing them here
-//!   would be exactly the guessing INV-008 exists to prevent; it lands when a source
-//!   fixes it.
+//! - **`docs/03`'s fifth claim dimension, `ObservationCoverage`, is absent.** docs/03's
+//!   conceptual `AssuranceClaim` struct named it, but §3 tabulated no levels for it and no
+//!   other dossier source enumerated them; inventing them here would have been exactly the
+//!   guessing INV-008 exists to prevent, so docs/03 has since struck the field instead
+//!   (bn-3usqn). This module still defines no such type, and should add one only if a
+//!   source later fixes the field's levels.
 
 use core::fmt;
 

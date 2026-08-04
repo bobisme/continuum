@@ -28,12 +28,9 @@ pub struct AssuranceResult {
 Established
 Refuted
 Inconclusive
-Unsupported
-ResourceExhausted
-EngineError
 ```
 
-`Established` is meaningful only together with evidence and scope.
+`Established` is meaningful only together with evidence and scope. `Unsupported`, `ResourceExhausted`, and `EngineError` are not verdicts: they are three of the six typed `inconclusive_reason` values `Inconclusive` carries per INV-008 and plan §11.4 (correction 1).
 
 ## Evidence classes
 
@@ -123,6 +120,12 @@ INCONCLUSIVE (production telemetry missing StorageStable)
 ```
 
 Colors and checkmarks may not erase the qualifier.
+
+## Corrections recorded by this RFC
+
+Per plan §25, where plan prose, docs, or a dependent artifact disagrees with this RFC, this RFC governs. The corrections in force:
+
+1. **The Verdict block listed inconclusive reasons as verdicts.** This RFC's "Verdict" section originally listed six items — `Established`, `Refuted`, `Inconclusive`, `Unsupported`, `ResourceExhausted`, `EngineError` — as though all six were verdicts. Normative: `assurance-result.schema.json`'s (and `evidence-graph-node.schema.json`'s) `verdict`/`status` enum has exactly three verdict members (`established`, `refuted`, `inconclusive`), and both schemas require `inconclusive_reason` whenever that value is `inconclusive`; `inconclusive_reason`'s six-member closed set — `Unsupported`, `ResourceExhausted`, `EngineError`, `InsufficientTelemetry`, `AbstractionAmbiguity`, `IncompleteProofSearch` — is the same list plan §11.4 gives for INV-008. Direction: this RFC is corrected to agree with the schemas and plan §11.4; the "Verdict" block above lists only the three verdicts, and `Unsupported`/`ResourceExhausted`/`EngineError` are named as inconclusive reasons instead.
 
 ## Rejected alternatives
 

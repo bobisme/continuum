@@ -19,7 +19,6 @@ struct AssuranceClaim {
     exploration: ExplorationClass,
     proof: ProofClass,
     linkage: ImplementationLinkage,
-    observation: ObservationCoverage,
 
     assumptions: Vec<Assumption>,
     trusted: Vec<TrustedComponent>,
@@ -30,6 +29,8 @@ struct AssuranceClaim {
     reproduction: Reproduction,
 }
 ```
+
+`ObservationCoverage` is struck from this struct: no source in this dossier, `notes/plan/schemas/`, or `continuum-value`'s assurance vocabulary (`crates/continuum-value/src/assurance.rs`) enumerates its levels, and §3 below tabulates only the four dimensions retained above; INV-003 leaves inventing levels to whichever source defines the field next.
 
 ## 3. Dimensions
 
