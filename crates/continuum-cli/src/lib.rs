@@ -13,11 +13,12 @@
 //! The PR-13 START_HERE line names three command groups. The third (bn-3tz60) landed first:
 //! `context expand`, and `task status`/`task resume`/`task cancel`. The second (bn-1g7e4)
 //! is the failure-investigation and promotion group: `debug open`/`debug state`,
-//! `repair begin`/`repair review`, and `evidence show`. The first group —
-//! `snapshot`/`check`/`explain` (bn-3rqvm) — and the cross-cutting output contract
-//! (bn-ybh1z) are separate bones and had not landed when this one did; [`cli`] therefore
-//! knows the `context`, `task`, `debug`, `repair`, and `evidence` verb groups and reports
-//! every other first word as a usage error.
+//! `repair begin`/`repair review`, and `evidence show`. The first — the read/verify group
+//! (bn-3rqvm) — is `snapshot create|fork|seal`, `check start|result|await`, and
+//! `explain compile`. The cross-cutting output contract (bn-ybh1z) is a separate bone and had
+//! not landed when this one did; [`cli`] therefore knows the `snapshot`, `check`, `explain`,
+//! `context`, `task`, `debug`, `repair`, and `evidence` verb groups and reports every other
+//! first word as a usage error.
 //!
 //! # Explicit handles everywhere (INV-002)
 //!
@@ -29,7 +30,7 @@
 //!
 //! # Honest depth (INV-008)
 //!
-//! Three of this crate's commands drive operations `continuumd` registers and does not yet
+//! Several of this crate's commands drive operations `continuumd` registers and does not yet
 //! serve. They do not pretend otherwise and they do not fail opaquely: the frame is sent, the
 //! daemon's own `UnsupportedSemanticFeature` comes back (`rule
 //! errors.unsupported_surface`), and every format prints a typed [`render::Depth`] token
@@ -37,6 +38,26 @@
 //! daemon's answer, so no list in this crate has to be edited on the day a family lands —
 //! see [`render::Depth`] for why that matters.
 //!
+//! - [`snapshot`] — `snapshot create`/`fork`/`seal` drive the PR-3 workspace family through
+//!   `continuumd`'s real `workspace.create`/`workspace.fork`/`workspace.seal`, all three of
+//!   which `continuumd::daemon::workspace::WorkspaceFamily` serves. Live end to end:
+//!   `tests/snapshot_family.rs` creates a snapshot, seals it by the handle the create
+//!   *printed*, and forks it, all through the command functions over real frames. The
+//!   registry's fourth `workspace` operation, `workspace.diff`, is deliberately not a verb of
+//!   this group — see [`snapshot`]'s module doc.
+//! - [`check`] — `check start` submits a verification campaign (`verification.start`) and
+//!   `check result`/`check await` read the verdict it earns (`verification.result`,
+//!   `verification.await`). All three are served. `check start` performs exactly one call and
+//!   prints the handle: there is no poll loop, because a client-side stopping rule would be a
+//!   CLI-only behavior with no daemon counterpart, and a remembered task would be the ambient
+//!   state INV-002 forbids. The verdict, its INV-008 `inconclusive_reason`, and the
+//!   nine-dimension assurance envelope are read off the answer and re-derived nowhere.
+//! - [`explain`] — `explain compile` asks for a Context Pack (`context.compile`) and renders
+//!   the *projection* of the pack document: its schema-normative fields as `key  value` lines
+//!   in the text formats, and the document itself embedded verbatim in machine output. The
+//!   compiler is the one operation in a served namespace this daemon refuses, so the command
+//!   reports a typed `unsupported` depth today (see above) and its projection is unit-tested
+//!   against a conforming pack.
 //! - [`context`] — `context expand` follows a PR-11 expansion handle
 //!   (`continuumd::protocol::operations::context::ContextExpandRequest`) and renders the
 //!   INV-007 omission manifest alongside the expanded slice, non-suppressibly. **Live as of
@@ -90,13 +111,16 @@
 //! same daemon in-process today (`continuum-mcp/tests/typed_surface.rs`,
 //! `crates/continuum-benchmark/src/rig.rs`).
 
+pub mod check;
 pub mod cli;
 pub mod context;
 pub mod debug;
 pub mod error;
 pub mod evidence;
+pub mod explain;
 pub mod format;
 pub mod render;
 pub mod repair;
+pub mod snapshot;
 pub mod task;
 pub mod wire;

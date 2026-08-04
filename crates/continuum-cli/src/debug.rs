@@ -45,7 +45,7 @@ use continuumd::protocol::spec::Optional;
 use crate::error::CliError;
 use crate::format::Format;
 use crate::render::{self, Projection, Rendered};
-use crate::wire::{Connection, Outcome, Transport};
+use crate::wire::{Admitted, Connection, Outcome, Transport};
 
 /// The wire operation `debug open` drives, in the registry's own spelling.
 pub const OPEN_OPERATION: &str = "debug.open";
@@ -121,7 +121,8 @@ pub fn render_open(
                 .map_or(Json::Null, |observer| Json::String(observer.clone())),
         ),
     ];
-    let success = |response: &DebugOpenResponse| {
+    let success = |admitted: &Admitted<DebugOpenResponse>| {
+        let response = &admitted.payload;
         (
             vec![
                 ("branch".to_owned(), response.branch.as_str().to_owned()),
@@ -229,7 +230,8 @@ pub fn render_state(
                 .map_or(Json::Null, |observer| Json::String(observer.clone())),
         ),
     ];
-    let success = |response: &DebugStateResponse| {
+    let success = |admitted: &Admitted<DebugStateResponse>| {
+        let response = &admitted.payload;
         (
             vec![(
                 "state.bytes".to_owned(),

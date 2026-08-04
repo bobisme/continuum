@@ -41,7 +41,7 @@ use continuumd::protocol::spec::{Optional, ProtocolEnum};
 use crate::error::CliError;
 use crate::format::Format;
 use crate::render::{self, Projection, Rendered};
-use crate::wire::{Connection, Outcome, Transport};
+use crate::wire::{Admitted, Connection, Outcome, Transport};
 
 /// The wire operation `evidence show` drives, in the registry's own spelling.
 pub const OPERATION: &str = "evidence.get";
@@ -108,8 +108,8 @@ pub fn render(args: &ShowArgs, outcome: &Outcome<Payload>, format: Format) -> Re
         ),
         ("inline".to_owned(), Json::Bool(args.inline)),
     ];
-    let success = |payload: &Payload| {
-        let body = response(payload);
+    let success = |admitted: &Admitted<Payload>| {
+        let body = response(&admitted.payload);
         let node = body.and_then(|body| body.node.value());
         let edge = body.and_then(|body| body.edge.value());
         let stub = body.and_then(|body| body.redacted.value());

@@ -51,7 +51,7 @@ use continuumd::protocol::vocabulary::GateProfile;
 use crate::error::CliError;
 use crate::format::Format;
 use crate::render::{self, Projection, Rendered};
-use crate::wire::{Connection, Outcome, Transport};
+use crate::wire::{Admitted, Connection, Outcome, Transport};
 
 /// The wire operation `repair begin` drives, in the registry's own spelling.
 pub const BEGIN_OPERATION: &str = "repair.begin";
@@ -121,7 +121,8 @@ pub fn render_begin(
             Json::String(args.gate_profile.as_wire().to_owned()),
         ),
     ];
-    let success = |response: &RepairBeginResponse| {
+    let success = |admitted: &Admitted<RepairBeginResponse>| {
+        let response = &admitted.payload;
         (
             vec![("repair".to_owned(), response.repair.as_str().to_owned())],
             vec![(
@@ -245,7 +246,8 @@ pub fn render_review(
         "repair".to_owned(),
         Json::String(args.repair.as_str().to_owned()),
     )];
-    let success = |response: &RepairReviewResponse| {
+    let success = |admitted: &Admitted<RepairReviewResponse>| {
+        let response = &admitted.payload;
         let mut lines = vec![(
             "semantic_diff".to_owned(),
             render::string_or_none(response.semantic_diff.value().map(|handle| handle.as_str())),

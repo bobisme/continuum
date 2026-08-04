@@ -689,6 +689,8 @@ fn admitted<T>(payload: T, omissions: Vec<Omission>) -> Outcome<T> {
         request_id: RequestId::new("req_cli000001").expect("a request id"),
         status: ResultStatus::Ok,
         payload,
+        verdict: None,
+        assurance: None,
         task: None,
         continuation: None,
         omissions,

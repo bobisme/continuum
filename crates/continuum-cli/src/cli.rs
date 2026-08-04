@@ -1,12 +1,13 @@
 //! Argument parsing and dispatch for the command groups this crate has landed:
-//! `continuum context expand`, `continuum task status|resume|cancel` (bn-3tz60), and
+//! `continuum context expand`, `continuum task status|resume|cancel` (bn-3tz60);
 //! `continuum debug open|state`, `continuum repair begin|review`, `continuum evidence show`
-//! (bn-1g7e4).
+//! (bn-1g7e4); and `continuum snapshot create|fork|seal`, `continuum check start|result|await`,
+//! `continuum explain compile` (bn-3rqvm).
 //!
-//! A sibling PR-13 bone owns the remaining verbs (`snapshot`, `check`, `explain`) and the
-//! cross-cutting output-contract infrastructure (bn-ybh1z); [`run`] therefore recognizes
-//! exactly the noun groups those two bones delivered and reports every other first word as a
-//! usage error rather than guessing at a verb no module here owns.
+//! A sibling PR-13 bone owns the cross-cutting output-contract infrastructure (bn-ybh1z);
+//! [`run`] therefore recognizes exactly the noun groups the three command bones delivered and
+//! reports every other first word as a usage error rather than guessing at a verb no module
+//! here owns.
 //!
 //! # Every command takes its handles on the command line
 //!
@@ -16,24 +17,35 @@
 //! is a handle no command uses.
 //!
 //! Flags are parsed by one small `--name value` / `--flag` scanner ([`Scan`]) rather than a
-//! declarative parser: the surface is eight commands and a dozen flags, and a hand-rolled
+//! declarative parser: the surface is fifteen commands and two dozen flags, and a hand-rolled
 //! scan keeps this crate's one external-facing dependency at `continuumd` (see the crate
-//! root and `Cargo.toml` for why that edge is minimal on purpose this wave).
+//! root and `Cargo.toml` for why that edge is minimal on purpose this wave). The scanner
+//! keeps both readings of a repeated `--name value`: the last occurrence ([`Scan::required`],
+//! for a single-valued field) and all of them in order ([`Scan::all`], for `list<…>` fields
+//! like `overlay`, `patches` and `guarantees`).
 
+use continuumd::codec;
 use continuumd::protocol::scalar::{
-    ActorId, ArtifactHandle, CapabilityHandle, ContextHandle, ContinuationHandle, CrashpackHandle,
-    DebugHandle, EvidenceHandle, ProtocolVersion, RepairHandle, TaskHandle,
+    ActorId, ArtifactHandle, CapabilityHandle, Commitment, ContextHandle, ContinuationHandle,
+    CrashpackHandle, DebugHandle, EvidenceHandle, ProtocolVersion, RepairHandle, TaskHandle,
+    WorkspaceHandle,
 };
+use continuumd::protocol::shared::{FileOverlay, SnapshotComponents, Target};
 use continuumd::protocol::spec::{Optional, ProtocolEnum};
-use continuumd::protocol::vocabulary::{ExpansionRelation, GateProfile};
+use continuumd::protocol::vocabulary::{
+    Audience, ExpansionRelation, GateProfile, Portfolio, PriorityClass, TargetKind,
+};
 
+use crate::check::{self, AwaitArgs, ResultArgs, StartArgs};
 use crate::context::{self, ExpandArgs};
 use crate::debug::{self, OpenArgs, StateArgs};
 use crate::error::CliError;
 use crate::evidence::{self, ShowArgs};
+use crate::explain::{self, CompileArgs};
 use crate::format::{self, Format};
 use crate::render::Rendered;
 use crate::repair::{self, BeginArgs, ReviewArgs};
+use crate::snapshot::{self, CreateArgs, ForkArgs, SealArgs};
 use crate::task;
 use crate::wire::{Connection, Transport};
 
@@ -61,6 +73,9 @@ pub fn run(
     let mut connection = build_connection(&scan)?;
 
     match scan.positional.first().map(String::as_str) {
+        Some("snapshot") => dispatch_snapshot(&scan, &mut connection, transport, format),
+        Some("check") => dispatch_check(&scan, &mut connection, transport, format),
+        Some("explain") => dispatch_explain(&scan, &mut connection, transport, format),
         Some("context") => dispatch_context(&scan, &mut connection, transport, format),
         Some("task") => dispatch_task(&scan, &mut connection, transport, format),
         Some("debug") => dispatch_debug(&scan, &mut connection, transport, format),
@@ -78,15 +93,136 @@ pub fn run(
 ///
 /// A named constant so the "unknown command" message and this module's tests read the same
 /// list, rather than a sentence in one place drifting from a `match` in another.
-pub const NOUNS: [&str; 5] = ["context", "task", "debug", "repair", "evidence"];
+pub const NOUNS: [&str; 8] = [
+    "snapshot", "check", "explain", "context", "task", "debug", "repair", "evidence",
+];
 
 /// The one-line usage this build answers a bare `continuum` with.
-const USAGE: &str = "usage: continuum context expand ... \
+const USAGE: &str = "usage: continuum snapshot create --components <json> \
+     | continuum snapshot fork <ws_*> | continuum snapshot seal <ws_*> \
+     | continuum check start <ws_*> --target <id> --target-kind <kind> --portfolio <p> \
+       --states <n> \
+     | continuum check result <task_*> | continuum check await <task_*> --timeout-ms <n> \
+     | continuum explain compile --evidence-root <handle> --question <text> --bytes <n> \
+     | continuum context expand ... \
      | continuum task status|resume|cancel <handle> \
      | continuum debug open <artifact> | continuum debug state <dbg_*> \
      | continuum repair begin <crash_*> --gate-profile <profile> \
      | continuum repair review <rt_*> \
      | continuum evidence show <ev_*>";
+
+fn dispatch_snapshot(
+    scan: &Scan,
+    connection: &mut Connection,
+    transport: &mut dyn Transport,
+    format: Format,
+) -> Result<Rendered, CliError> {
+    let verb = scan.positional.get(1).map(String::as_str);
+    let handle = scan.positional.get(2).map(String::as_str);
+    match (verb, handle) {
+        (Some("create"), _) => {
+            let args = CreateArgs {
+                components: components(scan)?,
+                overlay: overlays(scan)?,
+                seal: scan.seal_flag,
+            };
+            snapshot::create(connection, transport, &args, format)
+        }
+        (Some("fork"), Some(handle)) => {
+            let args = ForkArgs {
+                base: workspace_handle(handle)?,
+                overlay: overlays(scan)?,
+                patches: patches(scan),
+            };
+            snapshot::fork(connection, transport, &args, format)
+        }
+        (Some("seal"), Some(handle)) => {
+            let args = SealArgs {
+                snapshot: workspace_handle(handle)?,
+            };
+            snapshot::seal(connection, transport, &args, format)
+        }
+        (Some(verb @ ("fork" | "seal")), None) => Err(CliError::usage(format!(
+            "\"snapshot {verb}\" requires a snapshot handle: this command takes no ambient \
+             session and remembers no snapshot (INV-002)"
+        ))),
+        (Some(other), _) => Err(CliError::usage(format!(
+            "unknown \"snapshot\" verb {other:?}; expected \"create\", \"fork\", or \"seal\""
+        ))),
+        (None, _) => Err(CliError::usage(
+            "usage: continuum snapshot create --components <json> \
+             | continuum snapshot fork <ws_*> | continuum snapshot seal <ws_*>",
+        )),
+    }
+}
+
+fn dispatch_check(
+    scan: &Scan,
+    connection: &mut Connection,
+    transport: &mut dyn Transport,
+    format: Format,
+) -> Result<Rendered, CliError> {
+    let verb = scan.positional.get(1).map(String::as_str);
+    let handle = scan.positional.get(2).map(String::as_str);
+    match (verb, handle) {
+        (Some("start"), Some(handle)) => {
+            let args = start_args(scan, handle)?;
+            check::start(connection, transport, &args, format)
+        }
+        (Some("result"), Some(handle)) => {
+            let args = ResultArgs {
+                task: task_handle(handle)?,
+            };
+            check::result(connection, transport, &args, format)
+        }
+        (Some("await"), Some(handle)) => {
+            let args = AwaitArgs {
+                task: task_handle(handle)?,
+                // Required, never defaulted: an unbounded wait is the one thing this
+                // command must not perform, and the bound is the caller's to choose.
+                timeout_ms: scan.required_u64("timeout-ms")?,
+            };
+            check::await_result(connection, transport, &args, format)
+        }
+        (Some("start"), None) => Err(CliError::usage(
+            "\"check start\" requires the sealed snapshot the campaign runs over (INV-002)",
+        )),
+        (Some(verb @ ("result" | "await")), None) => Err(CliError::usage(format!(
+            "\"check {verb}\" requires a task handle: this command takes no ambient session \
+             and remembers no task (INV-002)"
+        ))),
+        (Some(other), _) => Err(CliError::usage(format!(
+            "unknown \"check\" verb {other:?}; expected \"start\", \"result\", or \"await\""
+        ))),
+        (None, _) => Err(CliError::usage(
+            "usage: continuum check start <ws_*> --target <id> --target-kind <kind> \
+             --portfolio <portfolio> --states <n> \
+             | continuum check result <task_*> \
+             | continuum check await <task_*> --timeout-ms <n>",
+        )),
+    }
+}
+
+fn dispatch_explain(
+    scan: &Scan,
+    connection: &mut Connection,
+    transport: &mut dyn Transport,
+    format: Format,
+) -> Result<Rendered, CliError> {
+    match scan.positional.get(1).map(String::as_str) {
+        Some("compile") => {
+            let args = compile_args(scan)?;
+            explain::compile(connection, transport, &args, format)
+        }
+        Some(other) => Err(CliError::usage(format!(
+            "unknown \"explain\" verb {other:?}; expected \"compile\""
+        ))),
+        None => Err(CliError::usage(
+            "usage: continuum explain compile --evidence-root <handle> --question <text> \
+             --bytes <n>",
+        )),
+    }
+}
 
 fn dispatch_context(
     scan: &Scan,
@@ -275,6 +411,140 @@ fn dispatch_evidence(
     }
 }
 
+/// The `SnapshotComponents` document `--components` carries.
+///
+/// Decoded here, before any frame exists, so a malformed declaration is a usage error the
+/// caller can fix rather than a daemon refusal they have to interpret. The document is
+/// *canonical* JSON — the encoding the protocol defines, with keys in ascending code-point
+/// order — because that is what `continuumd::codec` reads and this crate restates no second
+/// spelling of the wire format.
+fn components(scan: &Scan) -> Result<SnapshotComponents, CliError> {
+    let document = scan.required("components")?;
+    codec::from_bytes::<SnapshotComponents>(document.as_bytes()).map_err(|error| {
+        CliError::usage(format!(
+            "--components is not a canonical JSON SnapshotComponents document (keys in \
+             ascending code-point order): {error}"
+        ))
+    })
+}
+
+/// Every `--overlay <path>=<bytes>` on the line, in order.
+///
+/// The one place in this crate where content rather than a content identity travels, because
+/// `FileOverlay.content` is the one wire field that carries bytes (see
+/// [`crate::snapshot`]'s module doc). The split is on the *first* `=`, so a path may not
+/// contain one and content may contain as many as it likes.
+fn overlays(scan: &Scan) -> Result<Vec<FileOverlay>, CliError> {
+    scan.all("overlay")
+        .iter()
+        .map(|entry| {
+            let (path, content) = entry
+                .split_once('=')
+                .ok_or_else(|| CliError::usage("--overlay takes <path>=<content>".to_owned()))?;
+            Ok(FileOverlay {
+                path: path.to_owned(),
+                content: content.as_bytes().to_vec(),
+            })
+        })
+        .collect()
+}
+
+/// Every `--patch <commitment>` on the line, in order.
+///
+/// No validation beyond "it is a string": `Commitment::new` is infallible because "the IDL
+/// declares no pattern" for a content commitment, and a shape check invented here would be
+/// this crate holding the wire to a rule the protocol does not state.
+fn patches(scan: &Scan) -> Vec<Commitment> {
+    scan.all("patch")
+        .iter()
+        .map(|token| Commitment::new(token))
+        .collect()
+}
+
+fn workspace_handle(token: &str) -> Result<WorkspaceHandle, CliError> {
+    WorkspaceHandle::new(token)
+        .map_err(|error| CliError::usage(format!("{token:?} is not a snapshot handle: {error}")))
+}
+
+fn task_handle(token: &str) -> Result<TaskHandle, CliError> {
+    TaskHandle::new(token)
+        .map_err(|error| CliError::usage(format!("{token:?} is not a task handle: {error}")))
+}
+
+fn start_args(scan: &Scan, snapshot: &str) -> Result<StartArgs, CliError> {
+    let kind = scan.required("target-kind")?;
+    let kind = TargetKind::from_wire(&kind).map_err(|_| {
+        CliError::usage(format!(
+            "{kind:?} is not a target kind ({})",
+            wire_members(TargetKind::ALL)
+        ))
+    })?;
+    let portfolio = scan.required("portfolio")?;
+    let portfolio = Portfolio::from_wire(&portfolio).map_err(|_| {
+        CliError::usage(format!(
+            "{portfolio:?} is not a portfolio ({})",
+            wire_members(Portfolio::ALL)
+        ))
+    })?;
+    let priority_class = match scan.flags.get("priority-class") {
+        Some(token) => Optional::Present(PriorityClass::from_wire(token).map_err(|_| {
+            CliError::usage(format!(
+                "{token:?} is not a priority class ({})",
+                wire_members(PriorityClass::ALL)
+            ))
+        })?),
+        None => Optional::Absent,
+    };
+    Ok(StartArgs {
+        snapshot: workspace_handle(snapshot)?,
+        target: Target {
+            kind,
+            id: scan.required("target")?,
+        },
+        portfolio,
+        priority_class,
+        // Required, never defaulted: `verification.start` is `@task_starting`, so RFC 0026
+        // requires a budget, and choosing a state ceiling for the caller would be this crate
+        // deciding how much of a state space is enough.
+        states: scan.required_u64("states")?,
+    })
+}
+
+fn compile_args(scan: &Scan) -> Result<CompileArgs, CliError> {
+    let evidence_root = scan.required("evidence-root")?;
+    let evidence_root = ArtifactHandle::new(&evidence_root).map_err(|error| {
+        CliError::usage(format!(
+            "{evidence_root:?} is not an artifact handle: {error}"
+        ))
+    })?;
+    let audience = match scan.flags.get("audience") {
+        Some(token) => Optional::Present(Audience::from_wire(token).map_err(|_| {
+            CliError::usage(format!(
+                "{token:?} is not an audience ({})",
+                wire_members(Audience::ALL)
+            ))
+        })?),
+        None => Optional::Absent,
+    };
+    Ok(CompileArgs {
+        evidence_root,
+        question: scan.required("question")?,
+        audience,
+        guarantees: scan.all("guarantee").to_vec(),
+        bytes: scan.required_u64("bytes")?,
+    })
+}
+
+/// A closed vocabulary's members, comma-separated, for a usage error that names what *is*
+/// accepted rather than only what is not.
+fn wire_members<T: ProtocolEnum + Copy>(members: &[T]) -> String {
+    members
+        .iter()
+        .map(|member| member.as_wire())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn expand_args(scan: &Scan) -> Result<ExpandArgs, CliError> {
     let context = scan.required("context")?;
     let context = ContextHandle::new(&context).map_err(|error| {
@@ -329,7 +599,8 @@ fn build_connection(scan: &Scan) -> Result<Connection, CliError> {
         Some(token) => parse_version(token)?,
         None => ProtocolVersion::new(DEFAULT_PROTOCOL_VERSION.0, DEFAULT_PROTOCOL_VERSION.1),
     };
-    Ok(Connection::new(version, actor, capability))
+    Ok(Connection::new(version, actor, capability)
+        .with_idempotency_key(scan.flags.get("idempotency-key").cloned()))
 }
 
 fn parse_version(token: &str) -> Result<ProtocolVersion, CliError> {
@@ -353,16 +624,26 @@ fn parse_version(token: &str) -> Result<ProtocolVersion, CliError> {
 
 /// The command line, scanned once into positional words and `--name value` flags.
 ///
-/// Two boolean flags exist and they are named in [`BOOLEAN_FLAGS`]: `--json`
-/// (cli-conventions.md's hidden alias for `--format json`) and `--inline`
-/// (`evidence.get`'s `inline: Bool optional`). Every other `--name` consumes the following
-/// word as its value, and a `--name` at the end of the line with nothing after it is a
-/// usage error rather than a silently empty value.
+/// Three boolean flags exist and they are named in [`BOOLEAN_FLAGS`]: `--json`
+/// (cli-conventions.md's hidden alias for `--format json`), `--inline`
+/// (`evidence.get`'s `inline: Bool optional`), and `--seal` (`workspace.create`'s
+/// `seal: Bool optional`). Every other `--name` consumes the following word as its value,
+/// and a `--name` at the end of the line with nothing after it is a usage error rather than
+/// a silently empty value.
 struct Scan {
     positional: Vec<String>,
     flags: std::collections::BTreeMap<String, String>,
+    /// Every occurrence of every `--name value` flag, in command-line order.
+    ///
+    /// [`Scan::flags`] keeps the last one, which is what a single-valued flag means; this
+    /// keeps all of them, which is what `--overlay`, `--patch` and `--guarantee` mean. Both
+    /// are filled by the same pass, so a flag cannot be repeatable in one arm and
+    /// last-wins in another: which reading applies is a property of the *call site* that
+    /// asks, and asking for the wrong one is visible in one line rather than in a parser.
+    repeats: std::collections::BTreeMap<String, Vec<String>>,
     json_flag: bool,
     inline_flag: bool,
+    seal_flag: bool,
 }
 
 /// The flags that take no value.
@@ -370,21 +651,25 @@ struct Scan {
 /// A table rather than a chain of `if`s so that [`Scan::of`] cannot know about a boolean
 /// flag one arm forgot: a name here is value-less everywhere, and a name absent from it
 /// consumes the next word everywhere.
-const BOOLEAN_FLAGS: [&str; 2] = ["json", "inline"];
+const BOOLEAN_FLAGS: [&str; 3] = ["json", "inline", "seal"];
 
 impl Scan {
     fn of(args: &[String]) -> Result<Self, CliError> {
         let mut positional = Vec::new();
         let mut flags = std::collections::BTreeMap::new();
+        let mut repeats: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
         let mut json_flag = false;
         let mut inline_flag = false;
+        let mut seal_flag = false;
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
             if let Some(name) = arg.strip_prefix("--") {
                 if BOOLEAN_FLAGS.contains(&name) {
                     match name {
                         "json" => json_flag = true,
-                        _ => inline_flag = true,
+                        "inline" => inline_flag = true,
+                        _ => seal_flag = true,
                     }
                     continue;
                 }
@@ -392,6 +677,10 @@ impl Scan {
                     .next()
                     .ok_or_else(|| CliError::usage(format!("--{name} requires a value")))?;
                 flags.insert(name.to_owned(), value.clone());
+                repeats
+                    .entry(name.to_owned())
+                    .or_default()
+                    .push(value.clone());
             } else {
                 positional.push(arg.clone());
             }
@@ -399,8 +688,10 @@ impl Scan {
         Ok(Self {
             positional,
             flags,
+            repeats,
             json_flag,
             inline_flag,
+            seal_flag,
         })
     }
 
@@ -409,6 +700,11 @@ impl Scan {
             .get(name)
             .cloned()
             .ok_or_else(|| CliError::usage(format!("--{name} is required")))
+    }
+
+    /// Every occurrence of a repeatable flag, in command-line order. Empty when absent.
+    fn all(&self, name: &str) -> &[String] {
+        self.repeats.get(name).map_or(&[], Vec::as_slice)
     }
 
     fn optional_u32(&self, name: &str) -> Result<Optional<u32>, CliError> {
@@ -456,10 +752,82 @@ mod tests {
 
     #[test]
     fn an_unknown_top_level_command_is_a_usage_error_not_a_wire_call() {
+        // A first word no noun group owns. It was `"snapshot"` until bn-3rqvm landed that
+        // group; a test whose "unknown" example became a real command would have gone on
+        // passing for the wrong reason, so it names one no build has.
         let mut transport = Deaf;
-        let error = run(&args(&["snapshot"]), &mut transport, false).unwrap_err();
+        let error = run(
+            &args(&["promote", "--actor", "agent:x", "--capability", "cap_x"]),
+            &mut transport,
+            false,
+        )
+        .unwrap_err();
         assert_eq!(error.exit_code(), 1);
-        assert!(matches!(error, CliError::Usage(_)));
+        let CliError::Usage(detail) = &error else {
+            panic!("an unknown command is a usage error: {error:?}");
+        };
+        for noun in NOUNS {
+            assert!(detail.contains(noun), "the error names {noun}: {detail}");
+        }
+    }
+
+    #[test]
+    fn the_new_verb_groups_reject_a_verb_they_do_not_own() {
+        for (noun, expected) in [
+            ("snapshot", "\"create\", \"fork\", or \"seal\""),
+            ("check", "\"start\", \"result\", or \"await\""),
+            ("explain", "\"compile\""),
+        ] {
+            let mut transport = Deaf;
+            let error = run(
+                &args(&[
+                    noun,
+                    "promote",
+                    "--actor",
+                    "agent:x",
+                    "--capability",
+                    "cap_x",
+                ]),
+                &mut transport,
+                false,
+            )
+            .unwrap_err();
+            let CliError::Usage(detail) = &error else {
+                panic!("an unknown verb is a usage error: {error:?}");
+            };
+            assert!(detail.contains(expected), "{noun}: {detail}");
+        }
+    }
+
+    #[test]
+    fn a_repeated_flag_keeps_every_occurrence_and_a_single_valued_one_keeps_the_last() {
+        // The two readings live in one scan, so a call site asks for the one its wire field
+        // declares rather than the parser deciding for it.
+        let scan = Scan::of(&args(&[
+            "--overlay",
+            "a=1",
+            "--overlay",
+            "b=2",
+            "--question",
+            "first",
+            "--question",
+            "second",
+        ]))
+        .expect("the line parses");
+        assert_eq!(scan.all("overlay"), ["a=1".to_owned(), "b=2".to_owned()]);
+        assert_eq!(
+            scan.flags.get("question").map(String::as_str),
+            Some("second")
+        );
+        assert!(scan.all("patch").is_empty());
+    }
+
+    #[test]
+    fn the_seal_flag_takes_no_value_and_does_not_swallow_the_next_word() {
+        let scan = Scan::of(&args(&["snapshot", "create", "--seal", "--bytes", "16"]))
+            .expect("the line parses");
+        assert!(scan.seal_flag);
+        assert_eq!(scan.flags.get("bytes").map(String::as_str), Some("16"));
     }
 
     #[test]

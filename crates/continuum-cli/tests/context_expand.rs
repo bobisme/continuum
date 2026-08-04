@@ -420,6 +420,8 @@ fn the_success_renderer_prints_the_expanded_pack_beside_the_full_omission_manife
         request_id: RequestId::new("req_cli000001").expect("a request id"),
         status: ResultStatus::Ok,
         payload: response,
+        verdict: None,
+        assurance: None,
         task: None,
         continuation: None,
         omissions,

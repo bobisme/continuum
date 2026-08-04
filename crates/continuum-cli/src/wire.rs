@@ -20,9 +20,11 @@
 //!
 //! # Two outcome shapes, and why there are two
 //!
-//! `task.status`/`task.resume`/`task.cancel` and `evidence.get` decode through
-//! `continuumd`'s own [`Arguments`]/[`Payload`] tables, so [`Connection::task_status`] and
-//! its siblings return [`Outcome<Payload>`]. [`Connection::context_expand`],
+//! `task.status`/`task.resume`/`task.cancel`, `evidence.get`, the three `workspace` calls
+//! `snapshot` drives, the three `verification` calls `check` drives, and `context.compile`
+//! all decode through `continuumd`'s own [`Arguments`]/[`Payload`] tables, so
+//! [`Connection::task_status`] and its siblings return [`Outcome<Payload>`].
+//! [`Connection::context_expand`],
 //! [`Connection::debug_open`], and the three other typed-body calls return
 //! `Outcome<TheResponseStruct>` — the *typed body*, not the enum — because a command that
 //! has already chosen its operation has nothing to gain from re-matching a
@@ -52,9 +54,12 @@ use continuumd::codec::{self, CodecError, ProtocolValue};
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::is_mutation;
 use continuumd::protocol::envelope::{
-    ArtifactRef, Budget, Cost, NextOperation, Omission, RequestEnvelope, ResultEnvelope,
+    ArtifactRef, AssuranceEnvelope, Budget, Cost, NextOperation, Omission, RequestEnvelope,
+    ResultEnvelope, Verdict,
 };
-use continuumd::protocol::operations::context::{ContextExpandRequest, ContextExpandResponse};
+use continuumd::protocol::operations::context::{
+    ContextCompileRequest, ContextExpandRequest, ContextExpandResponse,
+};
 use continuumd::protocol::operations::debug::{
     DebugOpenRequest, DebugOpenResponse, DebugStateRequest, DebugStateResponse,
 };
@@ -65,9 +70,15 @@ use continuumd::protocol::operations::repair::{
 use continuumd::protocol::operations::task::{
     TaskCancelRequest, TaskResumeRequest, TaskStatusRequest,
 };
+use continuumd::protocol::operations::verification::{
+    VerificationAwaitRequest, VerificationResultRequest, VerificationStartRequest,
+};
+use continuumd::protocol::operations::workspace::{
+    WorkspaceCreateRequest, WorkspaceForkRequest, WorkspaceSealRequest,
+};
 use continuumd::protocol::scalar::{
     ActorId, CapabilityHandle, ContinuationHandle, Opaque, OperationName, ProtocolVersion,
-    RequestId, TaskHandle,
+    RequestId, TaskHandle, WorkspaceHandle,
 };
 use continuumd::protocol::spec::{Nullable, Optional};
 use continuumd::protocol::vocabulary::{ErrorCode, ResultStatus};
@@ -228,6 +239,15 @@ impl From<LinkError> for ConnectError {
 /// own to refuse *with* — every call this connection makes reaches the wire, honestly,
 /// which is what lets a refusal always be the daemon's own typed answer rather than a mix
 /// of two refusal sources under one rendering.
+// [`Admitted`] carries a whole decoded envelope — payload, verdict, assurance envelope,
+// omission manifest, cost — and is several times the size of a refusal. Boxing it would put
+// an allocation on the *common* arm and make the type's shape argue that a success is the
+// unusual case, which is the opposite of what this surface is for. The same choice, for the
+// same reason and against the same lint, as `continuum_mcp::Outcome`, whose own comment says
+// it: "one value per interface call, moved once". This crate's `Admitted` deliberately
+// carries the same field set as that one, so the two adapters do not disagree about what an
+// answer is.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome<T> {
     /// The daemon ran the operation.
@@ -250,6 +270,18 @@ pub struct Admitted<T> {
     pub status: ResultStatus,
     /// The operation's typed response body.
     pub payload: T,
+    /// The typed verdict, when the operation's registry entry declares a `verdict` clause.
+    ///
+    /// Read off [`ResultEnvelope::verdict`] and never reconstructed: INV-008's typed
+    /// inconclusiveness lives inside this value ([`SemanticVerdictValue::inconclusive_reason`
+    /// ](continuumd::protocol::envelope::SemanticVerdictValue)), and a client that recomputed
+    /// a verdict from a payload would be a second authority over the one fact the daemon
+    /// exists to decide. `None` is the IDL's own `verdict: null` — "an operation without a
+    /// `verdict` clause returns `verdict: null`" — not an absence this crate invented.
+    pub verdict: Option<Verdict>,
+    /// The nine-dimension assurance envelope, present on every semantic verdict
+    /// (`rule envelope.assurance_required`, plan B11).
+    pub assurance: Option<AssuranceEnvelope>,
     /// The task this call started or observes, when it names one.
     pub task: Option<TaskHandle>,
     /// The continuation a suspension parked, when there is one.
@@ -291,15 +323,18 @@ pub struct Refusal {
 
 /// The negotiated connection a command's wire calls travel over.
 ///
-/// Holds exactly two facts: the protocol version already negotiated, and the principal
-/// this connection speaks as. No snapshot, no task, no continuation — plan §20's "adapters
-/// do not own semantic state" as the struct's field list.
+/// Holds exactly two semantic facts: the protocol version already negotiated, and the
+/// principal this connection speaks as. No snapshot, no task, no continuation — plan §20's
+/// "adapters do not own semantic state" as the struct's field list. The other two fields are
+/// this invocation's own bookkeeping: a call counter, and the idempotency key the *command
+/// line* named if it named one ([`Connection::with_idempotency_key`]).
 #[derive(Debug, Clone)]
 pub struct Connection {
     version: ProtocolVersion,
     actor: ActorId,
     capability: CapabilityHandle,
     calls: u64,
+    idempotency_key: Option<String>,
 }
 
 impl Connection {
@@ -315,7 +350,33 @@ impl Connection {
             actor,
             capability,
             calls: 0,
+            idempotency_key: None,
         }
+    }
+
+    /// Speak every `@mutation` on this connection under the caller's own idempotency key.
+    ///
+    /// # Why a caller can name it, and why one is generated when they do not
+    ///
+    /// `rule idempotency.replay` gives the key one meaning: the same key with the same
+    /// canonical request is a *replay* and returns the first outcome, and the same key with a
+    /// different request is [`ErrorCode::IdempotencyKeyReused`]. Which of two invocations are
+    /// "the same request" is therefore a statement only the caller can make, and this is the
+    /// channel for making it — `continuum … --idempotency-key <key>`.
+    ///
+    /// When no key is given, [`Connection::envelope`] generates one from the operation name
+    /// and this connection's call counter. That is enough to keep two *different* operations
+    /// apart, which is what a single process issuing several calls needs, and it is
+    /// deliberately not more: a generated key cannot be a function of the request body
+    /// without a content hash, and this crate has exactly one dependency edge. Two separate
+    /// invocations of the same command with *different* arguments therefore present the same
+    /// generated key and earn the daemon's typed `IdempotencyKeyReused` — which is a correct,
+    /// rendered refusal naming the fix, not a silent wrong answer, and `--idempotency-key` is
+    /// the fix.
+    #[must_use]
+    pub fn with_idempotency_key(mut self, key: Option<String>) -> Self {
+        self.idempotency_key = key;
+        self
     }
 
     fn request_id(&mut self) -> RequestId {
@@ -324,9 +385,27 @@ impl Connection {
             .expect("a counter renders a well-formed request id")
     }
 
-    fn envelope(&mut self, operation: &'static str, budget: Optional<Budget>) -> RequestEnvelope {
+    /// The request envelope for one call.
+    ///
+    /// `snapshot` is a parameter and not a field: [`Connection`] holds no "current"
+    /// workspace, so an operation that runs *over* a snapshot — `verification.start` is the
+    /// only one this crate drives — takes it from the command line on every invocation
+    /// (INV-002). `intent` stays null on every call this crate makes, because a snapshot's
+    /// intent binding is a property of the snapshot by identity (INV-001, plan §4.2) and a
+    /// flag that let a caller name a different one would be a rebinding the protocol makes
+    /// privileged and `workspace.fork` alone performs.
+    fn envelope(
+        &mut self,
+        operation: &'static str,
+        budget: Optional<Budget>,
+        snapshot: Nullable<WorkspaceHandle>,
+    ) -> RequestEnvelope {
         let idempotency_key = if is_mutation(operation) {
-            Optional::Present(format!("cli-idem-{:06}", self.calls + 1))
+            Optional::Present(
+                self.idempotency_key
+                    .clone()
+                    .unwrap_or_else(|| format!("cli-idem-{operation}-{:06}", self.calls + 1)),
+            )
         } else {
             Optional::Absent
         };
@@ -337,7 +416,7 @@ impl Connection {
             actor: self.actor.clone(),
             capability: self.capability.clone(),
             operation: OperationName::new(operation).expect("a registry name is well formed"),
-            snapshot: Nullable::Null,
+            snapshot,
             intent: Nullable::Null,
             arguments: Opaque::from_bytes(Vec::new()),
             budget,
@@ -359,7 +438,7 @@ impl Connection {
         task: &TaskHandle,
     ) -> Result<Outcome<Payload>, ConnectError> {
         let arguments = Arguments::TaskStatus(TaskStatusRequest { task: task.clone() });
-        self.invoke(transport, &arguments, Optional::Absent)
+        self.invoke(transport, &arguments, Optional::Absent, Nullable::Null)
     }
 
     /// `task.cancel` — close a campaign, keeping whatever it committed (PR-6's
@@ -374,7 +453,7 @@ impl Connection {
         task: &TaskHandle,
     ) -> Result<Outcome<Payload>, ConnectError> {
         let arguments = Arguments::TaskCancel(TaskCancelRequest { task: task.clone() });
-        self.invoke(transport, &arguments, Optional::Absent)
+        self.invoke(transport, &arguments, Optional::Absent, Nullable::Null)
     }
 
     /// `task.resume` — spend a continuation under a declared budget.
@@ -396,7 +475,12 @@ impl Connection {
             continuation: continuation.clone(),
             budget: Optional::Present(budget.clone()),
         });
-        self.invoke(transport, &arguments, Optional::Present(budget))
+        self.invoke(
+            transport,
+            &arguments,
+            Optional::Present(budget),
+            Nullable::Null,
+        )
     }
 
     fn invoke(
@@ -404,12 +488,164 @@ impl Connection {
         transport: &mut dyn Transport,
         arguments: &Arguments,
         budget: Optional<Budget>,
+        snapshot: Nullable<WorkspaceHandle>,
     ) -> Result<Outcome<Payload>, ConnectError> {
-        let envelope = self.envelope(arguments.operation(), budget);
+        let envelope = self.envelope(arguments.operation(), budget, snapshot);
         let frame = transport::encode_request(&envelope, arguments)?;
         let answer = transport.exchange(&frame)?;
         let (result, payload) = transport::decode_result(arguments.operation(), &answer)?;
         classify(result, payload)
+    }
+
+    // --- workspace: the PR-3 snapshot family --------------------------------------------
+
+    /// `workspace.create` — name an immutable snapshot from content identities.
+    ///
+    /// `@mutation`, so the envelope carries an idempotency key; not `@task_starting`, so it
+    /// carries no budget. The snapshot a create *produces* is in the answer, so the envelope
+    /// names none: a `workspace` call's subject travels in its arguments, where the family's
+    /// own [`ScopeClaim`](continuumd::daemon::family::ScopeClaim) reads it.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn workspace_create(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &WorkspaceCreateRequest,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::WorkspaceCreate(request.clone());
+        self.invoke(transport, &arguments, Optional::Absent, Nullable::Null)
+    }
+
+    /// `workspace.fork` — derive a snapshot from an explicit base, preserving its intent
+    /// binding by identity (INV-001).
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn workspace_fork(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &WorkspaceForkRequest,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::WorkspaceFork(request.clone());
+        self.invoke(transport, &arguments, Optional::Absent, Nullable::Null)
+    }
+
+    /// `workspace.seal` — make a snapshot immutable, which is what makes it a valid
+    /// semantic input at all.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn workspace_seal(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &WorkspaceSealRequest,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::WorkspaceSeal(request.clone());
+        self.invoke(transport, &arguments, Optional::Absent, Nullable::Null)
+    }
+
+    // --- verification: submit, and read the verdict ---------------------------------------
+
+    /// `verification.start` — submit a campaign over an explicit sealed `snapshot`.
+    ///
+    /// The snapshot rides the *envelope* (`rule` — the IDL declares `snapshot` on
+    /// `RequestEnvelope`, not on this operation's request body), and the intent the campaign
+    /// runs under is the one bound to that snapshot: see [`Connection::envelope`] for why
+    /// this crate never names a second one.
+    ///
+    /// `@mutation @task_starting`, so both an idempotency key and a budget travel — the key
+    /// from [`Connection::envelope`]'s registry lookup, the budget from `budget`, which the
+    /// caller declared and this crate never invents.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn verification_start(
+        &mut self,
+        transport: &mut dyn Transport,
+        snapshot: &WorkspaceHandle,
+        request: &VerificationStartRequest,
+        budget: Budget,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::VerificationStart(request.clone());
+        self.invoke(
+            transport,
+            &arguments,
+            Optional::Present(budget),
+            Nullable::Value(snapshot.clone()),
+        )
+    }
+
+    /// `verification.result` — read the typed result of an explicit task.
+    ///
+    /// `@readonly`: no idempotency key, no budget. This is the operation whose registry
+    /// entry declares `verdict SemanticVerdictValue`, so it is the call whose answer carries
+    /// the verdict, its INV-008 reason, and the assurance envelope.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn verification_result(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &VerificationResultRequest,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::VerificationResult(request.clone());
+        self.invoke(transport, &arguments, Optional::Absent, Nullable::Null)
+    }
+
+    /// `verification.await` — block within a declared bound on an explicit task.
+    ///
+    /// `@readonly @task_starting`: no idempotency key, and a budget RFC 0026 requires. The
+    /// bound is the caller's `timeout_ms`, carried in both places it belongs — the request
+    /// body's own field and the envelope's `wall_ms` ceiling — the same double reading
+    /// [`Connection::task_resume`] gives the identical rule.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn verification_await(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &VerificationAwaitRequest,
+        budget: Budget,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::VerificationAwait(request.clone());
+        self.invoke(
+            transport,
+            &arguments,
+            Optional::Present(budget),
+            Nullable::Null,
+        )
+    }
+
+    /// `context.compile` — compile a bounded Context Pack from an evidence root and a
+    /// question.
+    ///
+    /// `@mutation @task_starting`, so a key and a budget travel. The budget dimension is
+    /// `bytes` — "the enforced context contract (RFC 0027)", the pack's own ceiling — and it
+    /// is the caller's, never this crate's.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn context_compile(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &ContextCompileRequest,
+        budget: Budget,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::ContextCompile(request.clone());
+        self.invoke(
+            transport,
+            &arguments,
+            Optional::Present(budget),
+            Nullable::Null,
+        )
     }
 
     /// `evidence.get` — read one PR-7 evidence-graph node or edge by handle.
@@ -428,7 +664,7 @@ impl Connection {
         request: &EvidenceGetRequest,
     ) -> Result<Outcome<Payload>, ConnectError> {
         let arguments = Arguments::EvidenceGet(request.clone());
-        self.invoke(transport, &arguments, Optional::Absent)
+        self.invoke(transport, &arguments, Optional::Absent, Nullable::Null)
     }
 
     /// `context.expand` — follow a PR-11 expansion handle along a relation.
@@ -544,7 +780,7 @@ impl Connection {
         request: &Req,
         budget: Optional<Budget>,
     ) -> Result<Outcome<Res>, ConnectError> {
-        let mut envelope = self.envelope(operation, budget);
+        let mut envelope = self.envelope(operation, budget, Nullable::Null);
         envelope.arguments = codec::to_opaque(request)?;
         let frame = codec::to_bytes(&envelope)?;
         let answer = transport.exchange(&frame)?;
@@ -579,6 +815,8 @@ fn classify(result: ResultEnvelope, payload: Payload) -> Result<Outcome<Payload>
             request_id: result.request_id,
             status: result.status,
             payload,
+            verdict: result.verdict.value().cloned(),
+            assurance: result.assurance.value().cloned(),
             task: result.task.value().cloned(),
             continuation: result.continuation.value().cloned(),
             omissions: result.omissions,
@@ -623,6 +861,8 @@ fn classify_typed<T>(
             request_id: result.request_id,
             status: result.status,
             payload,
+            verdict: result.verdict.value().cloned(),
+            assurance: result.assurance.value().cloned(),
             task: result.task.value().cloned(),
             continuation: result.continuation.value().cloned(),
             omissions: result.omissions,
