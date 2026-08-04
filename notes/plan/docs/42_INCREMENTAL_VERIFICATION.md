@@ -102,7 +102,7 @@ Deployments may adjust the sampling rate by policy; an opt-out is recorded in as
 
 Queries carry an auditability class, declared on the query definition (plan §9.5):
 
-- **Equality-auditable** — deterministic under the docs/19 matrix; compared bit-for-bit. Any disagreement quarantines the reuse class and emits a minimal invalidation counterexample.
+- **Equality-auditable** — deterministic under the docs/19 matrix; compared bit-for-bit. Any disagreement quarantines the `(reuse-edge class, function_id, function_version)` triple (RFC 0030, "Quarantine") and emits a minimal invalidation counterexample.
 - **Certificate-auditable** — solver-backed; the audit compares checked certificates and claim envelopes, never raw solver behavior. A certificate-level disagreement quarantines; a solver-outcome difference with agreeing certificates does not.
 - **Budget-sensitive** — anytime results; the audit checks only that the incremental result's evidence labels are no stronger than a clean run's under equal budget (monotone-honesty), and records divergence as drift telemetry without quarantine.
 
@@ -137,7 +137,7 @@ Reuse and retention pull against each other: reuse wants inputs kept, retention 
 
 Absorbed from plan §4.7.
 
-An equality-auditable disagreement quarantines the reuse class and emits a minimal invalidation counterexample. That counterexample is not a log line: the disagreement MUST also emit a `defect_*` artifact pinning every input by content identity, the semantic and checker epochs, the engine identity, and the minimized reproduction (plan §4.7, docs/35). The incremental engine is engine code, and a clean/incremental divergence is precisely the class of evidence `defect_*` exists to carry.
+An equality-auditable disagreement quarantines the `(reuse-edge class, function_id, function_version)` triple (RFC 0030, "Quarantine") and emits a minimal invalidation counterexample. That counterexample is not a log line: the disagreement MUST also emit a `defect_*` artifact pinning every input by content identity, the semantic and checker epochs, the engine identity, and the minimized reproduction (plan §4.7, docs/35). The incremental engine is engine code, and a clean/incremental divergence is precisely the class of evidence `defect_*` exists to carry.
 
 Two consequences:
 
