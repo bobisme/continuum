@@ -121,6 +121,8 @@ plan.md
 - `BLOCKED` — prerequisite unavailable.
 - `FALSIFIED` — tested and rejected.
 
-See [`VALIDATION_REPORT.md`](VALIDATION_REPORT.md) for the mechanical checks,
-their boundaries, and reproduction instructions. Git history is the dossier's
-package provenance.
+Live mechanical-check results are in `validation-results.json`
+(machine-generated, never hand-edited); see
+[`VALIDATION_REPORT.md`](VALIDATION_REPORT.md) — retired — for how it is
+produced, who regenerates it and when, and reproduction instructions. Git
+history is the dossier's package provenance.

@@ -235,8 +235,9 @@ Start with:
    actually been exercised and what remains unproved.
 6. [Implementation sequence](notes/plan/notes/START_HERE_IMPLEMENTATION.md) —
    the first 30 pull requests and their exit criteria.
-7. [Validation report](notes/plan/VALIDATION_REPORT.md) — current checks and
-   their boundaries.
+7. [Validation report](notes/plan/VALIDATION_REPORT.md) — retired; points
+   to the live, machine-generated `validation-results.json` and how it is
+   regenerated.
 
 ## Scope
 

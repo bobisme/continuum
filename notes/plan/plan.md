@@ -164,10 +164,11 @@ The following are explicitly weaker:
   Each is owned by a research lane with kill criteria (see §24.5).
 - Evidence boundary: no Lean source in this dossier has been parsed,
   elaborated, or kernel-checked; no theorem may be described as
-  machine-checked (`VALIDATION_REPORT.md`, `docs/18` C035). The Revision 3
-  spikes are finite Python reference experiments that validate artifact
-  shapes and interaction contracts, not engines, scale, concurrency,
-  persistence, or soundness (`docs/53`, "What remains unproven").
+  machine-checked (`validation-results.json` `lean_source` check,
+  `docs/18` C035). The Revision 3 spikes are finite Python reference
+  experiments that validate artifact shapes and interaction contracts,
+  not engines, scale, concurrency, persistence, or soundness (`docs/53`,
+  "What remains unproven").
 - G0 status: DX-01, DX-02, DX-03, DX-12, DX-13, and DX-14 carry spike
   evidence. DX-10 is open and freeze-blocking (Phase A).
   DX-04, DX-05, DX-06, DX-07, DX-08, DX-09, DX-11, and DX-15 are
@@ -2684,9 +2685,8 @@ a scheme qualifier or banner; §0.3's G0 counts and program status are
 derived checks; §24.5's register rows are checked for resolvable lanes
 and kill/defer/draft markers, with marked-quote identity enforced once
 rows ratify; the specification-debt ledger below is derived by
-`check_spec_debt`; and `VALIDATION_REPORT.md` /
-`validation-results.json` are regenerated so every advertised check has
-a recorded result.
+`check_spec_debt`; and `validation-results.json` is regenerated so
+every advertised check has a recorded result.
 
 Specification-debt status is validator-derived: each item below carries
 a stable ID and a mechanical predicate in `tools/validate_dossier.py`
