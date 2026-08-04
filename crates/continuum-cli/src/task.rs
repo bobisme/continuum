@@ -1,7 +1,16 @@
 //! `continuum task status|resume|cancel` — the PR-6 lifecycle, driven through the wire.
 //!
-//! - [`status`] renders a [`TaskRecord`] — cost, budget, and the INV-007 omission manifest
-//!   — faithfully: every field the wire carries, present or explicitly `none`.
+//! # The registry mapping, stated
+//!
+//! | Command | Wire operation |
+//! |---|---|
+//! | `task status` | `task.status` |
+//! | `task resume` | `task.resume` |
+//! | `task cancel` | `task.cancel` |
+//!
+//! - [`status`] renders a [`TaskRecord`] — cost, budget, epochs, milestones, and the INV-007
+//!   omission manifest — faithfully: every field the wire carries, present or explicitly
+//!   `none`.
 //! - [`resume`] spends a continuation under a declared `states` budget and renders the
 //!   typed refusal when the continuation's epochs or inputs no longer validate
 //!   (`ErrorCode::StaleSnapshot`, `ContinuationEpochMismatch`, `EpochUnsupported`), never a
@@ -10,19 +19,59 @@
 //!   continuation, or a clean absence with artifacts committed-or-absent — as a named
 //!   [`CancelOutcome`] token, the same three-way reading
 //!   `continuumd/tests/pr6_exit_evidence.rs`'s `ExitSide` uses for the identical contract.
+//!
+//! # What bn-ybh1z changed here
+//!
+//! This group shipped before the shared output contract did and rendered its own envelopes.
+//! Four divergences from [`crate::contract`] were fixed rather than documented as
+//! exceptions:
+//!
+//! 1. **No `operation`, no [`crate::render::Depth`].** A caller could not tell a refusal
+//!    about this request from one about a surface this deployment does not serve — the
+//!    INV-008 distinction the rest of the crate carries as a typed token. All three commands
+//!    now go through [`crate::render::project`], so both are on every arm.
+//! 2. **A JSON refusal arm that dropped every response key.** `task status` and `task cancel`
+//!    answered `{error, omissions, advice}` on the refusal arm and a dozen more keys on the
+//!    success arm, so a parser had to branch on which keys existed. The `absent_json` half of
+//!    [`crate::render::Projection`] exists to prevent exactly that, and these commands now
+//!    use it: one key set, whichever arm the answer took.
+//! 3. **An invented `refused: bool`.** `task resume` carried one. `depth` says the same
+//!    thing, typed and finer, and `error` says it structurally; a third spelling of one fact
+//!    is a field the daemon never sent.
+//! 4. **Dropped fields.** `TaskRecord.epochs` reached no format at all, and `milestones` and
+//!    `committed_evidence` reached the machine channel as counts. The record's six epochs are
+//!    rendered by name, and both lists travel as lists in JSON with their counts still
+//!    readable in the text formats — an array renders its length under the contract's one
+//!    rule, so nothing had to be printed twice to keep both readings.
+//!
+//! The daemon's response body is rendered under `record.`, on all three commands. That is
+//! forced and not cosmetic: [`TaskRecord`] declares an `operation` field — the operation the
+//! *task* runs — and `operation` is one of [`crate::contract::RESERVED_KEYS`], naming the
+//! operation this *command* drove. Two facts under one key is the ambiguity the contract
+//! exists to prevent, so the record keeps its own names one level down and the request echo
+//! keeps the top level.
 
 use continuumd::codec::json::Json;
 use continuumd::daemon::family::Payload;
-use continuumd::protocol::envelope::{Budget, Omission};
+use continuumd::protocol::envelope::{Budget, EpochSet};
 use continuumd::protocol::operations::task::{TaskCancelResponse, TaskResumeResponse};
 use continuumd::protocol::scalar::{ContinuationHandle, TaskHandle};
 use continuumd::protocol::spec::{Nullable, Optional, ProtocolEnum};
-use continuumd::protocol::task::TaskRecord;
+use continuumd::protocol::task::{Milestone, TaskRecord};
 
 use crate::error::CliError;
 use crate::format::Format;
-use crate::render::{self, Rendered};
-use crate::wire::{Connection, Outcome, Transport};
+use crate::render::{self, Lines, Projection, Rendered};
+use crate::wire::{Admitted, Connection, Outcome, Transport};
+
+/// The wire operation `task status` drives, in the registry's own spelling.
+pub const STATUS_OPERATION: &str = "task.status";
+
+/// The wire operation `task resume` drives.
+pub const RESUME_OPERATION: &str = "task.resume";
+
+/// The wire operation `task cancel` drives.
+pub const CANCEL_OPERATION: &str = "task.cancel";
 
 /// A `states`-only budget: the one dimension this daemon enforces
 /// (`continuumd::daemon::verification`), mirroring `continuum_mcp::client::states_budget`'s
@@ -57,20 +106,28 @@ pub fn status(
     format: Format,
 ) -> Result<Rendered, CliError> {
     let outcome = connection.task_status(transport, task)?;
-    Ok(render_status(&outcome, format))
+    Ok(render_status(task, &outcome, format))
 }
 
-fn render_status(outcome: &Outcome<Payload>, format: Format) -> Rendered {
-    let empty = Vec::new();
-    let (record, omissions, exit_code) = match outcome {
-        Outcome::Admitted(admitted) => (task_record(&admitted.payload), &admitted.omissions, 0),
-        Outcome::Refused(_) => (None, &empty, 1),
+/// Project one `task.status` answer, in whichever [`Format`] was resolved.
+#[must_use]
+pub fn render_status(task: &TaskHandle, outcome: &Outcome<Payload>, format: Format) -> Rendered {
+    let success = |admitted: &Admitted<Payload>| {
+        let record = task_record(&admitted.payload);
+        (record_lines(record), record_json(record))
     };
-    match format {
-        Format::Json => render_status_json(outcome, record, omissions, exit_code),
-        Format::Text => render_status_lines(outcome, record, omissions, exit_code, false),
-        Format::Pretty => render_status_lines(outcome, record, omissions, exit_code, true),
-    }
+    render::project(
+        &Projection {
+            command: "task status",
+            operation: STATUS_OPERATION,
+            request: vec![("task".to_owned(), task.as_str().to_owned())],
+            request_json: vec![("task".to_owned(), Json::String(task.as_str().to_owned()))],
+            absent_json: vec![("record".to_owned(), Json::Null)],
+        },
+        outcome,
+        success,
+        format,
+    )
 }
 
 fn task_record(payload: &Payload) -> Option<&TaskRecord> {
@@ -80,144 +137,241 @@ fn task_record(payload: &Payload) -> Option<&TaskRecord> {
     }
 }
 
-fn render_status_lines(
-    outcome: &Outcome<Payload>,
-    record: Option<&TaskRecord>,
-    omissions: &[Omission],
-    exit_code: i32,
-    pretty: bool,
-) -> Rendered {
-    let mut lines = if pretty {
-        vec![("command".to_owned(), "task status".to_owned())]
-    } else {
-        Vec::new()
+/// The whole [`TaskRecord`] as `key  value` lines under `record.`, or the same key set
+/// reading `none`.
+///
+/// Every declared field, including the two the pre-bn-ybh1z rendering left out: `epochs` (all
+/// six identities plus the negotiated protocol version) and the *members* of `milestones`.
+/// A task's epochs are what a continuation is validated against — `ContinuationEpochMismatch`
+/// is a refusal a caller can only understand with them in hand — so leaving them unrendered
+/// made the one command that could explain a stale continuation unable to.
+fn record_lines(record: Option<&TaskRecord>) -> Lines {
+    let Some(record) = record else {
+        return vec![("record".to_owned(), "none".to_owned())];
     };
-    if let Some(record) = record {
-        lines.push(("task".to_owned(), record.task.as_str().to_owned()));
-        lines.push(("operation".to_owned(), record.operation.as_str().to_owned()));
-        lines.push(("status".to_owned(), record.status.as_wire().to_owned()));
-        lines.push((
-            "snapshot".to_owned(),
+    let mut lines = vec![
+        ("record".to_owned(), RECORD_FIELDS.to_string()),
+        ("record.task".to_owned(), record.task.as_str().to_owned()),
+        (
+            "record.operation".to_owned(),
+            record.operation.as_str().to_owned(),
+        ),
+        (
+            "record.status".to_owned(),
+            record.status.as_wire().to_owned(),
+        ),
+        (
+            "record.snapshot".to_owned(),
             render::string_or_none(record.snapshot.value().map(|handle| handle.as_str())),
-        ));
-        lines.push((
-            "intent".to_owned(),
+        ),
+        (
+            "record.intent".to_owned(),
             render::string_or_none(record.intent.value().map(|handle| handle.as_str())),
-        ));
-        lines.push((
-            "priority_class".to_owned(),
+        ),
+        (
+            "record.priority_class".to_owned(),
             record.priority_class.as_wire().to_owned(),
-        ));
-        lines.extend(render::budget_lines("budget", &record.budget));
-        lines.extend(render::cost_lines("cost", &record.cost));
-        lines.push((
-            "failed_reason".to_owned(),
-            render::wire_or_none(record.failed_reason.value().copied()),
-        ));
-        lines.push((
-            "continuation".to_owned(),
-            render::string_or_none(record.continuation.value().map(|handle| handle.as_str())),
-        ));
-        lines.push((
-            "non_resumable_reason".to_owned(),
-            render::string_or_none(record.non_resumable_reason.value().map(String::as_str)),
-        ));
-        lines.push(("milestones".to_owned(), record.milestones.len().to_string()));
-        lines.push((
-            "committed_evidence".to_owned(),
-            record.committed_evidence.len().to_string(),
-        ));
-    } else if let Outcome::Refused(refusal) = outcome {
-        lines.push(("status".to_owned(), "refused".to_owned()));
-        lines.extend(render::refusal_lines(refusal));
-    }
-    lines.extend(render::omission_lines(omissions));
-    let next_operations = match outcome {
-        Outcome::Admitted(admitted) => admitted.next_operations.len(),
-        Outcome::Refused(refusal) => refusal.recovery.len(),
-    };
-    lines.push(("next_operations".to_owned(), next_operations.to_string()));
-    Rendered {
-        text: render::join_lines(&lines),
-        exit_code,
-    }
+        ),
+    ];
+    lines.extend(render::budget_lines("record.budget", &record.budget));
+    lines.extend(render::cost_lines("record.cost", &record.cost));
+    lines.extend(epoch_lines("record.epochs", &record.epochs));
+    lines.push((
+        "record.failed_reason".to_owned(),
+        render::wire_or_none(record.failed_reason.value().copied()),
+    ));
+    lines.push((
+        "record.continuation".to_owned(),
+        render::string_or_none(record.continuation.value().map(|handle| handle.as_str())),
+    ));
+    lines.push((
+        "record.non_resumable_reason".to_owned(),
+        render::string_or_none(record.non_resumable_reason.value().map(String::as_str)),
+    ));
+    lines.extend(milestone_lines("record.milestones", &record.milestones));
+    lines.extend(render::handle_lines(
+        "record.committed_evidence",
+        record
+            .committed_evidence
+            .iter()
+            .map(|handle| handle.as_str()),
+    ));
+    lines
 }
 
-fn render_status_json(
-    outcome: &Outcome<Payload>,
-    record: Option<&TaskRecord>,
-    omissions: &[Omission],
-    exit_code: i32,
-) -> Rendered {
-    let mut fields = Vec::new();
-    if let Some(record) = record {
-        fields.push((
+/// The count of fields [`record_json`] puts in the `record` object, which is what the bare
+/// `record` line reads under [`crate::contract`]'s one rule.
+///
+/// A named constant rather than a literal so the two renderings cannot drift: a field added
+/// to one and not the other fails `tests/output_contract.rs` immediately, and a field added
+/// to both without touching this fails it too.
+const RECORD_FIELDS: usize = 14;
+
+fn record_json(record: Option<&TaskRecord>) -> Vec<(String, Json)> {
+    let Some(record) = record else {
+        return vec![("record".to_owned(), Json::Null)];
+    };
+    let fields = vec![
+        (
             "task".to_owned(),
             Json::String(record.task.as_str().to_owned()),
-        ));
-        fields.push((
+        ),
+        (
             "operation".to_owned(),
             Json::String(record.operation.as_str().to_owned()),
-        ));
-        fields.push((
+        ),
+        (
             "status".to_owned(),
             Json::String(record.status.as_wire().to_owned()),
-        ));
-        fields.push((
+        ),
+        (
             "snapshot".to_owned(),
             record.snapshot.value().map_or(Json::Null, |handle| {
                 Json::String(handle.as_str().to_owned())
             }),
-        ));
-        fields.push((
+        ),
+        (
             "intent".to_owned(),
             record.intent.value().map_or(Json::Null, |handle| {
                 Json::String(handle.as_str().to_owned())
             }),
-        ));
-        fields.push((
+        ),
+        (
             "priority_class".to_owned(),
             Json::String(record.priority_class.as_wire().to_owned()),
-        ));
-        fields.push(("budget".to_owned(), render::budget_json(&record.budget)));
-        fields.push(("cost".to_owned(), render::cost_json(&record.cost)));
-        fields.push((
+        ),
+        ("budget".to_owned(), render::budget_json(&record.budget)),
+        ("cost".to_owned(), render::cost_json(&record.cost)),
+        ("epochs".to_owned(), epoch_json(&record.epochs)),
+        (
             "failed_reason".to_owned(),
             record
                 .failed_reason
                 .value()
                 .map_or(Json::Null, |code| Json::String(code.as_wire().to_owned())),
-        ));
-        fields.push((
+        ),
+        (
             "continuation".to_owned(),
             record.continuation.value().map_or(Json::Null, |handle| {
                 Json::String(handle.as_str().to_owned())
             }),
-        ));
-        fields.push((
+        ),
+        (
             "non_resumable_reason".to_owned(),
             record
                 .non_resumable_reason
                 .value()
                 .map_or(Json::Null, |reason| Json::String(reason.clone())),
-        ));
-        fields.push((
-            "milestones".to_owned(),
-            Json::Integer(record.milestones.len() as u64),
-        ));
-        fields.push((
+        ),
+        ("milestones".to_owned(), milestones_json(&record.milestones)),
+        (
             "committed_evidence".to_owned(),
-            Json::Integer(record.committed_evidence.len() as u64),
+            render::handle_json(
+                record
+                    .committed_evidence
+                    .iter()
+                    .map(|handle| handle.as_str()),
+            ),
+        ),
+    ];
+    debug_assert_eq!(
+        fields.len(),
+        RECORD_FIELDS,
+        "the bare `record` line reads this object's field count"
+    );
+    vec![(
+        "record".to_owned(),
+        Json::object(fields).expect("the record's field names are distinct"),
+    )]
+}
+
+/// The six epoch identities a task is pinned to, plus the negotiated protocol version.
+///
+/// `EpochSet.protocol` renders as its canonical `major.minor` spelling — the same string
+/// `ProtocolEpoch::identity` mints — because that *is* its content identity, and a projection
+/// that split it into two numbers would give one fact two keys.
+fn epoch_lines(prefix: &str, epochs: &EpochSet) -> Lines {
+    let mut lines = vec![(prefix.to_owned(), EPOCH_FIELDS.to_string())];
+    lines.push((format!("{prefix}.protocol"), epochs.protocol.to_string()));
+    for (name, value) in epoch_identities(epochs) {
+        lines.push((
+            format!("{prefix}.{name}"),
+            render::string_or_none(value.value().map(|epoch| epoch.as_str())),
         ));
-        fields.push(("error".to_owned(), Json::Null));
-    } else if let Outcome::Refused(refusal) = outcome {
-        fields.push(("error".to_owned(), render::refusal_json(refusal)));
     }
-    fields.push(("omissions".to_owned(), render::omissions_json(omissions)));
-    Rendered {
-        text: render::json_text(&render::envelope_json(fields)),
-        exit_code,
+    lines
+}
+
+fn epoch_json(epochs: &EpochSet) -> Json {
+    let mut fields = vec![(
+        "protocol".to_owned(),
+        Json::String(epochs.protocol.to_string()),
+    )];
+    for (name, value) in epoch_identities(epochs) {
+        fields.push((
+            (*name).to_owned(),
+            value
+                .value()
+                .map_or(Json::Null, |epoch| Json::String(epoch.as_str().to_owned())),
+        ));
     }
+    debug_assert_eq!(fields.len(), EPOCH_FIELDS);
+    Json::object(fields).expect("the seven epoch names are distinct")
+}
+
+/// The count of fields [`epoch_json`] emits, which the bare `record.epochs` line reads.
+const EPOCH_FIELDS: usize = 7;
+
+/// The six nullable identities of an [`EpochSet`], in the order it declares them.
+fn epoch_identities(
+    epochs: &EpochSet,
+) -> [(
+    &'static str,
+    &Nullable<continuumd::protocol::scalar::EpochIdentity>,
+); 6] {
+    [
+        ("semantic", &epochs.semantic),
+        ("intent", &epochs.intent),
+        ("evidence", &epochs.evidence),
+        ("proof", &epochs.proof),
+        ("corpus", &epochs.corpus),
+        ("engine", &epochs.engine),
+    ]
+}
+
+/// Every milestone the task reached, by name and timestamp — never the count alone.
+///
+/// "Semantic milestones reached so far, in order" is the record's own description, and the
+/// order carries the meaning: which milestone a task last reached is what says how far it
+/// got before it suspended.
+fn milestone_lines(prefix: &str, milestones: &[Milestone]) -> Lines {
+    let mut lines = vec![(prefix.to_owned(), milestones.len().to_string())];
+    for (index, milestone) in milestones.iter().enumerate() {
+        lines.push((format!("{prefix}[{index}].name"), milestone.name.clone()));
+        lines.push((
+            format!("{prefix}[{index}].at"),
+            milestone.at.as_str().to_owned(),
+        ));
+    }
+    lines
+}
+
+fn milestones_json(milestones: &[Milestone]) -> Json {
+    Json::Array(
+        milestones
+            .iter()
+            .map(|milestone| {
+                Json::object([
+                    ("name".to_owned(), Json::String(milestone.name.clone())),
+                    (
+                        "at".to_owned(),
+                        Json::String(milestone.at.as_str().to_owned()),
+                    ),
+                ])
+                .expect("two distinct literal keys never collide")
+            })
+            .collect(),
+    )
 }
 
 // --- task resume -----------------------------------------------------------------------
@@ -236,7 +390,7 @@ pub fn resume(
     format: Format,
 ) -> Result<Rendered, CliError> {
     let outcome = connection.task_resume(transport, continuation, states_budget(states))?;
-    Ok(render_resume(&outcome, format))
+    Ok(render_resume(continuation, states, &outcome, format))
 }
 
 fn resume_payload(payload: &Payload) -> Option<&TaskResumeResponse> {
@@ -246,85 +400,76 @@ fn resume_payload(payload: &Payload) -> Option<&TaskResumeResponse> {
     }
 }
 
-fn render_resume(outcome: &Outcome<Payload>, format: Format) -> Rendered {
-    let empty = Vec::new();
-    let (response, omissions, exit_code) = match outcome {
-        Outcome::Admitted(admitted) => (resume_payload(&admitted.payload), &admitted.omissions, 0),
-        Outcome::Refused(_) => (None, &empty, 1),
-    };
-    let mut lines = if format == Format::Pretty {
-        vec![("command".to_owned(), "task resume".to_owned())]
-    } else {
-        Vec::new()
-    };
-    match (response, outcome) {
-        (Some(response), _) => {
-            lines.push(("task".to_owned(), response.task.as_str().to_owned()));
-            lines.push(("status".to_owned(), response.status.as_wire().to_owned()));
-            lines.push(("refused".to_owned(), "false".to_owned()));
-        }
-        (None, Outcome::Refused(refusal)) => {
-            lines.push(("refused".to_owned(), "true".to_owned()));
-            lines.extend(render::refusal_lines(refusal));
-        }
-        (None, Outcome::Admitted(_)) => {
+/// Project one `task.resume` answer, in whichever [`Format`] was resolved.
+///
+/// The request echo is the *continuation* and the ceiling the caller declared, which are the
+/// two things this invocation chose; the task the continuation resolves to is the daemon's
+/// answer, under `record.`, and this crate never asserts which one it will be.
+#[must_use]
+pub fn render_resume(
+    continuation: &ContinuationHandle,
+    states: u64,
+    outcome: &Outcome<Payload>,
+    format: Format,
+) -> Rendered {
+    let success = |admitted: &Admitted<Payload>| {
+        let response = resume_payload(&admitted.payload);
+        let Some(response) = response else {
             // Unreachable: `Admitted` always decodes a `TaskResume` payload for
             // `task.resume` (`continuumd`'s own `debug_assert` in `Daemon::dispatch`
             // guarantees the payload matches the operation). Rendered plainly rather than
             // panicking, because a renderer must be total over what the type admits.
-            lines.push(("refused".to_owned(), "false".to_owned()));
-        }
-    }
-    lines.extend(render::omission_lines(omissions));
-    let next_operations = match outcome {
-        Outcome::Admitted(admitted) => admitted.next_operations.len(),
-        Outcome::Refused(refusal) => refusal.recovery.len(),
+            return (
+                vec![("record".to_owned(), "none".to_owned())],
+                vec![("record".to_owned(), Json::Null)],
+            );
+        };
+        (
+            vec![
+                ("record".to_owned(), "2".to_owned()),
+                ("record.task".to_owned(), response.task.as_str().to_owned()),
+                (
+                    "record.status".to_owned(),
+                    response.status.as_wire().to_owned(),
+                ),
+            ],
+            vec![(
+                "record".to_owned(),
+                Json::object([
+                    (
+                        "task".to_owned(),
+                        Json::String(response.task.as_str().to_owned()),
+                    ),
+                    (
+                        "status".to_owned(),
+                        Json::String(response.status.as_wire().to_owned()),
+                    ),
+                ])
+                .expect("two distinct literal keys never collide"),
+            )],
+        )
     };
-    lines.push(("next_operations".to_owned(), next_operations.to_string()));
-
-    if format == Format::Json {
-        return render_resume_json(response, outcome, omissions, exit_code);
-    }
-    Rendered {
-        text: render::join_lines(&lines),
-        exit_code,
-    }
-}
-
-fn render_resume_json(
-    response: Option<&TaskResumeResponse>,
-    outcome: &Outcome<Payload>,
-    omissions: &[Omission],
-    exit_code: i32,
-) -> Rendered {
-    let mut fields = Vec::new();
-    match (response, outcome) {
-        (Some(response), _) => {
-            fields.push((
-                "task".to_owned(),
-                Json::String(response.task.as_str().to_owned()),
-            ));
-            fields.push((
-                "status".to_owned(),
-                Json::String(response.status.as_wire().to_owned()),
-            ));
-            fields.push(("refused".to_owned(), Json::Bool(false)));
-            fields.push(("error".to_owned(), Json::Null));
-        }
-        (None, Outcome::Refused(refusal)) => {
-            fields.push(("refused".to_owned(), Json::Bool(true)));
-            fields.push(("error".to_owned(), render::refusal_json(refusal)));
-        }
-        (None, Outcome::Admitted(_)) => {
-            fields.push(("refused".to_owned(), Json::Bool(false)));
-            fields.push(("error".to_owned(), Json::Null));
-        }
-    }
-    fields.push(("omissions".to_owned(), render::omissions_json(omissions)));
-    Rendered {
-        text: render::json_text(&render::envelope_json(fields)),
-        exit_code,
-    }
+    render::project(
+        &Projection {
+            command: "task resume",
+            operation: RESUME_OPERATION,
+            request: vec![
+                ("continuation".to_owned(), continuation.as_str().to_owned()),
+                ("budget_states".to_owned(), states.to_string()),
+            ],
+            request_json: vec![
+                (
+                    "continuation".to_owned(),
+                    Json::String(continuation.as_str().to_owned()),
+                ),
+                ("budget_states".to_owned(), Json::Integer(states)),
+            ],
+            absent_json: vec![("record".to_owned(), Json::Null)],
+        },
+        outcome,
+        success,
+        format,
+    )
 }
 
 // --- task cancel -----------------------------------------------------------------------
@@ -334,6 +479,10 @@ fn render_resume_json(
 /// with everything it published committed and nothing dangling over it. The same three-way
 /// reading `continuumd/tests/pr6_exit_evidence.rs`'s `ExitSide` gives the identical wire
 /// contract.
+///
+/// A *derived token* in [`crate::contract`]'s sense: a total function of the answer that adds
+/// no fact the answer does not carry — `continuation` and `committed_evidence` are both
+/// rendered beside it — and present in every format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancelOutcome {
     /// A `cont_*` was handed back: committed partial evidence sits behind it, valid by the
@@ -382,7 +531,7 @@ pub fn cancel(
     format: Format,
 ) -> Result<Rendered, CliError> {
     let outcome = connection.task_cancel(transport, task)?;
-    Ok(render_cancel(&outcome, format))
+    Ok(render_cancel(task, &outcome, format))
 }
 
 fn cancel_payload(payload: &Payload) -> Option<&TaskCancelResponse> {
@@ -392,95 +541,97 @@ fn cancel_payload(payload: &Payload) -> Option<&TaskCancelResponse> {
     }
 }
 
-fn render_cancel(outcome: &Outcome<Payload>, format: Format) -> Rendered {
-    let empty = Vec::new();
-    let (response, omissions, exit_code) = match outcome {
-        Outcome::Admitted(admitted) => (cancel_payload(&admitted.payload), &admitted.omissions, 0),
-        Outcome::Refused(_) => (None, &empty, 1),
+/// Project one `task.cancel` answer, in whichever [`Format`] was resolved.
+///
+/// `TaskCancelResponse.task` is the echo of the request's own `task`, so it is rendered once
+/// — under the request's key — per [`crate::contract`]'s echoed-subject rule. The three
+/// fields that are the daemon's *answer* (`status`, `continuation`, `committed_evidence`)
+/// are under `record.`, and [`CancelOutcome`] names which side of `rule
+/// task.cancel_correct`'s disjunction they land on.
+#[must_use]
+pub fn render_cancel(task: &TaskHandle, outcome: &Outcome<Payload>, format: Format) -> Rendered {
+    let success = |admitted: &Admitted<Payload>| {
+        let response = cancel_payload(&admitted.payload);
+        let side = response.map(CancelOutcome::of);
+        let lines = vec![
+            (
+                "outcome".to_owned(),
+                side.map_or_else(|| "none".to_owned(), |side| side.token().to_owned()),
+            ),
+            (
+                "record".to_owned(),
+                response.map_or_else(|| "none".to_owned(), |_| "3".to_owned()),
+            ),
+            (
+                "record.status".to_owned(),
+                response.map_or_else(
+                    || "none".to_owned(),
+                    |response| response.status.as_wire().to_owned(),
+                ),
+            ),
+            (
+                "record.continuation".to_owned(),
+                render::string_or_none(
+                    response
+                        .and_then(|response| response.continuation.value())
+                        .map(|handle| handle.as_str()),
+                ),
+            ),
+            (
+                "record.committed_evidence".to_owned(),
+                render::number_or_none(
+                    response.map(|response| response.committed_evidence.len() as u64),
+                ),
+            ),
+        ];
+        let fields = vec![
+            (
+                "outcome".to_owned(),
+                side.map_or(Json::Null, |side| Json::String(side.token().to_owned())),
+            ),
+            (
+                "record".to_owned(),
+                response.map_or(Json::Null, |response| {
+                    Json::object([
+                        (
+                            "status".to_owned(),
+                            Json::String(response.status.as_wire().to_owned()),
+                        ),
+                        (
+                            "continuation".to_owned(),
+                            response.continuation.value().map_or(Json::Null, |handle| {
+                                Json::String(handle.as_str().to_owned())
+                            }),
+                        ),
+                        (
+                            "committed_evidence".to_owned(),
+                            render::handle_json(
+                                response
+                                    .committed_evidence
+                                    .iter()
+                                    .map(|handle| handle.as_str()),
+                            ),
+                        ),
+                    ])
+                    .expect("three distinct literal keys never collide")
+                }),
+            ),
+        ];
+        (lines, fields)
     };
-    match format {
-        Format::Json => render_cancel_json(response, outcome, omissions, exit_code),
-        Format::Text => render_cancel_lines(response, outcome, omissions, exit_code, false),
-        Format::Pretty => render_cancel_lines(response, outcome, omissions, exit_code, true),
-    }
-}
-
-fn render_cancel_lines(
-    response: Option<&TaskCancelResponse>,
-    outcome: &Outcome<Payload>,
-    omissions: &[Omission],
-    exit_code: i32,
-    pretty: bool,
-) -> Rendered {
-    let mut lines = if pretty {
-        vec![("command".to_owned(), "task cancel".to_owned())]
-    } else {
-        Vec::new()
-    };
-    if let Some(response) = response {
-        let side = CancelOutcome::of(response);
-        lines.push(("task".to_owned(), response.task.as_str().to_owned()));
-        lines.push(("status".to_owned(), response.status.as_wire().to_owned()));
-        lines.push(("outcome".to_owned(), side.token().to_owned()));
-        lines.push((
-            "continuation".to_owned(),
-            render::string_or_none(response.continuation.value().map(|handle| handle.as_str())),
-        ));
-        lines.push((
-            "committed_evidence".to_owned(),
-            response.committed_evidence.len().to_string(),
-        ));
-    } else if let Outcome::Refused(refusal) = outcome {
-        lines.push(("status".to_owned(), "refused".to_owned()));
-        lines.extend(render::refusal_lines(refusal));
-    }
-    lines.extend(render::omission_lines(omissions));
-    let next_operations = match outcome {
-        Outcome::Admitted(admitted) => admitted.next_operations.len(),
-        Outcome::Refused(refusal) => refusal.recovery.len(),
-    };
-    lines.push(("next_operations".to_owned(), next_operations.to_string()));
-    Rendered {
-        text: render::join_lines(&lines),
-        exit_code,
-    }
-}
-
-fn render_cancel_json(
-    response: Option<&TaskCancelResponse>,
-    outcome: &Outcome<Payload>,
-    omissions: &[Omission],
-    exit_code: i32,
-) -> Rendered {
-    let mut fields = Vec::new();
-    if let Some(response) = response {
-        let side = CancelOutcome::of(response);
-        fields.push((
-            "task".to_owned(),
-            Json::String(response.task.as_str().to_owned()),
-        ));
-        fields.push((
-            "status".to_owned(),
-            Json::String(response.status.as_wire().to_owned()),
-        ));
-        fields.push(("outcome".to_owned(), Json::String(side.token().to_owned())));
-        fields.push((
-            "continuation".to_owned(),
-            response.continuation.value().map_or(Json::Null, |handle| {
-                Json::String(handle.as_str().to_owned())
-            }),
-        ));
-        fields.push((
-            "committed_evidence".to_owned(),
-            Json::Integer(response.committed_evidence.len() as u64),
-        ));
-        fields.push(("error".to_owned(), Json::Null));
-    } else if let Outcome::Refused(refusal) = outcome {
-        fields.push(("error".to_owned(), render::refusal_json(refusal)));
-    }
-    fields.push(("omissions".to_owned(), render::omissions_json(omissions)));
-    Rendered {
-        text: render::json_text(&render::envelope_json(fields)),
-        exit_code,
-    }
+    render::project(
+        &Projection {
+            command: "task cancel",
+            operation: CANCEL_OPERATION,
+            request: vec![("task".to_owned(), task.as_str().to_owned())],
+            request_json: vec![("task".to_owned(), Json::String(task.as_str().to_owned()))],
+            absent_json: vec![
+                ("outcome".to_owned(), Json::Null),
+                ("record".to_owned(), Json::Null),
+            ],
+        },
+        outcome,
+        success,
+        format,
+    )
 }

@@ -353,12 +353,21 @@ fn show_renders_the_node_a_real_daemon_holds_under_that_handle() {
         // The handle is printed in full, never truncated.
         assert!(rendered.text.contains(handle.as_str()), "{}", rendered.text);
         assert!(
-            rendered.text.contains("edge.bytes  none"),
+            rendered.text.contains("edge_bytes  none"),
+            "{}",
+            rendered.text
+        );
+        // `none`, not `false`: the answer carried no stub, and the bare key reads the
+        // machine document's `redacted` — `null` there, `none` here. bn-ybh1z flipped this
+        // pin: `false` was a claim this crate made about a field the daemon never sent, and
+        // it disagreed with the machine channel for the same answer.
+        assert!(
+            rendered.text.contains("redacted  none"),
             "{}",
             rendered.text
         );
         assert!(
-            rendered.text.contains("redacted  false"),
+            rendered.text.contains("redacted.redacted  none"),
             "{}",
             rendered.text
         );
@@ -493,7 +502,11 @@ fn a_redacted_reference_renders_the_typed_stub_beside_the_record() {
     );
     // 1. The typed stub, field by field — "withheld" distinguishable from "absent"
     //    structurally, without inference (RFC 0026).
-    assert!(text.text.contains("redacted  true"), "{}", text.text);
+    assert!(
+        text.text.contains("redacted.redacted  true"),
+        "{}",
+        text.text
+    );
     assert!(
         text.text.contains(&format!(
             "redacted.reason  {}",
@@ -517,7 +530,7 @@ fn a_redacted_reference_renders_the_typed_stub_beside_the_record() {
     // 3. The record itself is still returned: an error carries no record, and this is not
     //    an error.
     assert!(
-        !text.text.contains("node.bytes  none"),
+        !text.text.contains("node_bytes  none"),
         "the node record travels beside the redaction:\n{}",
         text.text
     );
@@ -552,12 +565,15 @@ fn the_denial_json_document_is_pinned_byte_for_byte() {
     assert_eq!(
         rendered.text,
         concat!(
-            r#"{"advice":[],"depth":"refused","edge":null,"edge_bytes":null,"#,
+            r#"{"advice":[],"artifacts":[],"cost":null,"depth":"refused","#,
+            r#""edge":null,"edge_bytes":null,"#,
             r#""error":{"code":"CapabilityDenied","continuation":null,"#,
             r#""detail":"the presented capability does not admit this operation","#,
-            r#""non_resumable_reason":null,"recovery":0,"retryable":false},"#,
-            r#""evidence":"ev_neverappended01","inline":false,"node":null,"node_bytes":null,"#,
-            r#""omissions":[],"operation":"evidence.get","redacted":null}"#,
+            r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
+            r#""evidence":"ev_neverappended01","inline":false,"next_operations":[],"#,
+            r#""node":null,"node_bytes":null,"#,
+            r#""omissions":[],"operation":"evidence.get","redacted":null,"#,
+            r#""request_id":"req_cli000001"}"#,
             "\n"
         ),
         "the machine envelope is canonical JSON with a fixed key set"

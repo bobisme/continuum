@@ -587,12 +587,14 @@ fn the_denial_json_document_is_pinned_byte_for_byte() {
     assert_eq!(
         rendered.text,
         concat!(
-            r#"{"advice":[],"base":"ws_neverheld0001","depth":"refused","diagnostics":null,"#,
+            r#"{"advice":[],"artifacts":[],"base":"ws_neverheld0001","cost":null,"#,
+            r#""depth":"refused","diagnostics":null,"#,
             r#""error":{"code":"CapabilityDenied","continuation":null,"#,
             r#""detail":"the presented capability does not admit this operation","#,
-            r#""non_resumable_reason":null,"recovery":0,"retryable":false},"#,
-            r#""intent":null,"omissions":[],"operation":"workspace.fork","overlay":0,"#,
-            r#""patches":0,"pre_diff":null,"snapshot":null}"#,
+            r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
+            r#""intent":null,"next_operations":[],"omissions":[],"#,
+            r#""operation":"workspace.fork","overlay":0,"#,
+            r#""patches":0,"pre_diff":null,"request_id":"req_cli000001","snapshot":null}"#,
             "\n"
         ),
         "the machine envelope is canonical JSON with a fixed key set"

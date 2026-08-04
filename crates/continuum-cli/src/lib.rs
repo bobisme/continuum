@@ -8,6 +8,21 @@
 //! `--json` is the contract; prose is a projection of it (INV-003 — no prose-only
 //! machine interfaces).
 //!
+//! # The output contract is [`contract`]
+//!
+//! **Read that module first.** It is the crate's one statement of what every command's
+//! output is: the machine document's field rules, the pure projection from it to the
+//! terminal body, the exit-code taxonomy, and G8-06's non-colour guarantee — with the plan
+//! §13.4/§3.1 and INV-003 citations each rests on. `tests/output_contract.rs` holds every
+//! command in this crate to all four at once.
+//!
+//! In one paragraph: `--format json` is the daemon's answer with no field dropped and none
+//! invented; the text formats are a *pure function* of that document — every value in them
+//! is re-computed from it, by key, and a golden test asserts the two cannot diverge;
+//! `pretty` is `text` plus one label line, so nothing is behind colour, a table, or a graph
+//! because there is no colour, table or graph to be behind; and the exit code answers one
+//! question — *did I get an answer, and if so was it yes?* — in five documented classes.
+//!
 //! # What has landed here, bone by bone
 //!
 //! The PR-13 START_HERE line names three command groups. The third (bn-3tz60) landed first:
@@ -15,10 +30,12 @@
 //! is the failure-investigation and promotion group: `debug open`/`debug state`,
 //! `repair begin`/`repair review`, and `evidence show`. The first — the read/verify group
 //! (bn-3rqvm) — is `snapshot create|fork|seal`, `check start|result|await`, and
-//! `explain compile`. The cross-cutting output contract (bn-ybh1z) is a separate bone and had
-//! not landed when this one did; [`cli`] therefore knows the `snapshot`, `check`, `explain`,
-//! `context`, `task`, `debug`, `repair`, and `evidence` verb groups and reports every other
-//! first word as a usage error.
+//! `explain compile`. The fourth bone, bn-ybh1z, is the cross-cutting output contract those
+//! three grew under separately: [`contract`], the divergences it found in the three groups
+//! (named in [`task`] and [`context`], the two that shipped before it), and the exit-code
+//! taxonomy that replaced the served/refused pair. [`cli`] knows the `snapshot`, `check`,
+//! `explain`, `context`, `task`, `debug`, `repair`, and `evidence` verb groups and reports
+//! every other first word as a usage error.
 //!
 //! # Explicit handles everywhere (INV-002)
 //!
@@ -114,6 +131,7 @@
 pub mod check;
 pub mod cli;
 pub mod context;
+pub mod contract;
 pub mod debug;
 pub mod error;
 pub mod evidence;

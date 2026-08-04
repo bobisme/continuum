@@ -324,11 +324,43 @@ fn the_live_success_path_prints_the_expanded_pack_beside_the_full_omission_manif
             "the manifest line is present in {format:?}:\n{}",
             rendered.text
         );
+        // The shared output contract, which this command joined in bn-ybh1z: the registry
+        // operation and the typed depth on every arm, the request's expansion distance under
+        // `expand_depth` (because `depth` is the contract's own key), and the child pack's
+        // length beside the document the machine channel embeds.
+        assert!(
+            rendered.text.contains("operation  context.expand"),
+            "{format:?}:\n{}",
+            rendered.text
+        );
+        assert!(
+            rendered.text.contains("depth  served"),
+            "{format:?}:\n{}",
+            rendered.text
+        );
+        assert!(
+            rendered.text.contains("expand_depth  "),
+            "{format:?}:\n{}",
+            rendered.text
+        );
+        assert!(
+            rendered.text.contains("pack_bytes  "),
+            "{format:?}:\n{}",
+            rendered.text
+        );
+        // The CLI-authored `status: ok|refused` token this command carried before bn-ybh1z
+        // is gone: `depth` says the same thing, typed, and finer.
+        assert!(
+            !rendered.text.contains("status  ok"),
+            "{format:?}:\n{}",
+            rendered.text
+        );
     }
 
     let json = context::render(&args("node-42"), &outcome, Format::Json);
     assert_eq!(json.exit_code, 0);
     assert!(json.text.contains(&format!("\"expanded\":\"{expanded}\"")));
+    assert!(json.text.contains("\"pack_bytes\":"), "{}", json.text);
     // The pack is embedded verbatim, so the child's own two selected spans are readable in
     // the machine output without a second call.
     assert!(json.text.contains("\"span_1\""), "{}", json.text);
@@ -365,6 +397,18 @@ fn the_cli_renders_a_refusal_with_the_typed_reason_in_every_format() {
                 .contains(ErrorCode::MalformedRequest.as_wire()),
             "the typed reason is the protocol's own wire token, not a synonym, in {format:?}:\n{}",
             rendered.text
+        );
+    }
+
+    // The machine envelope keeps the whole response key set on the refusal arm, explicitly
+    // `null` — bn-ybh1z: before it, a refused `context expand` answered `{error, omissions,
+    // advice}` and a parser had to branch on which keys existed before it could read one.
+    let json = context::render(&args("node-99"), &outcome, Format::Json);
+    for key in ["expanded", "parent", "pack", "pack_bytes"] {
+        assert!(
+            json.text.contains(&format!("\"{key}\":null")),
+            "{key} is present and null on the refusal arm:\n{}",
+            json.text
         );
     }
 }

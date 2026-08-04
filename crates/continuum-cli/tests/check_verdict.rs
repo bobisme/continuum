@@ -39,6 +39,7 @@
 //! a `tests/*.rs` file is its own crate.
 
 use continuum_cli::check::{self, AnswerShape, AwaitArgs, ResultArgs, StartArgs};
+use continuum_cli::contract::Exit;
 use continuum_cli::format::Format;
 use continuum_cli::render::Rendered;
 use continuum_cli::wire::{Connection, LinkError, LocalLink, Transport};
@@ -481,7 +482,7 @@ fn a_fresh_start_is_task_shaped_and_a_repeat_start_is_result_shaped() {
     );
     // `verification.start` declares no `verdict` clause, so the answer carries none — stated
     // rather than left blank, because a caller must not read an absent verdict as a verdict.
-    assert_eq!(line(&first, "verdict"), "none");
+    assert_eq!(line(&first, "verdict.kind"), "none");
 
     // A second submit under a distinct idempotency key: same campaign identity, completed, so
     // the cached lane answers.
@@ -616,8 +617,17 @@ fn a_closed_campaign_renders_the_engines_own_refutation() {
         let mut link = fixture.link();
         let rendered =
             check::result(&mut connection, &mut link, &args, format).expect("the call is answered");
-        assert_eq!(rendered.exit_code, 0, "{format:?}:\n{}", rendered.text);
-        assert_eq!(line(&rendered, "verdict"), "semantic");
+        // `3`, not `0`: the daemon answered and the answer is **no**. bn-ybh1z flipped this
+        // pin deliberately — a refuted campaign exiting `0` is what makes
+        // `continuum check result … && deploy` deploy a refuted build
+        // (`continuum_cli::contract`, "the exit-code taxonomy").
+        assert_eq!(
+            rendered.exit_code,
+            Exit::Refuted.code(),
+            "{format:?}:\n{}",
+            rendered.text
+        );
+        assert_eq!(line(&rendered, "verdict.kind"), "semantic");
         assert_eq!(
             line(&rendered, "verdict.verdict"),
             SemanticVerdict::Refuted.as_wire()
@@ -670,7 +680,14 @@ fn a_bounded_campaign_renders_inconclusive_with_the_typed_reason_never_a_verdict
         let mut link = fixture.link();
         let rendered =
             check::result(&mut connection, &mut link, &args, format).expect("the call is answered");
-        assert_eq!(rendered.exit_code, 0, "{format:?}:\n{}", rendered.text);
+        // `4`: INV-008's typed unknown is neither a yes nor a no, and the taxonomy gives it
+        // a code of its own so a caller need not parse the verdict to tell (bn-ybh1z).
+        assert_eq!(
+            rendered.exit_code,
+            Exit::Inconclusive.code(),
+            "{format:?}:\n{}",
+            rendered.text
+        );
         for token in [
             SemanticVerdict::Inconclusive.as_wire(),
             InconclusiveReason::ResourceExhausted.as_wire(),
@@ -790,7 +807,14 @@ fn await_answers_within_the_callers_own_bound_and_prints_the_continuation() {
     let mut link = fixture.link();
     let rendered = check::await_result(&mut connection, &mut link, &awaited, Format::Text)
         .expect("the call is answered");
-    assert_eq!(rendered.exit_code, 0, "{}", rendered.text);
+    // Waiting never changes a verdict, and the exit code is the verdict's: a parked campaign
+    // is inconclusive, so the wait that reported it exits `4` (bn-ybh1z).
+    assert_eq!(
+        rendered.exit_code,
+        Exit::Inconclusive.code(),
+        "{}",
+        rendered.text
+    );
     assert_eq!(line(&rendered, "operation"), check::AWAIT_OPERATION);
     assert_eq!(line(&rendered, "timeout_ms"), "25");
     assert_eq!(
@@ -867,11 +891,13 @@ fn the_denial_json_document_is_pinned_byte_for_byte() {
     assert_eq!(
         rendered.text,
         concat!(
-            r#"{"advice":[],"assurance":null,"continuation":null,"depth":"refused","#,
+            r#"{"advice":[],"artifacts":[],"assurance":null,"continuation":null,"#,
+            r#""cost":null,"depth":"refused","#,
             r#""error":{"code":"CapabilityDenied","continuation":null,"#,
             r#""detail":"the presented capability does not admit this operation","#,
-            r#""non_resumable_reason":null,"recovery":0,"retryable":false},"#,
-            r#""omissions":[],"operation":"verification.result","result":null,"#,
+            r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
+            r#""next_operations":[],"omissions":[],"operation":"verification.result","#,
+            r#""request_id":"req_cli000001","result":null,"#,
             r#""status":null,"task":"task_neverstarted1","verdict":null}"#,
             "\n"
         ),

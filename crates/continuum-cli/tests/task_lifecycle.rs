@@ -519,10 +519,43 @@ fn status_renders_a_suspended_records_cost_budget_and_continuation_faithfully() 
         );
         assert!(
             rendered.text.contains(&PARK_BUDGET.to_string()),
-            "cost.states and budget.states render in {format:?}:\n{}",
+            "record.cost.states and record.budget.states render in {format:?}:\n{}",
             rendered.text
         );
     }
+
+    // The record's `epochs` reached no format at all before bn-ybh1z — a field the daemon
+    // sent and the adapter dropped, and the one a caller needs to read a
+    // `ContinuationEpochMismatch` refusal. All seven are rendered now, by name.
+    let mut connection = connection_as("agent:runner", "cap_runner");
+    let mut link = fixture.link();
+    let text = task::status(&mut connection, &mut link, &task, Format::Text)
+        .expect("the call is answered");
+    for key in [
+        "record.epochs  7",
+        "record.epochs.protocol  ",
+        "record.epochs.semantic  ",
+        "record.epochs.intent  ",
+        "record.epochs.evidence  ",
+        "record.epochs.proof  ",
+        "record.epochs.corpus  ",
+        "record.epochs.engine  ",
+    ] {
+        assert!(text.text.contains(key), "{key} renders:\n{}", text.text);
+    }
+    // The record's own `operation` — the operation the *task* runs — is one level down, so
+    // it cannot be read as the operation this command drove (`continuum_cli::contract`,
+    // "Reserved keys").
+    assert!(
+        text.text.contains("operation  task.status"),
+        "{}",
+        text.text
+    );
+    assert!(
+        text.text.contains("record.operation  verification.start"),
+        "{}",
+        text.text
+    );
 }
 
 #[test]
@@ -563,11 +596,10 @@ fn resume_spends_a_valid_continuation_and_closes_the_frozen_campaign() {
         .expect("the call is answered")
     };
     assert_eq!(rendered.exit_code, 0, "{}", rendered.text);
-    assert!(
-        rendered.text.contains("refused  false"),
-        "{}",
-        rendered.text
-    );
+    // `depth  served`, not the `refused  false` this command carried before bn-ybh1z: a
+    // CLI-invented boolean that restated what `depth` and `error` already say, typed and
+    // finer (`continuum_cli::contract`, "No invented fields").
+    assert!(rendered.text.contains("depth  served"), "{}", rendered.text);
     assert!(
         rendered.text.contains(TaskStatus::Completed.as_wire()),
         "the resumed campaign closes to Die Hard's frozen verdict:\n{}",
@@ -641,7 +673,13 @@ fn resume_refuses_a_continuation_whose_pinned_snapshot_the_lineage_superseded() 
         "a refusal exits non-zero:\n{}",
         rendered.text
     );
-    assert!(rendered.text.contains("refused  true"), "{}", rendered.text);
+    // The typed depth in place of the former `refused  true`, and it says more: this is a
+    // refusal about *this request*, not about a surface the deployment does not serve.
+    assert!(
+        rendered.text.contains("depth  refused"),
+        "{}",
+        rendered.text
+    );
     assert!(
         rendered.text.contains(ErrorCode::StaleSnapshot.as_wire()),
         "the typed reason is surfaced, not a bare failure:\n{}",
@@ -680,7 +718,10 @@ fn resume_refuses_a_continuation_whose_pinned_snapshot_the_lineage_superseded() 
         .expect("the call is answered")
     };
     assert_eq!(json.exit_code, 1);
-    assert!(json.text.contains("\"refused\":true"));
+    assert!(json.text.contains("\"depth\":\"refused\""), "{}", json.text);
+    // …and the machine envelope keeps the response key set on the refusal arm, so a parser
+    // never branches on which keys exist (bn-ybh1z).
+    assert!(json.text.contains("\"record\":null"), "{}", json.text);
     assert!(json.text.contains(&format!(
         "\"code\":\"{}\"",
         ErrorCode::StaleSnapshot.as_wire()

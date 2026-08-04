@@ -148,7 +148,7 @@ pub fn render_compile(args: &CompileArgs, outcome: &Outcome<Payload>, format: Fo
             "audience".to_owned(),
             render::wire_or_none(args.audience.value().copied()),
         ),
-        ("budget.bytes".to_owned(), args.bytes.to_string()),
+        ("budget_bytes".to_owned(), args.bytes.to_string()),
     ];
     request.extend(render::handle_lines(
         "guarantees",
@@ -181,7 +181,7 @@ pub fn render_compile(args: &CompileArgs, outcome: &Outcome<Payload>, format: Fo
                 "context".to_owned(),
                 render::string_or_none(body.map(|body| body.context.as_str())),
             ),
-            ("pack.bytes".to_owned(), render::embedded_bytes_line(pack)),
+            ("pack_bytes".to_owned(), render::embedded_bytes_line(pack)),
         ];
         lines.extend(pack_lines(document.as_ref()));
         let fields = vec![
@@ -322,19 +322,26 @@ pub fn pack_lines(pack: Option<&Json>) -> Lines {
 /// One array field: its length, then each element — either the element itself when `fields`
 /// is empty (a list of strings), or the named sub-fields of each element object.
 ///
-/// `none` for the count when the document is absent or carries no such array, which is
+/// `none` for the count when the document is absent or carries no such key, which is
 /// distinguishable from `0` — an empty manifest is an *assertion* under RFC 0028 ("the
 /// selection is the whole candidate set"), and a projection that printed `0` for a missing
 /// field would be making that assertion on the pack's behalf.
+///
+/// A key that is present but is *not* an array falls through to [`render_scalar`] rather
+/// than reading `none`: a pack whose `omissions` were an object is malformed, and the
+/// honest reading of a malformed field is what is there, not a claim that nothing is
+/// (bn-ybh1z — and it is what keeps this projection re-renderable from the embedded document
+/// under [`crate::contract`]'s one rule, on adversarial input as much as on a conforming
+/// pack).
 fn items(prefix: &str, pack: Option<&Json>, path: &[&str], fields: &[(&str, &[&str])]) -> Lines {
-    let Some(array) = pack
-        .and_then(|pack| walk(pack, path))
-        .and_then(|value| match value {
-            Json::Array(items) => Some(items),
-            _ => None,
-        })
-    else {
-        return vec![(prefix.to_owned(), "none".to_owned())];
+    let value = pack.and_then(|pack| walk(pack, path));
+    let Some(Json::Array(array)) = value else {
+        return vec![(
+            prefix.to_owned(),
+            value
+                .and_then(render_scalar)
+                .unwrap_or_else(|| "none".to_owned()),
+        )];
     };
     let mut lines = vec![(prefix.to_owned(), array.len().to_string())];
     for (index, item) in array.iter().enumerate() {
@@ -367,22 +374,22 @@ fn walk<'a>(document: &'a Json, path: &[&str]) -> Option<&'a Json> {
     Some(cursor)
 }
 
-/// The scalar at `path`, rendered — or `None` when it is absent, null, or not a scalar.
+/// The scalar at `path`, rendered — or `None` when it is absent or null.
 fn scalar(document: &Json, path: &[&str]) -> Option<String> {
     render_scalar(walk(document, path)?)
 }
 
-/// One JSON scalar as a line value.
+/// One JSON value as a line value — [`crate::contract::render_value`], modulo `null`, which
+/// this function reports as [`None`] so a caller can tell "the pack said null" from "the
+/// path led nowhere" before both collapse to `none`.
 ///
-/// An object or an array answers `None` rather than a summary: a projection that printed
-/// `{…}` for a nested value would be inventing a notation the document does not have, and
-/// every nested value this projection cares about has a key of its own above.
+/// A container answers its length rather than a `{…}` notation the document does not have,
+/// which is the contract's one rule and not a per-command choice: a pack whose `parent` were
+/// an object would otherwise read `none` here and `1` in the machine channel, and the two
+/// channels would disagree about a field neither of them invented.
 fn render_scalar(value: &Json) -> Option<String> {
     match value {
         Json::Null => None,
-        Json::Bool(flag) => Some(flag.to_string()),
-        Json::Integer(number) => Some(number.to_string()),
-        Json::String(text) => Some(text.clone()),
-        Json::Array(_) | Json::Object(_) => None,
+        other => Some(crate::contract::render_value(other)),
     }
 }

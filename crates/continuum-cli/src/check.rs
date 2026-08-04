@@ -206,16 +206,16 @@ pub fn render_start(args: &StartArgs, outcome: &Outcome<Payload>, format: Format
     let request = vec![
         ("snapshot".to_owned(), args.snapshot.as_str().to_owned()),
         (
-            "target.kind".to_owned(),
+            "target_kind".to_owned(),
             args.target.kind.as_wire().to_owned(),
         ),
-        ("target.id".to_owned(), args.target.id.clone()),
+        ("target_id".to_owned(), args.target.id.clone()),
         ("portfolio".to_owned(), args.portfolio.as_wire().to_owned()),
         (
             "priority_class".to_owned(),
             render::wire_or_none(args.priority_class.value().copied()),
         ),
-        ("budget.states".to_owned(), args.states.to_string()),
+        ("budget_states".to_owned(), args.states.to_string()),
     ];
     let request_json = vec![
         (

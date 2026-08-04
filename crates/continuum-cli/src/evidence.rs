@@ -36,7 +36,7 @@ use continuumd::daemon::family::Payload;
 use continuumd::protocol::envelope::Redacted;
 use continuumd::protocol::operations::evidence::{EvidenceGetRequest, EvidenceGetResponse};
 use continuumd::protocol::scalar::EvidenceHandle;
-use continuumd::protocol::spec::{Optional, ProtocolEnum};
+use continuumd::protocol::spec::Optional;
 
 use crate::error::CliError;
 use crate::format::Format;
@@ -114,8 +114,8 @@ pub fn render(args: &ShowArgs, outcome: &Outcome<Payload>, format: Format) -> Re
         let edge = body.and_then(|body| body.edge.value());
         let stub = body.and_then(|body| body.redacted.value());
         let mut lines = vec![
-            ("node.bytes".to_owned(), render::embedded_bytes_line(node)),
-            ("edge.bytes".to_owned(), render::embedded_bytes_line(edge)),
+            ("node_bytes".to_owned(), render::embedded_bytes_line(node)),
+            ("edge_bytes".to_owned(), render::embedded_bytes_line(edge)),
         ];
         lines.extend(redaction_lines(stub));
         let fields = vec![
@@ -155,16 +155,27 @@ fn response(payload: &Payload) -> Option<&EvidenceGetResponse> {
     }
 }
 
-/// The typed [`Redacted`] stub, field by field — or four explicit `none`s.
+/// The typed [`Redacted`] stub, field by field — or the same key set reading `none`.
 ///
-/// Four lines either way, on purpose: "withheld" and "absent" have to be distinguishable
+/// Five lines either way, on purpose: "withheld" and "absent" have to be distinguishable
 /// *structurally*, and a rendering that printed nothing when nothing was withheld would
 /// make the absence of the stub indistinguishable from a renderer that forgot it.
+///
+/// The bare `redacted` line reads the stub's own field count — `4` when a stub arrived,
+/// `none` when the answer carried none — rather than the literal `false` it read before
+/// bn-ybh1z. `false` was a *claim this crate made* about a field the daemon did not send,
+/// and it disagreed with the machine channel, which said `null` for the same answer. The
+/// stub's own `redacted` boolean is still rendered, under `redacted.redacted`, where it is
+/// the daemon's word and not this crate's.
 fn redaction_lines(redacted: Option<&Redacted>) -> render::Lines {
     vec![
         (
             "redacted".to_owned(),
-            redacted.map_or_else(|| "false".to_owned(), |stub| stub.redacted.to_string()),
+            redacted.map_or_else(|| "none".to_owned(), |_| "4".to_owned()),
+        ),
+        (
+            "redacted.redacted".to_owned(),
+            redacted.map_or_else(|| "none".to_owned(), |stub| stub.redacted.to_string()),
         ),
         (
             "redacted.reason".to_owned(),
@@ -181,24 +192,9 @@ fn redaction_lines(redacted: Option<&Redacted>) -> render::Lines {
     ]
 }
 
+/// The same stub, in the machine channel — [`render::redacted_json`], which the envelope's
+/// own `artifacts` also carries a stub through. One renderer, so a `Redacted` cannot be
+/// spelled two ways in one document.
 fn redaction_json(redacted: Option<&Redacted>) -> Json {
-    match redacted {
-        None => Json::Null,
-        Some(stub) => Json::object([
-            ("redacted".to_owned(), Json::Bool(stub.redacted)),
-            (
-                "reason".to_owned(),
-                Json::String(stub.reason.as_wire().to_owned()),
-            ),
-            (
-                "commitment".to_owned(),
-                Json::String(stub.commitment.as_str().to_owned()),
-            ),
-            (
-                "original_class".to_owned(),
-                Json::String(stub.original_class.clone()),
-            ),
-        ])
-        .expect("four distinct literal keys never collide"),
-    }
+    redacted.map_or(Json::Null, render::redacted_json)
 }

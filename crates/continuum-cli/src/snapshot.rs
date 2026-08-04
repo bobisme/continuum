@@ -120,11 +120,11 @@ pub fn create(
 pub fn render_create(args: &CreateArgs, outcome: &Outcome<Payload>, format: Format) -> Rendered {
     let request = vec![
         (
-            "components.intent".to_owned(),
+            "components_intent".to_owned(),
             args.components.intent.as_str().to_owned(),
         ),
         (
-            "components.files".to_owned(),
+            "components_files".to_owned(),
             args.components.files.len().to_string(),
         ),
         ("overlay".to_owned(), args.overlay.len().to_string()),
@@ -457,20 +457,28 @@ fn optional_list<T: Clone>(values: &[T]) -> Optional<Vec<T>> {
 ///
 /// Every one of them, never a "3 warnings" summary — a diagnostic a caller cannot read is a
 /// diagnostic the daemon produced and this projection dropped.
+///
+/// The keys are paths into the machine document's `diagnostics` array — `diagnostics[i].…`,
+/// plural, and `diagnostics[i].span.file` rather than a `span` key holding a file name,
+/// which the document reads as the whole five-field span object. bn-ybh1z renamed both so
+/// the text re-renders from the JSON under [`crate::contract`]'s one rule.
 fn diagnostic_lines(diagnostics: &[Diagnostic]) -> render::Lines {
     let mut lines = vec![("diagnostics".to_owned(), diagnostics.len().to_string())];
     for (index, diagnostic) in diagnostics.iter().enumerate() {
         lines.push((
-            format!("diagnostic[{index}].severity"),
+            format!("diagnostics[{index}].severity"),
             diagnostic.severity.as_wire().to_owned(),
         ));
-        lines.push((format!("diagnostic[{index}].code"), diagnostic.code.clone()));
         lines.push((
-            format!("diagnostic[{index}].detail"),
+            format!("diagnostics[{index}].code"),
+            diagnostic.code.clone(),
+        ));
+        lines.push((
+            format!("diagnostics[{index}].detail"),
             diagnostic.detail.clone(),
         ));
         lines.push((
-            format!("diagnostic[{index}].span"),
+            format!("diagnostics[{index}].span.file"),
             render::string_or_none(diagnostic.span.value().map(|span| span.file.as_str())),
         ));
     }

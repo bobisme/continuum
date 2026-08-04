@@ -1,17 +1,24 @@
-//! The CLI's own error taxonomy and its exit-code mapping
-//! (`.agents/edict/design/cli-conventions.md`, "Exit Codes").
+//! The CLI's own error taxonomy: the two ways a command can stop before it has an answer to
+//! render.
 //!
-//! Three exit codes exist in the convention — `0` success, `1` user error, `2` system error
-//! — and every failure this crate can produce is classified into one of the two non-zero
-//! ones by [`CliError::exit_code`]. A daemon's typed refusal is deliberately **not** an
-//! error here: `context`/`task` render a refusal as a successful command that reported a
-//! `no` (exit `0`), the same distinction `continuum_mcp::Outcome` draws between a
+//! [`crate::contract`] owns the exit-code taxonomy as a whole; this module is the half of it
+//! that no wire answer reaches. A command line that does not parse is
+//! [`crate::contract::Exit::Declined`] (`1`) — the daemon declined nothing because nothing
+//! was asked, and the conventions doc's "user error" is the same bucket — and a connection
+//! that failed below the protocol is [`crate::contract::Exit::Fault`] (`2`).
+//!
+//! A daemon's typed refusal is deliberately **not** a [`CliError`]: it is a rendered answer
+//! with its own exit code, the same distinction `continuum_mcp::Outcome` draws between a
 //! [`ClientError`](continuumd::codec::CodecError) and a
 //! [`Refused`](continuumd::protocol::vocabulary::ErrorCode) outcome — a refusal is an
-//! *answer*, not a failure to get one.
+//! *answer*, not a failure to get one. It lands on `1` as well, because a refusal is also
+//! "no answer to the question"; what distinguishes the two is the typed
+//! [`crate::render::Depth`] and [`crate::wire::Refusal`] in the output, which a fault has no
+//! way to carry.
 
 use core::fmt;
 
+use crate::contract::Exit;
 use crate::format::UnknownFormat;
 use crate::wire::ConnectError;
 
@@ -34,15 +41,20 @@ impl CliError {
         Self::Usage(detail.into())
     }
 
-    /// The exit code the conventions doc assigns this error's class.
-    ///
-    /// `1` for a user error (bad arguments), `2` for a system error (the wire failed).
+    /// Where this error sits in [`crate::contract`]'s taxonomy.
+    #[must_use]
+    pub const fn exit(&self) -> Exit {
+        match self {
+            Self::Usage(_) => Exit::Declined,
+            Self::Connection(_) => Exit::Fault,
+        }
+    }
+
+    /// The exit code this error's class earns: `1` for a command line that does not parse,
+    /// `2` for a connection that failed below the protocol ([`CliError::exit`]).
     #[must_use]
     pub const fn exit_code(&self) -> i32 {
-        match self {
-            Self::Usage(_) => 1,
-            Self::Connection(_) => 2,
-        }
+        self.exit().code()
     }
 }
 
@@ -79,5 +91,12 @@ mod tests {
     fn a_usage_error_exits_one_and_a_connection_error_exits_two() {
         assert_eq!(CliError::usage("bad flag").exit_code(), 1);
         assert_eq!(CliError::Connection("no answer".to_owned()).exit_code(), 2);
+        // …and both name the taxonomy class the code comes from, so a reader of one is a
+        // reader of the other (bn-ybh1z).
+        assert_eq!(CliError::usage("bad flag").exit(), Exit::Declined);
+        assert_eq!(
+            CliError::Connection("no answer".to_owned()).exit(),
+            Exit::Fault
+        );
     }
 }

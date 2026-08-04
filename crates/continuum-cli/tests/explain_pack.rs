@@ -282,15 +282,17 @@ fn the_unsupported_json_document_is_pinned_byte_for_byte() {
     assert_eq!(
         rendered.text,
         concat!(
-            r#"{"advice":[],"audience":"agent","budget_bytes":4096,"context":null,"depth":"unsupported","#,
+            r#"{"advice":[],"artifacts":[],"audience":"agent","budget_bytes":4096,"#,
+            r#""context":null,"cost":null,"depth":"unsupported","#,
             r#""error":{"code":"UnsupportedSemanticFeature","continuation":null,"#,
             r#""detail":"no Context Pack compiler is served by this daemon; a pack is "#,
             r#"compiled from the evidence graph, the property automaton and the "#,
             r#"correspondence graph, and none of those is wired here",""#,
-            r#"non_resumable_reason":null,"recovery":0,"retryable":false},"#,
-            r#""evidence_root":"ev_failure1","guarantees":["ReplayPreserving"],"omissions":[],"#,
+            r#"non_resumable_reason":null,"recovery":[],"retryable":false},"#,
+            r#""evidence_root":"ev_failure1","guarantees":["ReplayPreserving"],"#,
+            r#""next_operations":[],"omissions":[],"#,
             r#""operation":"context.compile","pack":null,"pack_bytes":null,"#,
-            r#""question":"why did AckImpliesDurable fail?"}"#,
+            r#""question":"why did AckImpliesDurable fail?","request_id":"req_cli000001"}"#,
             "\n"
         ),
         "the machine envelope is canonical JSON with a fixed key set"
@@ -377,7 +379,10 @@ fn the_projection_prints_both_manifests_and_conflates_neither() {
 
     // The envelope's manifest.
     assert_eq!(line(&rendered.text, "omissions"), "1");
-    assert_eq!(line(&rendered.text, "omission[0].subject"), "context.depth");
+    assert_eq!(
+        line(&rendered.text, "omissions[0].subject"),
+        "context.depth"
+    );
 
     // The pack's own — a different count, and every entry by kind, reason and exact count.
     assert_eq!(line(&rendered.text, "pack.omissions"), "2");
@@ -448,7 +453,7 @@ fn an_unparseable_pack_reads_none_beside_a_byte_count_that_is_not_none() {
     // malformed artifact behind a missing one.
     let outcome = admitted(b"not a document", Vec::new());
     let text = explain::render_compile(&compile_args("why?"), &outcome, Format::Text);
-    assert_eq!(line(&text.text, "pack.bytes"), "14");
+    assert_eq!(line(&text.text, "pack_bytes"), "14");
     assert_eq!(line(&text.text, "pack.context_id"), "none");
     assert_eq!(line(&text.text, "pack.selected"), "none");
 

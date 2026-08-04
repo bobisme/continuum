@@ -465,12 +465,14 @@ fn the_unsupported_json_document_is_pinned_byte_for_byte() {
     assert_eq!(
         rendered.text,
         concat!(
-            r#"{"advice":[],"branch":null,"depth":"unsupported","#,
+            r#"{"advice":[],"artifacts":[],"branch":null,"cost":null,"depth":"unsupported","#,
             r#""error":{"code":"UnsupportedSemanticFeature","continuation":null,"#,
             r#""detail":"the request body is not the shape this operation declares","#,
-            r#""non_resumable_reason":null,"recovery":0,"retryable":false},"#,
-            r#""frontier":null,"frontier_bytes":null,"observer":null,"omissions":[],"#,
-            r#""operation":"debug.open","subject":"crash_die_hard_1"}"#,
+            r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
+            r#""frontier":null,"frontier_bytes":null,"next_operations":[],"#,
+            r#""observer":null,"omissions":[],"#,
+            r#""operation":"debug.open","request_id":"req_cli000001","#,
+            r#""subject":"crash_die_hard_1"}"#,
             "\n"
         ),
         "the machine envelope is canonical JSON with a fixed key set"
@@ -763,7 +765,7 @@ fn the_debug_state_renderer_embeds_the_state_verbatim() {
     );
     let text = debug::render_state(&state_args(), &outcome, Format::Text);
     assert_eq!(text.exit_code, 0);
-    assert!(text.text.contains("state.bytes  19"), "{}", text.text);
+    assert!(text.text.contains("state_bytes  19"), "{}", text.text);
     assert!(text.text.contains("omissions  0"), "{}", text.text);
 
     let json = debug::render_state(&state_args(), &outcome, Format::Json);

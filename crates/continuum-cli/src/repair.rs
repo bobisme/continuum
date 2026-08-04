@@ -183,19 +183,23 @@ pub fn review(
 /// profile is a conjunction of named obligations and which ones are outstanding is the
 /// whole content of a review; a count would tell a reviewer that something is missing and
 /// not what.
+///
+/// The keys are paths into the machine document's `gates` array — `gates[i].…`, plural,
+/// since bn-ybh1z — so the evidence count a reviewer reads here is literally the length of
+/// the list a machine reads there ([`crate::contract`]).
 fn gate_lines(gates: &[GateOutcome]) -> render::Lines {
     let mut lines = vec![("gates".to_owned(), gates.len().to_string())];
     for (index, gate) in gates.iter().enumerate() {
         lines.push((
-            format!("gate[{index}].name"),
+            format!("gates[{index}].name"),
             gate.name.as_wire().to_owned(),
         ));
         lines.push((
-            format!("gate[{index}].status"),
+            format!("gates[{index}].status"),
             gate.status.as_wire().to_owned(),
         ));
         lines.push((
-            format!("gate[{index}].evidence"),
+            format!("gates[{index}].evidence"),
             gate.evidence.len().to_string(),
         ));
     }
@@ -235,6 +239,11 @@ fn gates_json(gates: &[GateOutcome]) -> Json {
 }
 
 /// Project one `repair.review` answer, in whichever [`Format`] was resolved.
+///
+/// `RepairReviewResponse.repair` is the echo of the request's own `repair`, so it is
+/// rendered once, under the request's key ([`crate::contract`]'s echoed-subject rule). The
+/// three fields that are the daemon's *answer* — the semantic diff, every gate, and the
+/// evidence the gates rest on — are the projection.
 #[must_use]
 pub fn render_review(
     args: &ReviewArgs,

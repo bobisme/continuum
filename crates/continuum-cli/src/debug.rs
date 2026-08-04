@@ -127,7 +127,7 @@ pub fn render_open(
             vec![
                 ("branch".to_owned(), response.branch.as_str().to_owned()),
                 (
-                    "frontier.bytes".to_owned(),
+                    "frontier_bytes".to_owned(),
                     render::embedded_bytes_line(Some(&response.frontier)),
                 ),
             ],
@@ -234,7 +234,7 @@ pub fn render_state(
         let response = &admitted.payload;
         (
             vec![(
-                "state.bytes".to_owned(),
+                "state_bytes".to_owned(),
                 render::embedded_bytes_line(Some(&response.state)),
             )],
             vec![

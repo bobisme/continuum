@@ -9,6 +9,15 @@
 //! is `continuum_benchmark::shell`'s projection contract, stated once there as the shape a
 //! human CLI's output is held to; this module is that contract's first real implementation.
 //!
+//! [`crate::contract`] is the contract itself — the machine document's field rules, the pure
+//! projection from it to the terminal body, the exit-code taxonomy, and G8-06's non-colour
+//! statement. This module is the machinery that satisfies it, and every key it emits is
+//! chosen so that [`crate::contract::divergence`] holds with no per-command exception: a
+//! text key is a *path into the machine document*, a count line is a container's own length,
+//! and a byte length lives beside its embedded document under a key of its own
+//! (`pack_bytes`, never `pack.bytes`, which the document would read as the pack's own
+//! `bytes` field).
+//!
 //! # INV-007 is non-suppressible here, on purpose
 //!
 //! Unlike `continuum_benchmark::shell::render`, which *summarizes* `omissions` behind a
@@ -22,7 +31,8 @@
 
 use continuumd::codec::json::Json;
 use continuumd::protocol::envelope::{
-    AssuranceEnvelope, Budget, Cost, EnvelopeDimension, NextOperation, Omission, Verdict,
+    ArtifactRef, AssuranceEnvelope, Budget, Cost, EnvelopeDimension, NextOperation, Omission,
+    Redacted, Verdict,
 };
 use continuumd::protocol::scalar::{ByteCount, DurationMs, Opaque};
 use continuumd::protocol::spec::ProtocolEnum;
@@ -33,15 +43,16 @@ use crate::wire::{Admitted, Outcome, Refusal};
 /// One rendered `key  value` pair, in emission order.
 pub type Lines = Vec<(String, String)>;
 
-/// A command's finished output: the text to write to stdout, and the exit code
-/// (cli-conventions.md, "Exit Codes") the daemon's answer earns.
+/// A command's finished output: the text to write to stdout, and the exit code the daemon's
+/// answer earns.
 ///
-/// `0` for [`crate::wire::Outcome::Admitted`], `1` for
-/// [`crate::wire::Outcome::Refused`] — a well-formed request the daemon typedly declined is
-/// closer to "the operation did not succeed" than to either bucket the convention names for
-/// a *failure to ask*, and `1` (user error) is the nearer of the two: `2` is reserved for a
-/// connection that failed below the protocol (see [`crate::error::CliError::exit_code`]),
-/// which is a different failure than a daemon that answered.
+/// The code is [`crate::contract::Exit`]'s, computed by [`crate::contract::Exit::of`] from
+/// the same [`Outcome`] the text is rendered from: `0` when the daemon answered and no
+/// verdict it carried says no, `3` when the answer is a decided no, `4` when it is INV-008's
+/// typed unknown, `1` when the request was typedly refused, and `2` (from
+/// [`crate::error::CliError::exit_code`]) when the connection failed below the protocol.
+/// [`crate::contract`]'s module doc is the taxonomy and the reasoning; nothing in this
+/// module decides it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendered {
     /// The text to write to stdout.
@@ -107,6 +118,16 @@ pub fn number_or_none(value: Option<u64>) -> String {
 /// `debug` family is registered, the same call is admitted and the same code prints
 /// [`Depth::Served`] with no edit here. That is what makes [`Depth::Unsupported`] a
 /// *report* rather than a claim.
+///
+/// # It is not an exit code
+///
+/// bn-1g7e4 gave this type an `exit_code` and bn-ybh1z took it away, without changing what
+/// either of its two refusal arms earns. The taxonomy is [`crate::contract::Exit`]'s, and it
+/// classifies something this type cannot see: an *admitted* answer whose verdict says no
+/// (`3`) or says "typed unknown" (`4`) is not [`Depth::Served`]'s `0`. `unsupported` and
+/// `refused` still share `1`, for the reason bn-1g7e4 gave and [`crate::contract`] restates:
+/// the distinction between them is [`Depth::token`], in the output, and a number that
+/// duplicated a token would be a second spelling of one fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Depth {
     /// The daemon ran the operation and answered its declared response body.
@@ -147,20 +168,6 @@ impl Depth {
             _ => Self::Refused,
         }
     }
-
-    /// Whether the answer earns a zero exit code (cli-conventions.md, "Exit Codes").
-    ///
-    /// Only [`Depth::Served`] does. An unsupported surface exits `1` alongside every other
-    /// refusal rather than claiming a fourth code the conventions doc does not define —
-    /// the machine-readable distinction is [`Depth::token`], in the output, where a caller
-    /// that needs it can read it without inferring anything from a number.
-    #[must_use]
-    pub const fn exit_code(self) -> i32 {
-        match self {
-            Self::Served => 0,
-            Self::Unsupported | Self::Refused => 1,
-        }
-    }
 }
 
 /// The two lines every command in the failure/promotion group prints first: the wire
@@ -191,20 +198,24 @@ pub fn depth_json(operation: &'static str, depth: Depth) -> Vec<(String, Json)> 
 
 /// The full INV-007 manifest as `key  value` lines: a count, then every omission's
 /// `reason`/`subject`/`recoverable_by`, indexed.
+///
+/// The indexed keys are `omissions[i].…` and not `omission[i].…`: they are paths into the
+/// machine document's own `omissions` array, which is what makes the text a projection of it
+/// under [`crate::contract`]'s one rule. bn-ybh1z renamed them for that reason.
 #[must_use]
 pub fn omission_lines(omissions: &[Omission]) -> Lines {
     let mut lines = vec![("omissions".to_owned(), omissions.len().to_string())];
     for (index, omission) in omissions.iter().enumerate() {
         lines.push((
-            format!("omission[{index}].reason"),
+            format!("omissions[{index}].reason"),
             omission.reason.as_wire().to_owned(),
         ));
         lines.push((
-            format!("omission[{index}].subject"),
+            format!("omissions[{index}].subject"),
             omission.subject.clone(),
         ));
         lines.push((
-            format!("omission[{index}].recoverable_by"),
+            format!("omissions[{index}].recoverable_by"),
             string_or_none(
                 omission
                     .recoverable_by
@@ -285,6 +296,24 @@ pub struct Projection {
 /// `ok`/`task_started`/`task_suspended` status, the task and continuation handles, and the
 /// typed verdict and assurance envelope. A closure that could see only the body would force
 /// a command that renders those to leave [`project`] and re-implement the shared shape.
+///
+/// # Three envelope facts the machine channel carries and the terminal does not
+///
+/// `request_id`, `cost` and `artifacts` are on every answer's envelope and reached no format
+/// at all before bn-ybh1z — dropped fields, in [`crate::contract`]'s sense, on all sixteen
+/// commands at once. They are added here, in the one place, and to the machine channel only:
+///
+/// - the **request identifier** is what correlates this invocation with a daemon log, which
+///   is a machine's question;
+/// - **`cost`** is nine dimensions plus a tokenizer identity, and printing ten lines of it
+///   under every `snapshot seal` would make plan §13.4's "terse by default" untrue while
+///   telling a human at a terminal nothing they asked for;
+/// - **`artifacts`** is the list of `ArtifactRef`s the call published or names, in full.
+///
+/// That direction is the contract's, not a convenience: prose must be a *selection* of the
+/// machine document (INV-003), never a superset of it, so a key the machine channel carries
+/// and the terminal does not is exactly the allowed asymmetry — the same standing `advice`
+/// has always had. `--format json` is where a caller reads them.
 pub fn project<T, F>(
     projection: &Projection,
     outcome: &Outcome<T>,
@@ -305,23 +334,40 @@ where
         Outcome::Refused(refusal) => &refusal.recovery,
     };
 
+    let exit_code = crate::contract::Exit::of(outcome).code();
+
     if format == crate::format::Format::Json {
         let mut fields = depth_json(projection.operation, depth);
         fields.extend(projection.request_json.iter().cloned());
         match outcome {
             Outcome::Admitted(admitted) => {
                 fields.extend(success(admitted).1);
+                fields.push((
+                    "request_id".to_owned(),
+                    Json::String(admitted.request_id.as_str().to_owned()),
+                ));
+                fields.push(("cost".to_owned(), cost_json(&admitted.cost)));
+                fields.push(("artifacts".to_owned(), artifacts_json(&admitted.artifacts)));
                 fields.push(("error".to_owned(), Json::Null));
             }
             Outcome::Refused(refusal) => {
                 fields.extend(projection.absent_json.iter().cloned());
+                fields.push((
+                    "request_id".to_owned(),
+                    Json::String(refusal.request_id.as_str().to_owned()),
+                ));
+                // A refusal carries no cost clause and publishes nothing: `null` and `[]`
+                // are the daemon's own readings, not this crate's guesses.
+                fields.push(("cost".to_owned(), Json::Null));
+                fields.push(("artifacts".to_owned(), Json::Array(Vec::new())));
                 fields.push(("error".to_owned(), refusal_json(refusal)));
             }
         }
         fields.push(("omissions".to_owned(), omissions_json(omissions)));
+        fields.push(("next_operations".to_owned(), next_operations_json(next)));
         return Rendered {
             text: json_text(&envelope_json(fields)),
-            exit_code: depth.exit_code(),
+            exit_code,
         };
     }
 
@@ -340,7 +386,7 @@ where
     lines.push(next_operations_line(next));
     Rendered {
         text: join_lines(&lines),
-        exit_code: depth.exit_code(),
+        exit_code,
     }
 }
 
@@ -408,6 +454,13 @@ pub fn refusal_lines(refusal: &Refusal) -> Lines {
 
 /// A refusal as a JSON object — the same six fields [`refusal_lines`] renders, keyed for
 /// machine reading.
+///
+/// `recovery` is the **list**, not the count the text formats print. RFC 0026 makes it "the
+/// only recovery channel: a list of allowed operations with pre-filled arguments", so a
+/// machine channel that carried a length would drop the one field a caller recovers *with* —
+/// and the text's count is still a projection of it, because an array renders its length
+/// ([`crate::contract`]'s one rule). bn-ybh1z fixed this; before it, the list reached no
+/// caller in any format.
 #[must_use]
 pub fn refusal_json(refusal: &Refusal) -> Json {
     Json::object([
@@ -419,7 +472,7 @@ pub fn refusal_json(refusal: &Refusal) -> Json {
         ("retryable".to_owned(), Json::Bool(refusal.retryable)),
         (
             "recovery".to_owned(),
-            Json::Integer(refusal.recovery.len() as u64),
+            next_operations_json(&refusal.recovery),
         ),
         (
             "continuation".to_owned(),
@@ -636,11 +689,17 @@ impl VerdictFacts {
 ///
 /// Total over the four union members and over `verdict: null`; every key present on every
 /// arm, present or explicitly `none`.
+///
+/// The union tag is `{prefix}.kind` and not the bare `{prefix}` it was before bn-ybh1z: in
+/// the machine document the verdict is an *object* whose tag is the field `kind`, and the
+/// bare prefix therefore reads that object's field count under [`crate::contract`]'s one
+/// rule. Naming the tag by its own key is what lets the same text be re-rendered from the
+/// document with no per-command exception.
 #[must_use]
 pub fn verdict_lines(prefix: &str, verdict: Option<&Verdict>) -> Lines {
     let facts = VerdictFacts::of(verdict);
     vec![
-        (prefix.to_owned(), facts.kind.to_owned()),
+        (format!("{prefix}.kind"), facts.kind.to_owned()),
         (
             format!("{prefix}.verdict"),
             string_or_none(facts.verdict.as_deref()),
@@ -827,6 +886,106 @@ pub fn next_operations_line(next_operations: &[NextOperation]) -> (String, Strin
     )
 }
 
+/// The artifacts one answer published or names, as a JSON array — one object each, with the
+/// typed [`Redacted`] stub carried rather than flattened.
+///
+/// Unabridged and by name: "a redacted value is reported, never silently dropped", and an
+/// artifact list summarized to a count would make a caller ask again for the handles the
+/// answer already carried. Machine-channel only — see [`project`] for why.
+#[must_use]
+pub fn artifacts_json(artifacts: &[ArtifactRef]) -> Json {
+    Json::Array(
+        artifacts
+            .iter()
+            .map(|artifact| {
+                Json::object([
+                    ("kind".to_owned(), Json::String(artifact.kind.clone())),
+                    (
+                        "handle".to_owned(),
+                        Json::String(artifact.handle.as_str().to_owned()),
+                    ),
+                    (
+                        "commitment".to_owned(),
+                        match artifact.commitment.value() {
+                            Some(commitment) => Json::String(commitment.as_str().to_owned()),
+                            None => Json::Null,
+                        },
+                    ),
+                    (
+                        "redacted".to_owned(),
+                        match artifact.redacted.value() {
+                            Some(stub) => redacted_json(stub),
+                            None => Json::Null,
+                        },
+                    ),
+                ])
+                .expect("four distinct literal keys never collide")
+            })
+            .collect(),
+    )
+}
+
+/// One typed [`Redacted`] stub as a JSON object — the four fields RFC 0026 declares, so that
+/// "withheld" stays distinguishable from "absent" structurally wherever a stub can ride.
+#[must_use]
+pub fn redacted_json(stub: &Redacted) -> Json {
+    Json::object([
+        ("redacted".to_owned(), Json::Bool(stub.redacted)),
+        (
+            "reason".to_owned(),
+            Json::String(stub.reason.as_wire().to_owned()),
+        ),
+        (
+            "commitment".to_owned(),
+            Json::String(stub.commitment.as_str().to_owned()),
+        ),
+        (
+            "original_class".to_owned(),
+            Json::String(stub.original_class.clone()),
+        ),
+    ])
+    .expect("four distinct literal keys never collide")
+}
+
+/// The allowed next operations as a JSON array — one object each, with the pre-filled
+/// arguments embedded verbatim and the typed rationale beside them.
+///
+/// The list, not the count [`next_operations_line`] prints. `next_operations` is the
+/// protocol's own "what may I do from here", and plan §3.1's five-minute path *is* that list
+/// rendered ("`debug  continuum debug crash_7m3…`"); a machine channel that carried only a
+/// length would make a caller ask again for the thing the answer already contained.
+/// bn-ybh1z added it: before that this key existed in the text formats only, which is the
+/// prose-only interface INV-003 forbids, in its smallest form.
+#[must_use]
+pub fn next_operations_json(next_operations: &[NextOperation]) -> Json {
+    Json::Array(
+        next_operations
+            .iter()
+            .map(|next| {
+                Json::object([
+                    (
+                        "operation".to_owned(),
+                        Json::String(next.operation.as_str().to_owned()),
+                    ),
+                    ("arguments".to_owned(), embedded(Some(&next.arguments))),
+                    (
+                        "arguments_bytes".to_owned(),
+                        embedded_bytes(Some(&next.arguments)),
+                    ),
+                    (
+                        "rationale".to_owned(),
+                        match next.rationale.value() {
+                            Some(rationale) => Json::String(rationale.clone()),
+                            None => Json::Null,
+                        },
+                    ),
+                ])
+                .expect("four distinct literal keys never collide")
+            })
+            .collect(),
+    )
+}
+
 /// Wrap a JSON envelope's named record beside the fields every machine answer in this crate
 /// carries: `advice` (per convention, always present, empty when there is none) is appended
 /// automatically.
@@ -882,14 +1041,14 @@ mod tests {
         ];
         let lines = omission_lines(&omissions);
         assert_eq!(lines[0], ("omissions".to_owned(), "2".to_owned()));
-        assert!(lines.contains(&("omission[0].reason".to_owned(), "unsupported".to_owned())));
+        assert!(lines.contains(&("omissions[0].reason".to_owned(), "unsupported".to_owned())));
         assert!(lines.contains(&(
-            "omission[0].subject".to_owned(),
+            "omissions[0].subject".to_owned(),
             "task.milestones".to_owned()
         )));
-        assert!(lines.contains(&("omission[0].recoverable_by".to_owned(), "none".to_owned())));
+        assert!(lines.contains(&("omissions[0].recoverable_by".to_owned(), "none".to_owned())));
         assert!(lines.contains(&(
-            "omission[1].recoverable_by".to_owned(),
+            "omissions[1].recoverable_by".to_owned(),
             "ev_abc123".to_owned()
         )));
 
@@ -897,6 +1056,15 @@ mod tests {
             panic!("omissions_json always answers an array");
         };
         assert_eq!(items.len(), 2);
+
+        // Every text key is a path into the machine document, so the manifest's own text
+        // re-renders from its JSON with nothing left over (bn-ybh1z, INV-003).
+        let document = Json::object([("omissions".to_owned(), omissions_json(&omissions))])
+            .expect("one key never collides");
+        assert_eq!(
+            crate::contract::divergence(&join_lines(&lines), &document),
+            None
+        );
     }
 
     #[test]
@@ -924,11 +1092,21 @@ mod tests {
         }
     }
 
+    /// The exit code is [`crate::contract::Exit`]'s, and this type no longer owns one —
+    /// bn-ybh1z. What did not change is that both refusal arms earn `1`: the distinction
+    /// between them is [`Depth::token`], in the output, where a caller reads it without
+    /// inferring anything from a number.
     #[test]
-    fn only_a_served_answer_exits_zero() {
-        assert_eq!(Depth::Served.exit_code(), 0);
-        assert_eq!(Depth::Unsupported.exit_code(), 1);
-        assert_eq!(Depth::Refused.exit_code(), 1);
+    fn both_refusal_depths_still_earn_the_same_declined_code() {
+        use crate::contract::Exit;
+
+        assert_eq!(
+            Exit::of_code(ErrorCode::UnsupportedSemanticFeature).code(),
+            1
+        );
+        assert_eq!(Exit::of_code(ErrorCode::CapabilityDenied).code(), 1);
+        assert_eq!(Depth::Unsupported.token(), "unsupported");
+        assert_eq!(Depth::Refused.token(), "refused");
     }
 
     #[test]
@@ -1001,7 +1179,7 @@ mod tests {
 
         // INV-008's typed reason survives verbatim, in the protocol's own spelling.
         let lines = verdict_lines("verdict", Some(&semantic));
-        assert!(lines.contains(&("verdict".to_owned(), "semantic".to_owned())));
+        assert!(lines.contains(&("verdict.kind".to_owned(), "semantic".to_owned())));
         assert!(lines.contains(&(
             "verdict.inconclusive_reason".to_owned(),
             InconclusiveReason::ResourceExhausted.as_wire().to_owned()
@@ -1036,6 +1214,21 @@ mod tests {
         );
         assert_eq!(fields.get("verdict"), Some(&Json::Null));
         assert_eq!(fields.get("gates"), Some(&Json::Integer(0)));
+
+        // …and the two channels cannot disagree: the seven text keys are paths into the
+        // seven-field object, `verdict.kind` included (bn-ybh1z).
+        for member in [None, Some(&semantic), Some(&policy), Some(&structural)] {
+            let document = Json::object([("verdict".to_owned(), verdict_json(member))])
+                .expect("one key never collides");
+            assert_eq!(
+                crate::contract::divergence(
+                    &join_lines(&verdict_lines("verdict", member)),
+                    &document
+                ),
+                None,
+                "{member:?}"
+            );
+        }
 
         // `verdict: null` is the IDL's own answer for an operation with no verdict clause.
         assert_eq!(
@@ -1105,6 +1298,20 @@ mod tests {
             vec![("assurance".to_owned(), "none".to_owned())]
         );
         assert_eq!(assurance_json(None), Json::Null);
+
+        // The count line is the object's own field count and the `none` line is its `null`,
+        // so both arms re-render from the machine document with no exception (bn-ybh1z).
+        for member in [None, Some(&envelope)] {
+            let document = Json::object([("assurance".to_owned(), assurance_json(member))])
+                .expect("one key never collides");
+            assert_eq!(
+                crate::contract::divergence(
+                    &join_lines(&assurance_lines("assurance", member)),
+                    &document
+                ),
+                None
+            );
+        }
 
         let Json::Object(dimensions) = assurance_json(Some(&envelope)) else {
             panic!("an envelope renders as an object");
