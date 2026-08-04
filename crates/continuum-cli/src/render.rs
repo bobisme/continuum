@@ -22,10 +22,11 @@
 
 use continuumd::codec::json::Json;
 use continuumd::protocol::envelope::{Budget, Cost, NextOperation, Omission};
-use continuumd::protocol::scalar::{ByteCount, DurationMs};
+use continuumd::protocol::scalar::{ByteCount, DurationMs, Opaque};
 use continuumd::protocol::spec::ProtocolEnum;
+use continuumd::protocol::vocabulary::ErrorCode;
 
-use crate::wire::Refusal;
+use crate::wire::{Outcome, Refusal};
 
 /// One rendered `key  value` pair, in emission order.
 pub type Lines = Vec<(String, String)>;
@@ -78,6 +79,110 @@ pub fn string_or_none(value: Option<&str>) -> String {
 #[must_use]
 pub fn number_or_none(value: Option<u64>) -> String {
     value.map_or_else(|| "none".to_owned(), |number| number.to_string())
+}
+
+// --- how deep a command actually got ----------------------------------------------------
+
+/// What one answer says about the wire surface the command drove — INV-008's typed
+/// inconclusiveness at the level of the *interface* rather than of a verdict.
+///
+/// # Why this is a third thing beside "admitted" and "refused"
+///
+/// A caller that gets a `no` needs to know which of two very different `no`s it is: *this
+/// request was declined* (a bad handle, a denied capability, a lost compare-and-set) or
+/// *this deployment does not serve that operation at all*. The first is about the request
+/// and a caller can fix it; the second is about the build and no argument will change it.
+/// Collapsing them into one non-zero exit is exactly the "opaque failure" INV-008 forbids,
+/// and inventing a success for the second is the "empty success" `rule
+/// errors.unsupported_surface` forbids. So the distinction is a token in every output
+/// format, beside the operation it is about.
+///
+/// # It is derived, never asserted
+///
+/// [`Depth::of`] reads the daemon's own [`ErrorCode`] off the answer. Nothing in this crate
+/// carries a list of "operations Phase A does not serve" — such a list would be a second
+/// authority over the registry, and would go stale silently the day a family lands. When a
+/// `debug` family is registered, the same call is admitted and the same code prints
+/// [`Depth::Served`] with no edit here. That is what makes [`Depth::Unsupported`] a
+/// *report* rather than a claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Depth {
+    /// The daemon ran the operation and answered its declared response body.
+    Served,
+    /// The daemon answered [`ErrorCode::UnsupportedSemanticFeature`]: this deployment does
+    /// not serve the operation the command named (`rule errors.unsupported_surface`).
+    Unsupported,
+    /// The daemon answered some other typed refusal — a `no` about *this request*, not a
+    /// statement about the surface.
+    Refused,
+}
+
+impl Depth {
+    /// A stable, kebab-case token for rendering — the same string in all three formats.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Served => "served",
+            Self::Unsupported => "unsupported",
+            Self::Refused => "refused",
+        }
+    }
+
+    /// Read the depth off one answer.
+    #[must_use]
+    pub fn of<T>(outcome: &Outcome<T>) -> Self {
+        match outcome {
+            Outcome::Admitted(_) => Self::Served,
+            Outcome::Refused(refusal) => Self::of_code(refusal.code),
+        }
+    }
+
+    /// Read the depth off a refusal's typed code alone.
+    #[must_use]
+    pub const fn of_code(code: ErrorCode) -> Self {
+        match code {
+            ErrorCode::UnsupportedSemanticFeature => Self::Unsupported,
+            _ => Self::Refused,
+        }
+    }
+
+    /// Whether the answer earns a zero exit code (cli-conventions.md, "Exit Codes").
+    ///
+    /// Only [`Depth::Served`] does. An unsupported surface exits `1` alongside every other
+    /// refusal rather than claiming a fourth code the conventions doc does not define —
+    /// the machine-readable distinction is [`Depth::token`], in the output, where a caller
+    /// that needs it can read it without inferring anything from a number.
+    #[must_use]
+    pub const fn exit_code(self) -> i32 {
+        match self {
+            Self::Served => 0,
+            Self::Unsupported | Self::Refused => 1,
+        }
+    }
+}
+
+/// The two lines every command in the failure/promotion group prints first: the wire
+/// operation it drove, in the registry's own spelling, and how deep it got.
+///
+/// The operation name is the one the command put in the envelope — a `&'static str` from
+/// the call site, never a string read back off an answer — so it is present and exact on
+/// the refusal arm too, which is precisely the arm on which a caller needs to know what was
+/// unsupported.
+#[must_use]
+pub fn depth_lines(operation: &'static str, depth: Depth) -> Lines {
+    vec![
+        ("operation".to_owned(), operation.to_owned()),
+        ("depth".to_owned(), depth.token().to_owned()),
+    ]
+}
+
+/// [`depth_lines`], as the two JSON fields of the same names.
+#[must_use]
+pub fn depth_json(operation: &'static str, depth: Depth) -> Vec<(String, Json)> {
+    vec![
+        ("operation".to_owned(), Json::String(operation.to_owned())),
+        ("depth".to_owned(), Json::String(depth.token().to_owned())),
+    ]
 }
 
 // --- the omission manifest, unabridged --------------------------------------------------
@@ -135,6 +240,136 @@ pub fn omissions_json(omissions: &[Omission]) -> Json {
             })
             .collect(),
     )
+}
+
+// --- the shared projection of one answer --------------------------------------------------
+
+/// Everything a projection needs that is not the answer itself.
+///
+/// A struct rather than five positional parameters: the rendering paths take the same facts
+/// and a positional list would be five chances to swap two `&'static str`s the compiler
+/// cannot tell apart.
+#[derive(Debug, Clone)]
+pub struct Projection {
+    /// The command's own name, printed in [`Format::Pretty`](crate::format::Format::Pretty)
+    /// only.
+    pub command: &'static str,
+    /// The wire operation, printed in every format on every arm.
+    pub operation: &'static str,
+    /// The request's own fields, echoed so the answer is self-describing.
+    pub request: Lines,
+    /// [`Projection::request`], as JSON fields.
+    pub request_json: Vec<(String, Json)>,
+    /// The response fields, all explicitly `null`, for the refusal arm — so the machine
+    /// envelope carries the same key set whichever arm it took, and a parser never has to
+    /// branch on which keys exist.
+    pub absent_json: Vec<(String, Json)>,
+}
+
+/// Render one answer whose success body is projected by `success`.
+///
+/// Shared by `evidence show`, `debug open|state`, and `repair begin|review` because their
+/// shape is identical and their bodies are not: the operation and the [`Depth`] first, the
+/// request echoed, then either the response body or the typed refusal, then the INV-007
+/// manifest — unabridged, on both arms, in all three formats — and the count of allowed
+/// next operations.
+///
+/// `success` answers a pair: the `key  value` lines for the text formats, and the JSON
+/// fields for the machine one. One closure rather than two so that a command cannot ship a
+/// text projection of a field it forgot to put in JSON.
+pub fn project<T, F>(
+    projection: &Projection,
+    outcome: &Outcome<T>,
+    success: F,
+    format: crate::format::Format,
+) -> Rendered
+where
+    F: Fn(&T) -> (Lines, Vec<(String, Json)>),
+{
+    let depth = Depth::of(outcome);
+    let empty = Vec::new();
+    let omissions = match outcome {
+        Outcome::Admitted(admitted) => &admitted.omissions,
+        Outcome::Refused(_) => &empty,
+    };
+    let next = match outcome {
+        Outcome::Admitted(admitted) => &admitted.next_operations,
+        Outcome::Refused(refusal) => &refusal.recovery,
+    };
+
+    if format == crate::format::Format::Json {
+        let mut fields = depth_json(projection.operation, depth);
+        fields.extend(projection.request_json.iter().cloned());
+        match outcome {
+            Outcome::Admitted(admitted) => {
+                fields.extend(success(&admitted.payload).1);
+                fields.push(("error".to_owned(), Json::Null));
+            }
+            Outcome::Refused(refusal) => {
+                fields.extend(projection.absent_json.iter().cloned());
+                fields.push(("error".to_owned(), refusal_json(refusal)));
+            }
+        }
+        fields.push(("omissions".to_owned(), omissions_json(omissions)));
+        return Rendered {
+            text: json_text(&envelope_json(fields)),
+            exit_code: depth.exit_code(),
+        };
+    }
+
+    let mut lines = if format == crate::format::Format::Pretty {
+        vec![("command".to_owned(), projection.command.to_owned())]
+    } else {
+        Vec::new()
+    };
+    lines.extend(depth_lines(projection.operation, depth));
+    lines.extend(projection.request.iter().cloned());
+    match outcome {
+        Outcome::Admitted(admitted) => lines.extend(success(&admitted.payload).0),
+        Outcome::Refused(refusal) => lines.extend(refusal_lines(refusal)),
+    }
+    lines.extend(omission_lines(omissions));
+    lines.push(next_operations_line(next));
+    Rendered {
+        text: join_lines(&lines),
+        exit_code: depth.exit_code(),
+    }
+}
+
+// --- opaque fields, carried verbatim ------------------------------------------------------
+
+/// An `Opaque` field's carried value, embedded verbatim rather than summarized.
+///
+/// `rule encoding.opaque_payloads` fixes what such a field holds: "carried verbatim as a
+/// canonical value of the negotiated encoding". So re-parsing it costs no information and
+/// loses no ordering — the value was canonical before it was embedded and is canonical
+/// after — and a machine reading this crate's JSON gets the document itself rather than a
+/// length it would have to make a second call to resolve.
+///
+/// [`Json::Null`] means the field was absent. A *present* field that does not parse also
+/// reads `null` here, which is why every caller in this crate prints
+/// [`embedded_bytes`] beside it: the pair `(null, 512)` is structurally distinguishable
+/// from `(null, null)`, so an unparseable body is visible rather than silently identical to
+/// an absent one.
+#[must_use]
+pub fn embedded(opaque: Option<&Opaque>) -> Json {
+    opaque.map_or(Json::Null, |value| {
+        Json::parse(value.as_bytes()).unwrap_or(Json::Null)
+    })
+}
+
+/// The byte length of an `Opaque` field, or [`Json::Null`] when the field is absent.
+#[must_use]
+pub fn embedded_bytes(opaque: Option<&Opaque>) -> Json {
+    opaque.map_or(Json::Null, |value| {
+        Json::Integer(value.as_bytes().len() as u64)
+    })
+}
+
+/// The byte length of an `Opaque` field as a line value, or the literal `none`.
+#[must_use]
+pub fn embedded_bytes_line(opaque: Option<&Opaque>) -> String {
+    number_or_none(opaque.map(|value| value.as_bytes().len() as u64))
 }
 
 // --- a typed refusal ------------------------------------------------------------------
@@ -401,5 +636,87 @@ mod tests {
     fn join_lines_uses_a_two_space_delimiter() {
         let lines = vec![("task".to_owned(), "task_abc123".to_owned())];
         assert_eq!(join_lines(&lines), "task  task_abc123\n");
+    }
+
+    #[test]
+    fn only_the_unsupported_code_reads_as_an_unsupported_surface() {
+        // The one code `rule errors.unsupported_surface` names maps to `Unsupported`;
+        // every other typed refusal is a `no` about the request, not about the build.
+        assert_eq!(
+            Depth::of_code(ErrorCode::UnsupportedSemanticFeature),
+            Depth::Unsupported
+        );
+        for other in [
+            ErrorCode::CapabilityDenied,
+            ErrorCode::MalformedRequest,
+            ErrorCode::StaleSnapshot,
+            ErrorCode::BudgetExhausted,
+            ErrorCode::InsufficientEvidence,
+        ] {
+            assert_eq!(Depth::of_code(other), Depth::Refused, "{other:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_served_answer_exits_zero() {
+        assert_eq!(Depth::Served.exit_code(), 0);
+        assert_eq!(Depth::Unsupported.exit_code(), 1);
+        assert_eq!(Depth::Refused.exit_code(), 1);
+    }
+
+    #[test]
+    fn the_depth_tokens_are_three_distinct_stable_strings() {
+        let tokens = [
+            Depth::Served.token(),
+            Depth::Unsupported.token(),
+            Depth::Refused.token(),
+        ];
+        assert_eq!(tokens, ["served", "unsupported", "refused"]);
+    }
+
+    #[test]
+    fn an_opaque_field_reports_its_document_and_its_length_together() {
+        let opaque = Opaque::from_bytes(br#"{"a":1}"#.to_vec());
+        assert_eq!(embedded_bytes(Some(&opaque)), Json::Integer(7));
+        assert_eq!(embedded_bytes_line(Some(&opaque)), "7");
+        let Json::Object(fields) = embedded(Some(&opaque)) else {
+            panic!("a canonical JSON object embeds as one");
+        };
+        assert_eq!(fields.len(), 1);
+
+        // Absent reads `null`/`none` in both channels, so the pair `(null, null)` is the
+        // only spelling of "the field was not there".
+        assert_eq!(embedded(None), Json::Null);
+        assert_eq!(embedded_bytes(None), Json::Null);
+        assert_eq!(embedded_bytes_line(None), "none");
+
+        // A present field that does not parse reads `null` in the document channel and a
+        // length in the other — visibly different from an absent one.
+        let broken = Opaque::from_bytes(b"not a document".to_vec());
+        assert_eq!(embedded(Some(&broken)), Json::Null);
+        assert_eq!(embedded_bytes(Some(&broken)), Json::Integer(14));
+    }
+
+    #[test]
+    fn the_two_depth_channels_carry_the_same_two_facts() {
+        let lines = depth_lines("debug.open", Depth::Unsupported);
+        assert_eq!(
+            lines,
+            vec![
+                ("operation".to_owned(), "debug.open".to_owned()),
+                ("depth".to_owned(), "unsupported".to_owned()),
+            ]
+        );
+        let fields = depth_json("debug.open", Depth::Unsupported);
+        assert_eq!(
+            fields,
+            vec![
+                (
+                    "operation".to_owned(),
+                    Json::String("debug.open".to_owned())
+                ),
+                ("depth".to_owned(), Json::String("unsupported".to_owned())),
+            ]
+        );
     }
 }

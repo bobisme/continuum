@@ -20,30 +20,48 @@
 //!
 //! # Two outcome shapes, and why there are two
 //!
-//! `task.status`/`task.resume`/`task.cancel` decode through `continuumd`'s own
-//! [`Arguments`]/[`Payload`] tables, so [`Connection::task_status`] and its two siblings
-//! return [`Outcome<Payload>`]. [`Connection::context_expand`] returns
-//! [`Outcome<ContextExpandResponse>`] — the *typed body*, not the enum — because a command
-//! that has already chosen its operation has nothing to gain from re-matching a
-//! twenty-eight-variant enum to find the shape it asked for. It builds and decodes the
-//! frame against the real [`ContextExpandRequest`]/[`ContextExpandResponse`] structs the
-//! IDL and `continuumd::protocol::operations::context` declare, with the same
+//! `task.status`/`task.resume`/`task.cancel` and `evidence.get` decode through
+//! `continuumd`'s own [`Arguments`]/[`Payload`] tables, so [`Connection::task_status`] and
+//! its siblings return [`Outcome<Payload>`]. [`Connection::context_expand`],
+//! [`Connection::debug_open`], and the three other typed-body calls return
+//! `Outcome<TheResponseStruct>` — the *typed body*, not the enum — because a command that
+//! has already chosen its operation has nothing to gain from re-matching a
+//! twenty-eight-variant enum to find the shape it asked for, and because for four of them
+//! *there is no variant to match*: `debug.*` and `repair.*` have request and response
+//! structs in `continuumd::protocol::operations` and rows in the registry, and no arm in
+//! [`Arguments`]. They are built and decoded against those real structs with the same
 //! `codec::to_opaque`/`from_opaque` pair `continuumd::transport::encode_request` uses per
-//! `Arguments` variant. Until bn-28jj (PR-11/IMPL-04) there was no variant to dispatch
-//! through at all; there is one now, and this method's shape is unchanged because the
-//! reason for it was never the missing variant. Both outcomes share one [`Refusal`] shape,
-//! because a daemon's typed refusal is the same three fields (`code`, `detail`,
-//! `retryable`) plus the two resumability fields whichever operation it answers.
+//! `Arguments` variant — see [`Connection::invoke_typed`]. Both outcomes share one
+//! [`Refusal`] shape, because a daemon's typed refusal is the same three fields (`code`,
+//! `detail`, `retryable`) plus the two resumability fields whichever operation it answers.
+//!
+//! # A surface this daemon does not serve is still a real round trip
+//!
+//! Nothing here short-circuits an operation the deployment cannot answer. A `debug.open`
+//! frame is encoded, written, and read exactly as a `task.status` frame is; what comes back
+//! is `codec::operations::decode_arguments`'s own refusal
+//! (`CodecError::UnknownOperation` ⇒ [`ErrorCode::UnsupportedSemanticFeature`], `rule
+//! errors.unsupported_surface`), rendered faithfully. That is the difference between
+//! reporting what the daemon said and guessing on its behalf: the day a `debug` family is
+//! registered, the same call is admitted and no line in this module changes. It is the same
+//! reading bn-3tz60 gave `context.expand` before bn-28jj served it.
 
 use core::fmt;
 
-use continuumd::codec::{self, CodecError};
+use continuumd::codec::{self, CodecError, ProtocolValue};
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::is_mutation;
 use continuumd::protocol::envelope::{
     ArtifactRef, Budget, Cost, NextOperation, Omission, RequestEnvelope, ResultEnvelope,
 };
 use continuumd::protocol::operations::context::{ContextExpandRequest, ContextExpandResponse};
+use continuumd::protocol::operations::debug::{
+    DebugOpenRequest, DebugOpenResponse, DebugStateRequest, DebugStateResponse,
+};
+use continuumd::protocol::operations::evidence::EvidenceGetRequest;
+use continuumd::protocol::operations::repair::{
+    RepairBeginRequest, RepairBeginResponse, RepairReviewRequest, RepairReviewResponse,
+};
 use continuumd::protocol::operations::task::{
     TaskCancelRequest, TaskResumeRequest, TaskStatusRequest,
 };
@@ -394,16 +412,32 @@ impl Connection {
         classify(result, payload)
     }
 
+    /// `evidence.get` — read one PR-7 evidence-graph node or edge by handle.
+    ///
+    /// Goes through the [`Arguments`]/[`Payload`] tables rather than
+    /// [`Connection::invoke_typed`], because `evidence.get` has an arm in both and a call
+    /// that has one has no reason to hand-roll the encoding — the same split
+    /// [`Connection::task_status`] is on, and for the same reason.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn evidence_get(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &EvidenceGetRequest,
+    ) -> Result<Outcome<Payload>, ConnectError> {
+        let arguments = Arguments::EvidenceGet(request.clone());
+        self.invoke(transport, &arguments, Optional::Absent)
+    }
+
     /// `context.expand` — follow a PR-11 expansion handle along a relation.
     ///
-    /// Encodes the real [`ContextExpandRequest`] into the envelope's `arguments` opaque
-    /// field with `continuumd::codec::to_opaque` and decodes the answer's payload as the
-    /// real [`ContextExpandResponse`] — see this module's doc for why the typed body rather
-    /// than the `Payload` enum. `context.expand` is `@mutation` and `@task_starting` per the
-    /// registry, so the envelope always carries an idempotency key and a budget; both are
-    /// read now that the family has landed (bn-28jj), by the dispatcher's obligation step
-    /// and by the expansion's own byte ceiling respectively, where before bn-28jj the call
-    /// was refused at `codec::operations::decode_arguments` before either was consulted.
+    /// `context.expand` is `@mutation` and `@task_starting` per the registry, so the
+    /// envelope always carries an idempotency key and a budget; both are read now that the
+    /// family has landed (bn-28jj), by the dispatcher's obligation step and by the
+    /// expansion's own byte ceiling respectively, where before bn-28jj the call was refused
+    /// at `codec::operations::decode_arguments` before either was consulted.
     ///
     /// # Errors
     ///
@@ -425,16 +459,101 @@ impl Connection {
             candidates: Optional::Absent,
             bytes: Optional::Absent,
         });
-        let mut envelope = self.envelope("context.expand", budget);
+        self.invoke_typed(transport, "context.expand", request, budget)
+    }
+
+    /// `debug.open` — open a PR-19 causal-debugger branch on an explicit failure artifact.
+    ///
+    /// `@mutation`, so the envelope carries an idempotency key; not `@task_starting`, so it
+    /// carries no budget (the registry's annotations decide, through
+    /// [`Connection::envelope`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn debug_open(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &DebugOpenRequest,
+    ) -> Result<Outcome<DebugOpenResponse>, ConnectError> {
+        self.invoke_typed(transport, "debug.open", request, Optional::Absent)
+    }
+
+    /// `debug.state` — the state view at an explicit branch's frontier.
+    ///
+    /// The branch is a request field and never a remembered cursor: this connection holds
+    /// no `dbg_*` of its own, which is INV-002 as the struct's field list rather than as a
+    /// promise (see [`Connection`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn debug_state(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &DebugStateRequest,
+    ) -> Result<Outcome<DebugStateResponse>, ConnectError> {
+        self.invoke_typed(transport, "debug.state", request, Optional::Absent)
+    }
+
+    /// `repair.begin` — open a PR-20 repair transaction against an explicit failure.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn repair_begin(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &RepairBeginRequest,
+    ) -> Result<Outcome<RepairBeginResponse>, ConnectError> {
+        self.invoke_typed(transport, "repair.begin", request, Optional::Absent)
+    }
+
+    /// `repair.review` — the reviewer projection of an explicit repair transaction.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    pub fn repair_review(
+        &mut self,
+        transport: &mut dyn Transport,
+        request: &RepairReviewRequest,
+    ) -> Result<Outcome<RepairReviewResponse>, ConnectError> {
+        self.invoke_typed(transport, "repair.review", request, Optional::Absent)
+    }
+
+    /// One round trip against an operation's own request and response structs.
+    ///
+    /// Encodes `request` into the envelope's `arguments` opaque field with
+    /// `continuumd::codec::to_opaque` and decodes the answer's payload as `Res` — see this
+    /// module's doc for why the typed body rather than the [`Payload`] enum, and for why
+    /// this path exists at all for the four `debug`/`repair` operations that have no
+    /// [`Arguments`] arm to travel through.
+    ///
+    /// The envelope is built by [`Connection::envelope`] from the operation's *registry*
+    /// annotations, so an idempotency key travels exactly when the registry says
+    /// `@mutation` and nothing here restates that table.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectError`] as [`Connection::task_status`].
+    fn invoke_typed<Req: ProtocolValue, Res: ProtocolValue>(
+        &mut self,
+        transport: &mut dyn Transport,
+        operation: &'static str,
+        request: &Req,
+        budget: Optional<Budget>,
+    ) -> Result<Outcome<Res>, ConnectError> {
+        let mut envelope = self.envelope(operation, budget);
         envelope.arguments = codec::to_opaque(request)?;
         let frame = codec::to_bytes(&envelope)?;
         let answer = transport.exchange(&frame)?;
         let result: ResultEnvelope = codec::from_bytes(&answer)?;
         let payload = match &result.payload {
             Nullable::Null => None,
-            Nullable::Value(opaque) => Some(codec::from_opaque::<ContextExpandResponse>(opaque)?),
+            Nullable::Value(opaque) => Some(codec::from_opaque::<Res>(opaque)?),
         };
-        classify_context(result, payload)
+        classify_typed(result, payload)
     }
 }
 
@@ -478,15 +597,17 @@ fn classify(result: ResultEnvelope, payload: Payload) -> Result<Outcome<Payload>
     }
 }
 
-/// [`classify`], for `context.expand`'s hand-decoded payload.
+/// [`classify`], for a hand-decoded typed payload ([`Connection::invoke_typed`]).
 ///
-/// `payload` is `None` on every refusal (the only arm reachable today) and would be
-/// `Some` on a future success; the two envelope halves are still cross-checked exactly as
-/// [`classify`] checks them, so a malformed answer is a [`ConnectError`] on this path too.
-fn classify_context(
+/// `payload` is `None` on every refusal and `Some` on a success; the two envelope halves
+/// are still cross-checked exactly as [`classify`] checks them, so a malformed answer is a
+/// [`ConnectError`] on this path too. Generic rather than one function per operation
+/// because the check is about the *envelope*, which is the same document whichever body it
+/// carries — a per-operation copy would be five chances to check it four ways.
+fn classify_typed<T>(
     result: ResultEnvelope,
-    payload: Option<ContextExpandResponse>,
-) -> Result<Outcome<ContextExpandResponse>, ConnectError> {
+    payload: Option<T>,
+) -> Result<Outcome<T>, ConnectError> {
     let is_error = result.status == ResultStatus::Error;
     match (is_error, result.error, payload) {
         (true, Optional::Present(error), None) => Ok(Outcome::Refused(Refusal {

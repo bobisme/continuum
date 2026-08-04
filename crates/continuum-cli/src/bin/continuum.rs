@@ -1,9 +1,10 @@
 //! `continuum` — the PR-13 human CLI binary.
 //!
-//! This build recognizes exactly the two command groups bn-3tz60 owns: `context expand` and
-//! `task status|resume|cancel`. Every other verb the plan names (`snapshot`, `check`,
-//! `explain`, `debug`, `repair`, `evidence show`) belongs to a sibling bone
-//! (`continuum_cli`'s crate doc names which) and is not recognized here.
+//! This build recognizes the command groups bn-3tz60 and bn-1g7e4 own: `context expand`,
+//! `task status|resume|cancel`, `debug open|state`, `repair begin|review`, and
+//! `evidence show`. The remaining verbs the plan names (`snapshot`, `check`, `explain`)
+//! belong to a sibling bone (`continuum_cli`'s crate doc names which) and are not recognized
+//! here.
 //!
 //! It connects over [`continuum_cli::wire::NullTransport`] — see the library crate's root
 //! doc for why: `continuumd` ships no socket or process transport yet, so there is no real

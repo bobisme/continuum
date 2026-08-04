@@ -8,15 +8,34 @@
 //! `--json` is the contract; prose is a projection of it (INV-003 — no prose-only
 //! machine interfaces).
 //!
-//! # What this bone (bn-3tz60) delivers
+//! # What has landed here, bone by bone
 //!
-//! The PR-13 START_HERE line names three command groups; this is the third: `context
-//! expand`, and `task status`/`task resume`/`task cancel`. The other two groups —
-//! `snapshot`/`check`/`explain` (bn-3rqvm) and `debug`/`repair`/`evidence show` (bn-1g7e4)
-//! — and the cross-cutting output contract (bn-ybh1z) are separate bones and had not landed
-//! when this one did; [`cli`] therefore knows only the `context` and `task` verb groups, and
-//! a sibling group is expected to add its own arm to the same dispatcher rather than replace
-//! it.
+//! The PR-13 START_HERE line names three command groups. The third (bn-3tz60) landed first:
+//! `context expand`, and `task status`/`task resume`/`task cancel`. The second (bn-1g7e4)
+//! is the failure-investigation and promotion group: `debug open`/`debug state`,
+//! `repair begin`/`repair review`, and `evidence show`. The first group —
+//! `snapshot`/`check`/`explain` (bn-3rqvm) — and the cross-cutting output contract
+//! (bn-ybh1z) are separate bones and had not landed when this one did; [`cli`] therefore
+//! knows the `context`, `task`, `debug`, `repair`, and `evidence` verb groups and reports
+//! every other first word as a usage error.
+//!
+//! # Explicit handles everywhere (INV-002)
+//!
+//! No command in this crate has an implicit subject. There is no session file, no "current"
+//! task, branch, transaction, or evidence node, and [`wire::Connection`] holds none: every
+//! handle is a positional argument on every invocation. That is why `debug` is two verbs
+//! rather than one — `debug open` prints the `dbg_*` branch in full and `debug state` takes
+//! one back — instead of a single command that opens a branch and remembers it.
+//!
+//! # Honest depth (INV-008)
+//!
+//! Three of this crate's commands drive operations `continuumd` registers and does not yet
+//! serve. They do not pretend otherwise and they do not fail opaquely: the frame is sent, the
+//! daemon's own `UnsupportedSemanticFeature` comes back (`rule
+//! errors.unsupported_surface`), and every format prints a typed [`render::Depth`] token
+//! beside the exact operation name that is unsupported. The token is *derived* from the
+//! daemon's answer, so no list in this crate has to be edited on the day a family lands —
+//! see [`render::Depth`] for why that matters.
 //!
 //! - [`context`] — `context expand` follows a PR-11 expansion handle
 //!   (`continuumd::protocol::operations::context::ContextExpandRequest`) and renders the
@@ -32,6 +51,18 @@
 //! - [`task`] — `task status`, `task resume`, `task cancel` drive the PR-6 lifecycle
 //!   through `continuumd`'s real `task.status`/`task.resume`/`task.cancel` operations,
 //!   which are fully implemented and wire-tested here against an in-process daemon.
+//! - [`evidence`] — `evidence show` reads one PR-7 evidence-graph node or edge by handle
+//!   through the real `evidence.get`, which
+//!   [`continuumd::daemon::evidence::EvidenceFamily`] serves. Live: `tests/evidence_show.rs`
+//!   drives the success arm, the RFC 0027 X2 denial, the RFC 0026 `Redacted` stub, and the
+//!   typed `unsupported` omission an `--inline` request earns, all against a real daemon.
+//! - [`debug`] — `debug open` and `debug state` drive the PR-19 verification debugger.
+//!   `continuumd` registers all eleven `debug` operations and serves none of them, so both
+//!   report a typed `unsupported` depth today (see above) over a real round trip; their
+//!   success renderers are unit-tested against the real wire types.
+//! - [`repair`] — `repair begin` and `repair review` open and inspect a PR-20 repair
+//!   transaction. Same standing as [`debug`]: registered, unserved, typed-unsupported, and
+//!   renderer-proven ahead of the family.
 //!
 //! # Dependency-boundary contract
 //!
@@ -61,8 +92,11 @@
 
 pub mod cli;
 pub mod context;
+pub mod debug;
 pub mod error;
+pub mod evidence;
 pub mod format;
 pub mod render;
+pub mod repair;
 pub mod task;
 pub mod wire;
