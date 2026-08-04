@@ -1958,8 +1958,8 @@
         "line": 273,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "bound change"
+      "status": "satisfied",
+      "summary": "bound change (delivered: bn-ycn6 \u2014 crates/continuum-semantic-diff/src/bounds.rs: classifybounds over continuum-intent's Bounds, closed over changepolicy::Relation with no second vocabulary and no second order \u2014 Bounds::relationto already carries the componentwise comparison over (values, nodes, faults, depth) with null = unbounded = top and absence read as null for values/depth (RFC 0037 correction 15), so the classifier is a total, no-wildcard, name-preserving map from BoundsRelation's five variants onto the five same-named Relation tokens rather than a re-derivation. Directional relations are expanded/contracted only (RFC 0031 correction 2); mixed movement is incomparable with no exception; a declaredness change on nodes/faults forces unknown unconditionally, even with growth everywhere else; unsupported is admissible through correction 13's blanket grant but never emitted \u2014 bounds carries no fragment member, pinned against the live schema exactly as observers.rs pins the same fact. Evidence: tests/pr12impl04boundchangeevidence.rs \u2014 a real-corpus contraction closed into PolicyTable::verdict under the fixture's own no-decrease verb; disguised simultaneous-grow+shrink sweeps never classifying affirmative; declaredness-change \u2192 unknown failing closed under three policy shapes; anti-vacuity mutants asserted in both directions. 53 crate tests)"
     },
     {
       "category": "pr-deliverable",
