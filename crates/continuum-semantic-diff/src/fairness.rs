@@ -23,7 +23,17 @@
 //! > - `kind`: `weak → strong` on the same action classifies `strengthened`, because
 //! >   strong fairness implies weak fairness; `strong → weak` classifies `weakened`.
 //! >   (A `kind` change is equivalently expressible as one `removed` plus one `added`
-//! >   record; a classifier MUST choose one encoding and MUST NOT emit both.)
+//! >   record; a classifier MUST choose one encoding and MUST NOT emit both.) This
+//! >   single-record encoding applies only to a *clean* swap — nothing differs
+//! >   between the before-only and after-only candidate units except `kind`, i.e.
+//! >   `condition` is structurally identical on both sides. A same-action swap whose
+//! >   `condition` also moved is not "equivalently expressible" as one constraint's
+//! >   kind changing: a `strengthened`/`weakened` record carries one direction, and
+//! >   the `kind` and `condition` axes may disagree in sign, so no single record can
+//! >   state both without inventing a net direction the classification lattice does
+//! >   not define. Such a pair falls outside the exception and back under the "one
+//! >   record per classified unit" rule above: it classifies as an ordinary
+//! >   `removed`+`added` pair, never a single `kind`-change record (correction 16).
 //! > - `condition`: the enabling predicate occupies an **antitone** position. A
 //! >   fairness constraint applies wherever its condition holds, so weakening the
 //! >   condition strengthens the constraint. Where `condition` is a state formula,
@@ -85,28 +95,42 @@
 //!   encoding and the alternative is left open for the acceptance corpus to
 //!   evaluate."
 //!
-//! # A recorded tension in RFC 0031's text (for the lead, not resolved here)
+//! # A tension in RFC 0031's text, and the correction that resolves it
 //!
 //! The field-by-field table gives `fairness`'s unit of classification as "one
 //! constraint, keyed by (`kind`, `action`)" — `kind` is *part* of the unit key under
 //! that table's own definition, so `weak:A` and `strong:A` are two distinct units.
 //! The `kind` bullet then describes `weak → strong` "on the same action" as if it
 //! were one edit to one constraint, which requires matching *across* two different
-//! keys by `action` alone — a second, narrower keying scheme laid over the first,
-//! stated in prose with no rule for when a same-action removed+added pair should
-//! *not* be read as a kind change (a condition edit at the same time; an action that
-//! legitimately carries both kinds and drops one). This module resolves the gap
-//! conservatively: the collapse fires only when the two candidate units' conditions
-//! are structurally identical (see [`classify_fairness`]'s second pass, and
+//! keys by `action` alone — a second, narrower keying scheme laid over the first.
+//! This module previously flagged the bullet as silent on one question: what a
+//! same-action swap classifies when `condition` moves too, since the bullet never
+//! said what "equivalently expressible" excludes. RFC 0031 has now decided it, and
+//! the flag is a citation rather than an open question:
+//!
+//! > This single-record encoding applies only to a *clean* swap — nothing differs
+//! > between the before-only and after-only candidate units except `kind`, i.e.
+//! > `condition` is structurally identical on both sides. A same-action swap whose
+//! > `condition` also moved is not "equivalently expressible" as one constraint's
+//! > kind changing: a `strengthened`/`weakened` record carries one direction, and
+//! > the `kind` and `condition` axes may disagree in sign, so no single record can
+//! > state both without inventing a net direction the classification lattice does
+//! > not define. Such a pair falls outside the exception and back under the "one
+//! > record per classified unit" rule above: it classifies as an ordinary
+//! > `removed`+`added` pair, never a single `kind`-change record.
+//! >
+//! > — `notes/plan/rfcs/0031-semantic-and-intent-diff.md`, "`fairness`" (correction 16)
+//!
+//! So the choice this module already makes is the ratified reading, not an
+//! invention: the collapse fires only when the two candidate units' conditions are
+//! structurally identical (see [`classify_fairness`]'s second pass, and
 //! `positive_strengthening_the_real_fixtures_fairness_constraint_classifies_strengthened_and_is_reviewed`
 //! in the evidence test for the case it *does* catch); a same-action swap whose
-//! condition also differs is left as the RFC's own explicitly-sanctioned alternate
-//! encoding, `removed`+`added` (see
+//! condition also differs classifies as the RFC's own ordinary `removed`+`added`
+//! encoding (see
 //! `negative_a_same_action_swap_with_a_different_condition_is_not_collapsed_into_a_kind_change`,
-//! below), rather than this module inventing an untested rule for combining two axes
-//! of movement the RFC's `kind` bullet never actually considers together. Recorded
-//! for the lead; not a claim that RFC 0031's text is wrong, only that it is silent
-//! here and this module had to choose.
+//! below), never a single record inventing a combined direction the RFC's `kind`
+//! bullet does not define (bn-1fik9).
 //!
 //! # The oracle this module does not have
 //!
@@ -247,8 +271,8 @@ impl FairnessChange {
 ///    action)` pair is rejected at construction), if their conditions are
 ///    structurally identical the pair collapses into one
 ///    [`FairnessUnit::KindChange`] record; otherwise both are left as plain
-///    `removed`+`added` records (see the module doc's recorded tension for why this
-///    module declines to guess a combined direction when both axes moved at once).
+///    `removed`+`added` records — RFC 0031 correction 16's scope rule for the
+///    `kind` bullet's single-record exception (see the module doc).
 ///
 /// RFC 0031 permits a wire artifact to omit `unchanged` records; this function does
 /// not, matching [`crate::observers::classify_observers`] and
@@ -316,10 +340,9 @@ pub fn classify_fairness(before: &FairnessSet, after: &FairnessSet) -> Vec<Fairn
                 relation,
             ));
         } else {
-            // Both axes moved at once: the RFC's `kind` bullet does not say what this
-            // classifies (see the module doc's recorded tension), so this module
-            // declines to guess and falls back to the RFC's own explicitly-sanctioned
-            // alternate encoding.
+            // Both axes moved at once: outside the `kind` bullet's single-record
+            // exception (RFC 0031 correction 16 — see the module doc), so this falls
+            // back under the general "one record per classified unit" rule.
             before_only.insert(action.clone(), (before_kind, before_constraint));
             after_only.insert(action, (after_kind, after_constraint));
         }
@@ -580,9 +603,9 @@ mod tests {
     #[test]
     fn negative_a_same_action_swap_with_a_different_condition_is_not_collapsed_into_a_kind_change()
     {
-        // The recorded tension: both axes moved at once, so this module declines to
-        // guess a combined direction and falls back to the RFC's own sanctioned
-        // alternate encoding.
+        // Both axes moved at once, outside the `kind` bullet's single-record
+        // exception (RFC 0031 correction 16), so this falls back to the RFC's own
+        // ordinary `removed`+`added` encoding.
         let before = set([constraint(FairnessKind::Weak, "A", Some(&predicate("p")))]);
         let after = set([constraint(FairnessKind::Strong, "A", Some(&predicate("q")))]);
         let changes = classify_fairness(&before, &after);
