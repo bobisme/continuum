@@ -44,6 +44,12 @@
 //! `continuum_value::assurance`'s RFC 0031-ordered class and its nine-dimension B11
 //! envelope.
 //!
+//! [`event`] and [`state_delta`] (PR-11 / IMPL-02) — `selected[].kind` in `{event,
+//! state_delta}`: [`event::EventRef`], a typed reference to a causal-core event,
+//! optionally inside a real `cir_*` causal execution graph, and
+//! [`state_delta::StateDeltaRef`], a typed per-variable concrete-or-abstract value
+//! transition, never a whole state.
+//!
 //! [`omission`] (PR-11 / IMPL-04) — the INV-007 manifest: the closed five-member reason
 //! vocabulary, and a record shape in which the schema's two conditionals on `expandable`
 //! are unrepresentable rather than validated.
@@ -74,13 +80,15 @@
 //! manifest is derived from. Below the smallest conforming child the branch flips: nothing
 //! is published and the caller is refused.
 //!
-//! Declined here, and left to their own bones: typed construction for the other nine
-//! `SelectionKind` members (`event`, `state_delta`, `proof`, `assumption`,
-//! `counterfactual`, `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
+//! Declined here, and left to their own bones: typed construction for the remaining
+//! seven `SelectionKind` members (`proof`, `assumption`, `counterfactual`,
+//! `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
 //! IMPL-04 carries items of any kind through an expansion and constructs items of none,
-//! because `SelectedItem`'s two typed constructors are IMPL-03's and the rest are
-//! IMPL-01/02/05's; the replay reference (IMPL-05),
-//! which an expansion child inherits from its parent rather than computing; a **token**
+//! because `SelectedItem`'s four typed constructors are IMPL-03's (`source`, `model`) and
+//! IMPL-02's (`event`, `state_delta`), and no PR-11 bullet owns the other seven — they
+//! remain wire tokens with no reference type, carried through expansions unclaimed
+//! (IMPL-01 and IMPL-05 turned out to own the answer header and the top-level `replay`
+//! field, not kinds); a **token**
 //! count, which is advisory, model-relative, and owed a tokenizer identity this workspace
 //! does not have, so `content_budget.tokens` is absent rather than invented (`pack`'s module
 //! documentation); a utility **ranker** for stage 9, whose absence is why `budget` packs the
@@ -94,6 +102,7 @@
 pub mod accounting;
 pub mod assurance;
 pub mod budget;
+pub mod event;
 pub mod expansion;
 pub mod model;
 pub mod omission;
@@ -101,5 +110,6 @@ pub mod pack;
 pub mod replay;
 pub mod selection;
 pub mod source;
+pub mod state_delta;
 pub mod target;
 pub mod verdict;
