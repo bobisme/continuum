@@ -1,0 +1,26 @@
+# G0-DX-02 falsification campaign — production classifier family
+# crates/continuum-semantic-diff/tests/dx02_falsification.rs (bn-3cgt)
+# columns: id | axis | base | door | non-unchanged records | decision | reasons
+DX02-C01 | guard-repair-baseline | replicated-register | shortcut | - | allow | -
+DX02-C02 | guard-repair-plus-name-metadata | replicated-register | shortcut | - | allow | -
+DX02-C03 | guard-repair-plus-source-prose | replicated-register | shortcut | - | allow | -
+DX02-C04 | reformatting | replicated-register | shortcut | - | allow | -
+DX02-A01 | weaken-property-complementary-disjunct | replicated-register | field-by-field | properties:weakened | block | properties:weakened->block
+DX02-A02 | weaken-property-disguised-by-rename | replicated-register | field-by-field | properties:removed,properties:added | block | properties:removed->block,properties:added->block
+DX02-A03 | strengthen-assumptions-add-favorable | replicated-register | field-by-field | assumptions:added | review | assumptions:added->review
+DX02-A04 | strengthen-assumption-in-place | replicated-register | field-by-field | assumptions:unknown | review | assumptions:unknown->review
+DX02-A05 | reduce-bounds | replicated-register | field-by-field | bounds:contracted | block | bounds:contracted->block
+DX02-A06 | reduce-bounds-disguised-by-mixed-movement | replicated-register | field-by-field | bounds:incomparable | review | bounds:incomparable->review
+DX02-A07 | hide-observer-events | replicated-register | field-by-field | observers:coarsened | review | observers:coarsened->review
+DX02-A08 | hide-observer-events-disguised-as-swap | replicated-register | field-by-field | observers:incomparable | review | observers:incomparable->review
+DX02-A09 | hide-observer-events-disguised-by-rename | replicated-register | field-by-field | observers:removed,observers:added,properties:incomparable | block | observers:removed->review,observers:added->review,properties:incomparable->block
+DX02-A10 | remove-faults | replicated-register | field-by-field | faults:removed | block | faults:removed->block
+DX02-A11 | lower-assurance | replicated-register | field-by-field | assurance:downgraded | block | assurance:downgraded->block
+DX02-A12 | add-fairness-that-schedules-away-the-bug | replicated-register | field-by-field | fairness:added | review | fairness:added->review
+DX02-A13 | self-unlock-rider | replicated-register | field-by-field | properties:weakened | block | properties:weakened->block
+DX02-A15 | unclassified-field-mark-storage-opaque | replicated-register | field-by-field | trust_boundaries:unknown | review | trust_boundaries:unknown->review
+DX02-A16 | weaken-property-complementary-disjunct | die-hard | field-by-field | properties:weakened | block | properties:weakened->block
+DX02-A17 | weaken-property-disguised-by-split | die-hard | field-by-field | properties:removed,properties:added,properties:added | block | properties:removed->block,properties:added->block,properties:added->block
+DX02-A18 | strengthen-assumptions-under-locked | die-hard | field-by-field | assumptions:added | block | assumptions:added->block
+DX02-A19 | reduce-bounds | die-hard | field-by-field | bounds:contracted | block | bounds:contracted->block
+DX02-B14 | governance-only-rewrite | replicated-register | field-by-field | - | allow | -
