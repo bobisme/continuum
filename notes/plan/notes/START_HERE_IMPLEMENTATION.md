@@ -300,9 +300,9 @@ continuum context expand
 continuum task status/resume/cancel
 ```
 
-Four Bones carry this PR: `snapshot`/`check`/`explain` (bn-3rqvm, open);
-`debug`/`repair`/`evidence show` (bn-1g7e4, open); the shared `--json` output contract
-(bn-ybh1z, open); and the third command group, `context expand` and
+Four Bones carry this PR: `snapshot`/`check`/`explain` (bn-3rqvm, delivered);
+`debug`/`repair`/`evidence show` (bn-1g7e4, delivered); the shared `--json` output contract
+(bn-ybh1z, delivered); and the third command group, `context expand` and
 `task status/resume/cancel` (delivered: bn-3tz60 —
 `crates/continuum-cli/src/{wire,render,context,task,cli,format,error}.rs` plus
 `src/bin/continuum.rs`, the crate's first real command implementations since the
