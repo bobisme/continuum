@@ -1,0 +1,14 @@
+{
+  "base": {
+    "crates/continuum-refinement/src/lib.rs": "refine-base.rs.fixture"
+  },
+  "check": "semantic-change-cites-a-decision-record",
+  "description": "An uncited semantic-core file whose doc comments were rewritten and whose code is byte-identical. Prose is not a semantic change.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-refinement/src/lib.rs": "refine-head-comment-only.rs.fixture"
+  },
+  "id": "gov-1-08-comment-only-edit-is-not-a-semantic-change",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

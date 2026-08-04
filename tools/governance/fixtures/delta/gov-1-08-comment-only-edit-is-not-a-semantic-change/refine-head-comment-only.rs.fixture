@@ -1,0 +1,10 @@
+//! Refinement checking (fixture payload — never compiled).
+//!
+//! This paragraph is new prose and nothing else: the code below is byte-identical
+//! to the base side, so the delta rule must not read it as a semantic change.
+
+/// Whether the concrete side refines the abstract side, stated again in prose
+/// that did not exist at the base revision.
+pub fn refines(concrete: u32, abstracted: u32) -> bool {
+    concrete == abstracted
+}

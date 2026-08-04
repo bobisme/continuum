@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schema/v2/widget.json",
+  "schema_epoch": 2,
+  "schema_kind": "artifact",
+  "title": "Widget (fixture)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_epoch",
+    "name",
+    "kind"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "https://continuum.dev/schema/widget.json"
+    },
+    "schema_epoch": {
+      "const": 2
+    },
+    "name": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "gadget",
+        "sprocket"
+      ]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "base": {
+    "crates/continuum-forge/src/lib.rs": "forge-base.rs.fixture"
+  },
+  "check": "semantic-change-cites-a-decision-record",
+  "description": "An uncited behaviour change in a boundary-tier crate. The tier partition is check_code_policy.py's; this rule is scoped to the semantic core exactly as GOV-1-03/04/05 are.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-forge/src/lib.rs": "forge-head.rs.fixture"
+  },
+  "id": "gov-1-08-boundary-crate-is-out-of-scope",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

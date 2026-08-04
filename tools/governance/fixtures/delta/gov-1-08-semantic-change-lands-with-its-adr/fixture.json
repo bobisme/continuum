@@ -1,0 +1,16 @@
+{
+  "base": {
+    "crates/continuum-refinement/src/lib.rs": "refine-base.rs.fixture",
+    "notes/plan/adr/0099-widget-artifact-class.md": "adr-base.md.fixture"
+  },
+  "check": "semantic-change-cites-a-decision-record",
+  "description": "The same uncited behaviour change, landing in one delta with the amended ADR that authorizes it. This is the branch the constitution accepts and it must not fire.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-refinement/src/lib.rs": "refine-head.rs.fixture",
+    "notes/plan/adr/0099-widget-artifact-class.md": "adr-amended.md.fixture"
+  },
+  "id": "gov-1-08-semantic-change-lands-with-its-adr",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

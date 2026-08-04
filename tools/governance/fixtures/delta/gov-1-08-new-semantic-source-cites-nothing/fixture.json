@@ -1,0 +1,15 @@
+{
+  "base": {
+    "notes/plan/adr/0099-widget-artifact-class.md": "adr-base.md.fixture"
+  },
+  "check": "added-semantic-source-cites-a-decision-record",
+  "description": "The delta adds a semantic-core source file that cites no decision record. It also amends an ADR, which excuses a *modified* file \u2014 a new module must still name its own record.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-repair/src/lattice.rs": "lattice-uncited.rs.fixture",
+    "notes/plan/adr/0099-widget-artifact-class.md": "adr-amended.md.fixture"
+  },
+  "id": "gov-1-08-new-semantic-source-cites-nothing",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

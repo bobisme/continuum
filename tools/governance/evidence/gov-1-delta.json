@@ -1,0 +1,176 @@
+{
+  "artifact": "continuum.governance.evidence/gov-1-delta",
+  "authority": {
+    "constitution": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a71 (semantic policy: GOV-1-08, GOV-1-09)",
+    "epoch_convention": "notes/plan/schemas/README.md (Identity; What advances a schema epoch)",
+    "requirement_ids": "notes/plan/notes/PLAN_REQUIREMENTS.json"
+  },
+  "base_resolution": {
+    "default": "git merge-base HEAD main, falling back to origin/main",
+    "degradation": "No resolvable base means SKIP: the reason is printed on stderr, the report carries \"status\": \"skip\" and the resolution trail, and the delta rules are reported as not enforced. Exit 0 by default so a fresh clone does not fail the local gate; exit 1 under --require-base, which is how CI states that a base is owed. There is no path on which an unenforced run reports a pass.",
+    "explicit": "--base <rev>; an explicit base that does not resolve is a hard failure",
+    "head_default": "the working tree (untracked files included); --head <rev> for a revision"
+  },
+  "boundary": "Two revisions, not a history: this compares a base to a head and does not look at the commits in between, so an edit made and reverted inside a branch is correctly invisible and a squashed force-push is judged on its result. `Semantic change` is approximated by `the comment-stripped code of a semantic-tier file changed`, which over-approximates (a local rename counts) and under-approximates in one narrow corner (a change confined to run-of-spaces inside a string literal). Whether the cited decision record actually governs the change, and whether a published compatibility verdict is the correct one, are review judgements no diff can make: this proves the record and the statement exist and shipped with the change. The epoch rule reads schema documents only \u2014 an IDL or RFC edit that breaks a contract without touching a schema file is out of its scope.",
+  "determinism": "This file records no timestamp, commit id, or absolute path: it is a function of the repository contents alone, so an unchanged tree reproduces it byte-for-byte. The real run's verdict is deliberately not recorded here \u2014 it is a function of two revisions, not of the tree \u2014 and is reported to stdout and to CI instead.",
+  "freeze_regime": {
+    "clause": "Until PR 5 freezes the interface",
+    "fail_closed": "An absent or reworded schemas/README.md is read as `in force`.",
+    "in_force": "Clause absent (or --freeze in-force): the same findings are violations.",
+    "pre_freeze": "While the clause is present, epoch 1 is a draft edited in place: `schema-bytes-changed-without-epoch-advance` and `published-schema-document-deleted` findings are DEFERRED \u2014 printed and reported, not failures.",
+    "read_from": "notes/plan/schemas/README.md"
+  },
+  "produced_by": "tools/governance/check_revision_delta.py",
+  "reproduce": "python3 tools/governance/check_revision_delta.py --evidence tools/governance/evidence/gov-1-delta.json",
+  "requirements": {
+    "GOV-1-08": {
+      "checks": [
+        "semantic-change-cites-a-decision-record",
+        "added-semantic-source-cites-a-decision-record"
+      ],
+      "enforces": "A semantic-tier source file whose code changed between the base and the head must cite a numbered decision record at head, unless the delta itself adds or modifies one; a source file the delta *adds* must cite one regardless. `Semantic tier` is check_code_policy.SEMANTIC_CORE, imported rather than re-declared. Comment-only and formatting-only edits are not semantic changes.",
+      "rule": "semantic-change-adr-delta",
+      "single_revision_half": "check_code_policy.py rule `semantic-change-adr`"
+    },
+    "GOV-1-09": {
+      "checks": [
+        "schema-bytes-changed-without-epoch-advance",
+        "published-schema-document-deleted",
+        "schema-epoch-never-retreats",
+        "epoch-advance-publishes-a-compatibility-statement"
+      ],
+      "enforces": "A schema document whose bytes changed with `schema_epoch` unchanged, or which was deleted, is a violation once the PR 5 freeze is in force; a `schema_epoch` that retreats, and an advance published without its typed `Preserved | Revalidate | Incompatible` statement in the same delta, are violations in every regime.",
+      "rule": "epoch-discipline-delta",
+      "single_revision_half": "check_code_policy.py rule `epoch-discipline`"
+    }
+  },
+  "self_test": {
+    "base_resolution_cases": [
+      {
+        "case": "git-is-not-installed",
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "fatal": false,
+        "reason": "not inside a git work tree, or `git` is unavailable: `git rev-parse --is-inside-work-tree` exited 127",
+        "resolved": false
+      },
+      {
+        "case": "not-a-git-work-tree",
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "fatal": false,
+        "reason": "not inside a git work tree, or `git` is unavailable: `git rev-parse --is-inside-work-tree` exited 128",
+        "resolved": false
+      },
+      {
+        "case": "unborn-head",
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "fatal": false,
+        "reason": "HEAD does not name a commit (unborn branch or empty repository); there is no head revision to diff against",
+        "resolved": false
+      },
+      {
+        "case": "no-trunk-ref",
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "fatal": false,
+        "reason": "no trunk base is resolvable: main: unknown ref; origin/main: unknown ref",
+        "resolved": false
+      },
+      {
+        "case": "shallow-checkout-no-common-ancestor",
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "fatal": false,
+        "reason": "no trunk base is resolvable: main: no common ancestor with HEAD (shallow checkout or unrelated history); origin/main: no common ancestor with HEAD (shallow checkout or unrelated history)",
+        "resolved": false
+      },
+      {
+        "case": "merge-base-with-main",
+        "exit_code_default": 0,
+        "exit_code_require_base": 0,
+        "fatal": false,
+        "reason": "`git merge-base HEAD main` resolved",
+        "resolved": true
+      },
+      {
+        "case": "falls-back-to-origin-main",
+        "exit_code_default": 0,
+        "exit_code_require_base": 0,
+        "fatal": false,
+        "reason": "`git merge-base HEAD origin/main` resolved",
+        "resolved": true
+      },
+      {
+        "case": "explicit-base-does-not-resolve",
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "fatal": true,
+        "reason": "--base 'no-such-rev' does not resolve to a commit; an explicit base that is wrong is a failure, not a reason to skip",
+        "resolved": false
+      },
+      {
+        "case": "explicit-base-resolves",
+        "exit_code_default": 0,
+        "exit_code_require_base": 0,
+        "fatal": false,
+        "reason": "--base v1 resolved",
+        "resolved": true
+      },
+      {
+        "case": "diff-fails-after-the-base-resolves",
+        "delta_available": false,
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "reason": "`git diff --name-only 0123456789ab` exited 128; the delta could not be computed",
+        "resolved": true
+      },
+      {
+        "case": "untracked-listing-fails",
+        "delta_available": false,
+        "exit_code_default": 0,
+        "exit_code_require_base": 1,
+        "reason": "`git ls-files --others` exited 128; untracked files could not be listed, so an added-but-unstaged source would be invisible to the delta rules",
+        "resolved": true
+      }
+    ],
+    "deferred_pairs": [
+      "gov-1-09-schema-edited-in-place-before-the-freeze"
+    ],
+    "failures": [],
+    "fixture_pairs": 15,
+    "passing_pairs": [
+      "gov-1-08-boundary-crate-is-out-of-scope",
+      "gov-1-08-comment-only-edit-is-not-a-semantic-change",
+      "gov-1-08-new-semantic-source-cites-its-record",
+      "gov-1-08-semantic-change-cites-an-existing-record",
+      "gov-1-08-semantic-change-lands-with-its-adr",
+      "gov-1-08-waived-semantic-change",
+      "gov-1-09-epoch-advance-with-its-compatibility-statement"
+    ],
+    "status": "pass",
+    "violating_pairs_by_check": {
+      "added-semantic-source-cites-a-decision-record": [
+        "gov-1-08-new-semantic-source-cites-nothing"
+      ],
+      "epoch-advance-publishes-a-compatibility-statement": [
+        "gov-1-09-epoch-advance-without-a-compatibility-statement"
+      ],
+      "published-schema-document-deleted": [
+        "gov-1-09-published-schema-deleted-past-the-freeze"
+      ],
+      "schema-bytes-changed-without-epoch-advance": [
+        "gov-1-09-schema-edited-in-place-past-the-freeze"
+      ],
+      "schema-epoch-never-retreats": [
+        "gov-1-09-schema-epoch-retreats"
+      ],
+      "semantic-change-cites-a-decision-record": [
+        "gov-1-08-semantic-source-changed-without-a-decision-record",
+        "gov-1-08-waiver-without-a-usable-reason"
+      ]
+    }
+  },
+  "status": "pass"
+}

@@ -25,8 +25,8 @@ These twelve obligations are enforced by `tools/governance/check_code_policy.py`
 dependency rationale and TCB classes in
 `tools/governance/dependency-rationale.toml`). GOV-1-08…12 are enforced at
 their checkable core with the proxy boundary stated per entry in the evidence
-file; a two-revision gate (diffing against the merge base) would make
-GOV-1-08/09 genuinely enforceable and is tracked as follow-up work.
+file; the two-revision half of GOV-1-08/09, which diffs the head against the
+merge base, is `tools/governance/check_revision_delta.py` (15 fixture pairs).
 
 ## 2. Decision process
 

@@ -62,8 +62,20 @@ covenant:
 # policy, GOV §2 ADR process, GOV §3 claim governance), the docs/09 T12
 # dependency vet/advisory-scanning posture, and the T12 six-control binding
 # over all of the above. Each checker runs its self-test first — every
-# violating fixture must be caught — so none of the five can pass vacuously.
+# violating fixture must be caught — so none of the six can pass vacuously.
 # Evidence lands in tools/governance/evidence/.
+#
+# `check_revision_delta.py` is the two-revision half of GOV-1-08/09: the other
+# five checkers read one revision, and "this change was semantic" / "this change
+# was breaking" are not one-revision properties. It runs *last* and guards
+# itself on a resolvable base rather than being guarded here, because a shell
+# guard would have to duplicate the base-resolution logic and could then
+# disagree with it: with no merge base — a fresh clone, a shallow checkout, an
+# unrelated history — the checker prints why and skips, exit 0, and says in its
+# report that the delta rules were not enforced. CI adds `--require-base`, which
+# turns that same skip into a failure where a base is genuinely owed:
+#
+#     python3 tools/governance/check_revision_delta.py --base origin/main --require-base
 governance:
     python3 tools/governance/check_code_policy.py --self-test
     python3 tools/governance/check_code_policy.py
@@ -75,6 +87,8 @@ governance:
     python3 tools/governance/check_dependency_audit.py
     python3 tools/governance/check_t12_evidence.py --self-test
     python3 tools/governance/check_t12_evidence.py
+    python3 tools/governance/check_revision_delta.py --self-test
+    python3 tools/governance/check_revision_delta.py
 
 # Mechanical validation of the architecture/research dossier.
 dossier:

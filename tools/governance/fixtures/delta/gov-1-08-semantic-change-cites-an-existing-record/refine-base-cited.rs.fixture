@@ -1,0 +1,8 @@
+//! Refinement checking (fixture payload — never compiled).
+//!
+//! Refinement is defined by ADR-0029.
+
+/// Whether the concrete side refines the abstract side.
+pub fn refines(concrete: u32, abstracted: u32) -> bool {
+    concrete == abstracted
+}

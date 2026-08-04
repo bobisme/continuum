@@ -1,0 +1,16 @@
+# Schema conventions (fixture)
+
+An inert trim of the clauses the two-revision gate reads. The normative
+document is `notes/plan/schemas/README.md`; this copy exists so a fixture pair
+can state which freeze regime it is written under.
+
+## What advances a schema epoch
+
+`schema_epoch` is a breaking-change counter, not a release counter. A change to
+a schema document MUST advance `schema_epoch` when it can invalidate an
+instance that was valid before, or change what a valid instance means.
+
+Until PR 5 freezes the interface (plan §25), epoch 1 is a draft: the documents
+in this directory are edited in place and no compatibility statement is owed
+for those edits. From the freeze onward a published document is immutable — a
+breaking change mints `v<n+1>` and leaves `v<n>` byte-for-byte intact.

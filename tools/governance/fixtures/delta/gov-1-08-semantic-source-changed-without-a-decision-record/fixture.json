@@ -1,0 +1,14 @@
+{
+  "base": {
+    "crates/continuum-refinement/src/lib.rs": "refine-base.rs.fixture"
+  },
+  "check": "semantic-change-cites-a-decision-record",
+  "description": "A semantic-core source file changes behaviour between base and head, cites no ADR or RFC, and the delta touches no decision record.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-refinement/src/lib.rs": "refine-head.rs.fixture"
+  },
+  "id": "gov-1-08-semantic-source-changed-without-a-decision-record",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

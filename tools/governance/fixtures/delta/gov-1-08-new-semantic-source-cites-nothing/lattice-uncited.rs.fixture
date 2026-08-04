@@ -1,0 +1,6 @@
+//! Repair lattice (fixture payload — never compiled).
+
+/// The join of two repair candidates.
+pub fn join(left: u32, right: u32) -> u32 {
+    left.max(right)
+}

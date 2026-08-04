@@ -1,0 +1,16 @@
+{
+  "base": {
+    "notes/plan/schemas/README.md": "README-draft.md.fixture",
+    "notes/plan/schemas/widget.schema.json": "widget-epoch-1.schema.json.fixture"
+  },
+  "check": "epoch-advance-publishes-a-compatibility-statement",
+  "description": "The epoch advances correctly, but nothing in the delta publishes the typed per-class `Preserved | Revalidate | Incompatible` statement plan \u00a74.6 requires before an advance is applied. Enforced pre-freeze as well: the draft clause excuses in-place edits, not advances.",
+  "expect": "violation",
+  "head": {
+    "notes/plan/schemas/README.md": "README-draft.md.fixture",
+    "notes/plan/schemas/widget.schema.json": "widget-epoch-2.schema.json.fixture"
+  },
+  "id": "gov-1-09-epoch-advance-without-a-compatibility-statement",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline-delta"
+}

@@ -1,0 +1,16 @@
+{
+  "base": {
+    "notes/plan/schemas/README.md": "README-draft.md.fixture",
+    "notes/plan/schemas/widget.schema.json": "widget-epoch-2.schema.json.fixture"
+  },
+  "check": "schema-epoch-never-retreats",
+  "description": "A schema moves from epoch 2 back to epoch 1, re-using an identity that already named a different contract. Enforced in the pre-freeze regime too: the counter is monotone in every regime.",
+  "expect": "violation",
+  "head": {
+    "notes/plan/schemas/README.md": "README-draft.md.fixture",
+    "notes/plan/schemas/widget.schema.json": "widget-epoch-1.schema.json.fixture"
+  },
+  "id": "gov-1-09-schema-epoch-retreats",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline-delta"
+}

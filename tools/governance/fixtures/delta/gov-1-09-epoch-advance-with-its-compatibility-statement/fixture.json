@@ -1,0 +1,18 @@
+{
+  "base": {
+    "notes/plan/adr/0099-widget-artifact-class.md": "adr-base.md.fixture",
+    "notes/plan/schemas/README.md": "README-frozen.md.fixture",
+    "notes/plan/schemas/widget.schema.json": "widget-epoch-1.schema.json.fixture"
+  },
+  "check": "epoch-advance-publishes-a-compatibility-statement",
+  "description": "The same advance, landing with the decision record that names the `widget` class and its `Revalidate` verdict. This is what a breaking change is supposed to look like.",
+  "expect": "clean",
+  "head": {
+    "notes/plan/adr/0099-widget-artifact-class.md": "adr-advance.md.fixture",
+    "notes/plan/schemas/README.md": "README-frozen.md.fixture",
+    "notes/plan/schemas/widget.schema.json": "widget-epoch-2.schema.json.fixture"
+  },
+  "id": "gov-1-09-epoch-advance-with-its-compatibility-statement",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline-delta"
+}

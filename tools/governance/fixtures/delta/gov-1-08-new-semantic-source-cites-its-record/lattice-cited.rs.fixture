@@ -1,0 +1,8 @@
+//! Repair lattice (fixture payload — never compiled).
+//!
+//! The lattice and its join are RFC 0032's.
+
+/// The join of two repair candidates.
+pub fn join(left: u32, right: u32) -> u32 {
+    left.max(right)
+}

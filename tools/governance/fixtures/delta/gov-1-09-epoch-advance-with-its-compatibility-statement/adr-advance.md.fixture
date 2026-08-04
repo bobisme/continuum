@@ -1,0 +1,19 @@
+# ADR-0099: Widget artifact class (fixture)
+
+**Status:** accepted
+
+## Context
+
+An inert decision record. Nothing outside `tools/governance/fixtures/delta/`
+reads it.
+
+## Decision
+
+The `widget` class advances to schema epoch 2: `kind` becomes required, which
+invalidates every instance that omitted it.
+
+## Compatibility
+
+The per-artifact-class compatibility statement for the `widget` class is
+`Revalidate`: every stored instance must be re-checked before it is reused as
+evidence. Estimated invalidation blast radius: the fixture corpus only.

@@ -1,0 +1,14 @@
+{
+  "base": {
+    "crates/continuum-refinement/src/lib.rs": "refine-base.rs.fixture"
+  },
+  "check": "semantic-change-cites-a-decision-record",
+  "description": "The changed file carries a waiver whose reason is four characters. A waiver with no usable reason is reported, not honoured \u2014 the finding still fires.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-refinement/src/lib.rs": "refine-head-waived-badly.rs.fixture"
+  },
+  "id": "gov-1-08-waiver-without-a-usable-reason",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

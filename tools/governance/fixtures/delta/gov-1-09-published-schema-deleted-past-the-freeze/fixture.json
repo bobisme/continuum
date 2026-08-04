@@ -1,0 +1,15 @@
+{
+  "base": {
+    "notes/plan/schemas/README.md": "README-frozen.md.fixture",
+    "notes/plan/schemas/widget.schema.json": "widget-epoch-1.schema.json.fixture"
+  },
+  "check": "published-schema-document-deleted",
+  "description": "A published schema document is removed. Every instance pinned to that epoch loses the contract it was written under.",
+  "expect": "violation",
+  "head": {
+    "notes/plan/schemas/README.md": "README-frozen.md.fixture"
+  },
+  "id": "gov-1-09-published-schema-deleted-past-the-freeze",
+  "requirement": "GOV-1-09",
+  "rule": "epoch-discipline-delta"
+}

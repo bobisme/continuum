@@ -1,0 +1,14 @@
+{
+  "base": {
+    "crates/continuum-refinement/src/lib.rs": "refine-base.rs.fixture"
+  },
+  "check": "semantic-change-cites-a-decision-record",
+  "description": "The same change under an inline `// continuum:allow(...)` waiver with a usable reason \u2014 a visible, reviewable line, recorded in the run's `waivers_granted`.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-refinement/src/lib.rs": "refine-head-waived.rs.fixture"
+  },
+  "id": "gov-1-08-waived-semantic-change",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

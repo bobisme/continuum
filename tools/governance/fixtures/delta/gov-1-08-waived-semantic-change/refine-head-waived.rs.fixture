@@ -1,0 +1,8 @@
+//! Refinement checking (fixture payload — never compiled).
+
+// continuum:allow(semantic-change-cites-a-decision-record): mechanical rename of a
+// private parameter; no decision is being taken here.
+/// Whether the concrete side refines the abstract side.
+pub fn refines(concrete: u32, abstracted: u32) -> bool {
+    concrete <= abstracted
+}

@@ -1,0 +1,13 @@
+# ADR-0099: Widget artifact class (fixture)
+
+**Status:** accepted
+
+## Context
+
+An inert decision record. Nothing outside `tools/governance/fixtures/delta/`
+reads it.
+
+## Decision
+
+The `widget` class exists at schema epoch 1, and refinement compares the
+concrete and abstract sides with `<=` rather than `==`.

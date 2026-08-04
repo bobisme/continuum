@@ -1,0 +1,5 @@
+//! Sandbox host (fixture payload — never compiled).
+
+pub fn spawn(command: &str) -> String {
+    format!("run {command}")
+}

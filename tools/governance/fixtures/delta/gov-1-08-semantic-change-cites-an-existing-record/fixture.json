@@ -1,0 +1,14 @@
+{
+  "base": {
+    "crates/continuum-refinement/src/lib.rs": "refine-base-cited.rs.fixture"
+  },
+  "check": "semantic-change-cites-a-decision-record",
+  "description": "A behaviour change inside a file that already cites the decision record governing it.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-refinement/src/lib.rs": "refine-head-cited.rs.fixture"
+  },
+  "id": "gov-1-08-semantic-change-cites-an-existing-record",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}

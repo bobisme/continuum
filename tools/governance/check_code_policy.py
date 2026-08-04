@@ -34,7 +34,15 @@ was breaking" or "this optimization was written after its reference". Each of
 those rules therefore enforces a checkable core — an artifact-level invariant
 whose violation would be a necessary consequence of breaking the obligation —
 and every such rule records an explicit `boundary` string in the evidence file
-naming what it does *not* see. Rules with a `boundary` are proxies and say so.
+naming what it does *not* see.
+
+For `GOV-1-08` and `GOV-1-09` the missing half is no longer missing: it is
+`tools/governance/check_revision_delta.py`, which reads *two* revisions (a base,
+by default the merge base with the trunk, and a head) and enforces the delta
+rules `semantic-change-adr-delta` and `epoch-discipline-delta`. This file keeps
+enforcing the state; that one enforces the change. Both are wired into the
+`governance` recipe, and each requirement's `delta_gate` field in the evidence
+file names its two-revision half.
 
 Self-test
 ---------
@@ -1988,6 +1996,11 @@ class Requirement:
     scanned: tuple[str, ...]
     boundary: str | None
     fn: object
+    # The two-revision half, where one exists: the rule in
+    # `check_revision_delta.py` that enforces the *change* this rule can only
+    # enforce the *state* of. `None` means this requirement is enforced from one
+    # revision alone, and its `boundary` says what that costs.
+    delta_gate: str | None = None
 
 
 REQUIREMENTS: tuple[Requirement, ...] = (
@@ -2142,13 +2155,20 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
         scanned=(f"{ADR_DIR}/*.md", f"{ADR_DIR}/README.md", f"{RFC_DIR}/*.md", "crates/**/*.rs"),
         boundary=(
-            "PROXY. One revision cannot show that a *change* was semantic, so this enforces the "
-            "artifact-level consequences instead: decisions are discoverable, statuses are declared, "
-            "citations resolve, and semantic code names the record that authorized it. A semantic change "
-            "made inside an already-cited module without amending its ADR is not visible here; that "
-            "remains the docs/12 §4 review obligation."
+            "This half reads one revision and enforces the artifact-level consequences: decisions are "
+            "discoverable, statuses are declared, citations resolve, and semantic code names the record "
+            "that authorized it. The half a single revision cannot see — that a *change* was semantic — "
+            "is enforced against the merge base by `check_revision_delta.py`'s `semantic-change-adr-delta` "
+            "rule (see `delta_gate`), at file granularity rather than this rule's crate granularity. What "
+            "neither half decides is whether the cited record actually *governs* the change it is cited "
+            "for; that remains the docs/12 §4 review obligation."
         ),
         fn=rule_semantic_change_adr,
+        delta_gate=(
+            f"{GOVERNANCE}/check_revision_delta.py rule `semantic-change-adr-delta` "
+            "(semantic-change-cites-a-decision-record, added-semantic-source-cites-a-decision-record); "
+            f"evidence {GOVERNANCE}/evidence/gov-1-delta.json"
+        ),
     ),
     Requirement(
         rid="GOV-1-09",
@@ -2169,14 +2189,24 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "crates/continuum-value/src/epoch.rs",
         ),
         boundary=(
-            "PROXY. Detecting that a change *was* breaking requires comparing two revisions; this runs "
-            "over one. What is enforced is that the epoch machinery cannot be bypassed or quietly "
-            "desynchronized: identities agree, the vocabulary is one set, and an advance carries a "
-            "published compatibility verdict. A breaking edit made *without* touching `$id` or "
-            "`schema_epoch` is invisible here and needs a revision-diff gate — see README-gov1.md, "
-            "\"Known gaps\"."
+            "This half reads one revision and enforces that the epoch machinery cannot be bypassed or "
+            "quietly desynchronized: identities agree, the vocabulary is one set, and an advance carries "
+            "a published compatibility verdict. The breaking edit made *without* touching `$id` or "
+            "`schema_epoch` — invisible to any single revision — is enforced against the merge base by "
+            "`check_revision_delta.py`'s `epoch-discipline-delta` rule (see `delta_gate`). Two limits are "
+            "stated there and are real: while `schemas/README.md` still carries its pre-freeze draft "
+            "clause, an in-place edit at epoch 1 is *recorded and printed but not failed*, because the "
+            "convention explicitly permits it until PR 5 freezes the interface; and the delta rule reads "
+            "schema documents, so a breaking change made in the IDL or an RFC without touching a schema "
+            "file is outside it."
         ),
         fn=rule_epoch_discipline,
+        delta_gate=(
+            f"{GOVERNANCE}/check_revision_delta.py rule `epoch-discipline-delta` "
+            "(schema-bytes-changed-without-epoch-advance, published-schema-document-deleted, "
+            "schema-epoch-never-retreats, epoch-advance-publishes-a-compatibility-statement); "
+            f"evidence {GOVERNANCE}/evidence/gov-1-delta.json"
+        ),
     ),
     Requirement(
         rid="GOV-1-10",
@@ -2427,6 +2457,7 @@ def build_evidence(tree: Tree, results: dict[str, list[Violation]], st: dict[str
             "violations": [v.render() for v in violations],
             "fixtures_proven_caught": list(fixtures_by_req.get(req.rid, [])),
             "boundary": req.boundary,
+            "delta_gate": req.delta_gate,
         }
     return {
         "artifact": "continuum.governance.evidence/gov-1",

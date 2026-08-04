@@ -1,0 +1,12 @@
+{
+  "base": {},
+  "check": "added-semantic-source-cites-a-decision-record",
+  "description": "A new semantic-core module that names the RFC it implements.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-repair/src/lattice.rs": "lattice-cited.rs.fixture"
+  },
+  "id": "gov-1-08-new-semantic-source-cites-its-record",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr-delta"
+}
