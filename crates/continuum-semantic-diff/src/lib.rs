@@ -47,5 +47,8 @@
 //! protected fields (`schemas/semantic-diff.schema.json`), and the impact-set
 //! computation (RFC 0031, "Impact set"). [`observers`]'s module doc states its own
 //! narrower boundary in full under "Scope: PR-12 / IMPL-05 only".
+//!
+//! PR-12 / IMPL-04 (`bn-ycn6`) adds [`bounds`] — RFC 0031's `bounds` field classification, the componentwise `(values, nodes, faults, depth)` order into `unchanged`/`expanded`/`contracted`/`incomparable`/`unknown`; see its module doc for scope.
 
+pub mod bounds;
 pub mod observers;
