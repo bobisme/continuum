@@ -49,6 +49,11 @@
 //! narrower boundary in full under "Scope: PR-12 / IMPL-05 only".
 //!
 //! PR-12 / IMPL-04 (`bn-ycn6`) adds [`bounds`] — RFC 0031's `bounds` field classification, the componentwise `(values, nodes, faults, depth)` order into `unchanged`/`expanded`/`contracted`/`incomparable`/`unknown`; see its module doc for scope.
+//!
+//! PR-12 / IMPL-06 (`bn-3vxp`) adds [`faults`], [`fairness`], and [`assurance`] — RFC 0031's `faults` (fault-model set membership), `fairness` (per-unit membership, the `kind` movement, and the antitone `condition` rule), and `assurance` (the requirement triple's total order, closed over `continuum_intent::assurance_policy` and never emitting `incomparable`) field classifications; see each module's doc for scope.
 
+pub mod assurance;
 pub mod bounds;
+pub mod fairness;
+pub mod faults;
 pub mod observers;
