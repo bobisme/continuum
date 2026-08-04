@@ -640,13 +640,15 @@ fn the_seal_text_rendering_is_pinned_line_for_line() {
     );
 }
 
-/// The idempotency channel, and the residual a generated key leaves.
+/// The idempotency channel, and the collision behaviour bn-jmx97 ratified for a generated
+/// key (this pin was a defect record until that bone declined content-derivation; see
+/// `wire::Connection::with_idempotency_key` for the ratification's grounds).
 ///
 /// `rule idempotency.replay` gives one key one meaning, and which two invocations are "the
 /// same request" is a statement only a caller can make. This test is both halves of that:
 /// two *different* requests presenting the same generated key earn the daemon's typed
-/// `IdempotencyKeyReused` — a rendered refusal naming the fix, never a silent wrong answer —
-/// and the same two under distinct `--idempotency-key` values are both admitted.
+/// `IdempotencyKeyReused` — a rendered refusal naming the channel, never a silent wrong
+/// answer — and the same two under distinct `--idempotency-key` values are both admitted.
 #[test]
 fn two_different_creates_need_two_idempotency_keys_and_say_so_when_they_share_one() {
     let mut fixture = Fixture::fresh();

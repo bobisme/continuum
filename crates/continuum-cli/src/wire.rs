@@ -365,14 +365,53 @@ impl Connection {
     /// channel for making it — `continuum … --idempotency-key <key>`.
     ///
     /// When no key is given, [`Connection::envelope`] generates one from the operation name
-    /// and this connection's call counter. That is enough to keep two *different* operations
-    /// apart, which is what a single process issuing several calls needs, and it is
-    /// deliberately not more: a generated key cannot be a function of the request body
-    /// without a content hash, and this crate has exactly one dependency edge. Two separate
-    /// invocations of the same command with *different* arguments therefore present the same
-    /// generated key and earn the daemon's typed `IdempotencyKeyReused` — which is a correct,
-    /// rendered refusal naming the fix, not a silent wrong answer, and `--idempotency-key` is
-    /// the fix.
+    /// and this connection's call counter. bn-jmx97 revisited whether the generated key
+    /// should instead be a function of the request *body* and **ratified this shape**. The
+    /// grounds, recorded here so the next reader does not re-litigate them blind:
+    ///
+    /// - **What the one dependency edge honestly offers.** This crate's single production
+    ///   edge is `continuumd` (`Cargo.toml`'s one-edge rationale). Through it the ID5
+    ///   canonical *encoding* is reachable and already used as designed —
+    ///   `codec::to_opaque`/`transport::encode_request` are the wire's own
+    ///   `rule encoding.canonical_form` discipline — but no content *digest* is:
+    ///   `continuumd::daemon::identity::Blake3Identity` is public yet uncallable from here
+    ///   (its one method's signature is spelled in `continuum-workspace` types this crate
+    ///   cannot name), `HashedCorrelation` is contractually `rule audit.correlation`'s
+    ///   function of the request *identity* alone (`request_id`, `actor`) and pushing body
+    ///   bytes through `RequestId`'s grammar would be using it against its own contract, and
+    ///   nothing else public in `codec`/`transport`/`protocol` hashes bytes. A key that
+    ///   embedded the canonical bytes themselves would be deterministic and collision-free,
+    ///   and was rejected on the workspace's own terms: every content-derived wire token
+    ///   here is a digest token, never the preimage (ADR-0013 — "hashes index and
+    ///   partition"); the key is user-visible surface (`evidence show` renders
+    ///   `idempotency_key` verbatim), so request-sized keys would leak whole bodies into
+    ///   rendered output; and it would roughly double every generated-key mutation frame.
+    ///   The one honest route to a compact content-derived key is a production edge to
+    ///   `continuum-value`'s `ContentHasher`/`Digest256` seam — the identity seam
+    ///   `Blake3Identity` itself composes — and taking a new edge was not this bone's to
+    ///   decide; the finding is recorded on bn-jmx97 for routing.
+    ///
+    /// - **What the counter shape actually gives.** Every command this binary runs speaks
+    ///   exactly one mutation per invocation, as call one, so across invocations the
+    ///   generated key is a function of the operation name alone. A genuine retry — the
+    ///   same command rebuilt from the same inputs — therefore presents the same key *and*
+    ///   the same canonical request, which is `rule idempotency.replay`'s replay arm: the
+    ///   recorded first outcome, returned verbatim. The same operation with *different*
+    ///   arguments presents the same key with a different request and earns the daemon's
+    ///   typed `IdempotencyKeyReused` — a rendered refusal naming this flag, never a silent
+    ///   wrong answer. That loud refusal is the whole residual, and `--idempotency-key` is
+    ///   the documented cross-invocation channel for stating "these are two requests".
+    ///
+    /// - **Why content-derivation was declined, not merely deferred.** A content-derived
+    ///   key hard-codes "same content = same request", silently collapsing a deliberately
+    ///   repeated identical mutation into a replay of its first outcome — a statement
+    ///   `rule idempotency.replay` reserves to the caller, and one this shape keeps loud.
+    ///   The daemon already delivers content-level idempotency at the layer that owns it:
+    ///   its handles are content-addressed (`verification.start` derives `task_*` from the
+    ///   request content, so an identical resubmission under *any* key resolves to the same
+    ///   campaign via its cached-result lane, and `ws_*` snapshots are likewise
+    ///   `Blake3Identity` tokens), so a client-side content key would restate, in an
+    ///   adapter, an idempotency the daemon answers authoritatively.
     #[must_use]
     pub fn with_idempotency_key(mut self, key: Option<String>) -> Self {
         self.idempotency_key = key;

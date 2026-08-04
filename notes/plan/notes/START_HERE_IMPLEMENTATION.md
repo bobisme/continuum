@@ -379,12 +379,17 @@ pairs. INV-005 by construction rather than by regex: two independently provision
 render byte-identical artifacts, the only timestamps in any golden are the fixture's
 declared `now`, and no path, clock, or map-order reaches any pinned byte; regeneration
 (`PR13_EXIT_BLESS=1`) rewrites and then always panics, so new bytes are always reviewed as
-a contract change rather than self-certified (INV-004). One residual pinned, not
-certified: scenario `pr13-06-check-start--generated-key-collision` retains bn-jmx97's
+a contract change rather than self-certified (INV-004). One generated-key behaviour pinned as a
+regression guard: scenario `pr13-06-check-start--generated-key-collision` retains the
 generated-idempotency-key content collision — a second `verification.start` with a
-different body under the same generated key is refused `IdempotencyKeyReused` — annotated
-in the suite, the summary's `residuals`, and here, so the golden fails visibly on the day
-the derivation is fixed).
+different body under the same generated key is refused `IdempotencyKeyReused` — which
+bn-jmx97 has since examined and ratified rather than fixed: no content digest is honestly
+reachable through the CLI's single production edge (`continuumd`), the daemon's
+content-addressed handles already answer identical-content resubmission idempotently, and
+`--idempotency-key` is the documented cross-invocation replay channel (grounds on
+`continuum_cli::wire::Connection::with_idempotency_key`). Annotated in the suite, the
+summary's `residuals`, and here, so the golden fails visibly if the derivation ever
+changes without revisiting that ratification).
 
 ### PR 14 — Asupersync semantic journal [G4]
 

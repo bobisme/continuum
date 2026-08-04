@@ -63,18 +63,24 @@
 //!   machine-readable summary (`tests/evidence/pr13-exit.json`) to what actually ran, so
 //!   the summary cannot drift from the suite it summarizes.
 //!
-//! # Known residual, pinned but not certified (bn-jmx97)
+//! # Ratified behaviour, pinned as a regression guard (bn-jmx97)
 //!
 //! The CLI's *generated* idempotency key is a function of the operation name and a
 //! per-process call counter, **not** of the request body
-//! (`continuum_cli::wire::Connection::envelope`). bn-jmx97 records the content-collision
-//! defect: two invocations of the same mutation with different arguments present the same
-//! generated key, and the daemon's `rule idempotency.replay` then refuses the second with
-//! `IdempotencyKeyReused`. Scenario `06-check-start--generated-key-collision` pins that
-//! behaviour mechanically — it is current behaviour, retained so the fix is visible when it
-//! lands, **not** a certification that the derivation is correct. Every other mutation this
-//! script repeats with a different body passes `--idempotency-key` explicitly, which is the
-//! documented remediation the same module names.
+//! (`continuum_cli::wire::Connection::envelope`). This suite originally retained that as a
+//! content-collision defect record; bn-jmx97 then examined content-derivation and
+//! **ratified the counter shape** — no content digest is honestly reachable through the
+//! crate's single production edge, and the daemon's own content-addressed handles already
+//! answer identical-content resubmission idempotently — with `--idempotency-key` as the
+//! documented cross-invocation channel (the full grounds live on
+//! `Connection::with_idempotency_key`). Two invocations of the same mutation with
+//! different arguments present the same generated key, and the daemon's
+//! `rule idempotency.replay` refuses the second with `IdempotencyKeyReused` — a loud,
+//! typed refusal naming the flag. Scenario `06-check-start--generated-key-collision` pins
+//! that ratified refusal mechanically, as a regression guard: the golden fails visibly if
+//! the derivation ever changes without revisiting bn-jmx97's ratification. Every other
+//! mutation this script repeats with a different body passes `--idempotency-key`
+//! explicitly, which is the documented channel the same module names.
 //!
 //! # House rules, inherited from `pr3_exit_evidence.rs`
 //!
@@ -817,9 +823,11 @@ fn script(fixture: &mut Fixture) -> (Vec<Pinned>, Vec<PinnedError>) {
     );
     let sealed_b = line(&seal, "snapshot");
 
-    // 06 — the bn-jmx97 residual, pinned: a second `verification.start` with a *different*
-    // body under the same *generated* key (scenario 02 recorded it) is the daemon's own
-    // `IdempotencyKeyReused`. Current behaviour, retained — not certified as correct.
+    // 06 — the bn-jmx97 ratified refusal, pinned as a regression guard: a second
+    // `verification.start` with a *different* body under the same *generated* key
+    // (scenario 02 recorded it) is the daemon's own `IdempotencyKeyReused` — the loud,
+    // typed refusal the ratified counter-key shape deliberately produces (see the header's
+    // "Ratified behaviour" section and `wire::Connection::with_idempotency_key`).
     pin(
         &mut pinned,
         fixture,
@@ -1524,7 +1532,8 @@ fn the_evidence_summary_agrees_with_what_this_file_observed() {
         assert_eq!(named, expected, "matrix row {key}");
     }
 
-    // The residual is annotated, by bone, against the scenario that pins it (bn-jmx97).
+    // The generated-key behaviour is annotated, by bone, against the scenario that pins it
+    // (bn-jmx97 — originally a retained defect record, since ratified; see the header).
     let residual = contract::render_value(contract::value_at(&summary, "residuals[0].bone"));
     assert_eq!(residual, "bn-jmx97");
     let pinned_by = contract::render_value(contract::value_at(&summary, "residuals[0].pinned_by"));
