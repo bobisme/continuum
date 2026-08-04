@@ -1982,8 +1982,8 @@
         "line": 273,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "fault/fairness/assurance change."
+      "status": "satisfied",
+      "summary": "fault/fairness/assurance change (delivered: bn-3vxp \u2014 crates/continuum-semantic-diff/src/{faults,fairness,assurance}.rs, per the observers.rs precedent and closed over continuum-intent::changepolicy::Relation with no second vocabulary. faults: pure set-membership over faultmodel.{enabled,profiles} \u2014 membership is always decidable, so the non-affirmative relations are never emitted, and the classifier judges revisions only, never emptiness (RFC 0037 AO4: no-removal over an empty fault model is dormant, not ill-formed). fairness: units keyed by (kind, action) per W1; two-pass \u2014 same-key classification uses the antitone condition rule (formularelation/dualize, absence \u2261 null per RFC 0037 correction 15), then a clean weak\u2194strong swap on one action collapses into RFC 0031's fixed single-record Strengthened/Weakened encoding, falling back to removed+added when the condition also moved \u2014 a documented conservative resolution of a genuine gap in RFC 0031's kind bullet, routed to bn-1fik9 for the text disposition. assurance: a thin projection over continuumintent::assurancepolicy::AssurancePolicy::changeto bridged by wire-token spelling \u2014 one authority for the total order and the checker-flag declaredness\u2192unknown rule, no duplicated decision; incomparable is never emitted, pinned, and the discovered divergence \u2014 PolicyField::admitsrelation over-admits Incomparable on assurance against RFC 0031 correction 13 \u2014 is mechanically pinned and routed to bn-2sngz. Evidence: tests/pr12impl06faultfairnessassuranceevidence.rs \u2014 real-corpus removals/coarsenings per field closed into PolicyTable::verdict under the fixtures' own verbs, adversarial disguise sweeps never classifying affirmative, declaredness-change failing closed, anti-vacuity mutants both directions. 111 crate tests)."
     },
     {
       "category": "pr-exit",
