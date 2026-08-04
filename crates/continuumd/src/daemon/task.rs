@@ -1232,6 +1232,17 @@ fn resume(
     // terminal status. So `cancel` → `resume(continuation, budget)` now leaves the record
     // byte-identical, which is exactly what `cancel` → `resume(continuation, no budget)`
     // always did (bn-3p32's A2, the localising control this repair must not step past).
+    //
+    // `reported(...)` below answers on the task-observing lane (`status = ok`), never
+    // `task_started` — this operation is `@task_starting` and could report either, and this
+    // is the one place the choice matters: a terminal task is not being started, so `ok` is
+    // the honest lane. `verification::start` faces the identical "identity resolves to an
+    // already-terminal task" case (bn-3p32's A12) and, absent an equivalent branch, answers
+    // `task_started` instead — ratified as no violation (RFC 0026, "What `task_started` means
+    // when an identity resolves to a task that will not run again"), because
+    // `verification.start`'s response has no third shape between "a task" and "a completed
+    // result" for `cached()` to route a terminal-but-not-completed identity through. F20
+    // records the candidate for giving `verification.start` this same `ok` branch.
     {
         let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
         if entry.is_terminal() {

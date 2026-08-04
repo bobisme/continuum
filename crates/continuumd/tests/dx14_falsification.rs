@@ -43,7 +43,7 @@
 //! | A9 | resume a cancelled task's continuation on a **fresh** daemon | [`negative_a_cancelled_daemons_continuation_does_not_resolve_on_a_fresh_daemon`] | held |
 //! | A10 | replay a stale continuation after its task was cancelled *and* re-resumed | [`negative_a_stale_continuation_replayed_after_cancellation_runs_nothing`] | held |
 //! | A11 | every ordering of a five-operation hostile suffix (120 programmes) | [`negative_every_ordering_of_a_hostile_operation_suffix_leaves_a_total_daemon`] | held |
-//! | A12 | re-issue the identical `verification.start` after the cancel | [`negative_a_cancelled_identity_is_reported_as_cancelled_and_never_re_run`] | held, with a concern recorded in the test |
+//! | A12 | re-issue the identical `verification.start` after the cancel | [`negative_a_cancelled_identity_is_reported_as_cancelled_and_never_re_run`] | held — the concern it recorded is disposed by bn-y9f7i (RFC 0026, ratified; F20 raised) |
 //! | A13 | the whole attack programme on two fresh daemons | [`negative_the_attack_programme_renders_byte_identically_on_two_fresh_daemons`] | held |
 //!
 //! # The one that landed, and the fix that closed it
@@ -1620,13 +1620,26 @@ fn negative_every_ordering_of_a_hostile_operation_suffix_leaves_a_total_daemon()
 /// `verification.start`'s cached-result lane only fires for a `Completed` one. What a caller
 /// gets is therefore the cancelled task back.
 ///
-/// **Recorded as a concern rather than a violation.** No obligation leaks and nothing is
-/// half-published — the envelope names the task and `task.status` reports `cancelled`
-/// authoritatively, which is what `rule subscription.hints_only` makes the load-bearing
-/// reading. But the envelope's lane says `task_started` for a task that will never run again,
-/// and a client that cancels a campaign cannot re-ask the identical question of this daemon:
-/// it must vary the budget or the target to get a new identity. That is a real property of
-/// the design and it is pinned here so a change to it is a change to a test.
+/// **Disposed by bn-y9f7i, against RFC 0026's own text (bn-3p32 A12).** Originally recorded
+/// here as a concern rather than a violation; RFC 0026's "What `task_started` means when an
+/// identity resolves to a task that will not run again" ratifies the reading directly, so this
+/// is no longer an open concern about this daemon but a documented, intentional property of
+/// the wire: `task_started` on `verification.start` states that the answer is task-shaped
+/// rather than result-shaped, never that this call began new execution, and the operation's
+/// declared response has no third shape for "the identity resolves to an already-terminal
+/// task" — its only result-shaped branch is licensed by RFC 0030's reuse rules, which require
+/// a produced output a `Cancelled` task does not have. The envelope names the task and
+/// `task.status` reports `cancelled` authoritatively, which is what `rule
+/// subscription.hints_only` makes the load-bearing reading; the assertions below are
+/// unchanged, because what they pin — no re-run, no re-publication, `task.status` staying
+/// authoritative — was never in question. The lane-naming asymmetry with `task.resume`'s own
+/// terminal short-circuit (which answers `status = ok` rather than `task_started` for the same
+/// "already-terminal" situation) is real and is carried forward as RFC 0026's flag F20, for a
+/// future protocol-minor lane that would distinguish the two on the wire; it is not a defect
+/// in this daemon today. A client that cancels a campaign still cannot re-ask the identical
+/// question of this daemon and get new work: it must vary the budget or the target to get a
+/// new identity. That remains a real, intentional property of the design, and it stays pinned
+/// here so a change to it is a change to a test.
 #[test]
 fn negative_a_cancelled_identity_is_reported_as_cancelled_and_never_re_run() {
     let mut fixture = fixture();

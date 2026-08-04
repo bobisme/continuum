@@ -947,6 +947,14 @@ fn start(
             effect.omissions = omissions;
             return Ok(effect);
         }
+        // Every other status this identity can resolve to — including `Failed` and
+        // `Cancelled`, neither of which will run again — takes the `started()` lane below.
+        // That is not a claim that this call started anything: see `started()`'s doc comment
+        // and RFC 0026's "What `task_started` means when an identity resolves to a task that
+        // will not run again" (bn-3p32's A12, ratified — `task_started` means "the answer is
+        // task-shaped, not result-shaped", never "new work began at this call"). F20 records
+        // the candidate for a future lane that would answer a terminal identity the way
+        // `task.resume`'s own terminal short-circuit already does.
         return Ok(started(entry));
     }
 
@@ -993,6 +1001,17 @@ fn start(
 /// operation because it is `@task_starting`, and until bn-i4aem item 9 neither was
 /// reachable: `result::success` hard-coded `ok` with both handles absent, so a parked
 /// campaign's continuation was reachable only by a second `task.status` call.
+///
+/// "Every other outcome" includes a `Failed` or `Cancelled` entry this identity already
+/// resolves to — neither runs again, and this call ran nothing. That is not this lane lying:
+/// `task_started` is this operation's "the answer is task-shaped, not result-shaped" member,
+/// not an event claim that execution began at this call, and `verification.start` has no
+/// third response shape to report "an already-terminal identity" with. RFC 0026's "What
+/// `task_started` means when an identity resolves to a task that will not run again"
+/// ratifies this reading against the RFC's own text (bn-3p32's A12,
+/// `crates/continuumd/tests/dx14_falsification.rs`) and records F20 as the candidate for a
+/// lane that would distinguish the two cases; `task.status` on `entry.handle` is what already
+/// tells a caller, authoritatively, whether this task is going to do anything further.
 fn started(entry: &TaskEntry) -> Effect {
     let mut effect = Effect::new(
         Payload::VerificationStart(VerificationStartResponse {
