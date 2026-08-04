@@ -1,0 +1,90 @@
+# CI gate for the Continuum dossier + implementation repo (bn-28ur: "Dossier <->
+# implementation sync discipline: validator in CI, living-document updates per
+# gate").
+#
+# Before this file, no CI configuration existed anywhere in the repository (no
+# .github/, .gitlab-ci.yml, .circleci/, Jenkinsfile, azure-pipelines.yml, or
+# .drone.yml) — every gate ran only where a human or agent happened to invoke
+# `just check` locally. This workflow runs the gate that already exists
+# (`just check`, named as `.edict.toml`'s `check_command`) on every push to
+# `main` and every pull request against it, so a PR that flips a G0 matrix row
+# without updating plan.md §0.3, or edits §25 without its predicate, or drops a
+# plan §22 / docs/52 gate bullet, fails CI instead of only failing whenever
+# someone happens to run the gate by hand.
+#
+# `just check` already runs the dossier validator as its `dossier` recipe
+# (`cd notes/plan && uv run --with jsonschema python3 tools/validate_dossier.py`)
+# — this workflow does not change that recipe, its order, or any other recipe
+# `just check` chains. See `notes/plan/VALIDATION_REPORT.md` for what else is,
+# and deliberately is not, part of the gate: `validation-results.json` and
+# `MANIFEST.md`/`SHA256SUMS.txt` regeneration are lead-loop/manual reproduction
+# steps ("It is not regenerated per-commit or by CI", VALIDATION_REPORT.md says
+# of `validation-results.json`), not CI-gated — so this workflow does not run
+# `tools/generate_manifest.py` and does not regenerate or commit either file.
+#
+# Setup this workflow assumes, matching README.md's "Toolchain" section:
+#   - `rustup` preinstalled (GitHub's ubuntu-latest runner images ship it);
+#     `rustup show` then installs the exact pinned toolchain
+#     (rust-toolchain.toml: channel 1.97.0, clippy + rustfmt components) the
+#     same way a developer's first `cargo`/`just` invocation would.
+#   - `mise` (via jdx/mise-action) installs `just` and `uv` (mise.toml's
+#     default-registry tools) and elan's installer, `elan-init`; `elan-init -y`
+#     then installs `elan`, `lake`, and `lean` the same way README's bootstrap
+#     three-liner does (`mise install && elan-init -y && just check`). The
+#     `lean` recipe exports `~/.elan/bin` onto PATH itself, so no extra PATH
+#     wiring is needed here.
+#   - system `python3` (ubuntu-latest ships >=3.11, meeting the validator's
+#     documented floor); the boundary/covenant/governance checkers are
+#     stdlib-only by design (see check_dependency_audit.py's own docstring:
+#     "a house-style, stdlib-only checker with no network access") and need
+#     nothing beyond that.
+#
+# One addition beyond the bare `just check` local gate:
+# tools/governance/check_revision_delta.py's own docstring and the Justfile's
+# `governance` recipe comment both name the CI-specific invocation
+# `--base origin/main --require-base` (a missing merge base degrades to a
+# silent, exit-0 skip by default — deliberately, so a shallow clone or
+# detached checkout doesn't fail a developer's local run — but CI is exactly
+# where a base is always owed, so the skip must be fatal there). `just
+# check`'s bare `governance` recipe, which runs the same checker without
+# those flags, is left untouched; this workflow adds the stricter invocation
+# as an extra step so CI enforces what the tool's own docs already prescribe
+# for it.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history (merge-base resolution needs it)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch origin/main (GOV-1-08/09 delta check's base)
+        run: git fetch origin main --no-tags
+
+      - name: "Install pinned tools (mise.toml: just, uv, elan-init)"
+        uses: jdx/mise-action@v2
+        env:
+          # Avoids unauthenticated-rate-limit failures on the `github:` backend
+          # mise.toml uses to fetch the pinned elan-init release.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install elan, lake, lean (README "Toolchain" bootstrap)
+        run: elan-init -y
+
+      - name: Select pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show
+
+      - name: just check
+        run: just check
+
+      - name: GOV-1-08/09 delta check, CI-strict (a base is always owed in CI)
+        run: python3 tools/governance/check_revision_delta.py --base origin/main --require-base

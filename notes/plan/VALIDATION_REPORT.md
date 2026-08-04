@@ -61,6 +61,46 @@ same command and read stdout directly; nothing requires copying it over
 `validation-results.json` unless the result is meant to become the new
 committed baseline.
 
+## CI
+
+`.github/workflows/check.yml` runs `just check` — the same gate a
+developer runs locally, unchanged — on every push to `main` and every
+pull request (bn-28ur). `tools/validate_dossier.py` is therefore
+enforced on every merge: a PR that flips a `G0_SPIKE_MATRIX.md` row
+without updating plan §0.3's derived counts, or edits the §25
+specification-debt ledger without its predicate, or drops a plan §22 /
+docs/52 gate bullet, fails CI the same way it fails a local `just
+check`. CI does not regenerate or commit `validation-results.json` or
+`MANIFEST.md`/`SHA256SUMS.txt` — see "Where the live results are"
+above; those stay lead-loop/manual conventions, not gate steps.
+
+## One-commit reconciliation rule (plan §22)
+
+Plan §22 states the rule normatively: "`docs/52` and this section are
+reconciled in both directions in one commit: every criterion this
+section adds is folded into `docs/52`, no `docs/52` criterion is
+dropped here, and the dossier validator enforces bullet-for-bullet
+correspondence between the two." `docs/52_RELEASE_GATES_REV3.md`
+carries the same statement at its own head ("Reconciled bullet-for-
+bullet with `plan.md` §22; the two are updated together"). The
+`gate_scheme_correspondence` check in `tools/validate_dossier.py`
+enforces this mechanically and bidirectionally — a bullet added to
+either document without its counterpart in the other fails the
+validator, hence fails CI.
+
+This bone (bn-28ur) adds the mechanism, not the rule: the rule was
+already written in both documents. What was missing is (a) CI running
+the validator that enforces it on every merge (see "CI" above), and
+(b) a place for the corollary the rule implies for how work is
+scoped: **any change to gate status or a gate bullet lands in plan §22
+and docs/52 together, in one commit — and each phase exit-gate bone
+(the bone that closes a G0–G10 gate) includes its own dossier updates
+(matrix rows, §0.3 counts, register rows, docs/52 and plan §22
+bullets) as part of that bone's own delivery, not deferred to a
+follow-up.** A gate-closing bone that lands code without its dossier
+update is not done; the follow-up bone pattern is for genuinely new
+findings, not for the update the closing bone itself owed.
+
 ## Narrative boundaries
 
 This file used to narrate the Lean, Rust/CML, and corpus-ingestion
