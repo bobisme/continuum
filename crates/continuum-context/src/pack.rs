@@ -37,12 +37,20 @@
 //!   already-decided question" is the IDL's own reason for `context.expand` declaring no
 //!   verdict. Inheriting is equal, never stronger, so "a pack MUST NOT report an envelope
 //!   stronger than the result's" is preserved by construction.
-//! - **`content_budget.bytes` is the ceiling in force**, not a measurement of the bytes
-//!   written. The schema calls it "byte budget of the pack"; the caller's request may name
-//!   one, and where it does not the parent's stands. What this crate does *not* do is pack
-//!   to it — dropping items to fit a byte ceiling is IMPL-06's bullet — so a caller of
-//!   [`ChildPack::to_json`] that names a ceiling is obliged to check the result against it
-//!   and refuse rather than over-run it; [`ChildPack::within`] is that check.
+//! - **`content_budget.bytes` is, ratified, a measurement, and this module still threads a
+//!   ceiling through it.** RFC 0028 correction 17 reads the field as the pack's own
+//!   measured byte size — the counterpart of the IDL's `Cost.bytes`, not `Budget.bytes` or
+//!   `OutputPolicy.max_bytes` — because the ratified FR-01 sentence is graded by *summing*
+//!   `content_budget.bytes` over a pack family, which only measures anything if each
+//!   member's value is what that member actually spent. This module does not yet compute
+//!   that: assembling the true post-packing size is IMPL-06's bullet (byte packing), not
+//!   this one's, so [`ChildPack`]'s `budget_bytes` field carries the byte ceiling this
+//!   expansion runs under — the caller's request, or the parent's own recorded value
+//!   where the caller names none — and [`ChildPack::to_json`] writes that ceiling into
+//!   `content_budget.bytes` as an interim placeholder. [`ChildPack::within`] is the
+//!   admission check this makes necessary: a caller that names a ceiling is obliged to run
+//!   it against the result and refuse rather than over-run it. The gap closes when IMPL-06
+//!   lands and this key is populated from the child's own encoded length instead.
 //!
 //! # `content_hash`, and the self-reference every content-addressed document has
 //!
@@ -178,7 +186,12 @@ pub fn required_keys_present(document: &Json) -> Result<(), PackError> {
     Ok(())
 }
 
-/// The byte ceiling the parent recorded — `content_budget.bytes`.
+/// The value the parent recorded under `content_budget.bytes`.
+///
+/// Ratified, per RFC 0028 correction 17, as the parent's own measured byte size, not a
+/// ceiling — but a caller of this function (see [`ChildPack`]'s documentation) uses the
+/// value as an inherited ceiling today, because IMPL-06 has not landed the packing step
+/// that would let this crate write the child's true measurement instead.
 ///
 /// # Errors
 ///
@@ -244,7 +257,9 @@ pub struct ChildPack<'a> {
     pub selected: &'a [SelectedItem],
     /// What this child, in turn, leaves out — the residual manifest.
     pub manifest: &'a Manifest,
-    /// The byte ceiling in force. Recorded, not enforced here — see [`ChildPack::within`].
+    /// The byte ceiling this expansion runs under. Recorded into `content_budget.bytes` as
+    /// an interim placeholder — see this module's documentation, "The three keys the
+    /// expansion decides" — and checked, not enforced, here: see [`ChildPack::within`].
     pub budget_bytes: u64,
 }
 

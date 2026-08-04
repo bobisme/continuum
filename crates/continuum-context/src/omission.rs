@@ -32,11 +32,15 @@
 //!
 //! # `kind` is the closed selection vocabulary, and the schema's free string is wider
 //!
-//! The schema types `omissions[].kind` as an unconstrained string and the shipped example
-//! writes a descriptive phrase (`"observer-independent causal predecessor"`). This module
-//! narrows it to [`SelectionKind`], the closed eleven-member `selected[].kind` enum, for
-//! three reasons, and the narrowing is *inside* what the schema admits, so a pack written
-//! here still validates:
+//! The schema types `omissions[].kind` as an unconstrained string, and the shipped example
+//! used to write a descriptive phrase (`"observer-independent causal predecessor"`) there.
+//! RFC 0028 correction 16 settles the reading: `omissions[].kind` names the same closed
+//! eleven-member `selected[].kind` vocabulary [`SelectionKind`] is, and the example is
+//! corrected to `"event"` (the 196 items are `e_ack`'s causal-predecessor events). This
+//! module narrows to [`SelectionKind`] for three reasons, and the narrowing is *inside*
+//! what the schema admits, so a pack written here still validates — a closed `enum` at
+//! this key is a shape change and is raised for the schema sweep as RFC 0028 F13, not made
+//! here:
 //!
 //! 1. the manifest partitions the **candidates for selection**, and a candidate's kind is
 //!    exactly that vocabulary — a partition keyed by free-form phrases cannot be checked

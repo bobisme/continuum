@@ -235,7 +235,7 @@
       "description": "Budget accounting for the pack. Bytes are the enforced contract and are always present; tokens are advisory and model-relative (RFC 0027, RFC 0028 \"Budgets and packing\"). The ratified FR-01 metric sums `bytes` over a whole pack family, so a family is summable only when every member records it (see `parent`).",
       "properties": {
         "bytes": {
-          "description": "Byte budget of the pack — the enforced contract and the graded cost denominator of the ratified FR-01 sentence.",
+          "description": "The pack's own measured byte size, post-packing — the enforced contract and the graded cost denominator of the ratified FR-01 sentence (RFC 0028 correction 17). A measurement, not the requested ceiling: content_budget.nodes records that role for OutputPolicy.max_nodes, while bytes records what this pack actually spent, the counterpart of the IDL's Cost.bytes, summed over a pack family via parent.",
           "minimum": 0,
           "type": "integer"
         },
@@ -422,6 +422,7 @@
             "type": "object"
           },
           "kind": {
+            "description": "Kind of the omitted candidates. Reading: the closed selected[].kind SelectionKind vocabulary (RFC 0028 correction 16) - the manifest partitions the candidates for selection, whose kind is exactly that vocabulary. Still typed here as an unconstrained string pending the schema sweep (RFC 0028 F13).",
             "type": "string"
           },
           "reason": {

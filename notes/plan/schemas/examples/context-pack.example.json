@@ -76,7 +76,7 @@
         "anchor": "e_ack",
         "relation": "causal_predecessors"
       },
-      "kind": "observer-independent causal predecessor",
+      "kind": "event",
       "reason": "slice-irrelevant"
     }
   ],
