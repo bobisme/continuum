@@ -375,35 +375,40 @@ mod tests {
         }
     }
 
-    // --- a recorded gap in `continuum-intent`, not this module's to fix -----------------------
+    // --- regression guard: `assurance` refuses `incomparable` (RFC 0031 correction 13) --------
 
     #[test]
-    fn admits_relation_currently_over_admits_incomparable_on_assurance_a_recorded_continuum_intent_gap()
-     {
+    fn admits_relation_now_refuses_incomparable_on_assurance_per_correction_13() {
         // RFC 0031 correction 13 is explicit: "the non-affirmative three are
         // admissible on every row (with `incomparable` excluded from `assurance`
-        // alone, per its own total-order rule)". `PolicyField::admits_relation`
-        // implements the *first* half unconditionally
-        // (`!relation.is_affirmative() || ...`, no field-specific override) but not
-        // the parenthetical exclusion: the boolean short-circuits to `true` for every
-        // non-affirmative relation on every field, `assurance` included, before the
-        // field-specific `classified_relations()` set is ever consulted. This is a
-        // fact about `continuum_intent::change_policy`, not about this crate —
-        // `continuum-intent` is read-only for this bone — so it is pinned here as a
-        // recorded discrepancy (see the bone comment) rather than "fixed" by this
-        // module pretending the row is narrower than the function it delegates
-        // admissibility checks to actually reports. [`classify_assurance`] itself
-        // still never *constructs* `Incomparable` (see
+        // alone, per its own total-order rule)".
+        //
+        // `bn-3vxp` found and pinned (as this test, then named
+        // `admits_relation_currently_over_admits_incomparable_on_assurance_a_recorded_continuum_intent_gap`)
+        // that `PolicyField::admits_relation` implemented the *first* half
+        // unconditionally (`!relation.is_affirmative() || ...`, no field-specific
+        // override) but not the parenthetical exclusion: the boolean short-circuited
+        // to `true` for every non-affirmative relation on every field, `assurance`
+        // included, before the field-specific `classified_relations()` set was ever
+        // consulted. `bn-2sngz` closed that gap directly in
+        // `crates/continuum-intent/src/change_policy.rs` (`continuum-intent` is no
+        // longer read-only for this bone), so the assertion below is now the negation
+        // of the one `bn-3vxp` recorded, and this test guards the fix rather than
+        // documenting the divergence.
+        //
+        // [`classify_assurance`] itself never *constructed* `Incomparable` either side
+        // of this fix (see
         // `incomparable_is_never_emitted_across_a_battery_of_mixed_and_declaredness_inputs`,
-        // above, and the `debug_assert_ne!` in `AssuranceChange::new`), so this gap
-        // has no live consequence for PR-12 / IMPL-06; it would only matter to a
+        // above, and the `debug_assert_ne!` in `AssuranceChange::new`), so the gap had
+        // no live consequence for PR-12 / IMPL-06; it would only have mattered to a
         // *different* caller that trusted `admits_relation` alone to reject an
-        // `Incomparable` record on `assurance` sight unseen.
+        // `Incomparable` record on `assurance` sight unseen — which is exactly what
+        // `admits_relation` now does.
         assert!(
-            PolicyField::Assurance.admits_relation(Relation::Incomparable),
-            "if this now returns false, `continuum-intent` has closed the gap RFC 0031 \
-             correction 13 names — update this test's assertion (to `!...`) and this crate's \
-             module doc no longer needs the caveat"
+            !PolicyField::Assurance.admits_relation(Relation::Incomparable),
+            "`assurance` must refuse `incomparable` (RFC 0031 correction 13's parenthetical); if \
+             this now returns true, the fix in `continuum-intent`'s `admits_relation` has \
+             regressed"
         );
     }
 

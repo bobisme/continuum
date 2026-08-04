@@ -383,23 +383,57 @@ impl PolicyField {
     /// Whether a relation may be recorded for this field.
     ///
     /// [`classified_relations`](Self::classified_relations) plus the three
-    /// non-affirmative relations, *always*. RFC 0031's per-field table omits `unknown`
-    /// from five rows (`faults`, `assurance`, `optimization`, `non_vacuity`,
-    /// `security_policy`), and its fail-closed rule requires it everywhere:
+    /// non-affirmative relations — with one carve-out for `assurance`. RFC 0031's
+    /// per-field table omitted `unknown` from five rows (`faults`, `assurance`,
+    /// `optimization`, `non_vacuity`, `security_policy`), which read as forbidding it
+    /// on exactly the fields whose set-membership or total order gives a classifier
+    /// the least room to discharge an obligation, contradicting its own fail-closed
+    /// rule:
     ///
     /// > A classifier that cannot complete MUST NOT emit a partial `intent_changes`
     /// > set with an `allow` decision. Failure to classify is `unknown` on every
     /// > unclassified protected field […] never silence.
     ///
-    /// The two readings conflict, and only one of them is safe: rejecting a
-    /// fail-closed `unknown` on `faults` would refuse the *blocking* answer and leave
-    /// the classifier with nothing admissible to say. So the non-affirmative three are
-    /// admitted on every field. *Raised as a flag against RFC 0031: the per-field
-    /// admissible sets and the fail-closed rule disagree on whether `unknown` may
-    /// appear on the five membership-only fields.*
+    /// RFC 0031 correction 13 resolves that disagreement and states the one exception
+    /// this function must also honor:
+    ///
+    /// > The per-field admissible-relation table omitted the non-affirmative relations
+    /// > from five rows. […] Normative: the non-affirmative three are admissible on
+    /// > every row (with `incomparable` excluded from `assurance` alone, per its own
+    /// > total-order rule). Direction: this RFC's table is corrected to agree with its
+    /// > own "Fail-closed rule" and "Policy verdict" P2, both already normative; found
+    /// > by `crates/continuum-intent/src/change_policy.rs`
+    /// > (`PolicyField::admits_relation`).
+    /// >
+    /// > — RFC 0031, "Corrections recorded by this RFC", correction 13
+    ///
+    /// `assurance` is RFC 0031's one totally ordered field: its three affirmative
+    /// relations — `unchanged`, `upgraded`, `downgraded` — already dispose of every
+    /// comparable pair, so there is no "both inclusions refuted" case left for
+    /// `incomparable` to name. `unknown` stays admissible there for a different case
+    /// entirely — the checker-flag declaredness change RFC 0031's "Assurance movement"
+    /// and RFC 0037 correction 14 both fail closed to (`AssuranceComparisonError::
+    /// CheckerDeclarednessChanged`) — so only `incomparable` is excluded, not the
+    /// whole non-affirmative trio.
+    ///
+    /// This function previously implemented correction 13's general "admissible on
+    /// every row" half but not its parenthetical `assurance` exclusion, so it admitted
+    /// `Incomparable` on `assurance` regardless — over-admitting exactly the case the
+    /// correction carves out. `bn-3vxp` found and pinned that gap
+    /// (`crates/continuum-semantic-diff/src/assurance.rs`'s
+    /// `admits_relation_now_refuses_incomparable_on_assurance_per_correction_13` test,
+    /// née `admits_relation_currently_over_admits_incomparable_on_assurance_a_recorded_continuum_intent_gap`);
+    /// this bone (bn-2sngz) closes it.
     #[must_use]
     pub fn admits_relation(self, relation: Relation) -> bool {
-        !relation.is_affirmative() || self.classified_relations().contains(&relation)
+        if relation.is_affirmative() {
+            return self.classified_relations().contains(&relation);
+        }
+        // Correction 13's parenthetical: every row admits the non-affirmative three
+        // except `assurance`, which excludes `incomparable` alone (see the doc comment
+        // above) — its own total-order rule leaves no "both inclusions refuted" case
+        // for `incomparable` to name.
+        !(matches!(self, Self::Assurance) && matches!(relation, Relation::Incomparable))
     }
 }
 
@@ -1399,7 +1433,8 @@ impl ClassificationRecord {
     ///
     /// [`ChangePolicyError::InadmissibleRelation`] when RFC 0031's per-field table
     /// does not assign this relation to this field — `downgraded` on `bounds`, say, or
-    /// `merged` on `faults`. The non-affirmative three are admissible everywhere; see
+    /// `merged` on `faults`. The non-affirmative three are admissible everywhere except
+    /// `incomparable` on `assurance` (RFC 0031 correction 13); see
     /// [`PolicyField::admits_relation`].
     pub fn new(field: PolicyField, relation: Relation) -> Result<Self, ChangePolicyError> {
         if !field.admits_relation(relation) {

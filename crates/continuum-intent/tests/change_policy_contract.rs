@@ -540,6 +540,13 @@ fn p1_a_partial_classification_cannot_reach_a_verdict() {
 fn p2_a_non_affirmative_relation_forbids_allow_on_every_field_under_every_verb() {
     // "This holds for every field and every verb — the fail-closed rule is not a
     // property of the directional verbs alone."
+    //
+    // One combination is excluded from the sweep: `assurance` × `incomparable`. RFC
+    // 0031 correction 13's parenthetical excludes exactly that pair from `assurance`'s
+    // admissible relations (bn-2sngz, closing the over-admission bn-3vxp pinned), so
+    // `records_with` cannot construct it — `ClassificationRecord::new` now returns
+    // `InadmissibleRelation` there, checked separately below rather than folded into
+    // this loop's uniform `.expect`.
     let reviewers = every_field_reviewed();
     for field in PolicyField::ALL {
         for verb in field.admissible_verbs() {
@@ -548,6 +555,9 @@ fn p2_a_non_affirmative_relation_forbids_allow_on_every_field_under_every_verb()
                 Relation::Unsupported,
                 Relation::Incomparable,
             ] {
+                if field == PolicyField::Assurance && relation == Relation::Incomparable {
+                    continue;
+                }
                 let table = table_with(field, *verb);
                 let verdict = table
                     .verdict(
@@ -572,6 +582,21 @@ fn p2_a_non_affirmative_relation_forbids_allow_on_every_field_under_every_verb()
             }
         }
     }
+}
+
+#[test]
+fn p2_excludes_assurance_incomparable_per_correction_13_rather_than_silently_skipping_it() {
+    // The gap in the sweep above is a typed rejection, not an untested corner:
+    // `assurance` refuses to record `incomparable` at all (RFC 0031 correction 13's
+    // parenthetical), so there is no record for P2 to ever apply the fail-closed rule
+    // to on that pair.
+    assert_eq!(
+        ClassificationRecord::new(PolicyField::Assurance, Relation::Incomparable),
+        Err(ChangePolicyError::InadmissibleRelation {
+            field: PolicyField::Assurance,
+            relation: Relation::Incomparable
+        })
+    );
 }
 
 #[test]
@@ -905,7 +930,20 @@ fn a_relation_the_fields_order_cannot_produce_is_a_typed_rejection() {
             relation: Relation::Strengthened
         })
     );
-    // The non-affirmative three are admissible everywhere, including on the five
+    // `incomparable` is also a relation `assurance`'s order cannot produce — RFC 0031
+    // correction 13's parenthetical: "the non-affirmative three are admissible on
+    // every row (with `incomparable` excluded from `assurance` alone, per its own
+    // total-order rule)". `assurance`'s three affirmative relations (`unchanged`,
+    // `upgraded`, `downgraded`) already dispose of every comparable pair, so there is
+    // no "both inclusions refuted" case left for `incomparable` to name.
+    assert_eq!(
+        ClassificationRecord::new(PolicyField::Assurance, Relation::Incomparable),
+        Err(ChangePolicyError::InadmissibleRelation {
+            field: PolicyField::Assurance,
+            relation: Relation::Incomparable
+        })
+    );
+    // The non-affirmative three are admissible everywhere else, including on the five
     // membership-only fields RFC 0031's table omits them from — refusing them would
     // refuse the fail-closed answer.
     for field in PolicyField::ALL {
@@ -914,6 +952,9 @@ fn a_relation_the_fields_order_cannot_produce_is_a_typed_rejection() {
             Relation::Unsupported,
             Relation::Incomparable,
         ] {
+            if field == PolicyField::Assurance && relation == Relation::Incomparable {
+                continue;
+            }
             assert!(
                 ClassificationRecord::new(field, relation).is_ok(),
                 "{field} cannot record {relation}"
