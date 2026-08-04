@@ -132,28 +132,35 @@
 //! below), never a single record inventing a combined direction the RFC's `kind`
 //! bullet does not define (bn-1fik9).
 //!
-//! # The oracle this module does not have
+//! # The oracle exists now, and why this module still takes no direction from it
 //!
 //! `condition` is a property AST (a bare, temporal-operator-free formula — RFC
 //! 0037's "the two carriers differ in shape... `fairness[].condition` is a **bare**
 //! temporal-operator-free formula"), and RFC 0031 computes its relation "over CPNF-1
 //! exactly as for claims": Finite-fragment behavior-set inclusion, with a checked
-//! witness, per the "Properties (per fragment)" classification-lattice bullet. That
-//! decision procedure is not implemented anywhere in `continuum-intent` as of this
-//! bone — `continuum_intent::property`'s own module doc says plainly "Classification
-//! is not here. Whether a change is `weakened` or `unknown` is RFC 0031's question
-//! (PR 12)", and no Finite-fragment inclusion oracle exists yet in this crate or that
-//! one (it is `properties`' bone, `bn-8mlg`, IMPL-02, still open at the time of this
-//! writing). [`formula_relation`] is honest about the gap rather than guessing past
-//! it: two *unequal*, *both-declared* conditions classify [`Relation::Unknown`] —
-//! never a guessed direction, and never [`Relation::Incomparable`] either, since this
-//! module never discharges a refutation of *both* inclusions (the only way RFC 0031
-//! lets `incomparable` be earned for an expression-shaped comparison; see "Properties
-//! (per fragment)" and "Fail-closed rule"). Only the two structurally decidable
-//! moves — equality, and the `null` extremum RFC 0031 states outright ("`C → null`
-//! classifies `strengthened`") — are computed without an oracle. This is recorded
-//! again in the bone comment as a real, current gap for whoever lands the Finite
-//! oracle next, not invented or duplicated here.
+//! witness, per the "Properties (per fragment)" classification-lattice bullet. When
+//! this module landed (`bn-3vxp`) no such oracle existed anywhere; `bn-8mlg`
+//! (IMPL-02, `properties`) has since landed it as
+//! [`crate::properties::finite_formula_relation`] — a sound, bounded implication
+//! prover — and made [`crate::properties`] the crate's **one** formula-comparison
+//! authority, which this module's [`formula_relation`] now delegates its
+//! both-declared arm to. What it delegates to is the authority's *structural* core
+//! ([`crate::properties::formula_relation`]), not the oracle, and the reason is a
+//! license, not an oversight: RFC 0037 S3 grants directions only under "the
+//! fragment's own decision procedure", a `fairness[]` item declares no `fragment`
+//! member (pinned below), and `classify_fairness` is never given the contract's
+//! `scope.fragments` — so no `Finite` license reaches this classifier, exactly the
+//! boundary [`crate::assumptions`]' module doc records for `unsupported`. Two
+//! *unequal*, *both-declared* conditions therefore still classify
+//! [`Relation::Unknown`] — never a guessed direction, and never
+//! [`Relation::Incomparable`] either, since nothing here discharges a refutation of
+//! *both* inclusions. Only the two structurally decidable moves — equality, and the
+//! `null` extremum RFC 0031 states outright ("`C → null` classifies
+//! `strengthened`") — are computed without a license. The upgrade path (thread the
+//! contract's declared fragment into `classify_fairness` and consult the oracle,
+//! dualized) is recorded in `bn-8mlg`'s bone comment for the lead to route, not
+//! taken silently here; `a_condition_edit_the_oracle_could_decide_still_classifies_unknown`
+//! pins the current behavior so the upgrade is loud when it comes.
 //!
 //! # Why `assurance`'s `incomparable` exclusion has no analogue here
 //!
@@ -161,11 +168,12 @@
 //! `assurance`'s, which excludes it by its own total-order rule). This module simply
 //! never happens to construct one, for the reason above: the only way to earn
 //! `incomparable` on an expression-shaped field is a discharged double refutation,
-//! and this module has no discharge mechanism to call. A future oracle landing in
-//! `continuum-intent` could make [`formula_relation`] return `Incomparable` for a
-//! provably-neither-side-implies-the-other pair without changing this module's
-//! `dualize` step at all — "`incomparable`/`unknown` pass through the duality
-//! unchanged" is already implemented that way below.
+//! and neither this module nor the landed oracle has a refutation mechanism —
+//! [`crate::properties`]' own doc records that a failed derivation search refutes
+//! nothing, so `incomparable` never flows from formula content anywhere in this
+//! crate. Were a refutation-capable oracle ever licensed here, its answer would pass
+//! through this module's `dualize` step unchanged — "`incomparable`/`unknown` pass
+//! through the duality unchanged" is already implemented that way below.
 //!
 //! # Scope: PR-12 / IMPL-06 only
 //!
@@ -370,27 +378,27 @@ pub fn classify_fairness(before: &FairnessSet, after: &FairnessSet) -> Vec<Fairn
 /// `null` (`None`) is RFC 0031's stated bottom of the condition order ("the weakest
 /// condition"), so:
 ///
-/// - both unconditional, or both declared and structurally identical: the formula is
-///   unchanged.
+/// - both unconditional: the formula is unchanged.
 /// - a declared condition moving to `null`: the formula moved to the bottom, which is
 ///   a formula *weakening* (RFC 0031's `Relation::Weakened` — "More behaviors are
 ///   admitted" — matches "unconditional" admitting every state).
 /// - `null` moving to a declared condition: the formula moved away from the bottom,
 ///   a formula *strengthening*.
-/// - two declared, structurally unequal conditions: undecidable without the Finite
-///   oracle this module does not have (see the module doc); the honest answer per
-///   RFC 0031's S2 ("otherwise `unknown` (undecidable/unattempted)") is
-///   [`Relation::Unknown`], never a guessed direction.
+/// - two declared conditions: delegated to the crate's one formula-comparison
+///   authority, [`crate::properties::formula_relation`] — structural equality is
+///   `Relation::Unchanged`, anything else [`Relation::Unknown`], never a guessed
+///   direction, because no `Finite` license reaches this classifier (see the module
+///   doc, "The oracle exists now, and why this module still takes no direction from
+///   it").
 ///
 /// [`dualize`] turns this into the relation RFC 0031 actually wants recorded, which
 /// is the relation on the *constraint*.
 fn formula_relation(before: Option<&Formula>, after: Option<&Formula>) -> Relation {
     match (before, after) {
         (None, None) => Relation::Unchanged,
-        (Some(before), Some(after)) if before == after => Relation::Unchanged,
         (Some(_), None) => Relation::Weakened,
         (None, Some(_)) => Relation::Strengthened,
-        (Some(_), Some(_)) => Relation::Unknown,
+        (Some(before), Some(after)) => crate::properties::formula_relation(before, after),
     }
 }
 
@@ -535,10 +543,36 @@ mod tests {
 
     #[test]
     fn two_distinct_declared_conditions_classify_unknown_not_a_guess() {
-        // No Finite oracle exists yet (see the module doc): the honest answer is
-        // `unknown`, never a guessed `strengthened`/`weakened`/`incomparable`.
+        // No `Finite` license reaches this classifier (see the module doc): the
+        // honest answer is `unknown`, never a guessed
+        // `strengthened`/`weakened`/`incomparable`.
         let before = set([constraint(FairnessKind::Weak, "A", Some(&predicate("p")))]);
         let after = set([constraint(FairnessKind::Weak, "A", Some(&predicate("q")))]);
+        let changes = classify_fairness(&before, &after);
+        assert_eq!(
+            relation_of(&changes, &FairnessUnit::Key(key(FairnessKind::Weak, "A"))),
+            Relation::Unknown
+        );
+    }
+
+    #[test]
+    fn a_condition_edit_the_oracle_could_decide_still_classifies_unknown() {
+        // The pin the module doc promises: `crate::properties`' oracle *can* derive
+        // that `p` weakens to `p or q` — asserted here so this test cannot go stale
+        // vacuously — but no fragment license reaches `classify_fairness`, so the
+        // constraint still classifies `unknown`, not the dualized `strengthened` an
+        // upgrade would produce. When the lead routes the upgrade (bn-8mlg's bone
+        // comment records the path), this test is the loud thing it changes.
+        let narrow = predicate("p");
+        let wide = Formula::or(vec![predicate("p"), predicate("q")]).expect("two operands");
+        assert_eq!(
+            crate::properties::finite_formula_relation(&narrow, &wide),
+            Relation::Weakened,
+            "the oracle must be able to decide this pair, or the pin is vacuous"
+        );
+
+        let before = set([constraint(FairnessKind::Weak, "A", Some(&narrow))]);
+        let after = set([constraint(FairnessKind::Weak, "A", Some(&wide))]);
         let changes = classify_fairness(&before, &after);
         assert_eq!(
             relation_of(&changes, &FairnessUnit::Key(key(FairnessKind::Weak, "A"))),

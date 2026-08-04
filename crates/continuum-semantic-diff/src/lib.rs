@@ -55,6 +55,8 @@
 //! PR-12 / IMPL-03 (`bn-7vg7`) adds [`assumptions`] — RFC 0031's `assumptions` field classification: per-unit `added`/`removed` membership keyed by `id`, `unchanged`/`incomparable` for declaredness moves on `classification`/`fidelity_profile` with the expression held fixed, and `unknown` for an unequal expression (no Finite-fragment inclusion oracle exists yet to discharge `strengthened`/`weakened`); the dangerous direction is `strengthened`, the mirror image of `properties`' `weakened` — see the module doc for scope and the recorded RFC 0031 table gap.
 //!
 //! PR-12 / IMPL-01 (`bn-b8ru`) adds [`equality`] — RFC 0031's whole-contract `unchanged` shortcut: `classify` decides whether two Intent Contract identities agree, licensing all fifteen fields `unchanged` without inspecting any of them; see its module doc for scope and for why it answers plan §5.3's "unchanged intent", the bullet's normative text rather than its two-word title.
+//!
+//! PR-12 / IMPL-02 (`bn-8mlg`) adds [`properties`] — RFC 0031's `properties` field classification over `continuum-intent`'s `Claim`/`ClaimSet`, keyed by `id`: membership (`added`/`removed`, never matched by expression to defeat a rename), the meaning axis (`kind`/`observer` moved with the expression fixed is `incomparable`; moved with it, `unknown`, and the oracle is never consulted across a meaning change), and the content axis — `unchanged` on equal ID2 canonical encodings and, under the `Finite` fragment license alone, a **sound and bounded** implication oracle (a closed set of meaning-preserving derivation rules under a fixed step budget, START_HERE's "solver-based implication only where sound and bounded") deciding `strengthened`/`weakened`, failing closed to `unknown` wherever it cannot derive an inclusion and never emitting `incomparable` from content, since a failed derivation refutes nothing. The module also becomes the crate's one formula-comparison authority (`formula_relation`/`finite_formula_relation`), which [`fairness`] now delegates its declared-condition arm to; see its module doc for the fragment license, the declined rules, and the both-directions collision arm.
 
 pub mod assumptions;
 pub mod assurance;
@@ -63,3 +65,4 @@ pub mod equality;
 pub mod fairness;
 pub mod faults;
 pub mod observers;
+pub mod properties;
