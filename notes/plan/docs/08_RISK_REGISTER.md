@@ -208,7 +208,7 @@ Controls:
 - semantic epochs;
 - concrete vertical slices.
 
-## R14 — “Alien math” theater
+## R14 — “Alien math” theater (delivered: bn-33iv — Phase A checkpoint; three controls live with mechanical evidence in notes/plan/notes/R14_ALIEN_MATH_THEATER_EVIDENCE.md; topology-confinement guarantee vacuous until frontier code lands, negative-results policy instance-empty until a §24.5 kill fires)
 
 **Probability:** medium  
 **Impact:** reputational/severe
