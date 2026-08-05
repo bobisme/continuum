@@ -305,7 +305,7 @@ Once the trust loop is closed, Continuum should search beyond known implementati
 
 ## 2. Constitutional invariants
 
-### INV-001 — Protected intent
+### INV-001 — Protected intent (delivered: bn-34je — crates/continuum-intent/tests/inv001_protected_intent_evidence.rs: the six-verb map anti-drift-checked against AGENTS.md's INV-001/INV-011 sentence and closed live into `PolicyTable::verdict` under the corpus fixture's own policy on every acceptance path, never `allow`; identity evidence that a protected-field change and a governance edit both mint a new contract (ID2/ID3) while ID2 metadata never does; the G0-DX-02 falsification campaign and PR-12 exit evidence cited as the classifier-grain proof via freshness tripwires; the privileged wire trio, T3 admission, docs/49's proposal-only row, and D1's first-intent-wins convergence pinned at the daemon boundary; honest absences pinned to go red — the daemon propose/diff classification lane (carrying bn-1604's rationale-recheck trigger), P7 accept-time recomputation (unexploitable: no wire path mints a proposal), the explicit dependent-evidence invalidation producer (the element is discharged today by content identity), and INV-011's repair reclassification awaiting continuum-repair)
 
 Ordinary tasks may not mutate intent. Intent changes require a new Intent Contract, semantic diff, policy decision, and invalidation of dependent evidence.
 
