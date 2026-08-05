@@ -6712,7 +6712,7 @@
         "line": 241,
         "path": "docs/08_RISK_REGISTER.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Rust compiler churn"
     },
     {

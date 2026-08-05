@@ -60,9 +60,12 @@ covenant:
 
 # Enforce the docs/12 executable policy obligations (GOV §1 code/semantic
 # policy, GOV §2 ADR process, GOV §3 claim governance), the docs/09 T12
-# dependency vet/advisory-scanning posture, and the T12 six-control binding
-# over all of the above. Each checker runs its self-test first — every
-# violating fixture must be caught — so none of the six can pass vacuously.
+# dependency vet/advisory-scanning posture, the T12 six-control binding
+# over all of the above, and the docs/08 R16 five-control binding (Rust
+# compiler churn: pinned toolchain, narrow compiler-internal usage,
+# extraction adapters isolated, compatibility CI, prefer stable metadata
+# over rustc internals). Each checker runs its self-test first — every
+# violating fixture must be caught — so none of these can pass vacuously.
 # Evidence lands in tools/governance/evidence/.
 #
 # `check_revision_delta.py` is the two-revision half of GOV-1-08/09: the other
@@ -87,6 +90,8 @@ governance:
     python3 tools/governance/check_dependency_audit.py
     python3 tools/governance/check_t12_evidence.py --self-test
     python3 tools/governance/check_t12_evidence.py
+    python3 tools/governance/check_r16_evidence.py --self-test
+    python3 tools/governance/check_r16_evidence.py
     python3 tools/governance/check_revision_delta.py --self-test
     python3 tools/governance/check_revision_delta.py
 

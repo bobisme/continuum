@@ -238,7 +238,7 @@ Controls:
 - gradually add Alethe/LRAT/theory checkers;
 - never mislabel.
 
-## R16 — Rust compiler churn
+## R16 — Rust compiler churn (delivered: bn-3j4g — five controls bound in `tools/governance/evidence/r16.json`)
 
 **Probability:** high  
 **Impact:** moderate/severe

@@ -1,0 +1,139 @@
+{
+  "artifact": "continuum.governance.evidence/r16",
+  "authority": "notes/plan/docs/08_RISK_REGISTER.md R16 (Rust compiler churn)",
+  "boundary": "See the module docstring's 'Honesty about limits' section: extraction isolation is a zero-edge count, true today because the PR-28 proof-service client has not landed, not a positive boundary rule that would survive it landing; compatibility CI is read as 'the pinned build is validated pre-merge', not multi-toolchain compatibility testing, consistent with this workspace's one-pinned-toolchain (INV-014) posture.",
+  "controls": {
+    "compatibility CI": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_r16_evidence.py ci-runs-pinned-gate",
+          "enforces": ".github/workflows/check.yml (bn-28ur) runs `just check` under the pinned toolchain (`rustup show`) on every push to main and every PR against main",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "extraction adapters isolated": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_r16_evidence.py extraction-boundary-zero-lean-edges",
+          "enforces": "zero workspace crate declares a Lean-named dependency edge and zero source file spawns lake/lean/elan as a subprocess; continuum-proof-client (plan \u00a720's reserved boundary crate, PR 28/Phase D) is a docs-only scaffold with no dependencies today",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_kernel_covenant.py KCOV-03/KCOV-04/KCOV-07",
+          "enforces": "no-async (kernel-is-synchronous), no-unsafe, no-plugins-or-dynamic-loading lint walls over the trusted checking base (bn-2he)",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_crate_boundaries.py",
+          "enforces": "no forbidden dependency edge exists anywhere in the workspace graph (kernel-is-synchronous, certificate-checker-not-search included); no Lean-specific rule exists because no crate reaches Lean yet to forbid",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "narrow compiler-internal usage": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_r16_evidence.py rustc-internal-usage",
+          "enforces": "zero nightly feature gates, zero rustc_private/rustc_* compiler-internal crate references, zero #[rustc_*] attributes, zero proc_macro:: (compiler ABI) use, zero RUSTC_BOOTSTRAP, zero cargo-features unstable tables, zero proc-macro=true libraries, zero build.rs scripts",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-02",
+          "enforces": "unsafe forbidden workspace-wide with no crate- or source-level relaxation (the adjacent stable-metadata discipline: no compiler-trust escape hatch of any kind, not just the nightly-feature one)",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "pinned toolchain": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-01",
+          "enforces": "rust-toolchain.toml pins an exact major.minor.patch channel; every crate inherits one workspace edition",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_t12_evidence.py 'pinned lockfile'",
+          "enforces": "Cargo.lock present and committed; every non-fmt cargo gate carries --locked",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_t12_evidence.py 'reproducible build metadata'",
+          "enforces": "toolchain pin + --locked gates + overflow-checks=true + INV-014 receipt build identity (KCOV-09) as one composite obligation",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_r16_evidence.py sanitizer-lane-excluded-from-pinned-gate",
+          "enforces": "the one deliberately nightly lane (bn-cho5's ASan/TSan sweep) sits outside `just check`'s dependency chain; its own dated-pin residual (a floating `nightly` toolchain arg, parameterized so a dated pin can be supplied) is recorded there, not re-litigated here",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    },
+    "prefer stable metadata over rustc internals where possible": {
+      "citations": [
+        {
+          "artifact": "tools/governance/check_r16_evidence.py rustc-internal-usage",
+          "enforces": "the same zero count as 'narrow compiler-internal usage' \u2014 the preference is not merely honored, it is exceeded (zero, not minimized)",
+          "status": "pass"
+        }
+      ],
+      "status": "pass"
+    }
+  },
+  "delegates": [
+    "tools/check_crate_boundaries.py",
+    "tools/check_kernel_covenant.py",
+    "tools/governance/check_code_policy.py",
+    "tools/governance/check_t12_evidence.py"
+  ],
+  "determinism": "This file records no timestamp, commit id, or absolute path: it is a function of the repository contents and the delegate checkers' own outputs alone, so an unchanged tree reproduces it byte-for-byte. The only subprocesses run are the delegate checkers listed below, invoked exactly as Justfile invokes them; none makes a network access.",
+  "produced_by": "tools/governance/check_r16_evidence.py",
+  "reproduce": "python3 tools/governance/check_r16_evidence.py --evidence tools/governance/evidence/r16.json",
+  "self_test": {
+    "delegates": {
+      "delegates": {
+        "check_code_policy": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_crate_boundaries": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_kernel_covenant": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_t12_evidence": {
+          "exit_code": 0,
+          "status": "pass"
+        }
+      },
+      "failures": [],
+      "status": "pass"
+    },
+    "direct": {
+      "checks_caught": [
+        "ci-runs-pinned-gate/file-removed",
+        "ci-runs-pinned-gate/no-check-step",
+        "ci-runs-pinned-gate/no-toolchain-select",
+        "extraction-boundary-zero-lean-edges/dependency",
+        "extraction-boundary-zero-lean-edges/subprocess",
+        "rustc-internal-usage/build-script",
+        "rustc-internal-usage/feature-gate",
+        "rustc-internal-usage/proc-macro-abi",
+        "rustc-internal-usage/proc-macro-lib",
+        "sanitizer-lane-excluded-from-pinned-gate/pulled-into-check",
+        "sanitizer-lane-excluded-from-pinned-gate/recipe-removed"
+      ],
+      "failures": [],
+      "status": "pass"
+    },
+    "status": "pass"
+  },
+  "status": "pass"
+}
