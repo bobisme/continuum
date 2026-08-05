@@ -1237,12 +1237,12 @@ fn resume(
     // `task_started` — this operation is `@task_starting` and could report either, and this
     // is the one place the choice matters: a terminal task is not being started, so `ok` is
     // the honest lane. `verification::start` faces the identical "identity resolves to an
-    // already-terminal task" case (bn-3p32's A12) and, absent an equivalent branch, answers
-    // `task_started` instead — ratified as no violation (RFC 0026, "What `task_started` means
-    // when an identity resolves to a task that will not run again"), because
-    // `verification.start`'s response has no third shape between "a task" and "a completed
-    // result" for `cached()` to route a terminal-but-not-completed identity through. F20
-    // records the candidate for giving `verification.start` this same `ok` branch.
+    // already-terminal task" case (bn-3p32's A12) and, as of protocol 3.4, answers it the
+    // same way: its own terminal short-circuit (`daemon::verification::terminal`) mirrors
+    // this one, which is F20 paid (bn-3jrtz) — the asymmetry bn-y9f7i's disposition
+    // recorded ("What `task_started` means when an identity resolves to a task that will
+    // not run again") is closed, and one fact is spelled one way by both operations that
+    // can reach it.
     {
         let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
         if entry.is_terminal() {

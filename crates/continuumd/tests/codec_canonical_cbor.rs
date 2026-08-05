@@ -65,9 +65,9 @@ use continuumd::codec::operations::{decode_arguments_in, encode_payload_in};
 use continuumd::codec::{CodecError, Document, ProtocolValue, read_in, to_opaque_in, write_in};
 use continuumd::daemon::family::Payload;
 use continuumd::protocol::envelope::{
-    ArtifactRef, AssuranceEnvelope, Budget, Cost, EnvelopeDimension, EpochSet, Error, Omission,
-    ProducedDimension, RequestEnvelope, ResultEnvelope, SemanticVerdictValue, UnsupportedDimension,
-    Verdict,
+    ArtifactRef, AssuranceEnvelope, Budget, CertificateRejection, Cost, EnvelopeDimension,
+    EpochSet, Error, Omission, ProducedDimension, RequestEnvelope, ResultEnvelope,
+    SemanticVerdictValue, UnsupportedDimension, Verdict,
 };
 use continuumd::protocol::handshake::{ClientHello, ServerReject, VersionRange};
 use continuumd::protocol::operations::evidence::EvidenceLinkRequest;
@@ -276,6 +276,54 @@ fn epochs() -> EpochSet {
         proof: Nullable::Null,
         corpus: Nullable::Null,
         engine: Nullable::Value(epoch("engine-reference-1")),
+    }
+}
+
+/// A `CertificateRejected` result carrying the declared `Error.data` shape — the F19
+/// exchange (RFC 0026, protocol 3.4, bn-3jrtz). Generic over the encoding because `data`
+/// is an `Opaque`: bytes of the encoding the message travels in, so "the same message" in
+/// the two encodings differs in exactly that field.
+fn certificate_rejected_result<D: Document>() -> ResultEnvelope {
+    ResultEnvelope {
+        request_id: RequestId::new("req_3").expect("a well-formed request id"),
+        status: ResultStatus::Error,
+        verdict: Nullable::Null,
+        error: Optional::Present(Error {
+            code: ErrorCode::CertificateRejected,
+            detail: "continuum-kernel-core rejected this certificate: the verdict is that \
+                     kernel's own, over the bytes the daemon holds"
+                .to_owned(),
+            data: Optional::Present(
+                to_opaque_in::<D, _>(&CertificateRejection {
+                    checker: "continuum-kernel-core".to_owned(),
+                    reason: "trailing-bytes".to_owned(),
+                    field: Optional::Absent,
+                })
+                .expect("the declared shape encodes"),
+            ),
+            recovery: Vec::new(),
+            continuation: Optional::Absent,
+            non_resumable_reason: Optional::Absent,
+            retryable: false,
+        }),
+        assurance: Optional::Absent,
+        artifacts: Vec::new(),
+        task: Optional::Absent,
+        continuation: Optional::Absent,
+        omissions: Vec::new(),
+        warnings: Vec::new(),
+        cost: Cost {
+            states: Optional::Absent,
+            ..unmeasured()
+        },
+        epochs: EpochSet {
+            protocol: ProtocolVersion::new(3, 4),
+            ..epochs()
+        },
+        next_operations: Vec::new(),
+        next_page_token: Optional::Absent,
+        payload: Nullable::Null,
+        audit: Optional::Absent,
     }
 }
 
@@ -526,8 +574,8 @@ fn every_declared_struct() -> Vec<(String, &'static StructSpec)> {
 /// The golden vectors, each computed here and pinned in [`GOLDEN`] as literal bytes.
 ///
 /// Two groups. The **exchange** vectors are hand-built messages: the handshake both ways,
-/// two request envelopes, and two result envelopes, which are the frames a conforming
-/// daemon actually exchanges. The **body** vectors are one operation body per IDL
+/// two request envelopes, and three result envelopes (the third is the F19 exchange, new
+/// at 3.4 — bn-3jrtz), which are the frames a conforming daemon actually exchanges. The **body** vectors are one operation body per IDL
 /// namespace, synthesized from the declaration, which is what makes the set cover the
 /// registry's breadth rather than one family's depth.
 fn golden() -> Vec<(String, Vec<u8>, Vec<u8>)> {
@@ -545,6 +593,11 @@ fn golden() -> Vec<(String, Vec<u8>, Vec<u8>)> {
             &link_envelope::<Cbor>(),
         ),
         pair("denial.result", &denial(), &denial()),
+        pair(
+            "certificate.rejected.result",
+            &certificate_rejected_result::<Json>(),
+            &certificate_rejected_result::<Cbor>(),
+        ),
         pair("task.result", &task_result(), &task_result()),
     ];
     for (namespace, spec) in first_operation_per_namespace() {
@@ -621,6 +674,11 @@ const GOLDEN: &[(&str, &str, &str)] = &[
         "denial.result",
         r#"{"artifacts":[],"audit":"audit-1","cost":{},"epochs":{"corpus":null,"engine":"engine-reference-1","evidence":null,"intent":null,"proof":null,"protocol":"3.3","semantic":"semantic-1"},"error":{"code":"CapabilityDenied","detail":"the presented capability does not admit this operation","recovery":[],"retryable":false},"next_operations":[],"omissions":[],"payload":null,"request_id":"req_1","status":"error","verdict":null,"warnings":[]}"#,
         "ac69617274696661637473806561756469746761756469742d3164636f7374a06665706f636873a766636f72707573f666656e67696e6572656e67696e652d7265666572656e63652d316865766964656e6365f666696e74656e74f66570726f6f66f66870726f746f636f6c63332e336873656d616e7469636a73656d616e7469632d31656572726f72a464636f6465704361706162696c69747944656e6965646664657461696c78367468652070726573656e746564206361706162696c69747920646f6573206e6f742061646d69742074686973206f7065726174696f6e687265636f766572798069726574727961626c65f46f6e6578745f6f7065726174696f6e7380696f6d697373696f6e7380677061796c6f6164f66a726571756573745f6964657265715f3166737461747573656572726f726776657264696374f6687761726e696e677380",
+    ),
+    (
+        "certificate.rejected.result",
+        r#"{"artifacts":[],"cost":{},"epochs":{"corpus":null,"engine":"engine-reference-1","evidence":null,"intent":null,"proof":null,"protocol":"3.4","semantic":"semantic-1"},"error":{"code":"CertificateRejected","data":{"checker":"continuum-kernel-core","reason":"trailing-bytes"},"detail":"continuum-kernel-core rejected this certificate: the verdict is that kernel's own, over the bytes the daemon holds","recovery":[],"retryable":false},"next_operations":[],"omissions":[],"payload":null,"request_id":"req_3","status":"error","verdict":null,"warnings":[]}"#,
+        "ab696172746966616374738064636f7374a06665706f636873a766636f72707573f666656e67696e6572656e67696e652d7265666572656e63652d316865766964656e6365f666696e74656e74f66570726f6f66f66870726f746f636f6c63332e346873656d616e7469636a73656d616e7469632d31656572726f72a564636f646573436572746966696361746552656a65637465646464617461a267636865636b657275636f6e74696e75756d2d6b65726e656c2d636f726566726561736f6e6e747261696c696e672d62797465736664657461696c7872636f6e74696e75756d2d6b65726e656c2d636f72652072656a656374656420746869732063657274696669636174653a2074686520766572646963742069732074686174206b65726e656c2773206f776e2c206f7665722074686520627974657320746865206461656d6f6e20686f6c6473687265636f766572798069726574727961626c65f46f6e6578745f6f7065726174696f6e7380696f6d697373696f6e7380677061796c6f6164f66a726571756573745f6964657265715f3366737461747573656572726f726776657264696374f6687761726e696e677380",
     ),
     (
         "task.result",

@@ -567,7 +567,9 @@ fn the_denial_json_document_is_pinned_byte_for_byte() {
         concat!(
             r#"{"advice":[],"artifacts":[],"cost":null,"depth":"refused","#,
             r#""edge":null,"edge_bytes":null,"#,
-            r#""error":{"code":"CapabilityDenied","continuation":null,"#,
+            // `data` joined the refusal at protocol 3.4 (RFC 0026 F19, bn-3jrtz):
+            // null for every code that declares no `Error.data` shape.
+            r#""error":{"code":"CapabilityDenied","continuation":null,"data":null,"#,
             r#""detail":"the presented capability does not admit this operation","#,
             r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
             r#""evidence":"ev_neverappended01","inline":false,"next_operations":[],"#,

@@ -136,12 +136,14 @@ use continuum_value::assurance::ValidationBasis;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::ReferenceStore;
 
-use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::family::{
+    Arguments, Call, Effect, ErrorData, Fault, OperationFamily, Payload, ScopeClaim,
+};
 use super::state::{DaemonState, EvidenceEdge, EvidenceNode, StatusWrite};
 use super::{Services, identity};
 use crate::protocol::envelope::{
-    AssuranceEnvelope, EnvelopeDimension, Omission, ProducedDimension, Redacted,
-    SemanticVerdictValue, UnsupportedDimension, Verdict,
+    AssuranceEnvelope, CertificateRejection, EnvelopeDimension, Omission, ProducedDimension,
+    Redacted, SemanticVerdictValue, UnsupportedDimension, Verdict,
 };
 use crate::protocol::operations::evidence::{
     EvidenceGetRequest, EvidenceGetResponse, EvidenceLinkRequest, EvidenceLinkResponse,
@@ -1002,26 +1004,50 @@ fn certificate_check(bytes: &[u8]) -> Result<Checked, Fault> {
             continuum_kernel_core::Verdict::Verified(_) => {
                 checked(ValidationBasis::CheckedCertificate)
             }
-            continuum_kernel_core::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_core::Verdict::Rejected(rejection) => Err(certificate_rejected(
+                family,
+                rejection.reason(),
+                rejection
+                    .field()
+                    .map(continuum_kernel_core::verdict::Field::as_str),
+            )),
             continuum_kernel_core::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
         },
         KernelVerdict::Sat(verdict) => match verdict {
             continuum_kernel_sat::Verdict::Verified(_) => {
                 checked(ValidationBasis::CheckedCertificate)
             }
-            continuum_kernel_sat::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_sat::Verdict::Rejected(rejection) => Err(certificate_rejected(
+                family,
+                rejection.reason(),
+                rejection
+                    .field()
+                    .map(continuum_kernel_sat::verdict::Field::as_str),
+            )),
             continuum_kernel_sat::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
         },
         KernelVerdict::Smt(verdict) => match verdict {
             continuum_kernel_smt::Verdict::Verified(claim) => checked(smt_basis(claim)),
-            continuum_kernel_smt::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_smt::Verdict::Rejected(rejection) => Err(certificate_rejected(
+                family,
+                rejection.reason(),
+                rejection
+                    .field()
+                    .map(continuum_kernel_smt::verdict::Field::as_str),
+            )),
             continuum_kernel_smt::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
         },
         KernelVerdict::Temporal(verdict) => match verdict {
             continuum_kernel_temporal::Verdict::Verified(_) => {
                 checked(ValidationBasis::CheckedCertificate)
             }
-            continuum_kernel_temporal::Verdict::Rejected(_) => Err(certificate_rejected(family)),
+            continuum_kernel_temporal::Verdict::Rejected(rejection) => Err(certificate_rejected(
+                family,
+                rejection.reason(),
+                rejection
+                    .field()
+                    .map(continuum_kernel_temporal::verdict::Field::as_str),
+            )),
             continuum_kernel_temporal::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
         },
     }
@@ -1052,15 +1078,22 @@ fn smt_basis(claim: &continuum_kernel_smt::verdict::CheckedClaim) -> ValidationB
 /// The `CertificateRejected` a routed kernel's own `Rejected` arm produces.
 ///
 /// One detail per family, so the answer names the trusted checker that spoke rather than
-/// leaving the caller to infer it. The kernel's *reason within* `Rejected` — which field ran
-/// out of bytes, at which offset, against which declared count — does not travel: `detail` is
-/// a non-interpolated `&'static str` by `rule envelope.no_prose`, and transcribing four
-/// kernels' `Rejection` enums into static strings here would put a second authority over
-/// vocabularies those crates own. What the wire carries is which of the four outcomes
-/// occurred and which checker reached it; recovering the reason is a matter of running that
-/// kernel over the same bytes, which is a thing any holder of the artifact can do and which
-/// this daemon's own tests do.
-const fn certificate_rejected(family: CertificateFamily) -> Fault {
+/// leaving the caller to infer it. As of protocol 3.4 the kernel's *reason within*
+/// `Rejected` travels too, on the typed channel built for exactly this: `Error.data`
+/// carries the declared `CertificateRejection` shape (RFC 0026 F19, bn-3jrtz), whose
+/// `reason` and `field` are the owning kernel's own stable diagnostic tokens
+/// (`Rejection::reason()`, `Field::as_str()`), relayed verbatim. `detail` stays a
+/// non-interpolated `&'static str` by `rule envelope.no_prose`, and no vocabulary is
+/// transcribed here: the tokens are produced by the crate that owns them, which is what
+/// keeps this daemon from becoming the second authority bn-dtg61 declined to create. The
+/// rejection's numeric specifics — offsets, counts, indices — still do not travel;
+/// recovering them is a matter of running that kernel over the same bytes, which any
+/// holder of the artifact can do and this daemon's own tests do.
+fn certificate_rejected(
+    family: CertificateFamily,
+    reason: &'static str,
+    field: Option<&'static str>,
+) -> Fault {
     Fault::new(
         ErrorCode::CertificateRejected,
         match family {
@@ -1082,6 +1115,14 @@ const fn certificate_rejected(family: CertificateFamily) -> Fault {
             }
         },
     )
+    .with_data(ErrorData::CertificateRejection(CertificateRejection {
+        checker: family.checker_crate().to_owned(),
+        reason: reason.to_owned(),
+        field: match field {
+            Some(token) => Optional::Present(token.to_owned()),
+            None => Optional::Absent,
+        },
+    }))
 }
 
 /// The `EpochUnsupported` a routing failure produces, one detail per [`RoutingFault`].

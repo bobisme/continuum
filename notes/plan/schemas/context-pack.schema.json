@@ -143,6 +143,23 @@
         "original_class"
       ],
       "type": "object"
+    },
+    "selection_kind": {
+      "$comment": "RFC 0028 F13/correction 18 (bn-3jrtz, the protocol-3.4 bundle): `omissions[].kind` was an unconstrained string while correction 16 had already settled the reading — an omission's `kind` names the same closed vocabulary `selected[].kind` does, because the manifest partitions the candidates for selection and a partition keyed by free prose cannot be checked for exactness. The F5/correction-2 precedent for `expansions[].relation` applies verbatim: the schema is corrected to the normative vocabulary, and an unrecognized member is rejected, never read as absent. crates/continuum-context::selection and ::omission already implement exactly this set.",
+      "description": "Closed selection-kind vocabulary (RFC 0028). `selected[].kind` and `omissions[].kind` both draw from it — one vocabulary, one definition, so the manifest's counting equation partitions over the same tokens the selection uses.",
+      "enum": [
+        "event",
+        "state_delta",
+        "source",
+        "model",
+        "proof",
+        "assumption",
+        "counterfactual",
+        "obligation_flow",
+        "order_constraint",
+        "repair_surface",
+        "unknown"
+      ]
     }
   },
   "additionalProperties": false,
@@ -422,8 +439,8 @@
             "type": "object"
           },
           "kind": {
-            "description": "Kind of the omitted candidates. Reading: the closed selected[].kind SelectionKind vocabulary (RFC 0028 correction 16) - the manifest partitions the candidates for selection, whose kind is exactly that vocabulary. Still typed here as an unconstrained string pending the schema sweep (RFC 0028 F13).",
-            "type": "string"
+            "$ref": "#/$defs/selection_kind",
+            "description": "Kind of the omitted candidates: the closed selected[].kind vocabulary (RFC 0028 correction 16; closed at this key by F13/correction 18, bn-3jrtz — a free-string kind is refused, never read as a new category)."
           },
           "reason": {
             "description": "Closed omission-reason set (the IDL's OmissionReason). `slice-irrelevant` is reserved for items provably outside the property-directed slice; an item dropped because the compiler could not decide is `heuristic-cutoff`.",
@@ -512,19 +529,7 @@
             "type": "string"
           },
           "kind": {
-            "enum": [
-              "event",
-              "state_delta",
-              "source",
-              "model",
-              "proof",
-              "assumption",
-              "counterfactual",
-              "obligation_flow",
-              "order_constraint",
-              "repair_surface",
-              "unknown"
-            ]
+            "$ref": "#/$defs/selection_kind"
           },
           "summary": {
             "type": "string"

@@ -33,11 +33,12 @@
 use crate::codec::cbor::Cbor;
 use crate::codec::json::Json;
 use crate::codec::{CodecError, Document, from_opaque_in, to_opaque_in};
-use crate::daemon::family::{Arguments, Payload};
+use crate::daemon::family::{Arguments, ErrorData, Payload};
 use crate::protocol::operations::{
     context, evidence, intent, observe, task, verification, workspace,
 };
 use crate::protocol::scalar::Opaque;
+use crate::protocol::vocabulary::ErrorCode;
 
 /// Decode an envelope's `arguments` into the typed request body its operation declares.
 ///
@@ -305,4 +306,66 @@ pub fn encode_cbor_payload(payload: &Payload) -> Result<Option<Opaque>, CodecErr
 /// As [`decode_payload_in`].
 pub fn decode_cbor_payload(operation: &str, payload: &Opaque) -> Result<Payload, CodecError> {
     decode_payload_in::<Cbor>(operation, payload)
+}
+
+/// Encode a typed `Error.data` value into the `Opaque` the error carries.
+///
+/// The `Error.data` half of the same seam the payload tables above are: the daemon layer
+/// carries the typed [`ErrorData`] beside the envelope and this is where it becomes bytes
+/// of the negotiated encoding. [`ErrorData::None`] returns [`None`], which the caller
+/// leaves as the absent field `rule encoding.opaque_payloads` requires of every code with
+/// no declared shape (RFC 0026 F19, protocol 3.4).
+///
+/// # Errors
+///
+/// [`CodecError`] when the declared struct cannot be encoded.
+pub fn encode_error_data_in<D: Document>(data: &ErrorData) -> Result<Option<Opaque>, CodecError> {
+    Ok(Some(match data {
+        ErrorData::None => return Ok(None),
+        ErrorData::CertificateRejection(body) => to_opaque_in::<D, _>(body)?,
+    }))
+}
+
+/// Decode an error's `data` into the typed value its `code` declares.
+///
+/// The resolution is a function of the message alone — `Error.code` is `required` in the
+/// same object — exactly as the envelope's payloads resolve through `operation`
+/// (`rule encoding.opaque_payloads`). A code that declares no shape answers
+/// [`CodecError::UnknownOperation`]'s sibling refusal here: there is nothing declared for
+/// the bytes to validate against, and inventing a reading would be the interpretation the
+/// rule forbids.
+///
+/// # Errors
+///
+/// [`CodecError::UndeclaredErrorData`] when `code` declares no `Error.data` shape, and
+/// any decode failure of the declared struct otherwise.
+pub fn decode_error_data_in<D: Document>(
+    code: ErrorCode,
+    data: &Opaque,
+) -> Result<ErrorData, CodecError> {
+    match code {
+        ErrorCode::CertificateRejected => Ok(ErrorData::CertificateRejection(from_opaque_in::<
+            D,
+            crate::protocol::envelope::CertificateRejection,
+        >(data)?)),
+        _ => Err(CodecError::UndeclaredErrorData),
+    }
+}
+
+/// Encode a typed `Error.data` value, in `canonical_json`.
+///
+/// # Errors
+///
+/// As [`encode_error_data_in`].
+pub fn encode_error_data(data: &ErrorData) -> Result<Option<Opaque>, CodecError> {
+    encode_error_data_in::<Json>(data)
+}
+
+/// Decode an error's `data`, in `canonical_json`.
+///
+/// # Errors
+///
+/// As [`decode_error_data_in`].
+pub fn decode_error_data(code: ErrorCode, data: &Opaque) -> Result<ErrorData, CodecError> {
+    decode_error_data_in::<Json>(code, data)
 }

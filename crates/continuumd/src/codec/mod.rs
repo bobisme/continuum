@@ -632,6 +632,10 @@ pub enum CodecError {
     },
     /// The envelope names an operation this daemon has no request shape for.
     UnknownOperation,
+    /// An error's `code` declares no `Error.data` shape, so there is nothing declared
+    /// for the carried bytes to validate against (`rule encoding.opaque_payloads`;
+    /// RFC 0026 F19).
+    UndeclaredErrorData,
 }
 
 impl CodecError {
@@ -708,6 +712,9 @@ impl core::fmt::Display for CodecError {
             }
             Self::UnknownOperation => {
                 f.write_str("this daemon declares no request shape for that operation")
+            }
+            Self::UndeclaredErrorData => {
+                f.write_str("this error code declares no `Error.data` shape")
             }
         }
     }

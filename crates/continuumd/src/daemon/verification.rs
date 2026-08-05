@@ -932,29 +932,37 @@ fn start(
         &budget,
     )?;
 
-    // The cached-result lane. A completed task under this identity is the same campaign, and
-    // re-running it could only produce the same answer more slowly.
+    // The terminal short-circuit, ahead of the cached/started split (RFC 0026 F20, paid
+    // at protocol 3.4 by bn-3jrtz). `task.resume` answers "this identity is already
+    // terminal" on the task-observing lane at `status = ok`, and until 3.4 this operation
+    // answered the identical fact `task_started` — one fact, spelled two ways by the two
+    // operations that can reach it (bn-3p32's A12; bn-y9f7i's disposition, which ratified
+    // the old lane as no violation and raised F20 for exactly this branch). A terminal
+    // identity is now one of two `ok` answers:
     if let Some(entry) = state.tasks().get(&handle) {
-        if entry.status == TaskStatus::Completed {
-            let (payload, verdict, omissions) = cached(entry)?;
-            // The cached lane answers with a *result*, not a task, so its status is `ok`;
-            // the envelope still names the task the result is about, which is the second
-            // clause of the `task` presence rule.
-            let mut effect = Effect::new(payload, verdict.0)
-                .observing(entry.handle.clone())
-                .with_artifacts(published(entry));
-            effect.assurance = verdict.1;
-            effect.omissions = omissions;
-            return Ok(effect);
+        if entry.is_terminal() {
+            // A completed task under this identity is the same campaign, and re-running
+            // it could only produce the same answer more slowly: the cached-result lane,
+            // `ok` with `result` present. The envelope still names the task the result
+            // is about, which is the second clause of the `task` presence rule.
+            if entry.status == TaskStatus::Completed {
+                let (payload, verdict, omissions) = cached(entry)?;
+                let mut effect = Effect::new(payload, verdict.0)
+                    .observing(entry.handle.clone())
+                    .with_artifacts(published(entry));
+                effect.assurance = verdict.1;
+                effect.omissions = omissions;
+                return Ok(effect);
+            }
+            // A `Cancelled` or `Failed` task produced no output for the result branch to
+            // reuse (RFC 0030 reuse classes), and it is not being started either — so the
+            // answer mirrors `task.resume`'s terminal short-circuit: `ok` on the
+            // task-observing lane, `task` present, `result` absent. Nothing runs, nothing
+            // is published, and `task.status` remains the authoritative reading of what
+            // this task will (never) do next.
+            return Ok(terminal(entry));
         }
-        // Every other status this identity can resolve to — including `Failed` and
-        // `Cancelled`, neither of which will run again — takes the `started()` lane below.
-        // That is not a claim that this call started anything: see `started()`'s doc comment
-        // and RFC 0026's "What `task_started` means when an identity resolves to a task that
-        // will not run again" (bn-3p32's A12, ratified — `task_started` means "the answer is
-        // task-shaped, not result-shaped", never "new work began at this call"). F20 records
-        // the candidate for a future lane that would answer a terminal identity the way
-        // `task.resume`'s own terminal short-circuit already does.
+        // A live identity — `Created`, `Running`, or `Suspended` — takes the task lane.
         return Ok(started(entry));
     }
 
@@ -992,26 +1000,27 @@ fn start(
     Ok(started(entry))
 }
 
-/// The `verification.start` answer that names a task.
+/// The `verification.start` answer that names a task that can still run.
 ///
 /// The envelope's status lane is read off the task rather than fixed: a campaign that
 /// parked reports `task_suspended` and names the continuation that resumes it, and every
-/// other outcome reports `task_started`, which is what `ResultStatus::task_started` says
-/// — "a long operation was started; `task` is present". Both lanes are open to this
+/// other *live* outcome reports `task_started`, which is what `ResultStatus::task_started`
+/// says — "a long operation was started; `task` is present". Both lanes are open to this
 /// operation because it is `@task_starting`, and until bn-i4aem item 9 neither was
 /// reachable: `result::success` hard-coded `ok` with both handles absent, so a parked
 /// campaign's continuation was reachable only by a second `task.status` call.
 ///
-/// "Every other outcome" includes a `Failed` or `Cancelled` entry this identity already
-/// resolves to — neither runs again, and this call ran nothing. That is not this lane lying:
-/// `task_started` is this operation's "the answer is task-shaped, not result-shaped" member,
-/// not an event claim that execution began at this call, and `verification.start` has no
-/// third response shape to report "an already-terminal identity" with. RFC 0026's "What
+/// As of protocol 3.4 this lane is reached by a live identity — `Created`, `Running`,
+/// `Suspended` — and by a task this very call created, whatever status it reached before
+/// the answer was written (a fresh campaign that runs to completion inside the call still
+/// answers `task_started`: the work genuinely began here, and the result is the *next*
+/// call's cached answer). What no longer reaches it is an identity that was terminal
+/// before the call: a `Failed` or `Cancelled` identity used to fall through here too,
+/// answered `task_started` for a call that started nothing. RFC 0026's "What
 /// `task_started` means when an identity resolves to a task that will not run again"
-/// ratifies this reading against the RFC's own text (bn-3p32's A12,
-/// `crates/continuumd/tests/dx14_falsification.rs`) and records F20 as the candidate for a
-/// lane that would distinguish the two cases; `task.status` on `entry.handle` is what already
-/// tells a caller, authoritatively, whether this task is going to do anything further.
+/// ratified that as no violation (bn-3p32's A12, bn-y9f7i) while recording the asymmetry
+/// with `task.resume`'s terminal short-circuit as F20, and the 3.4 bundle (bn-3jrtz)
+/// paid it: [`terminal`] answers those identities at `status = ok` on the observing lane.
 fn started(entry: &TaskEntry) -> Effect {
     let mut effect = Effect::new(
         Payload::VerificationStart(VerificationStartResponse {
@@ -1033,6 +1042,39 @@ fn started(entry: &TaskEntry) -> Effect {
         }
         _ => effect.started(entry.handle.clone()),
     }
+}
+
+/// The `verification.start` answer for an identity that resolves to a terminal,
+/// non-`Completed` task: `status = ok` on the task-observing lane, `task` present,
+/// `result` absent (RFC 0026 F20, protocol 3.4, bn-3jrtz).
+///
+/// The mirror of `task.resume`'s terminal short-circuit (`daemon::task::resume`,
+/// bn-10093), which answers the identical "this identity names a task that will never run
+/// again" fact the same way: `ok` because a terminal task is not being started and this
+/// call ran nothing, the observing lane because the answer is *about* the task the
+/// identity resolves to, and no `result` because a `Cancelled` or non-resumable `Failed`
+/// campaign produced no output the result branch is licensed to reuse (RFC 0030 reuse
+/// classes). The payload keeps the response's task-carrying spelling — `task` present,
+/// `result` absent — because the operation's two-optional response is the declared
+/// surface and the envelope's `ok` is what distinguishes this from a start
+/// (`AnswerShape` in `continuum-cli` derives its token from the body, deliberately not
+/// from the status, and both readings stay coherent here).
+///
+/// Omissions and artifacts are [`started`]'s: the record's own manifest plus the ledger's
+/// unenforced-ceiling omissions, and the artifacts the task already published — this
+/// answer names held state, exactly as `started` does for a live suspended identity.
+fn terminal(entry: &TaskEntry) -> Effect {
+    let mut effect = Effect::new(
+        Payload::VerificationStart(VerificationStartResponse {
+            task: Optional::Present(entry.handle.clone()),
+            result: Optional::Absent,
+        }),
+        Nullable::Null,
+    )
+    .observing(entry.handle.clone())
+    .with_artifacts(published(entry));
+    effect.omissions = [entry.omissions(), budget::omissions_of(&entry.ledger)].concat();
+    effect
 }
 
 /// The `verification.start` answer that carries a cached result instead of a task.

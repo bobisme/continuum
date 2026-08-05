@@ -85,7 +85,7 @@ use crate::protocol::envelope::{RequestEnvelope, ResultEnvelope};
 use crate::protocol::handshake::{
     ClientHello, Negotiated, NegotiationError, ServerReject, ServerWelcome,
 };
-use crate::protocol::spec::Nullable;
+use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::vocabulary::Encoding;
 
 /// The largest frame an endpoint will accept.
@@ -506,6 +506,21 @@ impl Server {
             Some(opaque) => Nullable::Value(opaque),
             None => Nullable::Null,
         };
+        // And where the typed `Error.data` becomes the error's `data` — the same seam for
+        // the same reason: an `Opaque` carries bytes of the *negotiated* encoding, so it
+        // is encoded here and not in the encoding-free dispatch (RFC 0026 F19, protocol
+        // 3.4). `ErrorData::None` leaves the field absent, which is what
+        // `rule encoding.opaque_payloads` requires of every code with no declared shape.
+        if let Some(opaque) = codec::operations::encode_error_data_in::<D>(&outcome.data)? {
+            if let Optional::Present(error) = &mut result.error {
+                error.data = Optional::Present(opaque);
+            } else {
+                debug_assert!(
+                    false,
+                    "a typed `Error.data` value can only arrive on a failure outcome"
+                );
+            }
+        }
         Ok(write_in::<D, _>(&result)?)
     }
 }

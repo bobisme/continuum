@@ -31,11 +31,12 @@
 use continuum_certificate::{KernelVerdict, Outcome, continuum_kernel_core};
 use continuum_evidence::claim_status::{ClaimStatus, verify_promotion_history};
 use continuum_value::epoch::ProtocolWindow;
+use continuumd::codec;
 use continuumd::daemon::capability::{ConnectionPolicy, Refusal};
 use continuumd::daemon::evidence::{
     DEFAULT_SERVICE, EDGE_IDENTITY_DOMAIN, EvidenceFamily, lattice_status, wire_status,
 };
-use continuumd::daemon::family::{Arguments, Payload};
+use continuumd::daemon::family::{Arguments, ErrorData, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::observe::ObserveFamily;
 use continuumd::daemon::state::{EvidenceNode, StatusWrite};
@@ -66,6 +67,7 @@ use continuumd::protocol::vocabulary::{
     EvidenceEventKind, EvidenceKind, EvidenceNodeKind, EvidenceStatus, InconclusiveReason,
     OmissionReason, RedactionReason, ResultStatus, SemanticVerdict,
 };
+use continuumd::transport::{Server, decode_result, encode_request};
 
 use continuum_workspace::snapshot::WorkspacePath;
 
@@ -983,14 +985,22 @@ fn a_mutated_certificate_is_rejected_because_the_kernel_rejected_it() {
     let mut fixture = fixture();
     // One trailing byte. The magic is untouched, so routing succeeds and a kernel really
     // does answer — which is what makes this a rejection rather than a routing failure.
+    // The kernel's own answer over the same bytes is captured, not just matched: the F19
+    // assertions below hold the daemon to *relaying* the kernel's reason rather than to
+    // agreeing with this test's guess about it.
     let mut mutated = certificate_bytes();
     mutated.push(0x00);
-    assert!(matches!(
-        continuum_certificate::check_certificate(&mutated),
-        Outcome::Checked(KernelVerdict::Core(
-            continuum_kernel_core::Verdict::Rejected(_)
-        ))
-    ));
+    let (kernel_reason, kernel_field) = match continuum_certificate::check_certificate(&mutated) {
+        Outcome::Checked(KernelVerdict::Core(continuum_kernel_core::Verdict::Rejected(
+            rejection,
+        ))) => (
+            rejection.reason(),
+            rejection
+                .field()
+                .map(continuum_kernel_core::verdict::Field::as_str),
+        ),
+        other => panic!("expected the core kernel's own rejection, got {other:?}"),
+    };
 
     let handle = certificate_node(&mut fixture, "certs/mutated.cert", mutated);
     let rejected = verify(&mut fixture, &handle, "req_mutated", "idem-mutated");
@@ -1008,6 +1018,35 @@ fn a_mutated_certificate_is_rejected_because_the_kernel_rejected_it() {
         error.detail
     );
     assert!(!error.retryable);
+    // The kernel's reason WITHIN `Rejected` travels too, typed (RFC 0026 F19, protocol
+    // 3.4, bn-3jrtz): the outcome carries the declared `CertificateRejection` value, its
+    // tokens byte-equal to the ones the kernel itself spelled over the same bytes. The
+    // envelope's own `data` field still reads absent at this layer for the same reason
+    // `payload` reads null — it is `Opaque`, bytes of the negotiated encoding, and the
+    // transport is where it becomes real (`the_kernels_rejection_reason_reaches_the_client_frame_typed`
+    // holds that half).
+    match &rejected.data {
+        ErrorData::CertificateRejection(data) => {
+            assert_eq!(
+                data.checker, "continuum-kernel-core",
+                "the data names the kernel whose verdict is relayed"
+            );
+            assert_eq!(
+                data.reason, kernel_reason,
+                "the reason token is the kernel's own, relayed verbatim"
+            );
+            assert_eq!(
+                data.field.value().map(String::as_str),
+                kernel_field,
+                "the field token travels exactly when the kernel's rejection names one"
+            );
+        }
+        ErrorData::None => panic!("a CertificateRejected outcome carries its declared data"),
+    }
+    assert!(
+        error.data.is_absent(),
+        "the envelope's `data` is encoded by the transport, not by the dispatch"
+    );
     // Nothing is promoted, and the refusal is not the identity re-derivation's: the node is
     // filed under the identity it derives and its bytes hash to the commitment it names.
     assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Proposed);
@@ -1017,6 +1056,74 @@ fn a_mutated_certificate_is_rejected_because_the_kernel_rejected_it() {
     let green = certificate_node(&mut fixture, "certs/green.cert", certificate_bytes());
     let verified = verify(&mut fixture, &green, "req_green", "idem-green");
     assert_eq!(verified.envelope.status, ResultStatus::Ok);
+}
+
+/// The client-visible half of F19: a real kernel rejection travels to the *frame* a
+/// client decodes, as the declared `Error.data` shape (RFC 0026 F19, protocol 3.4,
+/// bn-3jrtz).
+///
+/// The daemon-layer test above holds the typed value on the outcome; this one holds the
+/// wire. The same mutated certificate goes through [`Server::answer`] — the negotiated
+/// encoding, the same splice that fills `payload` — and the frame that comes back carries
+/// `error.data` present, decodable through the code's declared shape into the kernel's
+/// own tokens. Before this bundle the field was absent daemon-wide, so this test fails
+/// without the shape: that is the anti-vacuity the rider owes.
+#[test]
+fn the_kernels_rejection_reason_reaches_the_client_frame_typed() {
+    let mut fixture = fixture();
+    let mut mutated = certificate_bytes();
+    mutated.push(0x00);
+    let kernel_reason = match continuum_certificate::check_certificate(&mutated) {
+        Outcome::Checked(KernelVerdict::Core(continuum_kernel_core::Verdict::Rejected(
+            rejection,
+        ))) => rejection.reason(),
+        other => panic!("expected the core kernel's own rejection, got {other:?}"),
+    };
+    let handle = certificate_node(&mut fixture, "certs/mutated-frame.cert", mutated);
+
+    // The same daemon, behind the transport a client actually talks to.
+    let mut server = Server::new(fixture.daemon, negotiated());
+    let request = encode_request(
+        &started(
+            envelope("evidence.verify", "agent:reader", "cap_reader", "req_frame"),
+            "idem-frame",
+        ),
+        &Arguments::EvidenceVerify(EvidenceVerifyRequest {
+            evidence: handle,
+            expected_status: Optional::Absent,
+        }),
+    )
+    .expect("the request encodes");
+    let answer = server.answer(&request).expect("the daemon answers");
+    let (result, payload) =
+        decode_result("evidence.verify", &answer).expect("the client decodes the frame");
+
+    assert_eq!(result.status, ResultStatus::Error);
+    assert_eq!(
+        payload,
+        Payload::None,
+        "`payload` is null on `status = error`"
+    );
+    let error = result.error.value().expect("an error result carries one");
+    assert_eq!(error.code, ErrorCode::CertificateRejected);
+    let opaque = error
+        .data
+        .value()
+        .expect("the frame carries the declared `Error.data` (RFC 0026 F19)");
+    // Resolved the way `rule encoding.opaque_payloads` says: by the carrying object's own
+    // `code`, a function of the message alone.
+    match codec::operations::decode_error_data(error.code, opaque)
+        .expect("the data decodes through the shape its code declares")
+    {
+        ErrorData::CertificateRejection(data) => {
+            assert_eq!(data.checker, "continuum-kernel-core");
+            assert_eq!(
+                data.reason, kernel_reason,
+                "the client reads the kernel's own reason token, relayed verbatim"
+            );
+        }
+        ErrorData::None => panic!("`CertificateRejected` declares a data shape"),
+    }
 }
 
 #[test]

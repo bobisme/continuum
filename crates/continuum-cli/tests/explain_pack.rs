@@ -284,7 +284,9 @@ fn the_unsupported_json_document_is_pinned_byte_for_byte() {
         concat!(
             r#"{"advice":[],"artifacts":[],"audience":"agent","budget_bytes":4096,"#,
             r#""context":null,"cost":null,"depth":"unsupported","#,
-            r#""error":{"code":"UnsupportedSemanticFeature","continuation":null,"#,
+            // `data` joined the refusal at protocol 3.4 (RFC 0026 F19, bn-3jrtz):
+            // null for every code that declares no `Error.data` shape.
+            r#""error":{"code":"UnsupportedSemanticFeature","continuation":null,"data":null,"#,
             r#""detail":"no Context Pack compiler is served by this daemon; a pack is "#,
             r#"compiled from the evidence graph, the property automaton and the "#,
             r#"correspondence graph, and none of those is wired here",""#,

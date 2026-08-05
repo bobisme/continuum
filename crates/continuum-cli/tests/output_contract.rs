@@ -876,6 +876,9 @@ fn refusal(code: ErrorCode) -> Refusal {
         recovery: vec![next_operation()],
         continuation: Some(continuation()),
         non_resumable_reason: None,
+        // The fixture's codes declare no `Error.data` shape, so the typed specifics read
+        // `None` and the contract renders `error.data  none` (RFC 0026 F19, bn-3jrtz).
+        data: None,
     }
 }
 

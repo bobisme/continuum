@@ -466,7 +466,9 @@ fn the_unsupported_json_document_is_pinned_byte_for_byte() {
         rendered.text,
         concat!(
             r#"{"advice":[],"artifacts":[],"branch":null,"cost":null,"depth":"unsupported","#,
-            r#""error":{"code":"UnsupportedSemanticFeature","continuation":null,"#,
+            // `data` joined the refusal at protocol 3.4 (RFC 0026 F19, bn-3jrtz):
+            // null for every code that declares no `Error.data` shape.
+            r#""error":{"code":"UnsupportedSemanticFeature","continuation":null,"data":null,"#,
             r#""detail":"the request body is not the shape this operation declares","#,
             r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
             r#""frontier":null,"frontier_bytes":null,"next_operations":[],"#,
@@ -501,6 +503,12 @@ fn the_unsupported_text_rendering_is_pinned_line_for_line() {
             "error.recovery  0\n",
             "error.continuation  none\n",
             "error.non_resumable_reason  none\n",
+            // The F19 data block (protocol 3.4, bn-3jrtz): `none` on every code that
+            // declares no `Error.data` shape, spelled out member for member.
+            "error.data  none\n",
+            "error.data.checker  none\n",
+            "error.data.reason  none\n",
+            "error.data.field  none\n",
             "omissions  0\n",
             "next_operations  0\n",
         )
@@ -528,6 +536,12 @@ fn the_unsupported_repair_review_text_rendering_is_pinned_line_for_line() {
             "error.recovery  0\n",
             "error.continuation  none\n",
             "error.non_resumable_reason  none\n",
+            // The F19 data block (protocol 3.4, bn-3jrtz): `none` on every code that
+            // declares no `Error.data` shape, spelled out member for member.
+            "error.data  none\n",
+            "error.data.checker  none\n",
+            "error.data.reason  none\n",
+            "error.data.field  none\n",
             "omissions  0\n",
             "next_operations  0\n",
         )

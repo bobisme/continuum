@@ -157,6 +157,43 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.6 — the fourth protocol-minor bundle, 3.3 → 3.4 (bn-3jrtz),
+  ///         paying RFC 0026's F19 and F20 together under the
+  ///         deferred-and-bundled discipline. F19: `Error.data` gains
+  ///         its first declared shape — `CertificateRejection`
+  ///         (`@since("3.4")`), the shape of `data` on a
+  ///         `CertificateRejected` error — so the kernel's reason
+  ///         *within* `Rejected` travels: `checker` names the trusted
+  ///         checking-base crate, and `reason`/`field` are that
+  ///         kernel's own stable diagnostic tokens, relayed verbatim
+  ///         (the vocabulary stays the kernel's; a wire enum over it
+  ///         would be the second authority bn-dtg61 declined).
+  ///         `rule encoding.opaque_payloads`'s `Error.data` clause is
+  ///         rewritten from "no struct or schema is declared for any
+  ///         code" to the by-`code` resolution with this one shape
+  ///         declared. Compatible under `rule
+  ///         versioning.compatible_change`: `data` itself has been a
+  ///         defined `optional` field since 3.0, and what 3.4 adds is
+  ///         the declaration of its shape for one code — a new struct
+  ///         declaration, which a pre-3.4 reader handles exactly as the
+  ///         pre-3.4 text already obliged it to (an `Opaque` whose
+  ///         shape its version does not declare, carried verbatim and
+  ///         never guessed at). F20:
+  ///         `verification.start` gains `task.resume`'s terminal
+  ///         short-circuit — an identity resolving to a terminal,
+  ///         non-`Completed` task answers `status = ok` on the
+  ///         task-observing lane with `task` present and `result`
+  ///         absent. No field, member, code, or operation moves with
+  ///         F20; what moves is which of the operation's already-
+  ///         declared answer shapes one scenario lands on, a lane
+  ///         choice correction 45 types as "a fact about what the
+  ///         operation did" and which a client is already required to
+  ///         handle both spellings of ("a client MUST handle both
+  ///         shapes") — the same nature of change as 3.2's item 9,
+  ///         which made the `task_started`/`task_suspended` lanes
+  ///         reachable at all. The registry is untouched: 73
+  ///         operations, every count table unchanged; the named-struct
+  ///         count is 46.
   ///   1.5 — the handshake bootstrap-encoding rule (bn-1h158), closing
   ///         the gap bn-1mhcr's canonical_cbor delivery found and
   ///         declined to paper over: `ClientHello` is the frame that
@@ -267,8 +304,29 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.5";
+  idl_version = "1.6";
   /// The protocol version this document defines.
+  ///
+  /// 3.4 is the single minor bump for IDL 1.6, taken once at the end of
+  /// the bn-3jrtz bundle and covering both of its riders. F19 is an
+  /// ordinary compatible addition: a new `@since("3.4")` struct
+  /// declaring the shape of `Error.data` — a field defined since 3.0 —
+  /// for one code. A pre-3.4 reader receiving it does what the pre-3.4
+  /// text already obliged it to do with any `data` whose shape its
+  /// version does not declare: carry the canonical value verbatim and
+  /// never guess at it. F20 is the case worth naming,
+  /// as the relaxation was at 3.2: it moves no declaration, but it
+  /// flips which of `verification.start`'s two declared answer shapes
+  /// an already-reachable scenario lands on (terminal non-`Completed`
+  /// identity: `task_started` → `ok` on the observing lane). That is a
+  /// wire-visible behavior change and is why F20 waited for a bump
+  /// rather than landing silently (bn-y9f7i); it is admissible at a
+  /// *minor* because both shapes were declared all along, "a client
+  /// MUST handle both shapes" has been normative since 3.0, and the
+  /// status lane is a statement about what the operation did, not a
+  /// field a version defines (correction 45). The 3.2 precedent is
+  /// exact: bn-i4aem's item 9 flipped a parked campaign's answer from
+  /// `ok` to `task_suspended` at a minor for the same reason.
   ///
   /// IDL 1.5 (`rule handshake.bootstrap_encoding`, bn-1h158) does not
   /// move this value. It states a rule about which encoding a frame
@@ -306,7 +364,7 @@ protocol continuum.native {
   /// rather than to assume is the F13 discipline — the row exists in
   /// plan §10.2, in RFC 0027's authority table, and here, or it exists
   /// nowhere (`rule conformance.registry_agreement`).
-  version = "3.3";
+  version = "3.4";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -497,10 +555,15 @@ rule encoding.opaque_payloads {
       canonical form of the enclosing message applies to it because it
       is itself canonical.
 
-  `Error.data` is neither: its shape is "determined by `code`" and no
-  struct or schema is declared for any code, so a daemon that has no
-  typed specifics to report MUST leave it absent rather than inventing a
-  shape. See open item 3.
+  `Error.data` is neither of the two resolutions above; its shape is
+  "determined by `code`", and the carrying object's own required `code`
+  field is what resolves it — the same function-of-the-message-alone
+  property the envelope payloads have. As of 3.4 exactly one code
+  declares a shape: `data` on a `CertificateRejected` error is the
+  `CertificateRejection` struct, encoded as a canonical value of the
+  negotiated encoding like any other declared struct (F19). For every
+  code that declares no shape a daemon MUST leave `data` absent rather
+  than inventing one. See open item 3.
   """
 }
 
@@ -1222,7 +1285,10 @@ struct Error {
   /// Stable, non-interpolated explanation of the code in context.
   detail: String required;
   /// Typed, machine-readable specifics of this occurrence; the shape is
-  /// determined by `code`.
+  /// determined by `code`. `CertificateRejected` is the first code that
+  /// declares one — `CertificateRejection`, as of 3.4 (F19) — and for
+  /// every other code no shape is declared and the field stays absent
+  /// (`rule encoding.opaque_payloads`).
   data: Opaque optional;
   /// Allowed operations from this state.
   recovery: list<NextOperation> required;
@@ -1235,6 +1301,41 @@ struct Error {
   /// Whether an identical retry can succeed without any change by the
   /// caller.
   retryable: Bool required;
+}
+
+/// The declared `Error.data` shape for `code = CertificateRejected` —
+/// the kernel's reason *within* `Rejected`, carried to the wire (RFC
+/// 0026 F19, bn-dtg61's verdict-fidelity audit, bn-1dj05).
+///
+/// Every vocabulary here has exactly one owner and none of them is this
+/// protocol. `checker` names the trusted checking-base crate whose
+/// verdict this error relays — the same identity `detail` already
+/// spells and `proof_status` reports. `reason` and `field` are that
+/// kernel's *own* stable diagnostic tokens (`Rejection::reason()` and
+/// `Field::as_str()` in the owning `continuum-kernel-*` crate),
+/// relayed verbatim and never interpreted: the daemon does not close,
+/// enumerate, or re-spell them, because transcribing four kernels'
+/// rejection vocabularies into a wire enum would put a second authority
+/// over vocabularies those crates own — the exact move bn-dtg61
+/// declined at source. A reader switches on `checker` first; a token it
+/// does not recognize is surfaced verbatim (INV-016), never guessed at.
+///
+/// The rejection's numeric specifics (offsets, counts, indices) do not
+/// travel: they are recoverable by re-running the named kernel over the
+/// same bytes, which any holder of the artifact can do — the recovery
+/// bn-dtg61's audit already names.
+@since("3.4")
+struct CertificateRejection {
+  /// The kernel crate whose `Rejected` verdict this error relays,
+  /// e.g. `continuum-kernel-core`.
+  checker: String required;
+  /// That kernel's own stable reason token, e.g. `trailing-bytes`,
+  /// relayed verbatim.
+  reason: String required;
+  /// That kernel's own token for the wire position the rejection names,
+  /// e.g. `state-vector`, when the rejection names one. Absent when it
+  /// does not; never invented.
+  field: String optional;
 }
 
 /// The request envelope of every operation (RFC 0026).
@@ -2325,6 +2426,19 @@ operation intent.lock {
 /// Start a verification campaign against a target under an intent and a
 /// budget. Returns a task handle, or a cached result when one exists for
 /// the same snapshot, intent, target, and epochs.
+///
+/// As of 3.4 (F20), an identity that *already* resolves to a terminal,
+/// non-`Completed` task — `Cancelled`, or a non-resumable `Failed` — is
+/// answered on the task-observing lane: `status = ok` with the response
+/// carrying `task` and not `result`, mirroring `task.resume`'s own
+/// terminal short-circuit, because a terminal task is not being started
+/// and a cancelled or failed campaign produced no output for the
+/// result branch to reuse (RFC 0030 reuse classes; RFC 0026 "What
+/// `task_started` means when an identity resolves to a task that will
+/// not run again"). `task_started` therefore states that this call's
+/// answer names a task this call itself started — whatever status it
+/// reached before the answer was written — or one that can still run;
+/// an identity that was terminal before the call never takes that lane.
 @mutation @task_starting
 operation verification.start {
   authority execute;

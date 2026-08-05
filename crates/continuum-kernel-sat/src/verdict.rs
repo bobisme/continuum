@@ -588,6 +588,62 @@ pub enum Rejection {
     EmptyClauseNotDerived,
 }
 
+impl Rejection {
+    /// The stable lower-case token naming this rejection reason.
+    ///
+    /// This crate owns its rejection vocabulary, so this crate spells it: a consumer
+    /// that relays a rejection carries this token verbatim rather than transcribing
+    /// the enum into a vocabulary of its own (the second-authority mistake bn-dtg61
+    /// declined; RFC 0026 F19, paid at protocol 3.4 by bn-3jrtz). One token per
+    /// variant, in the same diagnostic register as [`Field::as_str`]; the variant's
+    /// numeric payload does not travel with it — those specifics are recoverable by
+    /// re-running this kernel over the same bytes, which any holder of the artifact
+    /// can do.
+    #[must_use]
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::Oversized { .. } => "oversized",
+            Self::Truncated { .. } => "truncated",
+            Self::BadMagic => "bad-magic",
+            Self::TrailingBytes { .. } => "trailing-bytes",
+            Self::MalformedToken { .. } => "malformed-token",
+            Self::CountOutOfRange { .. } => "count-out-of-range",
+            Self::NotStrictlyAscending { .. } => "not-strictly-ascending",
+            Self::SchemaEpochMismatch { .. } => "schema-epoch-mismatch",
+            Self::ZeroLiteral { .. } => "zero-literal",
+            Self::LiteralOutOfRange { .. } => "literal-out-of-range",
+            Self::LiteralsNotAscending { .. } => "literals-not-ascending",
+            Self::IdNotIncreasing { .. } => "id-not-increasing",
+            Self::HintOutOfRange { .. } => "hint-out-of-range",
+            Self::HintDeleted { .. } => "hint-deleted",
+            Self::HintSatisfied { .. } => "hint-satisfied",
+            Self::HintNotUnit { .. } => "hint-not-unit",
+            Self::ConflictBeforeEnd { .. } => "conflict-before-end",
+            Self::NoConflict { .. } => "no-conflict",
+            Self::VacuousDerivation { .. } => "vacuous-derivation",
+            Self::DeletionOutOfRange { .. } => "deletion-out-of-range",
+            Self::DeletionRepeated { .. } => "deletion-repeated",
+            Self::ProofContinuesAfterEmptyClause { .. } => "proof-continues-after-empty-clause",
+            Self::EmptyClauseNotDerived => "empty-clause-not-derived",
+        }
+    }
+
+    /// The wire position this rejection names, when it names one.
+    ///
+    /// Exactly the variants that carry a [`Field`] member answer [`Some`]; the rest
+    /// answer [`None`] rather than guessing a position the rejection never recorded.
+    #[must_use]
+    pub const fn field(&self) -> Option<Field> {
+        match self {
+            Self::Truncated { field, .. }
+            | Self::MalformedToken { field, .. }
+            | Self::CountOutOfRange { field, .. }
+            | Self::NotStrictlyAscending { field, .. } => Some(*field),
+            _ => None,
+        }
+    }
+}
+
 /// A feature the certificate names and this checker does not implement.
 ///
 /// Distinct from [`Rejection`] on purpose: an unsupported certificate may be perfectly

@@ -37,19 +37,16 @@
 //! returned". Both are rendered, and which one arrived is a named token,
 //! [`AnswerShape`], derived from the answer rather than assumed from the status.
 //!
-//! On the task-shaped arm the envelope's status is `task_started` or `task_suspended`, and
-//! this command does **not** report that work began:
-//!
-//! > `task_started` means "the answer is task-shaped, not result-shaped", never "new work
-//! > began at this call".
-//! >
-//! > — RFC 0026, "What `task_started` means when an identity resolves to a task that will not
-//! > run again" (bn-3p32's A12, ratified)
-//!
-//! An identity that resolves to a `Failed` or `Cancelled` task takes the same lane and will
-//! not run again. This command therefore prints the status token and the handle and claims
-//! nothing else; `continuum task status <task_*>` is the authority on whether that task is
-//! going to do anything further, and it is one command away.
+//! On the task-shaped arm the envelope's status is `task_started`, `task_suspended` — or,
+//! as of protocol 3.4, `ok`: an identity that resolves to a `Failed` or `Cancelled` task is
+//! answered on the task-observing lane (`status = ok`, `task` in the body, no `result`),
+//! mirroring `task.resume`'s terminal short-circuit (RFC 0026 F20, paid by bn-3jrtz; the
+//! prior `task_started` answer was ratified as no violation by bn-3p32's A12 disposition,
+//! which read the lane as "the answer is task-shaped, not result-shaped"). This command
+//! renders the status verbatim and [`AnswerShape`] from the body, so both readings survive
+//! rendering with no branch added; it still claims nothing about whether work began, and
+//! `continuum task status <task_*>` remains the authority on whether that task is going to
+//! do anything further, one command away.
 //!
 //! # The verdict is carried, never re-derived
 //!

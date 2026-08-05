@@ -19,9 +19,13 @@
 //! the frame is written, so on the wire `payload` is null exactly where the IDL says it
 //! must be: on `status = error`.
 //!
-//! `Error.data` stays absent, and that is not a limitation of this layer. Its shape is
-//! "determined by `code`" and no struct or schema is declared for any code, so a daemon
-//! with no typed specifics to report leaves it absent rather than inventing a shape
+//! `Error.data` reads absent here for the same reason `payload` reads null: its shape is
+//! "determined by `code`", and as of protocol 3.4 exactly one code declares one —
+//! `CertificateRejected` carries the `CertificateRejection` struct (RFC 0026 F19,
+//! bn-3jrtz). The typed value travels beside the envelope as
+//! [`ErrorData`](super::family::ErrorData) on the outcome, and the transport encodes it
+//! in the negotiated encoding where that encoding is known. For every code that declares
+//! no shape the daemon leaves the field absent rather than inventing one
 //! (`rule encoding.opaque_payloads`; IDL open item 3, whose misgrouping of this field
 //! bn-i4aem corrected).
 //!

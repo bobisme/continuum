@@ -7,5 +7,9 @@ error.retryable  false
 error.recovery  0
 error.continuation  none
 error.non_resumable_reason  none
+error.data  none
+error.data.checker  none
+error.data.reason  none
+error.data.field  none
 omissions  0
 next_operations  0

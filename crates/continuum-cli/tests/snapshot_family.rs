@@ -589,7 +589,9 @@ fn the_denial_json_document_is_pinned_byte_for_byte() {
         concat!(
             r#"{"advice":[],"artifacts":[],"base":"ws_neverheld0001","cost":null,"#,
             r#""depth":"refused","diagnostics":null,"#,
-            r#""error":{"code":"CapabilityDenied","continuation":null,"#,
+            // `data` joined the refusal at protocol 3.4 (RFC 0026 F19, bn-3jrtz):
+            // null for every code that declares no `Error.data` shape.
+            r#""error":{"code":"CapabilityDenied","continuation":null,"data":null,"#,
             r#""detail":"the presented capability does not admit this operation","#,
             r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
             r#""intent":null,"next_operations":[],"omissions":[],"#,
@@ -624,6 +626,11 @@ fn the_seal_text_rendering_is_pinned_line_for_line() {
             "error.recovery  0\n",
             "error.continuation  none\n",
             "error.non_resumable_reason  none\n",
+            // The F19 data block (protocol 3.4, bn-3jrtz).
+            "error.data  none\n",
+            "error.data.checker  none\n",
+            "error.data.reason  none\n",
+            "error.data.field  none\n",
             "omissions  0\n",
             "next_operations  0\n",
         )

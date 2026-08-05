@@ -54,8 +54,8 @@ use continuumd::codec::{self, CodecError, ProtocolValue};
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::is_mutation;
 use continuumd::protocol::envelope::{
-    ArtifactRef, AssuranceEnvelope, Budget, Cost, NextOperation, Omission, RequestEnvelope,
-    ResultEnvelope, Verdict,
+    ArtifactRef, AssuranceEnvelope, Budget, CertificateRejection, Cost, NextOperation, Omission,
+    RequestEnvelope, ResultEnvelope, Verdict,
 };
 use continuumd::protocol::operations::context::{
     ContextCompileRequest, ContextExpandRequest, ContextExpandResponse,
@@ -319,6 +319,13 @@ pub struct Refusal {
     pub continuation: Option<ContinuationHandle>,
     /// Present when a budget exhaustion is *not* resumable: the typed reason.
     pub non_resumable_reason: Option<String>,
+    /// The typed `Error.data` specifics, decoded through the shape the `code` declares.
+    /// As of protocol 3.4 exactly one code declares one — `CertificateRejected` carries
+    /// [`CertificateRejection`] (RFC 0026 F19) — and for every other code the wire field
+    /// is absent and this reads [`None`]. Decoded rather than dropped: after F19 the
+    /// field is a declared part of the answer, and a renderer that discarded it would be
+    /// narrowing the daemon's typed refusal on the caller's behalf.
+    pub data: Option<CertificateRejection>,
 }
 
 /// The negotiated connection a command's wire calls travel over.
@@ -841,15 +848,9 @@ impl Connection {
 fn classify(result: ResultEnvelope, payload: Payload) -> Result<Outcome<Payload>, ConnectError> {
     let is_error = result.status == ResultStatus::Error;
     match (is_error, result.error) {
-        (true, Optional::Present(error)) => Ok(Outcome::Refused(Refusal {
-            request_id: result.request_id,
-            code: error.code,
-            detail: error.detail,
-            retryable: error.retryable,
-            recovery: error.recovery,
-            continuation: error.continuation.value().cloned(),
-            non_resumable_reason: error.non_resumable_reason.value().cloned(),
-        })),
+        (true, Optional::Present(error)) => {
+            Ok(Outcome::Refused(refusal_of(result.request_id, error)?))
+        }
         (false, Optional::Absent) => Ok(Outcome::Admitted(Admitted {
             request_id: result.request_id,
             status: result.status,
@@ -874,6 +875,36 @@ fn classify(result: ResultEnvelope, payload: Payload) -> Result<Outcome<Payload>
     }
 }
 
+/// Build the typed [`Refusal`] one decoded `Error` carries, decoding `Error.data`
+/// through the shape its `code` declares.
+///
+/// `data` is decoded in `canonical_json` because that is the encoding every exchange in
+/// this crate travels in; a code that declares no shape arrives with the field absent
+/// (`rule encoding.opaque_payloads`), and a message that carries `data` under such a code
+/// is refused as malformed rather than half-read.
+fn refusal_of(
+    request_id: RequestId,
+    error: continuumd::protocol::envelope::Error,
+) -> Result<Refusal, ConnectError> {
+    let data = match error.data.value() {
+        None => None,
+        Some(opaque) => match codec::operations::decode_error_data(error.code, opaque)? {
+            continuumd::daemon::family::ErrorData::CertificateRejection(body) => Some(body),
+            continuumd::daemon::family::ErrorData::None => None,
+        },
+    };
+    Ok(Refusal {
+        request_id,
+        code: error.code,
+        detail: error.detail,
+        retryable: error.retryable,
+        recovery: error.recovery,
+        continuation: error.continuation.value().cloned(),
+        non_resumable_reason: error.non_resumable_reason.value().cloned(),
+        data,
+    })
+}
+
 /// [`classify`], for a hand-decoded typed payload ([`Connection::invoke_typed`]).
 ///
 /// `payload` is `None` on every refusal and `Some` on a success; the two envelope halves
@@ -887,15 +918,9 @@ fn classify_typed<T>(
 ) -> Result<Outcome<T>, ConnectError> {
     let is_error = result.status == ResultStatus::Error;
     match (is_error, result.error, payload) {
-        (true, Optional::Present(error), None) => Ok(Outcome::Refused(Refusal {
-            request_id: result.request_id,
-            code: error.code,
-            detail: error.detail,
-            retryable: error.retryable,
-            recovery: error.recovery,
-            continuation: error.continuation.value().cloned(),
-            non_resumable_reason: error.non_resumable_reason.value().cloned(),
-        })),
+        (true, Optional::Present(error), None) => {
+            Ok(Outcome::Refused(refusal_of(result.request_id, error)?))
+        }
         (false, Optional::Absent, Some(payload)) => Ok(Outcome::Admitted(Admitted {
             request_id: result.request_id,
             status: result.status,

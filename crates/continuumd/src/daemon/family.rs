@@ -49,7 +49,8 @@ use continuum_workspace::publication::ReferenceStore;
 use super::state::DaemonState;
 use super::{Services, errors};
 use crate::protocol::envelope::{
-    ArtifactRef, AssuranceEnvelope, Omission, RequestEnvelope, Verdict, Warning,
+    ArtifactRef, AssuranceEnvelope, CertificateRejection, Omission, RequestEnvelope, Verdict,
+    Warning,
 };
 use crate::protocol::handshake::CapabilityDescriptor;
 use crate::protocol::operations::context::{
@@ -578,13 +579,43 @@ pub enum Resumption {
     NonResumable(&'static str),
 }
 
+/// The typed `Error.data` value a fault carries, when its code declares a shape.
+///
+/// The wire field is `Opaque` — bytes of the *negotiated* encoding — so the daemon
+/// layer, which is encoding-free, carries the typed value here and the transport
+/// encodes it where the encoding is known, exactly as [`Payload`] travels beside the
+/// envelope until [`crate::transport::Server::answer`] splices it in.
+///
+/// One variant per code that declares a shape, which as of protocol 3.4 is exactly
+/// one: `rule encoding.opaque_payloads` — "for every code that declares no shape a
+/// daemon MUST leave `data` absent rather than inventing one" — is why this is a
+/// closed enum with a [`Self::None`] arm rather than an open bag of bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ErrorData {
+    /// This code declares no `Error.data` shape; the wire field stays absent.
+    #[default]
+    None,
+    /// The declared shape for `code = CertificateRejected` (RFC 0026 F19, 3.4):
+    /// the rejecting kernel and its own reason token, relayed verbatim.
+    CertificateRejection(CertificateRejection),
+}
+
+impl ErrorData {
+    /// Whether there is a typed value to encode.
+    #[must_use]
+    pub const fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
 /// A typed failure: the wire code, the stable explanation of it in context, and what the
 /// caller can resume from.
 ///
 /// `detail` is `&'static str` rather than `String` by construction, because
 /// `rule envelope.no_prose` forbids interpolating source, logs, model text, or production
 /// payloads into it and a static string cannot carry any of them. A caller needing the
-/// specifics reads them from `code` and, once the codec lands, from `Error.data`.
+/// specifics reads them from `code` and, where the code declares a shape, from
+/// `Error.data` ([`ErrorData`], RFC 0026 F19).
 ///
 /// Not [`Copy`] as of bn-23j7s: [`Resumption::From`] carries a handle, and a fault that
 /// could be duplicated silently would be two answers to "where does this resume".
@@ -598,6 +629,8 @@ pub struct Fault {
     pub retryable: bool,
     /// What the caller can resume from, for the codes RFC 0026 requires it of.
     pub resumption: Resumption,
+    /// The typed `Error.data` specifics, for the codes that declare a shape.
+    pub data: ErrorData,
 }
 
 impl Fault {
@@ -610,7 +643,15 @@ impl Fault {
             detail,
             retryable: false,
             resumption: Resumption::NotApplicable,
+            data: ErrorData::None,
         }
+    }
+
+    /// The same fault, carrying the typed `Error.data` value its code declares.
+    #[must_use]
+    pub fn with_data(mut self, data: ErrorData) -> Self {
+        self.data = data;
+        self
     }
 
     /// A `BudgetExhausted` with no continuation, whose typed `non_resumable_reason` is its
@@ -635,6 +676,7 @@ impl Fault {
             detail,
             retryable: false,
             resumption: Resumption::NonResumable(detail),
+            data: ErrorData::None,
         }
     }
 
@@ -646,6 +688,7 @@ impl Fault {
             detail,
             retryable: false,
             resumption: Resumption::From(continuation),
+            data: ErrorData::None,
         }
     }
 

@@ -30,17 +30,18 @@
 //! irretrievable has no spelling. There is no constructor that takes an `expandable: bool`
 //! and a reason independently, which is why there is no validation to forget.
 //!
-//! # `kind` is the closed selection vocabulary, and the schema's free string is wider
+//! # `kind` is the closed selection vocabulary, and the schema now says so too
 //!
-//! The schema types `omissions[].kind` as an unconstrained string, and the shipped example
-//! used to write a descriptive phrase (`"observer-independent causal predecessor"`) there.
-//! RFC 0028 correction 16 settles the reading: `omissions[].kind` names the same closed
-//! eleven-member `selected[].kind` vocabulary [`SelectionKind`] is, and the example is
-//! corrected to `"event"` (the 196 items are `e_ack`'s causal-predecessor events). This
-//! module narrows to [`SelectionKind`] for three reasons, and the narrowing is *inside*
-//! what the schema admits, so a pack written here still validates — a closed `enum` at
-//! this key is a shape change and is raised for the schema sweep as RFC 0028 F13, not made
-//! here:
+//! The schema used to type `omissions[].kind` as an unconstrained string, and the shipped
+//! example used to write a descriptive phrase (`"observer-independent causal predecessor"`)
+//! there. RFC 0028 correction 16 settled the reading — `omissions[].kind` names the same
+//! closed eleven-member `selected[].kind` vocabulary [`SelectionKind`] is, and the example
+//! was corrected to `"event"` (the 196 items are `e_ack`'s causal-predecessor events) —
+//! while raising the shape change itself as F13 for a bundle. The protocol-3.4 bundle paid
+//! it (RFC 0028 correction 18, bn-3jrtz): both keys now `$ref` one `$defs.selection_kind`
+//! enum, so this module's narrowing is no longer *inside* what the schema admits but
+//! exactly what it admits, and a free-string `kind` is refused by the schema rather than
+//! merely unrepresentable here. The reading rests on three reasons:
 //!
 //! 1. the manifest partitions the **candidates for selection**, and a candidate's kind is
 //!    exactly that vocabulary — a partition keyed by free-form phrases cannot be checked
@@ -62,6 +63,8 @@
 //! | the record's keys are exactly the schema's, ID5-sorted | `context-pack.schema.json`, RFC 0037 ID5 | `canonical_json_has_exactly_the_schema_keys_in_sorted_order` |
 //! | a manifest is deterministically ordered | `rule ordering.deterministic` | `records_sort_into_one_order_whatever_order_they_arrive_in` |
 //! | one partition cell is one record | RFC 0028, "Counts are exact" | `a_repeated_partition_cell_is_refused` |
+//! | the schema itself closes `kind` (F13 paid) | `context-pack.schema.json` `$defs.selection_kind`; RFC 0028 correction 18 | `the_schema_closes_omission_kind_to_the_selection_vocabulary` |
+//! | the closure check is not vacuous | the pre-F13 shape, reconstructed as a mutant | `a_reopened_free_string_kind_is_caught` |
 
 use core::fmt;
 
@@ -741,6 +744,90 @@ mod tests {
         assert_eq!(
             String::from_utf8(manifest.to_json().to_canonical_bytes()).expect("utf8"),
             "[]"
+        );
+    }
+
+    // --- the F13 payment, held against the real schema file (bn-3jrtz) ---------------------
+
+    /// The normative schema, read from the repository rather than transcribed, so this
+    /// test fails on the actual file — the device `continuumd`'s `inv003` suite uses for
+    /// its own schema-shape checks.
+    fn schema_text() -> String {
+        std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../notes/plan/schemas/context-pack.schema.json"
+        ))
+        .expect("the context-pack schema is in the repository")
+    }
+
+    /// Whether the schema closes `kind` to the shared `$defs.selection_kind` vocabulary:
+    /// both key sites (`selected[].kind`, `omissions[].kind`) `$ref` the one definition,
+    /// and that definition's `enum` is exactly [`SelectionKind::ALL`]'s tokens in order.
+    fn kind_is_closed(text: &str) -> bool {
+        if text
+            .matches(r##""$ref": "#/$defs/selection_kind""##)
+            .count()
+            != 2
+        {
+            return false;
+        }
+        let Some(start) = text.find(r#""selection_kind""#) else {
+            return false;
+        };
+        // The `enum` keyword's array, not the first bracket after the key: the def's
+        // `$comment` spells `omissions[].kind` and would otherwise match first.
+        let Some(keyword) = text[start..].find(r#""enum""#) else {
+            return false;
+        };
+        let def = &text[start + keyword..];
+        let Some(open) = def.find('[') else {
+            return false;
+        };
+        let Some(close) = def[open..].find(']') else {
+            return false;
+        };
+        let tokens: Vec<&str> = def[open..=open + close]
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .collect();
+        let ours: Vec<&str> = SelectionKind::ALL
+            .iter()
+            .map(|kind| kind.as_wire_str())
+            .collect();
+        tokens == ours
+    }
+
+    /// RFC 0028 F13, paid at the protocol-3.4 bundle (correction 18, bn-3jrtz): the
+    /// schema itself now closes `omissions[].kind` — under JSON Schema's `enum` keyword a
+    /// free-string kind such as the example's old `"observer-independent causal
+    /// predecessor"` is *refused*, not read as a new category. Before the payment this
+    /// test fails on both counts (`omissions[].kind` was `"type": "string"` and there was
+    /// no shared definition), which is the anti-vacuity the rider owes.
+    #[test]
+    fn the_schema_closes_omission_kind_to_the_selection_vocabulary() {
+        assert!(
+            kind_is_closed(&schema_text()),
+            "the schema must close `selected[].kind` and `omissions[].kind` over one \
+             `$defs.selection_kind` enum spelling exactly `SelectionKind::ALL`"
+        );
+    }
+
+    /// The check above is not vacuous: re-opening either key site to a free string is
+    /// caught. The mutant is the pre-F13 schema, reconstructed textually — the same
+    /// mutant-control device `continuumd`'s `inv003` schema checks use.
+    #[test]
+    fn a_reopened_free_string_kind_is_caught() {
+        let text = schema_text();
+        let mutant = text.replacen(
+            r##""$ref": "#/$defs/selection_kind""##,
+            r#""type": "string""#,
+            1,
+        );
+        assert_ne!(mutant, text, "the mutant must actually change the text");
+        assert!(
+            !kind_is_closed(&mutant),
+            "a key site re-opened to a free string must fail the closure check"
         );
     }
 }

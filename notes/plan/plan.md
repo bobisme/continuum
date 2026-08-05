@@ -2102,7 +2102,23 @@ Phase F.
 Deliver:
 
 - immutable workspace and intent schemas; (delivered: bn-15gj, bn-1qhe, bn-2xri, bn-1hrk, bn-u8z2, bn-136f, bn-1tgp, bn-7f23, bn-111k, bn-14w6, bn-fp0g, bn-1fc0, bn-185wn, bn-ces7)
-- native daemon protocol;
+- native daemon protocol; (delivered: the PR-5 campaign — bn-3gi/bn-18z/bn-24i landed the
+  operation layer over the 72-row registry, bn-i4aem/bn-3bhkp the wire-defect
+  reconciliation, the three codec decisions, the canonical dual-encoding codec and the
+  local transport, bn-1mhcr canonical_cbor with the cross-encoding golden set, bn-1h158
+  the bootstrap-encoding rule — and the four deferred-and-bundled protocol minors paid
+  the flag ledger as it accumulated: 3.0→3.1 bn-3ayom (RFC 0027 F1–F8), 3.1→3.2
+  bn-i4aem/bn-3bhkp, 3.2→3.3 bn-3sypm (evidence.link, the registry's one growth),
+  3.3→3.4 bn-3jrtz (F19 CertificateRejected Error.data with the kernels speaking their
+  own rejection vocabulary, F20 verification.start's terminal short-circuit, RFC 0028 F13
+  riding the same bundle), leaving every open flag deferred with its reason recorded in
+  its owning RFC's ledger. Absences stated: the transport is local and in-process — the
+  §10 sentence's "local IPC or authenticated HTTP/QUIC" socket half has no carrier bone
+  yet; 45 of the 73 registered operations answer the typed UnsupportedSemanticFeature
+  pending their producing subsystems (rule errors.unsupported_surface — registration
+  ahead of subsystem is the registry's own discipline, not a gap in the protocol); and
+  the docs/36, docs/46, docs/55 reference sketches still carry their
+  regenerated-at-3.3 banners, owed to the next doc regeneration.)
 - task/continuation lifecycle; (delivered: bn-3tz60, bn-cho5 — the lifecycle machinery
   itself landed through the PR 6 campaign (task table, budget ledger, regions,
   continuations, cancellation, recovery); bn-3tz60 closed the client half, the

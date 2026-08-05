@@ -449,10 +449,40 @@ pub fn refusal_lines(refusal: &Refusal) -> Lines {
             "error.non_resumable_reason".to_owned(),
             string_or_none(refusal.non_resumable_reason.as_deref()),
         ),
+        // The typed `Error.data` specifics (RFC 0026 F19, protocol 3.4), in the same
+        // always-rendered shape the redaction stub uses: the count when present, `none`
+        // when the code declares no shape, and every member spelled out so a reader
+        // never has to branch on which keys exist. The tokens are the rejecting
+        // kernel's own, relayed verbatim — printed, never branched on.
+        (
+            "error.data".to_owned(),
+            refusal
+                .data
+                .as_ref()
+                .map_or_else(|| "none".to_owned(), |_| "3".to_owned()),
+        ),
+        (
+            "error.data.checker".to_owned(),
+            string_or_none(refusal.data.as_ref().map(|data| data.checker.as_str())),
+        ),
+        (
+            "error.data.reason".to_owned(),
+            string_or_none(refusal.data.as_ref().map(|data| data.reason.as_str())),
+        ),
+        (
+            "error.data.field".to_owned(),
+            string_or_none(
+                refusal
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.field.value())
+                    .map(String::as_str),
+            ),
+        ),
     ]
 }
 
-/// A refusal as a JSON object — the same six fields [`refusal_lines`] renders, keyed for
+/// A refusal as a JSON object — the same fields [`refusal_lines`] renders, keyed for
 /// machine reading.
 ///
 /// `recovery` is the **list**, not the count the text formats print. RFC 0026 makes it "the
@@ -488,8 +518,26 @@ pub fn refusal_json(refusal: &Refusal) -> Json {
                 None => Json::Null,
             },
         ),
+        (
+            "data".to_owned(),
+            match &refusal.data {
+                Some(data) => Json::object([
+                    ("checker".to_owned(), Json::String(data.checker.clone())),
+                    ("reason".to_owned(), Json::String(data.reason.clone())),
+                    (
+                        "field".to_owned(),
+                        match data.field.value() {
+                            Some(token) => Json::String(token.clone()),
+                            None => Json::Null,
+                        },
+                    ),
+                ])
+                .expect("three distinct literal keys never collide"),
+                None => Json::Null,
+            },
+        ),
     ])
-    .expect("six distinct literal keys never collide")
+    .expect("seven distinct literal keys never collide")
 }
 
 // --- budget and cost, the nine shared dimensions ------------------------------------------

@@ -26,9 +26,10 @@
 //!    A permissive parser fails it immediately, because it accepts whitespace, a leading
 //!    zero, or a `+` as a second spelling of a value it already has.
 //!
-//! The vectors cover the five exchanges the transport bone named: the handshake, a
+//! The vectors cover the five exchanges the transport bone named — the handshake, a
 //! `workspace.create` request, a `verification.start` request, a denial result, and a task
-//! result.
+//! result — plus the F19 exchange the 3.4 bundle added: a `CertificateRejected` result
+//! whose `error.data` carries the first declared `Error.data` shape (bn-3jrtz).
 
 use continuumd::codec::json::{Json, JsonError, MAX_EXACT_INTEGER, base64url, from_base64url};
 use continuumd::codec::{CodecError, ProtocolValue, from_bytes, to_bytes};
@@ -216,6 +217,60 @@ fn denial() -> ResultEnvelope {
         audit: Optional::Present(
             AuditCorrelationId::new("audit-1").expect("a well-formed correlation identity"),
         ),
+    }
+}
+
+/// A `CertificateRejected` result carrying the declared `Error.data` shape — the F19
+/// exchange (RFC 0026, protocol 3.4, bn-3jrtz).
+///
+/// The one vector whose envelope is pinned at `3.4` rather than this file's `3.2`,
+/// because the shape it exercises is `@since("3.4")`: `data` is the canonical encoding of
+/// a `CertificateRejection`, spliced exactly where `rule encoding.opaque_payloads` puts
+/// it, resolved by the carrying object's own `code`. The tokens are the core kernel's own
+/// spellings for a trailing byte — the fixture `daemon_evidence.rs` rejects for real.
+fn certificate_rejected_result() -> ResultEnvelope {
+    ResultEnvelope {
+        request_id: RequestId::new("req_3").expect("a well-formed request id"),
+        status: ResultStatus::Error,
+        verdict: Nullable::Null,
+        error: Optional::Present(Error {
+            code: ErrorCode::CertificateRejected,
+            detail: "continuum-kernel-core rejected this certificate: the verdict is that \
+                     kernel's own, over the bytes the daemon holds"
+                .to_owned(),
+            data: Optional::Present(
+                continuumd::codec::to_opaque(
+                    &continuumd::protocol::envelope::CertificateRejection {
+                        checker: "continuum-kernel-core".to_owned(),
+                        reason: "trailing-bytes".to_owned(),
+                        field: Optional::Absent,
+                    },
+                )
+                .expect("the declared shape encodes"),
+            ),
+            recovery: Vec::new(),
+            continuation: Optional::Absent,
+            non_resumable_reason: Optional::Absent,
+            retryable: false,
+        }),
+        assurance: Optional::Absent,
+        artifacts: Vec::new(),
+        task: Optional::Absent,
+        continuation: Optional::Absent,
+        omissions: Vec::new(),
+        warnings: Vec::new(),
+        cost: Cost {
+            states: Optional::Absent,
+            ..unmeasured()
+        },
+        epochs: EpochSet {
+            protocol: ProtocolVersion::new(3, 4),
+            ..epochs()
+        },
+        next_operations: Vec::new(),
+        next_page_token: Optional::Absent,
+        payload: Nullable::Null,
+        audit: Optional::Absent,
     }
 }
 
@@ -582,7 +637,8 @@ fn bytes_are_unpadded_base64url_with_one_spelling() {
 
 // --- golden vectors ------------------------------------------------------------------
 
-/// The five golden vectors, each a byte sequence written here rather than computed.
+/// The golden vectors, each a byte sequence written here rather than computed. Five since
+/// the transport bone; a sixth at 3.4 (`certificate.rejected.result`, the F19 exchange).
 ///
 /// A change to the field order, an escape spelling, an integer form, a union tag, or a
 /// presence rule moves one of these and the diff names which.
@@ -613,6 +669,10 @@ fn golden() -> Vec<(&'static str, Vec<u8>)> {
             .expect("encodes"),
         ),
         ("denial.result", to_bytes(&denial()).expect("encodes")),
+        (
+            "certificate.rejected.result",
+            to_bytes(&certificate_rejected_result()).expect("encodes"),
+        ),
         ("task.result", to_bytes(&task_result()).expect("encodes")),
     ]
 }
@@ -639,6 +699,10 @@ fn the_golden_vectors_are_the_bytes_this_file_declares() {
         (
             "denial.result",
             r#"{"artifacts":[],"audit":"audit-1","cost":{},"epochs":{"corpus":null,"engine":"engine-reference-1","evidence":null,"intent":null,"proof":null,"protocol":"3.2","semantic":"semantic-1"},"error":{"code":"CapabilityDenied","detail":"the presented capability does not admit this operation","recovery":[],"retryable":false},"next_operations":[],"omissions":[],"payload":null,"request_id":"req_1","status":"error","verdict":null,"warnings":[]}"#,
+        ),
+        (
+            "certificate.rejected.result",
+            r#"{"artifacts":[],"cost":{},"epochs":{"corpus":null,"engine":"engine-reference-1","evidence":null,"intent":null,"proof":null,"protocol":"3.4","semantic":"semantic-1"},"error":{"code":"CertificateRejected","data":{"checker":"continuum-kernel-core","reason":"trailing-bytes"},"detail":"continuum-kernel-core rejected this certificate: the verdict is that kernel's own, over the bytes the daemon holds","recovery":[],"retryable":false},"next_operations":[],"omissions":[],"payload":null,"request_id":"req_3","status":"error","verdict":null,"warnings":[]}"#,
         ),
         (
             "task.result",

@@ -892,8 +892,11 @@ fn the_denial_json_document_is_pinned_byte_for_byte() {
         rendered.text,
         concat!(
             r#"{"advice":[],"artifacts":[],"assurance":null,"continuation":null,"#,
+            // `data` joined the refusal object at protocol 3.4 (RFC 0026 F19, bn-3jrtz):
+            // always present in the machine envelope, `null` for every code that declares
+            // no `Error.data` shape — the pin flips deliberately with the bundle.
             r#""cost":null,"depth":"refused","#,
-            r#""error":{"code":"CapabilityDenied","continuation":null,"#,
+            r#""error":{"code":"CapabilityDenied","continuation":null,"data":null,"#,
             r#""detail":"the presented capability does not admit this operation","#,
             r#""non_resumable_reason":null,"recovery":[],"retryable":false},"#,
             r#""next_operations":[],"omissions":[],"operation":"verification.result","#,

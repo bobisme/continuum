@@ -300,6 +300,33 @@ protocol_struct! {
 }
 
 protocol_struct! {
+    /// The declared `Error.data` shape for `code = CertificateRejected` — the kernel's
+    /// reason *within* `Rejected`, carried to the wire (RFC 0026 F19, protocol 3.4,
+    /// bn-3jrtz; origin bn-dtg61's verdict-fidelity audit, recorded by bn-1dj05).
+    ///
+    /// Every vocabulary here has exactly one owner and none of them is this daemon.
+    /// `checker` is the trusted checking-base crate whose verdict the error relays;
+    /// `reason` and `field` are that kernel's own stable diagnostic tokens
+    /// (`Rejection::reason()`, `Field::as_str()`), relayed verbatim and never
+    /// interpreted — transcribing four kernels' rejection vocabularies into a wire
+    /// enum would be a second authority over vocabularies those crates own, which is
+    /// the move bn-dtg61 declined at source. The rejection's numeric specifics do not
+    /// travel; they are recoverable by re-running the named kernel over the same
+    /// bytes.
+    struct CertificateRejection {
+        /// The kernel crate whose `Rejected` verdict this error relays,
+        /// e.g. `continuum-kernel-core`.
+        checker: String required;
+        /// That kernel's own stable reason token, e.g. `trailing-bytes`, relayed
+        /// verbatim.
+        reason: String required;
+        /// That kernel's own token for the wire position the rejection names, when
+        /// the rejection names one. Absent when it does not; never invented.
+        field: String optional;
+    }
+}
+
+protocol_struct! {
     /// The request envelope of every operation (RFC 0026).
     struct RequestEnvelope {
         /// The negotiated protocol version. A request naming a different

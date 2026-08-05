@@ -984,9 +984,16 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // wire shape. `version` stays "3.3" with it — see `rule
     // versioning.compatible_change`'s five triggers, none of which this revision
     // pulls.
+    //
+    // Protocol 3.4 (IDL 1.6, bn-3jrtz) adds one struct — `CertificateRejection`, the
+    // first declared `Error.data` shape (RFC 0026 F19) — and nothing else that these
+    // counts see: F20, the same bundle's other rider, flips which of
+    // `verification.start`'s two declared answer shapes a terminal identity lands on
+    // and therefore moves no declaration at all. The operation count stays 73; the
+    // struct count is the one number this bump moves, 45 -> 46.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
-    assert_eq!(document.structs.len(), 45, "structs");
+    assert_eq!(document.structs.len(), 46, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
     assert_eq!(document.rules.len(), 39, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document

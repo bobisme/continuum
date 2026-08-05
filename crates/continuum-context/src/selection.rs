@@ -284,7 +284,10 @@ mod tests {
     use super::*;
 
     /// Transcribed from `notes/plan/schemas/context-pack.schema.json`,
-    /// `properties.selected.items.properties.kind.enum`, in file order.
+    /// `$defs.selection_kind.enum`, in file order — the shared closed vocabulary
+    /// `selected[].kind` and `omissions[].kind` both `$ref` since RFC 0028 F13 was paid
+    /// (correction 18, bn-3jrtz). `crate::omission`'s schema-shape test reads the real
+    /// file and holds this same set against it, so this transcription cannot drift.
     const SCHEMA_KIND_ENUM: [&str; 11] = [
         "event",
         "state_delta",

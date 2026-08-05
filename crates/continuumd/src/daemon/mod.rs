@@ -215,6 +215,13 @@ pub struct OperationOutcome {
     pub envelope: ResultEnvelope,
     /// The operation's typed response body, or [`Payload::None`] on an error.
     pub payload: Payload,
+    /// The typed `Error.data` specifics, or [`ErrorData::None`] on a success and on
+    /// every failure whose code declares no shape. `Error.data` on the envelope reads
+    /// absent at this layer for the same reason `payload` reads null: the wire field is
+    /// `Opaque` — bytes of the *negotiated* encoding — and this layer is encoding-free,
+    /// so [`crate::transport::Server::answer`] encodes it where the encoding is known
+    /// (RFC 0026 F19, protocol 3.4).
+    pub data: family::ErrorData,
 }
 
 impl OperationOutcome {
@@ -506,6 +513,7 @@ impl Daemon {
             return Ok(OperationOutcome {
                 envelope: result::denial(&envelope.request_id, &services.epochs, &audit),
                 payload: Payload::None,
+                data: family::ErrorData::None,
             });
         };
 
@@ -585,6 +593,7 @@ impl Daemon {
                         audit_required.then_some(&audit),
                     ),
                     payload: effect.payload,
+                    data: family::ErrorData::None,
                 }
             }
             Err(fault) => raise(services, envelope, fault, &audit, audit_required),
@@ -683,9 +692,15 @@ fn raise(
     // result whose error is `CapabilityDenied`, "because a denial that leaves no audit
     // record is indistinguishable from an attack that was never tried".
     let attached = (required || fault.code == ErrorCode::CapabilityDenied).then_some(audit);
+    // The typed `Error.data` value travels beside the envelope, exactly as the typed
+    // payload does, because the wire field is `Opaque` — bytes of the negotiated
+    // encoding — and this layer is encoding-free (RFC 0026 F19; see
+    // `OperationOutcome::data`).
+    let data = fault.data.clone();
     OperationOutcome {
         envelope: result::failure(&envelope.request_id, fault, &services.epochs, attached),
         payload: Payload::None,
+        data,
     }
 }
 

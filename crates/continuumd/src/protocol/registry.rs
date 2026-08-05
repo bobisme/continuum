@@ -18,7 +18,7 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.5";
+pub const IDL_VERSION: &str = "1.6";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
@@ -51,7 +51,23 @@ pub const IDL_VERSION: &str = "1.5";
 /// rule). None of `rule versioning.compatible_change`'s five triggers fires —
 /// no operation, field, enum member, or relaxed constraint — so no wire byte
 /// moves and no flag is raised (the bn-23j7s no-F-flag precedent).
-pub const PROTOCOL_VERSION: &str = "3.3";
+///
+/// The 3.3 -> 3.4 bump covers IDL 1.6 (bn-3jrtz), the fourth
+/// deferred-and-bundled protocol minor, and pays RFC 0026's F19 and F20
+/// together. F19 declares `Error.data`'s first shape — `CertificateRejection`,
+/// for `code = CertificateRejected` — an ordinary compatible addition: `data`
+/// has been a defined `optional` field since 3.0, and a pre-3.4 reader handles
+/// the newly-shaped bytes exactly as the pre-3.4 text already obliged it to
+/// (an `Opaque` whose shape its version does not declare, carried verbatim,
+/// never guessed at). F20 flips which of `verification.start`'s two *declared*
+/// answer shapes an already-terminal, non-`Completed` identity lands on
+/// (`task_started` -> `ok` on the observing lane, mirroring `task.resume`'s
+/// terminal short-circuit): no declaration moves, a client is already required
+/// to handle both shapes, and the lane is "a fact about what the operation
+/// did" (correction 45) — the same nature of change as 3.2's item 9, which is
+/// the precedent that made the lanes reachable at all. The registry is
+/// untouched: 73 operations, every count table unchanged.
+pub const PROTOCOL_VERSION: &str = "3.4";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -994,6 +1010,7 @@ pub const NAMED_STRUCTS: &[StructSpec] = &[
     StructSpec::of::<SourceSpan>(),
     StructSpec::of::<NextOperation>(),
     StructSpec::of::<Error>(),
+    StructSpec::of::<CertificateRejection>(),
     StructSpec::of::<RequestEnvelope>(),
     StructSpec::of::<ResultEnvelope>(),
     StructSpec::of::<SemanticVerdictValue>(),
