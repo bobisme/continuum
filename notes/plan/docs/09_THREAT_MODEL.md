@@ -108,7 +108,7 @@ Controls:
 - observer/property class in result;
 - certificate/fallback for strong claims.
 
-### T04 — Forged trace or artifact substitution
+### T04 — Forged trace or artifact substitution (delivered: bn-1ptb — four of six controls bound to live, re-run enforcement in `tools/governance/check_t04_evidence.py` / `evidence/t04.json`: content-addressed manifests via ADR-0013 and `continuum-value`'s canonical hashing plus workspace snapshot manifests; build identity via the INV-014 receipt `Seam` and KCOV-09; reject digest mismatch via publication's `IdentityCollision` abort and the certificate kernel's independent wire-form-only re-verification of a wrong-family or mutated certificate; and preserve redaction commitments via `Redacted.commitment` surviving redaction and re-verification unmodified — plus two typed-absence gaps recorded rather than fabricated, each with its own mechanical absence-check: hash chain/Merkle root over events, since no production-trace ingestion producer exists yet in this Phase-A tree and bn-15gj's Merkle root is over workspace content, a different asset; and signing/attestation, since docs/09 marks this one optional, nothing in the tree falsely claims it, and the other four controls do not depend on it)
 
 Controls:
 

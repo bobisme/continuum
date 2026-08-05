@@ -6137,7 +6137,7 @@
         "line": 111,
         "path": "docs/09_THREAT_MODEL.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Forged trace or artifact substitution"
     },
     {

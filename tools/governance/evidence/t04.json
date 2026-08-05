@@ -1,0 +1,294 @@
+{
+  "artifact": "continuum.governance.evidence/t04",
+  "authority": "notes/plan/docs/09_THREAT_MODEL.md T04 (Forged trace or artifact substitution)",
+  "boundary": "Two of six controls (hash chain/Merkle root over events; optional signing/attestation) are typed absences, not live enforcement \u2014 see the module docstring's 'Gap controls' section. The other four are bound to citations that are re-run, not merely read, on every invocation.",
+  "controls": {
+    "build identity": {
+      "citations": [
+        {
+          "artifact": "crates/continuum-kernel-core/src/receipt.rs receipt::tests::the_trusted_inputs_are_exactly_the_seam",
+          "enforces": "build digest, binary digest, and toolchain are named trusted inputs, never invented",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_kernel_covenant.py KCOV-09",
+          "enforces": "receipts the schema admits, epochs named, build identity carried",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    },
+    "content-addressed manifests": {
+      "citations": [
+        {
+          "artifact": "notes/plan/adr/0013-exact-state-identity.md",
+          "enforces": "canonical structural identity + cryptographic digests, stated",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-value/src/identity.rs identity::tests::blake3_is_a_pure_function_of_the_bytes",
+          "enforces": "a digest is a pure function of canonical bytes alone, never of host/clock/process",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-workspace/tests/pr3_exit_evidence.rs positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes",
+          "enforces": "the workspace snapshot's content-addressed manifest (files, root_digest) survives disk changes",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    },
+    "hash chain/Merkle root over events": {
+      "absence_checks": [
+        {
+          "artifact": "tools/governance/check_t04_evidence.py event-hash-chain-gap",
+          "checks": "no notes/plan/schemas file names a trace/event artifact; no known producer-shaped Rust identifier exists under crates/*/src",
+          "status": "pass"
+        }
+      ],
+      "reason": "No production-trace ingestion pipeline exists in this tree (Phase A scope). The workspace Merkle root that exists (continuum-workspace::snapshot, bn-15gj) is a real mechanism for a different control (content-addressed manifests) over a different asset (workspace content, not a trace's event sequence).",
+      "status": "pass",
+      "type": "gap"
+    },
+    "optional signing/attestation": {
+      "absence_checks": [
+        {
+          "artifact": "tools/governance/check_t04_evidence.py signing-dependency-gap",
+          "checks": "no known signing/attestation crate name appears in Cargo.toml [workspace.dependencies]",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_code_policy.py GOV-1-07",
+          "checks": "dependency-rationale.toml is the workspace's complete external-dependency inventory (every manifest's every edge, not only the root's); today it names exactly one external crate, blake3, so a signing dependency added anywhere in the workspace cannot go unrationalized even if it evaded the direct check above",
+          "status": "pass"
+        }
+      ],
+      "reason": "docs/09 marks this control optional, unlike its five siblings, and this workspace does not implement it. Assurance does not depend on it: reject digest mismatch and build identity above already deny an adversary a path to a forged pass without a signature.",
+      "status": "pass",
+      "type": "gap"
+    },
+    "preserve redaction commitments": {
+      "citations": [
+        {
+          "artifact": "notes/plan/schemas/redacted.schema.json",
+          "enforces": "every Redacted stub requires commitment (a content hash of the withheld original)",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuumd/tests/daemon_evidence.rs a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission",
+          "enforces": "the commitment minted at staging travels byte-identical through redaction and back out the wire",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuumd/tests/daemon_evidence.rs verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction",
+          "enforces": "a later claim checked against a redacted reference still carries the commitment and downgrades honestly instead of lying",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    },
+    "reject digest mismatch": {
+      "citations": [
+        {
+          "artifact": "crates/continuum-workspace/src/publication.rs publication::tests::an_identity_collision_aborts_rather_than_conflating_two_artifacts",
+          "enforces": "a colliding-but-distinct artifact (the b\"impostor\" fixture) is refused, never conflated",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-certificate/tests/family_routing.rs (three tests)",
+          "enforces": "a certificate stamped with another family's magic, or mutated past its magic, is refused by the kernel it actually names",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-kernel-core/tests/pr9_exit_evidence.rs an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone",
+          "enforces": "an unrecognized wire epoch is rejected from bytes alone, never silently reinterpreted",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_crate_boundaries.py",
+          "enforces": "certificate-checker-not-search and kernel-is-synchronous hold, so rejection is independent re-verification, not self-certification",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    }
+  },
+  "determinism": "This file records no timestamp, commit id, or absolute path: it is a function of the repository contents and the delegates' own outputs alone, so an unchanged tree reproduces it byte-for-byte (Rust test 'tail' fields are trimmed to their final lines, which carry no timing information beyond a 'finished in N.NNs' string that this file does not otherwise consult). Every subprocess is either a delegate checker already invoked elsewhere in `just check`, or a `cargo test` invocation of a test already exercised by `just check`'s own `test` recipe; none makes a network access.",
+  "produced_by": "tools/governance/check_t04_evidence.py",
+  "py_delegates": [
+    "tools/check_crate_boundaries.py",
+    "tools/check_kernel_covenant.py",
+    "tools/governance/check_code_policy.py"
+  ],
+  "reproduce": "python3 tools/governance/check_t04_evidence.py --evidence tools/governance/evidence/t04.json",
+  "rust_delegates": {
+    "build_identity_receipt": {
+      "args": [
+        "--lib"
+      ],
+      "package": "continuum-kernel-core",
+      "tests": [
+        "receipt::tests::the_trusted_inputs_are_exactly_the_seam",
+        "receipt::tests::the_envelope_supplies_the_hashes_the_certificate_carries"
+      ]
+    },
+    "content_addressed_manifests_value": {
+      "args": [
+        "--lib"
+      ],
+      "package": "continuum-value",
+      "tests": [
+        "identity::tests::blake3_is_a_pure_function_of_the_bytes"
+      ]
+    },
+    "content_addressed_manifests_workspace": {
+      "args": [
+        "--test",
+        "pr3_exit_evidence"
+      ],
+      "package": "continuum-workspace",
+      "tests": [
+        "positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes"
+      ]
+    },
+    "preserve_redaction_commitments": {
+      "args": [
+        "--test",
+        "daemon_evidence"
+      ],
+      "package": "continuumd",
+      "tests": [
+        "a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission",
+        "verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction"
+      ]
+    },
+    "reject_digest_mismatch_family_routing": {
+      "args": [
+        "--test",
+        "family_routing"
+      ],
+      "package": "continuum-certificate",
+      "tests": [
+        "a_certificate_stamped_with_another_familys_magic_is_refused_by_the_kernel_it_names",
+        "a_single_byte_mutation_past_the_magic_keeps_the_route_and_the_kernels_own_answer",
+        "garbage_never_verifies_and_never_panics_through_the_composition"
+      ]
+    },
+    "reject_digest_mismatch_publication": {
+      "args": [
+        "--lib"
+      ],
+      "package": "continuum-workspace",
+      "tests": [
+        "publication::tests::an_identity_collision_aborts_rather_than_conflating_two_artifacts"
+      ]
+    },
+    "reject_digest_mismatch_wire_epoch": {
+      "args": [
+        "--test",
+        "pr9_exit_evidence"
+      ],
+      "package": "continuum-kernel-core",
+      "tests": [
+        "an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone"
+      ]
+    }
+  },
+  "self_test": {
+    "direct": {
+      "checks_caught": [
+        "adr-0013-states-canonical-identity",
+        "event-hash-chain-gap",
+        "signing-dependency-gap"
+      ],
+      "failures": [],
+      "status": "pass"
+    },
+    "py_delegates": {
+      "delegates": {
+        "check_code_policy": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_crate_boundaries": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_kernel_covenant": {
+          "exit_code": 0,
+          "status": "pass"
+        }
+      },
+      "failures": [],
+      "status": "pass"
+    },
+    "rust_delegates_rerun": {
+      "build_identity_receipt": {
+        "package": "continuum-kernel-core",
+        "status": "pass",
+        "tail": "running 2 tests\ntest receipt::tests::the_envelope_supplies_the_hashes_the_certificate_carries ... ok\ntest receipt::tests::the_trusted_inputs_are_exactly_the_seam ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 53 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running unittests src/lib.rs (target/debug/deps/continuum_kernel_core-7001eab8cfe257c8)",
+        "tests": [
+          "receipt::tests::the_trusted_inputs_are_exactly_the_seam",
+          "receipt::tests::the_envelope_supplies_the_hashes_the_certificate_carries"
+        ]
+      },
+      "content_addressed_manifests_value": {
+        "package": "continuum-value",
+        "status": "pass",
+        "tail": "running 1 test\ntest identity::tests::blake3_is_a_pure_function_of_the_bytes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s\n     Running unittests src/lib.rs (target/debug/deps/continuum_value-63c2fd1030471b8c)",
+        "tests": [
+          "identity::tests::blake3_is_a_pure_function_of_the_bytes"
+        ]
+      },
+      "content_addressed_manifests_workspace": {
+        "package": "continuum-workspace",
+        "status": "pass",
+        "tail": "running 1 test\ntest positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running tests/pr3_exit_evidence.rs (target/debug/deps/pr3_exit_evidence-aedea73190106755)",
+        "tests": [
+          "positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes"
+        ]
+      },
+      "preserve_redaction_commitments": {
+        "package": "continuumd",
+        "status": "pass",
+        "tail": "running 2 tests\ntest verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction ... ok\ntest a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 54 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s\n     Running tests/daemon_evidence.rs (target/debug/deps/daemon_evidence-bda7c0fc1046e505)",
+        "tests": [
+          "a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission",
+          "verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction"
+        ]
+      },
+      "reject_digest_mismatch_family_routing": {
+        "package": "continuum-certificate",
+        "status": "pass",
+        "tail": "test a_certificate_stamped_with_another_familys_magic_is_refused_by_the_kernel_it_names ... ok\ntest garbage_never_verifies_and_never_panics_through_the_composition ... ok\ntest a_single_byte_mutation_past_the_magic_keeps_the_route_and_the_kernels_own_answer ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running tests/family_routing.rs (target/debug/deps/family_routing-6dacaf40e7a2fa35)",
+        "tests": [
+          "a_certificate_stamped_with_another_familys_magic_is_refused_by_the_kernel_it_names",
+          "a_single_byte_mutation_past_the_magic_keeps_the_route_and_the_kernels_own_answer",
+          "garbage_never_verifies_and_never_panics_through_the_composition"
+        ]
+      },
+      "reject_digest_mismatch_publication": {
+        "package": "continuum-workspace",
+        "status": "pass",
+        "tail": "running 1 test\ntest publication::tests::an_identity_collision_aborts_rather_than_conflating_two_artifacts ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running unittests src/lib.rs (target/debug/deps/continuum_workspace-6a83f555aa640b19)",
+        "tests": [
+          "publication::tests::an_identity_collision_aborts_rather_than_conflating_two_artifacts"
+        ]
+      },
+      "reject_digest_mismatch_wire_epoch": {
+        "package": "continuum-kernel-core",
+        "status": "pass",
+        "tail": "running 1 test\ntest an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s\n     Running tests/pr9_exit_evidence.rs (target/debug/deps/pr9_exit_evidence-3d901d51edcb5429)",
+        "tests": [
+          "an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone"
+        ]
+      }
+    },
+    "status": "pass"
+  },
+  "status": "pass"
+}

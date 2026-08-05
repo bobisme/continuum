@@ -61,15 +61,20 @@ covenant:
 # Enforce the docs/12 executable policy obligations (GOV §1 code/semantic
 # policy, GOV §2 ADR process, GOV §3 claim governance), the docs/09 T12
 # dependency vet/advisory-scanning posture, the T12 six-control binding
-# over all of the above, and the docs/08 R16 five-control binding (Rust
+# over all of the above, the docs/08 R16 five-control binding (Rust
 # compiler churn: pinned toolchain, narrow compiler-internal usage,
 # extraction adapters isolated, compatibility CI, prefer stable metadata
-# over rustc internals). Each checker runs its self-test first — every
-# violating fixture must be caught — so none of these can pass vacuously.
-# Evidence lands in tools/governance/evidence/.
+# over rustc internals), and the docs/09 T04 six-control binding (forged
+# trace or artifact substitution: content-addressed manifests, build
+# identity, reject digest mismatch, and preserve redaction commitments
+# bound to live enforcement; hash chain/Merkle root over events and
+# optional signing/attestation recorded as typed absences, each with its
+# own mechanical absence-check). Each checker runs its self-test first —
+# every violating fixture must be caught — so none of these can pass
+# vacuously. Evidence lands in tools/governance/evidence/.
 #
 # `check_revision_delta.py` is the two-revision half of GOV-1-08/09: the other
-# five checkers read one revision, and "this change was semantic" / "this change
+# six checkers read one revision, and "this change was semantic" / "this change
 # was breaking" are not one-revision properties. It runs *last* and guards
 # itself on a resolvable base rather than being guarded here, because a shell
 # guard would have to duplicate the base-resolution logic and could then
@@ -92,6 +97,8 @@ governance:
     python3 tools/governance/check_t12_evidence.py
     python3 tools/governance/check_r16_evidence.py --self-test
     python3 tools/governance/check_r16_evidence.py
+    python3 tools/governance/check_t04_evidence.py --self-test
+    python3 tools/governance/check_t04_evidence.py
     python3 tools/governance/check_revision_delta.py --self-test
     python3 tools/governance/check_revision_delta.py
 
