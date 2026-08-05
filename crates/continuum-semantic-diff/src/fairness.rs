@@ -580,6 +580,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn audit_the_dualize_table_is_rfc_0031s_verbatim_duality_and_nothing_else() {
+        // bn-2nwpg's fairness audit: the delegation pin above
+        // (`a_condition_edit_the_oracle_could_decide_still_classifies_unknown`)
+        // proves zero behavior change, and THIS pin proves the pinned polarity is
+        // the RFC's, not merely unchanged — RFC 0031, verbatim: "the relation on
+        // the *constraint* is the dual of the relation on the *formula*: formula
+        // `weakened` ⇒ constraint `strengthened`, and formula `strengthened` ⇒
+        // constraint `weakened`... `incomparable`/`unknown` pass through the
+        // duality unchanged." Every oracle answer that ever flows through the
+        // delegated arm crosses exactly this table, so when the licensed upgrade
+        // lands (bn-8mlg's recorded path), the direction it records is already
+        // proven antitone-correct. Note the contrast pinned in
+        // `crate::assumptions`: its consumption is direct, and its module doc
+        // derives why the two differ.
+        assert_eq!(dualize(Relation::Weakened), Relation::Strengthened);
+        assert_eq!(dualize(Relation::Strengthened), Relation::Weakened);
+        for passthrough in [
+            Relation::Unchanged,
+            Relation::Incomparable,
+            Relation::Unknown,
+            Relation::Added,
+            Relation::Removed,
+        ] {
+            assert_eq!(dualize(passthrough), passthrough);
+        }
+    }
+
     // --- `kind` -----------------------------------------------------------------------------
 
     #[test]

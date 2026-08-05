@@ -86,40 +86,85 @@
 //! base row for the same reason `fairness`'s is — and records the gap here and in the
 //! bone comment (bn-7vg7) rather than deciding it silently.
 //!
-//! # No dualize — unlike `fairness[].condition`
+//! # No dualize — unlike `fairness[].condition` — derived, not assumed
 //!
-//! `fairness[].condition` sits in an antitone position (a weaker condition applies
-//! more often, so it *strengthens* the constraint), which is why
-//! [`crate::fairness::formula_relation`] runs its answer through
-//! [`crate::fairness::dualize`]. An assumption's `expression` has no such inversion:
-//! it is not a guard on when something else applies, it *is* the thing whose
-//! behavior-set the direction is stated over, exactly as a claim's `expression` is.
-//! "The relation is computed on `expression` exactly as for claims — the same order"
-//! means exactly that: a formula `strengthened` (fewer behaviors admitted) is an
-//! assumption `strengthened`, full stop, with no dual step in between. This module
-//! has no `dualize` function because none is called for.
+//! The oracle's answer is consumed **directly**: a formula relation *is* the
+//! assumption relation, with no dual step in between. Getting this backwards is
+//! exactly the dangerous-direction failure this family exists to prevent (a real
+//! in-place strengthening would classify `weakened` and read as the safe
+//! direction), so the polarity is derived from the texts and pinned by tests, not
+//! assumed:
 //!
-//! # The oracle this module does not have
+//! - RFC 0031's `assumptions` section: "The relation is computed on `expression`
+//!   exactly as for claims — the same order, on the same normal form." The *order*
+//!   is `properties`' behavior-set inclusion, applied to the assumption's own
+//!   expression; what "differ[s]" is "Direction and policy valence" — which
+//!   direction is dangerous — never the mechanism. An assumption `strengthened`
+//!   "admits fewer environments"; a formula `strengthened` admits fewer behaviors.
+//!   Same sign, term for term.
+//! - `fairness[].condition` is the contrast case, and RFC 0031 marks it
+//!   explicitly: "the enabling predicate occupies an **antitone** position. A
+//!   fairness constraint applies wherever its condition holds, so weakening the
+//!   condition strengthens the constraint" — which is why
+//!   [`crate::fairness::formula_relation`]'s answer runs through
+//!   [`crate::fairness::dualize`]. An assumption's `expression` occupies no such
+//!   position: it is not a guard on when something else applies, it *is* the thing
+//!   whose behavior-set the direction is stated over, exactly as a claim's
+//!   `expression` is. No antitone marker appears anywhere in the `assumptions`
+//!   text.
+//! - The antitone reading is anchored, in fairness's case, on a `null` extremum:
+//!   "`null` means unconditional and is the weakest condition, hence the
+//!   *strongest* constraint" (RFC 0031), with RFC 0037's absence rule ("An absent
+//!   `condition` key MUST be read as `null`", the equivalence family correction 15
+//!   extends to `scope.abstraction_level` alongside `bounds.values`/`bounds.depth`)
+//!   supplying the absent-key case. `assumptions[].expression` is in neither list
+//!   and has no null form at all — it is a *required* member of the schema's
+//!   `assumptions[]` items (pinned below against the live schema) — so the
+//!   weakest-formula/strongest-unit inversion that forces fairness's dual has no
+//!   anchor here, and no extremum arm exists in this module's content axis.
+//!
+//! So this module has no `dualize` function because none is called for, and the
+//! disguise sweeps prove the sign: a real in-place strengthening of a corpus
+//! assumption classifies `strengthened` (and is reviewed/blocked), never
+//! `weakened`, and a dualizing mutant is pinned wrong in both directions.
+//!
+//! # The oracle, and the license it is consulted under (`bn-2nwpg`)
 //!
 //! `expression` is a [`PropertyExpression`] — the identical `$defs/property_expression`
 //! carrier `claims[].expression` uses (RFC 0037: "`assumptions[].expression` reuses
 //! `PropertyExpression`") — and RFC 0031 computes its relation "exactly as for
-//! claims": Finite-fragment behavior-set inclusion with a checked witness, or a
-//! discharged `Symbolic` obligation, per the "Properties (per fragment)"
-//! classification-lattice bullet. That decision procedure is not implemented
-//! anywhere in `continuum-intent` as of this bone — `continuum_intent::property`'s
-//! own module doc says plainly "Classification is not here. Whether a change is
-//! `weakened` or `unknown` is RFC 0031's question (PR 12)", and
-//! `continuum_intent::assumptions` repeats the same deferral for its own field
-//! verbatim. No Finite-fragment inclusion oracle exists in this crate or that one at
-//! the time of this writing (`bn-8mlg`, IMPL-02, the `properties` bone, is the one
-//! that would need to land it first, and has not). [`classify_pair`] is honest about
-//! the gap rather than guessing past it: two *unequal*, both-present canonical
-//! encodings classify [`Relation::Unknown`] — never a guessed `strengthened`,
-//! `weakened`, or `incomparable` — matching [`crate::fairness::formula_relation`]'s
-//! identical answer for the identical reason (S2: "unequal encodings ⇒ no direction").
-//! This is recorded again in the bone comment as a real, current gap for whoever
-//! lands the Finite oracle next, not invented or duplicated here.
+//! claims". When this module landed (`bn-7vg7`) no Finite-fragment inclusion oracle
+//! existed anywhere in this crate or `continuum-intent`, so every unequal
+//! canonical encoding failed closed to [`Relation::Unknown`]; `bn-8mlg` (IMPL-02,
+//! `properties`) has since landed [`crate::properties::finite_formula_relation`] —
+//! a sound, bounded ([`crate::properties::IMPLICATION_STEP_BUDGET`]) implication
+//! prover — and made [`crate::properties`] the crate's **one** formula-comparison
+//! authority. This module now consumes it through the authority's own license arm,
+//! [`crate::properties::expression_relation`], shared verbatim with `properties`'
+//! content axis so the license cannot drift between the two consumers:
+//!
+//! - a direction is affirmed only when **both sides declare the same fragment and
+//!   that fragment is `Finite`** (RFC 0037 S3's license — directions "require the
+//!   fragment's own decision procedure");
+//! - both sides declaring the same non-`Finite` fragment, the two sides declaring
+//!   *different* fragments, and both sides leaving `fragment` absent (W3: absence
+//!   denotes the *contract's* declared fragment, which a two-[`AssumptionSet`]
+//!   classifier is never given — the same `scope.fragments` boundary the
+//!   `unsupported` section below records) all fail closed to
+//!   [`Relation::Unknown`];
+//! - an implication the bounded derivation search cannot establish — including by
+//!   budget exhaustion, and including a pair proved in *both* directions (the
+//!   properties module doc's correction-16-style collision refusal, inherited here
+//!   by delegation) — is [`Relation::Unknown`], never a guess and never
+//!   `incomparable` (a failed derivation refutes nothing, so `incomparable` never
+//!   flows from formula content anywhere in this crate).
+//!
+//! The one behavioral upgrade over `bn-7vg7`'s fail-closed landing is therefore
+//! exactly the single-axis decidable case: an expression edit with declaredness
+//! held fixed, both sides `Finite`, whose inclusion the oracle derives, now
+//! classifies an *affirmed* [`Relation::Strengthened`] or [`Relation::Weakened`]
+//! with a recomputable witness — the direction consumed straight, per the
+//! derivation above. Everything else answers exactly as it did before this bone.
 //!
 //! # What counts as "the same canonical encoding" — and why `source` and a bare
 //! declaredness edit are answered differently
@@ -145,16 +190,20 @@
 //! not state a combined rule for "`expression` and `classification` both moved in the
 //! same revision" — the same silence `properties`' analogous `kind`/`observer` bullet
 //! has ("a `kind` change with an unchanged expression classifies `incomparable`",
-//! stated only for the fixed-expression case). This module's reading, recorded here
-//! rather than decided silently: when the expression differs, [`Relation::Unknown`]
-//! already governs (no oracle, see above), and `Unknown` and `Incomparable` are both
-//! non-affirmative and fail closed identically under `PolicyTable::verdict`'s P2 — so
-//! folding a coincident declaredness edit into the same `Unknown` record costs
-//! nothing the fail-closed rule cares about, while inventing a case split RFC 0031
-//! never states would risk being *more* permissive than the text, not less. A
-//! narrower classifier — one that special-cased "content differs and declaredness
-//! also differs" into its own token — is a candidate for whoever lands the Finite
-//! oracle and needs one, not a change this bone makes.
+//! stated only for the fixed-expression case). The reading `bn-7vg7` recorded here
+//! rather than decided silently — and which this bone (`bn-2nwpg`) preserves
+//! unchanged, exactly as `properties` resolved its identical silence: the compound
+//! edit classifies [`Relation::Unknown`], and **the oracle is never consulted
+//! across a declaredness move**, so a `classification`/`fidelity_profile` flip can
+//! never ride a decidable expression edit into an affirmed direction (tested — the
+//! mirror of `properties`' "the implication oracle is never consulted across a
+//! meaning change"). `Unknown` and `Incomparable` are both non-affirmative and
+//! fail closed identically under `PolicyTable::verdict`'s P2, so folding the
+//! coincident declaredness edit into the same `Unknown` record costs nothing the
+//! fail-closed rule cares about, while inventing a case split RFC 0031 never
+//! states would risk being *more* permissive than the text, not less. `bn-181aj`
+//! may ratify this resolution as an RFC correction; until it does, the recorded
+//! reading stands.
 //!
 //! # `fragment`-only movement
 //!
@@ -197,13 +246,14 @@
 //! are separate bones — `bn-b8ru` (IMPL-01, exact equality), `bn-8mlg` (IMPL-02,
 //! property AST edit), `bn-ycn6` (IMPL-04, bound change), `bn-1sdp` (IMPL-05, observer
 //! event change), `bn-3vxp` (IMPL-06, fault/fairness/assurance change) — landing as
-//! their own reviewable units. Also out of scope, honestly: the Finite-fragment
-//! inclusion oracle (`properties`' bone, `bn-8mlg`, to land first), the wire
-//! `intent_changes[]`/`diff_*` artifact assembly, the impact set, and the field-level
-//! P1 completeness a `continuum_intent::change_policy::PolicyTable::verdict` call
-//! needs even when zero units changed — all of it belongs to whatever later bone
-//! assembles a full `diff_*` artifact across all fifteen fields, not to one field's
-//! classifier.
+//! their own reviewable units. The Finite-fragment inclusion oracle itself is
+//! `properties`' (`bn-8mlg`); this module consumes it through the shared license
+//! arm (`bn-2nwpg`) and implements none of it. Still out of scope, honestly: the
+//! wire `intent_changes[]`/`diff_*` artifact assembly, the impact set, and the
+//! field-level P1 completeness a
+//! `continuum_intent::change_policy::PolicyTable::verdict` call needs even when
+//! zero units changed — all of it belongs to whatever later bone assembles a full
+//! `diff_*` artifact across all fifteen fields, not to one field's classifier.
 
 use std::collections::BTreeSet;
 
@@ -218,12 +268,13 @@ use continuum_intent::property::PropertyExpression;
 ///
 /// The relation is always one [`PolicyField::Assumptions`] admits — pinned by this
 /// module's tests, not merely asserted — because [`classify_assumptions`] only ever
-/// produces [`Relation::Unchanged`], [`Relation::Added`], [`Relation::Removed`],
-/// [`Relation::Incomparable`], or [`Relation::Unknown`], all five of which are on the
-/// assumptions row (`strengthened`, `weakened`, and `unsupported` are admissible on
-/// that row too, per RFC 0031's own table and the fail-closed rule, but this module
-/// never emits them — see the module doc, "The oracle this module does not have" and
-/// "`unsupported` is out of this module's reach, honestly").
+/// produces [`Relation::Unchanged`], [`Relation::Strengthened`],
+/// [`Relation::Weakened`], [`Relation::Added`], [`Relation::Removed`],
+/// [`Relation::Incomparable`], or [`Relation::Unknown`], all seven of which are on
+/// the assumptions row. The directions come only from the `Finite`-licensed oracle
+/// arm (`bn-2nwpg`; module doc, "The oracle, and the license it is consulted
+/// under"); `unsupported` is admissible on the row too but never emitted here — see
+/// "`unsupported` is out of this module's reach, honestly".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssumptionChange {
     unit: UnitKey,
@@ -329,15 +380,23 @@ fn expression_unchanged(before: &PropertyExpression, after: &PropertyExpression)
 
 /// RFC 0031's per-unit comparison for one assumption present on both sides.
 ///
-/// - Equal canonical encodings ([`expression_unchanged`]) and equal declaredness
-///   (`classification`, `fidelity_profile` both hold): [`Relation::Unchanged`] — R2.
-/// - Equal canonical encodings, but `classification` or `fidelity_profile` (or both)
-///   moved: [`Relation::Incomparable`] — RFC 0031's explicit rule for this field,
-///   quoted in the module doc, scoped to exactly this case.
-/// - Unequal canonical encodings: [`Relation::Unknown`], whatever else moved — no
-///   Finite-fragment inclusion oracle exists in this crate to discharge a direction
-///   (see the module doc, "The oracle this module does not have"), so this is the
-///   honest S2 answer, never a guess.
+/// The declaredness axis first, then the content axis — the same two-axis shape as
+/// [`crate::properties`]' `classify_pair`, with `classification`/`fidelity_profile`
+/// standing where `kind`/`observer` stand there:
+///
+/// - Declaredness fixed, equal canonical encodings ([`expression_unchanged`]):
+///   [`Relation::Unchanged`] — R2, and nothing weaker.
+/// - Declaredness moved (`classification`, `fidelity_profile`, or both), equal
+///   encodings: [`Relation::Incomparable`] — RFC 0031's explicit rule for this
+///   field, quoted in the module doc, scoped to exactly this case.
+/// - Declaredness moved *and* encodings unequal: [`Relation::Unknown`] — the
+///   compound case the RFC does not state, folded into the non-affirmative
+///   relation that already governs; the oracle is never consulted across a
+///   declaredness move (module doc, and `bn-7vg7`'s recorded resolution).
+/// - Declaredness fixed, encodings unequal:
+///   [`crate::properties::expression_relation`] — the shared fragment license,
+///   then the bounded oracle, its relation consumed directly with no dualize
+///   (module doc, "No dualize"; `bn-2nwpg`).
 ///
 /// A `debug_assert_eq!` cross-checks [`expression_unchanged`] against
 /// [`PropertyExpression::identity_preimage_json`] equality on every call — the two
@@ -346,6 +405,8 @@ fn expression_unchanged(before: &PropertyExpression, after: &PropertyExpression)
 /// `Observer::identity`.
 #[must_use]
 fn classify_pair(before: &Assumption, after: &Assumption) -> Relation {
+    let declaredness_moved = before.classification() != after.classification()
+        || before.fidelity_profile() != after.fidelity_profile();
     let unchanged = expression_unchanged(before.expression(), after.expression());
     debug_assert_eq!(
         unchanged,
@@ -353,16 +414,13 @@ fn classify_pair(before: &Assumption, after: &Assumption) -> Relation {
         "expression_unchanged and identity_preimage_json equality must agree for unit {}",
         before.unit(),
     );
-    if unchanged {
-        if before.classification() == after.classification()
-            && before.fidelity_profile() == after.fidelity_profile()
-        {
-            Relation::Unchanged
-        } else {
-            Relation::Incomparable
+    match (declaredness_moved, unchanged) {
+        (false, true) => Relation::Unchanged,
+        (true, true) => Relation::Incomparable,
+        (true, false) => Relation::Unknown,
+        (false, false) => {
+            crate::properties::expression_relation(before.expression(), after.expression())
         }
-    } else {
-        Relation::Unknown
     }
 }
 
@@ -584,15 +642,15 @@ mod tests {
         assert_eq!(relation_of(&changes, "A"), Relation::Incomparable);
     }
 
-    // --- content: no oracle, never a guess -----------------------------------------------------
+    // --- content: the licensed oracle, consumed directly (bn-2nwpg) ----------------------------
 
     #[test]
-    fn two_distinct_expressions_classify_unknown_not_a_guess() {
-        // No Finite oracle exists yet (see the module doc): the honest answer is
-        // `unknown`, never a guessed `strengthened`/`weakened`/`incomparable` — this
-        // is the dangerous direction (RFC 0031: an assumption `strengthened` "admits
-        // fewer environments and makes verification easier"), so a false `unchanged`
-        // or a false affirmative here is exactly the failure INV-001 exists to catch.
+    fn two_distinct_expressions_the_oracle_cannot_relate_classify_unknown_not_a_guess() {
+        // The oracle is consulted now (bn-2nwpg) but cannot relate two opaque
+        // atoms in either direction, and a failed derivation refutes nothing: the
+        // honest answer is `unknown`, never a guessed
+        // `strengthened`/`weakened`/`incomparable` — S2's safe side, unchanged from
+        // bn-7vg7's landing for exactly this pair.
         let before = set([assumption("A", &predicate("p"), None, None)]);
         let after = set([assumption("A", &predicate("q"), None, None)]);
         let changes = classify_assumptions(&before, &after);
@@ -600,21 +658,211 @@ mod tests {
     }
 
     #[test]
+    fn a_decidable_in_place_narrowing_classifies_an_affirmed_strengthened() {
+        // The dangerous direction, decided and named: `p` -> `p AND q` admits
+        // fewer environments, and the oracle derives behaviors(after) ⊆
+        // behaviors(before) by conjunct rules — RFC 0031's "an assumption
+        // `strengthened` admits fewer environments and makes verification easier",
+        // consumed directly with no dualize (bn-2nwpg; module doc, "No dualize").
+        let narrowed = Formula::and(vec![predicate("p"), predicate("q")]).expect("two operands");
+        let before = set([assumption("A", &predicate("p"), None, None)]);
+        let after = set([assumption("A", &narrowed, None, None)]);
+        let changes = classify_assumptions(&before, &after);
+        assert_eq!(relation_of(&changes, "A"), Relation::Strengthened);
+    }
+
+    #[test]
+    fn a_decidable_in_place_widening_classifies_an_affirmed_weakened() {
+        // The mirror, so neither directional arm is vacuous: `p` -> `p OR q`
+        // admits more environments — formula weakened IS assumption weakened.
+        let widened = Formula::or(vec![predicate("p"), predicate("q")]).expect("two operands");
+        let before = set([assumption("A", &predicate("p"), None, None)]);
+        let after = set([assumption("A", &widened, None, None)]);
+        let changes = classify_assumptions(&before, &after);
+        assert_eq!(relation_of(&changes, "A"), Relation::Weakened);
+    }
+
+    #[test]
+    fn polarity_a_sweep_of_dressed_up_strengthenings_never_classifies_weakened_or_silent() {
+        // The disguise sweep the bone brief demands prove the polarity rather than
+        // assume it: every pair below is a genuine strengthening
+        // (behaviors(after) ⊆ behaviors(before)), arriving in CPNF-1 through
+        // several different shapes (the `not` costume is rewritten by N2 into
+        // conjunct form before the oracle ever sees it — the normalizer, not this
+        // module, dissolves that dressing). A dualized consumption — fairness's
+        // antitone reading misapplied here — would classify every one `weakened`,
+        // the safe-looking token on exactly the dangerous move. None may classify
+        // `weakened`, `unchanged`, or fail to appear.
+        let p_and_q = Formula::and(vec![predicate("p"), predicate("q")]).expect("two operands");
+        let p_or_q = Formula::or(vec![predicate("p"), predicate("q")]).expect("two operands");
+        let cases: Vec<(&str, Formula, Formula)> = vec![
+            ("conjunct added", predicate("p"), p_and_q.clone()),
+            ("disjunct dropped", p_or_q.clone(), predicate("p")),
+            (
+                "narrowing under always",
+                Formula::always(p_or_q.clone()),
+                Formula::always(predicate("p")),
+            ),
+            (
+                "narrowing under eventually",
+                Formula::eventually(p_or_q),
+                Formula::eventually(predicate("p")),
+            ),
+            (
+                "widening under not (antitone congruence)",
+                Formula::not(predicate("p")),
+                Formula::not(Formula::or(vec![predicate("p"), predicate("q")]).expect("two")),
+            ),
+        ];
+        for (name, before_ast, after_ast) in cases {
+            let before = set([assumption("A", &before_ast, None, None)]);
+            let after = set([assumption("A", &after_ast, None, None)]);
+            let changes = classify_assumptions(&before, &after);
+            assert_eq!(
+                relation_of(&changes, "A"),
+                Relation::Strengthened,
+                "disguise {name:?} must classify strengthened — anything else is the \
+                 dangerous-direction polarity failure"
+            );
+        }
+    }
+
+    #[test]
     fn a_content_change_alongside_a_declaredness_change_still_classifies_unknown() {
-        // Both axes moved: content is unequal, so `Unknown` governs regardless of the
-        // coincident declaredness edit — the module doc's documented reading of RFC
-        // 0031's silence on the combined case. Never `unchanged`, and never a
-        // fabricated `incomparable` invented past what the expression comparison
-        // alone can support.
+        // Both axes moved: `Unknown` governs regardless of the coincident
+        // declaredness edit — bn-7vg7's recorded reading of RFC 0031's silence on
+        // the combined case, preserved by bn-2nwpg. Strengthened deliberately by
+        // this bone (bn-2nwpg): the expression pair is now one the oracle CAN
+        // decide (asserted, so the pin cannot go stale vacuously), proving the
+        // oracle is never consulted across a declaredness move — the mirror of
+        // properties' "a `kind` flip cannot ride an expression edit into a
+        // direction". Never `unchanged`, never an affirmed direction, and never a
+        // fabricated `incomparable`.
+        let narrowed = Formula::and(vec![predicate("p"), predicate("q")]).expect("two operands");
+        assert_eq!(
+            crate::properties::finite_formula_relation(&predicate("p"), &narrowed),
+            Relation::Strengthened,
+            "the oracle must be able to decide this pair, or the pin is vacuous"
+        );
         let before = set([assumption("A", &predicate("p"), None, None)]);
         let after = set([assumption(
             "A",
-            &predicate("q"),
+            &narrowed,
             Some(AssumptionClassification::Trust),
             None,
         )]);
         let changes = classify_assumptions(&before, &after);
         assert_eq!(relation_of(&changes, "A"), Relation::Unknown);
+    }
+
+    // --- content: the fragment license fails closed (bn-2nwpg) ---------------------------------
+
+    #[test]
+    fn a_decidable_shaped_edit_without_the_finite_license_classifies_unknown() {
+        // The same `p` -> `p AND q` narrowing the decided test above affirms, in
+        // every unlicensed costume: S3 grants directions only under "the
+        // fragment's own decision procedure", so each must fail closed to
+        // `unknown` — never a direction on an unlicensed pair.
+        let narrowed = Formula::and(vec![predicate("p"), predicate("q")]).expect("two operands");
+        let unlicensed: Vec<(&str, Option<Fragment>, Option<Fragment>)> = vec![
+            (
+                "both sides Symbolic",
+                Some(Fragment::Symbolic),
+                Some(Fragment::Symbolic),
+            ),
+            (
+                "fragment moved Finite -> Symbolic",
+                Some(Fragment::Finite),
+                Some(Fragment::Symbolic),
+            ),
+            ("declared on one side only", Some(Fragment::Finite), None),
+            ("both sides absent", None, None),
+        ];
+        for (name, before_fragment, after_fragment) in unlicensed {
+            let before = AssumptionSet::from_assumptions([Assumption::new(
+                unit("A"),
+                expression(&predicate("p"), before_fragment),
+                None,
+                None,
+            )])
+            .expect("one assumption");
+            let after = AssumptionSet::from_assumptions([Assumption::new(
+                unit("A"),
+                expression(&narrowed, after_fragment),
+                None,
+                None,
+            )])
+            .expect("one assumption");
+            let changes = classify_assumptions(&before, &after);
+            assert_eq!(
+                relation_of(&changes, "A"),
+                Relation::Unknown,
+                "unlicensed case {name:?} must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn the_step_budget_fails_closed_through_the_assumptions_path() {
+        // Boundedness is observable through this module, not only through the
+        // oracle's own surface: the same one-disjunct widening decides `weakened`
+        // at 8 atoms and exhausts `IMPLICATION_STEP_BUDGET` into `unknown` at 400
+        // — mirroring the properties evidence, through `classify_assumptions`.
+        // Both inputs are flat linear vectors of distinct atoms, built once.
+        let disjuncts = |n: usize| -> Formula {
+            Formula::or((0..n).map(|i| predicate(&format!("p{i:03}"))).collect())
+                .expect("two or more operands")
+        };
+        for (atoms, expected) in [(8, Relation::Weakened), (400, Relation::Unknown)] {
+            let before = set([assumption("A", &disjuncts(atoms), None, None)]);
+            let after = set([assumption("A", &disjuncts(atoms + 1), None, None)]);
+            let changes = classify_assumptions(&before, &after);
+            assert_eq!(
+                relation_of(&changes, "A"),
+                expected,
+                "at {atoms} atoms the one-disjunct widening must classify {expected}"
+            );
+        }
+    }
+
+    // --- polarity anti-vacuity: a dualizing consumer is wrong in both directions ---------------
+
+    /// The plausible, *wrong* wiring this bone's brief names as the family's
+    /// dangerous-direction failure: consuming the oracle through
+    /// `fairness`'s antitone dual (formula `strengthened` ⇒ unit `weakened` and
+    /// vice versa) where RFC 0031 says "exactly as for claims — the same order".
+    fn mutant_dualizes_the_oracle(before: &Assumption, after: &Assumption) -> Relation {
+        match crate::properties::expression_relation(before.expression(), after.expression()) {
+            Relation::Strengthened => Relation::Weakened,
+            Relation::Weakened => Relation::Strengthened,
+            other => other,
+        }
+    }
+
+    #[test]
+    fn negative_mutant_dualizing_the_oracle_is_wrong_in_both_directions() {
+        let narrowed = Formula::and(vec![predicate("p"), predicate("q")]).expect("two operands");
+        let widened = Formula::or(vec![predicate("p"), predicate("q")]).expect("two operands");
+
+        // Direction one: a real strengthening (the dangerous direction — the
+        // dualized reading would sell it as the safe one).
+        let before = assumption("A", &predicate("p"), None, None);
+        let after = assumption("A", &narrowed, None, None);
+        assert_eq!(classify_pair(&before, &after), Relation::Strengthened);
+        assert_eq!(
+            mutant_dualizes_the_oracle(&before, &after),
+            Relation::Weakened,
+            "the mutant must actually get this wrong, or it is not exercising the bug"
+        );
+
+        // Direction two: a real weakening.
+        let after_wide = assumption("A", &widened, None, None);
+        assert_eq!(classify_pair(&before, &after_wide), Relation::Weakened);
+        assert_eq!(
+            mutant_dualizes_the_oracle(&before, &after_wide),
+            Relation::Strengthened,
+            "the mutant must actually get this wrong, or it is not exercising the bug"
+        );
     }
 
     #[test]
@@ -688,6 +936,8 @@ mod tests {
     fn every_relation_this_module_can_produce_is_admissible_on_the_assumptions_field() {
         for relation in [
             Relation::Unchanged,
+            Relation::Strengthened,
+            Relation::Weakened,
             Relation::Added,
             Relation::Removed,
             Relation::Incomparable,

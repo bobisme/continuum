@@ -19,7 +19,7 @@
 //! | "A change to `classification` or to `fidelity_profile` with an unchanged expression MUST classify `incomparable`" | [`positive_reclassifying_a_real_corpus_assumption_with_its_expression_held_fixed_classifies_incomparable_and_is_reviewed`] |
 //! | "the classifier MUST NOT match claims by expression to defeat the rename" (properties' text, same order for assumptions) | [`negative_renaming_a_real_corpus_assumption_while_preserving_its_expression_is_removed_plus_added`] |
 //! | R2 / "CPNF-1 interaction": `source` MUST NOT contribute to classification | [`negative_rewriting_a_real_corpus_assumptions_source_alone_still_classifies_unchanged`] |
-//! | S2 / fail-closed rule: no Finite oracle exists yet, so an unequal expression is `unknown`, never a guessed direction | [`pin_no_content_edit_across_a_sweep_of_real_fixture_mutations_ever_emits_strengthened_or_weakened`] |
+//! | S2 / fail-closed rule: an unequal expression the oracle cannot relate is `unknown`, never a guessed direction (clause re-scoped by `bn-2nwpg`, which wired the oracle in after this file landed — every sweep member is an atom rename the oracle cannot decide, so the pinned expectations hold unchanged) | [`pin_no_content_edit_across_a_sweep_of_real_fixture_mutations_ever_emits_strengthened_or_weakened`] |
 //! | anti-vacuity: the positive tests are not vacuously true | [`negative_mutant_blind_to_declaredness_would_wrongly_pass_a_reclassification_as_unchanged_on_the_real_fixture`], [`negative_mutant_matching_by_expression_instead_of_id_would_wrongly_pass_the_real_fixtures_rename_as_unchanged`] |
 //!
 //! # House rules, inherited from the PR-12 evidence precedent
@@ -133,10 +133,12 @@ fn positive_narrowing_a_real_corpus_assumptions_expression_is_never_silent_and_i
     // "admits fewer environments", making verification easier while the claim it
     // guards reads unchanged. Applied to the fixture's `NetworkNoForgery` assumption
     // (`always(was_sent OR NOT occurs(Deliver))`): renaming the predicate it hinges
-    // on is enough to move the canonical encoding, and — with no Finite oracle in
-    // this crate to discharge a direction either way — the honest, fail-closed
-    // answer is `unknown`, never a guessed `unchanged` that would let the edit pass
-    // silently.
+    // on is enough to move the canonical encoding, and — since the atoms are opaque
+    // to the oracle bn-2nwpg wired in after this file landed, exactly as they were
+    // to the oracle-less classifier it pinned — the honest, fail-closed answer is
+    // `unknown`, never a guessed `unchanged` that would let the edit pass
+    // silently. (A *decidable* in-place strengthening now classifies an affirmed
+    // `strengthened`: `tests/pr12_assumption_oracle_wiring_evidence.rs`.)
     let before = fixture_assumptions(FIXTURE);
     let mutated = FIXTURE.replacen(r#""name":"was_sent""#, r#""name":"was_definitely_sent""#, 1);
     assert_ne!(mutated, FIXTURE, "the replacement must actually fire");
@@ -339,11 +341,15 @@ fn negative_rewriting_a_real_corpus_assumptions_source_alone_still_classifies_un
 #[test]
 fn pin_no_content_edit_across_a_sweep_of_real_fixture_mutations_ever_emits_strengthened_or_weakened()
  {
-    // S2 / the fail-closed rule: "unequal encodings ⇒ no direction". No
-    // Finite-fragment inclusion oracle exists in this crate yet (see the module
-    // doc), so every one of these real-fixture content edits — including ones that
-    // read, in English, as obviously narrowing or obviously widening — must land on
-    // `unknown`, never on a guessed `strengthened`/`weakened`.
+    // S2 / the fail-closed rule: "unequal encodings ⇒ no direction" unless an
+    // obligation is discharged. Every mutation in this sweep is an atom rename,
+    // which the Finite oracle (wired in by bn-2nwpg after this file landed) cannot
+    // relate in either direction — so every one of these real-fixture content
+    // edits, including ones that read, in English, as obviously narrowing or
+    // obviously widening, must still land on `unknown`, never on a guessed
+    // `strengthened`/`weakened`. The pinned expectations are unchanged; only this
+    // comment's reason moved from "no oracle exists" to "the oracle proves
+    // nothing here, and a failed derivation refutes nothing".
     let before = fixture_assumptions(FIXTURE);
     let mutations: [(&str, &str); 3] = [
         (r#""name":"was_sent""#, r#""name":"was_definitely_sent""#),

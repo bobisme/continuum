@@ -76,7 +76,7 @@
 //! | DX02-A01 | weaken property — §5.1 complementary disjunct | replicated-register | `properties: weakened` | `block` |
 //! | DX02-A02 | weaken property, disguised by rename | replicated-register | `properties: removed`+`added` | `block` |
 //! | DX02-A03 | strengthen assumptions — add a favorable one | replicated-register | `assumptions: added` | `review` |
-//! | DX02-A04 | strengthen an assumption in place | replicated-register | `assumptions: unknown` (fail-closed, no oracle) | `review` |
+//! | DX02-A04 | strengthen an assumption in place | replicated-register | `assumptions: unknown` (fail-closed, atoms unrelatable) | `review` |
 //! | DX02-A05 | reduce bounds — nodes 3 → 2 | replicated-register | `bounds: contracted` | `block` |
 //! | DX02-A06 | reduce bounds, disguised by mixed movement | replicated-register | `bounds: incomparable` | `review` |
 //! | DX02-A07 | hide observer events — §19.5, drop the family | replicated-register | `observers: coarsened` | `review` |
@@ -144,12 +144,18 @@
 //!   the fail-closed rule is the load-bearing guard (and is pinned load-bearing
 //!   here by the fail-open mutant).
 //!
-//! One oracle note, recorded for precision: `assumptions` has no Finite inclusion
-//! oracle yet (its module doc records the gap), so DX02-A04's in-place strengthening
-//! classifies `unknown` rather than the RFC's eventual `strengthened` — fail-closed,
-//! reviewed, never allowed. The direction-carrying oracle exists today only for
-//! `properties`, where DX02-A01/A16 get their affirmed `weakened` with a
-//! recomputable witness.
+//! One oracle note, recorded for precision and amended by `bn-2nwpg` (which wired
+//! `assumptions` to the Finite oracle after this campaign first ran): DX02-A04's
+//! in-place strengthening is an atom rename (`was_sent` → `was_definitely_sent`),
+//! which the oracle — now consulted for `assumptions` under the `Finite` license —
+//! cannot relate in either direction, so the row's required `unknown` is unchanged:
+//! fail-closed, reviewed, never allowed, for the S2 reason (a failed derivation
+//! refutes nothing), no longer for want of an oracle. A *decidable* in-place
+//! strengthening now classifies an affirmed `strengthened`
+//! (`tests/pr12_assumption_oracle_wiring_evidence.rs` closes one into `review`
+//! under this fixture's own verb and `block` under Die Hard's `locked`).
+//! DX02-A01/A16 keep their affirmed `weakened` on `properties` with a recomputable
+//! witness, as before.
 
 use continuum_intent::change_policy::{
     AcceptancePath, ClassificationRecord, PolicyDecision, PolicyField, PolicyVerb, Relation,

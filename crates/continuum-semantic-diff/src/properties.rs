@@ -206,10 +206,13 @@
 //! `condition` comparison delegates its declared-pair arm to [`formula_relation`]
 //! (behavior unchanged: fairness items declare no fragment, so no direction is
 //! licensed there yet — its module doc records the upgrade path);
-//! [`crate::assumptions`] still carries its own equality comparison and `unknown`
-//! fallback, deliberately untouched by this bone per the lead's routing — the
-//! upgrade (its expressions carry the `fragment` a license needs) is recorded in
-//! the bone comment for a follow-up, not smuggled in here.
+//! [`crate::assumptions`] consumes the authority through the shared license arm
+//! [`expression_relation`] (`bn-2nwpg`, the follow-up this module's bone comment
+//! recorded): its expressions carry the `fragment` a license needs, so its
+//! single-axis content edits reach [`finite_formula_relation`] under the identical
+//! `Finite` license — the oracle's relation consumed *directly*, with no dualize,
+//! per RFC 0031's "exactly as for claims — the same order" (that module's doc
+//! derives the polarity).
 //!
 //! # Scope: PR-12 / IMPL-02 only
 //!
@@ -386,12 +389,19 @@ fn classify_pair(before: &Claim, after: &Claim) -> Relation {
 /// the fragment license (module doc, "The fragment license"), then
 /// [`finite_formula_relation`].
 ///
-/// Reached only from [`classify_pair`]'s meaning-fixed, content-moved arm, so the
+/// Reached only from a content-moved, single-axis arm — [`classify_pair`]'s
+/// meaning-fixed arm here, and [`crate::assumptions`]' declaredness-fixed arm
+/// (`bn-2nwpg`), which shares this function so the fragment license is written
+/// once and cannot drift between the two consumers ("exactly as for claims — the
+/// same order" is RFC 0031's own pointer back at this field's rule). The
 /// `Unchanged` arm of the oracle is unreachable from here (equal fragments plus
 /// unequal encodings entail unequal ASTs); it exists on the authority function
 /// because that function is also a public surface.
 #[must_use]
-fn expression_relation(before: &PropertyExpression, after: &PropertyExpression) -> Relation {
+pub(crate) fn expression_relation(
+    before: &PropertyExpression,
+    after: &PropertyExpression,
+) -> Relation {
     if before.fragment() != after.fragment() {
         // The unit changed which decision procedure it answers to; no single
         // fragment's order covers the pair.
