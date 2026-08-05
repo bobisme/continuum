@@ -37,8 +37,11 @@
 //!   manifest. Nothing is parsed out of a rendered line.
 //! - **Every refusal is a typed value.** A daemon refusal is a [`Refusal`] carrying the
 //!   closed [`ErrorCode`], the `retryable` flag, the typed `recovery` operations the
-//!   protocol offers, and the continuation on a resumable failure. An agent branches on an
-//!   enum, never on a message.
+//!   protocol offers, the continuation on a resumable failure, and the code's declared
+//!   `Error.data` shape where one exists ([`RefusalData`], RFC 0026 F19) — a kernel's
+//!   `CertificateRejection` reaches the caller with the kernel's own tokens intact, and
+//!   `data` under a code this version declares no shape for is preserved verbatim rather
+//!   than guessed at or dropped. An agent branches on an enum, never on a message.
 //! - **Omission manifests surface** (INV-007). `ResultEnvelope.omissions` is `required` on
 //!   the wire and is carried through to [`Admitted::omissions`] unabridged: a bounded
 //!   answer names what it left out, inline, without a second call.
@@ -89,7 +92,9 @@ pub mod client;
 pub mod link;
 pub mod register;
 
-pub use answer::{Admitted, Answer, ByteLedger, CallBytes, ClientError, Outcome, Refusal};
+pub use answer::{
+    Admitted, Answer, ByteLedger, CallBytes, ClientError, Outcome, Refusal, RefusalData,
+};
 pub use client::AgentClient;
 pub use link::{LinkError, LocalLink, Transport};
 pub use register::{AgentContext, CampaignState, Requirement, SnapshotState, Unmet};

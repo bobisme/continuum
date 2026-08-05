@@ -35,9 +35,10 @@
 use continuumd::codec::CodecError;
 use continuumd::daemon::family::Payload;
 use continuumd::protocol::envelope::{
-    ArtifactRef, AssuranceEnvelope, Cost, NextOperation, Omission, Verdict, Warning,
+    ArtifactRef, AssuranceEnvelope, CertificateRejection, Cost, NextOperation, Omission, Verdict,
+    Warning,
 };
-use continuumd::protocol::scalar::{ContinuationHandle, RequestId, TaskHandle};
+use continuumd::protocol::scalar::{ContinuationHandle, Opaque, RequestId, TaskHandle};
 use continuumd::protocol::vocabulary::{ErrorCode, ResultStatus};
 
 use crate::link::LinkError;
@@ -181,7 +182,9 @@ pub struct Admitted {
 ///
 /// `detail` is carried because RFC 0026 declares it `required`, and deliberately not
 /// *branched on*: an agent that read the sentence instead of [`Refusal::code`] would be
-/// scraping prose through a typed hole, which is the failure INV-003 names.
+/// scraping prose through a typed hole, which is the failure INV-003 names. The
+/// machine-readable specifics of an occurrence travel in `data` instead, typed
+/// ([`RefusalData`]), which is exactly the channel RFC 0026 F19 declared them for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     /// The request identifier the daemon echoed.
@@ -190,6 +193,10 @@ pub struct Refusal {
     pub code: ErrorCode,
     /// The stable, non-interpolated explanation of the code in context.
     pub detail: String,
+    /// The typed `Error.data` block, when the daemon sent one. The shape is a function
+    /// of [`Refusal::code`] (`rule encoding.opaque_payloads`), and a code that declares
+    /// no shape arrives with the field absent.
+    pub data: Option<RefusalData>,
     /// Whether an identical retry can succeed with no change by the caller.
     pub retryable: bool,
     /// The allowed operations from this state, with pre-filled arguments. This is the
@@ -199,6 +206,38 @@ pub struct Refusal {
     pub continuation: Option<ContinuationHandle>,
     /// Present when a budget exhaustion is *not* resumable: the typed reason.
     pub non_resumable_reason: Option<String>,
+}
+
+/// The typed `Error.data` value a refusal carries, when its code declares a shape this
+/// client knows.
+///
+/// Resolution is a function of the message alone — the shape is declared per `code`
+/// (`rule encoding.opaque_payloads`) and read through the codec's own
+/// [`decode_error_data`], never through a second table here. As of protocol 3.4 exactly
+/// one code declares a shape: `CertificateRejected` (RFC 0026 F19, bn-3jrtz).
+///
+/// [`Undeclared`](Self::Undeclared) is the forward-compatibility posture RFC 0026's 3.4
+/// revision states for a reader whose version does not declare a shape for the `data` it
+/// was sent: *"carry the canonical value verbatim, never guess at it."* A future minor
+/// may declare shapes for further codes (F11's retry-after is the standing candidate),
+/// and this daemon emits `data` without per-field version gating — so a client that
+/// errored on an undeclared code's `data` would break against the first daemon newer
+/// than itself, and one that dropped it would silently lose what the daemon said.
+/// Neither is this client: the bytes are preserved, uninterpreted.
+///
+/// [`decode_error_data`]: continuumd::codec::operations::decode_error_data
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefusalData {
+    /// The declared shape for `code = CertificateRejected` (RFC 0026 F19, protocol 3.4):
+    /// the trusted checking-base crate whose `Rejected` verdict the error relays, and
+    /// that kernel's *own* stable reason/field tokens. Relayed verbatim end to end —
+    /// re-spelling them here would be the second authority over the kernels'
+    /// vocabularies that bn-dtg61 declined to create.
+    CertificateRejection(CertificateRejection),
+    /// `data` under a code this client's protocol version declares no shape for: the
+    /// canonical value of the negotiated encoding, preserved verbatim and never
+    /// interpreted (RFC 0026, 3.4 revision).
+    Undeclared(Opaque),
 }
 
 /// Interface bytes spent by one call.

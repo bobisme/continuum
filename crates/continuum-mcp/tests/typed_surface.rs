@@ -34,41 +34,55 @@
 //!   [`two_fresh_daemons_answer_the_identical_script_with_identical_bytes`].
 //! - **INV-015 — the client may narrow authority, never widen it** →
 //!   [`speaking_as_a_reader_cannot_buy_an_execute_operation`].
+//! - **the declared `Error.data` shape survives the client surface (RFC 0026 F19,
+//!   bn-ulhg3)** →
+//!   [`a_kernel_certificate_rejection_arrives_typed_on_the_clients_refusal`].
+//! - **`data` this version declares no shape for is carried verbatim, never guessed at
+//!   (RFC 0026, 3.4 revision)** →
+//!   [`data_under_a_code_this_client_declares_no_shape_for_is_preserved_verbatim`].
 
 use continuum_engine_reference::diehard;
 use continuum_intent::canonical_json::Json;
 use continuum_intent::contract::IntentContract;
-use continuum_mcp::client::states_budget;
+use continuum_mcp::client::{Call, states_budget};
 use continuum_mcp::register::{self, CampaignState, Requirement, SnapshotState};
-use continuum_mcp::{AgentClient, AgentContext, LocalLink, Outcome};
+use continuum_mcp::{
+    AgentClient, AgentContext, LinkError, LocalLink, Outcome, RefusalData, Transport,
+};
 use continuum_value::epoch::ProtocolWindow;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::ContentIdentifier;
 use continuum_workspace::snapshot::WorkspacePath;
-use continuumd::codec::from_bytes;
-use continuumd::daemon::family::{Arguments, Payload};
+use continuumd::codec::{from_bytes, to_bytes};
+use continuumd::daemon::evidence::{self, EvidenceFamily, lattice_status};
+use continuumd::daemon::family::{Arguments, ErrorData, Payload};
 use continuumd::daemon::identity::{Blake3Identity, intent_to_wire};
 use continuumd::daemon::intent::IntentFamily;
-use continuumd::daemon::state::{IntentRecord, RegistryStatus};
+use continuumd::daemon::state::{EvidenceNode, IntentRecord, RegistryStatus, StatusWrite};
 use continuumd::daemon::task::TaskFamily;
 use continuumd::daemon::verification::{VerificationFamily, model_source};
 use continuumd::daemon::workspace::WorkspaceFamily;
 use continuumd::daemon::{Daemon, OperationRequest};
-use continuumd::protocol::envelope::{Budget, EpochSet, RequestEnvelope, Verdict};
+use continuumd::protocol::envelope::{
+    Budget, Cost, EpochSet, Error, RequestEnvelope, ResultEnvelope, Verdict,
+};
 use continuumd::protocol::handshake::{
     CapabilityDescriptor, CapabilityProfile, ClientHello, Negotiated, ServerLimits, ServerWelcome,
     VersionRange, negotiate,
 };
+use continuumd::protocol::operations::evidence::EvidenceVerifyRequest;
 use continuumd::protocol::operations::intent::IntentAcceptRequest;
 use continuumd::protocol::registry::ENCODINGS;
 use continuumd::protocol::scalar::{
-    ActorId, ByteCount, CapabilityHandle, Commitment, DurationMs, EpochIdentity, IntentHandle,
-    Opaque, OperationName, ProtocolVersion, RequestId, Timestamp, WorkspaceHandle,
+    ActorId, ByteCount, CapabilityHandle, Commitment, DurationMs, EpochIdentity, EvidenceHandle,
+    IntentHandle, Opaque, OperationName, ProtocolVersion, RequestId, TaskHandle, Timestamp,
+    WorkspaceHandle,
 };
 use continuumd::protocol::shared::{FileComponent, SnapshotComponents, SnapshotEpochs, Target};
 use continuumd::protocol::spec::{Nullable, Optional};
 use continuumd::protocol::vocabulary::{
-    AuthorityLevel, Encoding, ErrorCode, ResultStatus, SemanticVerdict, TargetKind, TaskStatus,
+    AuthorityLevel, Encoding, ErrorCode, EvidenceKind, EvidenceNodeKind, EvidenceStatus,
+    ResultStatus, SemanticVerdict, TargetKind, TaskStatus,
 };
 use continuumd::transport::{LocalPair, Server};
 
@@ -216,6 +230,7 @@ impl Fixture {
             .family(IntentFamily)
             .family(TaskFamily)
             .family(VerificationFamily)
+            .family(EvidenceFamily::new())
             .build();
 
         let intent = accept_intent(&mut daemon);
@@ -764,6 +779,282 @@ fn speaking_as_a_reader_cannot_buy_an_execute_operation() {
         assert_eq!(answer.error_code(), expected, "{who} under {handle}");
     }
     let _ = agent.ledger();
+}
+
+// --- the `Error.data` carry (RFC 0026 F19, bn-ulhg3) -------------------------------------
+
+/// The instrumentation profile a certificate node is filed under.
+const CERTIFICATE_PROFILE: &str = "continuum-engine-reference/finite-closure";
+
+/// A real `CONTCERT` artifact: Die Hard explored, closed, and emitted as wire bytes — the
+/// same construction `continuumd`'s own F19 evidence emits (`tests/daemon_evidence.rs`),
+/// built from the engine crate this file already provisions the daemon's models from.
+fn certificate_bytes() -> Vec<u8> {
+    use continuum_engine_reference::bfs::{self, Bounds};
+    use continuum_engine_reference::certificate::{self, ClaimEnvelope, ClosedSet, PRODUCER};
+
+    let model = diehard::model().expect("the Die Hard transcription is a valid model");
+    let exploration = bfs::explore(&model, Bounds::CERTIFIABLE).expect("Die Hard evaluates");
+    let closed = ClosedSet::of(&exploration).expect("Die Hard's exploration completes");
+    certificate::emit_finite_closure(
+        &model,
+        closed,
+        &ClaimEnvelope {
+            model_digest: "blake3:diehard-model",
+            semantic_epoch: "continuum-semantics-1",
+            property_digest: "blake3:diehard-typeok",
+            scope_digest: "blake3:diehard-scope",
+            assumptions_digest: "blake3:empty-assumptions",
+            producer: PRODUCER,
+            domain_pack_digests: &[],
+        },
+    )
+    .expect("a closed exploration of a declared model emits")
+}
+
+/// Stage `bytes` and file a certificate-class node over them, under the identity the seam
+/// derives — out of band, through [`Server::daemon_mut`], because provisioning is
+/// administration rather than an operation (IDL §7).
+fn certificate_node(fixture: &mut Fixture, bytes: Vec<u8>) -> EvidenceHandle {
+    let artifact = fixture
+        .server
+        .daemon_mut()
+        .state_mut()
+        .stage(
+            &Blake3Identity,
+            WorkspacePath::new("certs/mutated.cert").expect("a workspace path"),
+            bytes,
+        )
+        .expect("staging names its content");
+    let handle = evidence::node_identity(
+        fixture.server.daemon().services(),
+        &artifact,
+        CERTIFICATE_PROFILE,
+    )
+    .expect("the identity seam names the node");
+    let record = EvidenceNode {
+        kind: EvidenceNodeKind::Certificate,
+        evidence_kind: EvidenceKind::Certificate,
+        claim_id: "claim:die-hard-closure".to_owned(),
+        artifact,
+        // Not the verification service: INV-004 refuses a producer that verifies its own
+        // claim before any byte is read, and that refusal is not this test's subject.
+        producer: actor("agent:builder"),
+        tool: CERTIFICATE_PROFILE.to_owned(),
+        created_at: Timestamp::new(NOW).expect("a timestamp"),
+        inputs: Vec::new(),
+        idempotency_key: "idem-certificate-append".to_owned(),
+        history: vec![StatusWrite {
+            status: lattice_status(EvidenceStatus::Proposed),
+            service_identity: None,
+            validation_basis: None,
+            inconclusive_reason: None,
+        }],
+        redaction: None,
+    };
+    fixture
+        .server
+        .daemon_mut()
+        .state_mut()
+        .append_evidence(handle.clone(), record);
+    handle
+}
+
+/// F19 through the client surface: a certificate the kernel rejects, driven through the
+/// daemon over this client's own wire, arrives as a client-visible typed value with the
+/// kernel's `checker`/`reason`/`field` intact (bn-ulhg3).
+///
+/// Flagged at bn-3jrtz's 3.4 bundle: the CLI rendered `error.data` from the day the shape
+/// was declared, while this client's [`Refusal`](continuum_mcp::Refusal) dropped it — so a
+/// typed-client caller could not see the one thing `Error.data` was declared to carry.
+/// This test is the anti-vacuity for the carry: before bn-ulhg3 the `data` read below was
+/// impossible, and if the block is ever dropped again the field reads `None` and the test
+/// fails.
+#[test]
+fn a_kernel_certificate_rejection_arrives_typed_on_the_clients_refusal() {
+    let mut fixture = Fixture::fresh();
+    // One trailing byte. The magic is untouched, so routing succeeds and a kernel really
+    // answers `Rejected` — a rejection, not a routing failure (the same mutation
+    // `continuumd`'s own F19 evidence drives).
+    let mut mutated = certificate_bytes();
+    mutated.push(0x00);
+    let handle = certificate_node(&mut fixture, mutated);
+
+    // The daemon's own typed outcome over the same node, captured in-process before any
+    // frame exists. The wire-carried value below is held against THIS — the relay whose
+    // tokens `continuumd`'s F19 evidence pins byte-equal to the kernel's own answer —
+    // rather than against this test's guess at a vocabulary the kernels own.
+    let expected = {
+        let outcome = fixture.server.daemon_mut().dispatch(&OperationRequest {
+            envelope: RequestEnvelope {
+                protocol_version: version(),
+                request_id: RequestId::new("req_seed").expect("a request id"),
+                idempotency_key: Optional::Present("idem-seed".to_owned()),
+                actor: actor("agent:reader"),
+                capability: capability("cap_reader"),
+                operation: OperationName::new("evidence.verify").expect("a name"),
+                snapshot: Nullable::Null,
+                intent: Nullable::Null,
+                arguments: Opaque::from_bytes(Vec::new()),
+                budget: Optional::Present(declared()),
+                output_policy: Optional::Absent,
+                trace: Optional::Absent,
+                page: Optional::Absent,
+            },
+            arguments: Arguments::EvidenceVerify(EvidenceVerifyRequest {
+                evidence: handle.clone(),
+                expected_status: Optional::Absent,
+            }),
+        });
+        assert_eq!(outcome.envelope.status, ResultStatus::Error);
+        match outcome.data {
+            ErrorData::CertificateRejection(body) => body,
+            ErrorData::None => panic!("a CertificateRejected outcome carries its declared data"),
+        }
+    };
+
+    // The same rejection, over the client's own wire. A rejection writes no status, so the
+    // node is still at the lattice's bottom and the kernel answers the second caller too.
+    let mut agent = client("agent:reader", "cap_reader");
+    {
+        let hello = hello();
+        let mut link = fixture.link();
+        agent.open(&mut link, &hello).expect("the connection opens");
+    }
+    let arguments = Arguments::EvidenceVerify(EvidenceVerifyRequest {
+        evidence: handle,
+        expected_status: Optional::Absent,
+    });
+    let answer = {
+        let mut link = fixture.link();
+        agent
+            .invoke(
+                &mut link,
+                &AgentContext::EMPTY,
+                &Call::new(&arguments).within(declared()),
+            )
+            .expect("the call is made")
+    };
+    assert!(
+        answer.bytes.total() > 0,
+        "the rejection was answered over a real byte boundary"
+    );
+    let refusal = answer.refusal().expect("the kernel rejected the bytes");
+    assert_eq!(refusal.code, ErrorCode::CertificateRejected);
+
+    let data = refusal
+        .data
+        .as_ref()
+        .expect("the declared `Error.data` block survives the client surface (RFC 0026 F19)");
+    let RefusalData::CertificateRejection(body) = data else {
+        panic!("`CertificateRejected` resolves to its declared shape, got {data:?}");
+    };
+    assert_eq!(
+        body, &expected,
+        "checker/reason/field intact across the client's wire"
+    );
+    // The tokens are the first authorities' own, relayed verbatim (bn-dtg61): the checker
+    // names the trusted checking-base crate, and a trailing-byte rejection names no wire
+    // position — so none is invented for it.
+    assert_eq!(body.checker, "continuum-kernel-core");
+    assert!(
+        !body.reason.is_empty(),
+        "the kernel's own stable reason token travels"
+    );
+    assert!(body.field.is_absent());
+}
+
+/// A byte boundary standing in for a daemon *newer than this client*: it answers every
+/// exchange with one prepared frame. This daemon cannot be made to play the part — `rule
+/// encoding.opaque_payloads` forbids it from emitting `data` under a code that declares no
+/// shape — so the future one is a hand-built frame, the conformance-vector posture.
+struct FutureDaemon {
+    answer: Vec<u8>,
+}
+
+impl Transport for FutureDaemon {
+    fn open(&mut self, _hello: &[u8]) -> Result<Vec<u8>, LinkError> {
+        Err(LinkError::NoAnswer)
+    }
+
+    fn exchange(&mut self, _frame: &[u8]) -> Result<Vec<u8>, LinkError> {
+        Ok(self.answer.clone())
+    }
+}
+
+/// The forward-compatibility half of the carry: `data` under a code this client's version
+/// declares no shape for MUST NOT break the client, and MUST NOT be guessed at — RFC
+/// 0026's 3.4 revision obliges exactly one reading, "carry the canonical value verbatim".
+///
+/// The frame stages F11's standing candidate: a future minor declaring a retry-after shape
+/// for `QuotaExhausted`. The codec refuses to invent a reading for it
+/// (`CodecError::UndeclaredErrorData`), and this client's posture mirrors the refusal's
+/// grounds without inheriting its severity: nothing is interpreted, and nothing is lost —
+/// the bytes arrive as [`RefusalData::Undeclared`], preserved verbatim.
+#[test]
+fn data_under_a_code_this_client_declares_no_shape_for_is_preserved_verbatim() {
+    // F11's proposed retry-after, as a future daemon might declare it: a canonical value
+    // this client's protocol version has no shape for.
+    let future_shape = Opaque::from_bytes(br#"{"retry_after_ms":30000}"#.to_vec());
+    let envelope = ResultEnvelope {
+        request_id: RequestId::new("req_c000000").expect("a request id"),
+        status: ResultStatus::Error,
+        verdict: Nullable::Null,
+        error: Optional::Present(Error {
+            code: ErrorCode::QuotaExhausted,
+            detail: "concurrent task quota exhausted".to_owned(),
+            data: Optional::Present(future_shape.clone()),
+            recovery: Vec::new(),
+            continuation: Optional::Absent,
+            non_resumable_reason: Optional::Absent,
+            retryable: true,
+        }),
+        assurance: Optional::Absent,
+        artifacts: Vec::new(),
+        task: Optional::Absent,
+        continuation: Optional::Absent,
+        omissions: Vec::new(),
+        warnings: Vec::new(),
+        cost: Cost {
+            wall_ms: Optional::Absent,
+            cpu_ms: Optional::Absent,
+            memory_bytes: Optional::Absent,
+            states: Optional::Absent,
+            solver_ms: Optional::Absent,
+            proof_ms: Optional::Absent,
+            tokens: Optional::Absent,
+            candidates: Optional::Absent,
+            bytes: Optional::Absent,
+            tokenizer_id: Optional::Absent,
+        },
+        epochs: epochs(),
+        next_operations: Vec::new(),
+        next_page_token: Optional::Absent,
+        payload: Nullable::Null,
+        audit: Optional::Absent,
+    };
+    let mut future = FutureDaemon {
+        answer: to_bytes(&envelope).expect("the future frame encodes"),
+    };
+
+    let mut agent = client("agent:runner", "cap_runner");
+    let held = AgentContext {
+        snapshot: SnapshotState::Absent,
+        campaign: CampaignState::Live,
+    };
+    let task = TaskHandle::new("task_future").expect("a task handle");
+    let answer = agent
+        .task_status(&mut future, &held, &task)
+        .expect("an unrecognized code's `data` must not break the client");
+
+    let refusal = answer.refusal().expect("the frame is a typed refusal");
+    assert_eq!(refusal.code, ErrorCode::QuotaExhausted);
+    assert!(refusal.retryable);
+    assert_eq!(
+        refusal.data,
+        Some(RefusalData::Undeclared(future_shape)),
+        "the canonical value is carried verbatim, never guessed at (RFC 0026, 3.4)"
+    );
 }
 
 #[test]

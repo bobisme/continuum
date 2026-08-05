@@ -40,8 +40,9 @@
 //! [`Arguments`]: continuumd::daemon::family::Arguments
 //! [`NextOperation`]: continuumd::protocol::envelope::NextOperation
 
-use continuumd::codec::from_bytes;
-use continuumd::daemon::family::Arguments;
+use continuumd::codec::operations::decode_error_data;
+use continuumd::codec::{CodecError, from_bytes};
+use continuumd::daemon::family::{Arguments, ErrorData};
 use continuumd::daemon::is_mutation;
 use continuumd::protocol::envelope::{Budget, RequestEnvelope, ResultEnvelope};
 use continuumd::protocol::handshake::{ClientHello, ServerWelcome};
@@ -63,7 +64,9 @@ use continuumd::protocol::spec::{Nullable, Optional};
 use continuumd::protocol::vocabulary::{Portfolio, ResultStatus};
 use continuumd::transport::{decode_result, encode_hello, encode_request};
 
-use crate::answer::{Admitted, Answer, ByteLedger, CallBytes, ClientError, Outcome, Refusal};
+use crate::answer::{
+    Admitted, Answer, ByteLedger, CallBytes, ClientError, Outcome, Refusal, RefusalData,
+};
 use crate::link::Transport;
 use crate::register::{self, AgentContext};
 
@@ -476,21 +479,47 @@ fn classify(
     let is_error = result.status == ResultStatus::Error;
     let error = result.error;
     match (is_error, error) {
-        (true, Optional::Present(error)) => Ok(Outcome::Refused(Refusal {
-            request_id: result.request_id,
-            code: error.code,
-            detail: error.detail,
-            retryable: error.retryable,
-            recovery: error.recovery,
-            continuation: match error.continuation {
-                Optional::Present(handle) => Some(handle),
+        (true, Optional::Present(error)) => {
+            // `Error.data` is resolved through the shape its `code` declares — a function
+            // of the message alone (`rule encoding.opaque_payloads`), read through the
+            // codec's own table rather than a second one here. A code the codec declares
+            // no shape for is *not* an error on this surface: RFC 0026's 3.4 revision
+            // obliges a reader whose version does not declare the shape to carry the
+            // canonical value verbatim and never guess at it, so the bytes arrive as
+            // [`RefusalData::Undeclared`] instead of breaking the client against a daemon
+            // newer than itself. A *declared* shape whose bytes do not decode stays a
+            // [`ClientError`]: the answer is not the shape the protocol declares, which
+            // is the one thing this function refuses to accept.
+            let data = match &error.data {
                 Optional::Absent => None,
-            },
-            non_resumable_reason: match error.non_resumable_reason {
-                Optional::Present(reason) => Some(reason),
-                Optional::Absent => None,
-            },
-        })),
+                Optional::Present(opaque) => match decode_error_data(error.code, opaque) {
+                    Ok(ErrorData::CertificateRejection(body)) => {
+                        Some(RefusalData::CertificateRejection(body))
+                    }
+                    Ok(ErrorData::None) => None,
+                    Err(CodecError::UndeclaredErrorData) => {
+                        Some(RefusalData::Undeclared(opaque.clone()))
+                    }
+                    Err(error) => return Err(error.into()),
+                },
+            };
+            Ok(Outcome::Refused(Refusal {
+                request_id: result.request_id,
+                code: error.code,
+                detail: error.detail,
+                data,
+                retryable: error.retryable,
+                recovery: error.recovery,
+                continuation: match error.continuation {
+                    Optional::Present(handle) => Some(handle),
+                    Optional::Absent => None,
+                },
+                non_resumable_reason: match error.non_resumable_reason {
+                    Optional::Present(reason) => Some(reason),
+                    Optional::Absent => None,
+                },
+            }))
+        }
         (false, Optional::Absent) => Ok(Outcome::Admitted(Admitted {
             request_id: result.request_id,
             status: result.status,
