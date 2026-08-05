@@ -4344,14 +4344,14 @@
       "metadata": {
         "experiment": "200+ event noisy durability failure \u2192 Context Pack",
         "failure_consequence": "redesign evidence model",
-        "matrix_status": "Evidence (finite spike)",
+        "matrix_status": "Evidence (reference implementation)",
         "pass_condition": "causal core replay-preserving; \u226510\u00d7 context reduction; exact expansion handles"
       },
       "source": {
         "line": 9,
         "path": "notes/G0_SPIKE_MATRIX.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Can an agent diagnose from a bounded artifact rather than raw logs?"
     },
     {

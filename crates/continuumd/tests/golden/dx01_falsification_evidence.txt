@@ -1,0 +1,38 @@
+G0-DX-01 falsification evidence (bn-37gu)
+row: 200+ event noisy durability failure -> Context Pack
+legs: causal core replay-preserving | >=10x reduction | exact expansion handles
+
+[trace]
+events=225 noise_events=221 core_events=4
+core=e_0064:begin_txn,e_0113:submit_write,e_0162:ack_before_flush,e_0179:power_loss
+engine_check_verdict=refuted invariant=AckImpliesDurable reachable_states=5248
+shortest_witness=begin_txn,submit_write,ack_before_flush,power_loss len=4 equals_core=true
+
+[leg1 replay-preserving core]
+core_replay=refutes
+drop_begin_txn=disabled_at_submit_write pre_registered=disabled_at_submit_write held=true
+drop_submit_write=disabled_at_ack_before_flush pre_registered=disabled_at_ack_before_flush held=true
+drop_ack_before_flush=completes_without_refuting pre_registered=completes_without_refuting held=true
+drop_power_loss=completes_without_refuting pre_registered=completes_without_refuting held=true
+textual_selection: admits_noise=67 misses=begin_txn,power_loss strict=disabled_at_telemetry_flush forgiving=completes_without_refuting
+
+[leg2 reduction, measured under the packer's counting rule]
+pack_bytes=2791 (== published canonical length) candidates=258 selected=10 omitted=248
+graded raw_named_json=48764 ratio_x100=1747 pass_10x=true
+sensitivity raw_engine_display=13736 ratio_x100=492
+sensitivity raw_positional_json=12573 ratio_x100=450
+sensitivity raw_delta_log=10986 ratio_x100=393
+sensitivity raw_action_names=4023 ratio_x100=144
+pack_decomposition selected=1110 manifest+expansions=183 header=1498
+
+[leg3 exact expansion handles, wire-live]
+parent=ctx_6eaca9f8da97b66cd49e98bb6745164c5a72d93e487c15b36bfa32f9efbd6c9f
+promised=ctx_4d77c9cd4eb8aa87bb37155c74a9197a9d35488399c6ae816721f43a7f3c532b returned=ctx_4d77c9cd4eb8aa87bb37155c74a9197a9d35488399c6ae816721f43a7f3c532b equal=true
+child_items=248 exact_match=true child_manifest_empty=true child_bytes=29968
+packed(ceiling=child-400): kept=243 dropped=5 recoverable_by_promised=true
+
+[grain]
+leg1: selection=harness(stage-2 dynamic dependence slice; no compiler) check=production(engine successors+check+witness)
+leg2: counting=production(RFC 0028 correction 17) assembly=harness(no root assembler)
+leg3: production end-to-end (Daemon::dispatch)
+missing_producers: ten-stage compiler (context.compile refused); root pack assembly; crashpack producer; intent registry resolution
