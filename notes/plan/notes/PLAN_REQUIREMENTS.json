@@ -1483,7 +1483,7 @@
         "line": 208,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Evidence Graph v0 [G1]"
     },
     {
@@ -1543,8 +1543,8 @@
         "line": 208,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "an untrusted client cannot promote a proposal to validated/proved."
+      "status": "satisfied",
+      "summary": "an untrusted client cannot promote a proposal to validated/proved (delivered: bn-wco1 \u2014 crates/continuumd/tests/pr7exitevidence.rs, seven tests through Daemon::dispatch and nothing else, quantified over the promotion paths the governing texts spell rather than a chosen sample. P0 \u2014 a direct status write \u2014 is not refused but unspellable: a closed scan over every request shape the live registry declares (held to the IDL by rule conformance.registryagreement) finds exactly one status-typed field on any @mutation, evidence.verify's compare-and-set guard, with the three remaining EvidenceStatus request fields all read filters on @readonly operations \u2014 so a future minor that adds a status-bearing request field fails the exit loudly instead of widening the surface silently. The exit witness then drives a real agent: principal at execute, over the real dispatch, through every refusable path: the guard named as validated and as proved (both StatusConflict, nothing written), the check-edge mint over another producer's claim and over its own (CapabilityDenied at RFC 0038's scheme gate \u2014 the ladder rung was sufficient, so the refusal is attributable to authority over status), and both T4 identity masquerades (CapabilityDenied), holding the proposal's whole wire record byte-identical before and after as the attacker itself reads it back through evidence.get, with evidence.query over {validated, proved} answering empty across the graph. The ceiling is stated rather than hidden: the one write a client can cause is the daemon's own independent check, which establishes observed under the service's identity whoever asked, and a forged guard cannot ratchet it. The positive control keeps the sentence non-vacuous: the same untrusted principal's own real CONTCERT artifact, kernel-verified by continuum-kernel-core, is promoted to validated by the trusted service with the service-attributed history entry the node schema requires \u2014 the client's say-so buys nothing and its work everything; proved is honestly out of reach of every configuration in the file (Lean is PR 28's) and is asserted absent rather than assumed, with the library's authority table carrying its service restriction. Replay transfers no authority: the idempotency ledger is scoped per actor, admission precedes the ledger, and a byte-perfect replay converges on the recorded outcome without executing \u2014 while even the authorized check edge moves no status, because what an edge licenses is evidence.verify's separate decision. Anti-vacuity at the exit's own gate: re-registering the same principal under a service: scheme \u2014 same capability, level, profile \u2014 flips exactly the edge-mint refusal (dx12's mutant precedent at exit grain) while self-certification moves from the scheme's denial to INV-004's InsufficientEvidence and no status moves anywhere: the grant buys edge authority, never a status. The type-level half is cited rather than duplicated \u2014 bn-2c8l's three compilefail witnesses and UNTRUSTEDCEILING, bn-24i's four-place INV-004 boundary with the private-constructor Promotion witness \u2014 and the campaign half likewise (dx12's B1\u2013B5 and its capability mutants), both behind freshness tripwires that rot loudly)."
     },
     {
       "category": "pr",
