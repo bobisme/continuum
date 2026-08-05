@@ -10,7 +10,7 @@
 - Impact: moderate / severe / existential.
 - Evidence state: observed / plausible / speculative.
 
-## R01 — Scope collapse under ambition
+## R01 — Scope collapse under ambition (delivered: bn-1os6 — Phase A checkpoint; gate-driven delivery, first vertical slice, and no-frontier-engine-before-G2 all verified live with mechanical evidence in notes/plan/notes/R01_RISK_CHECKPOINT.md; fourteen PRs exited, §20's 42-crate list matches crates/ with every frontier-adjacent crate a scaffold)
 
 **Probability:** high  
 **Impact:** existential

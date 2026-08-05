@@ -13,7 +13,7 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 325
+      "scanned_files": 326
     },
     "g0_matrix_counts": {
       "evidence": 6,
@@ -43,10 +43,10 @@
       "kernel_checked": false
     },
     "markdown_fences": {
-      "files": 223
+      "files": 224
     },
     "markdown_links": {
-      "links": 414
+      "links": 416
     },
     "numbering": {
       "adr": 53,
@@ -57,12 +57,12 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 764,
-      "active_edges": 1773,
-      "active_requirements": 651,
+      "active_bones": 763,
+      "active_edges": 1772,
+      "active_requirements": 650,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 671,
+      "leaf_bones": 670,
       "requirements": 846
     },
     "program_status": {
@@ -85,7 +85,7 @@
       "rows": 21
     },
     "retired_names": {
-      "files_scanned": 311
+      "files_scanned": 312
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20
