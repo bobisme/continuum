@@ -4687,8 +4687,8 @@
         "line": 332,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "Omission transparency"
+      "status": "satisfied",
+      "summary": "Omission transparency, bn-38p2's byte-budget packer (a packed child is an answer; BudgetExhausted only below the minimal child), bn-3jrtz's F13 schema closure of kind, bn-1gc/bn-23j7s's MeterSet declared/unmetered discipline derived live into the daemon's own omission list, bn-1604's INV-016 interaction (ContextExpandRequest.anchor as closed-vocabulary equality), and bn-37gu's dx01falsification campaign against the PR-11 acceptance criterion; new evidence added here: a live Daemon::dispatch proving a real ResultEnvelope.omissions cannot be dropped from the wire \u2014 stripped from a real answer's own encoded bytes, decoding refuses with CodecError::MissingField; honest absences recorded as unbuilt-producer typed refusals, never silent drops \u2014 the ten-stage compiler, whole-pack store publication, the crashpack producer, and continuum-benchmark's documented count-plus-retrieval-command summarization)"
     },
     {
       "category": "invariant",

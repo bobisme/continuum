@@ -329,7 +329,7 @@ Controlled code accesses scheduling, time, entropy, I/O, faults, and cancellatio
 
 A failure advertised as replayable must reproduce under its pinned semantic epoch or be downgraded to an engine defect.
 
-### INV-007 — Omission transparency
+### INV-007 — Omission transparency (delivered: bn-kh8b — crates/continuumd/tests/inv007_omission_transparency_evidence.rs: a facet-to-site evidence map over substance PR-11/PR-6 had already landed, cited via freshness tripwires rather than re-run — bn-28jj's closed five-member `OmissionReason` and constructor-only closed accounting (`Accounting::close`/`ClosedAccounting::reconcile`, the shrunk/inflated-manifest-count anti-vacuity mutants), bn-38p2's byte-budget packer (a packed child is an answer; `BudgetExhausted` only below the minimal child), bn-3jrtz's F13 schema closure of `kind`, bn-1gc/bn-23j7s's `MeterSet` declared/unmetered discipline derived live into the daemon's own omission list, bn-1604's INV-016 interaction (`ContextExpandRequest.anchor` as closed-vocabulary equality), and bn-37gu's `dx01_falsification` campaign against the PR-11 acceptance criterion; new evidence added here: a live `Daemon::dispatch` proving a real `ResultEnvelope.omissions` cannot be dropped from the wire — stripped from a real answer's own encoded bytes, decoding refuses with `CodecError::MissingField`; honest absences recorded as unbuilt-producer typed refusals, never silent drops — the ten-stage compiler, whole-pack store publication, the crashpack producer, and `continuum-benchmark`'s documented count-plus-retrieval-command summarization)
 
 Any bounded Context Pack, explanation, slice, or visualization names what was omitted and how to retrieve it.
 
