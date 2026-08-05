@@ -4531,14 +4531,14 @@
       "metadata": {
         "experiment": "planner, repairer, prover, reviewer with adversarial patch",
         "failure_consequence": "block multi-agent autonomy",
-        "matrix_status": "Evidence (finite spike)",
+        "matrix_status": "Evidence (reference implementation)",
         "pass_condition": "evidence graph catches every unauthorized intent edge"
       },
       "source": {
         "line": 20,
         "path": "notes/G0_SPIKE_MATRIX.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Can intent remain stable across swarm work?"
     },
     {
