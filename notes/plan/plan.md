@@ -2121,7 +2121,20 @@ Deliver:
   outside `just check`, with armed-canary anti-vacuity)
 - evidence graph;
 - Context Pack v0;
-- semantic diff v0;
+- semantic diff v0; (delivered: the PR 12 campaign — bn-b8ru, bn-8mlg, bn-7vg7,
+  bn-ycn6, bn-1sdp, bn-3vxp landed the classifier family (equality shortcut plus
+  the seven classified fields, one formula authority, fail-closed everywhere
+  else); bn-2nwpg wired the assumptions oracle; bn-3cgt/bn-3jtr closed the
+  G0-DX-02 falsification campaign and the PR-12 exit; bn-7ek41 closed the two
+  remaining halves — the wire `intent_changes[]`/`diff_*` artifact assembler
+  across all fifteen protected fields (`crates/continuum-semantic-diff/src/
+  artifact.rs`, schema-valid canonical bytes against
+  `schemas/semantic-diff.schema.json`, correction 14's unchanged-shortcut wire
+  shape, the assembler-owned `unsupported`/`requested_assurance` rules, the
+  P1-complete `PolicyTable::verdict` closure) and the RFC 0031 impact set
+  (`src/impact.rs`, `invalidated`/`reused`/`unknown` over RFC 0030's dependency
+  reasons with `Unknown`-is-dependent). Library-level engine per RFC 0031; the
+  daemon `DiffHandle` endpoints ride the protocol PRs that own them)
 - executable finite reference engine and certificates from Revision 2;
   (delivered: bn-2d0e, bn-3p8u, bn-2pmc, bn-3e4l, bn-3e0m —
   `crates/continuum-engine-reference` is the docs/01 §7.1 reference path,

@@ -745,13 +745,21 @@ mod cited_campaigns {
             "lib.rs",
             "observers.rs",
             "properties.rs",
+            // Not classifiers: the PR-12 assembler halves (bn-7ek41). `artifact.rs`
+            // assembles the family's records into the wire `diff_*` shape and
+            // `impact.rs` computes RFC 0031's impact set; neither owns a
+            // classification, so neither may appear in the map's classifier column
+            // (asserted below).
+            "artifact.rs",
+            "impact.rs",
         ]
         .into_iter()
         .map(str::to_owned)
         .collect();
         assert_eq!(
             found, expected,
-            "the eight-module family (plus lib.rs), exactly — update the map on drift"
+            "the eight-module classifier family (plus lib.rs and the two bn-7ek41 \
+             assembler modules), exactly — update the map on drift"
         );
         for row in &MAP {
             assert!(

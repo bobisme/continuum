@@ -115,7 +115,15 @@ use std::collections::BTreeMap;
 use crate::canonical_json::{Json, JsonError};
 use crate::change_policy::Relation;
 use crate::identity::canonical_identity;
-use continuum_value::assurance::{
+/// Re-exported because they are already this module's public API surface —
+/// [`AssurancePolicy::minimum`] returns an [`AssuranceLevel`],
+/// [`AssurancePolicy::accepted_evidence_classes`] yields [`EvidenceClass`]es, and
+/// [`AssurancePolicy::change_to`] returns an [`AssuranceChange`] — so a downstream
+/// crate consuming those accessors (the semantic-diff assembler takes RFC 0031's
+/// `requested_assurance` input, typed as the level the returned values already are)
+/// can name the types through the same crate that handed them out, without opening
+/// its own `continuum-value` edge for a vocabulary it only reads.
+pub use continuum_value::assurance::{
     AssuranceChange, AssuranceLevel, AssuranceRequirement, EvidenceClass,
 };
 
