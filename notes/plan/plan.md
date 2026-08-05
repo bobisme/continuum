@@ -337,7 +337,7 @@ Any bounded Context Pack, explanation, slice, or visualization names what was om
 
 Timeout, unsupported semantics, insufficient telemetry, abstraction ambiguity, and incomplete proof search are distinct outcomes.
 
-### INV-009 — Monotonic task evidence
+### INV-009 — Monotonic task evidence (delivered: bn-2lq8 — crates/continuumd/tests/inv009_monotonic_task_evidence.rs: the facet→site→suite map over the budget ledger, the publications typestate, and the task table; one whole-trace dispatch walking all five task.update_budget arms plus both resume shapes with cost/artifacts/milestones non-decreasing and prefix-preserving at every readable point, ending on the Completed-task terminal arm no prior guard exercised; the bn-23j7s silent-truncation fix (bounds_of floors the engine bound at recorded spend) cited and freshness-pinned with its unit and wire regression guards rather than re-derived; a removal-verb sweep proving the five declared append-only containers admit none, with mutants; monotone spend, the checkpoint regression refusal, the ratified recorded-non-refundable committed-spend reading, cancellation both-or-neither (bn-1n6r), and restart survival (bn-3dr) cited via freshness tripwires; honest absences pinned to go red — TaskEntry.committed_evidence has no evidence-graph producer yet (a typed omission today), and daemon-grain monotonicity is enforced for the one metered dimension, MeterSet::STATES_ONLY pinned by equality)
 
 Resuming a task may add evidence or refine an unknown; it may not silently replace prior artifacts under the same identity.
 

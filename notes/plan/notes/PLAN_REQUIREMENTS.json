@@ -4715,8 +4715,8 @@
         "line": 340,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "Monotonic task evidence"
+      "status": "satisfied",
+      "summary": "Monotonic task evidence cited and freshness-pinned with its unit and wire regression guards rather than re-derived; a removal-verb sweep proving the five declared append-only containers admit none, with mutants; monotone spend, the checkpoint regression refusal, the ratified recorded-non-refundable committed-spend reading, cancellation both-or-neither (bn-1n6r), and restart survival (bn-3dr) cited via freshness tripwires; honest absences pinned to go red \u2014 TaskEntry.committedevidence has no evidence-graph producer yet (a typed omission today), and daemon-grain monotonicity is enforced for the one metered dimension, MeterSet::STATESONLY pinned by equality)"
     },
     {
       "category": "invariant",
