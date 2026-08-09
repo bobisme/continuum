@@ -1,0 +1,15 @@
+{
+  "check": "citations-resolve",
+  "description": "Semantic code cites a Continuum RFC that does not exist. The citation pattern is narrowed to the dossier's `00NN` range so an IETF number is not misread as a dangling Continuum record; this fixture is what keeps that narrowing from turning the RFC half of the check into a no-op.",
+  "id": "gov-1-08-dangling-rfc-citation",
+  "requirement": "GOV-1-08",
+  "rule": "semantic-change-adr",
+  "substitute": {
+    "crates/continuum-value/src/lib.rs": [
+      {
+        "find": "RFC 0026 makes the assurance envelope",
+        "replace": "RFC 0099 makes the assurance envelope"
+      }
+    ]
+  }
+}

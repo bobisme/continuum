@@ -1308,7 +1308,16 @@ ADR_STATUS_BOLD = re.compile(r"^\*\*Status:\*\*\s*(.+)$", re.M)
 ADR_STATUS_SECTION = re.compile(r"^##\s+Status\s*\n+(.+)$", re.M)
 ADR_LINK = re.compile(r"\((\d{4})-[^)]*\.md\)")
 ADR_CITATION = re.compile(r"\bADR[- ](\d{4})\b")
-RFC_CITATION = re.compile(r"\bRFC[- ](\d{4})\b")
+# Continuum RFCs are numbered `00NN` (`notes/plan/rfcs/00NN-*.md`), and this
+# pattern deliberately matches only that shape. A four-digit RFC outside it is
+# an IETF citation — `RFC 3339`, `RFC 2119`, `RFC 8949` — which names no
+# Continuum decision record; reporting it as a dangling one taught authors to
+# write `IETF RFC3339` to dodge the checker, which is a worse artifact than
+# the citation. The `IETF` guard rejects the same citation written with an
+# in-range number. Widening the dossier past RFC 0099 means widening this
+# pattern with it, and `continuum-rfc-range` below fails if that is forgotten.
+CONTINUUM_RFC_NUMBER = re.compile(r"^00\d{2}$")
+RFC_CITATION = re.compile(r"(?<!IETF )(?<!IETF-)\bRFC[- ](00\d{2})\b")
 
 
 def _decision_record_ids(tree: Tree, directory: str) -> set[str]:
@@ -1324,6 +1333,21 @@ def rule_semantic_change_adr(tree: Tree) -> list[Violation]:
     if not adr_ids:
         out.append(Violation(rule, "adr-directory-populated", f"{ADR_DIR} contains no ADR files"))
         return out
+
+    # `RFC_CITATION` narrows to the `00NN` shape so IETF numbers are not read as
+    # dangling Continuum records. That narrowing is only sound while every
+    # Continuum RFC has that shape, so the assumption is checked, not assumed:
+    # the first RFC 0100 makes its own citations invisible to the rule above.
+    for out_of_range in sorted(n for n in rfc_ids if not CONTINUUM_RFC_NUMBER.match(n)):
+        out.append(
+            Violation(
+                rule,
+                "continuum-rfc-range",
+                f"RFC {out_of_range} exists in {RFC_DIR} but falls outside the `00NN` range "
+                f"`RFC_CITATION` matches; widen the pattern (and this check) or citations to "
+                "it silently stop resolving",
+            )
+        )
 
     index = tree.read_text(f"{ADR_DIR}/README.md")
     if index is None:
@@ -2149,7 +2173,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         enforces=(
             "`notes/plan/adr/README.md` and the ADR files are a bijection, so a decision cannot be "
             "landed unindexed or indexed without a file. Every ADR declares a docs/12 §2 status. Every "
-            "`ADR-NNNN`/`RFC NNNN` citation in crate sources resolves to an existing record. Every "
+            "`ADR-NNNN`/`RFC 00NN` citation in crate sources resolves to an existing record — RFC "
+            "citations are read in the dossier's `00NN` range only, so an IETF number (`RFC 3339`) is "
+            "not a dangling Continuum record, and the range itself is checked against `rfcs/`. Every "
             "semantic-core crate that carries code cites at least one numbered decision record in its "
             "`src/`."
         ),

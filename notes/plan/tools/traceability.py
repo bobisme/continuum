@@ -72,9 +72,27 @@ def _text(path: str) -> str:
 
 
 def _clean(value: str) -> str:
-    value = re.sub(r"`([^`]*)`", r"\1", value)
+    """Strip Markdown decoration, but never from inside a code span.
+
+    A code span is literal text, and the emphasis strip below cannot tell an
+    underscore in `MAX_STATES` from one wrapping a word: unguarded, the
+    registry summary would read `MAXSTATES` and an identifier that appears
+    nowhere in the dossier would become the checked-in record of it (bn-3p8u).
+    So the spans are stashed behind markers that survive every substitution
+    and restored afterwards. `\\x00` cannot occur in the Markdown sources — a
+    NUL byte fails `check_empty`/`check_json` long before this — so the marker
+    can never collide with real content.
+    """
+    spans: list[str] = []
+
+    def _stash(match: re.Match[str]) -> str:
+        spans.append(match.group(1))
+        return f"\x00{len(spans) - 1}\x00"
+
+    value = re.sub(r"`([^`]*)`", _stash, value)
     value = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", value)
     value = re.sub(r"[*_]+", "", value)
+    value = re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], value)
     return re.sub(r"\s+", " ", value).strip(" \n;:")
 
 

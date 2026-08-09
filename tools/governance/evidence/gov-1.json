@@ -161,10 +161,11 @@
     "GOV-1-08": {
       "boundary": "This half reads one revision and enforces the artifact-level consequences: decisions are discoverable, statuses are declared, citations resolve, and semantic code names the record that authorized it. The half a single revision cannot see \u2014 that a *change* was semantic \u2014 is enforced against the merge base by `check_revision_delta.py`'s `semantic-change-adr-delta` rule (see `delta_gate`), at file granularity rather than this rule's crate granularity. What neither half decides is whether the cited record actually *governs* the change it is cited for; that remains the docs/12 \u00a74 review obligation.",
       "delta_gate": "tools/governance/check_revision_delta.py rule `semantic-change-adr-delta` (semantic-change-cites-a-decision-record, added-semantic-source-cites-a-decision-record); evidence tools/governance/evidence/gov-1-delta.json",
-      "enforces": "`notes/plan/adr/README.md` and the ADR files are a bijection, so a decision cannot be landed unindexed or indexed without a file. Every ADR declares a docs/12 \u00a72 status. Every `ADR-NNNN`/`RFC NNNN` citation in crate sources resolves to an existing record. Every semantic-core crate that carries code cites at least one numbered decision record in its `src/`.",
+      "enforces": "`notes/plan/adr/README.md` and the ADR files are a bijection, so a decision cannot be landed unindexed or indexed without a file. Every ADR declares a docs/12 \u00a72 status. Every `ADR-NNNN`/`RFC 00NN` citation in crate sources resolves to an existing record \u2014 RFC citations are read in the dossier's `00NN` range only, so an IETF number (`RFC 3339`) is not a dangling Continuum record, and the range itself is checked against `rfcs/`. Every semantic-core crate that carries code cites at least one numbered decision record in its `src/`.",
       "fixtures_proven_caught": [
         "gov-1-08-adr-without-a-status",
         "gov-1-08-dangling-adr-citation",
+        "gov-1-08-dangling-rfc-citation",
         "gov-1-08-semantic-code-without-a-decision-record",
         "gov-1-08-unindexed-adr"
       ],
@@ -330,7 +331,7 @@
   },
   "self_test": {
     "failures": [],
-    "fixtures": 56,
+    "fixtures": 57,
     "fixtures_by_requirement": {
       "GOV-1-01": [
         "gov-1-01-absent-toolchain-file",
@@ -382,6 +383,7 @@
       "GOV-1-08": [
         "gov-1-08-adr-without-a-status",
         "gov-1-08-dangling-adr-citation",
+        "gov-1-08-dangling-rfc-citation",
         "gov-1-08-semantic-code-without-a-decision-record",
         "gov-1-08-unindexed-adr"
       ],

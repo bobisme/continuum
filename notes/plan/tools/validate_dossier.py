@@ -19,6 +19,7 @@ from jsonschema import Draft202012Validator
 from traceability import validate_checked_traceability
 
 ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = ROOT.parents[1]
 
 SCHEMA_PAIRS = {
     "schemas/cir.schema.json": "schemas/examples/minimal.cir.json",
@@ -41,6 +42,38 @@ SCHEMA_PAIRS = {
     "schemas/redacted.schema.json": "schemas/examples/redacted.example.json",
     "schemas/promotion-receipt.schema.json": "schemas/examples/promotion-receipt.example.json",
 }
+
+# Instances that live outside the dossier but are still governed by a dossier
+# schema. Paths are relative to the repository root, not to `notes/plan/`.
+# The `continuum-intent` fixtures are the contracts the Rust suite parses, and
+# INV-003 makes `schemas/` — not the parser — normative for their shape, so
+# their conformance belongs in this gate rather than in a hand-run command.
+EXTERNAL_SCHEMA_PAIRS = {
+    "schemas/intent-contract.schema.json": (
+        "crates/continuum-intent/tests/fixtures/die-hard-contract.json",
+        "crates/continuum-intent/tests/fixtures/replicated-register-contract.json",
+    ),
+}
+
+# The normative protocol artifacts `rule conformance.registry_agreement` binds
+# to one another: the IDL declares the operations, plan §10.2 registers them,
+# and the RFC 0027 table carries one authority row per registered operation.
+PROTOCOL_IDL_REL = "schemas/continuumd-native-protocol.idl"
+PROTOCOL_RFC_REL = "rfcs/0027-agent-tool-protocol.md"
+IDL_OPERATION_RE = re.compile(
+    r"^operation\s+([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)\s*\{(.*?)^\}",
+    re.MULTILINE | re.DOTALL,
+)
+IDL_AUTHORITY_RE = re.compile(r"^\s*authority\s+([A-Za-z][A-Za-z_-]*)\s*;", re.MULTILINE)
+PLAN_OPERATION_FENCE_RE = re.compile(
+    r"^### 10\.2 .*?^```text\n(.*?)^```", re.MULTILINE | re.DOTALL
+)
+PLAN_OPERATION_LINE_RE = re.compile(r"^[a-z_][a-z0-9_]*\.")
+RFC_REGISTRY_ROW_RE = re.compile(
+    r"^\|\s*`([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)`\s*\|\s*([a-z][a-z_-]*)\s*\|",
+    re.MULTILINE,
+)
+RFC_REGISTRY_COUNT_RE = re.compile(r"\*\*(\d+) operations in (\d+) namespaces\*\*")
 
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 BIB_ID_RE = re.compile(r"^### \[(S[^\]]+)\]", re.MULTILINE)
@@ -79,15 +112,30 @@ def check_json() -> dict[str, Any]:
 
 
 def check_schemas() -> dict[str, Any]:
-    for schema_rel, instance_rel in SCHEMA_PAIRS.items():
+    pairs: list[tuple[str, str, Path]] = [
+        (schema_rel, instance_rel, ROOT / instance_rel)
+        for schema_rel, instance_rel in SCHEMA_PAIRS.items()
+    ]
+    pairs += [
+        (schema_rel, instance_rel, PROJECT_ROOT / instance_rel)
+        for schema_rel, instances in EXTERNAL_SCHEMA_PAIRS.items()
+        for instance_rel in instances
+    ]
+    for schema_rel, instance_rel, instance_path in pairs:
+        assert instance_path.exists(), (
+            f"{instance_rel}: schema instance is registered against {schema_rel} but does "
+            "not exist; a moved or deleted instance loses its conformance check silently"
+        )
         schema = json.loads((ROOT / schema_rel).read_text(encoding="utf-8"))
-        instance = json.loads((ROOT / instance_rel).read_text(encoding="utf-8"))
+        instance = json.loads(instance_path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
         errors = sorted(Draft202012Validator(schema).iter_errors(instance), key=lambda e: list(e.path))
         if errors:
             formatted = "\n".join(f"{instance_rel}:{list(e.path)}: {e.message}" for e in errors)
             raise AssertionError(formatted)
-    return {"pairs": len(SCHEMA_PAIRS)}
+    return {"pairs": len(pairs), "external_instances": sum(
+        len(instances) for instances in EXTERNAL_SCHEMA_PAIRS.values()
+    )}
 
 
 def check_toml() -> dict[str, Any]:
@@ -555,6 +603,150 @@ def _strip_comments(node: Any) -> Any:
     return node
 
 
+def _authority_token(value: str) -> str:
+    """Normalize an authority token to its comparable form.
+
+    RFC 0027 spells one level `revise-intent` where the IDL spells it
+    `revise_intent`, and the RFC says so explicitly ("allowing for the
+    `revise-intent`/`revise_intent` spelling of one token"). That single
+    licensed difference is the only one folded away here; every other
+    disagreement is a disagreement.
+    """
+    return value.replace("-", "_")
+
+
+def _idl_operations() -> dict[str, str]:
+    """Every operation the normative IDL declares, mapped to its authority token."""
+    text = (ROOT / PROTOCOL_IDL_REL).read_text(encoding="utf-8")
+    operations: dict[str, str] = {}
+    for match in IDL_OPERATION_RE.finditer(text):
+        name, body = match.group(1), match.group(2)
+        assert name not in operations, f"{PROTOCOL_IDL_REL}: operation {name} declared twice"
+        authority = IDL_AUTHORITY_RE.search(body)
+        assert authority, f"{PROTOCOL_IDL_REL}: operation {name} declares no authority clause"
+        operations[name] = authority.group(1)
+    assert operations, f"{PROTOCOL_IDL_REL}: no operation declarations parsed"
+    return operations
+
+
+def _plan_operations() -> list[str]:
+    """The plan §10.2 registry, expanded from its `namespace.verb / verb` shorthand.
+
+    A registry entry may wrap across lines; a continuation is any line inside
+    the fence that does not itself open a `namespace.` group.
+    """
+    plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
+    fence = PLAN_OPERATION_FENCE_RE.search(plan_text)
+    assert fence, "plan.md section 10.2 operation registry fence not found"
+    entries: list[str] = []
+    for raw in fence.group(1).splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if PLAN_OPERATION_LINE_RE.match(line) or not entries:
+            entries.append(line)
+        else:
+            entries[-1] = f"{entries[-1]} {line}"
+    operations: list[str] = []
+    for entry in entries:
+        namespace, separator, verbs = entry.partition(".")
+        assert separator, f"plan.md section 10.2: registry entry {entry!r} names no namespace"
+        for verb in verbs.split("/"):
+            verb = verb.strip()
+            assert verb, f"plan.md section 10.2: registry entry {entry!r} has an empty verb"
+            operations.append(f"{namespace.strip()}.{verb}")
+    assert operations, "plan.md section 10.2: no operations parsed"
+    return operations
+
+
+def _rfc_operations() -> dict[str, str]:
+    """The RFC 0027 authority registry: one row per operation, one level per row."""
+    text = (ROOT / PROTOCOL_RFC_REL).read_text(encoding="utf-8")
+    rows: dict[str, str] = {}
+    for name, authority in RFC_REGISTRY_ROW_RE.findall(text):
+        assert name not in rows, f"{PROTOCOL_RFC_REL}: registry lists {name} twice"
+        rows[name] = authority
+    assert rows, f"{PROTOCOL_RFC_REL}: no registry rows parsed"
+    return rows
+
+
+def check_protocol_registry_agreement() -> dict[str, Any]:
+    """`rule conformance.registry_agreement`, enforced rather than asserted.
+
+    The IDL states that its operation set MUST equal the plan §10.2 registry
+    exactly, that each operation's `authority` clause MUST equal the RFC 0027
+    registry row for the same operation, and that "a generator or validator
+    MUST fail closed on any disagreement rather than preferring either
+    source". Three independent parses and no precedence between them: every
+    disagreement is reported by name, in both directions, and the count RFC
+    0027 states in prose must be the count its own table carries.
+    """
+    idl = _idl_operations()
+    plan_list = _plan_operations()
+    rfc = _rfc_operations()
+
+    problems: list[str] = []
+
+    repeated = sorted(name for name, count in Counter(plan_list).items() if count > 1)
+    if repeated:
+        problems.append("plan §10.2 registers an operation more than once: " + ", ".join(repeated))
+    plan = set(plan_list)
+
+    for label, other in (
+        ("plan.md §10.2", plan),
+        (f"{PROTOCOL_RFC_REL} authority registry", set(rfc)),
+    ):
+        absent = sorted(set(idl) - other)
+        unknown = sorted(other - set(idl))
+        if absent:
+            problems.append(
+                f"declared in {PROTOCOL_IDL_REL} but absent from {label}: " + ", ".join(absent)
+            )
+        if unknown:
+            problems.append(
+                f"listed in {label} but not declared in {PROTOCOL_IDL_REL}: " + ", ".join(unknown)
+            )
+
+    for name in sorted(set(idl) & set(rfc)):
+        if _authority_token(idl[name]) != _authority_token(rfc[name]):
+            problems.append(
+                f"{name}: authority {idl[name]!r} in {PROTOCOL_IDL_REL}, "
+                f"{rfc[name]!r} in {PROTOCOL_RFC_REL}"
+            )
+
+    namespaces = {name.split(".", 1)[0] for name in idl}
+    stated = RFC_REGISTRY_COUNT_RE.search((ROOT / PROTOCOL_RFC_REL).read_text(encoding="utf-8"))
+    if not stated:
+        problems.append(
+            f"{PROTOCOL_RFC_REL}: no '**N operations in M namespaces**' statement to check "
+            "the derived registry against"
+        )
+    else:
+        if int(stated.group(1)) != len(idl):
+            problems.append(
+                f"{PROTOCOL_RFC_REL} says {stated.group(1)} operations, "
+                f"{PROTOCOL_IDL_REL} declares {len(idl)}"
+            )
+        if int(stated.group(2)) != len(namespaces):
+            problems.append(
+                f"{PROTOCOL_RFC_REL} says {stated.group(2)} namespaces, "
+                f"{PROTOCOL_IDL_REL} declares {len(namespaces)}: {sorted(namespaces)}"
+            )
+
+    if problems:
+        raise AssertionError(
+            "protocol registry disagreement (IDL `rule conformance.registry_agreement`; "
+            "no source is preferred — fix whichever artifact moved alone):\n"
+            + "\n".join(f"  {problem}" for problem in problems)
+        )
+    return {
+        "operations": len(idl),
+        "namespaces": len(namespaces),
+        "authority_levels": dict(sorted(Counter(idl.values()).items())),
+        "sources": [PROTOCOL_IDL_REL, "plan.md §10.2", PROTOCOL_RFC_REL],
+    }
+
+
 def check_spec_debt() -> dict[str, Any]:
     """Derive the section 25 specification-debt ledger; plan text must agree."""
 
@@ -565,9 +757,21 @@ def check_spec_debt() -> dict[str, Any]:
         return json.loads(text_of(rel))
 
     def sd01() -> bool:
-        return bool(
-            list((ROOT / "rfcs").glob("*idl*")) + list((ROOT / "schemas").glob("*idl*"))
-        )
+        """SD-01 is paid when the protocol IDL exists *and* its registry agrees.
+
+        A glob for a file named `*idl*` only ever proved that something had
+        been written down. The debt §25 records is the drift the IDL's own
+        `rule conformance.registry_agreement` forbids — between the IDL, the
+        plan §10.2 registry, and the RFC 0027 authority table — so the
+        predicate is that agreement. `check_protocol_registry_agreement` runs
+        as a check of its own and names every disagreeing operation when it
+        fails; §25 needs only the boolean, and an unevaluable predicate is
+        open debt by the loop below.
+        """
+        if not (ROOT / PROTOCOL_IDL_REL).exists():
+            return False
+        check_protocol_registry_agreement()
+        return True
 
     def sd02() -> bool:
         t = text_of("rfcs/0026-continuumd-native-protocol.md")
@@ -1017,6 +1221,7 @@ def main() -> None:
         ("rev2_target_gate_qualifiers", check_rev2_target_gate_qualifiers),
         ("register_rows", check_register_rows),
         ("program_status", check_program_status),
+        ("protocol_registry_agreement", check_protocol_registry_agreement),
         ("spec_debt", check_spec_debt),
         ("plan_bones_traceability", validate_checked_traceability),
     ]

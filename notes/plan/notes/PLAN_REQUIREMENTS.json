@@ -4688,7 +4688,7 @@
         "path": "plan.md"
       },
       "status": "satisfied",
-      "summary": "Omission transparency, bn-38p2's byte-budget packer (a packed child is an answer; BudgetExhausted only below the minimal child), bn-3jrtz's F13 schema closure of kind, bn-1gc/bn-23j7s's MeterSet declared/unmetered discipline derived live into the daemon's own omission list, bn-1604's INV-016 interaction (ContextExpandRequest.anchor as closed-vocabulary equality), and bn-37gu's dx01falsification campaign against the PR-11 acceptance criterion; new evidence added here: a live Daemon::dispatch proving a real ResultEnvelope.omissions cannot be dropped from the wire \u2014 stripped from a real answer's own encoded bytes, decoding refuses with CodecError::MissingField; honest absences recorded as unbuilt-producer typed refusals, never silent drops \u2014 the ten-stage compiler, whole-pack store publication, the crashpack producer, and continuum-benchmark's documented count-plus-retrieval-command summarization)"
+      "summary": "Omission transparency, bn-38p2's byte-budget packer (a packed child is an answer; BudgetExhausted only below the minimal child), bn-3jrtz's F13 schema closure of kind, bn-1gc/bn-23j7s's MeterSet declared/unmetered discipline derived live into the daemon's own omission list, bn-1604's INV-016 interaction (ContextExpandRequest.anchor as closed-vocabulary equality), and bn-37gu's dx01_falsification campaign against the PR-11 acceptance criterion; new evidence added here: a live Daemon::dispatch proving a real ResultEnvelope.omissions cannot be dropped from the wire \u2014 stripped from a real answer's own encoded bytes, decoding refuses with CodecError::MissingField; honest absences recorded as unbuilt-producer typed refusals, never silent drops \u2014 the ten-stage compiler, whole-pack store publication, the crashpack producer, and continuum-benchmark's documented count-plus-retrieval-command summarization)"
     },
     {
       "category": "invariant",
@@ -4702,7 +4702,7 @@
         "path": "plan.md"
       },
       "status": "satisfied",
-      "summary": "Typed inconclusiveness and crates/continuumd/tests/inv008typedinconclusivenessevidence.rs (engine/task/daemon: five-kind audit, never-a-pass restated live, no-boolean-verdict sweep); abstraction ambiguity and incomplete proof search honestly pinned as unlanded, Phase-D-adjacent boundaries)"
+      "summary": "Typed inconclusiveness and crates/continuumd/tests/inv008_typed_inconclusiveness_evidence.rs (engine/task/daemon: five-kind audit, never-a-pass restated live, no-boolean-verdict sweep); abstraction ambiguity and incomplete proof search honestly pinned as unlanded, Phase-D-adjacent boundaries)"
     },
     {
       "category": "invariant",
@@ -6149,7 +6149,7 @@
         "controls": [
           "instrumentation schema declares observability",
           "sequence gaps and dropped buffers are events",
-          "checker has INCONCLUSIVEOBSERVATION",
+          "checker has INCONCLUSIVE_OBSERVATION",
           "property monitorability analysis",
           "no default closed-world assumption."
         ]
@@ -6340,7 +6340,7 @@
       "metadata": {
         "contract": "Controls",
         "controls": [
-          "INCONCLUSIVERESOURCELIMIT",
+          "INCONCLUSIVE_RESOURCE_LIMIT",
           "partial exploration artifacts clearly marked",
           "no success from frontier exhaustion unless closure is verified",
           "certificate checker separately confirms closure."
@@ -6680,7 +6680,7 @@
       "metadata": {
         "contract": "Probability: high Impact: moderate",
         "controls": [
-          "precise TRUSTEDSOLVER label",
+          "precise TRUSTED_SOLVER label",
           "multiple solvers",
           "bounded witness replay",
           "gradually add Alethe/LRAT/theory checkers",
@@ -6809,7 +6809,7 @@
       "metadata": {
         "contract": "Probability: medium Impact: severe",
         "controls": [
-          "Phase B build-vs-adopt ADR backed by a spike implementing the four reuse-edge classes and query.explaininvalidation, with a measured invalidation-precision baseline",
+          "Phase B build-vs-adopt ADR backed by a spike implementing the four reuse-edge classes and query.explain_invalidation, with a measured invalidation-precision baseline",
           "Incremental Parity Audit (plan \u00a79.5)."
         ]
       },
@@ -7196,7 +7196,7 @@
         "path": "plan.md"
       },
       "status": "satisfied",
-      "summary": "one $id/versioning convention with a schema-epoch field across all schemas (\u00a74.3) \u2014 every schema document is identified by https://continuum.dev/schema/v<epoch>/<name>.json and declares schemaepoch and schemakind; every artifact instance declares the epoch-free class identity schemaid and the schemaepoch it was written against; the rival format/version, schemaversion, and encodingversion forms are retired; the convention, including what advances an epoch and why it is not a seventh epoch, is normative in schemas/README.md"
+      "summary": "one $id/versioning convention with a schema-epoch field across all schemas (\u00a74.3) \u2014 every schema document is identified by https://continuum.dev/schema/v<epoch>/<name>.json and declares schema_epoch and schema_kind; every artifact instance declares the epoch-free class identity schema_id and the schema_epoch it was written against; the rival format/version, schema_version, and encoding_version forms are retired; the convention, including what advances an epoch and why it is not a seventh epoch, is normative in schemas/README.md"
     },
     {
       "category": "spec-debt",
@@ -7210,7 +7210,7 @@
         "path": "plan.md"
       },
       "status": "satisfied",
-      "summary": "docs/35, RFC 0026, ADR-0018, and docs/42 absorb the \u00a74.5/\u00a74.6/\u00a74.7 operational contract (purge and Redacted(reason, commitment), backup and verified restore, the cross-user dedup existence-oracle rule, two-epoch migration, Preserved | Revalidate | Incompatible compatibility statements, engine-defect artifacts) \u2014 docs/35 takes crash safety, storage lifecycle and attribution, purge, restore, capabilities and cross-principal sharing, and the daemon's migration duties; RFC 0026 takes the wire slice (the four-field Redacted stub, PublicationAborted/QuotaExhausted, the existence-oracle rules, EpochAdvanceNotice, defect on divergence); ADR-0018 takes epoch advance; docs/42 takes reuse across an advance, redacted and collected inputs, and parity mismatches as engine defects. Each absorbing document records its corrections with direction"
+      "summary": "docs/35, RFC 0026, ADR-0018, and docs/42 absorb the \u00a74.5/\u00a74.6/\u00a74.7 operational contract (purge and Redacted(reason, commitment), backup and verified restore, the cross-user dedup existence-oracle rule, two-epoch migration, Preserved | Revalidate | Incompatible compatibility statements, engine-defect artifacts) \u2014 docs/35 takes crash safety, storage lifecycle and attribution, purge, restore, capabilities and cross-principal sharing, and the daemon's migration duties; RFC 0026 takes the wire slice (the four-field Redacted stub, PublicationAborted/QuotaExhausted, the existence-oracle rules, EpochAdvanceNotice, defect_* on divergence); ADR-0018 takes epoch advance; docs/42 takes reuse across an advance, redacted and collected inputs, and parity mismatches as engine defects. Each absorbing document records its corrections with direction"
     },
     {
       "category": "spec-debt",
@@ -7224,7 +7224,7 @@
         "path": "plan.md"
       },
       "status": "satisfied",
-      "summary": "docs/41 regenerated around the 12-gate, phase-profile repair design \u2014 the twelve gates by name, the phase-staged profiles with notyetenforced, derived-never-asserted status, the gate-5 disclosure and counting rule by reference, and worked examples against the shipped schema examples; RFC 0032 and schemas/repair-transaction.schema.json / schemas/promotion-receipt.schema.json are normative and docs/41 is the non-normative guide around them, with RFC 0032's corrections 6, 8, and 14 (gate 1 failed vs inconclusive, gate 3 on the recomputed verdict, the struct that was never the artifact shape) applied"
+      "summary": "docs/41 regenerated around the 12-gate, phase-profile repair design \u2014 the twelve gates by name, the phase-staged profiles with not_yet_enforced, derived-never-asserted status, the gate-5 disclosure and counting rule by reference, and worked examples against the shipped schema examples; RFC 0032 and schemas/repair-transaction.schema.json / schemas/promotion-receipt.schema.json are normative and docs/41 is the non-normative guide around them, with RFC 0032's corrections 6, 8, and 14 (gate 1 failed vs inconclusive, gate 3 on the recomputed verdict, the struct that was never the artifact shape) applied"
     },
     {
       "category": "spec-debt",
@@ -7238,7 +7238,7 @@
         "path": "plan.md"
       },
       "status": "satisfied",
-      "summary": "RFC 0026 absorbs the \u00a74.3 requirements it omitted \u2014 the N and N\u22121 protocol-major window, evidence/receipt readability decoupling, mid-flight budget updates (task.updatebudget), evidence subscriptions, and the five \u00a710.3 error codes added in review 5"
+      "summary": "RFC 0026 absorbs the \u00a74.3 requirements it omitted \u2014 the N and N\u22121 protocol-major window, evidence/receipt readability decoupling, mid-flight budget updates (task.update_budget), evidence subscriptions, and the five \u00a710.3 error codes added in review 5"
     },
     {
       "category": "spec-debt",
@@ -7308,7 +7308,7 @@
         "path": "plan.md"
       },
       "status": "satisfied",
-      "summary": "fail-closed repair of the anti-gaming schemas \u2014 semantic-diff binds protected structurally; repair-transaction drops the undefined notapplicable status from promotable profiles and gains phase-c/phase-d conditionals; gate lists in repair-transaction and promotion-receipt enforce the twelve gate identities, not a count; evidence-graph-node requires a service identity on Sampled/Bounded/Validated/Proved promotion and evidence-graph-edge requires checker on CHECKEDBY (INV-004)"
+      "summary": "fail-closed repair of the anti-gaming schemas \u2014 semantic-diff binds protected structurally; repair-transaction drops the undefined not_applicable status from promotable profiles and gains phase-c/phase-d conditionals; gate lists in repair-transaction and promotion-receipt enforce the twelve gate identities, not a count; evidence-graph-node requires a service identity on Sampled/Bounded/Validated/Proved promotion and evidence-graph-edge requires checker on CHECKED_BY (INV-004)"
     },
     {
       "category": "spec-debt",
