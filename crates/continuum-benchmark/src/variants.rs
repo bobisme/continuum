@@ -1014,3 +1014,314 @@ fn take(record: &mut continuumd::protocol::task::TaskRecord, subject: &str) {
         _ => {}
     }
 }
+
+// --- C5: what pinning the epoch set at the handshake is actually worth, and when ------------
+
+/// What the three `required` envelope members C5 would suppress cost, measured over the matrix.
+///
+/// The row `DX10_BYTE_LEDGER.md` §3 C5 projected at **27,864 B + 5,160 B of key skeleton,
+/// 1,344 B per solved task, "declaration-moving, bundled 3.6"**, re-measured — both for the
+/// size of the prize and, the part the projection did not check, for *which protocol version
+/// can collect it*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpochProjection {
+    /// Answers the matrix produced.
+    pub answers: u32,
+    /// Their result frames, summed, as landed.
+    pub frame_bytes: u64,
+    /// Distinct `epochs` encodings across those answers.
+    pub distinct_epoch_sets: u32,
+    /// Answers whose `epochs` is not the set `ServerWelcome` pinned.
+    ///
+    /// The premise of the whole candidate: absence can only mean "the set the welcome pinned"
+    /// if the welcome pinned the set the answers carry. Zero here is the premise holding.
+    pub answers_unpinned_by_the_welcome: u32,
+    /// Bytes that removing `epochs` from every result frame would save.
+    pub epochs_absent_bytes: u64,
+    /// Bytes that removing `cost` from every result frame would save.
+    pub cost_absent_bytes: u64,
+    /// Bytes that removing `next_operations` from every result frame would save.
+    pub next_operations_absent_bytes: u64,
+    /// Answers whose `cost` carried no dimension at all.
+    pub empty_cost: u32,
+    /// Answers whose `next_operations` offered nothing.
+    pub empty_next_operations: u32,
+    /// What reducing `epochs` to its protocol member and six explicit nulls would save.
+    ///
+    /// The figure the landed instrument credits. It moves no presence marker — every key still
+    /// ships — and it is nonetheless **unavailable**, because six of those nulls would be the
+    /// daemon denying it can pin an epoch it can pin, which `rule envelope.epochs_named`
+    /// spends its second sentence forbidding.
+    pub protocol_only_bytes: u64,
+    /// What C5 is worth at 3.5, moving no presence marker and stating nothing false.
+    ///
+    /// Measured, not asserted: for each of the three members, the smallest value the
+    /// declaration admits *and the daemon can truthfully emit*, against what it emits today.
+    pub available_without_a_bump: u64,
+}
+
+impl EpochProjection {
+    /// The full-suppression saving per solved task, over the matrix's 24 solved tasks.
+    #[must_use]
+    pub const fn per_solved(&self) -> u64 {
+        (self.epochs_absent_bytes + self.cost_absent_bytes + self.next_operations_absent_bytes) / 24
+    }
+}
+
+/// Re-measure C5 against the declaration the wire actually has.
+///
+/// # Method
+///
+/// The recorded answers are the daemon's own (`shell_sweep` in recording mode), re-encoded
+/// with `continuumd`'s codec — the ledger's own method. The suppression itself cannot be
+/// performed by building a value, because `ResultEnvelope` declares all three members
+/// `required` and [`protocol_struct!`](continuumd::protocol_struct) gives a `required` field a
+/// plain Rust type with no absent state: the codec's `required` arm writes the key
+/// unconditionally. So the counterfactual is built by **surgery on the canonical JSON**, by
+/// [`without_member`], exactly as C7's was. That is not a workaround; it is the finding, and
+/// [`EpochProjection::available_without_a_bump`] is what remains once it is excluded.
+///
+/// # Errors
+///
+/// [`SurfaceError`] as [`shell_sweep`].
+pub fn epoch_projection() -> Result<EpochProjection, SurfaceError> {
+    let cells = shell_sweep(Renderer::Standard, Disciplines::ALL, true)?;
+    let welcome = crate::rig::epochs();
+    let mut sets: BTreeMap<Vec<u8>, u32> = BTreeMap::new();
+    let mut projection = EpochProjection {
+        answers: 0,
+        frame_bytes: 0,
+        distinct_epoch_sets: 0,
+        answers_unpinned_by_the_welcome: 0,
+        epochs_absent_bytes: 0,
+        cost_absent_bytes: 0,
+        next_operations_absent_bytes: 0,
+        empty_cost: 0,
+        empty_next_operations: 0,
+        protocol_only_bytes: 0,
+        available_without_a_bump: 0,
+    };
+
+    for cell in &cells {
+        for recorded in &cell.recorded {
+            let Ok(frame) = to_bytes(&recorded.envelope) else {
+                continue;
+            };
+            let Ok(text) = String::from_utf8(frame) else {
+                continue;
+            };
+            projection.answers += 1;
+            projection.frame_bytes += text.len() as u64;
+
+            if recorded.envelope.epochs != welcome {
+                projection.answers_unpinned_by_the_welcome += 1;
+            }
+            if let Ok(encoded) = to_bytes(&recorded.envelope.epochs) {
+                *sets.entry(encoded).or_insert(0) += 1;
+            }
+
+            for (member, into) in [
+                ("epochs", &mut projection.epochs_absent_bytes),
+                ("cost", &mut projection.cost_absent_bytes),
+                (
+                    "next_operations",
+                    &mut projection.next_operations_absent_bytes,
+                ),
+            ] {
+                if let Some(stripped) = without_member(&text, member) {
+                    *into += text.len().saturating_sub(stripped.len()) as u64;
+                }
+            }
+
+            if recorded.envelope.cost == EMPTY_COST {
+                projection.empty_cost += 1;
+            }
+            if recorded.envelope.next_operations.is_empty() {
+                projection.empty_next_operations += 1;
+            }
+
+            // The value-only counterfactual: every key still on the wire, every epoch the
+            // daemon can pin denied. Priced here so the credit the landed instrument takes has
+            // a measured size beside the reason it cannot be collected.
+            let mut denied = recorded.envelope.clone();
+            denied.epochs = EpochSet {
+                protocol: recorded.envelope.epochs.protocol,
+                semantic: Nullable::Null,
+                intent: Nullable::Null,
+                evidence: Nullable::Null,
+                proof: Nullable::Null,
+                corpus: Nullable::Null,
+                engine: Nullable::Null,
+            };
+            if let Ok(smaller) = to_bytes(&denied) {
+                projection.protocol_only_bytes += text.len().saturating_sub(smaller.len()) as u64;
+            }
+
+            projection.available_without_a_bump += truthful_saving(&recorded.envelope, &text);
+        }
+    }
+    projection.distinct_epoch_sets = u32::try_from(sets.len()).unwrap_or(u32::MAX);
+    Ok(projection)
+}
+
+/// The bytes a **3.5** daemon can still take out of one answer's `epochs`, `cost` and
+/// `next_operations` — moving no presence marker, and stating nothing that is not so.
+///
+/// Each member is replaced by the smallest value its declaration admits, and the replacement
+/// is kept only where it changes no statement the answer makes. That is a real per-answer
+/// test, not a constant: an answer that shipped a pinnable epoch as a redundant value, or an
+/// offer list padded with an offer it did not mean, would show up here as bytes. What it
+/// finds on this matrix is reported by [`EpochProjection::available_without_a_bump`].
+///
+/// Why each replacement is conditional:
+///
+/// - `epochs` — a nullable member of `EpochSet` is not a spelling choice. `rule
+///   envelope.epochs_named` reads "an epoch the result cannot pin reads null", so writing
+///   null over an epoch the daemon *can* pin states something false about the daemon, and
+///   RFC 0027's Safety section prohibits exactly that trade ("hiding uncertainty to save
+///   tokens"). The replacement is therefore admissible only where the member is already null.
+/// - `cost` — its nine dimensions are `optional`, so an unspent dimension is already absent.
+///   Emptying a `Cost` that reported a spend would delete the spend, not compress it.
+/// - `next_operations` — an offer not made is already an empty list.
+fn truthful_saving(envelope: &ResultEnvelope, today: &str) -> u64 {
+    let mut smallest = envelope.clone();
+    let pinned = &envelope.epochs;
+    if pinned.semantic.is_null()
+        && pinned.intent.is_null()
+        && pinned.evidence.is_null()
+        && pinned.proof.is_null()
+        && pinned.corpus.is_null()
+        && pinned.engine.is_null()
+    {
+        smallest.epochs = EpochSet {
+            protocol: pinned.protocol,
+            semantic: Nullable::Null,
+            intent: Nullable::Null,
+            evidence: Nullable::Null,
+            proof: Nullable::Null,
+            corpus: Nullable::Null,
+            engine: Nullable::Null,
+        };
+    }
+    if envelope.cost == EMPTY_COST {
+        smallest.cost = EMPTY_COST;
+    }
+    if envelope.next_operations.is_empty() {
+        smallest.next_operations = Vec::new();
+    }
+    to_bytes(&smallest).map_or(0, |bytes| today.len().saturating_sub(bytes.len()) as u64)
+}
+
+/// A `Cost` carrying no dimension: the value the matrix's answers actually hold.
+const EMPTY_COST: Cost = Cost {
+    wall_ms: Optional::Absent,
+    cpu_ms: Optional::Absent,
+    memory_bytes: Optional::Absent,
+    states: Optional::Absent,
+    solver_ms: Optional::Absent,
+    proof_ms: Optional::Absent,
+    tokens: Optional::Absent,
+    candidates: Optional::Absent,
+    bytes: Optional::Absent,
+    tokenizer_id: Optional::Absent,
+};
+
+/// One canonical-JSON object with a top-level member removed, or `None` if it has no such
+/// member.
+///
+/// # Why surgery and not a value
+///
+/// `ResultEnvelope.epochs`, `.cost` and `.next_operations` are `required`, so the generated
+/// Rust types are `EpochSet`, `Cost` and `Vec<NextOperation>` — none of which has an absent
+/// state — and the generated codec's `required` arm writes the key whatever the value is.
+/// A conforming daemon *cannot* emit these frames, and this function is how a measurement
+/// prices something the type system is right to refuse to build.
+///
+/// The scan is a small canonical-JSON walker rather than a regex: a value may contain the
+/// member's own name inside a string, and a brace inside a string is not a brace. It removes
+/// the member and exactly one separator, which is what absence costs.
+#[must_use]
+pub fn without_member(object: &str, member: &str) -> Option<String> {
+    let bytes = object.as_bytes();
+    let key = format!("\"{member}\":");
+    let mut at = 1; // past the opening brace
+    while at < bytes.len() {
+        if bytes[at] == b'}' {
+            return None;
+        }
+        let start = at;
+        if !object[at..].starts_with('"') {
+            return None;
+        }
+        let key_end = string_end(bytes, at)?;
+        let matched = object[at..].starts_with(&key);
+        at = key_end;
+        if bytes.get(at) != Some(&b':') {
+            return None;
+        }
+        at += 1;
+        at = value_end(bytes, at)?;
+        if matched {
+            // Take the separator that binds this member to a neighbour: the following comma
+            // when there is one, otherwise the preceding one.
+            let (from, to) = if bytes.get(at) == Some(&b',') {
+                (start, at + 1)
+            } else if start > 1 {
+                (start - 1, at)
+            } else {
+                (start, at)
+            };
+            let mut out = String::with_capacity(object.len());
+            out.push_str(&object[..from]);
+            out.push_str(&object[to..]);
+            return Some(out);
+        }
+        match bytes.get(at) {
+            Some(b',') => at += 1,
+            Some(b'}') => return None,
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The index one past a JSON string starting at `at`.
+fn string_end(bytes: &[u8], at: usize) -> Option<usize> {
+    let mut index = at + 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return Some(index + 1),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// The index one past the JSON value starting at `at`.
+fn value_end(bytes: &[u8], at: usize) -> Option<usize> {
+    let mut index = at;
+    let mut depth = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => index = string_end(bytes, index)?,
+            b'{' | b'[' => {
+                depth += 1;
+                index += 1;
+            }
+            b'}' | b']' => {
+                if depth == 0 {
+                    return Some(index);
+                }
+                depth -= 1;
+                index += 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            b',' if depth == 0 => return Some(index),
+            _ => index += 1,
+        }
+    }
+    None
+}
