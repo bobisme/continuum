@@ -13,7 +13,7 @@
 //! | alter evidence status | `daemon/evidence.rs` — [`Promotion`] has private fields and no public constructor, so producer code (`daemon/observe.rs`, a *different module*) can name the type and never build one; `observe.ingest`'s wire shape declares no status field, so an append lands at the lattice's bottom as a property of the request's *type* | `daemon_evidence.rs`: `a_producers_append_lands_at_the_lattices_bottom`, `the_producers_request_body_has_no_field_that_could_name_a_status`, `the_status_written_is_what_the_checker_established_not_what_the_caller_named`, `no_operation_in_either_family_removes_or_edits_an_appended_node` — cited via [`status_authority`], plus this file's own registry-grain sweep [`privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status`] |
 //! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; the cryptographic-signing lifecycle (plan §18.6, docs/09) has **no producer** — pinned as a gap |
 //! | access ungranted production traces | `daemon/admission.rs` — R-4: `observe.ingest` requires `DataGrant::ProductionTrace` beyond its `execute` level, decided by [`required_grant`] *before* any family runs; the denial is the zero-bit [`Denied`] (X1) and precedes the index (X3), so a refused caller learns nothing (X2) | live here: [`trace_grant::positive_exactly_one_operation_requires_a_data_grant_and_it_is_the_production_trace`], [`trace_grant::positive_a_denial_carries_zero_bits`]; cited: `the_production_trace_grant_is_required_beyond_the_execute_level`, `every_admission_failure_is_one_byte_identical_answer`, `a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does` |
-//! | execute unrestricted host effects | structurally: the 73-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every host-effect crate (`continuum-effects-*`, `continuum-forge`, `continuum-proof-client`) is a zero-pub-item scaffold, pinned to go red when the substance arrives | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
+//! | execute unrestricted host effects | structurally: the 73-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-*`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
 //!
 //! Cross-cutting, because "no ambient authority" is a property of the *admission
 //! predicate* rather than of any one clause: the `@privileged` set is exactly the five
@@ -61,8 +61,19 @@
 //! 1. **Worker isolation has no worker.** All eight docs/49 controls are
 //!    declared-no-producer at worker scope ([`isolation_controls`]); the scaffold
 //!    sweep ([`no_widening::boundary_the_host_effect_surface_has_not_arrived_and_its_crates_are_scaffolds`])
-//!    goes red the moment any effects/forge/proof-client/security crate grows a public
-//!    item, forcing this audit to be redone against a surface that then exists.
+//!    goes red the moment any effects/proof-client/security crate grows a public item,
+//!    forcing this audit to be redone against a surface that then exists. `continuum-forge`
+//!    has already left that list: bn-1dsih landed its task-assembly lane — the caller
+//!    RFC 0037 AO2 names for INV-012's non-vacuity obligation — and
+//!    [`no_widening::boundary_forge_grew_a_task_assembly_lane_and_it_reaches_no_host_effect`]
+//!    re-establishes for that real surface what emptiness used to assert. The audit's
+//!    conclusion is unchanged and its basis is not: Forge's surface decides whether a
+//!    contract may become a synthesis task, it names no host-effect facility, it
+//!    declares one verifier-side dependency, and no route runs from an agent connection
+//!    to it — the `forge.*` operations the registry has always declared still have no
+//!    family answering them, and the daemon neither links nor names the crate. Nothing
+//!    about worker isolation is discharged by that lane; the worker itself is still
+//!    absent.
 //! 2. **`continuum-security` is a PR-1/IMPL-01 scaffold.** The crate plan §18 names
 //!    for "capability model, sandboxing … audit trail, and signing identities" has
 //!    zero public items; the live capability model ships in `continuumd`
@@ -83,8 +94,10 @@
 //! [`mutants`] re-runs every evaluating leg against a doctored input and requires the
 //! defect to be reported: a docs/49 copy missing one isolation bullet, a privileged
 //! set with a smuggled member and with a dropped member, each load-bearing source pin
-//! stripped from a copy of its source, a planted `.mint(` caller, and a scaffold
-//! grown a public item.
+//! stripped from a copy of its source, a planted `.mint(` caller, a scaffold grown a
+//! public item, and — for the Forge audit — a planted host-effect call, a comment that
+//! merely mentions one, an added public item, a widened dependency set, and a planted
+//! daemon caller.
 //!
 //! House rules: `src/` untouched, no existing test edited, no new dependency edge
 //! (every cross-crate citation is `include_str!` over tracked files), deterministic
@@ -139,8 +152,17 @@ const EFFECTS_NETWORK_LIB: &str = include_str!("../../continuum-effects-network/
 const EFFECTS_PROCESS_LIB: &str = include_str!("../../continuum-effects-process/src/lib.rs");
 const EFFECTS_STORAGE_LIB: &str = include_str!("../../continuum-effects-storage/src/lib.rs");
 const EFFECTS_TIME_LIB: &str = include_str!("../../continuum-effects-time/src/lib.rs");
-const FORGE_LIB: &str = include_str!("../../continuum-forge/src/lib.rs");
 const PROOF_CLIENT_LIB: &str = include_str!("../../continuum-proof-client/src/lib.rs");
+
+/// `continuum-forge`'s manifest — the crate is no longer a zero-pub-item scaffold
+/// (bn-1dsih), so what is swept about it is its *declared dependency set* rather than
+/// its emptiness. Read as text, deliberately independent of the `cargo metadata` walk
+/// `tools/check_crate_boundaries.py` uses, per docs/03 §8's diversity rule.
+const FORGE_MANIFEST: &str = include_str!("../../continuum-forge/Cargo.toml");
+
+/// `continuumd`'s own manifest — the other end of the same edge: whether the daemon
+/// links Forge at all.
+const CONTINUUMD_MANIFEST: &str = include_str!("../Cargo.toml");
 
 // --- shared helpers ------------------------------------------------------------------------
 
@@ -216,6 +238,87 @@ fn rust_sources(dir: &Path, into: &mut Vec<(PathBuf, String)>) {
             into.push((path, text));
         }
     }
+}
+
+/// Every source file of `continuum-forge`, walked rather than listed, so a module added
+/// to that crate is swept without anyone remembering to name it here.
+fn forge_sources() -> Vec<(PathBuf, String)> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../continuum-forge/src");
+    let mut sources = Vec::new();
+    rust_sources(&root, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "the walk found no continuum-forge source; the crate moved and this sweep is \
+         reporting nothing rather than checking something"
+    );
+    sources
+}
+
+/// The std surfaces through which a crate could reach the machine. A crate whose code
+/// names none of them cannot execute a host effect on its own, whatever its callers do.
+///
+/// The one spelling that could reach a facility without naming it — a raw block — is
+/// deliberately *not* listed here, and not because it is unimportant: the workspace
+/// forbids it outright with no crate-level override (`Cargo.toml`'s
+/// `[workspace.lints.rust]`, docs/03, docs/12), and `GOV-1-07`'s sibling rule
+/// `unsafe-forbidden` scans every source in the tree for it on every `just check` run.
+/// Naming the token here would plant the very literal that rule searches for and turn
+/// this file into its own violation, so the check is cited rather than duplicated.
+const HOST_EFFECT_FACILITIES: &[&str] = &[
+    "std::fs",
+    "std::io",
+    "std::net",
+    "std::os",
+    "std::env",
+    "std::process",
+    "std::thread",
+    "std::time",
+    "SystemTime",
+    "Instant",
+    "Command",
+    "TcpStream",
+];
+
+/// Every code line of `source` that names a host-effect facility, comments excluded so
+/// that prose *about* an effect is never mistaken for the effect.
+fn host_effect_lines(source: &str) -> Vec<&str> {
+    source
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| !line.starts_with("//"))
+        .filter(|line| {
+            HOST_EFFECT_FACILITIES
+                .iter()
+                .any(|facility| line.contains(facility))
+        })
+        .collect()
+}
+
+/// The dependency names declared under `[dependencies]` of a manifest, read as text.
+///
+/// Deliberately not a TOML parse and deliberately not `cargo metadata`: this file shares
+/// no code with `tools/check_crate_boundaries.py`, so the two can disagree (docs/03 §8,
+/// "diversity against common-mode bugs") — the same posture
+/// `continuum-certificate/tests/inv004_no_self_certification.rs` takes on the same
+/// forbidden-edge family.
+fn declared_dependencies(manifest: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut inside = false;
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            inside = trimmed == "[dependencies]";
+            continue;
+        }
+        if !inside || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (name, _) = trimmed
+            .split_once('=')
+            .expect("a dependency line is `name = …`");
+        names.push(name.trim().to_owned());
+    }
+    names
 }
 
 /// Every source file of this crate, from the manifest directory the harness fixes.
@@ -634,10 +737,14 @@ mod trace_grant {
 // --- clause 4: execute unrestricted host effects, and never-by-default ---------------------
 
 mod no_widening {
+    use continuumd::protocol::registry::OPERATIONS;
+    use continuumd::protocol::vocabulary::ErrorCode;
+
     use super::{
-        ADMISSION, CAPABILITY, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB, EFFECTS_PROCESS_LIB,
-        EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_LIB, PROOF_CLIENT_LIB, PUBLICATION,
-        SECURITY_LIB, administrative_callers, continuumd_sources, pin, pub_items,
+        ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
+        EFFECTS_PROCESS_LIB, EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_MANIFEST,
+        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, administrative_callers, continuumd_sources,
+        declared_dependencies, forge_sources, host_effect_lines, pin, pub_items,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -700,6 +807,14 @@ mod no_widening {
     /// zero-pub-item scaffold that says so itself. This is the tripwire that makes the
     /// isolation gap rows honest — the moment any of these grows a public item, this
     /// file fails and the docs/49 audit below must be redone against a real surface.
+    ///
+    /// `continuum-forge` was the seventh row here until bn-1dsih landed its
+    /// task-assembly lane. It is *not* silently dropped: it moves to
+    /// [`boundary_forge_grew_a_task_assembly_lane_and_it_reaches_no_host_effect`], where
+    /// the property this sweep actually guards — that no crate on this list can execute
+    /// a host effect on an agent's behalf — is re-established for a surface that now
+    /// exists, instead of being asserted by emptiness. The six rows below keep the
+    /// original, stricter form because their substance genuinely has not arrived.
     #[test]
     fn boundary_the_host_effect_surface_has_not_arrived_and_its_crates_are_scaffolds() {
         let scaffolds = [
@@ -707,7 +822,6 @@ mod no_widening {
             ("continuum-effects-process", EFFECTS_PROCESS_LIB),
             ("continuum-effects-storage", EFFECTS_STORAGE_LIB),
             ("continuum-effects-time", EFFECTS_TIME_LIB),
-            ("continuum-forge", FORGE_LIB),
             ("continuum-proof-client", PROOF_CLIENT_LIB),
             ("continuum-security", SECURITY_LIB),
         ];
@@ -730,6 +844,181 @@ mod no_widening {
             SECURITY_LIB,
             &["INV-015 — agent least authority."],
         );
+    }
+
+    /// `continuum-forge`'s recorded public surface, sorted — every `pub` item across
+    /// every source file of the crate, as `pub_items` reads them.
+    ///
+    /// A recorded inventory rather than a zero-item assertion, because the crate is no
+    /// longer empty. It is the same tripwire in a different shape: an unrecorded public
+    /// item fails this test, so a surface cannot grow past what INV-015 has audited
+    /// without the audit being redone.
+    const FORGE_PUBLIC_SURFACE: [&str; 17] = [
+        "pub const fn intent_id(&self) -> &IntentId {",
+        "pub const fn intent_id(&self) -> &IntentId {",
+        "pub const fn intent_id(&self) -> &IntentId {",
+        "pub const fn intent_id(&self) -> &IntentId {",
+        "pub const fn invariant(&self) -> &'static str {",
+        "pub const fn vacuous(&self) -> Option<&VacuousIntent> {",
+        "pub const fn vacuous(&self) -> Option<&VacuousIntent> {",
+        "pub const fn verdict(&self) -> &ContractVerdict {",
+        "pub enum TaskRefusal {",
+        "pub fn assemble(",
+        "pub fn hard_objectives(&self) -> &[Objective] {",
+        "pub fn positive_behaviors(&self) -> &[NonVacuityObligation] {",
+        "pub fn soft_objectives(&self) -> &[Objective] {",
+        "pub mod task;",
+        "pub struct NotWellFormed {",
+        "pub struct SynthesisTask {",
+        "pub struct VacuousIntent {",
+    ];
+
+    /// The first crate on the host-effect list to grow a real surface, audited rather
+    /// than grandfathered (bn-1dsih; RFC 0037 flag F12).
+    ///
+    /// What arrived is a *contract-admission* lane: `assemble` decides whether an Intent
+    /// Contract may become a synthesis task, by making the two calls RFC 0037 AO2/AO3
+    /// require, and refusing with a typed value. What INV-015's fourth clause forbids is
+    /// executing unrestricted host effects on an agent's behalf, so the question this
+    /// test answers is not "is the crate empty" but "can any of this new surface be
+    /// reached from the wire, and can any of it touch the machine". Four independent
+    /// legs, each swept live:
+    ///
+    /// 1. the surface is exactly what has been audited — an unrecorded `pub` item fails;
+    /// 2. no code line in the crate names a host-effect facility, so the lane cannot
+    ///    open a file, a socket, a process, a thread, or a clock;
+    /// 3. the crate's declared dependency set is one verifier-side crate, so it cannot
+    ///    reach an effect through a neighbour either;
+    /// 4. it is unreachable from an agent connection.
+    ///
+    /// Leg 4 is stated carefully, because the obvious version of it is false: the
+    /// registry *does* declare a `forge` namespace — `forge.create`, `forge.step`,
+    /// `forge.archive`, `forge.materialize` — and has since the protocol surface landed.
+    /// Those four are declared vocabulary ahead of their subsystem, which `rule
+    /// errors.unsupported_surface` provides for and which is why each carries
+    /// `UnsupportedSemanticFeature` in its own `errors` clause. What makes the lane
+    /// unreachable is one layer down: no [`OperationFamily`] answers for the `forge`
+    /// namespace, `continuumd` does not link `continuum-forge`, and no `continuumd`
+    /// source names it — so a `forge.*` request meets a typed refusal from the
+    /// dispatcher and never reaches any code in that crate. All three are swept live.
+    ///
+    /// Any of the four legs turning red means Forge has acquired authority the docs/49
+    /// audit below has never examined, and that audit must be redone before the change
+    /// lands.
+    ///
+    /// [`OperationFamily`]: continuumd::daemon::family::OperationFamily
+    #[test]
+    fn boundary_forge_grew_a_task_assembly_lane_and_it_reaches_no_host_effect() {
+        // 1. The audited surface, exactly.
+        let mut items: Vec<String> = forge_sources()
+            .iter()
+            .flat_map(|(_, text)| {
+                pub_items(text)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<String>>()
+            })
+            .collect();
+        items.sort();
+        let audited: Vec<String> = FORGE_PUBLIC_SURFACE
+            .iter()
+            .map(|it| (*it).to_owned())
+            .collect();
+        assert_eq!(
+            items, audited,
+            "continuum-forge's public surface is not the one INV-015 audited; record the \
+             new items here and re-derive this test's four legs against them"
+        );
+
+        // 2. No host-effect facility is named anywhere in the crate's code.
+        for (path, text) in forge_sources() {
+            let effects = host_effect_lines(&text);
+            assert!(
+                effects.is_empty(),
+                "{} names host-effect facilities {effects:?}; the lane is supposed to be \
+                 a pure function of a contract and an environment",
+                path.display()
+            );
+        }
+
+        // 3. One declared dependency, and it is verifier-side.
+        assert_eq!(
+            declared_dependencies(FORGE_MANIFEST),
+            vec!["continuum-intent".to_owned()],
+            "continuum-forge's dependency set widened; an effect crate, an engine, or the \
+             daemon among them would give the lane authority through a neighbour"
+        );
+
+        // 4. Unreachable from an agent connection. The `forge` namespace is declared
+        // vocabulary — recorded here rather than wished away — and every one of its
+        // operations answers `UnsupportedSemanticFeature`, which is the shape `rule
+        // errors.unsupported_surface` fixes for an operation registered ahead of its
+        // subsystem.
+        let forge_operations: Vec<&str> = OPERATIONS
+            .iter()
+            .map(|spec| spec.name)
+            .filter(|name| name.starts_with("forge."))
+            .collect();
+        assert_eq!(
+            forge_operations,
+            vec![
+                "forge.create",
+                "forge.step",
+                "forge.archive",
+                "forge.materialize"
+            ],
+            "the declared forge vocabulary changed; re-derive what a forge.* request can \
+             now reach"
+        );
+        for name in &forge_operations {
+            let spec = OPERATIONS
+                .iter()
+                .find(|spec| spec.name == *name)
+                .expect("the operation was just enumerated");
+            assert!(
+                spec.errors.contains(&ErrorCode::UnsupportedSemanticFeature),
+                "{name} no longer declares UnsupportedSemanticFeature; it may have grown a \
+                 subsystem, and this audit must be redone against it"
+            );
+        }
+
+        // No family answers for the namespace, so the dispatcher refuses before any
+        // handler runs. Swept by looking for the namespace literal a family's
+        // `OperationFamily::namespace` would have to return.
+        for (path, text) in continuumd_sources() {
+            let claims: Vec<&str> = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| *line == "\"forge\"")
+                .collect();
+            assert!(
+                claims.is_empty(),
+                "{} claims the forge namespace; a family now answers forge.* and INV-015's \
+                 fourth clause must be re-audited against it",
+                path.display()
+            );
+        }
+
+        // And the crate itself is not linked and not named, so even the declared verbs
+        // have no route into it.
+        assert!(
+            !declared_dependencies(CONTINUUMD_MANIFEST).contains(&"continuum-forge".to_owned()),
+            "continuumd now links continuum-forge; the lane is one call away from the wire"
+        );
+        for (path, text) in continuumd_sources() {
+            let callers: Vec<&str> = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_forge"))
+                .collect();
+            assert!(
+                callers.is_empty(),
+                "{} names continuum_forge: {callers:?}",
+                path.display()
+            );
+        }
     }
 }
 
@@ -1005,7 +1294,8 @@ mod mutants {
     use std::collections::BTreeSet;
 
     use super::{
-        ADMISSION, CAPABILITY, DOCS_49, EFFECTS_PROCESS_LIB, EVIDENCE, administrative_callers,
+        ADMISSION, CAPABILITY, DOCS_49, EFFECTS_PROCESS_LIB, EVIDENCE, FORGE_MANIFEST,
+        administrative_callers, declared_dependencies, forge_sources, host_effect_lines,
         isolation_bullets, missing_pin, pub_items,
     };
     use crate::privileged_perimeter::{PRIVILEGED, privileged_names};
@@ -1099,5 +1389,59 @@ mod mutants {
         );
         let grown = format!("{EFFECTS_PROCESS_LIB}\npub fn spawn_worker() {{}}\n");
         assert_eq!(pub_items(&grown), vec!["pub fn spawn_worker() {}"]);
+    }
+
+    /// The Forge audit's own legs are shown capable of failing, so the crate that
+    /// *stopped* being a scaffold is held by a live check rather than by a recorded
+    /// hope. Each leg is re-run against a doctored copy of a real input.
+    #[test]
+    fn negative_the_forge_host_effect_audit_detects_its_mutants() {
+        // Leg 2: a planted effect is found, and prose about an effect is not.
+        let planted =
+            "fn escape() {\n    let _ = std::process::Command::new(\"sh\").status();\n}\n";
+        assert_eq!(host_effect_lines(planted).len(), 1);
+        assert!(
+            host_effect_lines("// this lane never calls std::process::Command\n").is_empty(),
+            "a comment about an effect is not an effect"
+        );
+        // And the real crate is clean by the same predicate.
+        for (_, text) in forge_sources() {
+            assert!(host_effect_lines(&text).is_empty());
+        }
+
+        // Leg 1: an added public item is detected.
+        let (_, first) = forge_sources()
+            .into_iter()
+            .next()
+            .expect("continuum-forge has at least one source");
+        let grown = format!("{first}\npub fn run_candidate() {{}}\n");
+        assert!(
+            pub_items(&grown).contains(&"pub fn run_candidate() {}"),
+            "an added public item must be visible to the inventory"
+        );
+
+        // Leg 3: a widened dependency set is detected.
+        let widened = FORGE_MANIFEST.replacen(
+            "[dependencies]\ncontinuum-intent",
+            "[dependencies]\ncontinuum-effects-process = { path = \"../continuum-effects-process\" }\ncontinuum-intent",
+            1,
+        );
+        assert_ne!(widened, FORGE_MANIFEST, "the doctoring did nothing");
+        assert!(
+            declared_dependencies(&widened).contains(&"continuum-effects-process".to_owned()),
+            "a planted effect dependency must be visible to the manifest read"
+        );
+
+        // Leg 4: a planted daemon caller is detected by the same line predicate.
+        let caller = "fn dispatch() {\n    continuum_forge::task::assemble(&contract, &env);\n}\n";
+        assert_eq!(
+            caller
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_forge"))
+                .count(),
+            1
+        );
     }
 }

@@ -7,11 +7,14 @@
 //! > — `notes/plan/plan.md`, INV-012's contract sentence
 //!
 //! bn-2z0b was groomed against bn-37d (PR 4, Intent Contract) because non-vacuity is
-//! *first* enforced there: `continuum-forge` (plan §14, PR 29) is still a PR-1/IMPL-01
-//! scaffold — [`boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed`]
-//! pins that mechanically — so this file's scope is the Phase A enforcement point:
+//! *first* enforced there, and this file's scope stays the Phase A enforcement point:
 //! `src/optimization.rs`'s `optimization`/`non_vacuity` field group and
-//! `IntentContract`'s use of it.
+//! `IntentContract`'s use of it. What has changed since is *who calls it*:
+//! `continuum-forge`'s task-assembly lane landed at bn-1dsih and is now the production
+//! caller RFC 0037 AO2 names, cited live by
+//! [`boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed`].
+//! The mutation-challenge half of plan §14.5 is still unlanded, and that test remains
+//! the tripwire for it.
 //!
 //! # What already closes most of this sentence, and where
 //!
@@ -94,6 +97,16 @@
 //!   [`ratified_a_directional_verb_over_an_empty_set_is_dormant_not_ill_formed`] (the
 //!   corpus evidence for AO4, which is what decided against the narrower candidate rule
 //!   that would have flagged only the `no-removal`-over-empty-`non_vacuity` pair).
+//! - **the second call's production caller, landed** —
+//!   [`boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed`].
+//!   This file used to record that nothing outside tests called the obligation, which
+//!   RFC 0037 carried as flag F12. bn-1dsih landed `continuum-forge`'s task-assembly
+//!   lane — `crates/continuum-forge/src/task.rs`'s `assemble`, AO2's caller with
+//!   standing — and that test now cites it by content: the lane's second call, its
+//!   public entry point, its skip-the-second-call mutant test, and the RFC's own
+//!   discharge annotation. It stays a tripwire in both directions, because the *other*
+//!   half of plan §14.5 — mutation challenges and hidden semantic variants — is still
+//!   unlanded, and the same test pins that absence against the lane's real source.
 //! - **the schema does not itself enforce non-emptiness** —
 //!   [`schema_does_not_encode_inv_012s_non_emptiness_constraint`]. Confirmed by exact
 //!   text match against the live schema, so this reports rather than edits it (schema
@@ -186,10 +199,24 @@ const PLAN_REQUIREMENTS_JSON: &str =
 /// prose that no longer exists.
 const RFC_0037: &str = include_str!("../../../notes/plan/rfcs/0037-intent-contract.md");
 
-/// `continuum-forge`'s own crate documentation — still a PR-1/IMPL-01 scaffold, cited
-/// so the "mutation challenges" deferral is checked against real text rather than
-/// asserted in prose.
+/// `continuum-forge`'s own crate documentation, cited so the split between what has
+/// landed there and what has not is checked against real text rather than asserted in
+/// prose. `include_str!` reads bytes and declares no dependency edge, so this citation
+/// leaves `tools/check_crate_boundaries.py`'s `forge-not-imported-by-verifier` rule
+/// untouched — the same device this file already uses for `plan.md` and the schema.
 const CONTINUUM_FORGE_LIB: &str = include_str!("../../continuum-forge/src/lib.rs");
+
+/// `continuum-forge`'s task-assembly lane — the production caller of
+/// [`Optimization::require_non_vacuity`](continuum_intent::optimization::Optimization::require_non_vacuity),
+/// landed at bn-1dsih. Cited by content so that a lane which stopped making the second
+/// call breaks this file rather than leaving it claiming a caller that no longer calls.
+const CONTINUUM_FORGE_TASK: &str = include_str!("../../continuum-forge/src/task.rs");
+
+/// That lane's own evidence suite, cited by test name rather than re-run here: a
+/// `tests/*.rs` file is its own crate and this one takes no dependency on
+/// `continuum-forge`.
+const CONTINUUM_FORGE_TASK_TESTS: &str =
+    include_str!("../../continuum-forge/tests/non_vacuity_second_call.rs");
 
 /// INV-012's contract sentence, transcribed once. Every extractor below is checked
 /// against this fixed constant, and [`the_check_is_not_vacuous`] proves each extraction
@@ -662,17 +689,59 @@ fn boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed
         "the two clauses are distinct and ordered"
     );
 
-    // continuum-forge names INV-012 as its own future responsibility and is still a
-    // PR-1/IMPL-01 scaffold — not a silent omission, a documented one.
+    // continuum-forge names INV-012 as its own responsibility, and now discharges the
+    // half of it that is a contract-admission question: bn-1dsih landed the
+    // task-assembly lane RFC 0037 AO2 names, so the obligation implemented in
+    // `src/optimization.rs` has a production caller. This is the flipped half of what
+    // this test used to pin — it read "continuum-forge is a PR-1/IMPL-01 scaffold, so
+    // nothing outside tests makes the second call" — and it stays a tripwire in the
+    // same direction: the citations below are matched against the lane's real source,
+    // so a lane that stops calling the obligation, or that grows the search this
+    // boundary says has not landed, breaks this test rather than leaving it asserting a
+    // caller that no longer calls.
     assert!(
         CONTINUUM_FORGE_LIB.contains("INV-012"),
         "continuum-forge's crate doc must still name INV-012 as its own responsibility"
     );
     assert!(
-        CONTINUUM_FORGE_LIB.contains("PR-1 / IMPL-01 scaffold"),
-        "if this line has moved, continuum-forge may have landed types and this bone's \
-         'mutation challenges are deferred' boundary needs to be revisited, not assumed"
+        CONTINUUM_FORGE_TASK.contains("require_non_vacuity"),
+        "continuum-forge's task-assembly lane must still make the second call — if this \
+         is gone, RFC 0037's F12 is undischarged and its bookkeeping is wrong"
     );
+    assert!(
+        CONTINUUM_FORGE_TASK.contains("pub fn assemble("),
+        "the second call must be reachable from a public lane, not buried in a private \
+         helper no caller can invoke"
+    );
+    assert!(
+        CONTINUUM_FORGE_TASK_TESTS.contains(
+            "fn mutant_a_lane_that_made_only_the_first_call_would_accept_the_vacuous_contract"
+        ),
+        "the lane's own suite must keep the skip-the-second-call mutant"
+    );
+
+    // The mutation-challenge half of §14.5 is still *not* landed, and this is the
+    // tripwire for it: the lane decides whether a contract may become a task and runs no
+    // search, so nothing yet detects a trivially-satisfiable declared behavior. The
+    // moment continuum-forge grows the enumeration or mutation machinery PR 29 names,
+    // these lines change and the boundary above must be re-derived rather than assumed.
+    assert!(
+        CONTINUUM_FORGE_LIB.contains("no enumeration, no counterexample loop"),
+        "continuum-forge must still declare the search half unlanded; if it does not, \
+         the 'mutation challenges are deferred' boundary needs revisiting, not assuming"
+    );
+    for absent in [
+        "fn enumerate",
+        "fn mutate",
+        "struct Candidate",
+        "struct Archive",
+    ] {
+        assert!(
+            !CONTINUUM_FORGE_TASK.contains(absent),
+            "continuum-forge's task lane grew {absent:?}; the search machinery may be \
+             arriving and this boundary must be re-derived"
+        );
+    }
 }
 
 // --- schema: what it does and does not enforce -----------------------------------------------
@@ -730,10 +799,20 @@ fn the_disposition_this_file_pins_is_the_one_rfc_0037_records() {
         ),
         "the rejected W-rule must stay recorded under RFC 0037's \"Rejected alternatives\""
     );
-    // And the obligation's caller is named as unlanded rather than assumed present.
+    // And the obligation's caller is named. The flag's own text is kept — flags are not
+    // deleted when paid, they are annotated (`F3`, `F4`, `F5`, `F10`, `F11` all carry a
+    // "Paid by …" tail) — so both halves are pinned: the flag as raised, and the
+    // discharge that answers it.
     assert!(
         RFC_0037.contains("**F12 — No landed lane discharges the non-vacuity obligation.**"),
-        "AO2's caller with standing has not shipped; the flag says so"
+        "the flag as raised must stay recorded, so a reader finds the reasoning"
+    );
+    assert!(
+        RFC_0037.contains("**Discharged by the bn-1dsih Forge task-assembly lane, 2026-08-09**"),
+        "AO2's caller with standing has shipped, and the flag must say so — if this \
+         annotation is gone, either the lane was reverted or the bookkeeping was lost, \
+         and boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed \
+         must be re-derived rather than trusted"
     );
 }
 

@@ -6,5 +6,19 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# One workspace edge, stated in `src/lib.rs`'s dependency-boundary contract and
+# permitted by plan §20's "Forge depends on verifier interfaces, never vice versa"
+# (`tools/check_crate_boundaries.py` RULE forge-not-imported-by-verifier enforces the
+# direction). `continuum-intent` owns the Intent Contract that is a synthesis task's
+# fixed part, and owns `Optimization::require_non_vacuity` — the obligation RFC 0037
+# AO2 requires this crate's task-assembly lane to call. Repeated under
+# [dev-dependencies] because integration tests in `tests/` are separate crates and do
+# not inherit the library's dependencies.
+[dependencies]
+continuum-intent = { path = "../continuum-intent" }
+
+[dev-dependencies]
+continuum-intent = { path = "../continuum-intent" }
+
 [lints]
 workspace = true

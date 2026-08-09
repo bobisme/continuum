@@ -283,7 +283,7 @@ against the rule set `["members-match-plan-20", "no-protocol-crate",
 frontier engine would have to cross to reach the trust base or the
 product surface; both are checked, not merely documented.
 
-### 3b. Frontier-adjacent crates are doc-comment-only scaffolds
+### 3b. Frontier-adjacent crates are doc-comment-only scaffolds, with one audited exception
 
 The research/ directory (36 lanes, `research/01`–`research/36`) names
 the frontier work — symbolic and solver-backed exploration
@@ -302,7 +302,6 @@ are present in `crates/` (per §3a's 42-of-42 membership) but hold
 | `continuum-engine-symbolic` | 1 | 21 |
 | `continuum-engine-liveness` | 1 | 21 |
 | `continuum-engine-dpor` | 1 | 21 |
-| `continuum-forge` | 1 | 25 |
 | `continuum-proof-client` | 1 | 22 |
 | `continuum-refinement` | 1 | 21 |
 | `continuum-repair` | 1 | 19 |
@@ -327,6 +326,67 @@ locally rather than import it, "because `continuum-incremental` is a
 PR-23 scaffold with no types" — independent confirmation from a bone
 that needed the real types and recorded their absence as a cost.
 
+**Amendment, 2026-08-09 (bn-1dsih): `continuum-forge` has left this
+table, and the reconciliation is recorded here rather than by quietly
+restating the control.** The table above carried `continuum-forge` at
+1 file / 25 lines; it is now 2 files / 402 lines. What landed is
+`src/task.rs`'s task-assembly lane: `assemble` decides whether an
+Intent Contract may become a synthesis task, by making the two calls
+RFC 0037 corrections 17 and AO2/AO3 require — `IntentContract::check`
+for the document's five cross-field rules, and
+`Optimization::require_non_vacuity` for INV-012 — and refusing with a
+typed `TaskRefusal` when the contract declares no behavior that must
+remain possible. RFC 0037 recorded the absence of that caller as flag
+F12; the flag now carries its discharge annotation.
+
+Two claims in this section therefore need restating, and they are not
+the same claim:
+
+- **Forge is still frontier-adjacent.** §3a above classifies
+  `continuum-forge` with the search/synthesis crates by name, and §24.5
+  owns the synthesis lanes research/29 and research/30 that would fill
+  it. Nothing here reclassifies it, and the forbidden-edge rules
+  `forge-not-imported-by-verifier` and `certificate-checker-not-search`
+  are untouched — both still pass with zero violations, and the crate's
+  single declared dependency is `continuum-intent`, which is
+  verifier-side and adds no edge either rule forbids.
+- **The sentence "every frontier-adjacent crate is a scaffold" is no
+  longer true as written, and is corrected rather than reinterpreted.**
+  The table carried thirteen crates when this checkpoint was written.
+  Twelve of them are still doc-comment-only scaffolds and keep their
+  rows; `continuum-forge` is the one exception and its row is removed,
+  because leaving a "1 file / 25 lines" measurement standing beside a
+  crate that now has two files would be a false reading of a live
+  workspace, not a historical record of one.
+
+Control 3's substance survives that correction under this section's own
+test, applied unchanged. R01's failure mode is a frontier engine built
+before its gate, and the four ambitions it names are a search or
+exploration engine, a theorem prover, a synthesis engine, and the rest
+of the §1b list. The lane is none of them: it holds no grammar, no
+enumeration, no counterexample loop, no candidate, no archive, and no
+engine adapter, and it runs no search at all — it is a contract
+*admission* decision, the same category as the intent-diff classifier
+this section already declines to count as a frontier engine. PR 29
+("Forge finite CEGIS v0") remains unopened and is where the search
+itself lands. The mechanical statement of that boundary is
+`crates/continuum-intent/tests/inv012_nonvacuity_evidence.rs`'s
+`boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed`,
+which pins the absence of the search machinery against the lane's real
+source, and
+`crates/continuumd/tests/inv015_agent_least_authority_evidence.rs`'s
+`boundary_forge_grew_a_task_assembly_lane_and_it_reaches_no_host_effect`,
+which records the crate's whole public surface and re-derives that it
+grants no host authority reachable from a connection. A future
+checkpoint should read this amendment as narrowing the *evidence*, not
+the control: "no frontier engine before G2" is now carried by two live
+tests over a real surface plus twelve self-declared scaffolds, where it
+was previously carried by thirteen self-declarations alone.
+
+The twelve rows left in the table are unaffected: each is still a
+one-file, 19–22-line doc comment ending in the self-declared scaffold
+sentence quoted above.
+
 By contrast, `continuum-kernel-{sat,smt,temporal}` (4,000+ lines each)
 and `continuum-semantic-diff` (7,600+ lines) are **not** frontier
 engines under R01's failure mode — they are Phase A deliverables
@@ -342,9 +402,12 @@ gate — §1b) and, for several, no earlier than G4–G7.
 
 **Control 3 is live**: crate membership is exactly the declared 42, the
 forbidden-edge checker passes with zero violations, and every
-frontier-adjacent crate is independently, mechanically verifiable as a
-non-implementing scaffold (self-declared in its own doc comment, and
-externally confirmed at `bn-7ek41`).
+frontier-adjacent crate is independently, mechanically verifiable as
+holding no frontier engine — twelve as non-implementing scaffolds
+(self-declared in their own doc comments, and externally confirmed at
+`bn-7ek41`), and `continuum-forge` by the two live tests named in the
+2026-08-09 amendment above, which pin the absence of its search
+machinery and the whole of its public surface.
 
 ---
 
