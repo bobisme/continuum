@@ -1,9 +1,10 @@
 //! The compiler's pipeline, run: the redaction pre-pass, stage 1 (root selection), stage 2
-//! (backward causal slicing), stage 3 (property-automaton relevance filtering) and stage 4
-//! (the static/dynamic dependence join), ending in a closed accounting, an auditable trail,
-//! and the guarantees those stages actually established.
+//! (backward causal slicing), stage 3 (property-automaton relevance filtering), stage 4
+//! (the static/dynamic dependence join), stage 5 (proof-dependency slicing), stage 6 (observer
+//! projection) and stage 7 (abstraction/refinement correspondence mapping), ending in a closed
+//! accounting, an auditable trail, and the guarantees those stages actually established.
 //!
-//! # Scope: bn-21vno (stages 1–2) and bn-1kj2n (stages 3–4) of RFC 0028's ten
+//! # Scope: bn-21vno (1–2), bn-1kj2n (3–4) and bn-imhw2 (5–7) of RFC 0028's ten
 //!
 //! | Phase | RFC 0028 | Licenses |
 //! |---|---|---|
@@ -12,26 +13,61 @@
 //! | 2 | backward causal slicing | `CausallyClosed`, and the precondition of `ReplayPreserving` |
 //! | 3 | property-automaton relevance filtering | `PropertyPreserving`, with stage 2 |
 //! | 4 | static/dynamic dependence join | admissibility of `source` and `model` items |
+//! | 5 | proof-dependency slicing | `ProofRelevant` — **refused here**: no proof service is deployed |
+//! | 6 | observer projection | "scoping under INV-013; never a guarantee by itself" |
+//! | 7 | correspondence mapping | the concrete-to-abstract links — **refused here**: no §16 graph is deployed |
 //!
-//! Stages 3 and 4 are **opt-in**: [`CausalCompile::new`] runs stages 1–2 alone, and
-//! [`CausalCompile::with_property`] and [`CausalCompile::with_dependence`] each add one stage.
-//! That is not a convenience — RFC 0028 requires a deployment be able to run the pipeline in
-//! reduced configurations, a stage that did not run has no auditable intermediate (which is a
-//! different fact from an empty one), and a stage whose input the deployment does not have
-//! must not be simulated with a default. Stages 5–8 are their own bones and append to
+//! Stages 3–7 are **opt-in**: [`CausalCompile::new`] runs stages 1–2 alone, and
+//! [`CausalCompile::with_property`], [`CausalCompile::with_dependence`],
+//! [`CausalCompile::with_proof_slicing`], [`CausalCompile::with_observer_projection`] and
+//! [`CausalCompile::with_correspondence_mapping`] each add one stage. That is not a
+//! convenience — RFC 0028 requires a deployment be able to run the pipeline in reduced
+//! configurations, a stage that did not run has no auditable intermediate (which is a different
+//! fact from an empty one), and a stage whose input the deployment does not have must not be
+//! simulated with a default. Stage 8 is its own bone and appends to
 //! [`crate::stage::StageTrail`] the same way; stage 9 is the ranker RFC 0028 requires a
 //! deployment be able to run *without* ("the register row's named fallback for the whole
 //! capability is 'plain causal slice + expansion' — that is, stages 1–8 plus the expansion
 //! protocol, with stage 9 disabled"); stage 10 is [`crate::budget::BudgetPacker`] in
 //! substance.
 //!
+//! # A stage whose producer this deployment does not have refuses; it does not degrade
+//!
+//! > An operation registered ahead of its producing subsystem MUST fail with the typed
+//! > `UnsupportedSemanticFeature` rather than degrading, guessing, or returning an empty
+//! > success.
+//! >
+//! > — RFC 0026, `rule errors.unsupported_surface`
+//!
+//! Stages 5 and 7 are in that position: `continuum-proof-client` and `continuum-refinement` are
+//! PR-1 / IMPL-01 scaffolds with no public item, so there is no proof dependency slice and no
+//! plan §16 correspondence graph to be had. Configuring either stage therefore produces a
+//! [`crate::unsupported::StageRefusal`], which:
+//!
+//! - **licenses nothing** — `ProofRelevant` in particular is unreachable by construction (see
+//!   [`crate::proof`]);
+//! - **narrows nothing** — acting on behalf of a subsystem that does not exist is the guessing
+//!   the rule prohibits, and a drop that no stage decided could not be attributed to one;
+//! - **records that it ran**, with the typed note [`crate::unsupported::StageRefusal::note`], so
+//!   a refusal is distinguishable from a stage that was never configured;
+//! - **records an `unsupported`, irretrievable omission** for every candidate only that stage
+//!   could have decided — for stage 5 the `proof` kind; stage 7 decides no candidate kind and
+//!   deliberately invents no manifest cell (see [`crate::correspondence`]);
+//! - **owes the pack a typed `inconclusive` reason**
+//!   ([`Compilation::inconclusive_reason`]), so a proof-target or invariant pack "MUST NOT
+//!   default to `satisfied`" holds by construction rather than by review.
+//!
+//! The pipeline still runs end to end. What a refusal costs is the guarantee, never the
+//! honesty — stage 2's own precedent, applied to an absent subsystem.
+//!
 //! # The pipeline is not monotone, and the trail says so
 //!
 //! Stage 1 selects the roots; stage 2 **grows** that into their causal past; stage 3
 //! **narrows** it to what the property is directed at; stage 4 **grows** it again with the
-//! `source` and `model` items whose dependence the join corroborates. The one structural
-//! invariant across all four is the candidate universe the pre-pass left, which is what
-//! [`crate::stage::StageTrail`] enforces.
+//! `source` and `model` items whose dependence the join corroborates; stage 5 leaves it exactly
+//! as it found it (it refuses); stage 6 **narrows** it to the named observers' scope; stage 7
+//! leaves it alone again. The one structural invariant across all seven is the candidate
+//! universe the pre-pass left, which is what [`crate::stage::StageTrail`] enforces.
 //!
 //! # The three refusals this module exists to make
 //!
@@ -62,13 +98,18 @@
 //! construction — and that is exactly why the licence does not come from it. RFC 0028's
 //! Validation section requires a checker independent of the producer, so
 //! [`CausalCompile::run`] takes the selection it is actually about to publish — after
-//! redaction has removed items from it, after stage 3 narrowed it and after stage 4 grew it —
-//! and hands it to [`crate::causal::CausalOrder::closure_violation`], which reads the order's
-//! edges and nothing else, and to [`crate::monitor::PropertyMonitor`], which runs the
-//! automaton over the whole order and over that selection and compares. Both licences are
-//! issued from a checker's verdict. A slicer bug that dropped a predecessor, or a filter bug
-//! that dropped a property-relevant event, therefore costs the guarantee rather than
-//! producing a false one.
+//! redaction has removed items from it, after stage 3 narrowed it, after stage 4 grew it and
+//! after stage 6 scoped it — and hands it to
+//! [`crate::causal::CausalOrder::closure_violation`], which reads the order's edges and nothing
+//! else, and to [`crate::monitor::PropertyMonitor`], which runs the automaton over the whole
+//! order and over that selection and compares. Both licences are issued from a checker's
+//! verdict. A slicer bug that dropped a predecessor, or a filter bug that dropped a
+//! property-relevant event, therefore costs the guarantee rather than producing a false one.
+//!
+//! Stage 6's reduction is checked the same way, by [`crate::scope::ScopeAudit`] — and its
+//! affirmative verdict licenses **nothing**, because RFC 0028's Licenses column for that stage
+//! reads "never a guarantee by itself". The audit exists so that an unjustified reduction is
+//! *named* rather than trusted; it is not a route to a wire-visible claim.
 //!
 //! # Which stage's reason a drop is recorded under
 //!
@@ -77,15 +118,25 @@
 //!
 //! 1. In the published selection → selected.
 //! 2. Withheld by field policy → an irretrievable `redaction` omission.
-//! 3. Claimed by the dependence join and declined by stage 4 → `heuristic-cutoff`
+//! 3. Of the `proof` kind while stage 5 refused → an irretrievable `unsupported` omission.
+//!    Stage 5 is the only stage that can put an item on the proof dependency slice, so with it
+//!    refused there is no deciding stage at all and no expansion in this deployment retrieves
+//!    one. Recording it under any other reason would claim a decision nothing made.
+//! 4. Claimed by the dependence join and declined by stage 4 → `heuristic-cutoff`
 //!    ([`crate::dependence::Inadmissible::omission_reason`]). Stage 4's decision is taken
 //!    *before* stage 3's on purpose: stage 3 drops every `source` and `model` candidate,
 //!    because no property automaton steps on a source span, and recording those as *provably*
 //!    outside the property-directed slice would be false about exactly the items stage 4
 //!    exists to decide.
-//! 4. In the stage-2 slice and not in stage 3's → the automaton's
+//! 5. Dropped by stage 6's observer projection → `heuristic-cutoff`, always. INV-013 justifies
+//!    a reduction relative to "named observers/properties **and fairness obligations**"; stage
+//!    6 consults the first, stage 3 supplies the second, and the third has no producer in this
+//!    workspace. An item outside every named observer's scope is therefore *undecided* with
+//!    respect to the property-directed slice, never disproved — the reading stage 4 already
+//!    states for an uncorroborated source claim, pointed at the other justification source.
+//! 6. In the stage-2 slice and not in stage 3's → the automaton's
 //!    [`crate::property::Coverage::omission_reason`].
-//! 5. Otherwise → the order's [`crate::causal::Completeness::omission_reason`].
+//! 7. Otherwise → the order's [`crate::causal::Completeness::omission_reason`].
 //!
 //! Where two stages both declined an item the manifest records the weaker claim. A drop is
 //! `slice-irrelevant` only where the stage that decided it could prove it.
@@ -124,6 +175,18 @@
 //! - **Stage 4's `id` and array position.** [`Compilation::admissible_items`] builds the items
 //!   through the landed typed constructors and under the candidate's own identity; deciding
 //!   the published `selected[]` order and the pack they land in is whole-pack assembly's.
+//! - **The pack's `verdict`.** [`Compilation::inconclusive_reason`] is the typed reason a
+//!   refusal owes; the pack's `verdict` field "names the verdict of the evaluation the pack
+//!   compiles evidence *for*" (RFC 0028), which this crate does not run. Whole-pack assembly
+//!   pairs the two, and [`crate::verdict::Verdict::Inconclusive`] already makes an untyped
+//!   `inconclusive` unspellable at that seam.
+//! - **A manifest cell for stage 7.** See [`crate::correspondence`]: the manifest partitions
+//!   candidates and stage 7 drops none, so inventing a cell would make the counting equation
+//!   false in the direction that looks like diligence.
+//! - **Re-deciding what an earlier stage published.** Stage 5's refusal does not un-select a
+//!   `proof` candidate stage 2 selected as a causal ancestor: that item is in the pack for
+//!   stage 2's reason and under stage 2's guarantee, and `ProofRelevant` is not claimed about
+//!   it or about anything else.
 //!
 //! # Clause → test
 //!
@@ -144,23 +207,35 @@
 //! | stage 4 admits only a corroborated dependence | INV-016 | `stage_four_admits_only_a_corroborated_dependence` |
 //! | a join claim must name a `source` or `model` candidate | RFC 0028, "Compiler pipeline" | `a_join_claim_about_another_kind_is_refused` |
 //! | a withheld candidate stays a redaction omission | plan §18.4 | `a_withheld_candidate_is_never_admitted` |
+//! | stage 5 refuses and declines its guarantee | RFC 0026 `rule errors.unsupported_surface` | `stage_five_refuses_and_declines_proof_relevance` |
+//! | a refused stage's candidates are `unsupported` and irretrievable | RFC 0028, "Omission manifest" | `a_proof_candidate_is_unsupported_and_irretrievable` |
+//! | stage 6 licenses nothing | RFC 0028, "Compiler pipeline" | `stage_six_licenses_nothing` |
+//! | observer scoping cannot undo property slicing | RFC 0028, "Selection and the causal core" | `stage_six_cannot_undo_stage_three` |
+//! | stage 7 refuses and adds no manifest cell | RFC 0028, "Omission manifest" | `stage_seven_refuses_and_invents_no_manifest_cell` |
+//! | the earliest refusing stage names the verdict's reason | RFC 0028, "Verdict and assurance" | `the_earliest_refusing_stage_names_the_verdicts_reason` |
 //! | deterministic (INV-005) | INV-005, ADR-0003 | `two_runs_of_one_compile_agree` |
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
+use continuum_value::assurance::InconclusiveReason;
 use continuum_value::value::Name;
 
 use crate::accounting::{Accounting, AccountingError, CandidateSet, ClosedAccounting, Omitted};
 use crate::causal::{CausalError, CausalOrder, ClosureViolation};
+use crate::correspondence::CorrespondenceMapping;
 use crate::dependence::{Admissibility, DependenceJoin, Inadmissible};
 use crate::expansion::ExpansionQuery;
 use crate::guarantee::{Guarantee, GuaranteeSet, License, SealedGuarantees};
 use crate::monitor::{MonitorVerdict, PropertyMonitor};
-use crate::omission::IrretrievableReason;
+use crate::observer::{ObserverFilter, ObserverProjection, ProjectionApplicability};
+use crate::omission::{IrretrievableReason, OmissionReason};
+use crate::proof::ProofSlicing;
 use crate::property::{PropertyAutomaton, PropertyFilter};
+use crate::scope::{ScopeAudit, ScopeReduction, ScopeVerdict};
 use crate::selection::{SelectedItem, SelectionKind};
 use crate::stage::{Phase, Stage, StageIntermediate, StageTrail, TrailError};
+use crate::unsupported::{StageRefusal, UnsupportedSurface};
 
 /// Why a candidate is withheld from *this* caller — the three members of the schema's shared
 /// `Redacted.reason` vocabulary (`redacted.schema.json`; the IDL's `RedactionReason`).
@@ -264,13 +339,28 @@ struct PropertyStage {
     monitor: PropertyMonitor,
 }
 
-/// A compile of stages 1–4 over one causal order under one field policy.
+/// The observer inputs stage 6 needs: the projection the filter is directed by, and the
+/// **independent** audit that decides whether its reduction was justified.
+///
+/// Two fields rather than one for the reason [`PropertyStage`] has two — they are two
+/// authorities — with one difference stated in [`crate::scope`]: the audit's affirmative
+/// verdict licenses nothing, because stage 6 licenses nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObserverStage {
+    projection: ObserverProjection,
+    audit: ScopeAudit,
+}
+
+/// A compile of stages 1–7 over one causal order under one field policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CausalCompile {
     order: CausalOrder,
     policy: RedactionPolicy,
     property: Option<PropertyStage>,
     dependence: Option<DependenceJoin>,
+    proof: Option<ProofSlicing>,
+    observer: Option<ObserverStage>,
+    correspondence: Option<CorrespondenceMapping>,
 }
 
 impl CausalCompile {
@@ -282,6 +372,9 @@ impl CausalCompile {
             policy,
             property: None,
             dependence: None,
+            proof: None,
+            observer: None,
+            correspondence: None,
         }
     }
 
@@ -301,6 +394,48 @@ impl CausalCompile {
     #[must_use]
     pub fn with_dependence(mut self, join: DependenceJoin) -> Self {
         self.dependence = Some(join);
+        self
+    }
+
+    /// Add stage 5, over the obligations `slicing` names.
+    ///
+    /// In this deployment the stage always refuses — `continuum-proof-client` is a scaffold and
+    /// there is no proof dependency slice to compute or check. Configuring it is still
+    /// meaningful, and is how a proof-target pack "states why it cannot" claim `ProofRelevant`
+    /// (RFC 0028, "Pack profiles"): the refusal, its typed absence, the `unsupported` omissions
+    /// and the `IncompleteProofSearch` reason are all recorded, where a compile that simply
+    /// left the stage out would record none of them.
+    #[must_use]
+    pub fn with_proof_slicing(mut self, slicing: ProofSlicing) -> Self {
+        self.proof = Some(slicing);
+        self
+    }
+
+    /// Add stage 6, directed by `projection` and audited by `audit`.
+    ///
+    /// The two are separate arguments for [`CausalCompile::with_property`]'s reason: a caller
+    /// may audit against a wider observer set than the filter was given, and the reduction is
+    /// then recorded unjustified rather than assumed. Unlike stage 3, no guarantee turns on the
+    /// outcome — stage 6 is "never a guarantee by itself" (RFC 0028).
+    #[must_use]
+    pub fn with_observer_projection(
+        mut self,
+        projection: ObserverProjection,
+        audit: ScopeAudit,
+    ) -> Self {
+        self.observer = Some(ObserverStage { projection, audit });
+        self
+    }
+
+    /// Add stage 7, over the subjects `mapping` names.
+    ///
+    /// In this deployment the stage always refuses — `continuum-refinement` is a scaffold and
+    /// there is no plan §16 correspondence graph to map against. See
+    /// [`CausalCompile::with_proof_slicing`] for why configuring a refusing stage is still the
+    /// honest thing to do.
+    #[must_use]
+    pub fn with_correspondence_mapping(mut self, mapping: CorrespondenceMapping) -> Self {
+        self.correspondence = Some(mapping);
         self
     }
 
@@ -334,6 +469,30 @@ impl CausalCompile {
         self.dependence.as_ref()
     }
 
+    /// The obligations stage 5 was asked to slice over, when stage 5 runs.
+    #[must_use]
+    pub const fn proof_slicing(&self) -> Option<&ProofSlicing> {
+        self.proof.as_ref()
+    }
+
+    /// The observer projection stage 6 scopes by, when stage 6 runs.
+    #[must_use]
+    pub fn observer_projection(&self) -> Option<&ObserverProjection> {
+        self.observer.as_ref().map(|stage| &stage.projection)
+    }
+
+    /// The independent audit of stage 6's reduction, when stage 6 runs.
+    #[must_use]
+    pub fn scope_audit(&self) -> Option<&ScopeAudit> {
+        self.observer.as_ref().map(|stage| &stage.audit)
+    }
+
+    /// The subjects stage 7 was asked to map, when stage 7 runs.
+    #[must_use]
+    pub const fn correspondence_mapping(&self) -> Option<&CorrespondenceMapping> {
+        self.correspondence.as_ref()
+    }
+
     /// Run the pre-pass, stage 1, stage 2, and the stages 3 and 4 that were configured.
     ///
     /// `roots` is stage 1's output — the handles the question names. `residual` is the
@@ -344,8 +503,10 @@ impl CausalCompile {
     /// # Errors
     ///
     /// [`CompileError::RedactedRoot`] for a root field policy withheld (correction 12);
-    /// [`CompileError::Causal`] for a root, or a dependence-join claim, that is not a node of
-    /// the order; [`CompileError::NotACorrespondenceKind`] for a join claim about a candidate
+    /// [`CompileError::Causal`] for a root, a dependence-join claim, an observer attribution or
+    /// a correspondence subject that is not a node of the order — structure is checked at every
+    /// stage's input, even where the stage's content cannot be;
+    /// [`CompileError::NotACorrespondenceKind`] for a join claim about a candidate
     /// whose kind is neither `source` nor `model`, which is stage 4's column and nothing else;
     /// [`CompileError::AnchorNotSelected`] for a residual query nothing published anchors;
     /// [`CompileError::Accounting`] and [`CompileError::Trail`] where the closed-accounting
@@ -480,6 +641,87 @@ impl CausalCompile {
                 },
             ))?;
         }
+        // --- stage 5: proof-dependency slicing ------------------------------------------
+        // Refused in this deployment. It narrows nothing — see the module documentation's "A
+        // stage whose producer this deployment does not have refuses; it does not degrade" —
+        // and records that it RAN, which is a different fact from not being configured.
+        let mut refusals: BTreeMap<UnsupportedSurface, StageRefusal> = BTreeMap::new();
+        if let Some(slicing) = &self.proof {
+            let refusal = slicing.refusal();
+            trail.record(StageIntermediate::noted(
+                Phase::Stage(Stage::ProofSlicing),
+                working.iter().cloned(),
+                refusal.note(),
+            ))?;
+            refusals.insert(refusal.surface(), refusal);
+        }
+
+        // --- stage 6: observer projection -----------------------------------------------
+        // The one stage of this group with a real input. It narrows to what the intent's named
+        // observers scope, keeping whatever the property protects, and re-closes — so it
+        // cannot undo stage 3 and cannot break stage 2's closure.
+        let mut observer_dropped: BTreeSet<Name> = BTreeSet::new();
+        let mut scope_verdict = None;
+        if let Some(stage) = &self.observer {
+            for (id, _) in stage.projection.attributed() {
+                if !self.order.contains(id) {
+                    return Err(CompileError::Causal(CausalError::UnknownEndpoint {
+                        id: id.clone(),
+                    }));
+                }
+            }
+            let protected: BTreeSet<Name> = self
+                .property
+                .as_ref()
+                .map(|property| property.automaton.relevant())
+                .unwrap_or_default();
+            let before = working.clone();
+            let applicability = stage.projection.applicability(&self.order);
+            if applicability.is_applicable() {
+                working =
+                    ObserverFilter::retain(&stage.projection, &self.order, &before, &protected)?;
+            }
+            observer_dropped = before.difference(&working).cloned().collect();
+            trail.record(StageIntermediate::noted(
+                Phase::Stage(Stage::ObserverProjection),
+                working.iter().cloned(),
+                match applicability {
+                    ProjectionApplicability::Applicable if observer_dropped.is_empty() => {
+                        "observer-retained"
+                    }
+                    other => other.as_str(),
+                },
+            ))?;
+            // The audit is handed the reduction that actually happened, and it is a different
+            // computation over the same premise (RFC 0028, "Validation").
+            scope_verdict = Some(stage.audit.verdict(
+                &self.order,
+                &ScopeReduction::new(before, working.iter().cloned(), protected),
+            ));
+        }
+
+        // --- stage 7: abstraction/refinement correspondence mapping ----------------------
+        // Refused in this deployment, and — unlike stage 5 — deciding no candidate kind, so it
+        // adds no manifest cell (see `crate::correspondence`).
+        let mut unmapped_correspondence = BTreeSet::new();
+        if let Some(mapping) = &self.correspondence {
+            for subject in mapping.subjects() {
+                if !self.order.contains(subject) {
+                    return Err(CompileError::Causal(CausalError::UnknownEndpoint {
+                        id: subject.clone(),
+                    }));
+                }
+            }
+            let refusal = mapping.refusal();
+            trail.record(StageIntermediate::noted(
+                Phase::Stage(Stage::CorrespondenceMapping),
+                working.iter().cloned(),
+                refusal.note(),
+            ))?;
+            unmapped_correspondence = mapping.unmapped();
+            refusals.insert(refusal.surface(), refusal);
+        }
+
         let published = working;
 
         // --- the independent checks, on the selection that will be published -------------
@@ -512,8 +754,11 @@ impl CausalCompile {
             .property
             .as_ref()
             .map(|property| property.automaton.coverage().omission_reason());
+        let proof_refusal = refusals
+            .get(&UnsupportedSurface::ProofDependencySlice)
+            .copied();
         let mut residual_used = false;
-        for (id, _) in self.order.nodes() {
+        for (id, kind) in self.order.nodes() {
             if published.contains(id) {
                 accounting.select(id)?;
                 continue;
@@ -525,10 +770,24 @@ impl CausalCompile {
                 accounting.omit(id, Omitted::Irretrievable(IrretrievableReason::Redaction))?;
                 continue;
             }
+            if let Some(refusal) = proof_refusal
+                && ProofSlicing::decides(kind)
+            {
+                // Stage 5's column, and the only stage that could have put this item on a
+                // proof dependency slice. `unsupported`, and irretrievable because nothing in
+                // this deployment retrieves it.
+                accounting.omit(id, Omitted::Irretrievable(refusal.irretrievable_reason()))?;
+                continue;
+            }
             // The reason names the stage that decided the drop; see the module
             // documentation's "Which stage's reason a drop is recorded under".
             let reason = if let Some(inadmissible) = declined.get(id) {
                 inadmissible.omission_reason()
+            } else if observer_dropped.contains(id) {
+                // Stage 6 licenses scoping, not irrelevance: INV-013's third justification
+                // source, the fairness obligations, has no producer here, so an item outside
+                // every named observer's scope is undecided rather than disproved.
+                OmissionReason::HeuristicCutoff
             } else if selection.contains(id) {
                 property_reason.unwrap_or(causal_reason)
             } else {
@@ -561,6 +820,10 @@ impl CausalCompile {
             monitor_verdict,
             admissible,
             declined,
+            refusals,
+            scope_verdict,
+            observer_dropped,
+            unmapped_correspondence,
         })
     }
 }
@@ -576,6 +839,10 @@ pub struct Compilation {
     monitor_verdict: Option<MonitorVerdict>,
     admissible: BTreeMap<Name, crate::dependence::Admissible>,
     declined: BTreeMap<Name, Inadmissible>,
+    refusals: BTreeMap<UnsupportedSurface, StageRefusal>,
+    scope_verdict: Option<ScopeVerdict>,
+    observer_dropped: BTreeSet<Name>,
+    unmapped_correspondence: BTreeSet<Name>,
 }
 
 impl Compilation {
@@ -667,9 +934,79 @@ impl Compilation {
             .map(|(id, admitted)| admitted.clone().into_selected_item(id.clone()))
             .collect()
     }
+
+    /// The stages that refused, keyed by the surface they could not get, in stage order.
+    ///
+    /// Empty for a compile that configured neither stage 5 nor stage 7 — a refusal is a fact
+    /// about a stage that *ran*, and a stage that was never configured refused nothing.
+    #[must_use]
+    pub const fn refusals(&self) -> &BTreeMap<UnsupportedSurface, StageRefusal> {
+        &self.refusals
+    }
+
+    /// One stage's refusal, when that stage ran and refused.
+    #[must_use]
+    pub fn refusal(&self, surface: UnsupportedSurface) -> Option<StageRefusal> {
+        self.refusals.get(&surface).copied()
+    }
+
+    /// The typed `inconclusive_reason` this compile owes the pack, when it owes one.
+    ///
+    /// > A pack whose question is not about an evaluation outcome […] MUST carry `inconclusive`
+    /// > with the reason naming why no verdict is available […]. It MUST NOT default to
+    /// > `satisfied`.
+    /// >
+    /// > — RFC 0028, "Verdict and assurance"
+    ///
+    /// Where more than one stage refused, the **earliest** one names the reason: a later
+    /// stage's input would have been consumed over the earlier stage's output, so the earlier
+    /// absence is the one that makes the answer unusable first. The rule is a consequence of
+    /// [`UnsupportedSurface`]'s declaration order rather than a comparison written here, and
+    /// `the_earliest_refusing_stage_names_the_verdicts_reason` pins it.
+    ///
+    /// `None` means no configured stage refused. It does *not* mean `satisfied`: the pack's
+    /// verdict is the evaluation's, which this crate does not run (see the module
+    /// documentation's "What is declined here").
+    #[must_use]
+    pub fn inconclusive_reason(&self) -> Option<InconclusiveReason> {
+        self.refusals
+            .values()
+            .next()
+            .map(|refusal| refusal.inconclusive_reason())
+    }
+
+    /// What the independent scope audit concluded, when stage 6 ran.
+    ///
+    /// `None` means stage 6 did not run — a different fact from an audit that ran and found
+    /// the projection inapplicable, which is [`ScopeVerdict::Inapplicable`]. **No guarantee
+    /// turns on this value**; see [`crate::scope`].
+    #[must_use]
+    pub const fn scope_verdict(&self) -> Option<&ScopeVerdict> {
+        self.scope_verdict.as_ref()
+    }
+
+    /// The candidates stage 6's observer projection removed, in canonical order.
+    #[must_use]
+    pub const fn observer_dropped(&self) -> &BTreeSet<Name> {
+        &self.observer_dropped
+    }
+
+    /// The correspondence subjects stage 7 could not map — all of them, in this deployment.
+    ///
+    /// Empty when stage 7 did not run. No pack this crate builds carries a concrete-to-abstract
+    /// link, because there is no §16 correspondence graph to derive one from and no constructor
+    /// for one; see [`crate::correspondence`].
+    #[must_use]
+    pub const fn unmapped_correspondence(&self) -> &BTreeSet<Name> {
+        &self.unmapped_correspondence
+    }
 }
 
-/// A way a compile of stages 1–2 refuses.
+/// A way a compile of stages 1–7 refuses.
+///
+/// Distinct from a [`StageRefusal`], which is a *stage* declining to run because its producing
+/// subsystem is absent: that is a recorded outcome of a successful compile, not a failure of
+/// one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileError {
     /// Field policy withheld a root. "A redacted root is not a root" (RFC 0028
@@ -1536,6 +1873,530 @@ mod tests {
         assert_eq!(
             one.trail().to_json().to_canonical_bytes(),
             other.trail().to_json().to_canonical_bytes()
+        );
+    }
+
+    // =================================================================================
+    // stages 5, 6 and 7
+    // =================================================================================
+
+    use crate::correspondence::CorrespondenceMapping;
+    use crate::observer::{Observation, ObserverProjection};
+    use crate::proof::ProofSlicing;
+    use crate::scope::{ScopeAudit, ScopeReduction, ScopeVerdict, ScopeViolation};
+    use crate::unsupported::{AbsentProducer, SurfaceAbsence, UnsupportedSurface};
+    use continuum_intent::observers::{Observer, ObserverId, ObserverSet, ProjectionKind};
+    use continuum_value::assurance::InconclusiveReason;
+
+    /// The stages-3–4 fixture plus a `proof` candidate, so stage 5 has a column to decide.
+    fn proof_bearing_order() -> CausalOrder {
+        CausalOrder::new(
+            [
+                (name("e_begin"), SelectionKind::Event),
+                (name("e_submit"), SelectionKind::Event),
+                (name("e_ack"), SelectionKind::Event),
+                (name("e_loss"), SelectionKind::Event),
+                (name("e_flush"), SelectionKind::Event),
+                (name("e_probe"), SelectionKind::Event),
+                (name("n_beat_1"), SelectionKind::Event),
+                (name("s_writer"), SelectionKind::Source),
+                (name("m_commit"), SelectionKind::Model),
+                (name("p_durable"), SelectionKind::Proof),
+                (name("p_ack"), SelectionKind::Proof),
+            ],
+            [
+                (name("e_submit"), name("e_begin")),
+                (name("e_ack"), name("e_submit")),
+                (name("e_loss"), name("e_ack")),
+            ],
+        )
+        .expect("a well-formed order")
+    }
+
+    fn slicing() -> ProofSlicing {
+        ProofSlicing::over([name("o_durable")])
+    }
+
+    fn an_observer(id: &str, events: &[&str]) -> Observer {
+        Observer::new(
+            ObserverId::new(id).expect("a non-empty id"),
+            [(
+                ProjectionKind::Events,
+                events.iter().map(|event| (*event).to_owned()).collect(),
+            )],
+        )
+        .expect("a well-formed observer")
+    }
+
+    fn observer_set(members: impl IntoIterator<Item = Observer>) -> ObserverSet {
+        ObserverSet::from_observers(members).expect("a well-formed set")
+    }
+
+    fn seen(element: &str) -> Observation {
+        Observation::new(ProjectionKind::Events, element)
+    }
+
+    /// `client` publishes the chain's tail; everything else in the chain's neighbourhood is
+    /// declared into a family no observer names.
+    fn projection() -> ObserverProjection {
+        ObserverProjection::new(
+            observer_set([an_observer("client", &["Acked", "Lost"])]),
+            [
+                (name("e_begin"), seen("Internal")),
+                (name("e_submit"), seen("Internal")),
+                (name("e_ack"), seen("Acked")),
+                (name("e_loss"), seen("Lost")),
+                (name("e_flush"), seen("Internal")),
+                (name("e_probe"), seen("Internal")),
+            ],
+        )
+        .expect("a well-formed projection")
+    }
+
+    /// The same, coarsened by one element: `client` no longer publishes `Lost`, so stage 6 has
+    /// something real to narrow.
+    fn narrow_projection() -> ObserverProjection {
+        ObserverProjection::new(
+            observer_set([an_observer("client", &["Acked"])]),
+            [
+                (name("e_begin"), seen("Internal")),
+                (name("e_submit"), seen("Internal")),
+                (name("e_ack"), seen("Acked")),
+                (name("e_loss"), seen("Internal")),
+            ],
+        )
+        .expect("a well-formed projection")
+    }
+
+    /// Anchored at `e_ack`, for the compiles in which observer scoping drops `e_loss`: a
+    /// residual query must anchor at something the pack publishes.
+    fn residual_ack() -> ExpansionQuery {
+        ExpansionQuery::new(ExpansionRelation::CausalPredecessors, name("e_ack"))
+    }
+
+    fn clean_proof_order() -> CausalCompile {
+        CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+    }
+
+    #[test]
+    fn stage_five_refuses_and_declines_proof_relevance() {
+        let compiled = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_proof_slicing(slicing())
+        .run(&ids(&["e_loss"]), &residual())
+        .expect("compiles");
+
+        // The refusal is recorded, typed, and names the workspace fact behind it.
+        let refusal = compiled
+            .refusal(UnsupportedSurface::ProofDependencySlice)
+            .expect("stage 5 refused");
+        assert_eq!(
+            refusal.absence(),
+            SurfaceAbsence::ProducerNotDeployed(AbsentProducer::ProofService)
+        );
+        // The guarantee is declined — and `ProofRelevant` is not merely absent from the set,
+        // it has no path into one (`crate::proof`, and the integration suite's licence scan).
+        assert!(
+            !compiled
+                .guarantees()
+                .members()
+                .contains(&Guarantee::ProofRelevant)
+        );
+        assert_eq!(compiled.guarantees().members(), [Guarantee::CausallyClosed]);
+        // And the pack cannot default to `satisfied`.
+        assert_eq!(
+            compiled.inconclusive_reason(),
+            Some(InconclusiveReason::IncompleteProofSearch)
+        );
+    }
+
+    #[test]
+    fn a_proof_candidate_is_unsupported_and_irretrievable() {
+        let compiled = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_proof_slicing(slicing())
+        .run(&ids(&["e_loss"]), &residual())
+        .expect("compiles");
+
+        let record = compiled
+            .accounting()
+            .manifest()
+            .records()
+            .iter()
+            .find(|record| record.kind() == SelectionKind::Proof)
+            .expect("the proof candidates are in the manifest");
+        assert_eq!(record.reason(), OmissionReason::Unsupported);
+        assert_eq!(record.count(), 2);
+        assert!(!record.retrievability().is_expandable());
+        compiled.accounting().reconcile().expect("halves agree");
+
+        // Without stage 5 the same candidates fall through to the causal order's own reason:
+        // the `unsupported` cell exists *because* a stage ran and refused.
+        let without = clean_proof_order()
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+        assert!(
+            !without
+                .accounting()
+                .manifest()
+                .records()
+                .iter()
+                .any(|record| record.reason() == OmissionReason::Unsupported)
+        );
+        assert!(without.refusals().is_empty());
+        assert_eq!(without.inconclusive_reason(), None);
+    }
+
+    #[test]
+    fn a_refusing_stage_records_that_it_ran_and_narrows_nothing() {
+        let with = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_proof_slicing(slicing())
+        .with_correspondence_mapping(CorrespondenceMapping::of([name("e_ack")]))
+        .run(&ids(&["e_loss"]), &residual())
+        .expect("compiles");
+        let without = clean_proof_order()
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+
+        // Ran: the intermediates exist and carry the refusals' typed notes.
+        assert_eq!(
+            with.trail()
+                .intermediate(Phase::Stage(Stage::ProofSlicing))
+                .expect("stage 5 recorded")
+                .note(),
+            Some("proof-slicing-no-producer")
+        );
+        assert_eq!(
+            with.trail()
+                .intermediate(Phase::Stage(Stage::CorrespondenceMapping))
+                .expect("stage 7 recorded")
+                .note(),
+            Some("correspondence-no-producer")
+        );
+        // Not configured: no intermediate at all, which is a different fact from an empty one.
+        assert!(
+            without
+                .trail()
+                .intermediate(Phase::Stage(Stage::ProofSlicing))
+                .is_none()
+        );
+        // Narrowed nothing: the selection is the same either way.
+        assert_eq!(with.selected(), without.selected());
+    }
+
+    #[test]
+    fn stage_seven_refuses_and_invents_no_manifest_cell() {
+        let with = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_correspondence_mapping(CorrespondenceMapping::of([name("e_ack"), name("m_commit")]))
+        .run(&ids(&["e_loss"]), &residual())
+        .expect("compiles");
+        let without = clean_proof_order()
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+
+        assert_eq!(
+            with.refusal(UnsupportedSurface::CorrespondenceGraph)
+                .expect("stage 7 refused")
+                .absence(),
+            SurfaceAbsence::ProducerNotDeployed(AbsentProducer::CorrespondenceGraph)
+        );
+        assert_eq!(
+            with.inconclusive_reason(),
+            Some(InconclusiveReason::AbstractionAmbiguity)
+        );
+        // Every subject is unmapped, and the candidate partition is untouched: a link is not a
+        // candidate, so no cell is invented for it (`crate::correspondence`).
+        assert_eq!(with.unmapped_correspondence(), &ids(&["e_ack", "m_commit"]));
+        assert_eq!(
+            with.accounting().manifest(),
+            without.accounting().manifest()
+        );
+        with.accounting().reconcile().expect("halves agree");
+    }
+
+    #[test]
+    fn the_earliest_refusing_stage_names_the_verdicts_reason() {
+        let both = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_proof_slicing(slicing())
+        .with_correspondence_mapping(CorrespondenceMapping::of([name("e_ack")]))
+        .run(&ids(&["e_loss"]), &residual())
+        .expect("compiles");
+        assert_eq!(both.refusals().len(), 2);
+        // Stage 5 is earlier than stage 7, so its reason is the one the pack carries.
+        assert_eq!(
+            both.inconclusive_reason(),
+            Some(InconclusiveReason::IncompleteProofSearch)
+        );
+        // And stage 7's is still recorded rather than lost.
+        assert_eq!(
+            both.refusal(UnsupportedSurface::CorrespondenceGraph)
+                .expect("stage 7 refused")
+                .inconclusive_reason(),
+            InconclusiveReason::AbstractionAmbiguity
+        );
+    }
+
+    #[test]
+    fn stage_six_licenses_nothing() {
+        // RFC 0028: "never a guarantee by itself". The guarantee set is equal with and without
+        // the stage, even where the stage narrowed the pack.
+        let with = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_observer_projection(narrow_projection(), ScopeAudit::over(narrow_projection()))
+        .run(&ids(&["e_loss"]), &residual_ack())
+        .expect("compiles");
+        let without = clean_proof_order()
+            .run(&ids(&["e_loss"]), &residual_ack())
+            .expect("compiles");
+
+        assert!(with.scope_verdict().expect("stage 6 ran").is_justified());
+        assert_eq!(with.guarantees(), without.guarantees());
+        assert_eq!(with.guarantees().members(), [Guarantee::CausallyClosed]);
+        // The reduction is real, so the equality above is not vacuous.
+        assert_ne!(with.selected(), without.selected());
+        assert_eq!(with.observer_dropped(), &ids(&["e_loss"]));
+    }
+
+    #[test]
+    fn a_stage_six_drop_is_heuristic_cutoff_and_never_slice_irrelevant() {
+        let compiled = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_observer_projection(narrow_projection(), ScopeAudit::over(narrow_projection()))
+        .run(&ids(&["e_loss"]), &residual_ack())
+        .expect("compiles");
+
+        assert_eq!(compiled.observer_dropped(), &ids(&["e_loss"]));
+        let cells: BTreeMap<(SelectionKind, OmissionReason), u32> = compiled
+            .accounting()
+            .manifest()
+            .records()
+            .iter()
+            .map(|record| ((record.kind(), record.reason()), record.count()))
+            .collect();
+        // One manifest, two deciding stages: `e_loss` is stage 6's undecided drop, and the
+        // rest are stage 2's proofs under a complete order. A stage-6 drop is never
+        // `slice-irrelevant`, because INV-013's fairness half has no producer here.
+        assert_eq!(
+            cells,
+            [
+                ((SelectionKind::Event, OmissionReason::HeuristicCutoff), 1),
+                ((SelectionKind::Event, OmissionReason::SliceIrrelevant), 3),
+                ((SelectionKind::Source, OmissionReason::SliceIrrelevant), 1),
+                ((SelectionKind::Model, OmissionReason::SliceIrrelevant), 1),
+                ((SelectionKind::Proof, OmissionReason::SliceIrrelevant), 2),
+            ]
+            .into()
+        );
+        compiled.accounting().reconcile().expect("halves agree");
+    }
+
+    #[test]
+    fn stage_six_cannot_undo_stage_three() {
+        // The theorem, not a coincidence: stage 3's output is the backward closure of the
+        // relevance set, so every member is either protected or an ancestor of something
+        // protected, and observer projection restores both.
+        //
+        // The projection below is deliberately *applicable* — `client` publishes `n_beat_1`,
+        // which stage 2 never selected — so the stage really runs and really finds nothing it
+        // may remove. An inapplicable projection would have narrowed nothing for a different
+        // and much weaker reason.
+        let elsewhere = ObserverProjection::new(
+            observer_set([an_observer("client", &["Beat"])]),
+            [
+                (name("n_beat_1"), seen("Beat")),
+                (name("e_begin"), seen("Internal")),
+                (name("e_submit"), seen("Internal")),
+                (name("e_ack"), seen("Internal")),
+                (name("e_loss"), seen("Internal")),
+                (name("e_flush"), seen("Internal")),
+                (name("e_probe"), seen("Internal")),
+            ],
+        )
+        .expect("a well-formed projection");
+        let staged = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_property(
+            automaton(Coverage::Total),
+            PropertyMonitor::over(automaton(Coverage::Total)),
+        );
+        let without_six = staged.clone().run(&roots(), &residual()).expect("compiles");
+        let with_six = staged
+            .with_observer_projection(elsewhere.clone(), ScopeAudit::over(elsewhere))
+            .run(&roots(), &residual())
+            .expect("compiles");
+
+        assert_eq!(with_six.selected(), without_six.selected());
+        assert!(with_six.observer_dropped().is_empty());
+        assert!(with_six.is_property_preserving());
+        assert!(
+            with_six.selected().contains(&name("e_begin")),
+            "restored by the re-closure, not by being observed"
+        );
+        assert!(
+            with_six
+                .scope_verdict()
+                .expect("stage 6 ran")
+                .is_justified()
+        );
+    }
+
+    #[test]
+    fn an_abstraction_relevant_hidden_event_survives_observer_projection() {
+        // `e_flush` is declared into a family no observer names — exactly the "no observer
+        // publishes it" ground RFC 0028 forbids excluding on — and the property declares it an
+        // abstraction-relevant hidden dependency, so it survives.
+        let projection = ObserverProjection::new(
+            observer_set([an_observer("client", &["Acked"])]),
+            [
+                (name("e_flush"), seen("Internal")),
+                (name("e_ack"), seen("Acked")),
+                (name("e_probe"), seen("Internal")),
+            ],
+        )
+        .expect("a well-formed projection");
+        let compiled = CausalCompile::new(
+            proof_bearing_order(),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_property(
+            automaton(Coverage::Total),
+            PropertyMonitor::over(automaton(Coverage::Total)),
+        )
+        .with_observer_projection(projection.clone(), ScopeAudit::over(projection))
+        .run(&roots(), &residual())
+        .expect("compiles");
+
+        assert!(compiled.selected().contains(&name("e_flush")));
+        assert!(compiled.is_property_preserving());
+        // And the audit refuses the reduction that would have dropped it.
+        let audit = ScopeAudit::over(
+            ObserverProjection::new(
+                observer_set([an_observer("client", &["Acked"])]),
+                [
+                    (name("e_flush"), seen("Internal")),
+                    (name("e_ack"), seen("Acked")),
+                ],
+            )
+            .expect("a well-formed projection"),
+        );
+        assert_eq!(
+            audit.verdict(
+                &proof_bearing_order(),
+                &ScopeReduction::new(
+                    ids(&["e_ack", "e_flush"]),
+                    ids(&["e_ack"]),
+                    ids(&["e_flush"])
+                )
+            ),
+            ScopeVerdict::Unjustified(ScopeViolation::ProtectedCandidateDropped {
+                id: name("e_flush")
+            })
+        );
+    }
+
+    #[test]
+    fn an_attribution_about_a_candidate_from_nowhere_is_refused() {
+        let stray = ObserverProjection::new(
+            observer_set([an_observer("client", &["Acked"])]),
+            [(name("e_nowhere"), seen("Acked"))],
+        )
+        .expect("a well-formed projection");
+        assert_eq!(
+            CausalCompile::new(
+                proof_bearing_order(),
+                RedactionPolicy::permitting_everything()
+            )
+            .with_observer_projection(stray.clone(), ScopeAudit::over(stray))
+            .run(&ids(&["e_loss"]), &residual()),
+            Err(CompileError::Causal(CausalError::UnknownEndpoint {
+                id: name("e_nowhere"),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_correspondence_subject_from_nowhere_is_refused() {
+        assert_eq!(
+            CausalCompile::new(
+                proof_bearing_order(),
+                RedactionPolicy::permitting_everything()
+            )
+            .with_correspondence_mapping(CorrespondenceMapping::of([name("x_nowhere")]))
+            .run(&ids(&["e_loss"]), &residual()),
+            Err(CompileError::Causal(CausalError::UnknownEndpoint {
+                id: name("x_nowhere"),
+            }))
+        );
+    }
+
+    #[test]
+    fn the_seven_stage_trail_is_the_phases_that_ran() {
+        let compiled = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(
+                automaton(Coverage::Total),
+                PropertyMonitor::over(automaton(Coverage::Total)),
+            )
+            .with_dependence(join())
+            .with_proof_slicing(slicing())
+            .with_observer_projection(projection(), ScopeAudit::over(projection()))
+            .with_correspondence_mapping(CorrespondenceMapping::of([name("m_commit")]))
+            .run(&roots(), &residual())
+            .expect("compiles");
+        assert_eq!(
+            compiled.trail().phases(),
+            [
+                Phase::Redaction,
+                Phase::Stage(Stage::RootSelection),
+                Phase::Stage(Stage::CausalSlicing),
+                Phase::Stage(Stage::PropertyRelevance),
+                Phase::Stage(Stage::DependenceJoin),
+                Phase::Stage(Stage::ProofSlicing),
+                Phase::Stage(Stage::ObserverProjection),
+                Phase::Stage(Stage::CorrespondenceMapping),
+            ]
+        );
+        compiled.accounting().reconcile().expect("halves agree");
+    }
+
+    #[test]
+    fn two_runs_of_a_seven_stage_compile_agree() {
+        let build = || {
+            CausalCompile::new(
+                proof_bearing_order(),
+                RedactionPolicy::permitting_everything(),
+            )
+            .with_proof_slicing(slicing())
+            .with_observer_projection(projection(), ScopeAudit::over(projection()))
+            .with_correspondence_mapping(CorrespondenceMapping::of([name("m_commit")]))
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles")
+        };
+        assert_eq!(build(), build());
+        assert_eq!(
+            build().trail().to_json().to_canonical_bytes(),
+            build().trail().to_json().to_canonical_bytes()
         );
     }
 

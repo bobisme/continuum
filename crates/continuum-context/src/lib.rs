@@ -117,6 +117,36 @@
 //! item (INV-016), and every stage-4 decline is `heuristic-cutoff` because an uncorroborated
 //! claim is undecided rather than disproved.
 //!
+//! [`unsupported`], [`proof`], [`observer`], [`scope`], [`correspondence`] (bn-imhw2 — the
+//! compiler's **stage group 3**, RFC 0028 stages 5–7) — the group whose load-bearing work is a
+//! *refusal*. Two of its three stages have no producing subsystem in this workspace:
+//! `continuum-proof-client` (RFC 0035's proof service, stage 5's slicer and the `ProofRelevant`
+//! checker) and `continuum-refinement` (plan §16's correspondence graph, stage 7's input) are
+//! PR-1 / IMPL-01 scaffolds with no public item at all. RFC 0026's
+//! `rule errors.unsupported_surface` decides what a stage does about that — refuse, "rather
+//! than degrading, guessing, or returning an empty success" — so [`unsupported`] carries the
+//! typed refusal vocabulary those two stages record in, keeping "no proof service in this
+//! deployment" and "the question named nothing to slice" apart as INV-008 requires;
+//! [`proof`] is stage 5, whose guarantee `ProofRelevant` is additionally **unreachable by
+//! construction** (no line of this crate issues that licence, and the integration suite holds
+//! every `License::issue` call site to a recorded inventory); and [`correspondence`] is stage 7,
+//! which decides no candidate kind and therefore deliberately invents no manifest cell. Both
+//! refusals are pinned to the workspace state that justifies them by *freshness tripwires* that
+//! go red the moment either producer grows a public surface.
+//!
+//! Stage 6 is the exception and is implemented for real, because its input is here: the intent's
+//! observers are [`continuum_intent::observers::ObserverSet`], a landed field group in a crate
+//! this one already depends on. [`observer`] carries stage 6's premise — the observer set
+//! together with a declared attribution of candidates to projection elements — and the filter,
+//! which keeps whatever the property protects and re-closes, so observer scoping structurally
+//! *cannot* undo stage 3 and cannot break stage 2's closure ("a compiler MUST NOT exclude an
+//! abstraction-relevant hidden event on the grounds that no observer publishes it"). A candidate
+//! whose observability nobody declared is never dropped: INV-013 justifies a reduction relative
+//! to named observers, and there is no justification for removing what nobody described.
+//! [`scope`] is the **independent** audit of that reduction — a different computation in a
+//! different module, over the same premise — whose affirmative verdict licenses *nothing*,
+//! because RFC 0028's Licenses column for stage 6 reads "never a guarantee by itself".
+//!
 //! Declined here, and left to their own bones: typed construction for the remaining
 //! seven `SelectionKind` members (`proof`, `assumption`, `counterfactual`,
 //! `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
@@ -141,19 +171,24 @@ pub mod assurance;
 pub mod budget;
 pub mod causal;
 pub mod compile;
+pub mod correspondence;
 pub mod dependence;
 pub mod event;
 pub mod expansion;
 pub mod guarantee;
 pub mod model;
 pub mod monitor;
+pub mod observer;
 pub mod omission;
 pub mod pack;
+pub mod proof;
 pub mod property;
 pub mod replay;
+pub mod scope;
 pub mod selection;
 pub mod source;
 pub mod stage;
 pub mod state_delta;
 pub mod target;
+pub mod unsupported;
 pub mod verdict;
