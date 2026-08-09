@@ -1,10 +1,11 @@
 //! The compiler's pipeline, run: the redaction pre-pass, stage 1 (root selection), stage 2
 //! (backward causal slicing), stage 3 (property-automaton relevance filtering), stage 4
 //! (the static/dynamic dependence join), stage 5 (proof-dependency slicing), stage 6 (observer
-//! projection) and stage 7 (abstraction/refinement correspondence mapping), ending in a closed
-//! accounting, an auditable trail, and the guarantees those stages actually established.
+//! projection), stage 7 (abstraction/refinement correspondence mapping) and stage 8 (minimal
+//! unsatisfied core / correction-set analysis), ending in a closed accounting, an auditable trail,
+//! and the guarantees those stages actually established.
 //!
-//! # Scope: bn-21vno (1–2), bn-1kj2n (3–4) and bn-imhw2 (5–7) of RFC 0028's ten
+//! # Scope: bn-21vno (1–2), bn-1kj2n (3–4), bn-imhw2 (5–7) and bn-3ub6i (8) of RFC 0028's ten
 //!
 //! | Phase | RFC 0028 | Licenses |
 //! |---|---|---|
@@ -16,20 +17,31 @@
 //! | 5 | proof-dependency slicing | `ProofRelevant` — **refused here**: no proof service is deployed |
 //! | 6 | observer projection | "scoping under INV-013; never a guarantee by itself" |
 //! | 7 | correspondence mapping | the concrete-to-abstract links — **refused here**: no §16 graph is deployed |
+//! | 8 | minimal unsatisfied core / correction-set analysis | the six minimality classes, **each from its own transcript** |
 //!
-//! Stages 3–7 are **opt-in**: [`CausalCompile::new`] runs stages 1–2 alone, and
+//! Stages 3–8 are **opt-in**: [`CausalCompile::new`] runs stages 1–2 alone, and
 //! [`CausalCompile::with_property`], [`CausalCompile::with_dependence`],
-//! [`CausalCompile::with_proof_slicing`], [`CausalCompile::with_observer_projection`] and
-//! [`CausalCompile::with_correspondence_mapping`] each add one stage. That is not a
-//! convenience — RFC 0028 requires a deployment be able to run the pipeline in reduced
-//! configurations, a stage that did not run has no auditable intermediate (which is a different
-//! fact from an empty one), and a stage whose input the deployment does not have must not be
-//! simulated with a default. Stage 8 is its own bone and appends to
-//! [`crate::stage::StageTrail`] the same way; stage 9 is the ranker RFC 0028 requires a
+//! [`CausalCompile::with_proof_slicing`], [`CausalCompile::with_observer_projection`],
+//! [`CausalCompile::with_correspondence_mapping`] and [`CausalCompile::with_minimality`] each add
+//! one stage. That is not a convenience — RFC 0028 requires a deployment be able to run the
+//! pipeline in reduced configurations, a stage that did not run has no auditable intermediate
+//! (which is a different fact from an empty one), and a stage whose input the deployment does not
+//! have must not be simulated with a default. Stage 9 is the ranker RFC 0028 requires a
 //! deployment be able to run *without* ("the register row's named fallback for the whole
 //! capability is 'plain causal slice + expansion' — that is, stages 1–8 plus the expansion
 //! protocol, with stage 9 disabled"); stage 10 is [`crate::budget::BudgetPacker`] in
 //! substance.
+//!
+//! # Stage 8's licences are plural, and none of them is `ExplanationMinimal`
+//!
+//! Every other stage licenses at most one guarantee. Stage 8 licenses up to six, one per
+//! [`crate::minimality::MinimalityClass`], and each one only from that class's *own* transcript
+//! (rule C3). The licensing block below matches on the six-member class enum, so the six
+//! `License::issue` call sites are written out and `ExplanationMinimal` — which RFC 0028
+//! correction 5 says "MUST NOT be emitted from a minimizer transcript" — has no arm to be
+//! emitted from. That is the same device [`crate::proof`] uses for `ProofRelevant`: a guarantee
+//! this crate must not mint has no line of source that mints it, and the integration suite reads
+//! every call site to keep it that way.
 //!
 //! # A stage whose producer this deployment does not have refuses; it does not degrade
 //!
@@ -66,7 +78,8 @@
 //! **narrows** it to what the property is directed at; stage 4 **grows** it again with the
 //! `source` and `model` items whose dependence the join corroborates; stage 5 leaves it exactly
 //! as it found it (it refuses); stage 6 **narrows** it to the named observers' scope; stage 7
-//! leaves it alone again. The one structural invariant across all seven is the candidate
+//! leaves it alone again; stage 8 leaves it alone too, because it analyses the selection rather
+//! than minimising it. The one structural invariant across all eight is the candidate
 //! universe the pre-pass left, which is what [`crate::stage::StageTrail`] enforces.
 //!
 //! # The three refusals this module exists to make
@@ -183,6 +196,18 @@
 //! - **A manifest cell for stage 7.** See [`crate::correspondence`]: the manifest partitions
 //!   candidates and stage 7 drops none, so inventing a cell would make the counting equation
 //!   false in the direction that looks like diligence.
+//! - **A manifest cell, or a narrowing, for stage 8.** The same reading, for the same reason, and
+//!   with one more: the closed [`crate::omission::OmissionReason`] vocabulary has no member that
+//!   is true of an item a minimality search found redundant — it is not `slice-irrelevant`
+//!   (nothing proved it outside the property-directed slice) and it is not `heuristic-cutoff`
+//!   (the stage *did* decide it). RFC 0028 states the classes about the *selected* set, so stage 8
+//!   analyses the pack stages 1–7 decided and the counting equation is untouched. See
+//!   [`crate::minimality`]'s "What is declined here".
+//! - **An `inconclusive` reason for an unclaimed minimality class.** RFC 0028's failure-pack
+//!   profile *SHOULD* claim one, not MUST, so its absence does not make the answer unusable and
+//!   rule C1's second sentence is not triggered. [`Compilation::inconclusive_reason`] is
+//!   unchanged by stage 8, and [`crate::guarantee::RequestedGuarantees::unachieved`] already
+//!   computes what a requested-and-unachieved class owes the manifest.
 //! - **Re-deciding what an earlier stage published.** Stage 5's refusal does not un-select a
 //!   `proof` candidate stage 2 selected as a causal ancestor: that item is in the pack for
 //!   stage 2's reason and under stage 2's guarantee, and `ProofRelevant` is not claimed about
@@ -213,6 +238,12 @@
 //! | observer scoping cannot undo property slicing | RFC 0028, "Selection and the causal core" | `stage_six_cannot_undo_stage_three` |
 //! | stage 7 refuses and adds no manifest cell | RFC 0028, "Omission manifest" | `stage_seven_refuses_and_invents_no_manifest_cell` |
 //! | the earliest refusing stage names the verdict's reason | RFC 0028, "Verdict and assurance" | `the_earliest_refusing_stage_names_the_verdicts_reason` |
+//! | stage 8 licenses a class from its own transcript | RFC 0028, "Compiler pipeline" | `stage_eight_licenses_a_class_from_its_own_transcript` |
+//! | one class's check licenses no other class | RFC 0028 C3 | `stage_eight_licenses_only_the_classes_that_were_checked` |
+//! | `ExplanationMinimal` is never emitted | RFC 0028 correction 5 | `no_configuration_of_stage_eight_emits_explanation_minimal` |
+//! | a refuted class costs the guarantee | RFC 0028, "Guarantee classes" | `a_survivable_removal_costs_the_class_and_nothing_else` |
+//! | stage 8 narrows nothing and adds no manifest cell | RFC 0028, "Omission manifest" | `stage_eight_narrows_nothing_and_invents_no_manifest_cell` |
+//! | stage 8 without stage 3 refuses | INV-008 | `stage_eight_without_a_property_refuses_every_class` |
 //! | deterministic (INV-005) | INV-005, ADR-0003 | `two_runs_of_one_compile_agree` |
 
 use core::fmt;
@@ -227,6 +258,10 @@ use crate::correspondence::CorrespondenceMapping;
 use crate::dependence::{Admissibility, DependenceJoin, Inadmissible};
 use crate::expansion::ExpansionQuery;
 use crate::guarantee::{Guarantee, GuaranteeSet, License, SealedGuarantees};
+use crate::minimality::{
+    MinimalityClass, MinimalityOutcome, MinimalityQuestion, MinimalityRefusal, MinimalitySearch,
+    MinimalityTranscript,
+};
 use crate::monitor::{MonitorVerdict, PropertyMonitor};
 use crate::observer::{ObserverFilter, ObserverProjection, ProjectionApplicability};
 use crate::omission::{IrretrievableReason, OmissionReason};
@@ -236,6 +271,7 @@ use crate::scope::{ScopeAudit, ScopeReduction, ScopeVerdict};
 use crate::selection::{SelectedItem, SelectionKind};
 use crate::stage::{Phase, Stage, StageIntermediate, StageTrail, TrailError};
 use crate::unsupported::{StageRefusal, UnsupportedSurface};
+use crate::witness::{MinimalityAudit, TranscriptVerdict};
 
 /// Why a candidate is withheld from *this* caller — the three members of the schema's shared
 /// `Redacted.reason` vocabulary (`redacted.schema.json`; the IDL's `RedactionReason`).
@@ -351,7 +387,20 @@ struct ObserverStage {
     audit: ScopeAudit,
 }
 
-/// A compile of stages 1–7 over one causal order under one field policy.
+/// The minimality inputs stage 8 needs: the question the search is directed by, and the
+/// **independent** audit that decides whether its transcript establishes anything.
+///
+/// Two fields rather than one for [`PropertyStage`]'s reason — they are two authorities — and the
+/// audit carries its own automaton and its own dimension attribution, so a caller may audit
+/// against a stricter property or a different attribution than the search was given (see
+/// [`crate::witness`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MinimalityStage {
+    question: MinimalityQuestion,
+    audit: MinimalityAudit,
+}
+
+/// A compile of stages 1–8 over one causal order under one field policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CausalCompile {
     order: CausalOrder,
@@ -361,6 +410,7 @@ pub struct CausalCompile {
     proof: Option<ProofSlicing>,
     observer: Option<ObserverStage>,
     correspondence: Option<CorrespondenceMapping>,
+    minimality: Option<MinimalityStage>,
 }
 
 impl CausalCompile {
@@ -375,6 +425,7 @@ impl CausalCompile {
             proof: None,
             observer: None,
             correspondence: None,
+            minimality: None,
         }
     }
 
@@ -439,6 +490,23 @@ impl CausalCompile {
         self
     }
 
+    /// Add stage 8, over the classes `question` asks for and checked by `audit`.
+    ///
+    /// The two are separate arguments for [`CausalCompile::with_property`]'s reason: the search is
+    /// directed by the first and every licence is issued from the second, so a caller may audit
+    /// against a stricter automaton — or a different dimension attribution — than the search was
+    /// given, and the class is then refused rather than assumed.
+    ///
+    /// Stage 8 **narrows nothing**. RFC 0028 states the classes about the *selected* set
+    /// ("removing any one selected item destroys the witness"), so what this stage produces is
+    /// evidence about the pack stages 1–7 already decided, and the omission manifest is untouched
+    /// (see [`crate::minimality`]'s "What is declined here").
+    #[must_use]
+    pub fn with_minimality(mut self, question: MinimalityQuestion, audit: MinimalityAudit) -> Self {
+        self.minimality = Some(MinimalityStage { question, audit });
+        self
+    }
+
     /// The causal order this compile slices over.
     #[must_use]
     pub const fn order(&self) -> &CausalOrder {
@@ -491,6 +559,18 @@ impl CausalCompile {
     #[must_use]
     pub const fn correspondence_mapping(&self) -> Option<&CorrespondenceMapping> {
         self.correspondence.as_ref()
+    }
+
+    /// The classes stage 8 was asked to establish, when stage 8 runs.
+    #[must_use]
+    pub fn minimality_question(&self) -> Option<&MinimalityQuestion> {
+        self.minimality.as_ref().map(|stage| &stage.question)
+    }
+
+    /// The independent audit that licenses a minimality class, when stage 8 runs.
+    #[must_use]
+    pub fn minimality_audit(&self) -> Option<&MinimalityAudit> {
+        self.minimality.as_ref().map(|stage| &stage.audit)
     }
 
     /// Run the pre-pass, stage 1, stage 2, and the stages 3 and 4 that were configured.
@@ -722,6 +802,63 @@ impl CausalCompile {
             refusals.insert(refusal.surface(), refusal);
         }
 
+        // --- stage 8: minimal unsatisfied core / correction-set analysis ------------------
+        // The last stage that runs here, and the only one whose licences are plural. It narrows
+        // nothing: RFC 0028 states every class about the *selected* set, so `working` is already
+        // what will be published and the search and the audit both see exactly that. Each class is
+        // searched separately, transcribed separately, and audited separately — rule C3's "a
+        // consumer MUST NOT infer one class from another", applied to the producer.
+        let mut minimality: BTreeMap<MinimalityClass, TranscriptVerdict> = BTreeMap::new();
+        let mut transcripts: BTreeMap<MinimalityClass, MinimalityTranscript> = BTreeMap::new();
+        let mut minimality_outcome = None;
+        if let Some(stage) = &self.minimality {
+            let outcome = if stage.question.is_empty() {
+                MinimalityOutcome::NothingAsked
+            } else if let Some(property) = &self.property {
+                for class in stage.question.classes() {
+                    let verdict = match MinimalitySearch::transcribe(
+                        *class,
+                        &self.order,
+                        &property.automaton,
+                        &working,
+                        stage.question.dimensions(),
+                        stage.question.bound(),
+                    ) {
+                        Ok(transcript) => {
+                            // The licence comes from the audit's verdict on the transcript, never
+                            // from the search that wrote it.
+                            let verdict = stage.audit.verdict(&self.order, &working, &transcript);
+                            transcripts.insert(*class, transcript);
+                            verdict
+                        }
+                        Err(refusal) => TranscriptVerdict::Refused(refusal),
+                    };
+                    minimality.insert(*class, verdict);
+                }
+                if minimality.values().any(TranscriptVerdict::is_verified) {
+                    MinimalityOutcome::Licensed
+                } else {
+                    MinimalityOutcome::Unlicensed
+                }
+            } else {
+                // No property automaton ran, so nothing here decides whether a reduced set still
+                // witnesses the failure. Every asked-for class is refused, by name.
+                for class in stage.question.classes() {
+                    minimality.insert(
+                        *class,
+                        TranscriptVerdict::Refused(MinimalityRefusal::NoProperty),
+                    );
+                }
+                MinimalityOutcome::NoProperty
+            };
+            trail.record(StageIntermediate::noted(
+                Phase::Stage(Stage::MinimalCore),
+                working.iter().cloned(),
+                outcome.as_str(),
+            ))?;
+            minimality_outcome = Some(outcome);
+        }
+
         let published = working;
 
         // --- the independent checks, on the selection that will be published -------------
@@ -739,6 +876,28 @@ impl CausalCompile {
             .is_some_and(MonitorVerdict::is_preserving)
         {
             guarantees.claim(License::issue(Guarantee::PropertyPreserving));
+        }
+        // Stage 8's licences, one per class the audit verified. The match is exhaustive over the
+        // *six* members of `MinimalityClass`, and `ExplanationMinimal` is not one of them: RFC
+        // 0028 correction 5's "MUST NOT be emitted from a minimizer transcript" therefore has no
+        // spelling here rather than being a rule somebody remembered. The six call sites are
+        // written out rather than computed from `class.guarantee()` on purpose — the integration
+        // suite's licence inventory reads these lines, and a computed argument would hide from it
+        // exactly what this crate can mint.
+        for (class, verdict) in &minimality {
+            if !verdict.is_verified() {
+                continue;
+            }
+            guarantees.claim(match class {
+                MinimalityClass::OneMinimal => License::issue(Guarantee::OneMinimal),
+                MinimalityClass::CardinalityMinimal => {
+                    License::issue(Guarantee::CardinalityMinimal)
+                }
+                MinimalityClass::CausallyMinimal => License::issue(Guarantee::CausallyMinimal),
+                MinimalityClass::ValueMinimal => License::issue(Guarantee::ValueMinimal),
+                MinimalityClass::OwnerMinimal => License::issue(Guarantee::OwnerMinimal),
+                MinimalityClass::FaultMinimal => License::issue(Guarantee::FaultMinimal),
+            });
         }
 
         // --- accounting: every candidate dispositioned ----------------------------------
@@ -824,6 +983,9 @@ impl CausalCompile {
             scope_verdict,
             observer_dropped,
             unmapped_correspondence,
+            minimality,
+            transcripts,
+            minimality_outcome,
         })
     }
 }
@@ -843,6 +1005,9 @@ pub struct Compilation {
     scope_verdict: Option<ScopeVerdict>,
     observer_dropped: BTreeSet<Name>,
     unmapped_correspondence: BTreeSet<Name>,
+    minimality: BTreeMap<MinimalityClass, TranscriptVerdict>,
+    transcripts: BTreeMap<MinimalityClass, MinimalityTranscript>,
+    minimality_outcome: Option<MinimalityOutcome>,
 }
 
 impl Compilation {
@@ -1000,6 +1165,59 @@ impl Compilation {
     pub const fn unmapped_correspondence(&self) -> &BTreeSet<Name> {
         &self.unmapped_correspondence
     }
+
+    /// What the independent audit concluded about every minimality class stage 8 attempted, in
+    /// schema order.
+    ///
+    /// Empty when stage 8 did not run. A class present here with a non-`Verified` verdict is a
+    /// class this compile *tried* and did not establish — a different fact from a class nobody
+    /// asked for, and the record RFC 0028 C1's "a daemon MUST NOT echo a requested guarantee it
+    /// did not achieve" is read off.
+    #[must_use]
+    pub const fn minimality_verdicts(&self) -> &BTreeMap<MinimalityClass, TranscriptVerdict> {
+        &self.minimality
+    }
+
+    /// One class's verdict, when stage 8 attempted that class.
+    #[must_use]
+    pub fn minimality_verdict(&self, class: MinimalityClass) -> Option<&TranscriptVerdict> {
+        self.minimality.get(&class)
+    }
+
+    /// The transcripts stage 8's search produced, in schema order.
+    ///
+    /// The *evidence*, retrievable per class: a claim without an independently checkable artifact
+    /// is a hypothesis, so the artifact the audit checked is kept rather than discarded once the
+    /// verdict is in. A class whose search refused has no transcript, which is a different fact
+    /// from an empty one.
+    #[must_use]
+    pub const fn minimality_transcripts(&self) -> &BTreeMap<MinimalityClass, MinimalityTranscript> {
+        &self.transcripts
+    }
+
+    /// One class's transcript, where the search produced one.
+    #[must_use]
+    pub fn minimality_transcript(&self, class: MinimalityClass) -> Option<&MinimalityTranscript> {
+        self.transcripts.get(&class)
+    }
+
+    /// The classes this compile established, in schema order.
+    ///
+    /// Exactly the classes whose own transcript verified — "a pack MUST claim exactly the classes
+    /// whose checks ran and passed" (RFC 0028 C3).
+    #[must_use]
+    pub fn minimality_classes(&self) -> BTreeSet<MinimalityClass> {
+        self.minimality
+            .values()
+            .filter_map(TranscriptVerdict::licensed)
+            .collect()
+    }
+
+    /// The token stage 8's auditable intermediate carries, when stage 8 ran.
+    #[must_use]
+    pub const fn minimality_outcome(&self) -> Option<MinimalityOutcome> {
+        self.minimality_outcome
+    }
 }
 
 /// A way a compile of stages 1–7 refuses.
@@ -1097,6 +1315,8 @@ mod tests {
         CorrespondenceClaim, CorrespondenceRef, ExecutionDependence, SourceCorrespondence,
     };
     use crate::expansion::ExpansionRelation;
+    use crate::guarantee::RequestedGuarantees;
+    use crate::minimality::{DimensionAttribution, DimensionSet, MinimizedDimension, SearchBound};
     use crate::model::ModelActionRef;
     use crate::monitor::{Inapplicable, MonitorDisagreement};
     use crate::omission::OmissionReason;
@@ -2415,5 +2635,431 @@ mod tests {
         }
         assert_eq!(RedactionReason::from_wire_str("redacted"), None);
         assert_eq!(RedactionReason::from_wire_str("Purged"), None);
+    }
+
+    // =================================================================================
+    // stage 8
+    // =================================================================================
+
+    /// An automaton that steps on every member of the causal chain in sequence and violates only
+    /// at the end, so the chain's closure really is its own minimal witness.
+    fn chain_automaton(hidden: &[&str]) -> PropertyAutomaton {
+        PropertyAutomaton::new(
+            state("q_0"),
+            [
+                (state("q_0"), name("e_begin"), state("q_1")),
+                (state("q_1"), name("e_submit"), state("q_2")),
+                (state("q_2"), name("e_ack"), state("q_3")),
+                (state("q_3"), name("e_loss"), state("q_bad")),
+            ],
+            [state("q_bad")],
+            hidden.iter().map(|id| name(id)),
+            Coverage::Total,
+        )
+        .expect("a well-formed automaton")
+    }
+
+    /// Two value domains, two owners and two fault classes over the chain — three different
+    /// partitions, so the three dimension classes have three different removal families.
+    fn dimensions() -> DimensionSet {
+        DimensionSet::of([
+            DimensionAttribution::new(
+                MinimizedDimension::Value,
+                [
+                    (name("e_begin"), name("v_id")),
+                    (name("e_submit"), name("v_id")),
+                    (name("e_ack"), name("v_seq")),
+                    (name("e_loss"), name("v_seq")),
+                    (name("n_beat_1"), name("v_id")),
+                ],
+            ),
+            DimensionAttribution::new(
+                MinimizedDimension::Owner,
+                [
+                    (name("e_begin"), name("o_client")),
+                    (name("e_submit"), name("o_client")),
+                    (name("e_ack"), name("o_server")),
+                    (name("e_loss"), name("o_server")),
+                    (name("n_beat_1"), name("o_client")),
+                ],
+            ),
+            DimensionAttribution::new(
+                MinimizedDimension::Fault,
+                [
+                    (name("e_begin"), name("f_none")),
+                    (name("e_submit"), name("f_none")),
+                    (name("e_ack"), name("f_none")),
+                    (name("e_loss"), name("f_drop")),
+                    (name("n_beat_1"), name("f_none")),
+                ],
+            ),
+        ])
+    }
+
+    fn all_classes() -> MinimalityQuestion {
+        MinimalityQuestion::asking(MinimalityClass::ALL)
+            .with_dimensions(dimensions())
+            .with_bound(SearchBound::of(2).expect("a positive bound"))
+    }
+
+    /// Stages 1–3 and 8, over a core the property really is minimal about.
+    fn minimized(question: MinimalityQuestion) -> CausalCompile {
+        CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(
+                chain_automaton(&[]),
+                PropertyMonitor::over(chain_automaton(&[])),
+            )
+            .with_minimality(
+                question,
+                MinimalityAudit::of(chain_automaton(&[]), dimensions()),
+            )
+    }
+
+    #[test]
+    fn stage_eight_licenses_a_class_from_its_own_transcript() {
+        let compiled = minimized(all_classes())
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+
+        assert_eq!(
+            compiled.trail().phases(),
+            [
+                Phase::Redaction,
+                Phase::Stage(Stage::RootSelection),
+                Phase::Stage(Stage::CausalSlicing),
+                Phase::Stage(Stage::PropertyRelevance),
+                Phase::Stage(Stage::MinimalCore),
+            ]
+        );
+        assert_eq!(
+            compiled.minimality_outcome(),
+            Some(MinimalityOutcome::Licensed)
+        );
+        assert_eq!(
+            compiled
+                .trail()
+                .intermediate(Phase::Stage(Stage::MinimalCore))
+                .expect("stage 8 recorded")
+                .note(),
+            Some("minimality-licensed")
+        );
+        // Every class verified, each from its own transcript, and each transcript is kept as the
+        // evidence the audit checked rather than discarded once the verdict was in.
+        assert_eq!(
+            compiled.minimality_classes(),
+            MinimalityClass::ALL.into_iter().collect()
+        );
+        for class in MinimalityClass::ALL {
+            let transcript = compiled
+                .minimality_transcript(class)
+                .expect("a transcript per class");
+            assert_eq!(transcript.class(), class);
+            assert_eq!(
+                transcript.core(),
+                &compiled.selected().iter().cloned().collect()
+            );
+            assert!(
+                compiled
+                    .minimality_verdict(class)
+                    .expect("a verdict per class")
+                    .is_verified()
+            );
+        }
+        // The published guarantee set, in schema order: stage 2's, stage 3's, and stage 8's six.
+        assert_eq!(
+            compiled.guarantees().members(),
+            [
+                Guarantee::PropertyPreserving,
+                Guarantee::OneMinimal,
+                Guarantee::CardinalityMinimal,
+                Guarantee::CausallyMinimal,
+                Guarantee::ValueMinimal,
+                Guarantee::OwnerMinimal,
+                Guarantee::FaultMinimal,
+                Guarantee::CausallyClosed,
+            ]
+        );
+    }
+
+    #[test]
+    fn stage_eight_licenses_only_the_classes_that_were_checked() {
+        // RFC 0028 C3: "A pack MUST claim exactly the classes whose checks ran and passed, and a
+        // consumer MUST NOT infer one class from another." Running the one-removal check licenses
+        // `OneMinimal` and nothing else — even though the same removals would, examined under the
+        // cardinality bound 1, have established that class too.
+        let compiled = minimized(MinimalityQuestion::asking([MinimalityClass::OneMinimal]))
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+
+        assert_eq!(
+            compiled.minimality_classes(),
+            BTreeSet::from([MinimalityClass::OneMinimal])
+        );
+        assert_eq!(compiled.minimality_verdicts().len(), 1);
+        assert_eq!(compiled.minimality_transcripts().len(), 1);
+        assert_eq!(
+            compiled.guarantees().members(),
+            [
+                Guarantee::PropertyPreserving,
+                Guarantee::OneMinimal,
+                Guarantee::CausallyClosed,
+            ]
+        );
+        // No other class is decided at all: an unattempted class is a different fact from a
+        // refused one, and neither is a claim.
+        for class in MinimalityClass::ALL {
+            if class == MinimalityClass::OneMinimal {
+                continue;
+            }
+            assert!(compiled.minimality_verdict(class).is_none(), "{class}");
+        }
+    }
+
+    #[test]
+    fn no_configuration_of_stage_eight_emits_explanation_minimal() {
+        // Correction 5's pin at the pipeline: the strongest configuration this crate can build
+        // asks for every class it has, verifies all six, and `ExplanationMinimal` is still absent —
+        // because there is no `MinimalityClass` for it and therefore no licensing arm.
+        let compiled = minimized(all_classes())
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+        assert!(
+            !compiled
+                .guarantees()
+                .members()
+                .contains(&Guarantee::ExplanationMinimal)
+        );
+        assert!(
+            !compiled
+                .minimality_classes()
+                .iter()
+                .any(|class| class.guarantee() == Guarantee::ExplanationMinimal)
+        );
+        // And a caller who asks for it by name gets it recorded as unachieved, never echoed.
+        let requested = RequestedGuarantees::of([
+            Guarantee::ExplanationMinimal,
+            Guarantee::OneMinimal,
+            Guarantee::CausallyClosed,
+        ]);
+        assert_eq!(
+            requested.unachieved(&guarantee_set(&compiled)),
+            [Guarantee::ExplanationMinimal]
+        );
+    }
+
+    /// The sealed set, read back as a [`GuaranteeSet`] so `unachieved` can be asked about it.
+    fn guarantee_set(compiled: &Compilation) -> GuaranteeSet {
+        let mut set = GuaranteeSet::empty();
+        for guarantee in compiled.guarantees().members() {
+            // Every member here came from a licence this pipeline issued; re-issuing one to
+            // rebuild the set is a test-local convenience and mints nothing new.
+            set.claim(License::issue(*guarantee));
+        }
+        set
+    }
+
+    #[test]
+    fn a_survivable_removal_costs_the_class_and_nothing_else() {
+        // `n_beat_1` is an abstraction-relevant hidden event: stage 3 must keep it (RFC 0028's
+        // "no observer publishes it" rule), and the automaton does not step on it — so the core is
+        // causally closed, property-preserving, and *not* one-minimal. The honest answer is to
+        // drop the class and keep the rest.
+        let compiled = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(
+                chain_automaton(&["n_beat_1"]),
+                PropertyMonitor::over(chain_automaton(&["n_beat_1"])),
+            )
+            .with_minimality(
+                MinimalityQuestion::asking([MinimalityClass::OneMinimal]),
+                MinimalityAudit::over(chain_automaton(&["n_beat_1"])),
+            )
+            .run(&ids(&["e_loss", "n_beat_1"]), &residual())
+            .expect("compiles");
+
+        assert_eq!(
+            compiled.minimality_verdict(MinimalityClass::OneMinimal),
+            Some(&TranscriptVerdict::Refuted {
+                removed: ids(&["n_beat_1"])
+            })
+        );
+        assert!(compiled.minimality_classes().is_empty());
+        assert_eq!(
+            compiled.minimality_outcome(),
+            Some(MinimalityOutcome::Unlicensed)
+        );
+        assert_eq!(
+            compiled
+                .trail()
+                .intermediate(Phase::Stage(Stage::MinimalCore))
+                .expect("stage 8 recorded")
+                .note(),
+            Some("minimality-unlicensed")
+        );
+        // The transcript is kept: the refutation is evidence, not an absence.
+        assert_eq!(
+            compiled
+                .minimality_transcript(MinimalityClass::OneMinimal)
+                .expect("transcribed")
+                .len(),
+            5
+        );
+        // What the refutation costs is the class. Stage 2's and stage 3's claims stand.
+        assert_eq!(
+            compiled.guarantees().members(),
+            [Guarantee::PropertyPreserving, Guarantee::CausallyClosed]
+        );
+    }
+
+    #[test]
+    fn stage_eight_narrows_nothing_and_invents_no_manifest_cell() {
+        let with = minimized(all_classes())
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+        let without = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(
+                chain_automaton(&[]),
+                PropertyMonitor::over(chain_automaton(&[])),
+            )
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+
+        // The selection and the whole candidate partition are untouched: the classes are claims
+        // *about* the published set, and no omission reason is true of a redundant item.
+        assert_eq!(with.selected(), without.selected());
+        assert_eq!(
+            with.accounting().manifest(),
+            without.accounting().manifest()
+        );
+        with.accounting().reconcile().expect("halves agree");
+        // Stage 8's intermediate is stage 3's working set, unchanged.
+        assert_eq!(
+            with.trail()
+                .intermediate(Phase::Stage(Stage::MinimalCore))
+                .expect("stage 8 recorded")
+                .working_set(),
+            with.trail()
+                .intermediate(Phase::Stage(Stage::PropertyRelevance))
+                .expect("stage 3 recorded")
+                .working_set()
+        );
+        // And the verdict's reason is unchanged: an unclaimed minimality class does not make the
+        // answer unusable (RFC 0028's failure profile says SHOULD, not MUST).
+        assert_eq!(with.inconclusive_reason(), None);
+        assert_eq!(with.refusals().len(), 0);
+    }
+
+    #[test]
+    fn stage_eight_without_a_property_refuses_every_class() {
+        // No automaton ran, so nothing here decides whether a reduced set still witnesses the
+        // failure. Every asked-for class is refused by name; none is quietly skipped.
+        let compiled = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_minimality(
+                all_classes(),
+                MinimalityAudit::of(chain_automaton(&[]), dimensions()),
+            )
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+
+        assert_eq!(
+            compiled.minimality_outcome(),
+            Some(MinimalityOutcome::NoProperty)
+        );
+        assert_eq!(compiled.minimality_verdicts().len(), 6);
+        for class in MinimalityClass::ALL {
+            assert_eq!(
+                compiled.minimality_verdict(class),
+                Some(&TranscriptVerdict::Refused(MinimalityRefusal::NoProperty))
+            );
+        }
+        assert!(compiled.minimality_transcripts().is_empty());
+        assert!(compiled.minimality_classes().is_empty());
+        assert_eq!(compiled.guarantees().members(), [Guarantee::CausallyClosed]);
+    }
+
+    #[test]
+    fn a_stage_eight_that_was_asked_for_nothing_still_records_that_it_ran() {
+        let compiled = minimized(MinimalityQuestion::nothing_asked())
+            .run(&ids(&["e_loss"]), &residual())
+            .expect("compiles");
+        assert_eq!(
+            compiled.minimality_outcome(),
+            Some(MinimalityOutcome::NothingAsked)
+        );
+        assert_eq!(
+            compiled
+                .trail()
+                .intermediate(Phase::Stage(Stage::MinimalCore))
+                .expect("stage 8 recorded")
+                .note(),
+            Some("minimality-nothing-asked")
+        );
+        assert!(compiled.minimality_verdicts().is_empty());
+        // A stage that was never configured has no intermediate at all — a different fact.
+        let unconfigured =
+            CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+                .run(&ids(&["e_loss"]), &residual())
+                .expect("compiles");
+        assert!(
+            unconfigured
+                .trail()
+                .intermediate(Phase::Stage(Stage::MinimalCore))
+                .is_none()
+        );
+        assert_eq!(unconfigured.minimality_outcome(), None);
+    }
+
+    #[test]
+    fn an_empty_selection_refuses_every_minimality_class() {
+        // Boundary: an empty order compiles to an empty pack, and there is nothing to be minimal
+        // about. Refused rather than vacuously verified — "every removal destroyed the witness" is
+        // trivially true of a core with no removals in it.
+        let compiled = CausalCompile::new(
+            CausalOrder::new([], []).expect("an empty order is well formed"),
+            RedactionPolicy::permitting_everything(),
+        )
+        .with_property(
+            chain_automaton(&[]),
+            PropertyMonitor::over(chain_automaton(&[])),
+        )
+        .with_minimality(
+            all_classes(),
+            MinimalityAudit::of(chain_automaton(&[]), dimensions()),
+        )
+        .run(&BTreeSet::new(), &residual())
+        .expect("compiles");
+        assert!(compiled.selected().is_empty());
+        for class in MinimalityClass::ALL {
+            assert_eq!(
+                compiled.minimality_verdict(class),
+                Some(&TranscriptVerdict::Refused(MinimalityRefusal::EmptyCore))
+            );
+        }
+        assert!(compiled.minimality_classes().is_empty());
+    }
+
+    #[test]
+    fn two_runs_of_a_minimized_compile_agree() {
+        let build = || {
+            minimized(all_classes())
+                .run(&ids(&["e_loss"]), &residual())
+                .expect("compiles")
+        };
+        assert_eq!(build(), build());
+        assert_eq!(
+            build()
+                .minimality_transcript(MinimalityClass::CardinalityMinimal)
+                .expect("transcribed")
+                .to_json()
+                .to_canonical_bytes(),
+            build()
+                .minimality_transcript(MinimalityClass::CardinalityMinimal)
+                .expect("transcribed")
+                .to_json()
+                .to_canonical_bytes()
+        );
+        assert_eq!(
+            build().trail().to_json().to_canonical_bytes(),
+            build().trail().to_json().to_canonical_bytes()
+        );
     }
 }

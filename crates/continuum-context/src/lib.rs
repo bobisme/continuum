@@ -147,6 +147,30 @@
 //! different module, over the same premise — whose affirmative verdict licenses *nothing*,
 //! because RFC 0028's Licenses column for stage 6 reads "never a guarantee by itself".
 //!
+//! [`minimality`] and [`witness`] (bn-3ub6i — the compiler's **stage group 4**, RFC 0028 stage 8)
+//! — the pipeline's last guarantee-bearing stage, and the only one whose licences are plural. RFC
+//! 0028 licenses "the minimality classes, **each with its own transcript**", so what establishes a
+//! class here is not a recomputation a consumer could repeat but a *search* that already happened,
+//! and the evidence-not-assertion discipline lands on the search's record. [`minimality`] carries
+//! the premise: the six transcript-licensed classes, the declared value/owner/fault attributions
+//! the dimension classes reduce along, the declared [`minimality::SearchBound`] without which
+//! `CardinalityMinimal` "cannot claim it", the [`minimality::MinimalityTranscript`] a minimizer
+//! leaves behind — publicly constructible, because an external solver artifact is RFC 0028's
+//! stated stage-8 input "where one exists" — and [`minimality::MinimalitySearch`], the in-crate
+//! producer, which is not privileged over any other. [`witness`] is the **independent** check: it
+//! never searches, it re-derives every recorded outcome from the premise and verifies the
+//! transcript covered exactly the removals the class requires, so a forged outcome, a truncated
+//! family, a padded one, or a core that is not the published selection each cost the class by
+//! name. Two pins are structural rather than reviewed. `ExplanationMinimal` is **not emittable**:
+//! [`minimality::MinimalityClass`] has six members and it is not one of them, no transcript can be
+//! recorded for it, and [`compile`]'s licensing match has no arm that mints it — RFC 0028
+//! correction 5, "MUST NOT be emitted from a minimizer transcript", made unspellable the way
+//! `ProofRelevant` already is. And `CardinalityMinimal` without a declared bound is a typed
+//! refusal from the *checker*, so a transcript that arrived from anywhere is held to it. Stage 8
+//! narrows nothing and invents no manifest cell: the classes are claims about the *selected* set,
+//! and RFC 0028's five omission reasons have no member that is true of an item a minimality search
+//! found redundant.
+//!
 //! Declined here, and left to their own bones: typed construction for the remaining
 //! seven `SelectionKind` members (`proof`, `assumption`, `counterfactual`,
 //! `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
@@ -176,6 +200,7 @@ pub mod dependence;
 pub mod event;
 pub mod expansion;
 pub mod guarantee;
+pub mod minimality;
 pub mod model;
 pub mod monitor;
 pub mod observer;
@@ -192,3 +217,4 @@ pub mod state_delta;
 pub mod target;
 pub mod unsupported;
 pub mod verdict;
+pub mod witness;

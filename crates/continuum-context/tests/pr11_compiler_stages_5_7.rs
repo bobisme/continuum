@@ -63,6 +63,7 @@ use continuum_context::dependence::{
 };
 use continuum_context::expansion::{ExpansionQuery, ExpansionRelation};
 use continuum_context::guarantee::{Guarantee, RequestedGuarantees};
+use continuum_context::minimality::MinimalityClass;
 use continuum_context::model::ModelActionRef;
 use continuum_context::monitor::PropertyMonitor;
 use continuum_context::observer::{
@@ -1174,7 +1175,7 @@ fn negative_the_producer_tripwire_is_not_vacuous() {
 /// A recorded inventory is itself a tripwire: a new module has to be added here before the scan
 /// below can pass, so a module cannot start licensing a guarantee without this audit being
 /// redone. `every_source_file_of_the_crate_is_recorded` closes the loop against the directory.
-const SOURCES: [(&str, &str); 27] = [
+const SOURCES: [(&str, &str); 29] = [
     ("accounting.rs", include_str!("../src/accounting.rs")),
     ("assurance.rs", include_str!("../src/assurance.rs")),
     ("budget.rs", include_str!("../src/budget.rs")),
@@ -1189,6 +1190,7 @@ const SOURCES: [(&str, &str); 27] = [
     ("expansion.rs", include_str!("../src/expansion.rs")),
     ("guarantee.rs", include_str!("../src/guarantee.rs")),
     ("lib.rs", include_str!("../src/lib.rs")),
+    ("minimality.rs", include_str!("../src/minimality.rs")),
     ("model.rs", include_str!("../src/model.rs")),
     ("monitor.rs", include_str!("../src/monitor.rs")),
     ("observer.rs", include_str!("../src/observer.rs")),
@@ -1205,6 +1207,7 @@ const SOURCES: [(&str, &str); 27] = [
     ("target.rs", include_str!("../src/target.rs")),
     ("unsupported.rs", include_str!("../src/unsupported.rs")),
     ("verdict.rs", include_str!("../src/verdict.rs")),
+    ("witness.rs", include_str!("../src/witness.rs")),
 ];
 
 /// A module's production half, with comment lines removed.
@@ -1247,26 +1250,49 @@ fn licensed_guarantees(sources: &[(&str, &str)]) -> Vec<String> {
 /// **TRIPWIRE / anti-vacuity mutant.** The guarantee-licensing surface of the whole crate,
 /// recorded exactly.
 ///
-/// RFC 0028's guarantee-violation list, read at this stage group, names the mutant this test
-/// exists to make unreachable: *a stage that quietly licenses `ProofRelevant` with no proof
-/// slice behind it*. `License::issue` is `pub(crate)`, so the only code that could mint that
-/// permission is this crate — and the inventory below is every call site there is. Two of them,
-/// both in `compile.rs`, both from a checker's verdict, and neither for `ProofRelevant`.
+/// RFC 0028's guarantee-violation list names two mutants this test exists to make unreachable:
+/// *a stage that quietly licenses `ProofRelevant` with no proof slice behind it* (stage group 3),
+/// and — since correction 5 — an `ExplanationMinimal` emitted from a minimizer transcript
+/// (stage 8). `License::issue` is `pub(crate)`, so the only code that could mint either permission
+/// is this crate, and the inventory below is every call site there is.
 ///
-/// A third call site, or a different guarantee at either of these two, fails this test until
-/// the audit is redone.
+/// Eight of them, all in `compile.rs`, all from a checker's verdict: stage 2's closure check,
+/// stage 3's independent monitor, and stage 8's six — one per member of
+/// `continuum_context::minimality::MinimalityClass`, which has six members precisely because
+/// `ExplanationMinimal` is not one of them. Neither absent guarantee appears, and a ninth call
+/// site, or a different guarantee at any of these eight, fails this test until the audit is redone.
+///
+/// The stage-8 arms are written out one per class rather than computed from `class.guarantee()`
+/// on purpose: a computed argument would read here as one opaque call site and hide exactly what
+/// this crate can mint.
 #[test]
-fn tripwire_the_crate_licenses_exactly_two_guarantees_and_proof_relevance_is_not_one() {
+fn tripwire_the_crate_licenses_exactly_eight_guarantees_and_neither_absent_one_is_among_them() {
     let licensed = licensed_guarantees(&SOURCES);
     assert_eq!(
         licensed,
         [
             "Guarantee::CausallyClosed".to_owned(),
             "Guarantee::PropertyPreserving".to_owned(),
+            "Guarantee::OneMinimal".to_owned(),
+            "Guarantee::CardinalityMinimal".to_owned(),
+            "Guarantee::CausallyMinimal".to_owned(),
+            "Guarantee::ValueMinimal".to_owned(),
+            "Guarantee::OwnerMinimal".to_owned(),
+            "Guarantee::FaultMinimal".to_owned(),
         ],
         "the crate's `License::issue` call sites have changed"
     );
     assert!(!licensed.iter().any(|g| g.contains("ProofRelevant")));
+    assert!(!licensed.iter().any(|g| g.contains("ExplanationMinimal")));
+    // The six minimality call sites are exactly the six classes, in the schema's order: the
+    // inventory and the closed class vocabulary cannot drift apart.
+    assert_eq!(
+        licensed[2..],
+        MinimalityClass::ALL
+            .into_iter()
+            .map(|class| format!("Guarantee::{:?}", class.guarantee()))
+            .collect::<Vec<String>>()
+    );
     // The compile-time half of the same claim: `ProofRelevant` is absent from every pack this
     // pipeline can build, including the one that ran all seven stages.
     assert!(
@@ -1293,10 +1319,24 @@ fn negative_the_licence_inventory_is_not_vacuous() {
         licensed.contains(&"Guarantee::ProofRelevant".to_owned()),
         "the scan must catch a spliced licence: {licensed:?}"
     );
+    // The stage-8 half of the same mutant: correction 5's forbidden emission, spliced in, is
+    // caught by the same scan. Without this the `ExplanationMinimal` assertion above would be
+    // satisfied by a scanner that simply never looked.
+    let correction_five = format!(
+        "{}\nfn sneak(set: &mut GuaranteeSet) {{ set.claim(License::issue(Guarantee::ExplanationMinimal)); }}\n#[cfg(test)]\nmod tests {{}}",
+        production_code(SOURCES[11].1)
+    );
+    assert!(
+        licensed_guarantees(&[("mutant.rs", &correction_five)])
+            .contains(&"Guarantee::ExplanationMinimal".to_owned())
+    );
     // And a source with no call site at all yields nothing, so the scanner is not matching on
     // the word `Guarantee`.
-    assert!(licensed_guarantees(&[("proof.rs", SOURCES[16].1)]).is_empty());
-    assert_eq!(SOURCES[16].0, "proof.rs");
+    assert!(licensed_guarantees(&[("proof.rs", SOURCES[17].1)]).is_empty());
+    assert!(licensed_guarantees(&[("witness.rs", SOURCES[28].1)]).is_empty());
+    assert_eq!(SOURCES[17].0, "proof.rs");
+    assert_eq!(SOURCES[11].0, "minimality.rs");
+    assert_eq!(SOURCES[28].0, "witness.rs");
     assert_eq!(SOURCES[4].0, "compile.rs");
 }
 
