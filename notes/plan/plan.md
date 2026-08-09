@@ -558,6 +558,8 @@ A workspace snapshot contains content identities for:
 
 Snapshots form a Merkle DAG. A tool call never means “whatever is currently on disk”; it means a named snapshot. Clients may create a snapshot from a working tree, overlay an in-memory editor buffer, or fork an existing snapshot.
 
+A client that is not on the daemon's filesystem may also name a component set it does not have to enumerate: `workspace.create_by_reference` (§10.2, protocol 3.6) takes the content identity of a component set the daemon already holds, plus the two members a shared set cannot carry — the governing intent and the snapshot's epochs, which are the caller's own declaration on every request (`rule snapshot.by_reference`). `workspace.create` is unchanged and is what establishes such a set; the two are one act with two spellings of one argument, and they publish the same snapshot.
+
 Intent Contracts are stored and versioned only in the intent registry,
 outside every writable or forkable snapshot. `workspace.fork` preserves the
 intent binding by identity; rebinding a snapshot lineage to a different
@@ -1215,7 +1217,7 @@ The Agent–Computer Interface follows these rules:
 ### 10.2 Core operations
 
 ```text
-workspace.create / fork / diff / seal
+workspace.create / create_by_reference / fork / diff / seal
 intent.get / diff / propose_revision / accept / reject / lock
 verification.start / result / await
 model.check / explore / compare
@@ -2117,7 +2119,7 @@ Deliver:
   riding the same bundle), leaving every open flag deferred with its reason recorded in
   its owning RFC's ledger. Absences stated: the transport is local and in-process — the
   §10 sentence's "local IPC or authenticated HTTP/QUIC" socket half has no carrier bone
-  yet; 45 of the 73 registered operations answer the typed UnsupportedSemanticFeature
+  yet; 45 of the 75 registered operations answer the typed UnsupportedSemanticFeature
   pending their producing subsystems (rule errors.unsupported_surface — registration
   ahead of subsystem is the registry's own discipline, not a gap in the protocol); and
   the docs/36, docs/46, docs/55 reference sketches still carry their
@@ -2777,7 +2779,7 @@ projections, and the docs/35/40/41/42/45 corrections) are recorded in
 `plan.review.5.md` Appendix B, not re-listed as debt.
 
 - SD-01 (paid, `schemas/continuumd-native-protocol.idl`): RFC 0026's
-  normative IDL file — all 74 §10.2 operations, envelopes, handshake;
+  normative IDL file — all 75 §10.2 operations, envelopes, handshake;
 - SD-07 (paid, PR 0): `schemas/intent-contract.schema.json` — a
   structured property-AST expression form with canonical
   normalization, replacing the bare `expression` string;

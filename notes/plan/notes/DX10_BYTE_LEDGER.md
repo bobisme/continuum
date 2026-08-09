@@ -1114,3 +1114,88 @@ decision from the one the redesign was commissioned as. It is not a byte questio
 **Do not dispatch C1, C2, C3, C4a or C6 against the §3 or §6 tables.** Both stay above as the
 record of what was projected, and both are superseded on wire visibility by §8.2. Each of the
 five bones carries a comment naming its verdict and the declaration that blocks it.
+
+---
+
+## 9. C4b landed — the measurement, against §8's projection
+
+**Amendment, `bn-3of5h`, 2026-08-09.** Nothing above this heading is rewritten. §8 stays as
+the record of what was projected and at which version it was collectable; this section is
+what the projection turned out to be worth once it was on the wire.
+
+`workspace.create_by_reference` is the operation, at protocol **3.6** (IDL 1.11) — the 75th
+row, the third the registry has ever gained, and the first to enter an existing namespace.
+`rule snapshot.by_reference` is its semantics. The full three-source registry edit landed
+together per F13, and the dossier validator's three-way parse enforces it rather than
+remembering it.
+
+### 9.1 The numbers
+
+| | before | after | delta |
+|---|---:|---:|---:|
+| native, B per solved task | 10,859 | **10,384** | **−475** |
+| native, B over the matrix | 260,616 | 249,230 | −11,386 |
+| `workspace.create`, B per call (request + result) | 1,470 | 996 | −474 |
+| **shell, B per solved task** | **4,118** | **4,118** | **0** |
+| byte margin against the +30% floor | −163% | **−152%** | +11 pts |
+
+**Against §8.5's projection of 494 B per solved task the landed figure is 475 — 96.2% of
+it**, and §8.8's predicted "native after 10,365, margin −152%" lands at 10,384 and −152%.
+The 19 B/solved shortfall is one erratum in the projection's favour and it is stated rather
+than absorbed: §8.5 priced a by-reference request at 211 B from a 77 B port commitment plus
+132 B of intent and epochs. The landed request is larger. A commitment on this wire is a
+`ws_`-prefixed 64-hex token — 69 B with its quotes — and the model charged nothing for the
+member keys (`"components"`, `"epochs"`, `"intent"`, `"seal"`) or for the `epochs` object's
+own braces and keys. The saving per call is therefore 474 B where 506 was projected.
+
+### 9.2 What did not move, and why that is the load-bearing half
+
+**The baseline's numbers are byte-for-byte unchanged** — 4,118 B per solved task, 98,836 B
+total, 69‰ invalid, 24/24 solved, and its `workspace.create` row still 24 calls at 9,000 B.
+The anti-gaming discipline asks whether a disciplined shell user could mirror the typed
+arm's change, and here the question runs the other way: **the baseline has named the port
+since the instrument was built.** Its command line is
+`continuum workspace create --port TV-009 --seal false --as agent:builder`, and the CLI
+resolves the port's components from the filesystem. PR-10 IMPL-02 recorded the asymmetry in
+as many words — "a local CLI names a corpus port and resolves its components from the
+filesystem while a remote protocol client must transmit `SnapshotComponents` in full" — and
+this operation is that sentence paid. There is nothing to mirror because the mirror already
+exists; what changed is that the typed arm may now say the same thing.
+
+Three further controls, each a test in
+`crates/continuum-benchmark/tests/pr10_c4b_port_by_reference.rs`:
+
+- **The protocol bump costs zero bytes.** `"3.2"` and `"3.6"` are the same length and
+  `ProtocolVersion` is the only place either appears, so the handshake is the same 875 B and
+  every envelope is the same size. The whole delta is attributable to the request argument.
+- **Only one row of the per-operation table moved.** `task.status`, `task.resume`,
+  `verification.start`, `verification.result`, `workspace.fork` and `workspace.seal` are
+  their 3.5 byte totals exactly.
+- **Both arms still attempt one sequence.** `Call::operation()` reports the *act*, and a
+  by-reference create is `workspace.create` with a different argument, so the shared policy
+  still decides one script and `both_arms_attempt_the_identical_operation_sequence` is
+  unweakened. The same `ws_` handle comes back, so nothing was traded for the bytes.
+
+`bn-2phq3`'s control family and `bn-2c0a`'s seventeen falsification tests are all green.
+The control family's mechanism is untouched — it still compares the control run to the
+landed run over whole `ArmRun` values, every counter and every transcript line — and only
+the landed value it is compared *at* has moved. Every one of the thirteen attacks keeps its
+verdict: eight LANDED, four HELD, one INCONCLUSIVE. What moved is the size of the loss and
+not any conclusion about it.
+
+### 9.3 The sum-check, once more, with the landed figure
+
+| candidate set | saved / solved | native after | margin |
+|---|---:|---:|---:|
+| landed measurement, before this bone | — | 10,859 | −163% |
+| §8's 3.6 bundle as projected — C4b alone | 494 | 10,365 | −152% |
+| **§9's landed measurement — C4b alone** | **475** | **10,384** | **−152%** |
+| required for the ratified floor | 7,977 | ≤ 2,882 | +30% |
+
+**C4b recovers 5.9% of the 7,977 B the floor needs and removes 4.4% of the native arm's
+total wire spend.** Both figures are within a tenth of a point of §8.8's projections (6.2%
+and 4.5%), which is the useful result of this bone beyond the bytes: **the ledger's method
+predicts a landed measurement to within 4%.** §8.9's recommendation stands unchanged and is
+now the record of a completed item rather than a proposal: everything else is a 4.0
+question, the exit sentence is still satisfied by the redesign having happened, and no
+redesign of this encoding clears the margin.

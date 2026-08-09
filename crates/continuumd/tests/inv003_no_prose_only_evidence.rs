@@ -58,7 +58,7 @@
 //!
 //! | class | binding | checker / evidence |
 //! |---|---|---|
-//! | wire envelopes/operations (74, IDL) | typed wire — `continuumd-native-protocol.idl` | `idl_conformance.rs` (cited) |
+//! | wire envelopes/operations (75, IDL) | typed wire — `continuumd-native-protocol.idl` | `idl_conformance.rs` (cited) |
 //! | CONTCERT certificates (4 kernel crates) | typed wire — `wire.rs`'s byte grammar, `check_certificate(bytes: &[u8])` | `certificate_wire.rs`, `wire_form_boundary.rs` ×4 (cited); `wire_bytes_not_prose` below |
 //! | the 19 `notes/plan/schemas/*.schema.json` instance classes | schema, `additionalProperties: false` + const-pinned identity | `schema_closure` below; GOV-1-12 (cited) |
 //! | intent registry record (representative) | schema, daemon-emitted | `schema_resolution` below |
@@ -1317,7 +1317,7 @@ mod dispatch_reads_structure_not_prose {
         for needle in [
             "fn the_free_text_inventory_reachable_from_every_landed_request_is_exactly_this_list",
             "fn every_unlanded_operation_is_inert_for_any_payload_whatsoever",
-            "fn exactly_twenty_nine_of_the_seventy_four_operations_are_landed",
+            "fn exactly_thirty_of_the_seventy_five_operations_are_landed",
             "never against anything a free-text field carries",
         ] {
             assert!(

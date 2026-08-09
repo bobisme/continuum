@@ -27,6 +27,12 @@
 //!   [`AgentContext::observe`] moves the state using `TaskRecord.status`, the envelope's
 //!   `continuation`, and `WorkspaceCreateResponse.sealed` — values, not renderings. This is
 //!   the whole of the ACI's claimed advantage over scraping, stated as one function.
+//! - **The grammar names acts, not spellings.** Protocol 3.6 gave `workspace.create` a
+//!   by-reference sibling, and [`OPERATIONS`] stays eight rows: the two are one act with
+//!   two spellings of one argument (`rule snapshot.by_reference`), they publish the same
+//!   snapshot, and `workspace.create`'s row is `Requirement::Nothing` — so an operation
+//!   the register does not name is admitted, and admitting it is exactly what the named
+//!   row would have done. Nothing about the local-refusal channel moves.
 //!
 //! # Why a locally refused call still costs an attempt
 //!
@@ -96,10 +102,20 @@ impl AgentContext {
     /// caller that will next ask the grammar what it may do.
     pub fn observe(&mut self, operation: &str, admitted: &Admitted) {
         match operation {
-            "workspace.create" => {
+            // One act, two spellings of one argument (protocol 3.6,
+            // `rule snapshot.by_reference`). The transition is read off the typed answer,
+            // and both bodies carry the same `sealed` — so the state moves identically
+            // whichever the caller sent, and the grammar below stays eight rows because
+            // this is not a ninth act.
+            "workspace.create" | "workspace.create_by_reference" => {
                 self.snapshot = match &admitted.payload {
                     Payload::WorkspaceCreate(response) if response.sealed => SnapshotState::Sealed,
-                    Payload::WorkspaceCreate(_) => SnapshotState::Draft,
+                    Payload::WorkspaceCreateByReference(response) if response.sealed => {
+                        SnapshotState::Sealed
+                    }
+                    Payload::WorkspaceCreate(_) | Payload::WorkspaceCreateByReference(_) => {
+                        SnapshotState::Draft
+                    }
                     _ => self.snapshot,
                 };
             }
@@ -253,7 +269,7 @@ pub fn rule(operation: &str) -> Option<&'static OperationRule> {
 /// Whether `operation` may be called from `context`.
 ///
 /// An operation the register does not name is admitted: this client's surface is a curated
-/// subset of the protocol's seventy-four operations, and a grammar that refused everything
+/// subset of the protocol's seventy-five operations, and a grammar that refused everything
 /// it had not been told about would be an authority rather than an aid.
 ///
 /// # Errors

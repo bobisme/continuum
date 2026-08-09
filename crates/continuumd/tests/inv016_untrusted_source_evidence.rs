@@ -9,7 +9,7 @@
 //!
 //! # The architectural guard this file holds to a fact
 //!
-//! `continuumd` dispatches its 74 operations as *data*: [`registry::OPERATIONS`] is a table
+//! `continuumd` dispatches its 75 operations as *data*: [`registry::OPERATIONS`] is a table
 //! the daemon reads, never a program the wire writes, and
 //! [`Daemon::dispatch`](continuumd::daemon::Daemon::dispatch)'s eight steps — named in that
 //! function's own module documentation — key on exactly four things: the negotiated
@@ -54,9 +54,9 @@
 //!
 //! # The landed/unlanded boundary, and why it bounds leg 1's scope honestly
 //!
-//! Only 29 of the registry's 74 operations have a family wired up today:
+//! Only 30 of the registry's 75 operations have a family wired up today:
 //! `codec::operations::decode_arguments`'s own documentation states it plainly — "the 45 of
-//! the 74 whose families have not landed" answer `CodecError::UnknownOperation` — and that
+//! the 75 whose families have not landed" answer `CodecError::UnknownOperation` — and that
 //! function's match is on the operation *name* alone, never on the argument bytes, so an
 //! unlanded operation is inert for **any** payload, hostile or not, before a single byte of
 //! it is parsed. `structural_every_unlanded_operation_is_inert_for_any_payload_whatsoever`
@@ -471,7 +471,7 @@ mod structural {
 
     // --- the landed/unlanded boundary, mechanically ------------------------------------
 
-    /// The 29 operations `codec::operations::decode_arguments` actually decodes, derived by
+    /// The 30 operations `codec::operations::decode_arguments` actually decodes, derived by
     /// probing every registry operation rather than copied from that module's doc comment.
     fn landed_operations() -> BTreeSet<&'static str> {
         OPERATIONS
@@ -487,7 +487,7 @@ mod structural {
     }
 
     #[test]
-    fn exactly_twenty_nine_of_the_seventy_four_operations_are_landed() {
+    fn exactly_thirty_of_the_seventy_five_operations_are_landed() {
         // 25 of 72 through protocol 3.2; `evidence.link` is the 26th and the 73rd, and it
         // lands with its family rather than ahead of it (bn-3sypm). The 27th and 28th are
         // the `context` pair, landed by bn-28jj (PR-11 / IMPL-04): `context.expand` is
@@ -496,12 +496,16 @@ mod structural {
         // `observe.result` are — decodable, reachable, and honestly unserved. The 29th is
         // `whiteboard.compile`, the 74th, landed with its family at protocol 3.5
         // (bn-1as8e) — an operation that grew the registry rather than the landed set
-        // alone, so both numbers moved together.
-        assert_eq!(OPERATION_COUNT, 74);
+        // alone, so both numbers moved together. The 30th is
+        // `workspace.create_by_reference`, the 75th, at protocol 3.6 (bn-3of5h): it is
+        // served the day it is declared, because it resolves its reference and then calls
+        // the `create` this family already had.
+        assert_eq!(OPERATION_COUNT, 75);
         let landed = landed_operations();
-        assert_eq!(landed.len(), 29, "landed operations: {landed:?}");
+        assert_eq!(landed.len(), 30, "landed operations: {landed:?}");
         let expected: BTreeSet<&str> = [
             "workspace.create",
+            "workspace.create_by_reference",
             "workspace.fork",
             "workspace.diff",
             "workspace.seal",

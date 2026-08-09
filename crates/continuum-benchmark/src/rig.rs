@@ -66,7 +66,17 @@ use continuumd::transport::{LocalPair, Server, encode_hello};
 use crate::corpus::{CONTRACT, Source};
 
 /// The protocol version every rig speaks.
-pub const VERSION: (u32, u32) = (3, 2);
+///
+/// 3.6 as of bn-3of5h, and the bump is the *precondition* of the measurement rather than a
+/// part of it: `workspace.create_by_reference` is `@since("3.6")`, and a client that
+/// negotiated 3.2 is not entitled to name it (`rule versioning.compatible_change` —
+/// "servers MUST NOT emit fields the negotiated version does not define", read from the
+/// client's side). Two things make the bump byte-neutral, and both are asserted in
+/// `tests/pr10_c4b_port_by_reference.rs`: `"3.2"` and `"3.6"` are the same length, and
+/// `ProtocolVersion` is the only place either appears — the hello, the welcome, and every
+/// envelope's `epochs.protocol` each carry exactly one of them. So the whole of the delta
+/// this bone reports is attributable to the request argument and none of it to the version.
+pub const VERSION: (u32, u32) = (3, 6);
 
 /// The one timestamp in this crate.
 ///
@@ -155,6 +165,7 @@ pub struct Rig {
     welcome_frame: Vec<u8>,
     intent: IntentHandle,
     staged: BTreeMap<Source, Staged>,
+    references: BTreeMap<Source, Commitment>,
 }
 
 impl Rig {
@@ -176,6 +187,15 @@ impl Rig {
         let mut daemon = daemon(negotiated);
         let intent = accept_intent(&mut daemon);
         let staged = stage_corpus(&mut daemon);
+        // The component set of each port, registered under its content identity — beside
+        // the content it names, out of band, in the one place this rig provisions a
+        // deployment (IDL §7). That is what the *shell* arm has always had: its command
+        // line is `continuum workspace create --port TV-009`, and the CLI resolves the
+        // port's components from the filesystem. Until protocol 3.6 the typed arm had no
+        // way to say the same thing and transmitted `SnapshotComponents` in full, which is
+        // the asymmetry PR-10 IMPL-02 recorded and this registration removes. Nothing here
+        // is charged to either arm, exactly as staging the content is charged to neither.
+        let references = register_components(&mut daemon, &staged, &intent);
 
         let welcome = welcome_for(negotiated);
         let welcome_frame = Server::open(&welcome, None, Ok(negotiated))
@@ -194,6 +214,7 @@ impl Rig {
             welcome_frame,
             intent,
             staged,
+            references,
         }
     }
 
@@ -243,6 +264,25 @@ impl Rig {
         (&mut self.server, &mut self.pair, &self.welcome_frame)
     }
 
+    /// The content identity of one corpus port's component set: what a by-reference create
+    /// names instead of enumerating.
+    ///
+    /// Equal to `DaemonState::components_identity` over [`Rig::components`] for the same
+    /// source, which is the whole of `rule snapshot.by_reference`'s client half — a client
+    /// derives the daemon's own commitment from the value it would otherwise have sent.
+    ///
+    /// # Panics
+    ///
+    /// When `source` was not registered, which cannot happen: [`Rig::fresh`] registers
+    /// every member of [`Source::ALL`].
+    #[must_use]
+    pub fn components_reference(&self, source: Source) -> Commitment {
+        self.references
+            .get(&source)
+            .expect("every source is registered")
+            .clone()
+    }
+
     /// The snapshot components naming one corpus port's staged content.
     ///
     /// # Panics
@@ -252,23 +292,7 @@ impl Rig {
     #[must_use]
     pub fn components(&self, source: Source) -> SnapshotComponents {
         let staged = self.staged.get(&source).expect("every source is staged");
-        SnapshotComponents {
-            files: staged.files.clone(),
-            cml_modules: Vec::new(),
-            rust_extraction: Vec::new(),
-            domain_packs: Vec::new(),
-            dependencies: Vec::new(),
-            epochs: SnapshotEpochs {
-                semantic: epoch("semantic-1"),
-                proof: epoch("proof-1"),
-                toolchain: Optional::Absent,
-            },
-            intent: self.intent.clone(),
-            correspondence: Vec::new(),
-            proof_environment: Vec::new(),
-            configuration: staged.configuration.clone(),
-            file_components: Optional::Present(staged.placements.clone()),
-        }
+        components_of(staged, &self.intent)
     }
 }
 
@@ -321,6 +345,8 @@ fn implemented() -> Vec<ProtocolVersion> {
         ProtocolVersion::new(2, 0),
         ProtocolVersion::new(3, 0),
         ProtocolVersion::new(3, 1),
+        ProtocolVersion::new(3, 2),
+        ProtocolVersion::new(3, 5),
         version(),
     ]
 }
@@ -502,6 +528,57 @@ fn stage_corpus(daemon: &mut Daemon) -> BTreeMap<Source, Staged> {
         );
     }
     staged
+}
+
+/// Register each port's component set under its content identity, out of band.
+fn register_components(
+    daemon: &mut Daemon,
+    staged: &BTreeMap<Source, Staged>,
+    intent: &IntentHandle,
+) -> BTreeMap<Source, Commitment> {
+    let mut references = BTreeMap::new();
+    for (source, entry) in staged {
+        let components = components_of(entry, intent);
+        let commitment = daemon
+            .state_mut()
+            .register_components(&Blake3Identity, components)
+            .expect("blake3 names every input");
+        references.insert(*source, commitment);
+    }
+    references
+}
+
+/// The one construction of a port's `SnapshotComponents`, shared by [`Rig::components`] and
+/// by the registration above so the reference cannot name a different value than the inline
+/// form would have sent.
+fn components_of(staged: &Staged, intent: &IntentHandle) -> SnapshotComponents {
+    SnapshotComponents {
+        files: staged.files.clone(),
+        cml_modules: Vec::new(),
+        rust_extraction: Vec::new(),
+        domain_packs: Vec::new(),
+        dependencies: Vec::new(),
+        epochs: snapshot_epochs(),
+        intent: intent.clone(),
+        correspondence: Vec::new(),
+        proof_environment: Vec::new(),
+        configuration: staged.configuration.clone(),
+        file_components: Optional::Present(staged.placements.clone()),
+    }
+}
+
+/// The snapshot epochs every request declares.
+///
+/// A by-reference create carries these on the request rather than behind the reference,
+/// which is `rule snapshot.by_reference`'s epoch clause: they are the caller's declaration
+/// about the snapshot, checked against what the deployment serves.
+#[must_use]
+pub fn snapshot_epochs() -> SnapshotEpochs {
+    SnapshotEpochs {
+        semantic: epoch("semantic-1"),
+        proof: epoch("proof-1"),
+        toolchain: Optional::Absent,
+    }
 }
 
 fn stage(daemon: &mut Daemon, path: &str, content: &str) -> Commitment {

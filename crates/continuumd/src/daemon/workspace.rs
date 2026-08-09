@@ -1,4 +1,4 @@
-//! The `workspace` family: `create`, `fork`, `diff`, `seal`.
+//! The `workspace` family: `create`, `create_by_reference`, `fork`, `diff`, `seal`.
 //!
 //! # What each operation is wired to
 //!
@@ -9,6 +9,7 @@
 //! | Operation | Landed machinery |
 //! |---|---|
 //! | `workspace.create` | [`WorkspaceContent`] + [`Snapshot::build`] + [`Overlay::derive`] + [`WorkspaceDescriptorBuilder`], then [`SealedWorkspace::seal`] when `seal` is requested |
+//! | `workspace.create_by_reference` | [`DaemonState::components`] resolves the reference, then **`create` itself** |
 //! | `workspace.fork` | [`staleness::advance_current`] — the compare-and-set advance — then [`rebind_components`] |
 //! | `workspace.seal` | [`staleness::seal_current`] |
 //! | `workspace.diff` | none: see "The diff lane" below |
@@ -168,15 +169,53 @@ use super::state::{DaemonState, RegistryStatus, WorkspaceRecord};
 use super::{Services, identity};
 use crate::protocol::envelope::{ArtifactRef, StructuralVerdictValue, Verdict};
 use crate::protocol::operations::workspace::{
-    WorkspaceCreateRequest, WorkspaceCreateResponse, WorkspaceForkRequest, WorkspaceForkResponse,
-    WorkspaceSealRequest, WorkspaceSealResponse,
+    WorkspaceCreateByReferenceRequest, WorkspaceCreateByReferenceResponse, WorkspaceCreateRequest,
+    WorkspaceCreateResponse, WorkspaceForkRequest, WorkspaceForkResponse, WorkspaceSealRequest,
+    WorkspaceSealResponse,
 };
 use crate::protocol::scalar::{ArtifactHandle, Commitment, WorkspaceHandle};
 use crate::protocol::shared::SnapshotComponents;
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::vocabulary::{ErrorCode, StructuralOutcome};
 
-/// The `workspace` namespace's four operations.
+/// The `workspace` namespace's five operations.
+///
+/// # The by-reference lane (protocol 3.6, `rule snapshot.by_reference`)
+///
+/// `workspace.create_by_reference` is not a second creator. It resolves its `components`
+/// commitment to the `SnapshotComponents` value this daemon holds, substitutes the
+/// request's own `intent` and `epochs` into it, and then calls [`create`] — the same
+/// function, on a value of the same type. So the two spellings cannot drift: there is one
+/// implementation of what a create *is*, and equal components produce an equal `ws_`
+/// handle and a member-for-member equal response whichever spelling named them. The rule
+/// requires exactly that ("two spellings of one argument MUST NOT become two
+/// behaviours"), and `tests/daemon_operations.rs` holds it as a byte comparison rather
+/// than as a claim.
+///
+/// **Why the two members travel.** `intent` cannot come from the reference because
+/// [`OperationFamily::scope`] is computed from the *arguments alone*, before any handler
+/// runs and before the state is reachable: admission decides T2 and T3 from that claim, so
+/// a governing intent hidden behind a commitment is a scope claim the admission predicate
+/// cannot see, and INV-015 is not enforceable against a claim it cannot read. That is a
+/// property of this daemon's own architecture and not a preference. `epochs` cannot come
+/// from the reference because [`check_epochs`] checks them against the epochs the
+/// deployment serves; reading them out of the store would make the daemon check itself,
+/// and the same components at two semantic epochs are two snapshots.
+///
+/// **Where a reference comes from.** [`DaemonState::register_components`], and there is no
+/// verb for it: a deployment registers the sets it holds out of band, exactly as it stages
+/// the content those sets name, and every accepted inline `workspace.create` registers its
+/// own components through the same method. The inline form is the registration. A
+/// commitment this daemon does not hold is [`Fault::denied`] — byte identical with every
+/// other denial, because there is no `UnknownComponents` code and a distinguishable
+/// not-found is the existence oracle RFC 0027 X2 forbids. It is not an oracle in the other
+/// direction either, and for the reason [`create`] already gives about `file_components`:
+/// a caller reaches this line by naming a commitment, and that commitment's preimage is
+/// the component set it would have had to hold to derive it.
+///
+/// [`create`]: create()
+/// [`DaemonState::components`]: super::state::DaemonState::components
+/// [`DaemonState::register_components`]: super::state::DaemonState::register_components
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WorkspaceFamily;
 
@@ -192,6 +231,21 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("workspace.create", ErrorCode::UnsupportedSemanticFeature),
     ("workspace.create", ErrorCode::MalformedRequest),
     ("workspace.create", ErrorCode::PublicationAborted),
+    ("workspace.create_by_reference", ErrorCode::CapabilityDenied),
+    (
+        "workspace.create_by_reference",
+        ErrorCode::AcceptanceChainInvalid,
+    ),
+    ("workspace.create_by_reference", ErrorCode::EpochUnsupported),
+    (
+        "workspace.create_by_reference",
+        ErrorCode::UnsupportedSemanticFeature,
+    ),
+    ("workspace.create_by_reference", ErrorCode::MalformedRequest),
+    (
+        "workspace.create_by_reference",
+        ErrorCode::PublicationAborted,
+    ),
     ("workspace.fork", ErrorCode::CapabilityDenied),
     ("workspace.fork", ErrorCode::StaleSnapshot),
     ("workspace.fork", ErrorCode::UnsupportedSemanticFeature),
@@ -214,6 +268,14 @@ impl OperationFamily for WorkspaceFamily {
             Arguments::WorkspaceCreate(request) => ScopeClaim {
                 snapshots: Vec::new(),
                 intents: vec![request.components.intent.clone()],
+                classes: vec![workspace, ArtifactClass::IntentContract.token()],
+            },
+            Arguments::WorkspaceCreateByReference(request) => ScopeClaim {
+                // The intent is read from the *request*, which is why the operation
+                // declares it rather than resolving it: this function has no state, and a
+                // scope claim admission cannot read is a claim it cannot enforce.
+                snapshots: Vec::new(),
+                intents: vec![request.intent.clone()],
                 classes: vec![workspace, ArtifactClass::IntentContract.token()],
             },
             Arguments::WorkspaceFork(request) => ScopeClaim {
@@ -244,6 +306,9 @@ impl OperationFamily for WorkspaceFamily {
     ) -> Result<Effect, Fault> {
         match call.arguments {
             Arguments::WorkspaceCreate(request) => create(call, request, state, services, store),
+            Arguments::WorkspaceCreateByReference(request) => {
+                create_by_reference(call, request, state, services, store)
+            }
             Arguments::WorkspaceFork(request) => fork(request, state, services),
             Arguments::WorkspaceDiff(_) => Err(Fault::new(
                 ErrorCode::UnsupportedSemanticFeature,
@@ -390,6 +455,15 @@ fn create(
         }
     };
 
+    // The inline form is what registers what the by-reference form may later name
+    // (`rule snapshot.by_reference`, protocol 3.6), so there is no registration verb and
+    // no second surface. It is deliberately unable to change what this operation answers:
+    // the value is recorded after every check has passed, and a deployment whose identity
+    // seam cannot name it simply holds no reference to it — the by-reference lane then
+    // denies, which is the typed outcome for a set the daemon does not hold. Every byte
+    // `workspace.create` sends and receives is what 3.5 sent and received.
+    let _ = state.register_components(services.identifier(), request.components.clone());
+
     Ok(Effect::new(
         Payload::WorkspaceCreate(WorkspaceCreateResponse {
             snapshot: handle.clone(),
@@ -399,6 +473,61 @@ fn create(
         structural(StructuralOutcome::Created),
     )
     .with_artifacts(vec![artifact(&handle)?]))
+}
+
+/// The by-reference lane: resolve, substitute the two caller-declared members, delegate.
+///
+/// Three lines of substance and no fourth, which is the design. Everything a create *is*
+/// happens in [`create`], reached with a `SnapshotComponents` value of the same type the
+/// inline lane builds from the wire, so `rule snapshot.by_reference`'s "two spellings of
+/// one argument MUST NOT become two behaviours" is a property of the call graph rather
+/// than a discipline anyone has to keep.
+fn create_by_reference(
+    call: &Call<'_>,
+    request: &WorkspaceCreateByReferenceRequest,
+    state: &mut DaemonState,
+    services: &Services,
+    store: &ReferenceStore,
+) -> Result<Effect, Fault> {
+    // A commitment this daemon does not hold is a denial and not a not-found (X2).
+    let mut components = state
+        .components(&request.components)
+        .ok_or_else(Fault::denied)?
+        .clone();
+    // `rule snapshot.by_reference`: the stored value's own `intent` and `epochs` are NOT
+    // read on this lane. The request's are what govern — the intent because admission has
+    // already decided T2/T3 against exactly this handle (see `scope`), the epochs because
+    // `check_epochs` is a check of the caller's declaration against the deployment.
+    components.intent = request.intent.clone();
+    components.epochs = request.epochs.clone();
+
+    let inline = WorkspaceCreateRequest {
+        components,
+        // No overlay on this lane: an overlay is content inline again, and the operation
+        // does not declare one. `workspace.fork` is where buffers go.
+        overlay: Optional::Absent,
+        seal: request.seal,
+    };
+    let effect = create(call, &inline, state, services, store)?;
+    // The one thing that differs, and it differs only because the IDL names two anonymous
+    // bodies: the response members are equal, field for field, by construction.
+    let Payload::WorkspaceCreate(response) = effect.payload else {
+        // Unreachable: `create` returns exactly that payload. A typed refusal rather than
+        // an `unreachable!`, because a daemon does not abort on its own invariant.
+        return Err(Fault::new(
+            ErrorCode::PublicationAborted,
+            "the create lane produced a body this operation does not declare",
+        ));
+    };
+    Ok(Effect::new(
+        Payload::WorkspaceCreateByReference(WorkspaceCreateByReferenceResponse {
+            snapshot: response.snapshot,
+            sealed: response.sealed,
+            diagnostics: response.diagnostics,
+        }),
+        effect.verdict,
+    )
+    .with_artifacts(effect.artifacts))
 }
 
 fn fork(

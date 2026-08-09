@@ -157,6 +157,103 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.11 — the port-by-reference verb (bn-3of5h) and the single
+  ///         protocol-minor bump 3.5 → 3.6 that covers it.
+  ///         `workspace.create_by_reference` is the **75th** operation
+  ///         and the third the registry has ever gained; it enters an
+  ///         existing namespace, so the namespace count stays 19. It is
+  ///         the one survivor of the DX-10 redesign pre-check
+  ///         (`notes/plan/notes/DX10_BYTE_LEDGER.md` §8): of seven
+  ///         candidates, six move a presence marker on a `required`
+  ///         member or rewrite a rule and are none of
+  ///         `rule versioning.compatible_change`'s five, and this one
+  ///         moves no declaration at all.
+  ///
+  ///         **What it is.** `SnapshotComponents` is the largest single
+  ///         argument this protocol carries — 17,208 B over the
+  ///         instrument's 24 `workspace.create` calls, a mean 717 B per
+  ///         request — and a local CLI never pays it, because it names a
+  ///         corpus port and resolves the components from the
+  ///         filesystem. The asymmetry was recorded, not assumed:
+  ///         "a remote protocol client must transmit
+  ///         `SnapshotComponents` in full"
+  ///         (`notes/plan/notes/START_HERE_IMPLEMENTATION.md`, PR-10
+  ///         IMPL-02). This verb is that sentence paid. It names the
+  ///         same components by their content identity, and
+  ///         `rule snapshot.by_reference` fixes what the identity is
+  ///         (the canonical encoding of the value, which
+  ///         `rule encoding.canonical_form` makes unique), what it
+  ///         resolves to (that value, served exactly as the inline form
+  ///         serves it), which two members do not come from it and why
+  ///         (`intent`, because admission reads a scope claim from the
+  ///         request; `epochs`, because they are the caller's
+  ///         declaration and not the store's), and what an unresolvable
+  ///         one is (`CapabilityDenied`, X2).
+  ///
+  ///         **Why a bump, and why only a minor.** The declared surface
+  ///         was searched first, because serving already-declared
+  ///         vocabulary is the cheaper payment and is what 1.5, 1.7,
+  ///         1.8, and 1.10 each took. Nothing serves it. `workspace.fork`
+  ///         names a *snapshot* and preserves its intent binding, so it
+  ///         cannot open a lineage under a different contract;
+  ///         `SnapshotComponents.file_components` is `optional` but the
+  ///         nine component lists it sits beside are `required`, so
+  ///         there is no absent form of the inline argument; and no
+  ///         declared member anywhere takes a components identity. So
+  ///         the honest artifact is a new operation, which is the
+  ///         **first** change `rule versioning.compatible_change` names
+  ///         — the `evidence.link` (3.3) and `whiteboard.compile` (3.5)
+  ///         route, taken a third time. The minor is raised once, at the
+  ///         end of the work, and the major window `[3, 2]` is
+  ///         untouched, because a minor is not a window: a 3.0 through
+  ///         3.5 client never sends this name, and an operation it never
+  ///         names cannot reach it. `workspace.create` keeps all three
+  ///         request members and every existing client keeps its bytes.
+  ///
+  ///         **Why `propose`.** RFC 0027's own row for the family: "a
+  ///         `read`-only reviewer therefore reaches diffs through
+  ///         `repair.review` […] and not through `workspace.diff`", and
+  ///         the level the family carries is for the act — creating,
+  ///         forking, and sealing publish candidate snapshots. This
+  ///         operation publishes one. The tempting reading is that
+  ///         naming already-held content is a *read*, which is the
+  ///         argument `context` is `read` on; it does not transfer,
+  ///         because what leaves this operation is a new `ws_` a caller
+  ///         may then fork, seal, and verify against. A level below
+  ///         `propose` would restore snapshot creation to exactly the
+  ///         profile RFC 0027's Reviewer example denies it to, which is
+  ///         the widening INV-015 and A7 forbid.
+  ///
+  ///         Counts move where an operation cannot enter without moving
+  ///         them: the registry is **75** rows in **19** namespaces,
+  ///         `propose` is **10**, `@mutation` is **47**, and the
+  ///         `structural` verdict count is **28**. The named-struct
+  ///         count stays 47 — the request and response are anonymous
+  ///         bodies over `Commitment`, `SnapshotEpochs`,
+  ///         `IntentHandle`, `WorkspaceHandle`, and `Diagnostic`, all
+  ///         declared — `@task_starting` stays 26 and `@audit_recorded`
+  ///         stays 7, both decisions and argued in RFC 0027. One rule
+  ///         arrives (`snapshot.by_reference`, 43 → 44).
+  ///
+  ///         **Flags.** No RFC 0026 flag rides this bump and the
+  ///         negative statement is owed rather than implied. F6 was
+  ///         *touched and deliberately not paid* at 1.10, and it is not
+  ///         payable here either: it is a `list<String>` where the
+  ///         pack's vocabulary is a closed enum, and narrowing a
+  ///         declared field's type is `rule versioning.breaking_change`
+  ///         whatever else a minor carries — this revision adds a
+  ///         declaration and narrows none. F15 sits nearest of all:
+  ///         it names the same eight component lists this operation
+  ///         carries by reference, and it stays raised, because a
+  ///         reference to a set does not give the members of that set
+  ///         the `name` beside each `digest` the schema requires — the
+  ///         gap moves behind a commitment rather than closing. F1, F2,
+  ///         F3, F8, F9, F10, F11, F16, F17, F18, and F21 do not ride
+  ///         it either, each for the reason its own entry states, and
+  ///         F17's residue is unchanged: `components` here is a
+  ///         `Commitment`, the pattern-less alias the flag already
+  ///         names, so this adds a fifth carrier and no new
+  ///         pattern-less member.
   ///   1.10 — the context-compilation rule (bn-1y4qc), serving a verb
   ///         that has been declared since 3.0 and refused for as long
   ///         as no compiler existed. `context.compile` is not added
@@ -528,8 +625,50 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.10";
+  idl_version = "1.11";
   /// The protocol version this document defines.
+  ///
+  /// 3.6 is the single minor bump for IDL 1.11, taken once at the end of
+  /// that revision, and it is the third minor that adds an operation.
+  /// `rule versioning.compatible_change` names "adding an operation"
+  /// first among the five, so a registry that grows by one is still a
+  /// minor: `workspace.create_by_reference` is a name a 3.0 through 3.5
+  /// client never sends, and an operation it never names cannot reach
+  /// it. No existing declaration moves — `workspace.create` keeps
+  /// `components`, `overlay`, and `seal`; `SnapshotComponents` keeps all
+  /// eleven members and their presence markers; no enum gains a member,
+  /// no error code is minted, and no server-side constraint is relaxed
+  /// — so the four later triggers stay unfired and the major window
+  /// `[3, 2]` is untouched, because a minor is not a window.
+  ///
+  /// Two things about this bump were checked before it was taken. The
+  /// first is that it was not avoidable: the declared surface carries no
+  /// member and no operation that takes a components identity, and the
+  /// two neighbours that read as candidates are neither.
+  /// `workspace.fork` names a snapshot and *preserves* its intent
+  /// binding, so it cannot open a lineage under a different contract —
+  /// rebinding one is privileged and produces an intent diff — and
+  /// `SnapshotComponents.file_components` is `optional` only beside nine
+  /// `required` peers, so there is no absent form of the inline
+  /// argument to serve. The second is the namespace: this is the first
+  /// registry growth of the three that enters an **existing** one, and
+  /// that is the argument rather than the convenience. RFC 0027's R-1
+  /// says a namespace has no authority of its own and the row decides;
+  /// what puts this row in `workspace` is that its act is the family's
+  /// act — it publishes a candidate snapshot, which is what `create`,
+  /// `fork`, and `seal` each do — and a second namespace for a second
+  /// spelling of one argument would make "one act each" false in the
+  /// other direction.
+  ///
+  /// The by-reference form is worth stating in bytes, because that is
+  /// what it exists for and the number is measured rather than
+  /// projected. `SnapshotComponents` is 17,208 B over the DX-10
+  /// instrument's 24 `workspace.create` calls, 717 B on average; the
+  /// same request by reference carries a commitment, the snapshot
+  /// epochs, and the intent handle. The residue is deliberate: the
+  /// intent and the epochs must travel whatever the mechanism
+  /// (`rule snapshot.by_reference`), so this operation does not recover
+  /// the whole line and never claimed to.
   ///
   /// 3.5 is the single minor bump for IDL 1.9, taken once at the end of
   /// that revision, and it is the second minor that adds an operation.
@@ -634,7 +773,7 @@ protocol continuum.native {
   /// and the F13 discipline is now mechanically enforced rather than
   /// remembered: the dossier validator parses all three sources and
   /// fails closed on any disagreement, preferring none.
-  version = "3.5";
+  version = "3.6";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -2725,6 +2864,58 @@ rule snapshot.file_components {
   """
 }
 
+rule snapshot.by_reference {
+  """
+  `workspace.create_by_reference.components` is the content identity of a
+  `SnapshotComponents` value, taken over that value's **`canonical_json`**
+  encoding — `rule encoding.canonical_form` fixes exactly one byte
+  spelling per value per encoding, so the commitment is a function of the
+  components and a client derives the same one the daemon does. The
+  encoding is named here and is NOT the connection's: an identity that
+  moved with the negotiated encoding would give one component set two
+  names on two connections, which is what content addressing exists to
+  prevent, and `rule handshake.bootstrap_encoding` already fixes
+  `canonical_json` unconditionally for exactly this kind of reason —
+  "independent of `ClientHello.encodings` and of the negotiation
+  outcome". A daemon MUST
+  resolve it to the stored value and then serve the request **as
+  `workspace.create` serves the same components inline**: the same
+  checks, the same identity derivation, the same lineage, the same
+  response. Two spellings of one argument MUST NOT become two
+  behaviours.
+
+  The resolved value's own `intent` and `epochs` members are NOT read on
+  this lane; the request's are what govern, and both are `required`
+  there. `intent` because admission decides T2 and T3 from the request
+  before any handler runs (INV-015): a governing contract hidden behind a
+  reference is a scope claim the admission predicate cannot see, and a
+  create that inherited another caller's intent would re-govern a
+  snapshot by naming bytes. `epochs` because they are the caller's
+  declaration about the snapshot, checked against the epochs the
+  deployment serves — a daemon reading them out of its own store would
+  be checking itself, and the same components at two semantic epochs are
+  two snapshots.
+
+  How a daemon comes to hold a value is out of band, exactly as content
+  is: "content reaches a daemon out of band in any case, since no
+  operation in this file carries file bytes" (`rule
+  snapshot.file_components`). A conforming daemon MAY additionally record
+  the components of a `workspace.create` it accepted, under this
+  identity, so the inline form registers what the by-reference form can
+  then name. It MUST NOT invent a set it does not hold: an unresolvable
+  commitment is `CapabilityDenied`, byte identical with every other
+  denial (RFC 0027 X2), never a distinguishable not-found.
+
+  The reference is a **content** identity and therefore survives
+  everything a handle survives: it is valid on a new connection, after a
+  reconnection, and across a daemon upgrade within the major (`rule
+  versioning.handle_stability`), and it names the same components on
+  every daemon that holds them. That is what separates it from a
+  session-scoped alias, which `rule handshake.no_session_state` forbids
+  and which no conforming reader could refuse.
+  """
+}
+
 /// An in-memory editor buffer overlaid on a snapshot's files.
 struct FileOverlay {
   path: String required;
@@ -2794,7 +2985,7 @@ struct EvidenceQuery {
 // =====================================================================
 // 10. Operations
 //
-// The complete plan §10.2 registry: 74 operations in 19 namespaces.
+// The complete plan §10.2 registry: 75 operations in 19 namespaces.
 // Each operation's `authority` clause mirrors RFC 0027's registry table
 // exactly; a generator MUST fail if the two disagree.
 // =====================================================================
@@ -2821,6 +3012,58 @@ operation workspace.create {
   };
   verdict StructuralVerdictValue;
   errors [UnsupportedSemanticFeature, AcceptanceChainInvalid];
+}
+
+/// Create an immutable workspace snapshot from a component set this
+/// daemon already holds, named by that set's content commitment instead
+/// of enumerated inline (plan §4.2, `rule snapshot.by_reference`).
+///
+/// `workspace.create` is untouched and is what a client sends when the
+/// daemon holds no such set. The two are one act with two spellings of
+/// one argument: a daemon serves this one by resolving `components` to
+/// the very `SnapshotComponents` value the inline form would have
+/// carried, so equal components yield the same `ws_` handle whichever
+/// spelling named them, and neither form's bytes move.
+///
+/// Two members of that value do **not** come from the reference and
+/// travel on every request. `intent` is the governing contract, and
+/// admission reads it from the *request* before any handler runs (RFC
+/// 0027 T2/T3, INV-015) — a scope claim a daemon cannot read from the
+/// request is a scope claim admission cannot check. `epochs` are the
+/// caller's own declaration and are checked against the epochs the
+/// daemon serves; a daemon that read them out of what it stored would be
+/// checking itself. A component set is shared. A governing intent and an
+/// epoch declaration are the caller's, per request.
+///
+/// A commitment this daemon cannot resolve is `CapabilityDenied`, byte
+/// identical with every other denial (RFC 0027 X2), and it is not an
+/// existence oracle: a caller names a commitment, and that commitment's
+/// preimage is the component set it would have had to hold to derive it.
+@mutation
+@since("3.6")
+operation workspace.create_by_reference {
+  authority propose;
+  request {
+    /// Content identity of a `SnapshotComponents` value this daemon
+    /// holds, over that value's `canonical_json` encoding — one value,
+    /// one spelling, and not the connection's encoding
+    /// (`rule snapshot.by_reference`).
+    components: Commitment required;
+    /// Toolchain and semantic epochs of the snapshot (plan §4.2; SD-13).
+    epochs: SnapshotEpochs required;
+    /// Reference to the governing Intent Contract — the identity only,
+    /// never the contract itself (plan §4.2, INV-001).
+    intent: IntentHandle required;
+    /// Seal the snapshot on creation.
+    seal: Bool optional;
+  };
+  response {
+    snapshot: WorkspaceHandle required;
+    sealed: Bool required;
+    diagnostics: list<Diagnostic> required;
+  };
+  verdict StructuralVerdictValue;
+  errors [AcceptanceChainInvalid];
 }
 
 /// Fork an existing snapshot, optionally applying patches or overlays.

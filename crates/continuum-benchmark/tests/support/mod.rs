@@ -135,7 +135,8 @@ impl Surface for NativeSurface {
                 line: families::mistake_line(step, mistake, false, 0),
             });
         }
-        let components = rig.components(task.source);
+        let rig_reference = rig.components_reference(task.source);
+        let rig_intent = rig.intent().clone();
         let hello = continuum_benchmark::rig::hello();
         let target = Target {
             kind: task.target_kind,
@@ -157,9 +158,20 @@ impl Surface for NativeSurface {
 
         let context = self.context;
         let answer = match &step.call {
-            Call::CreateWorkspace { seal } => self
-                .client
-                .workspace_create(&mut link, &context, components, *seal),
+            // Protocol 3.6: the typed arm names the port's component set by its content
+            // identity, which is what the shell arm's `--port TV-009` has always done. The
+            // *act* is unchanged — `Call::operation()` still reports `workspace.create`,
+            // both arms attempt the identical sequence, and the same snapshot comes back —
+            // and what changed is the argument. `tests/pr10_c4b_port_by_reference.rs`
+            // holds the delta, and holds the shell arm's numbers still.
+            Call::CreateWorkspace { seal } => self.client.workspace_create_by_reference(
+                &mut link,
+                &context,
+                rig_reference,
+                continuum_benchmark::rig::snapshot_epochs(),
+                rig_intent,
+                *seal,
+            ),
             Call::ForkModule { base } => self.client.workspace_fork(
                 &mut link,
                 &context,
@@ -232,6 +244,13 @@ pub fn read(operation: &str, answer: &Answer) -> Reading {
     };
     match &admitted.payload {
         Payload::WorkspaceCreate(response) => {
+            reading.snapshot = Some(response.snapshot.clone());
+            reading.sealed = Some(response.sealed);
+        }
+        // The 3.6 spelling of the same act, and the same two facts. The bodies are
+        // member-for-member equal by construction (`rule snapshot.by_reference`), so this
+        // arm reads exactly what the inline arm read.
+        Payload::WorkspaceCreateByReference(response) => {
             reading.snapshot = Some(response.snapshot.clone());
             reading.sealed = Some(response.sealed);
         }

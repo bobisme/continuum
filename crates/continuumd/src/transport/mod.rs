@@ -345,6 +345,7 @@ pub fn encode_arguments_in<D: Document>(
         Arguments::ContextCompile(body) => codec::to_opaque_in::<D, _>(body),
         Arguments::ContextExpand(body) => codec::to_opaque_in::<D, _>(body),
         Arguments::WhiteboardCompile(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::WorkspaceCreateByReference(body) => codec::to_opaque_in::<D, _>(body),
     }
 }
 

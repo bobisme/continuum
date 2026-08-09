@@ -260,7 +260,11 @@ fn the_control_family_is_the_landed_matrix_run_for_run() {
     let shell_totals = totals(&campaign.landed_shell);
     assert_eq!(native_totals.invalid_permille(), 69);
     assert_eq!(shell_totals.invalid_permille(), 69);
-    assert_eq!(native_totals.bytes_per_solved(), Some(10_859));
+    // 10,384 as of bn-3of5h (protocol 3.6's `workspace.create_by_reference`). The
+    // *mechanism* this test defends is untouched — the control family is still the landed
+    // matrix run for run, compared over whole `ArmRun` values above — and only the landed
+    // value it is compared at has moved.
+    assert_eq!(native_totals.bytes_per_solved(), Some(10_384));
     assert_eq!(shell_totals.bytes_per_solved(), Some(4_118));
     assert_eq!((native_totals.solved, shell_totals.solved), (24, 24));
 

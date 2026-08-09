@@ -81,12 +81,12 @@
       "authority_levels": {
         "execute": 41,
         "promote": 2,
-        "propose": 9,
+        "propose": 10,
         "read": 18,
         "revise_intent": 4
       },
       "namespaces": 19,
-      "operations": 74,
+      "operations": 75,
       "sources": [
         "schemas/continuumd-native-protocol.idl",
         "plan.md \u00a710.2",

@@ -27,9 +27,9 @@
 //!
 //! | # | Harness choice attacked | Test | Verdict |
 //! |---|---|---|---|
-//! | S1 | the baseline is not charged for the CLI's own protocol frames | [`s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged`] | **LANDED** — worth 10,162 bytes/solved task; margin −163% → +23%, still short of +30% |
-//! | S2 | nor for the handshake each CLI process would perform | [`s2_the_baseline_is_not_charged_a_handshake_per_process_invocation`] | **LANDED** — margin → +47%, which *clears* the floor |
-//! | S3 | the expansion command is answered from an envelope the harness already holds | [`s3_the_expansion_command_never_leaves_the_harness`] | **LANDED** — margin → +53% |
+//! | S1 | the baseline is not charged for the CLI's own protocol frames | [`s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged`] | **LANDED** — worth 10,162 bytes/solved task; margin −152% → +27%, still short of +30% |
+//! | S2 | nor for the handshake each CLI process would perform | [`s2_the_baseline_is_not_charged_a_handshake_per_process_invocation`] | **LANDED** — margin → +49%, which *clears* the floor |
+//! | S3 | the expansion command is answered from an envelope the harness already holds | [`s3_the_expansion_command_never_leaves_the_harness`] | **LANDED** — margin → +55% |
 //! | S4 | the adapter renders from the very answer the daemon just produced | [`s4_the_adapter_is_never_a_beat_behind_the_daemon`] | **LANDED** — one stale rendering costs the baseline 4/24 tasks and 502‰ of invalid-action rate |
 //! | S5 | one shared policy, so only mistakes *both* surfaces can express are counted | [`s5_the_shared_policy_can_only_make_mistakes_both_surfaces_can_express`] | **LANDED** — break-even is 0.6 shell-only invalid attempts per run |
 //! | S6 | the envelope's bytes are treated as one undifferentiated cost | [`s6_where_the_typed_arms_bytes_go_and_how_far_a_redesign_reaches`] | **LANDED** on the *explanation*, **HELD** on the conclusion |
@@ -39,7 +39,7 @@
 //! | N3 | the baseline is *disciplined* | [`n3_the_baselines_whole_result_rests_on_one_of_its_four_disciplines`] | **LANDED** — discipline 1 carries it; 2 and 4 are inert here |
 //! | N4 | four tasks over two families | [`n4_every_conclusion_survives_dropping_any_one_task`] | **HELD** |
 //! | N5 | completion requires the one datum the baseline pays extra for | [`n5_the_completion_criterion_contains_the_datum_only_one_arm_gets_free`] | **HELD** — worth 119 bytes/solved task, and it widens the loss |
-//! | X1 | *whose* interface "interface bytes per solved task" names | recorded in the artifact by [`the_falsification_artifact_carries_a_verdict_for_every_attack_and_a_row_for_every_variant`] | **INCONCLUSIVE** — RFC 0027 fixes the metric and never fixes the interface; the margin is −163% under one reading and +53% under the other, and both are defensible from the text as written |
+//! | X1 | *whose* interface "interface bytes per solved task" names | recorded in the artifact by [`the_falsification_artifact_carries_a_verdict_for_every_attack_and_a_row_for_every_variant`] | **INCONCLUSIVE** — RFC 0027 fixes the metric and never fixes the interface; the margin is −152% under one reading and +55% under the other, and both are defensible from the text as written |
 //!
 //! X1 is the attack this campaign could not decide, and it is the one that decides the byte
 //! metric. It is recorded as [`Outcome::Inconclusive`] with its reason typed, per INV-008's
@@ -48,7 +48,16 @@
 //! # Controls
 //!
 //! - [`control_every_landed_number_is_unchanged_by_this_campaign`] — the landed artifact
-//!   still reads 10,859 / 4,118 / −163% / 69‰ / 69‰ / 24 / 24. Nothing here weakened it.
+//!   still reads 10,384 / 4,118 / −152% / 69‰ / 69‰ / 24 / 24. Nothing here weakened it.
+//!
+//! **The landed figures moved once since this campaign ran, and every number above is
+//! the value after that move.** bn-3of5h landed `workspace.create_by_reference` at
+//! protocol 3.6 and the typed arm takes it, which took the native arm from 10,859 to
+//! **10,384** B per solved task and the byte margin from −163% to −152%. The baseline is
+//! byte-for-byte unmoved at 4,118, which is the anti-gaming half of that bone and is
+//! asserted in `tests/pr10_c4b_port_by_reference.rs`. Every attack below was re-run
+//! against the new matrix and every verdict is unchanged: eight LANDED, four HELD, one
+//! INCONCLUSIVE. What moved is the size of the loss, not any conclusion about it.
 //! - [`control_the_hidden_ledger_never_enters_an_interface_byte_total`] — the instrumentation
 //!   this campaign added is beside the measurement, not inside it.
 //! - [`control_a_decomposed_answer_re_encodes_to_the_frame_that_carried_it`] — the byte
@@ -147,7 +156,7 @@ fn per_solved(row: &Sensitivity, arm: Arm) -> u64 {
 ///
 /// **LANDED.** The CLI exchanged 243,902 bytes of protocol traffic underneath 172 command
 /// invocations that the agent was never charged for — two and a half times everything the
-/// agent read. Charging it moves the byte margin from −163% to +23%: the sign flips.
+/// agent read. Charging it moves the byte margin from −152% to +27%: the sign flips.
 /// It still does not reach the ratified +30% floor.
 #[test]
 fn s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged() {
@@ -163,10 +172,10 @@ fn s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged() {
         "the CLI's own traffic is more than twice what the agent read: {frames}"
     );
 
-    assert_eq!(landed.byte_saving_percent, Some(-163), "the landed margin");
+    assert_eq!(landed.byte_saving_percent, Some(-152), "the landed margin");
     assert_eq!(
         charged.byte_saving_percent,
-        Some(23),
+        Some(27),
         "charging the CLI's own frames flips the sign of the byte margin"
     );
     assert!(
@@ -193,7 +202,7 @@ fn s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged() {
 /// baseline zero of them — `ShellSurface::handshake_bytes` returns 0 and says why.
 ///
 /// **LANDED, and this one flips a ratified margin.** 172 invocations at 875 bytes each is
-/// 150,500 bytes the baseline did not pay; charging them takes the byte margin to +47%,
+/// 150,500 bytes the baseline did not pay; charging them takes the byte margin to +49%,
 /// which *clears* the +30% floor.
 #[test]
 fn s2_the_baseline_is_not_charged_a_handshake_per_process_invocation() {
@@ -208,7 +217,7 @@ fn s2_the_baseline_is_not_charged_a_handshake_per_process_invocation() {
         "one process per command line written, re-reads included"
     );
     assert!(!landed.clears.1, "the landed byte margin does not clear");
-    assert_eq!(charged.byte_saving_percent, Some(47));
+    assert_eq!(charged.byte_saving_percent, Some(49));
     assert!(
         charged.clears.1,
         "under symmetric connection accounting the byte margin clears"
@@ -228,7 +237,7 @@ fn s2_the_baseline_is_not_charged_a_handshake_per_process_invocation() {
 /// gets a second read of a past answer for the price of the text.
 ///
 /// **LANDED, small.** 28 expansions across the matrix; charging each a real invocation and
-/// round trip moves the byte margin from +47% to +53%.
+/// round trip moves the byte margin from +49% to +55%.
 #[test]
 fn s3_the_expansion_command_never_leaves_the_harness() {
     let campaign = Campaign::run();
@@ -241,8 +250,8 @@ fn s3_the_expansion_command_never_leaves_the_harness() {
         2_856,
         "what the agent paid for them"
     );
-    assert_eq!(without.byte_saving_percent, Some(47));
-    assert_eq!(with.byte_saving_percent, Some(53));
+    assert_eq!(without.byte_saving_percent, Some(49));
+    assert_eq!(with.byte_saving_percent, Some(55));
     assert!(with.clears.1);
     // The subsidy is real but it is not what decides the metric: S2 already cleared it.
     assert!(without.clears.1);
@@ -438,9 +447,9 @@ fn arm_totals(runs: &[ArmRun]) -> ArmTotals {
 /// only `epochs` is both required and *constant across a connection*, so it is the only
 /// conformance cost a redesign could amortize without changing a guarantee: with `epochs`
 /// pinned at the handshake and `SnapshotComponents` resolved by reference, the typed arm
-/// spends 9,830 bytes per solved task against the baseline's 4,118 — a -138% margin. Even
+/// spends 9,355 bytes per solved task against the baseline's 4,118 — a -138% margin. Even
 /// reducing the whole envelope to its floor — every list empty, every optional absent, the
-/// six epochs gone — leaves 7,668 against 4,118, a -86% margin. **The byte loss is not an
+/// six epochs gone — leaves 7,193 against 4,118, a -74% margin. **The byte loss is not an
 /// envelope-overhead artefact. It survives a maximal redesign of the encoding.**
 #[test]
 fn s6_where_the_typed_arms_bytes_go_and_how_far_a_redesign_reaches() {
@@ -498,16 +507,18 @@ fn s6_where_the_typed_arms_bytes_go_and_how_far_a_redesign_reaches() {
     let margin = |bytes: u64| ((shell as i64 - (bytes / 24) as i64) * 100) / shell as i64;
     assert_eq!(
         redesign / 24,
-        9_830,
-        "epochs pinned, components by reference"
+        9_355,
+        "epochs pinned, components by reference — and `components` is now a *landed* \
+         reduction rather than a projected one (bn-3of5h), which is why this row moved \
+         with the arm it decomposes"
     );
-    assert_eq!(margin(redesign), -138);
+    assert_eq!(margin(redesign), -127);
     assert_eq!(
         maximal / 24,
-        7_668,
+        7_193,
         "the whole envelope reduced to its floor"
     );
-    assert_eq!(margin(maximal), -86);
+    assert_eq!(margin(maximal), -74);
     assert!(
         margin(maximal) < RATIFIED.byte_saving_percent,
         "the byte loss survives a maximal redesign of the encoding"
@@ -524,10 +535,10 @@ fn s6_where_the_typed_arms_bytes_go_and_how_far_a_redesign_reaches() {
 ///
 /// **HELD.** Any `bytes/k` rule is affine in bytes with the *same* divisor on both arms, so
 /// the relative margin is identical for every k — asserted here for 3, 4, 5 and 8, all
-/// −163%. The declared rule cannot be hiding anything. And the one rule tried that is *not*
+/// −152%. The declared rule cannot be hiding anything. And the one rule tried that is *not*
 /// affine — words and punctuation counted separately, under which canonical JSON costs 309
-/// tokens per thousand bytes against the projection's 145 — moves the margin from −163% to
-/// **-461%**, further against the typed arm. No counting rule available to this campaign
+/// tokens per thousand bytes against the projection's 145 — moves the margin from −152% to
+/// **-437%**, further against the typed arm. No counting rule available to this campaign
 /// improves the typed arm's position.
 #[test]
 fn s7_the_declared_token_rule_cannot_move_the_margin_and_the_one_that_could_moves_it_the_other_way()
@@ -545,7 +556,7 @@ fn s7_the_declared_token_rule_cannot_move_the_margin_and_the_one_that_could_move
         let margin = ((shell.div_ceil(divisor) as i64 - native.div_ceil(divisor) as i64) * 100)
             / shell.div_ceil(divisor) as i64;
         assert_eq!(
-            margin, -163,
+            margin, -152,
             "every affine rule gives the same margin; bytes/{divisor} included"
         );
     }
@@ -565,9 +576,9 @@ fn s7_the_declared_token_rule_cannot_move_the_margin_and_the_one_that_could_move
     let native_tokens = native * json_density / 1000;
     let shell_tokens = shell * prose_density / 1000;
     let margin = ((shell_tokens as i64 - native_tokens as i64) * 100) / shell_tokens as i64;
-    assert_eq!(margin, -461);
+    assert_eq!(margin, -437);
     assert!(
-        margin < -163,
+        margin < -152,
         "the only non-affine rule tried moves the margin further against the typed arm"
     );
 }
@@ -583,7 +594,7 @@ fn s7_the_declared_token_rule_cannot_move_the_margin_and_the_one_that_could_move
 ///
 /// **HELD.** Priced at the request frame the client would have written — 411 bytes,
 /// measured on the frame the operation actually produces — the four locally refused calls
-/// are worth 69 bytes per solved task and move the margin from −163% to −165%. The claim in
+/// are worth 69 bytes per solved task and move the margin from −152% to −153%. The claim in
 /// bn-134i's landing comment is real, correctly scoped, and worth 0.6% of the typed arm's
 /// cost. Nothing an adjudicator would rely on turns on it.
 #[test]
@@ -594,8 +605,8 @@ fn n1_a_call_refused_before_the_wire_is_free_on_the_wire_and_not_free_to_compose
 
     assert_eq!(campaign.composition, 411, "the frame it would have written");
     assert_eq!(arm_totals(&campaign.native).zero_cost_invalid, 4);
-    assert_eq!(landed.byte_saving_percent, Some(-163));
-    assert_eq!(priced.byte_saving_percent, Some(-165));
+    assert_eq!(landed.byte_saving_percent, Some(-152));
+    assert_eq!(priced.byte_saving_percent, Some(-153));
     assert_eq!(
         per_solved(&priced, Arm::Native) - per_solved(&landed, Arm::Native),
         69,
@@ -771,7 +782,7 @@ fn n3_the_baselines_whole_result_rests_on_one_of_its_four_disciplines() {
 /// **N4 — four tasks, two semantic families, and every conclusion drawn over all four.**
 ///
 /// **HELD.** Every leave-one-out subset the corpus admits reproduces every landed
-/// conclusion: the byte margin stays at −163% or −164%, the success margin stays at zero,
+/// conclusion: the byte margin stays at −152% or −151%, the success margin stays at zero,
 /// the invalid-action reduction stays at zero, and the §19.4 separation check still passes
 /// on every three-task subset — so each one is a subset a result could legitimately be
 /// reported over. Nothing in the landed result depends on which task is in it.
@@ -797,7 +808,7 @@ fn n4_every_conclusion_survives_dropping_any_one_task() {
         assert_eq!(row.success_points_permille, 0);
         assert_eq!(row.invalid_reduction_percent, Some(0));
         assert!(
-            matches!(row.byte_saving_percent, Some(-164 | -163)),
+            matches!(row.byte_saving_percent, Some(-153..=-151)),
             "the byte margin is stable without {dropped}: {}",
             row.render()
         );
@@ -819,7 +830,7 @@ fn n4_every_conclusion_survives_dropping_any_one_task() {
 /// solved when it read the frozen state count and the frozen verdict, whatever it knew about
 /// metering — leaves **both** arms at 24/24. The criterion changes no completion outcome.
 /// Its only effect is the 119 bytes per solved task the baseline pays for the expansion, and
-/// removing that makes the typed arm's byte loss *worse*, from −163% to −171%. The
+/// removing that makes the typed arm's byte loss *worse*, from −152% to −159%. The
 /// concession is real, is small, and is the only one; it is not holding the result up.
 #[test]
 fn n5_the_completion_criterion_contains_the_datum_only_one_arm_gets_free() {
@@ -850,10 +861,10 @@ fn n5_the_completion_criterion_contains_the_datum_only_one_arm_gets_free() {
             },
         ),
     );
-    assert_eq!(landed.byte_saving_percent, Some(-163));
+    assert_eq!(landed.byte_saving_percent, Some(-152));
     assert_eq!(
         without.byte_saving_percent,
-        Some(-171),
+        Some(-159),
         "removing the concession widens the typed arm's loss"
     );
 }
@@ -873,9 +884,9 @@ fn control_every_landed_number_is_unchanged_by_this_campaign() {
     let shell = *report.totals.get(&Arm::Shell).expect("the baseline");
 
     assert!(report.accepted, "the §19.4 gate still passes");
-    assert_eq!(native.bytes_per_solved(), Some(10_859));
+    assert_eq!(native.bytes_per_solved(), Some(10_384));
     assert_eq!(shell.bytes_per_solved(), Some(4_118));
-    assert_eq!(report.margins.byte_saving_percent, Some(-163));
+    assert_eq!(report.margins.byte_saving_percent, Some(-152));
     assert_eq!(native.invalid_permille(), 69);
     assert_eq!(shell.invalid_permille(), 69);
     assert_eq!(report.margins.invalid_reduction_percent, Some(0));
@@ -1137,8 +1148,8 @@ fn campaign_report() -> FalsificationReport {
             target: "ceil(bytes/4) treats dense JSON and prose alike",
             outcome: Outcome::Held,
             evidence: "research/25 declares no alternative rule; every bytes/k rule is \
-                       affine and gives -163% for k in {3,4,5,8}; the one non-affine rule \
-                       tried gives -461%, further against the typed arm"
+                       affine and gives -152% for k in {3,4,5,8}; the one non-affine rule \
+                       tried gives -437%, further against the typed arm"
                 .to_owned(),
         },
         Attack {
@@ -1188,7 +1199,7 @@ fn campaign_report() -> FalsificationReport {
             target: "four tasks over two semantic families",
             outcome: Outcome::Held,
             evidence: "every leave-one-out subset still passes the plan 19.4 check and \
-                       reproduces every conclusion: byte margin -163/-164%, success 0, \
+                       reproduces every conclusion: byte margin -152/-151%, success 0, \
                        invalid reduction 0"
                 .to_owned(),
         },
@@ -1199,7 +1210,7 @@ fn campaign_report() -> FalsificationReport {
             outcome: Outcome::Held,
             evidence: "dropping the clause leaves both arms at 24/24; its only effect is \
                        119 bytes/solved task on the baseline, and removing it widens the \
-                       typed arm's loss to -171%"
+                       typed arm's loss to -159%"
                 .to_owned(),
         },
         Attack {
@@ -1208,8 +1219,8 @@ fn campaign_report() -> FalsificationReport {
             target: "whose interface 'interface bytes per solved task' names",
             outcome: Outcome::Inconclusive("the governing text does not decide it".to_owned()),
             evidence: "RFC 0027 fixes the metric and the denominator and never says whose \
-                       interface; under the agent's stdin/stdout the margin is -163%, under \
-                       total protocol traffic it is +53%. Both readings are defensible from \
+                       interface; under the agent's stdin/stdout the margin is -152%, under \
+                       total protocol traffic it is +55%. Both readings are defensible from \
                        the text as written."
                 .to_owned(),
         },
@@ -1235,16 +1246,16 @@ fn campaign_report() -> FalsificationReport {
         ),
         format!(
             "3. BYTES: the sign of the margin is decided by an accounting choice the \
-             governing text leaves open. Agent-interface bytes: -163%. CLI frames charged: \
-             +23%. Frames and per-invocation handshakes charged: +47%. Fully symmetric: \
-             +53%. The +{}% floor is missed under the landed rule and cleared under \
+             governing text leaves open. Agent-interface bytes: -152%. CLI frames charged: \
+             +27%. Frames and per-invocation handshakes charged: +49%. Fully symmetric: \
+             +55%. The +{}% floor is missed under the landed rule and cleared under \
              symmetric connection accounting.",
             RATIFIED.byte_saving_percent
         ),
         "4. BYTES, the part no accounting choice moves: under the landed rule the loss is \
          NOT an envelope-overhead artefact. Reducing the whole result envelope to its floor \
-         and resolving SnapshotComponents by reference still leaves the typed arm at 7,668 \
-         bytes per solved task against 4,118 - a -86% margin. A redesign of the ENCODING \
+         and resolving SnapshotComponents by reference still leaves the typed arm at 7,193 \
+         bytes per solved task against 4,118 - a -74% margin. A redesign of the ENCODING \
          cannot close it."
             .to_owned(),
         "5. RECOVERY parity (1000permille both arms) holds under every symmetric fault, and \
@@ -1341,9 +1352,9 @@ fn the_falsification_artifact_carries_a_verdict_for_every_attack_and_a_row_for_e
     // The first sensitivity row is the landed artifact, unchanged, so a reader who quotes
     // the table cannot quote a variant thinking it is the measurement.
     assert_eq!(report.sensitivity[0].rule, "landed");
-    assert_eq!(report.sensitivity[0].native_bytes_per_solved, Some(10_859));
+    assert_eq!(report.sensitivity[0].native_bytes_per_solved, Some(10_384));
     assert_eq!(report.sensitivity[0].shell_bytes_per_solved, Some(4_118));
-    assert_eq!(report.sensitivity[0].byte_saving_percent, Some(-163));
+    assert_eq!(report.sensitivity[0].byte_saving_percent, Some(-152));
     assert!(!report.sensitivity[0].clears_all());
     assert_eq!(report.sensitivity.len(), 15);
 
@@ -1357,5 +1368,5 @@ fn the_falsification_artifact_carries_a_verdict_for_every_attack_and_a_row_for_e
 
     assert_eq!(report.surviving.len(), 7);
     assert!(report.surviving[0].contains("TIE"));
-    assert!(report.surviving[2].contains("-163%"));
+    assert!(report.surviving[2].contains("-152%"));
 }

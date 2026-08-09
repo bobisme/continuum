@@ -35,7 +35,7 @@
 //! > `Preserved | Revalidate | Incompatible` required by plan §4.6 before it is applied.
 //!
 //! C5's mechanism is *stated in those words* — "three `required` markers become `optional`" —
-//! so it is a **major**, not the bundled 3.6 minor, and it cannot be made dormant-at-3.5
+//! so it is a **major**, not the 3.6 minor, and it cannot be made dormant-at-3.5
 //! either: the suppression a 3.6 client would receive is a frame the declaration does not
 //! admit at any minor of major 3. [`a_conforming_reader_rejects_an_answer_with_these_members_absent`]
 //! is that verdict taken mechanically rather than read off the rule — the decoder this repo
@@ -375,7 +375,11 @@ fn the_landed_matrix_is_unmoved_by_this_bone() {
     let native = report.totals[&Arm::Native];
     let shell = report.totals[&Arm::Shell];
 
-    assert_eq!(native.bytes_per_solved(), Some(10_859));
+    // 10,384 as of bn-3of5h, not 10,859: `workspace.create_by_reference` landed at
+    // protocol 3.6 and the typed arm takes it. Nothing in *this* bone moved it — the
+    // control's claim is unchanged and is still checked against the matrix, at the value
+    // the matrix now has.
+    assert_eq!(native.bytes_per_solved(), Some(10_384));
     assert_eq!(shell.bytes_per_solved(), Some(4_118));
     assert_eq!((native.solved, shell.solved), (24, 24));
     assert_eq!(native.invalid_permille(), 69);

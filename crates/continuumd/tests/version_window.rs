@@ -18,7 +18,7 @@
 //!
 //! # The minor bumps, and why none of them is a window
 //!
-//! `protocol.version` is `"3.5"` as of IDL 1.9, and the whole claim of a *compatible*
+//! `protocol.version` is `"3.6"` as of IDL 1.11, and the whole claim of a *compatible*
 //! bump is that a client pinned to an older minor is unaffected. That claim is a test, not
 //! a sentence: `a_client_pinned_to_the_previous_minor_still_gets_it` is it. The window is
 //! stated in *majors* (`[3, 2]`), so a bump moves nothing about it — 2.x remains
@@ -38,6 +38,16 @@
 //! is the same case as 3.3 for the same reason: a client that never sends the name cannot
 //! reach the verb, and a 19th namespace is not a wider window. `implemented()` gains 3.5,
 //! and every window assertion below is untouched.
+//!
+//! 3.6 (`workspace.create_by_reference`, bn-3of5h) is the third, and it is the case where
+//! the claim is worth *testing* rather than restating, because this operation has an
+//! inline sibling a 3.5 client uses every day. Two obligations follow and both are held
+//! here: a client pinned below 3.6 is still served its own version
+//! ([`a_client_pinned_to_the_previous_minor_still_gets_it`], now run at 3.5 as well as at
+//! 3.0), and the sibling's bytes do not move —
+//! `crates/continuumd/tests/daemon_operations.rs` holds `workspace.create`'s request and
+//! result frames byte for byte across the bump. `implemented()` gains 3.6; every window
+//! assertion below is untouched, because a minor is not a window.
 
 use continuum_value::epoch::ProtocolWindow;
 use continuumd::protocol::handshake::{
@@ -54,7 +64,7 @@ use continuumd::protocol::vocabulary::{Encoding, ErrorCode};
 /// tell "you are outside my window" from "we have nothing in common", and the two are
 /// different facts about the client.
 ///
-/// `3.0` through `3.5` are all here for the same reason one level up: a daemon at the new
+/// `3.0` through `3.6` are all here for the same reason one level up: a daemon at the new
 /// minor still implements the old ones, and a client pinned to `3.0` must still be served
 /// `3.0` rather than silently upgraded.
 fn implemented() -> Vec<ProtocolVersion> {
@@ -68,6 +78,7 @@ fn implemented() -> Vec<ProtocolVersion> {
         ProtocolVersion::new(3, 3),
         ProtocolVersion::new(3, 4),
         ProtocolVersion::new(3, 5),
+        ProtocolVersion::new(3, 6),
     ]
 }
 
@@ -119,9 +130,9 @@ fn a_client_on_the_current_major_is_served() {
 fn the_declared_version_is_the_idls() {
     // `protocol.version` is the version the *document* defines; the conformance test
     // holds this constant to the IDL. This asserts the two facts that make the bump a
-    // bump: the constant reads 3.5 (bn-1as8e, `whiteboard.compile`), and 3.5 is a version
-    // the daemon of this test can actually negotiate.
-    assert_eq!(PROTOCOL_VERSION, "3.5");
+    // bump: the constant reads 3.6 (bn-3of5h, `workspace.create_by_reference`), and 3.6
+    // is a version the daemon of this test can actually negotiate.
+    assert_eq!(PROTOCOL_VERSION, "3.6");
     let declared: ProtocolVersion = PROTOCOL_VERSION.parse().expect("canonical");
     assert!(implemented().contains(&declared));
     assert!(window().serves(declared));
@@ -139,6 +150,19 @@ fn a_client_pinned_to_the_previous_minor_still_gets_it() {
     assert!(
         !negotiated.admits_request(ProtocolVersion::new(3, 1)),
         "a connection negotiated at 3.0 does not admit a 3.1 request"
+    );
+
+    // The 3.6 obligation, stated at the minor that precedes it rather than only at 3.0:
+    // a client that offers exactly 3.5 gets exactly 3.5, is not silently upgraded, and a
+    // request naming 3.6 is not admitted on that connection. `workspace.create` is what
+    // such a client sends, and `rule versioning.compatible_change` then forbids this
+    // daemon from emitting any 3.6 field on it.
+    let pinned = open((3, 5), (3, 5)).expect("3.5 is still implemented and served");
+    assert_eq!(pinned.protocol_version(), ProtocolVersion::new(3, 5));
+    assert!(pinned.admits_request(ProtocolVersion::new(3, 5)));
+    assert!(
+        !pinned.admits_request(ProtocolVersion::new(3, 6)),
+        "a connection negotiated at 3.5 does not admit a 3.6 request"
     );
 }
 
@@ -177,8 +201,8 @@ fn a_range_spanning_the_window_selects_the_highest_served_version() {
     // The client would accept anything from 1.0 to 9.9. The daemon must not hand back
     // 1.0 (outside its window) or 4.0 (which it does not implement), and must prefer the
     // newest minor it implements inside the window.
-    let negotiated = open((1, 0), (9, 9)).expect("3.5 is common and served");
-    assert_eq!(negotiated.protocol_version(), ProtocolVersion::new(3, 5));
+    let negotiated = open((1, 0), (9, 9)).expect("3.6 is common and served");
+    assert_eq!(negotiated.protocol_version(), ProtocolVersion::new(3, 6));
 }
 
 #[test]

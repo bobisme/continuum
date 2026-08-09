@@ -53,13 +53,14 @@ use continuumd::protocol::operations::verification::{
     VerificationResultRequest, VerificationStartRequest,
 };
 use continuumd::protocol::operations::workspace::{
-    WorkspaceCreateRequest, WorkspaceForkRequest, WorkspaceSealRequest,
+    WorkspaceCreateByReferenceRequest, WorkspaceCreateRequest, WorkspaceForkRequest,
+    WorkspaceSealRequest,
 };
 use continuumd::protocol::scalar::{
-    ActorId, ByteCount, CapabilityHandle, ContinuationHandle, IntentHandle, Opaque, OperationName,
-    ProtocolVersion, RequestId, TaskHandle, WorkspaceHandle,
+    ActorId, ByteCount, CapabilityHandle, Commitment, ContinuationHandle, IntentHandle, Opaque,
+    OperationName, ProtocolVersion, RequestId, TaskHandle, WorkspaceHandle,
 };
-use continuumd::protocol::shared::{FileOverlay, SnapshotComponents, Target};
+use continuumd::protocol::shared::{FileOverlay, SnapshotComponents, SnapshotEpochs, Target};
 use continuumd::protocol::spec::{Nullable, Optional};
 use continuumd::protocol::vocabulary::{Portfolio, ResultStatus};
 use continuumd::transport::{decode_result, encode_hello, encode_request};
@@ -351,6 +352,40 @@ impl AgentClient {
         let arguments = Arguments::WorkspaceCreate(WorkspaceCreateRequest {
             components,
             overlay: Optional::Absent,
+            seal: Optional::Present(seal),
+        });
+        self.invoke(link, context, &Call::new(&arguments))
+    }
+
+    /// `workspace.create_by_reference` — import a snapshot by naming the component set the
+    /// daemon already holds, instead of enumerating it (protocol 3.6).
+    ///
+    /// The same act as [`workspace_create`](AgentClient::workspace_create) and the same
+    /// answer; what differs is the argument. A local CLI has always named a corpus port and
+    /// let the daemon resolve its components from the filesystem, and until 3.6 a remote
+    /// client had no way to say the same thing — PR-10 IMPL-02 measured what that cost and
+    /// `rule snapshot.by_reference` is the repair.
+    ///
+    /// `epochs` and `intent` are not part of the reference and are passed here for the
+    /// reason the rule states: the intent is the scope claim admission decides on, and the
+    /// epochs are this caller's declaration.
+    ///
+    /// # Errors
+    ///
+    /// [`ClientError`] as [`AgentClient::invoke`].
+    pub fn workspace_create_by_reference(
+        &mut self,
+        link: &mut dyn Transport,
+        context: &AgentContext,
+        components: Commitment,
+        epochs: SnapshotEpochs,
+        intent: IntentHandle,
+        seal: bool,
+    ) -> Result<Answer, ClientError> {
+        let arguments = Arguments::WorkspaceCreateByReference(WorkspaceCreateByReferenceRequest {
+            components,
+            epochs,
+            intent,
             seal: Optional::Present(seal),
         });
         self.invoke(link, context, &Call::new(&arguments))

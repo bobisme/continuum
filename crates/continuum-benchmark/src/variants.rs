@@ -890,7 +890,8 @@ pub fn ceiling_declaration_bytes(max_bytes: u64) -> u64 {
 /// `priority_class` and `budget` from the answer — and `TaskRecord` declares five of those
 /// `required` and two `nullable`, so eliding them changes a presence marker, which
 /// `rule versioning.breaking_change` makes a **major** change. Not behavior-only, and not
-/// eligible for the bundled 3.6 minor either.
+/// eligible for the 3.6 minor either — and 3.6 landed at bn-3of5h carrying one item,
+/// `workspace.create_by_reference`, which is not this one.
 ///
 /// What the declaration *does* permit a ceiling to take is the contents of two `required`
 /// lists and the nine `optional` members of `Budget`. That is what this function measures,

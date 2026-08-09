@@ -950,7 +950,7 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     let document = document();
     // The IDL's §10 header states the registry's size in prose; if the parser silently
     // dropped a declaration, every comparison below would pass vacuously for it.
-    assert_eq!(document.operations.len(), 74, "operations");
+    assert_eq!(document.operations.len(), 75, "operations");
     assert_eq!(document.scalars.len(), 9, "scalars");
     assert_eq!(document.handles.len(), 19, "handles");
     // Protocol 3.1 (IDL 1.2) adds one alias (`AuditCorrelationId`), one enum
@@ -1001,6 +1001,17 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // delta is one frame however many of a connection's scopes select it, and which
     // deltas a scope selects) rather than reporting them.
     //
+    // Protocol 3.6 (IDL 1.11, bn-3of5h) is the third registry edit, and the first that
+    // moves **one** of these five numbers rather than four:
+    // `workspace.create_by_reference`, 74 -> 75, in the `workspace` namespace it already
+    // had, so 19 stays 19. Structs stay 47 and unions 2 — the request and response are
+    // anonymous bodies over `Commitment`, `SnapshotEpochs`, `IntentHandle`,
+    // `WorkspaceHandle`, and `Diagnostic`, every one already declared, which is what
+    // "prefer existing declared types" costs when it is actually done. One rule arrives
+    // (`snapshot.by_reference`, 43 -> 44), and it is the operation's whole semantics:
+    // what the commitment is over, that resolving it means serving `workspace.create`,
+    // which two members do not come from it, and that an unresolvable one is a denial.
+    //
     // Protocol 3.5 (IDL 1.9, bn-1as8e) is the second registry edit this protocol has
     // ever taken: `whiteboard.compile`, 73 -> 74, in a **19th** namespace, 18 -> 19 —
     // plan §11.5's whiteboard compiler on the wire and the paragraph RFC 0038 deferred
@@ -1029,7 +1040,7 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 43, "rules");
+    assert_eq!(document.rules.len(), 44, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
@@ -1053,7 +1064,7 @@ fn the_operation_set_is_exactly_the_idl_registry() {
         .map(|operation| operation.name.as_str())
         .collect();
     assert_eq!(mine, theirs);
-    assert_eq!(OPERATION_COUNT, 74);
+    assert_eq!(OPERATION_COUNT, 75);
 }
 
 #[test]
@@ -1302,9 +1313,12 @@ fn the_check_is_not_vacuous() {
             "component: SnapshotComponents required;",
         ),
         (
+            // Anchored through `overlay` because protocol 3.6 gave `seal: Bool optional`
+            // a second declaration site: `workspace.create_by_reference` carries the same
+            // member, and a mutation anchor that matches twice is not an anchor.
             "a changed presence marker",
-            "    seal: Bool optional;",
-            "    seal: Bool nullable;",
+            "    overlay: list<FileOverlay> optional;\n    /// Seal the snapshot on creation.\n    seal: Bool optional;",
+            "    overlay: list<FileOverlay> optional;\n    /// Seal the snapshot on creation.\n    seal: Bool nullable;",
         ),
         (
             "a changed field type",
@@ -1358,12 +1372,12 @@ fn a_removed_operation_is_reported() {
     mutated.push_str(&source[end..]);
 
     let document = idl::parse(&mutated);
-    assert_eq!(document.operations.len(), 73);
+    assert_eq!(document.operations.len(), 74);
     let found = all_mismatches(&document);
     assert!(
         found
             .iter()
-            .any(|item| item.contains("workspace.seal") || item.contains("73")),
+            .any(|item| item.contains("workspace.seal") || item.contains("74")),
         "removing an operation must be reported, got {found:?}"
     );
 }

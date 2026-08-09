@@ -18,7 +18,7 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.10";
+pub const IDL_VERSION: &str = "1.11";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
@@ -97,7 +97,37 @@ pub const IDL_VERSION: &str = "1.10";
 /// wire. Counts move where they must be visible: 74 rows in 19 namespaces,
 /// `propose` 9, `@mutation` 46, `structural` verdicts 27, named structs 47,
 /// rules 42. No flag rides the bump and one is raised (RFC 0026 F21).
-pub const PROTOCOL_VERSION: &str = "3.5";
+///
+/// The 3.5 -> 3.6 bump covers IDL 1.11 (bn-3of5h) and is the **third** one that
+/// adds an operation: `workspace.create_by_reference`, the 75th, and the first
+/// registry growth that enters an **existing** namespace. What it pays is a
+/// measurement rather than a deferral. `SnapshotComponents` is the largest
+/// argument this protocol carries -- 17,208 B over the DX-10 instrument's 24
+/// `workspace.create` calls -- and the same act through a local CLI costs a
+/// port name, because the CLI resolves the components from the filesystem;
+/// PR-10 IMPL-02 recorded the asymmetry and left it open, and
+/// `notes/plan/notes/DX10_BYTE_LEDGER.md` §8 then measured seven candidate
+/// answers and left exactly one inside major 3. This is that one.
+///
+/// It was checked for avoidability first, which is what 1.5, 1.7, 1.8, and 1.10
+/// each did instead of bumping: no declared member anywhere takes a components
+/// identity, `workspace.fork` names a snapshot and preserves its intent binding
+/// so it cannot open a lineage under a different contract, and
+/// `SnapshotComponents.file_components` is `optional` beside nine `required`
+/// peers, so the inline argument has no absent form. "Adding an operation" is
+/// the first change `rule versioning.compatible_change` names, so the bump is a
+/// minor and [`MAJORS_SERVED`] is untouched -- a 3.0 through 3.5 client never
+/// sends the name, and an operation it never names cannot reach it.
+/// `workspace.create` keeps `components`, `overlay`, and `seal`;
+/// `SnapshotComponents` keeps all eleven members and their presence markers.
+///
+/// Counts move where they must be visible: 75 rows in 19 namespaces, `propose`
+/// 10, `@mutation` 47, `structural` verdicts 28, named structs 47 (unchanged --
+/// both bodies are anonymous over already-declared types), rules 43 -> 44
+/// (`snapshot.by_reference`). No flag rides the bump and none is raised; RFC
+/// 0026's flags preamble records the sweep, including why F6, touched at 1.10,
+/// is not payable here either.
+pub const PROTOCOL_VERSION: &str = "3.6";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -111,8 +141,10 @@ pub const ENCODINGS: &[Encoding] = &[Encoding::CanonicalJson, Encoding::Canonica
 ///
 /// 72 from protocol 3.0 through 3.2; 73 as of 3.3, when `evidence.link` became
 /// the first operation ever added to this protocol (bn-3sypm); 74 as of 3.5,
-/// when `whiteboard.compile` became the second (bn-1as8e).
-pub const OPERATION_COUNT: usize = 74;
+/// when `whiteboard.compile` became the second (bn-1as8e); 75 as of 3.6, when
+/// `workspace.create_by_reference` became the third and the first to enter an
+/// existing namespace (bn-3of5h).
+pub const OPERATION_COUNT: usize = 75;
 
 /// Every operation the IDL declares, in its declaration order.
 pub const OPERATIONS: &[OperationSpec] = &[
@@ -128,6 +160,16 @@ pub const OPERATIONS: &[OperationSpec] = &[
             ErrorCode::UnsupportedSemanticFeature,
             ErrorCode::AcceptanceChainInvalid,
         ],
+    },
+    OperationSpec {
+        name: "workspace.create_by_reference",
+        authority: AuthorityLevel::Propose,
+        annotations: &[Annotation::Mutation],
+        request: StructSpec::of::<WorkspaceCreateByReferenceRequest>(),
+        response: StructSpec::of::<WorkspaceCreateByReferenceResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::AcceptanceChainInvalid],
     },
     OperationSpec {
         name: "workspace.fork",

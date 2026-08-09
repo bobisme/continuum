@@ -28,7 +28,7 @@
 //! # What a family may assume when `handle` is called
 //!
 //! - the request named this connection's negotiated protocol version;
-//! - the operation is one of the registry's 74 and `Call::spec` is its entry;
+//! - the operation is one of the registry's 75 and `Call::spec` is its entry;
 //! - the arguments are the shape that operation declares;
 //! - admission T1–T4 passed for this actor, this capability, and every handle
 //!   [`OperationFamily::scope`] reported — so no family re-checks authority, and none may
@@ -84,8 +84,9 @@ use crate::protocol::operations::whiteboard::{
     WhiteboardCompileRequest, WhiteboardCompileResponse,
 };
 use crate::protocol::operations::workspace::{
-    WorkspaceCreateRequest, WorkspaceCreateResponse, WorkspaceDiffRequest, WorkspaceDiffResponse,
-    WorkspaceForkRequest, WorkspaceForkResponse, WorkspaceSealRequest, WorkspaceSealResponse,
+    WorkspaceCreateByReferenceRequest, WorkspaceCreateByReferenceResponse, WorkspaceCreateRequest,
+    WorkspaceCreateResponse, WorkspaceDiffRequest, WorkspaceDiffResponse, WorkspaceForkRequest,
+    WorkspaceForkResponse, WorkspaceSealRequest, WorkspaceSealResponse,
 };
 use crate::protocol::scalar::{
     AuditCorrelationId, ContinuationHandle, IntentHandle, TaskHandle, WorkspaceHandle,
@@ -174,6 +175,8 @@ pub enum Arguments {
     ContextExpand(ContextExpandRequest),
     /// `whiteboard.compile`.
     WhiteboardCompile(WhiteboardCompileRequest),
+    /// `workspace.create_by_reference`.
+    WorkspaceCreateByReference(WorkspaceCreateByReferenceRequest),
 }
 
 impl Arguments {
@@ -210,6 +213,7 @@ impl Arguments {
             Self::ContextCompile(_) => "context.compile",
             Self::ContextExpand(_) => "context.expand",
             Self::WhiteboardCompile(_) => "whiteboard.compile",
+            Self::WorkspaceCreateByReference(_) => "workspace.create_by_reference",
         }
     }
 }
@@ -289,6 +293,8 @@ pub enum Payload {
     ContextExpand(ContextExpandResponse),
     /// `whiteboard.compile`.
     WhiteboardCompile(WhiteboardCompileResponse),
+    /// `workspace.create_by_reference`.
+    WorkspaceCreateByReference(WorkspaceCreateByReferenceResponse),
 }
 
 impl Payload {
@@ -327,6 +333,7 @@ impl Payload {
             Self::ContextCompile(_) => Some("context.compile"),
             Self::ContextExpand(_) => Some("context.expand"),
             Self::WhiteboardCompile(_) => Some("whiteboard.compile"),
+            Self::WorkspaceCreateByReference(_) => Some("workspace.create_by_reference"),
         }
     }
 }

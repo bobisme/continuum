@@ -41,12 +41,12 @@
 //! # Coverage of the registry, and the honest boundary of it
 //!
 //! The bone this file answers owes "the conforming-daemon golden set", and the registry is
-//! 74 operations as of protocol 3.5. Two devices carry that between them and they cover
+//! 75 operations as of protocol 3.6. Two devices carry that between them and they cover
 //! different things:
 //!
 //! - the **literal** vectors are exchanges and per-namespace bodies — bytes a second
 //!   implementation can be tested against directly;
-//! - the **registry sweep** is mechanical: every one of the 74 operations' request and
+//! - the **registry sweep** is mechanical: every one of the 75 operations' request and
 //!   response structs, and every named struct besides, is decoded from a document
 //!   synthesized out of its own `FieldSpec` list and re-encoded, in both encodings, with
 //!   the field sequences compared across them. It is not a literal byte sequence and does
@@ -555,7 +555,7 @@ fn type_value<D: Document>(ty: &str, depth: usize) -> D {
     panic!("no registry table declares the type `{ty}`");
 }
 
-/// Every struct the registry declares: the 74 operations' request and response bodies and
+/// Every struct the registry declares: the 75 operations' request and response bodies and
 /// every named struct, each named for the failure message.
 fn every_declared_struct() -> Vec<(String, &'static StructSpec)> {
     let mut out = Vec::new();
@@ -1001,7 +1001,7 @@ fn every_registry_struct_round_trips_in_both_encodings() {
         );
         swept += 1;
     }
-    assert_eq!(OPERATIONS.len(), OPERATION_COUNT, "the registry is 74 rows");
+    assert_eq!(OPERATIONS.len(), OPERATION_COUNT, "the registry is 75 rows");
     assert_eq!(
         swept,
         OPERATION_COUNT * 2 + NAMED_STRUCTS.len(),
@@ -1065,11 +1065,14 @@ fn every_operation_the_families_serve_round_trips_through_the_codec() {
     // `context` family, which serves `context.expand` and answers `context.compile` with
     // the typed refusal `rule errors.unsupported_surface` requires — both decode, so both
     // are served here, and 28/45 until bn-1as8e added `whiteboard.compile` at protocol
-    // 3.5, which grew the registry rather than the landed set alone. A count that moves
-    // when a family lands is the point: it forces the landing to be visible in a file
-    // nobody editing a family would otherwise open.
-    assert_eq!(served, 29, "the operations the landed families serve");
-    assert_eq!(unserved, OPERATION_COUNT - 29);
+    // 3.5, which grew the registry rather than the landed set alone. bn-3of5h moved it
+    // once more and the other way round: `workspace.create_by_reference` grows the
+    // registry *and* the landed set in one step, because the `workspace` family serves it
+    // the day it is declared — 30/45. A count that moves when a family lands is the point:
+    // it forces the landing to be visible in a file nobody editing a family would
+    // otherwise open.
+    assert_eq!(served, 30, "the operations the landed families serve");
+    assert_eq!(unserved, OPERATION_COUNT - 30);
 }
 
 #[test]

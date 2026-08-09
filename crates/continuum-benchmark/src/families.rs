@@ -402,14 +402,19 @@ pub const SITES: &[Site] = &[
         operation: "workspace.create",
         ordinal: 0,
         flag: "--port",
-        typed: "WorkspaceCreateRequest.components",
+        // Protocol 3.6: the typed arm names the same port by the content identity of its
+        // component set (`rule snapshot.by_reference`). The channel is unchanged — a
+        // mistaken port is a wrong `components` value on both arms, and the daemon refuses
+        // it either way — and only the type of that value moved, from a struct to a
+        // commitment.
+        typed: "WorkspaceCreateByReferenceRequest.components",
         guaranteed: true,
     },
     Site {
         operation: "workspace.create",
         ordinal: 1,
         flag: "--seal",
-        typed: "WorkspaceCreateRequest.seal",
+        typed: "WorkspaceCreateByReferenceRequest.seal",
         guaranteed: true,
     },
     Site {

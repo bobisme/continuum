@@ -20,7 +20,7 @@
 //! `rule versioning.breaking_change` lists "changing a field's type or presence marker" among
 //! the changes that MUST advance the **major** and publish a per-artifact-class compatibility
 //! statement. So the projected mechanism is not behavior-only, and it is not eligible for the
-//! bundled 3.6 *minor* either — a distinction worth more than the bytes, because the whole
+//! 3.6 *minor* either — a distinction worth more than the bytes, because the whole
 //! candidate set was accepted on the promise that item 1 needed no declaration to move.
 //! [`the_projected_summary_needs_presence_markers_no_minor_can_move`] states it structurally.
 //!
@@ -229,7 +229,11 @@ fn the_landed_matrix_is_unmoved_by_this_bone() {
     let native = report.totals[&Arm::Native];
     let shell = report.totals[&Arm::Shell];
 
-    assert_eq!(native.bytes_per_solved(), Some(10_859));
+    // 10,384 as of bn-3of5h, not 10,859: `workspace.create_by_reference` landed at
+    // protocol 3.6 and the typed arm takes it. Nothing in *this* bone moved it — the
+    // control's claim is unchanged and is still checked against the matrix, at the value
+    // the matrix now has.
+    assert_eq!(native.bytes_per_solved(), Some(10_384));
     assert_eq!(shell.bytes_per_solved(), Some(4_118));
     assert_eq!((native.solved, shell.solved), (24, 24));
     assert_eq!(native.invalid_permille(), 69);

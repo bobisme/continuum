@@ -40,7 +40,16 @@ Four artifact kinds carry protocol truth. The order is fixed:
 
 ## Versioning and revision
 
-- **Two versions, never conflated.** `protocol_version` (`"3.5"` as of bn-1as8e) is the wire version this document and the IDL define; `idl_version` (`"1.9"` as of bn-1as8e) versions the IDL *document* and is bumped on every change to that file, including changes that leave the protocol untouched. A client never negotiates `idl_version`.
+- **Two versions, never conflated.** `protocol_version` (`"3.6"` as of bn-3of5h) is the wire version this document and the IDL define; `idl_version` (`"1.11"` as of bn-3of5h; this bullet stood at `"1.9"` while IDL 1.10 left the protocol untouched) versions the IDL *document* and is bumped on every change to that file, including changes that leave the protocol untouched. A client never negotiates `idl_version`.
+- **3.6 is one bump covering IDL 1.11, and it is the third that adds an operation (bn-3of5h): `workspace.create_by_reference`, the 75th, and the first registry growth that enters an *existing* namespace.** `idl_version` is `"1.11"`. What it pays is a measurement rather than a deferral: `SnapshotComponents` is the largest argument this protocol carries — 17,208 B over the DX-10 instrument's 24 `workspace.create` calls, a mean 717 B — and the same act through a local CLI costs a port name, because the CLI resolves the components from the filesystem. PR-10 IMPL-02 recorded the asymmetry in those words ("a remote protocol client must transmit `SnapshotComponents` in full") and left the question open; `notes/DX10_BYTE_LEDGER.md` §8 then measured seven candidate answers against `rule versioning.compatible_change`, found that six of them move a presence marker on a `required` member or rewrite a rule — none of which is one of that rule's five, and the rule is a closed list — and left exactly one standing. This is that one. The verb names a component set the daemon already holds by its content identity, and `rule snapshot.by_reference` fixes the four things a reference needs: what the identity is (the canonical encoding of the `SnapshotComponents` value, which `rule encoding.canonical_form` makes unique, so a client derives the daemon's own commitment rather than being told it), what resolving it means (the request is then served *exactly* as `workspace.create` serves the same components inline — two spellings of one argument MUST NOT become two behaviours), which two members do not come from it, and what an unresolvable one is (`CapabilityDenied`, byte identical with every other denial, X2).
+
+    **The two members that still travel are the interesting half.** `intent` is `required` on the request because the admission predicate decides T2 and T3 from the *request*, before any handler runs: a governing contract hidden behind a reference is a scope claim admission cannot see, and INV-015 is not enforceable against a claim the daemon cannot read. `epochs` are `required` because they are the caller's declaration about the snapshot and are checked against the epochs the deployment serves — a daemon that read them out of its own store would be checking itself — and because the same components at two semantic epochs are two snapshots. So this operation does not recover the whole `SnapshotComponents` line and never claimed to; the ledger's own correction says the same thing from the other side, that the landed `redesign_reducible` figure is an upper bound and not an available saving.
+
+    **The bump was checked for avoidability first**, which is the discipline three of the last five revisions used to leave `version` alone (1.5, 1.7, 1.8, 1.10 all served already-declared vocabulary). There is nothing to serve. No declared member anywhere takes a components identity. `workspace.fork` names a *snapshot* and preserves its intent binding by identity, so it cannot open a lineage under a different contract — rebinding one is privileged and produces an intent diff (plan §4.2, INV-001) — and `SnapshotComponents.file_components` is `optional` beside nine `required` peers, so the inline argument has no absent form. The three later triggers stay unfired: `workspace.create` keeps `components`, `overlay`, and `seal`, `SnapshotComponents` keeps all eleven members and their presence markers, no enum gains a member, no error code is minted, and no server-side constraint is relaxed. The major window `[3, 2]` is untouched, because a minor is not a window: a 3.0 through 3.5 client never sends this name, and an operation it never names cannot reach it.
+
+    **What is new about this row is the namespace, and it is an argument rather than a convenience.** 3.3 and 3.5 each minted a namespace; this one does not, and R-1 is why the question is answerable at all — a namespace has no authority of its own, so what puts a row in `workspace` is that its act is the family's act. It publishes a candidate snapshot, which is what `create`, `fork`, and `seal` each do, and a second namespace for a second spelling of one argument would make the registry's "one act each" discipline false from the other direction. The level follows the same sentence and is `propose`; RFC 0027 records why `read` — the reading that naming held content is an inspection — does not survive contact with A7 and INV-015.
+
+    Counts move where an operation cannot enter the protocol without moving them: the registry is 75 rows in **19** namespaces, `propose` 10, `@mutation` 47, `structural` verdicts 28. The named-struct count stays 47 and rules go 43 → 44 (`snapshot.by_reference`): the request and response are anonymous bodies over `Commitment`, `SnapshotEpochs`, `IntentHandle`, `WorkspaceHandle`, and `Diagnostic`, every one of them already declared, so nothing new had to be minted to say this. `@audit_recorded` stays 7 and `@task_starting` stays 26, both argued in RFC 0027 rather than left to inference. No flag rides this bump and none is raised — the flags-preamble paragraph below records the sweep, including why F6, which IDL 1.10 *touched* and deliberately did not pay, is not payable here either.
 - **3.5 is one bump covering IDL 1.9, and it is the second that adds an operation (bn-1as8e): `whiteboard.compile`, the 74th, in a 19th namespace.** plan §11.5's whiteboard compiler, `schemas/whiteboard-note.schema.json`, RFC 0038's W1–W9, and `crates/continuum-evidence/src/whiteboard.rs` all landed with the wire deliberately deferred, and the deferral paragraph named the operation it was deferring — "There is no `whiteboard.compile` operation and no `EvidenceQuery` field that names one" — so this bump pays a debt the owning RFC wrote down, exactly as 3.3 paid F14. `idl_version` is `"1.9"`.
 
     **The bump was checked for avoidability first.** Three of the last four IDL revisions left `version` alone by *serving already-declared vocabulary* (1.5's bootstrap encoding, 1.7's event frames, 1.8's traversal), which is the cheapest possible payment and the one to look for before minting anything. There is nothing to serve here: no operation, no `EvidenceQuery` member, and no struct in the file names a note. The two neighbours that read as candidates are not — `forge.create`'s `sketch: Opaque` is RFC 0033's synthesis input (holes, objectives, diversity descriptors, an assurance target) and answers with a `ForgeHandle`, so serving a note through it would be one verb performing two acts against the registry's "one act each" discipline; and `context.compile` runs evidence-root-to-pack, which is the *reverse* direction and is the undelivered whiteboard **view**, not the compiler. A new operation was the only honest artifact, and per the F13 precedent it arrives in plan §10.2, RFC 0027's authority table, and the IDL together — now mechanically, since the dossier validator parses all three and fails closed on any disagreement without preferring one.
@@ -98,7 +107,7 @@ Every operation is invoked through `RequestEnvelope`. The presence column is the
 | `idempotency_key` | `String` | optional | **REQUIRED for every `@mutation` operation; absent for every `@readonly` one** |
 | `actor` | `ActorId` | required | `agent:` \| `human:` \| `service:` \| `ci:` — a closed four-member scheme |
 | `capability` | `CapabilityHandle` | required | checked below the adapter, independently of handle possession, before any semantic work |
-| `operation` | `OperationName` | required | one of the 74 registered `namespace.verb` names |
+| `operation` | `OperationName` | required | one of the 75 registered `namespace.verb` names |
 | `snapshot` | `WorkspaceHandle` | nullable | explicit null when the operation takes no snapshot; the field name is `snapshot` everywhere, schemas included |
 | `intent` | `IntentHandle` | nullable | explicit null when the operation takes no intent |
 | `arguments` | `Opaque` | required | the operation's request struct, exactly |
@@ -139,14 +148,14 @@ The result envelope carries **no** `snapshot`, `intent`, `budget`, or trace-corr
 
 ### Verdicts
 
-`Verdict` is a four-member union, and an operation's `verdict` clause names which variant it returns. The distribution across the 74 operations is fixed:
+`Verdict` is a four-member union, and an operation's `verdict` clause names which variant it returns. The distribution across the 75 operations is fixed:
 
 | Variant | Value type | Operations |
 |---|---|---|
 | `semantic` | `SemanticVerdictValue` — `established` \| `refuted` \| `inconclusive`, plus `assurance_class` | 7 |
 | `evaluation` | `EvaluationVerdictValue` — `satisfied` \| `refuted` \| `deadlock` \| `inconclusive`, plus `assurance_class` | 9 |
 | `policy` | `PolicyVerdictValue` — a `PolicyDecision` (`allow` \| `review` \| `block`) plus `GateOutcome`s | 7 |
-| `structural` | `StructuralVerdictValue` — a `StructuralOutcome` (`created`, `updated`, `sealed`, `accepted`, `rejected`, `locked`, `cancelled`, `unchanged`, `acknowledged`) | 27 |
+| `structural` | `StructuralVerdictValue` — a `StructuralOutcome` (`created`, `updated`, `sealed`, `accepted`, `rejected`, `locked`, `cancelled`, `unchanged`, `acknowledged`) | 28 |
 | — | no `verdict` clause; `verdict` is null | 24 |
 
 - **A verdict is a tagged union value, never a bare scalar.** `refuted` is a member of both `SemanticVerdict` and `EvaluationVerdict`; the union tag is what disambiguates them, and `assurance_class` is required on both. A daemon MUST NOT emit a verdict as a plain string.
@@ -172,7 +181,7 @@ The result envelope carries **no** `snapshot`, `intent`, `budget`, or trace-corr
 
 ## Operation semantics
 
-The IDL declares **74 operations in 19 namespaces** — exactly the plan §10.2 registry, no more and no fewer (`rule conformance.registry_agreement`). Each operation's `authority` clause mirrors RFC 0027's table exactly; a generator or validator MUST fail closed on any disagreement rather than preferring either source. The distribution below is protocol 3.5's. It was unchanged from 3.0 through 3.2 — neither sweep added an operation, and each said so — 3.3 moved it in the four places `evidence.link` touches, and 3.5 moved it again in the four places `whiteboard.compile` touches, each time together with RFC 0027's table, plan §10.2, and the IDL:
+The IDL declares **75 operations in 19 namespaces** — exactly the plan §10.2 registry, no more and no fewer (`rule conformance.registry_agreement`). Each operation's `authority` clause mirrors RFC 0027's table exactly; a generator or validator MUST fail closed on any disagreement rather than preferring either source. The distribution below is protocol 3.5's. It was unchanged from 3.0 through 3.2 — neither sweep added an operation, and each said so — 3.3 moved it in the four places `evidence.link` touches, and 3.5 moved it again in the four places `whiteboard.compile` touches, each time together with RFC 0027's table, plan §10.2, and the IDL:
 
 | Annotation | Count | Obligation this RFC states |
 |---|---|---|
@@ -184,7 +193,7 @@ The IDL declares **74 operations in 19 namespaces** — exactly the plan §10.2 
 | `@privileged` | 5 | audit-recorded, and never present in a default agent capability profile |
 | `@audit_recorded` | 7 | every call written to the audit log with actor, capability, inputs, policy decision, outputs, and evidence identity (plan §18.5) |
 
-Authority levels across the 74: `read` 18, `propose` 9, `execute` 41, `revise-intent` 4, `promote` 2. Agent-facing installations MUST omit `promote` and `revise-intent` from default capability profiles (RFC 0027).
+Authority levels across the 75: `read` 18, `propose` 10, `execute` 41, `revise-intent` 4, `promote` 2. Agent-facing installations MUST omit `promote` and `revise-intent` from default capability profiles (RFC 0027).
 
 Four independence rules govern the annotation set, and each exists because the obvious conflation is wrong:
 
@@ -563,7 +572,7 @@ Plan §4.5 requires capabilities to be "minted, scoped, delegated, and revoked t
 
 Capability administration is **not** part of the native protocol's operation registry at major 3. Three reasons, in order of weight:
 
-1. **There is no authority level that can hold it.** RFC 0027's ladder is `read < propose < execute < revise-intent < promote`, and each of the 74 operations carries exactly one minimum level so that `CapabilityDenied` is decidable from the table. Minting a grant is not a repair promotion and is not an intent revision; it belongs to neither top level. Adding a sixth level to accommodate one namespace would change `AuthorityLevel`, every `authority` clause, and RFC 0027's table — a breaking protocol change with a far larger blast radius than the gap it closes.
+1. **There is no authority level that can hold it.** RFC 0027's ladder is `read < propose < execute < revise-intent < promote`, and each of the 75 operations carries exactly one minimum level so that `CapabilityDenied` is decidable from the table. Minting a grant is not a repair promotion and is not an intent revision; it belongs to neither top level. Adding a sixth level to accommodate one namespace would change `AuthorityLevel`, every `authority` clause, and RFC 0027's table — a breaking protocol change with a far larger blast radius than the gap it closes.
 2. **A mint operation on the agent-facing connection is a privilege-escalation surface.** The capability authorizing a mint would itself be presented in `ClientHello.capability`, so a compromised agent connection would be one operation away from a wider grant. Keeping administration out-of-band gives the native protocol a property worth stating outright: **no operation in this protocol can widen the authority of the connection that invokes it** (INV-015, agent least authority).
 3. **The descriptor already fixes the vocabulary.** `CapabilityDescriptor` declares what such operations manipulate, and `ServerWelcome.grant` is how a client learns the result. Nothing on the wire is missing; only the administrative verbs are, and they are precisely the verbs that should not be reachable from an agent's connection.
 
@@ -594,7 +603,7 @@ Bringing capability administration into the protocol at a future major requires,
 
 ### Golden wire vectors
 
-A conforming implementation MUST ship golden request/result traces pinned **per protocol version, in both encodings**, covering: every one of the 74 operations; every error code; idempotency replay (identical and conflicting); restart and resume with matching and mismatched epochs; cancellation at every instrumented phase; deterministic pagination across page boundaries; and an unsupported empty task whose result still names every epoch.
+A conforming implementation MUST ship golden request/result traces pinned **per protocol version, in both encodings**, covering: every one of the 75 operations; every error code; idempotency replay (identical and conflicting); restart and resume with matching and mismatched epochs; cancellation at every instrumented phase; deterministic pagination across page boundaries; and an unsupported empty task whose result still names every epoch.
 
 A golden vector is a byte sequence, not a shape: the JSON and CBOR vectors for one exchange MUST decode to the same values, and re-encoding either MUST reproduce it byte for byte. A vector that only round-trips through a permissive parser is not a golden vector.
 
@@ -686,7 +695,7 @@ Per plan §25, where plan prose, docs, or a dependent artifact disagrees with th
 33. **`intent.lock` edits a policy table; it does not set a boolean lock.** docs/55 describes it as applying an intent lock. Normative: the request and response both carry the plan §5.4 field-to-verb `policy` map, drawn from RFC 0037's closed verb set. Direction: RFC governs docs/55.
 34. **There is no draft status.** docs/55 speaks of drafts gaining protection on acceptance. Normative: the state is `Proposed`; `EvidenceStatus` states outright that there is no `draft` status, and `intent.accept` is the only transition out of `Proposed`. Direction: RFC governs docs/55.
 35. **docs/35's engine-identity correction quotes a disagreement that no longer exists, and its own body still commits it.** docs/35's corrections table attributes the phrase "engine epoch" to plan §4.7 and to this RFC's result envelope; neither document contains that token — both say "engine identity". Meanwhile docs/35's task-identity block still groups `engine` with the semantic and proof epochs under the word "epochs", the grouping its own correction forbids, and docs/55 repeats it. Normative: `engine` is engine identity and is never grouped under "epochs". Direction: RFC governs both documents; docs/35's corrections row is right in substance and wrong in its citation.
-36. **`continuum doctor` is not a protocol operation.** plan §4.7 and docs/35 name it as the defect-bundle assembler; it is in neither the 74-operation registry nor any adapter mapping. Normative: it is a local tool over published `defect_*` artifacts, not a wire operation, and it MUST NOT acquire semantics the protocol does not declare. Direction: RFC governs; if bundle assembly needs a wire surface it is a registry addition, not an implicit one.
+36. **`continuum doctor` is not a protocol operation.** plan §4.7 and docs/35 name it as the defect-bundle assembler; it is in neither the 75-operation registry nor any adapter mapping. Normative: it is a local tool over published `defect_*` artifacts, not a wire operation, and it MUST NOT acquire semantics the protocol does not declare. Direction: RFC governs; if bundle assembly needs a wire surface it is a registry addition, not an implicit one.
 
 ### Where this RFC decides at protocol 3.1
 
@@ -752,6 +761,39 @@ its other half would land a vocabulary member for a status the schema
 does not define the field at. Forcing an undecided flag into a bump to
 make the bump look complete is the drift the flag discipline exists to
 prevent.
+
+Protocol 3.6 (IDL 1.11, bn-3of5h) pays **no flag either**, and the
+negative statement is owed rather than implied, because this is the
+first bump whose motive is a byte measurement and a bump taken for one
+reason is exactly the kind that quietly acquires riders. Every open flag
+was re-swept and **none rides it**. Two sit close enough to name
+explicitly. **F15** is the nearest of all: it records that eight
+snapshot component lists carry no `name` beside each `digest`, and those
+are the very lists this operation now carries by reference. It stays
+raised, and stays raised *unchanged*, because a reference to a set does
+not give that set's members a field they do not have — the gap moves
+behind a commitment rather than closing, and its proper repair is still
+the major-version type change correction 43's addition is a compatible
+stand-in for. **F6** is the one the deferred-and-bundled discipline owes
+a sentence to, because IDL 1.10 *touched* it and deliberately did not
+pay it: it is not payable here either, and for a reason that has nothing
+to do with which bump is in front of it — narrowing `guarantees` from
+`list<String>` to the pack's closed vocabulary changes a declared
+field's type, which `rule versioning.breaking_change` makes a major
+whatever else a minor is carrying, and this revision narrows nothing. Of
+the rest: F1 is a grammar change to the IDL's own notation, which the
+additive mechanism cannot pay; F2's repair changes a declared field's
+type and is breaking; F3 does not grow, because this operation declares
+no `Opaque` at all; F8's two remaining clauses are statements about what
+a daemon must never emit; F9, F10, and F11 are undecided or waiting on a
+producer and nothing either waits on moved; F16's owner is SD-12; F17 is
+unchanged in substance — `components` here is a `Commitment`, the
+pattern-less alias the flag already names, so this adds a fifth carrier
+and no new pattern-less member; F18's other half is breaking; and F21
+waits on the rank-1 schema and `continuum-value` its entry names. A flag
+forced into a bump to make the bump look complete is the drift the
+ledger exists to prevent, and a bump justified by bytes is not a licence
+to collect one.
 
 Protocol 3.5 (IDL 1.9, bn-1as8e) pays **no flag at all**, and that is the
 statement the deferred-and-bundled discipline owes as much as a payment

@@ -647,7 +647,9 @@ fn the_register_admits_every_operation_whose_handles_the_caller_holds() {
     assert_eq!(
         register::OPERATIONS.len(),
         8,
-        "the grammar names exactly the operations the client exposes"
+        "the grammar names exactly the acts the client exposes — protocol 3.6's \
+         `workspace.create_by_reference` is the second spelling of the first row's \
+         argument, not a ninth act"
     );
     // `workspace.create` is unconditioned on purpose: creating a second snapshot while
     // holding a first is a legitimate strategy, and research/25's kill list includes a

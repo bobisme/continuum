@@ -47,6 +47,7 @@ use crate::protocol::scalar::{
     ActorId, ArtifactHandle, CapabilityHandle, Commitment, ContextHandle, EvidenceHandle,
     IntentHandle, Timestamp, WorkspaceHandle,
 };
+use crate::protocol::shared::SnapshotComponents;
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::task::EvidenceEvent;
 use crate::protocol::vocabulary::{
@@ -433,6 +434,7 @@ pub struct DaemonState {
     workspaces: BTreeMap<WorkspaceHandle, WorkspaceRecord>,
     lineages: BTreeMap<ForkName, Fork>,
     content: BTreeMap<Commitment, StagedFile>,
+    components: BTreeMap<Commitment, SnapshotComponents>,
     intents: BTreeMap<IntentHandle, IntentRecord>,
     evidence: BTreeMap<EvidenceHandle, EvidenceNode>,
     edges: BTreeMap<EvidenceHandle, EvidenceEdge>,
@@ -578,6 +580,85 @@ impl DaemonState {
     #[must_use]
     pub fn staged(&self, commitment: &Commitment) -> Option<&StagedFile> {
         self.content.get(commitment)
+    }
+
+    // --- component sets (`rule snapshot.by_reference`, protocol 3.6) ----------------
+
+    /// Register a `SnapshotComponents` value under its content identity, and return that
+    /// identity.
+    ///
+    /// Two callers, one surface — `put_context_pack`'s shape, for the same reason. A
+    /// deployment registers the component sets it already holds here, out of band through
+    /// [`Daemon::state_mut`](super::Daemon::state_mut) (IDL §7), exactly as it stages the
+    /// content those sets name; and `workspace.create` writes through the same method on
+    /// every accepted inline create, so **the inline form is what registers what the
+    /// by-reference form can then name**. That is the whole of "whatever registration verb
+    /// RFC 0019's manifest needs": there is no verb, because a components identity is
+    /// derivable from the components and content already reaches a daemon out of band in
+    /// any case (`rule snapshot.file_components`).
+    ///
+    /// The identity is over the value's `canonical_json` encoding and not the connection's
+    /// negotiation, which is `rule snapshot.by_reference`'s own clause: an identity that
+    /// moved with the negotiated encoding would give one component set two names on two
+    /// connections. It goes through the deployment's [`ContentIdentifier`] seam, as every
+    /// other identity in this daemon does.
+    ///
+    /// [`ContentIdentifier`]: continuum_workspace::publication::ContentIdentifier
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceError::Identity`] when the value cannot be canonically encoded or the
+    /// identity seam cannot name it.
+    pub fn register_components(
+        &mut self,
+        identifier: &dyn continuum_workspace::publication::ContentIdentifier,
+        components: SnapshotComponents,
+    ) -> Result<Commitment, ServiceError> {
+        let commitment = Self::components_identity(identifier, &components)?;
+        self.components.insert(commitment.clone(), components);
+        Ok(commitment)
+    }
+
+    /// The content identity a `SnapshotComponents` value has, without registering it.
+    ///
+    /// Factored out for [`stage`](DaemonState::stage)'s reason: a client derives this
+    /// value to *name* a set and the daemon derives it to *resolve* one, and two spellings
+    /// of the preimage would make the resolution agree with its own copy of the rule
+    /// rather than with the rule. The preimage is length-prefixed exactly as
+    /// [`commit_of`](DaemonState::commit_of)'s is, over a domain tag and the canonical
+    /// bytes, so no other record can collide with it by construction.
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceError::Identity`] when the value cannot be canonically encoded or the
+    /// identity seam cannot name it.
+    pub fn components_identity(
+        identifier: &dyn continuum_workspace::publication::ContentIdentifier,
+        components: &SnapshotComponents,
+    ) -> Result<Commitment, ServiceError> {
+        let canonical = crate::codec::to_bytes(components).map_err(|_| ServiceError::Identity)?;
+        let mut preimage = Vec::new();
+        for part in [b"snapshot-components".as_slice(), canonical.as_slice()] {
+            preimage.extend_from_slice(&(part.len() as u64).to_be_bytes());
+            preimage.extend_from_slice(part);
+        }
+        let handle = identifier
+            .identify(
+                continuum_workspace::artifact_path::ArtifactClass::WorkspaceSnapshot,
+                &preimage,
+            )
+            .map_err(|_| ServiceError::Identity)?;
+        Ok(Commitment::new(&handle.to_string()))
+    }
+
+    /// The component set a commitment names, or [`None`] when this daemon holds none.
+    ///
+    /// [`None`] is answered as `CapabilityDenied` on the wire, byte identical with every
+    /// other denial: there is no `UnknownComponents` code and inventing a distinguishable
+    /// not-found is the existence oracle RFC 0027 X2 forbids.
+    #[must_use]
+    pub fn components(&self, commitment: &Commitment) -> Option<&SnapshotComponents> {
+        self.components.get(commitment)
     }
 
     // --- Context Packs (out-of-band administration) ---------------------------------
