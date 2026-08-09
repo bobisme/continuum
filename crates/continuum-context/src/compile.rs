@@ -1,20 +1,37 @@
-//! The compiler's first stage group, run: the redaction pre-pass, stage 1 (root selection),
-//! and stage 2 (backward causal slicing), ending in a closed accounting, an auditable trail,
+//! The compiler's pipeline, run: the redaction pre-pass, stage 1 (root selection), stage 2
+//! (backward causal slicing), stage 3 (property-automaton relevance filtering) and stage 4
+//! (the static/dynamic dependence join), ending in a closed accounting, an auditable trail,
 //! and the guarantees those stages actually established.
 //!
-//! # Scope: bn-21vno — stages 1–2 of RFC 0028's ten
+//! # Scope: bn-21vno (stages 1–2) and bn-1kj2n (stages 3–4) of RFC 0028's ten
 //!
 //! | Phase | RFC 0028 | Licenses |
 //! |---|---|---|
 //! | pre-pass | "Redaction runs before stage 1" (correction 12) | nothing |
 //! | 1 | root selection | "nothing on its own; a bad root is a wrong pack, not an unsound one" |
 //! | 2 | backward causal slicing | `CausallyClosed`, and the precondition of `ReplayPreserving` |
+//! | 3 | property-automaton relevance filtering | `PropertyPreserving`, with stage 2 |
+//! | 4 | static/dynamic dependence join | admissibility of `source` and `model` items |
 //!
-//! Stages 3–8 are their own bones and append to [`crate::stage::StageTrail`]; stage 9 is the
-//! ranker RFC 0028 requires a deployment be able to run *without* ("the register row's named
-//! fallback for the whole capability is 'plain causal slice + expansion' — that is, stages
-//! 1–8 plus the expansion protocol, with stage 9 disabled"); stage 10 is
-//! [`crate::budget::BudgetPacker`] in substance.
+//! Stages 3 and 4 are **opt-in**: [`CausalCompile::new`] runs stages 1–2 alone, and
+//! [`CausalCompile::with_property`] and [`CausalCompile::with_dependence`] each add one stage.
+//! That is not a convenience — RFC 0028 requires a deployment be able to run the pipeline in
+//! reduced configurations, a stage that did not run has no auditable intermediate (which is a
+//! different fact from an empty one), and a stage whose input the deployment does not have
+//! must not be simulated with a default. Stages 5–8 are their own bones and append to
+//! [`crate::stage::StageTrail`] the same way; stage 9 is the ranker RFC 0028 requires a
+//! deployment be able to run *without* ("the register row's named fallback for the whole
+//! capability is 'plain causal slice + expansion' — that is, stages 1–8 plus the expansion
+//! protocol, with stage 9 disabled"); stage 10 is [`crate::budget::BudgetPacker`] in
+//! substance.
+//!
+//! # The pipeline is not monotone, and the trail says so
+//!
+//! Stage 1 selects the roots; stage 2 **grows** that into their causal past; stage 3
+//! **narrows** it to what the property is directed at; stage 4 **grows** it again with the
+//! `source` and `model` items whose dependence the join corroborates. The one structural
+//! invariant across all four is the candidate universe the pre-pass left, which is what
+//! [`crate::stage::StageTrail`] enforces.
 //!
 //! # The three refusals this module exists to make
 //!
@@ -33,20 +50,45 @@
 //! privacy"). A pack that answered anyway would be the confident smaller answer that section
 //! prohibits.
 //!
-//! **A drop is only `slice-irrelevant` if the order it was decided against is complete.**
-//! See [`crate::causal::Completeness`]. Under a partial order the same drop is
-//! `heuristic-cutoff`, because non-ancestry in an incomplete order proves nothing.
+//! **A drop is only `slice-irrelevant` if the declaration it was decided against is
+//! complete.** See [`crate::causal::Completeness`] for stage 2 and
+//! [`crate::property::Coverage`] for stage 3. Under a partial declaration the same drop is
+//! `heuristic-cutoff`, because non-ancestry in an incomplete order, and non-relevance in an
+//! incomplete relevance set, prove nothing.
 //!
-//! # Why the closure check runs on the published selection
+//! # Why both checks run on the published selection
 //!
 //! [`crate::causal::CausalOrder::backward_closure`] produces a set that is closed by
 //! construction — and that is exactly why the licence does not come from it. RFC 0028's
 //! Validation section requires a checker independent of the producer, so
-//! [`CausalCompile::run`] takes the selection it is actually about to publish (after
-//! redaction has removed items from it) and hands it to
-//! [`crate::causal::CausalOrder::closure_violation`], which reads the order's edges and
-//! nothing else. The licence is issued from the checker's verdict. A slicer bug that dropped
-//! a predecessor therefore costs the guarantee rather than producing a false one.
+//! [`CausalCompile::run`] takes the selection it is actually about to publish — after
+//! redaction has removed items from it, after stage 3 narrowed it and after stage 4 grew it —
+//! and hands it to [`crate::causal::CausalOrder::closure_violation`], which reads the order's
+//! edges and nothing else, and to [`crate::monitor::PropertyMonitor`], which runs the
+//! automaton over the whole order and over that selection and compares. Both licences are
+//! issued from a checker's verdict. A slicer bug that dropped a predecessor, or a filter bug
+//! that dropped a property-relevant event, therefore costs the guarantee rather than
+//! producing a false one.
+//!
+//! # Which stage's reason a drop is recorded under
+//!
+//! Every candidate is dispositioned exactly once, and the reason names the stage that
+//! decided it. The ladder, in the order it is applied:
+//!
+//! 1. In the published selection → selected.
+//! 2. Withheld by field policy → an irretrievable `redaction` omission.
+//! 3. Claimed by the dependence join and declined by stage 4 → `heuristic-cutoff`
+//!    ([`crate::dependence::Inadmissible::omission_reason`]). Stage 4's decision is taken
+//!    *before* stage 3's on purpose: stage 3 drops every `source` and `model` candidate,
+//!    because no property automaton steps on a source span, and recording those as *provably*
+//!    outside the property-directed slice would be false about exactly the items stage 4
+//!    exists to decide.
+//! 4. In the stage-2 slice and not in stage 3's → the automaton's
+//!    [`crate::property::Coverage::omission_reason`].
+//! 5. Otherwise → the order's [`crate::causal::Completeness::omission_reason`].
+//!
+//! Where two stages both declined an item the manifest records the weaker claim. A drop is
+//! `slice-irrelevant` only where the stage that decided it could prove it.
 //!
 //! # Determinism (INV-005)
 //!
@@ -70,6 +112,18 @@
 //!   checker is not this crate's, and rule C2 is enforced in
 //!   [`crate::guarantee::GuaranteeSet::seal`] so the later group that adds it finds the rule
 //!   already in force.
+//! - **A seal-level rule for `PropertyPreserving`.** RFC 0028's pipeline table reads
+//!   "`PropertyPreserving`, with stage 2", and the preservation obligation in its "Formal
+//!   model" has causal closure as a hypothesis — so this pipeline never claims the one without
+//!   the other, because [`crate::monitor::PropertyMonitor`] checks closure itself before
+//!   concluding. It is deliberately *not* added to
+//!   [`crate::guarantee::GuaranteeSet::seal`]: the RFC states six composition rules and this is
+//!   not one of them, and inventing a seventh would put a rule in the artifact contract that
+//!   the RFC does not carry. `a_property_preserving_pack_is_always_causally_closed` pins the
+//!   pipeline-level fact instead.
+//! - **Stage 4's `id` and array position.** [`Compilation::admissible_items`] builds the items
+//!   through the landed typed constructors and under the candidate's own identity; deciding
+//!   the published `selected[]` order and the pack they land in is whole-pack assembly's.
 //!
 //! # Clause → test
 //!
@@ -83,6 +137,13 @@
 //! | closure = selection + Σ counts | INV-007 | `every_compile_reconciles` |
 //! | complete vs partial decides the reason | RFC 0028, "Omission manifest" | `a_partial_order_drops_to_heuristic_cutoff` |
 //! | the residual anchor resolves in the selection | RFC 0028, "Expansion protocol" | `a_residual_anchor_outside_the_selection_is_refused` |
+//! | stage 3 licenses `PropertyPreserving` from the monitor | RFC 0028, "Validation" | `stage_three_licenses_property_preservation` |
+//! | a monitor that disagrees costs the guarantee | RFC 0028, "Validation" | `a_monitor_that_disagrees_costs_the_guarantee` |
+//! | `PropertyPreserving` never travels without closure | RFC 0028, "Compiler pipeline" | `a_property_preserving_pack_is_always_causally_closed` |
+//! | stage 3's drops carry the automaton's coverage | RFC 0028, "Omission manifest" | `stage_three_drops_carry_the_automatons_coverage` |
+//! | stage 4 admits only a corroborated dependence | INV-016 | `stage_four_admits_only_a_corroborated_dependence` |
+//! | a join claim must name a `source` or `model` candidate | RFC 0028, "Compiler pipeline" | `a_join_claim_about_another_kind_is_refused` |
+//! | a withheld candidate stays a redaction omission | plan §18.4 | `a_withheld_candidate_is_never_admitted` |
 //! | deterministic (INV-005) | INV-005, ADR-0003 | `two_runs_of_one_compile_agree` |
 
 use core::fmt;
@@ -92,9 +153,13 @@ use continuum_value::value::Name;
 
 use crate::accounting::{Accounting, AccountingError, CandidateSet, ClosedAccounting, Omitted};
 use crate::causal::{CausalError, CausalOrder, ClosureViolation};
+use crate::dependence::{Admissibility, DependenceJoin, Inadmissible};
 use crate::expansion::ExpansionQuery;
 use crate::guarantee::{Guarantee, GuaranteeSet, License, SealedGuarantees};
+use crate::monitor::{MonitorVerdict, PropertyMonitor};
 use crate::omission::IrretrievableReason;
+use crate::property::{PropertyAutomaton, PropertyFilter};
+use crate::selection::{SelectedItem, SelectionKind};
 use crate::stage::{Phase, Stage, StageIntermediate, StageTrail, TrailError};
 
 /// Why a candidate is withheld from *this* caller — the three members of the schema's shared
@@ -186,18 +251,57 @@ impl RedactionPolicy {
     }
 }
 
-/// A compile of stages 1–2 over one causal order under one field policy.
+/// The property inputs stage 3 needs: the automaton the filter is directed by, and the
+/// **independent** monitor that licenses the guarantee.
+///
+/// They are two fields rather than one because they are two authorities. RFC 0028: "an
+/// implementation that reuses the compiler's own automaton has checked nothing" — see
+/// [`crate::monitor`]'s "The independence argument" for what the separation does and does not
+/// establish.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PropertyStage {
+    automaton: PropertyAutomaton,
+    monitor: PropertyMonitor,
+}
+
+/// A compile of stages 1–4 over one causal order under one field policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CausalCompile {
     order: CausalOrder,
     policy: RedactionPolicy,
+    property: Option<PropertyStage>,
+    dependence: Option<DependenceJoin>,
 }
 
 impl CausalCompile {
-    /// Prepare a compile.
+    /// Prepare a compile of stages 1–2.
     #[must_use]
     pub const fn new(order: CausalOrder, policy: RedactionPolicy) -> Self {
-        Self { order, policy }
+        Self {
+            order,
+            policy,
+            property: None,
+            dependence: None,
+        }
+    }
+
+    /// Add stage 3, directed by `automaton` and checked by `monitor`.
+    ///
+    /// The two are separate arguments on purpose: the filter is directed by the first and the
+    /// licence is issued from the second, so a caller may supply a stricter monitor than the
+    /// filter was given and the guarantee is then refused rather than assumed.
+    #[must_use]
+    pub fn with_property(mut self, automaton: PropertyAutomaton, monitor: PropertyMonitor) -> Self {
+        self.property = Some(PropertyStage { automaton, monitor });
+        self
+    }
+
+    /// Add stage 4, joining an untrusted source correspondence with a trusted execution
+    /// record (INV-016; see [`crate::dependence`]).
+    #[must_use]
+    pub fn with_dependence(mut self, join: DependenceJoin) -> Self {
+        self.dependence = Some(join);
+        self
     }
 
     /// The causal order this compile slices over.
@@ -212,17 +316,37 @@ impl CausalCompile {
         &self.policy
     }
 
-    /// Run the pre-pass, stage 1, and stage 2.
+    /// The property automaton stage 3 filters by, when stage 3 runs.
+    #[must_use]
+    pub fn automaton(&self) -> Option<&PropertyAutomaton> {
+        self.property.as_ref().map(|stage| &stage.automaton)
+    }
+
+    /// The independent monitor that licenses `PropertyPreserving`, when stage 3 runs.
+    #[must_use]
+    pub fn monitor(&self) -> Option<&PropertyMonitor> {
+        self.property.as_ref().map(|stage| &stage.monitor)
+    }
+
+    /// The dependence join stage 4 decides admissibility from, when stage 4 runs.
+    #[must_use]
+    pub const fn dependence(&self) -> Option<&DependenceJoin> {
+        self.dependence.as_ref()
+    }
+
+    /// Run the pre-pass, stage 1, stage 2, and the stages 3 and 4 that were configured.
     ///
     /// `roots` is stage 1's output — the handles the question names. `residual` is the
-    /// expansion query that retrieves the candidates stage 2 leaves behind; its anchor MUST
-    /// resolve in the published selection, because "expansion is navigation over a published
-    /// pack, not a general graph query" (RFC 0028, "Expansion protocol").
+    /// expansion query that retrieves the candidates the pipeline leaves behind; its anchor
+    /// MUST resolve in the published selection, because "expansion is navigation over a
+    /// published pack, not a general graph query" (RFC 0028, "Expansion protocol").
     ///
     /// # Errors
     ///
     /// [`CompileError::RedactedRoot`] for a root field policy withheld (correction 12);
-    /// [`CompileError::Causal`] for a root that is not a node of the order;
+    /// [`CompileError::Causal`] for a root, or a dependence-join claim, that is not a node of
+    /// the order; [`CompileError::NotACorrespondenceKind`] for a join claim about a candidate
+    /// whose kind is neither `source` nor `model`, which is stage 4's column and nothing else;
     /// [`CompileError::AnchorNotSelected`] for a residual query nothing published anchors;
     /// [`CompileError::Accounting`] and [`CompileError::Trail`] where the closed-accounting
     /// or trail disciplines refuse — neither can be reached by a caller of this function, and
@@ -291,11 +415,88 @@ impl CausalCompile {
             },
         ))?;
 
-        // --- the independent closure check, on the selection that will be published -----
-        let violation = self.order.closure_violation(&selection);
+        // --- stage 3: property-automaton relevance filtering ---------------------------
+        // A narrowing, and the only stage of the four that is one. Seeded from the
+        // automaton's *relevance* set — the alphabet together with the abstraction-relevant
+        // hidden events — and re-closed, so the output is still downward closed and no hidden
+        // event is excluded "on the grounds that no observer publishes it".
+        let mut working = selection.clone();
+        if let Some(property) = &self.property {
+            working = PropertyFilter::retain(&property.automaton, &self.order, &selection)?;
+            trail.record(StageIntermediate::noted(
+                Phase::Stage(Stage::PropertyRelevance),
+                working.iter().cloned(),
+                if working.len() == selection.len() {
+                    "property-retained"
+                } else {
+                    "property-filtered"
+                },
+            ))?;
+        }
+        let property_core = working.clone();
+
+        // --- stage 4: the static/dynamic dependence join --------------------------------
+        let mut admissible: BTreeMap<Name, crate::dependence::Admissible> = BTreeMap::new();
+        let mut declined: BTreeMap<Name, Inadmissible> = BTreeMap::new();
+        if let Some(join) = &self.dependence {
+            for id in join.claimed() {
+                // Structure is checked: a claim about a candidate this compile never held, or
+                // about a candidate of another kind, is a mismatch between the join and the
+                // order rather than an assertion to corroborate.
+                let Some(kind) = self.order.kind(id) else {
+                    return Err(CompileError::Causal(CausalError::UnknownEndpoint {
+                        id: id.clone(),
+                    }));
+                };
+                if !matches!(kind, SelectionKind::Source | SelectionKind::Model) {
+                    return Err(CompileError::NotACorrespondenceKind {
+                        id: id.clone(),
+                        kind,
+                    });
+                }
+                // Redaction wins: a withheld candidate is not stage 4's to admit or decline,
+                // and its omission stays the irretrievable `redaction` record the pre-pass
+                // earned it.
+                if self.policy.withholds(id) {
+                    continue;
+                }
+                match join.admissibility(id, &property_core) {
+                    Admissibility::Admissible(admitted) => {
+                        working.insert(id.clone());
+                        admissible.insert(id.clone(), admitted);
+                    }
+                    Admissibility::Inadmissible(reason) => {
+                        declined.insert(id.clone(), reason);
+                    }
+                }
+            }
+            trail.record(StageIntermediate::noted(
+                Phase::Stage(Stage::DependenceJoin),
+                working.iter().cloned(),
+                if admissible.is_empty() {
+                    "no-admissible-correspondence"
+                } else {
+                    "correspondence-joined"
+                },
+            ))?;
+        }
+        let published = working;
+
+        // --- the independent checks, on the selection that will be published -------------
+        let violation = self.order.closure_violation(&published);
         let mut guarantees = GuaranteeSet::empty();
         if violation.is_none() {
             guarantees.claim(License::issue(Guarantee::CausallyClosed));
+        }
+        let monitor_verdict = self
+            .property
+            .as_ref()
+            .map(|property| property.monitor.verdict(&self.order, &published));
+        if monitor_verdict
+            .as_ref()
+            .is_some_and(MonitorVerdict::is_preserving)
+        {
+            guarantees.claim(License::issue(Guarantee::PropertyPreserving));
         }
 
         // --- accounting: every candidate dispositioned ----------------------------------
@@ -306,31 +507,46 @@ impl CausalCompile {
                 .collect::<Vec<_>>(),
         )?;
         let mut accounting = Accounting::over(candidates);
-        let slice_reason = self.order.completeness().omission_reason();
+        let causal_reason = self.order.completeness().omission_reason();
+        let property_reason = self
+            .property
+            .as_ref()
+            .map(|property| property.automaton.coverage().omission_reason());
         let mut residual_used = false;
         for (id, _) in self.order.nodes() {
-            if selection.contains(id) {
+            if published.contains(id) {
                 accounting.select(id)?;
-            } else if self.policy.withholds(id) {
+                continue;
+            }
+            if self.policy.withholds(id) {
                 // Withheld, whether or not the slice wanted it. `expandable: false` and the
                 // reason that explains irretrievability — RFC 0028's expansion table's
                 // redacted row, read at compile time rather than at expansion time.
                 accounting.omit(id, Omitted::Irretrievable(IrretrievableReason::Redaction))?;
-            } else {
-                residual_used = true;
-                accounting.omit(
-                    id,
-                    Omitted::Expandable {
-                        reason: slice_reason,
-                        query: residual.clone(),
-                    },
-                )?;
+                continue;
             }
+            // The reason names the stage that decided the drop; see the module
+            // documentation's "Which stage's reason a drop is recorded under".
+            let reason = if let Some(inadmissible) = declined.get(id) {
+                inadmissible.omission_reason()
+            } else if selection.contains(id) {
+                property_reason.unwrap_or(causal_reason)
+            } else {
+                causal_reason
+            };
+            residual_used = true;
+            accounting.omit(
+                id,
+                Omitted::Expandable {
+                    reason,
+                    query: residual.clone(),
+                },
+            )?;
         }
         let accounting = accounting.close()?;
         accounting.reconcile()?;
 
-        if residual_used && !selection.contains(residual.anchor()) {
+        if residual_used && !published.contains(residual.anchor()) {
             return Err(CompileError::AnchorNotSelected {
                 anchor: residual.anchor().clone(),
             });
@@ -342,11 +558,14 @@ impl CausalCompile {
             guarantees: guarantees.seal().map_err(|_| CompileError::Unreachable)?,
             closure_violation: violation,
             redaction_gap,
+            monitor_verdict,
+            admissible,
+            declined,
         })
     }
 }
 
-/// What stages 1–2 produced.
+/// What the pipeline produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Compilation {
     trail: StageTrail,
@@ -354,6 +573,9 @@ pub struct Compilation {
     guarantees: SealedGuarantees,
     closure_violation: Option<ClosureViolation>,
     redaction_gap: BTreeSet<Name>,
+    monitor_verdict: Option<MonitorVerdict>,
+    admissible: BTreeMap<Name, crate::dependence::Admissible>,
+    declined: BTreeMap<Name, Inadmissible>,
 }
 
 impl Compilation {
@@ -402,6 +624,49 @@ impl Compilation {
             .members()
             .contains(&Guarantee::CausallyClosed)
     }
+
+    /// What the independent property monitor concluded, when stage 3 ran.
+    ///
+    /// `None` means stage 3 did not run — a different fact from a monitor that ran and
+    /// declined, which is [`MonitorVerdict::Inapplicable`].
+    #[must_use]
+    pub const fn monitor_verdict(&self) -> Option<&MonitorVerdict> {
+        self.monitor_verdict.as_ref()
+    }
+
+    /// Whether this compile established property preservation.
+    #[must_use]
+    pub fn is_property_preserving(&self) -> bool {
+        self.guarantees
+            .members()
+            .contains(&Guarantee::PropertyPreserving)
+    }
+
+    /// The `source` and `model` candidates stage 4 admitted, in canonical order.
+    #[must_use]
+    pub const fn admissible(&self) -> &BTreeMap<Name, crate::dependence::Admissible> {
+        &self.admissible
+    }
+
+    /// The `source` and `model` candidates stage 4 declined, each with its typed reason.
+    #[must_use]
+    pub const fn declined(&self) -> &BTreeMap<Name, Inadmissible> {
+        &self.declined
+    }
+
+    /// The admitted items, projected into the pack's `selected[]` shape under their own
+    /// candidate identities.
+    ///
+    /// Built through [`crate::source::SourceRef::into_selected_item`] and
+    /// [`crate::model::ModelActionRef::into_selected_item`], which are this crate's only
+    /// constructors for those two kinds and take no string parameter (INV-016).
+    #[must_use]
+    pub fn admissible_items(&self) -> Vec<SelectedItem> {
+        self.admissible
+            .iter()
+            .map(|(id, admitted)| admitted.clone().into_selected_item(id.clone()))
+            .collect()
+    }
 }
 
 /// A way a compile of stages 1–2 refuses.
@@ -421,6 +686,13 @@ pub enum CompileError {
     AnchorNotSelected {
         /// The anchor that does not resolve in the selection.
         anchor: Name,
+    },
+    /// The dependence join claims a candidate whose kind is neither `source` nor `model`.
+    NotACorrespondenceKind {
+        /// The claimed candidate.
+        id: Name,
+        /// The kind it actually has.
+        kind: SelectionKind,
     },
     /// Closed accounting refused.
     Accounting(AccountingError),
@@ -463,6 +735,12 @@ impl fmt::Display for CompileError {
                 "the residual expansion query anchors at `{anchor}`, which this pack does \
                  not publish; expansion is navigation over a published pack (RFC 0028)"
             ),
+            Self::NotACorrespondenceKind { id, kind } => write!(
+                f,
+                "the dependence join claims `{id}`, whose kind is `{kind}`; stage 4 licenses \
+                 the admissibility of `source` and `model` items and nothing else (RFC 0028, \
+                 \"Compiler pipeline\")"
+            ),
             Self::Accounting(error) => write!(f, "{error}"),
             Self::Trail(error) => write!(f, "{error}"),
             Self::Unreachable => {
@@ -478,9 +756,16 @@ impl core::error::Error for CompileError {}
 mod tests {
     use super::*;
     use crate::causal::PartialReason;
+    use crate::dependence::{
+        CorrespondenceClaim, CorrespondenceRef, ExecutionDependence, SourceCorrespondence,
+    };
     use crate::expansion::ExpansionRelation;
+    use crate::model::ModelActionRef;
+    use crate::monitor::{Inapplicable, MonitorDisagreement};
     use crate::omission::OmissionReason;
-    use crate::selection::SelectionKind;
+    use crate::property::{AutomatonState, Coverage, CoverageGap};
+    use crate::source::{SourceRef, SourceSpan};
+    use continuum_workspace::snapshot::WorkspacePath;
 
     fn name(text: &str) -> Name {
         Name::new(text).expect("well formed")
@@ -775,6 +1060,478 @@ mod tests {
         let other = clean()
             .run(&ids(&["e_loss"]), &residual())
             .expect("compiles");
+        assert_eq!(one, other);
+        assert_eq!(
+            one.trail().to_json().to_canonical_bytes(),
+            other.trail().to_json().to_canonical_bytes()
+        );
+    }
+
+    // =================================================================================
+    // stages 3 and 4
+    // =================================================================================
+
+    fn state(text: &str) -> AutomatonState {
+        AutomatonState::new(name(text))
+    }
+
+    /// The stage-1–2 fixture, plus an isolated abstraction-relevant hidden `e_flush`, an
+    /// isolated property-irrelevant `e_probe`, and a `model` candidate.
+    fn wider_order() -> CausalOrder {
+        CausalOrder::new(
+            [
+                (name("e_begin"), SelectionKind::Event),
+                (name("e_submit"), SelectionKind::Event),
+                (name("e_ack"), SelectionKind::Event),
+                (name("e_loss"), SelectionKind::Event),
+                (name("e_flush"), SelectionKind::Event),
+                (name("e_probe"), SelectionKind::Event),
+                (name("n_beat_1"), SelectionKind::Event),
+                (name("s_writer"), SelectionKind::Source),
+                (name("m_commit"), SelectionKind::Model),
+            ],
+            [
+                (name("e_submit"), name("e_begin")),
+                (name("e_ack"), name("e_submit")),
+                (name("e_loss"), name("e_ack")),
+            ],
+        )
+        .expect("a well-formed order")
+    }
+
+    fn automaton(coverage: Coverage) -> PropertyAutomaton {
+        PropertyAutomaton::new(
+            state("q_0"),
+            [
+                (state("q_0"), name("e_submit"), state("q_1")),
+                (state("q_1"), name("e_ack"), state("q_2")),
+                (state("q_2"), name("e_loss"), state("q_bad")),
+            ],
+            [state("q_bad")],
+            [name("e_flush")],
+            coverage,
+        )
+        .expect("a well-formed automaton")
+    }
+
+    /// `s_writer` is corroborated on `e_ack`; `m_commit` is claimed on `e_submit` and
+    /// attested nowhere.
+    fn join() -> DependenceJoin {
+        DependenceJoin::new(
+            SourceCorrespondence::of([
+                (
+                    name("s_writer"),
+                    CorrespondenceClaim::new(
+                        CorrespondenceRef::Source(SourceRef::new(
+                            SourceSpan::new(
+                                WorkspacePath::new("crates/a/src/lib.rs").expect("well formed"),
+                                12,
+                                1,
+                                12,
+                                9,
+                            )
+                            .expect("well ordered"),
+                        )),
+                        [name("e_ack")],
+                    ),
+                ),
+                (
+                    name("m_commit"),
+                    CorrespondenceClaim::new(
+                        CorrespondenceRef::Model(ModelActionRef::action_only(name("Commit"))),
+                        [name("e_submit")],
+                    ),
+                ),
+            ])
+            .expect("a well-formed correspondence"),
+            ExecutionDependence::attesting([(name("s_writer"), ids(&["e_ack"]))])
+                .expect("a well-formed execution record"),
+        )
+    }
+
+    fn staged() -> CausalCompile {
+        CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(
+                automaton(Coverage::Total),
+                PropertyMonitor::over(automaton(Coverage::Total)),
+            )
+            .with_dependence(join())
+    }
+
+    fn roots() -> BTreeSet<Name> {
+        ids(&["e_loss", "e_flush", "e_probe"])
+    }
+
+    #[test]
+    fn stage_three_licenses_property_preservation() {
+        let compiled = staged().run(&roots(), &residual()).expect("compiles");
+
+        assert_eq!(
+            compiled.trail().phases(),
+            [
+                Phase::Redaction,
+                Phase::Stage(Stage::RootSelection),
+                Phase::Stage(Stage::CausalSlicing),
+                Phase::Stage(Stage::PropertyRelevance),
+                Phase::Stage(Stage::DependenceJoin),
+            ]
+        );
+        assert_eq!(
+            compiled.monitor_verdict(),
+            Some(&MonitorVerdict::Preserving)
+        );
+        assert!(compiled.is_property_preserving());
+        assert!(compiled.is_causally_closed());
+        assert_eq!(
+            compiled.guarantees().members(),
+            [Guarantee::PropertyPreserving, Guarantee::CausallyClosed]
+        );
+    }
+
+    #[test]
+    fn stage_three_narrows_and_stage_four_grows() {
+        let compiled = staged().run(&roots(), &residual()).expect("compiles");
+        let trail = compiled.trail();
+
+        // Stage 2 grew the three roots into the chain; stage 3 dropped `e_probe`; stage 4
+        // added the one corroborated source span.
+        assert_eq!(
+            trail
+                .intermediate(Phase::Stage(Stage::CausalSlicing))
+                .expect("stage 2")
+                .working_set(),
+            &ids(&[
+                "e_begin", "e_submit", "e_ack", "e_loss", "e_flush", "e_probe"
+            ])
+        );
+        assert_eq!(
+            trail
+                .intermediate(Phase::Stage(Stage::PropertyRelevance))
+                .expect("stage 3")
+                .working_set(),
+            &ids(&["e_begin", "e_submit", "e_ack", "e_loss", "e_flush"])
+        );
+        assert_eq!(
+            trail
+                .intermediate(Phase::Stage(Stage::PropertyRelevance))
+                .expect("stage 3")
+                .note(),
+            Some("property-filtered")
+        );
+        assert_eq!(
+            trail
+                .intermediate(Phase::Stage(Stage::DependenceJoin))
+                .expect("stage 4")
+                .working_set(),
+            &ids(&[
+                "e_begin", "e_submit", "e_ack", "e_loss", "e_flush", "s_writer"
+            ])
+        );
+        assert_eq!(
+            trail
+                .intermediate(Phase::Stage(Stage::DependenceJoin))
+                .expect("stage 4")
+                .note(),
+            Some("correspondence-joined")
+        );
+    }
+
+    /// The independence claim at pipeline grain: the filter is directed by one automaton and
+    /// the licence is issued by a monitor over another. A stricter monitor refuses.
+    #[test]
+    fn a_monitor_that_disagrees_costs_the_guarantee() {
+        let stricter = PropertyAutomaton::new(
+            state("q_0"),
+            [
+                (state("q_0"), name("e_submit"), state("q_1")),
+                (state("q_1"), name("e_ack"), state("q_2")),
+                (state("q_2"), name("e_loss"), state("q_bad")),
+                // The monitor also observes the diagnostic chain stage 3's automaton ignores.
+                (state("q_bad"), name("e_probe"), state("q_bad")),
+            ],
+            [state("q_bad")],
+            [name("e_flush")],
+            Coverage::Total,
+        )
+        .expect("a well-formed automaton");
+        let compiled = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(automaton(Coverage::Total), PropertyMonitor::over(stricter))
+            .with_dependence(join())
+            .run(&roots(), &residual())
+            .expect("compiles");
+
+        assert!(!compiled.is_property_preserving());
+        assert_eq!(
+            compiled.monitor_verdict(),
+            Some(&MonitorVerdict::Divergent(
+                MonitorDisagreement::ObservedEventDropped {
+                    id: name("e_probe")
+                }
+            ))
+        );
+        // The rest of the pack is unchanged: the guarantee is dropped, never the honesty.
+        assert!(compiled.is_causally_closed());
+        compiled.accounting().reconcile().expect("halves agree");
+    }
+
+    #[test]
+    fn a_monitor_that_observes_nothing_here_is_inapplicable_not_preserving() {
+        let elsewhere = PropertyAutomaton::new(
+            state("q_0"),
+            [(state("q_0"), name("e_elsewhere"), state("q_1"))],
+            [state("q_1")],
+            [],
+            Coverage::Total,
+        )
+        .expect("a well-formed automaton");
+        let compiled = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(automaton(Coverage::Total), PropertyMonitor::over(elsewhere))
+            .with_dependence(join())
+            .run(&roots(), &residual())
+            .expect("compiles");
+
+        assert!(!compiled.is_property_preserving());
+        assert_eq!(
+            compiled.monitor_verdict(),
+            Some(&MonitorVerdict::Inapplicable(Inapplicable::NoObservedEvent))
+        );
+    }
+
+    #[test]
+    fn a_property_preserving_pack_is_always_causally_closed() {
+        // RFC 0028's pipeline table reads "`PropertyPreserving`, with stage 2". The monitor
+        // checks closure itself, so the pipeline cannot claim the one without the other.
+        for policy in [
+            RedactionPolicy::permitting_everything(),
+            RedactionPolicy::withholding([(name("e_submit"), RedactionReason::Purged)]),
+            RedactionPolicy::withholding([(name("n_beat_1"), RedactionReason::Lost)]),
+        ] {
+            let compiled = CausalCompile::new(wider_order(), policy)
+                .with_property(
+                    automaton(Coverage::Total),
+                    PropertyMonitor::over(automaton(Coverage::Total)),
+                )
+                .with_dependence(join())
+                .run(&roots(), &residual())
+                .expect("compiles");
+            assert!(!compiled.is_property_preserving() || compiled.is_causally_closed());
+        }
+    }
+
+    #[test]
+    fn a_redaction_hole_costs_property_preservation_too() {
+        let compiled = CausalCompile::new(
+            wider_order(),
+            RedactionPolicy::withholding([(name("e_submit"), RedactionReason::Purged)]),
+        )
+        .with_property(
+            automaton(Coverage::Total),
+            PropertyMonitor::over(automaton(Coverage::Total)),
+        )
+        .run(&roots(), &residual())
+        .expect("compiles");
+
+        assert!(!compiled.is_causally_closed());
+        assert!(!compiled.is_property_preserving());
+        assert_eq!(
+            compiled.monitor_verdict(),
+            Some(&MonitorVerdict::Divergent(
+                MonitorDisagreement::ObservedEventDropped {
+                    id: name("e_submit")
+                }
+            ))
+        );
+    }
+
+    /// One manifest, three deciding stages, and each cell's reason traceable to the stage
+    /// that decided it — the first compile in which `slice-irrelevant` and `heuristic-cutoff`
+    /// are distinguishable at all.
+    #[test]
+    fn stage_three_drops_carry_the_automatons_coverage() {
+        let cells = |compiled: &Compilation| {
+            compiled
+                .accounting()
+                .manifest()
+                .records()
+                .iter()
+                .map(|record| ((record.kind(), record.reason()), record.count()))
+                .collect::<BTreeMap<(SelectionKind, OmissionReason), u32>>()
+        };
+
+        // Total coverage: a stage-3 drop (`e_probe`) is a proof of irrelevance, and so is a
+        // stage-2 drop (`n_beat_1`) under a complete order — one cell of two.
+        let total = staged().run(&roots(), &residual()).expect("compiles");
+        assert_eq!(
+            cells(&total),
+            [
+                ((SelectionKind::Event, OmissionReason::SliceIrrelevant), 2),
+                ((SelectionKind::Model, OmissionReason::HeuristicCutoff), 1),
+            ]
+            .into()
+        );
+
+        // Partial coverage: the same drops, and `e_probe` splits off into its own honest
+        // cell while the stage-2 drop keeps its proof. The two reasons now live in one
+        // manifest, each naming the stage that could — or could not — decide.
+        let partial = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_property(
+                automaton(Coverage::Partial {
+                    reason: CoverageGap::UnenumeratedAbstraction,
+                }),
+                PropertyMonitor::over(automaton(Coverage::Total)),
+            )
+            .with_dependence(join())
+            .run(&roots(), &residual())
+            .expect("compiles");
+        assert_eq!(
+            cells(&partial),
+            [
+                ((SelectionKind::Event, OmissionReason::HeuristicCutoff), 1),
+                ((SelectionKind::Event, OmissionReason::SliceIrrelevant), 1),
+                ((SelectionKind::Model, OmissionReason::HeuristicCutoff), 1),
+            ]
+            .into()
+        );
+        // The selection is unchanged — coverage is a statement about what a drop *proves*.
+        assert_eq!(total.selected(), partial.selected());
+        assert!(partial.is_property_preserving());
+        partial.accounting().reconcile().expect("halves agree");
+    }
+
+    #[test]
+    fn stage_four_admits_only_a_corroborated_dependence() {
+        let compiled = staged().run(&roots(), &residual()).expect("compiles");
+
+        assert!(compiled.selected().contains(&name("s_writer")));
+        assert!(!compiled.selected().contains(&name("m_commit")));
+        assert_eq!(
+            compiled.declined().get(&name("m_commit")),
+            Some(&Inadmissible::UncorroboratedSource)
+        );
+        assert_eq!(
+            compiled.admissible().keys().collect::<Vec<_>>(),
+            [&name("s_writer")]
+        );
+        let items = compiled.admissible_items();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind(), SelectionKind::Source);
+        assert_eq!(items[0].summary(), "crates/a/src/lib.rs:12:1-12:9");
+        // The declined model candidate is a `heuristic-cutoff` record, never `slice-irrelevant`.
+        let model_record = compiled
+            .accounting()
+            .manifest()
+            .records()
+            .iter()
+            .find(|record| record.kind() == SelectionKind::Model)
+            .expect("the model candidate is in the manifest");
+        assert_eq!(model_record.reason(), OmissionReason::HeuristicCutoff);
+        assert_eq!(model_record.count(), 1);
+        compiled.accounting().reconcile().expect("halves agree");
+    }
+
+    #[test]
+    fn a_join_claim_about_another_kind_is_refused() {
+        let miscast = DependenceJoin::new(
+            SourceCorrespondence::of([(
+                name("e_ack"),
+                CorrespondenceClaim::new(
+                    CorrespondenceRef::Model(ModelActionRef::action_only(name("Commit"))),
+                    [name("e_loss")],
+                ),
+            )])
+            .expect("a well-formed correspondence"),
+            ExecutionDependence::none(),
+        );
+        assert_eq!(
+            CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+                .with_dependence(miscast)
+                .run(&roots(), &residual()),
+            Err(CompileError::NotACorrespondenceKind {
+                id: name("e_ack"),
+                kind: SelectionKind::Event,
+            })
+        );
+    }
+
+    #[test]
+    fn a_join_claim_about_a_candidate_from_nowhere_is_refused() {
+        let stray = DependenceJoin::new(
+            SourceCorrespondence::of([(
+                name("s_nowhere"),
+                CorrespondenceClaim::new(
+                    CorrespondenceRef::Model(ModelActionRef::action_only(name("Commit"))),
+                    [name("e_loss")],
+                ),
+            )])
+            .expect("a well-formed correspondence"),
+            ExecutionDependence::none(),
+        );
+        assert_eq!(
+            CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+                .with_dependence(stray)
+                .run(&roots(), &residual()),
+            Err(CompileError::Causal(CausalError::UnknownEndpoint {
+                id: name("s_nowhere"),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_withheld_candidate_is_never_admitted() {
+        let compiled = CausalCompile::new(
+            wider_order(),
+            RedactionPolicy::withholding([(name("s_writer"), RedactionReason::Purged)]),
+        )
+        .with_property(
+            automaton(Coverage::Total),
+            PropertyMonitor::over(automaton(Coverage::Total)),
+        )
+        .with_dependence(join())
+        .run(&roots(), &residual())
+        .expect("compiles");
+
+        assert!(!compiled.selected().contains(&name("s_writer")));
+        assert!(compiled.admissible().is_empty());
+        assert!(!compiled.declined().contains_key(&name("s_writer")));
+        let redacted = compiled
+            .accounting()
+            .manifest()
+            .records()
+            .iter()
+            .find(|record| record.reason() == OmissionReason::Redaction)
+            .expect("the withheld span is a redaction omission");
+        assert_eq!(redacted.kind(), SelectionKind::Source);
+        assert!(!redacted.retrievability().is_expandable());
+        // The property core is untouched, so the property guarantee survives.
+        assert!(compiled.is_property_preserving());
+    }
+
+    #[test]
+    fn a_stage_that_did_not_run_leaves_no_intermediate() {
+        let compiled = CausalCompile::new(wider_order(), RedactionPolicy::permitting_everything())
+            .with_dependence(join())
+            .run(&roots(), &residual())
+            .expect("compiles");
+        assert!(
+            compiled
+                .trail()
+                .intermediate(Phase::Stage(Stage::PropertyRelevance))
+                .is_none()
+        );
+        assert!(
+            compiled
+                .trail()
+                .intermediate(Phase::Stage(Stage::DependenceJoin))
+                .is_some()
+        );
+        assert_eq!(compiled.monitor_verdict(), None);
+        assert!(!compiled.is_property_preserving());
+    }
+
+    #[test]
+    fn two_runs_of_a_four_stage_compile_agree() {
+        let one = staged().run(&roots(), &residual()).expect("compiles");
+        let other = staged().run(&roots(), &residual()).expect("compiles");
         assert_eq!(one, other);
         assert_eq!(
             one.trail().to_json().to_canonical_bytes(),

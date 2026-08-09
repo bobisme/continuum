@@ -97,6 +97,26 @@
 //! (the guarantee is dropped, never the honesty), and a residual expansion query nothing
 //! published anchors.
 //!
+//! [`property`], [`monitor`], [`dependence`] (bn-1kj2n — the compiler's **stage group 2**, RFC
+//! 0028 stages 3–4) — the pipeline's next two stages, appended to the same trail and the same
+//! accounting. [`property`] carries the finite, deterministic property automaton stage 3 is
+//! directed by and the filter itself; the automaton declares its *relevance* set as the
+//! alphabet **together with** the abstraction-relevant hidden events, because "a compiler MUST
+//! NOT exclude an abstraction-relevant hidden event on the grounds that no observer publishes
+//! it", and a declared [`property::Coverage`] decides — exactly as [`causal::Completeness`]
+//! does for stage 2 — whether a stage-3 drop is a proof or an undecided. [`monitor`] is the
+//! **independent** property monitor RFC 0028's Validation section requires ("an implementation
+//! that reuses the compiler's own automaton has checked nothing"): a different computation in a
+//! different module, which runs the automaton over the whole causal order and over the proposed
+//! selection and compares the two runs, and whose verdict is the only thing that licenses
+//! `PropertyPreserving`. [`dependence`] is stage 4, which licenses no guarantee at all but the
+//! *admissibility* of `source` and `model` items: the untrusted static
+//! [`dependence::SourceCorrespondence`] and the trusted dynamic
+//! [`dependence::ExecutionDependence`] are two types with no conversion between them, so a
+//! dependence claimed only by untrusted source input cannot silently upgrade into a selected
+//! item (INV-016), and every stage-4 decline is `heuristic-cutoff` because an uncorroborated
+//! claim is undecided rather than disproved.
+//!
 //! Declined here, and left to their own bones: typed construction for the remaining
 //! seven `SelectionKind` members (`proof`, `assumption`, `counterfactual`,
 //! `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
@@ -121,12 +141,15 @@ pub mod assurance;
 pub mod budget;
 pub mod causal;
 pub mod compile;
+pub mod dependence;
 pub mod event;
 pub mod expansion;
 pub mod guarantee;
 pub mod model;
+pub mod monitor;
 pub mod omission;
 pub mod pack;
+pub mod property;
 pub mod replay;
 pub mod selection;
 pub mod source;
