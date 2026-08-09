@@ -361,7 +361,7 @@ Independence, symmetry, abstraction, slicing, and quotienting are justified rela
 
 Lean version, library closure, theorem hashes, axioms, certificate schema, and checker identity are recorded.
 
-### INV-015 — Agent least authority
+### INV-015 — Agent least authority (delivered: bn-3mjd — crates/continuumd/tests/inv015_agent_least_authority_evidence.rs: clause→site map with live registry/admission sweeps + docs/49 eight-control worker-isolation audit, zero worker-scoped producers, declared-no-producer gaps pinned as tripwires + mutant anti-vacuity)
 
 Agents cannot alter evidence status, sign receipts, access ungranted production traces, or execute unrestricted host effects.
 
