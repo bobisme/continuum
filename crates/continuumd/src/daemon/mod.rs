@@ -93,6 +93,7 @@ pub mod result;
 pub mod state;
 pub mod task;
 pub mod verification;
+pub mod whiteboard;
 pub mod workspace;
 
 use core::fmt;

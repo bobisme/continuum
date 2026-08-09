@@ -28,7 +28,7 @@
 //! # What a family may assume when `handle` is called
 //!
 //! - the request named this connection's negotiated protocol version;
-//! - the operation is one of the registry's 72 and `Call::spec` is its entry;
+//! - the operation is one of the registry's 74 and `Call::spec` is its entry;
 //! - the arguments are the shape that operation declares;
 //! - admission T1–T4 passed for this actor, this capability, and every handle
 //!   [`OperationFamily::scope`] reported — so no family re-checks authority, and none may
@@ -79,6 +79,9 @@ use crate::protocol::operations::task::{
 use crate::protocol::operations::verification::{
     VerificationAwaitRequest, VerificationResultRequest, VerificationStartRequest,
     VerificationStartResponse,
+};
+use crate::protocol::operations::whiteboard::{
+    WhiteboardCompileRequest, WhiteboardCompileResponse,
 };
 use crate::protocol::operations::workspace::{
     WorkspaceCreateRequest, WorkspaceCreateResponse, WorkspaceDiffRequest, WorkspaceDiffResponse,
@@ -169,6 +172,8 @@ pub enum Arguments {
     ContextCompile(ContextCompileRequest),
     /// `context.expand`.
     ContextExpand(ContextExpandRequest),
+    /// `whiteboard.compile`.
+    WhiteboardCompile(WhiteboardCompileRequest),
 }
 
 impl Arguments {
@@ -204,6 +209,7 @@ impl Arguments {
             Self::TaskUpdateBudget(_) => "task.update_budget",
             Self::ContextCompile(_) => "context.compile",
             Self::ContextExpand(_) => "context.expand",
+            Self::WhiteboardCompile(_) => "whiteboard.compile",
         }
     }
 }
@@ -281,6 +287,8 @@ pub enum Payload {
     ContextCompile(ContextCompileResponse),
     /// `context.expand`.
     ContextExpand(ContextExpandResponse),
+    /// `whiteboard.compile`.
+    WhiteboardCompile(WhiteboardCompileResponse),
 }
 
 impl Payload {
@@ -318,6 +326,7 @@ impl Payload {
             Self::TaskUpdateBudget(_) => Some("task.update_budget"),
             Self::ContextCompile(_) => Some("context.compile"),
             Self::ContextExpand(_) => Some("context.expand"),
+            Self::WhiteboardCompile(_) => Some("whiteboard.compile"),
         }
     }
 }

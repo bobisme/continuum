@@ -19,7 +19,7 @@
 //! > — RFC 0026, "Capability administration" (correction 20)
 //!
 //! [`registry::OPERATIONS`](crate::protocol::registry::OPERATIONS) agrees: there is no
-//! `capability` namespace among the 73, and `continuum-workspace`'s store-side
+//! `capability` namespace among the 74, and `continuum-workspace`'s store-side
 //! [`ReferenceStore::mint`] and [`ReferenceStore::revoke`] have **no wire caller** and are
 //! deliberately not given one here. Adding a wire mint would not be filling a gap; it would
 //! be deleting the property RFC 0026 names. So what this module implements is exactly the

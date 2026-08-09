@@ -834,7 +834,8 @@ fn certificate_node(fixture: &mut Fixture, bytes: Vec<u8>) -> EvidenceHandle {
     .expect("the identity seam names the node");
     let record = EvidenceNode {
         kind: EvidenceNodeKind::Certificate,
-        evidence_kind: EvidenceKind::Certificate,
+        evidence_kind: Some(EvidenceKind::Certificate),
+        labels: Vec::new(),
         claim_id: "claim:die-hard-closure".to_owned(),
         artifact,
         // Not the verification service: INV-004 refuses a producer that verifies its own

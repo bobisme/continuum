@@ -9,7 +9,7 @@
 //!
 //! # The architectural guard this file holds to a fact
 //!
-//! `continuumd` dispatches its 73 operations as *data*: [`registry::OPERATIONS`] is a table
+//! `continuumd` dispatches its 74 operations as *data*: [`registry::OPERATIONS`] is a table
 //! the daemon reads, never a program the wire writes, and
 //! [`Daemon::dispatch`](continuumd::daemon::Daemon::dispatch)'s eight steps — named in that
 //! function's own module documentation — key on exactly four things: the negotiated
@@ -39,7 +39,7 @@
 //!    identity (deterministic, and not "interpretation") or a byte-for-byte echo of the
 //!    field itself, never anything else.
 //! 2. **structural** — an IDL-derived enumeration, in `idl_conformance.rs`'s own style,
-//!    walks every one of the registry's 73 request bodies through
+//!    walks every one of the registry's 74 request bodies through
 //!    [`registry::NAMED_STRUCTS`] and every [`FieldSpec`] it reaches, mechanically rather
 //!    than by this file's say-so, and restricts the result to the 28 *landed* operations
 //!    (themselves derived mechanically, from `codec::operations::decode_arguments` rather
@@ -54,9 +54,9 @@
 //!
 //! # The landed/unlanded boundary, and why it bounds leg 1's scope honestly
 //!
-//! Only 28 of the registry's 73 operations have a family wired up today:
+//! Only 29 of the registry's 74 operations have a family wired up today:
 //! `codec::operations::decode_arguments`'s own documentation states it plainly — "the 45 of
-//! the 73 whose families have not landed" answer `CodecError::UnknownOperation` — and that
+//! the 74 whose families have not landed" answer `CodecError::UnknownOperation` — and that
 //! function's match is on the operation *name* alone, never on the argument bytes, so an
 //! unlanded operation is inert for **any** payload, hostile or not, before a single byte of
 //! it is parsed. `structural_every_unlanded_operation_is_inert_for_any_payload_whatsoever`
@@ -355,9 +355,9 @@ mod structural {
         found
     }
 
-    /// Every free-text position reachable from *any* of the registry's 73 requests — the
+    /// Every free-text position reachable from *any* of the registry's 74 requests — the
     /// full IDL surface, landed or not. Used only for the sanity check that restricting to
-    /// the 28 landed operations below is a genuine narrowing, not a no-op.
+    /// the 29 landed operations below is a genuine narrowing, not a no-op.
     fn free_text_positions_reachable_from_every_request() -> BTreeSet<Position> {
         let table = struct_table();
         let mut found = BTreeSet::new();
@@ -367,7 +367,7 @@ mod structural {
         found
     }
 
-    /// The same walk, restricted to the 28 operations a hostile payload can actually reach
+    /// The same walk, restricted to the 29 operations a hostile payload can actually reach
     /// a family handler through (`landed_operations`, derived mechanically below). This is
     /// the set leg 1's probes are obliged to cover.
     fn free_text_positions_reachable_from_landed_requests() -> BTreeSet<Position> {
@@ -383,7 +383,7 @@ mod structural {
     }
 
     /// The hand-maintained inventory leg 1 is obliged to cover — every position the
-    /// mechanical walk above finds among the 28 *landed* operations. A field found by the
+    /// mechanical walk above finds among the 29 *landed* operations. A field found by the
     /// walk but missing from this list is a gap this test reports; a field on this list the
     /// walk no longer finds is a stale entry the same assertion reports the other way.
     const LANDED_FREE_TEXT: &[&str] = &[
@@ -427,9 +427,9 @@ mod structural {
 
     #[test]
     fn restricting_to_landed_operations_is_a_genuine_narrowing() {
-        // The whole point of separating the two walks: the full-73 surface is much larger
+        // The whole point of separating the two walks: the full-74 surface is much larger
         // (it includes `hypothesis`, `obligation`, `objectives`, and two dozen more, none of
-        // which a hostile caller can reach a handler through today) than the 28-operation
+        // which a hostile caller can reach a handler through today) than the 29-operation
         // one leg 1 actually probes. If this ever failed, the landed/unlanded split above
         // would not be doing any work.
         let all = free_text_positions_reachable_from_every_request();
@@ -471,7 +471,7 @@ mod structural {
 
     // --- the landed/unlanded boundary, mechanically ------------------------------------
 
-    /// The 28 operations `codec::operations::decode_arguments` actually decodes, derived by
+    /// The 29 operations `codec::operations::decode_arguments` actually decodes, derived by
     /// probing every registry operation rather than copied from that module's doc comment.
     fn landed_operations() -> BTreeSet<&'static str> {
         OPERATIONS
@@ -487,16 +487,19 @@ mod structural {
     }
 
     #[test]
-    fn exactly_twenty_eight_of_the_seventy_three_operations_are_landed() {
+    fn exactly_twenty_nine_of_the_seventy_four_operations_are_landed() {
         // 25 of 72 through protocol 3.2; `evidence.link` is the 26th and the 73rd, and it
         // lands with its family rather than ahead of it (bn-3sypm). The 27th and 28th are
         // the `context` pair, landed by bn-28jj (PR-11 / IMPL-04): `context.expand` is
         // served over a registered pack, and `context.compile` decodes and is refused
         // `UnsupportedSemanticFeature` by the family, the way `observe.classify` and
-        // `observe.result` are — decodable, reachable, and honestly unserved.
-        assert_eq!(OPERATION_COUNT, 73);
+        // `observe.result` are — decodable, reachable, and honestly unserved. The 29th is
+        // `whiteboard.compile`, the 74th, landed with its family at protocol 3.5
+        // (bn-1as8e) — an operation that grew the registry rather than the landed set
+        // alone, so both numbers moved together.
+        assert_eq!(OPERATION_COUNT, 74);
         let landed = landed_operations();
-        assert_eq!(landed.len(), 28, "landed operations: {landed:?}");
+        assert_eq!(landed.len(), 29, "landed operations: {landed:?}");
         let expected: BTreeSet<&str> = [
             "workspace.create",
             "workspace.fork",
@@ -526,6 +529,7 @@ mod structural {
             "task.update_budget",
             "context.compile",
             "context.expand",
+            "whiteboard.compile",
         ]
         .into_iter()
         .collect();

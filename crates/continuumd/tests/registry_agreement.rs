@@ -91,7 +91,7 @@ fn the_authority_of_every_operation_equals_rfc_0027s_registry_row() {
         "## The operation authority registry",
         "| Operation | Authority | Annotations |",
     );
-    assert_eq!(rows.len(), 73, "RFC 0027 declares 73 rows");
+    assert_eq!(rows.len(), 74, "RFC 0027 declares 74 rows");
 
     let declared: BTreeMap<&str, &continuumd::protocol::spec::OperationSpec> =
         OPERATIONS.iter().map(|spec| (spec.name, spec)).collect();
@@ -184,7 +184,7 @@ fn the_authority_and_annotation_distribution_matches_rfc_0027() {
             checked += 1;
         }
         if authority == "total" {
-            assert_eq!(unbacktick(&row[1]).parse::<usize>().expect("a count"), 73);
+            assert_eq!(unbacktick(&row[1]).parse::<usize>().expect("a count"), 74);
         }
         if !annotation.is_empty() {
             let stated: usize = unbacktick(&row[3]).parse().expect("a count");
@@ -224,7 +224,7 @@ fn the_verdict_distribution_matches_rfc_0026() {
         };
         stated.insert(key, count);
     }
-    assert_eq!(stated.values().sum::<usize>(), 73);
+    assert_eq!(stated.values().sum::<usize>(), 74);
 
     let mut derived: BTreeMap<String, usize> = BTreeMap::new();
     for spec in OPERATIONS {

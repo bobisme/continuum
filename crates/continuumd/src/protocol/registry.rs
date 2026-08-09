@@ -10,7 +10,7 @@
 use super::operations::{
     benchmark::*, context::*, correspondence::*, debug::*, evidence::*, failure::*, forge::*,
     intent::*, model::*, observe::*, program::*, proof::*, query::*, refinement::*, repair::*,
-    task::*, verification::*, workspace::*,
+    task::*, verification::*, whiteboard::*, workspace::*,
 };
 use super::prelude::*;
 use super::spec::{
@@ -18,7 +18,7 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.8";
+pub const IDL_VERSION: &str = "1.9";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
@@ -81,7 +81,23 @@ pub const IDL_VERSION: &str = "1.8";
 /// "whether a lane has shipped" a property of a deployment rather than of an
 /// operation — a daemon that serves the channel answers `ok`, one that does not
 /// keeps `UnsupportedSemanticFeature`, and both conform.
-pub const PROTOCOL_VERSION: &str = "3.4";
+///
+/// The 3.4 -> 3.5 bump covers IDL 1.9 (bn-1as8e) and is the **second** one that
+/// adds an operation: `whiteboard.compile`, the 74th, in a 19th namespace, and
+/// the wire paragraph RFC 0038 deferred when the whiteboard compiler landed as
+/// a crate-level surface. It was checked for avoidability first — three of the
+/// last four revisions left this value alone by *serving already-declared
+/// vocabulary*, which is the cheapest payment there is — and there was nothing
+/// to serve: no operation, no `EvidenceQuery` member, and no struct in the IDL
+/// names a note. `forge.create`'s `sketch` is RFC 0033's synthesis input and
+/// answers with a `ForgeHandle`; `context.compile` runs the other way, from an
+/// evidence root to a pack. So the registry grows for the second time in this
+/// protocol's life, and again not as a defect paid with a verb (RFC 0027
+/// correction 30) but as a subsystem the dossier already specified reaching the
+/// wire. Counts move where they must be visible: 74 rows in 19 namespaces,
+/// `propose` 9, `@mutation` 46, `structural` verdicts 27, named structs 47,
+/// rules 42. No flag rides the bump and one is raised (RFC 0026 F21).
+pub const PROTOCOL_VERSION: &str = "3.5";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -94,8 +110,9 @@ pub const ENCODINGS: &[Encoding] = &[Encoding::CanonicalJson, Encoding::Canonica
 /// The number of operations in the plan §10.2 registry.
 ///
 /// 72 from protocol 3.0 through 3.2; 73 as of 3.3, when `evidence.link` became
-/// the first operation ever added to this protocol (bn-3sypm).
-pub const OPERATION_COUNT: usize = 73;
+/// the first operation ever added to this protocol (bn-3sypm); 74 as of 3.5,
+/// when `whiteboard.compile` became the second (bn-1as8e).
+pub const OPERATION_COUNT: usize = 74;
 
 /// Every operation the IDL declares, in its declaration order.
 pub const OPERATIONS: &[OperationSpec] = &[
@@ -971,6 +988,16 @@ pub const OPERATIONS: &[OperationSpec] = &[
         errors: &[ErrorCode::InsufficientEvidence],
     },
     OperationSpec {
+        name: "whiteboard.compile",
+        authority: AuthorityLevel::Propose,
+        annotations: &[Annotation::Mutation],
+        request: StructSpec::of::<WhiteboardCompileRequest>(),
+        response: StructSpec::of::<WhiteboardCompileResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::InsufficientEvidence],
+    },
+    OperationSpec {
         name: "query.explain_reuse",
         authority: AuthorityLevel::Read,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
@@ -1051,6 +1078,7 @@ pub const NAMED_STRUCTS: &[StructSpec] = &[
     StructSpec::of::<FileOverlay>(),
     StructSpec::of::<ContextPolicy>(),
     StructSpec::of::<IntentChangeSet>(),
+    StructSpec::of::<WhiteboardTaskProposal>(),
     StructSpec::of::<EvidenceQuery>(),
     StructSpec::of::<VerificationResult>(),
 ];

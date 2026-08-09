@@ -220,8 +220,21 @@ pub struct StatusWrite {
 pub struct EvidenceNode {
     /// `kind` — the plan §11.2 node type.
     pub kind: EvidenceNodeKind,
-    /// The assurance-result evidence class this node offers toward its claim.
-    pub evidence_kind: EvidenceKind,
+    /// The assurance-result evidence class this node offers toward its claim, when it
+    /// offers one.
+    ///
+    /// [`None`] is not "unknown": it is the honest reading for a node that offers no
+    /// evidence at all. Every member of [`EvidenceKind`] is *a class of evidence
+    /// offered toward a claim* (RFC 0010's thirteen), and a node a whiteboard note
+    /// proposed offers none of them — it sits at `proposed` and asserts nothing, which
+    /// is the whole point of RFC 0038 W5. Naming a class anyway would be the
+    /// overstatement `evidence.verify` exists to refuse, so the field is absent and
+    /// that operation answers `InsufficientEvidence` rather than routing a lane. The
+    /// vocabulary's want of a fourteenth member is recorded as RFC 0026 F21, not
+    /// papered over here: it is closed in a rank-1 schema and in
+    /// `crates/continuum-value/src/assurance.rs` together, so widening it is not this
+    /// slice's act.
+    pub evidence_kind: Option<EvidenceKind>,
     /// `claim_id` — "Claim identity this node's status promotion is linearized against".
     pub claim_id: String,
     /// `artifact` — the artifact this node is *about*, by identity.
@@ -238,6 +251,13 @@ pub struct EvidenceNode {
     pub inputs: Vec<String>,
     /// `idempotency_key` — "Idempotency key making agent retries safe (plan §11.7)".
     pub idempotency_key: String,
+    /// `labels` — the node schema's own member for a producer's typed markers.
+    ///
+    /// Empty for a producer's append, which has nothing to mark. `whiteboard.compile`
+    /// writes one, `whiteboard:<section key>` — `continuum-evidence`'s own spelling of
+    /// which plan §11.5 section proposed the node — so a note's derivation is recoverable
+    /// from the node itself and not only from the note the author holds.
+    pub labels: Vec<String>,
     /// Every status this claim has held, in write order. Never empty: the append itself is
     /// the first element.
     pub history: Vec<StatusWrite>,

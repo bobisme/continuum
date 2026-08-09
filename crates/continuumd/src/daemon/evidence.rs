@@ -476,6 +476,19 @@ fn node_record(handle: &EvidenceHandle, node: &EvidenceNode) -> Json {
         "idempotency_key",
         Json::String(node.idempotency_key.clone()),
     );
+    // `labels` is optional and a node with none has none: an empty array would be a
+    // producer's assertion that it considered the question and had nothing to say.
+    if !node.labels.is_empty() {
+        put(
+            "labels",
+            Json::Array(
+                node.labels
+                    .iter()
+                    .map(|label| Json::String(label.clone()))
+                    .collect(),
+            ),
+        );
+    }
 
     let mut provenance: BTreeMap<String, Json> = BTreeMap::new();
     provenance.insert(
@@ -495,7 +508,13 @@ fn node_record(handle: &EvidenceHandle, node: &EvidenceNode) -> Json {
                 .collect(),
         ),
     );
-    provenance.insert("tool".to_owned(), Json::String(node.tool.clone()));
+    // `provenance.tool` is optional in the schema, and a producer that named no tool has
+    // no tool: an empty string would be a name. `whiteboard.compile` is the first producer
+    // that can reach the absent case, because a note's `tool` is the one member of the
+    // format that is optional rather than empty-able (RFC 0038 W1).
+    if !node.tool.is_empty() {
+        provenance.insert("tool".to_owned(), Json::String(node.tool.clone()));
+    }
     put("provenance", Json::Object(provenance));
 
     if let Some(write) = node.history.last() {
@@ -938,6 +957,22 @@ impl EvidenceFamily {
             ));
         }
 
+        // A node that offers no evidence class has no checker to run. This is the case a
+        // whiteboard proposal lands in (`whiteboard.compile`): it sits at `proposed` and
+        // asserts nothing, so there is nothing for an independent checker to re-derive and
+        // no member of `EvidenceKind` that would be true of it. Refusing is the same act
+        // the lane match below performs for the ten classes this daemon cannot check —
+        // stated here because it is a fact about the *node*, not about which checker this
+        // build ships, and because the response's `evidence_kind` is `required` and there
+        // is no honest value for it. RFC 0026 F21 records the vocabulary gap.
+        let Some(evidence_kind) = node.evidence_kind else {
+            return Err(Fault::new(
+                ErrorCode::InsufficientEvidence,
+                "this node offers no class of evidence toward its claim, so no independent \
+                 checker applies to it; nothing is promoted on a check that cannot be run",
+            ));
+        };
+
         let checked = self.check(&request.evidence, &node, state, services)?;
 
         let expected = match &request.expected_status {
@@ -1054,7 +1089,7 @@ impl EvidenceFamily {
             Payload::EvidenceVerify(EvidenceVerifyResponse {
                 evidence: request.evidence.clone(),
                 status: wire_status(status),
-                evidence_kind: node.evidence_kind,
+                evidence_kind,
                 // "The checker's service identity (INV-004)." The daemon's, never the
                 // caller's: `call.grant.actor` is who *asked*, and who asked is not who
                 // checked.
@@ -1115,8 +1150,11 @@ impl EvidenceFamily {
         //    the strength of a re-derived reference would be precisely the
         //    self-certification INV-004 forbids.
         let lane = match node.evidence_kind {
-            EvidenceKind::ProductionObservation | EvidenceKind::Example => Lane::Observation,
-            EvidenceKind::Certificate => Lane::Certificate,
+            Some(EvidenceKind::ProductionObservation | EvidenceKind::Example) => Lane::Observation,
+            Some(EvidenceKind::Certificate) => Lane::Certificate,
+            // `None` is unreachable here — `verify` refuses a node with no evidence class
+            // before it calls this function — and is folded into the same arm rather than
+            // given an `unreachable!`: a daemon does not abort on its own invariant.
             _ => {
                 return Err(Fault::new(
                     ErrorCode::InsufficientEvidence,
@@ -1562,6 +1600,8 @@ fn link(
         created_at: created_at.clone(),
         inputs: vec![request.receipt.as_str().to_owned()],
         idempotency_key: key.clone(),
+        // A receipt records that a check ran; it carries no producer marker.
+        labels: Vec::new(),
         history: vec![StatusWrite {
             status: ClaimStatus::BOTTOM,
             service_identity: None,
@@ -1677,7 +1717,11 @@ fn edge_record(handle: &EvidenceHandle, edge: &EvidenceEdge) -> Json {
                 .collect(),
         ),
     );
-    provenance.insert("tool".to_owned(), Json::String(edge.tool.clone()));
+    // Optional, and omitted when the producer named none — `node_record`'s rule, for the
+    // same reason and over the same schema object.
+    if !edge.tool.is_empty() {
+        provenance.insert("tool".to_owned(), Json::String(edge.tool.clone()));
+    }
     fields.insert("provenance".to_owned(), Json::Object(provenance));
     Json::Object(fields)
 }
@@ -1750,6 +1794,21 @@ pub fn edge_identity(
 #[must_use]
 pub fn library_kind(kind: EvidenceNodeKind) -> Option<NodeKind> {
     NodeKind::from_token(kind.as_wire())
+}
+
+/// The wire node kind a `continuum-evidence` node kind names — [`library_kind`]'s inverse.
+///
+/// Both vocabularies transcribe `evidence-graph-node.schema.json`'s `kind` enum token for
+/// token, so the bridge is the token itself rather than a second twenty-row table that
+/// could disagree with either side. [`None`] is unreachable while the two agree, and is
+/// returned rather than panicked on for the reason the dispatcher returns a typed refusal
+/// on an unroutable shape: a daemon does not abort on its own invariant.
+#[must_use]
+pub fn wire_node_kind(kind: NodeKind) -> Option<EvidenceNodeKind> {
+    EvidenceNodeKind::ALL
+        .iter()
+        .copied()
+        .find(|member| member.as_wire() == kind.as_str())
 }
 
 /// The wire edge kind a `continuum-evidence` edge kind names, by the same bridge.

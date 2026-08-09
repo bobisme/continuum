@@ -87,7 +87,7 @@ A human-friendly whiteboard view permits provisional notes. Compilation rules:
 - conclusions require supporting edges;
 - unresolved contradictions remain visible.
 
-The note format itself is [`../schemas/whiteboard-note.schema.json`](../schemas/whiteboard-note.schema.json) — plan §11.5's seven headings as a schema, since prose cannot be an input format (INV-003). Which heading proposes which node kind, and how each rule above is met by the shape of the format rather than by a check, is RFC 0038 W1–W9; `crates/continuum-evidence/src/whiteboard.rs` is the library surface. There is deliberately no wire operation.
+The note format itself is [`../schemas/whiteboard-note.schema.json`](../schemas/whiteboard-note.schema.json) — plan §11.5's seven headings as a schema, since prose cannot be an input format (INV-003). Which heading proposes which node kind, and how each rule above is met by the shape of the format rather than by a check, is RFC 0038 W1–W9; `crates/continuum-evidence/src/whiteboard.rs` is the library surface. The wire surface is `whiteboard.compile` (plan §10.2, protocol 3.5, `rule whiteboard.compilation`): compilation runs daemon-side, because "references must resolve" is a refusal only the holder of the graph can perform, and the note crosses as an `Opaque` governed by its schema rather than as a declared wire struct. The *view* this section opens with — rendering graph state back into a note — is still undelivered; the compiler is one-way (RFC 0038 W10–W12).
 
 ## Merging agent work
 

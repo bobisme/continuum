@@ -1233,6 +1233,7 @@ forge.create / step / archive / materialize
 benchmark.run
 task.status / cancel / resume / subscribe / update_budget
 evidence.get / query / verify / subscribe / link
+whiteboard.compile
 query.explain_reuse / explain_invalidation / clean_compare
 ```
 
@@ -1383,7 +1384,7 @@ Decision
 
 The compiler turns whiteboard entries into typed graph proposals, rejecting references to nonexistent artifacts or unsupported status claims.
 
-The seven headings above are a map, not the format: the note's normative shape is `schemas/whiteboard-note.schema.json` (INV-003), the section-to-node-kind mapping and the rest of what this prose leaves open are RFC 0038 W1–W9, and the library surface is `crates/continuum-evidence/src/whiteboard.rs`.
+The seven headings above are a map, not the format: the note's normative shape is `schemas/whiteboard-note.schema.json` (INV-003), the section-to-node-kind mapping and the rest of what this prose leaves open are RFC 0038 W1–W9, and the library surface is `crates/continuum-evidence/src/whiteboard.rs`. The wire surface is `whiteboard.compile` (§10.2, protocol 3.5): compilation runs daemon-side because the graph an entry's references must resolve against is the daemon's, and the note crosses as an `Opaque` governed by its schema rather than as a declared wire struct (`rule whiteboard.compilation`).
 
 ### 11.6 Swarm roles
 
@@ -2776,7 +2777,7 @@ projections, and the docs/35/40/41/42/45 corrections) are recorded in
 `plan.review.5.md` Appendix B, not re-listed as debt.
 
 - SD-01 (paid, `schemas/continuumd-native-protocol.idl`): RFC 0026's
-  normative IDL file — all 73 §10.2 operations, envelopes, handshake;
+  normative IDL file — all 74 §10.2 operations, envelopes, handshake;
 - SD-07 (paid, PR 0): `schemas/intent-contract.schema.json` — a
   structured property-AST expression form with canonical
   normalization, replacing the bare `expression` string;

@@ -35,7 +35,7 @@ use crate::codec::json::Json;
 use crate::codec::{CodecError, Document, from_opaque_in, to_opaque_in};
 use crate::daemon::family::{Arguments, ErrorData, Payload};
 use crate::protocol::operations::{
-    context, evidence, intent, observe, task, verification, workspace,
+    context, evidence, intent, observe, task, verification, whiteboard, workspace,
 };
 use crate::protocol::scalar::Opaque;
 use crate::protocol::vocabulary::ErrorCode;
@@ -45,7 +45,7 @@ use crate::protocol::vocabulary::ErrorCode;
 /// # Errors
 ///
 /// [`CodecError::UnknownOperation`] when this daemon declares no request shape for the
-/// named operation — the 45 of the 73 whose families have not landed — and any decode
+/// named operation — the 45 of the 74 whose families have not landed — and any decode
 /// failure of the named struct otherwise.
 pub fn decode_arguments_in<D: Document>(
     operation: &str,
@@ -154,6 +154,10 @@ pub fn decode_arguments_in<D: Document>(
             D,
             context::ContextExpandRequest,
         >(arguments)?),
+        "whiteboard.compile" => Arguments::WhiteboardCompile(from_opaque_in::<
+            D,
+            whiteboard::WhiteboardCompileRequest,
+        >(arguments)?),
         _ => return Err(CodecError::UnknownOperation),
     })
 }
@@ -197,6 +201,7 @@ pub fn encode_payload_in<D: Document>(payload: &Payload) -> Result<Option<Opaque
         Payload::TaskUpdateBudget(body) => to_opaque_in::<D, _>(body)?,
         Payload::ContextCompile(body) => to_opaque_in::<D, _>(body)?,
         Payload::ContextExpand(body) => to_opaque_in::<D, _>(body)?,
+        Payload::WhiteboardCompile(body) => to_opaque_in::<D, _>(body)?,
     }))
 }
 
@@ -244,6 +249,7 @@ pub fn decode_payload_in<D: Document>(
         "task.update_budget" => Payload::TaskUpdateBudget(from_opaque_in::<D, _>(payload)?),
         "context.compile" => Payload::ContextCompile(from_opaque_in::<D, _>(payload)?),
         "context.expand" => Payload::ContextExpand(from_opaque_in::<D, _>(payload)?),
+        "whiteboard.compile" => Payload::WhiteboardCompile(from_opaque_in::<D, _>(payload)?),
         _ => return Err(CodecError::UnknownOperation),
     })
 }

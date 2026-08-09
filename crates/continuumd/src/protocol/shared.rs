@@ -116,6 +116,28 @@ protocol_struct! {
 }
 
 protocol_struct! {
+    /// One `Experiment` line of a whiteboard note, compiled (protocol 3.5,
+    /// RFC 0038 W3).
+    ///
+    /// plan §11.2's twenty node kinds have no task kind, so an experiment proposes a
+    /// *task* rather than a node: it carries no claim identity, no subject, and
+    /// therefore no handle — nothing publishes a task proposal and it is not a plan
+    /// §4.4 artifact class.
+    ///
+    /// The line's own prose is deliberately not a member. It is the caller's text,
+    /// the caller holds the note it sent, and echoing untrusted text back into a
+    /// result is what `rule envelope.no_prose` and INV-016 forbid; `index` is how a
+    /// client recovers the sentence from the document it already has.
+    struct WhiteboardTaskProposal {
+        /// Position in the note's `experiments` array, counting from zero.
+        index: U32 required;
+        /// The prior artifacts the experiment would be run against, in the note's
+        /// own order. Every one resolved before the compilation happened (W4).
+        references: list<Commitment> required;
+    }
+}
+
+protocol_struct! {
     /// A filter over the evidence graph.
     struct EvidenceQuery {
         /// IDL `node_kinds: list<EvidenceNodeKind> optional`.

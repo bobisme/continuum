@@ -607,7 +607,8 @@ fn certificate_node(
         .expect("the identity seam names the node");
     let record = EvidenceNode {
         kind: EvidenceNodeKind::Certificate,
-        evidence_kind: EvidenceKind::Certificate,
+        evidence_kind: Some(EvidenceKind::Certificate),
+        labels: Vec::new(),
         claim_id: "claim:die-hard-closure".to_owned(),
         artifact,
         producer: who(producer),

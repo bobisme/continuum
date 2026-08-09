@@ -198,7 +198,7 @@ fn ingest(
     let node = EvidenceNode {
         // A captured execution is a `run` (plan §11.2), not a certificate and not a proof.
         kind: EvidenceNodeKind::Run,
-        evidence_kind: EvidenceKind::ProductionObservation,
+        evidence_kind: Some(EvidenceKind::ProductionObservation),
         // The claim a production observation is about is the trace's own identity: two
         // ingests of one trace are two statements about one claim, which is what makes the
         // per-claim compare-and-set linearization meaningful.
@@ -219,6 +219,9 @@ fn ingest(
             .value()
             .cloned()
             .unwrap_or_default(),
+        // A capture carries no producer marker: `labels` is the node schema's optional
+        // member and an ingest has nothing to put in it.
+        labels: Vec::new(),
         history: vec![StatusWrite {
             // The unpromoted entry status. No request field reaches it.
             status: ClaimStatus::BOTTOM,

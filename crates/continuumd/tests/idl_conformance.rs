@@ -950,7 +950,7 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     let document = document();
     // The IDL's §10 header states the registry's size in prose; if the parser silently
     // dropped a declaration, every comparison below would pass vacuously for it.
-    assert_eq!(document.operations.len(), 73, "operations");
+    assert_eq!(document.operations.len(), 74, "operations");
     assert_eq!(document.scalars.len(), 9, "scalars");
     assert_eq!(document.handles.len(), 19, "handles");
     // Protocol 3.1 (IDL 1.2) adds one alias (`AuditCorrelationId`), one enum
@@ -1001,6 +1001,19 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // delta is one frame however many of a connection's scopes select it, and which
     // deltas a scope selects) rather than reporting them.
     //
+    // Protocol 3.5 (IDL 1.9, bn-1as8e) is the second registry edit this protocol has
+    // ever taken: `whiteboard.compile`, 73 -> 74, in a **19th** namespace, 18 -> 19 —
+    // plan §11.5's whiteboard compiler on the wire and the paragraph RFC 0038 deferred
+    // when the compiler landed as a crate-level surface. One struct arrives with it
+    // (`WhiteboardTaskProposal`, 46 -> 47) and one rule (`whiteboard.compilation`,
+    // 41 -> 42). **These four numbers are the visibility the count assertions exist
+    // for**: an operation cannot enter the protocol without moving them here, in RFC
+    // 0027's distribution table, and in RFC 0026's verdict table, and a namespace cannot
+    // enter without moving the fifth. The declared surface was searched before the verb
+    // was minted — three of the last four revisions left `version` alone by serving
+    // already-declared vocabulary — and nothing here served a note, which is why this
+    // revision bumps and 1.5/1.7/1.8 did not.
+    //
     // IDL 1.8 (bn-35l6g) adds one rule, `evidence.traversal`, and nothing else:
     // 40 -> 41, with no operation, alias, enum, struct, or union moving, so `version`
     // stays "3.4". It is the 1.7 shape again — a rule over surface the file already
@@ -1014,15 +1027,15 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // argument here rather than inferring it from a diff.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
-    assert_eq!(document.structs.len(), 46, "structs");
+    assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 41, "rules");
+    assert_eq!(document.rules.len(), 42, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
         .map(|operation| operation.namespace.as_str())
         .collect();
-    assert_eq!(namespaces.len(), 18, "namespaces");
+    assert_eq!(namespaces.len(), 19, "namespaces");
 }
 
 #[test]
@@ -1040,7 +1053,7 @@ fn the_operation_set_is_exactly_the_idl_registry() {
         .map(|operation| operation.name.as_str())
         .collect();
     assert_eq!(mine, theirs);
-    assert_eq!(OPERATION_COUNT, 73);
+    assert_eq!(OPERATION_COUNT, 74);
 }
 
 #[test]
@@ -1345,12 +1358,12 @@ fn a_removed_operation_is_reported() {
     mutated.push_str(&source[end..]);
 
     let document = idl::parse(&mutated);
-    assert_eq!(document.operations.len(), 72);
+    assert_eq!(document.operations.len(), 73);
     let found = all_mismatches(&document);
     assert!(
         found
             .iter()
-            .any(|item| item.contains("workspace.seal") || item.contains("72")),
+            .any(|item| item.contains("workspace.seal") || item.contains("73")),
         "removing an operation must be reported, got {found:?}"
     );
 }

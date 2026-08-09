@@ -41,12 +41,12 @@
 //! # Coverage of the registry, and the honest boundary of it
 //!
 //! The bone this file answers owes "the conforming-daemon golden set", and the registry is
-//! 73 operations as of protocol 3.3. Two devices carry that between them and they cover
+//! 74 operations as of protocol 3.5. Two devices carry that between them and they cover
 //! different things:
 //!
 //! - the **literal** vectors are exchanges and per-namespace bodies — bytes a second
 //!   implementation can be tested against directly;
-//! - the **registry sweep** is mechanical: every one of the 73 operations' request and
+//! - the **registry sweep** is mechanical: every one of the 74 operations' request and
 //!   response structs, and every named struct besides, is decoded from a document
 //!   synthesized out of its own `FieldSpec` list and re-encoded, in both encodings, with
 //!   the field sequences compared across them. It is not a literal byte sequence and does
@@ -555,7 +555,7 @@ fn type_value<D: Document>(ty: &str, depth: usize) -> D {
     panic!("no registry table declares the type `{ty}`");
 }
 
-/// Every struct the registry declares: the 73 operations' request and response bodies and
+/// Every struct the registry declares: the 74 operations' request and response bodies and
 /// every named struct, each named for the failure message.
 fn every_declared_struct() -> Vec<(String, &'static StructSpec)> {
     let mut out = Vec::new();
@@ -627,7 +627,7 @@ fn pair<T: ProtocolValue, U: ProtocolValue>(
     )
 }
 
-/// The first operation of each of the IDL's 18 namespaces, in registry order.
+/// The first operation of each of the IDL's 19 namespaces, in registry order.
 fn first_operation_per_namespace() -> Vec<(&'static str, &'static StructSpec)> {
     let mut seen: Vec<&'static str> = Vec::new();
     let mut out = Vec::new();
@@ -769,6 +769,11 @@ const GOLDEN: &[(&str, &str, &str)] = &[
         "evidence.get.body",
         r#"{"evidence":"ev_x","inline":true}"#,
         "a26865766964656e63656465765f7866696e6c696e65f5",
+    ),
+    (
+        "whiteboard.compile.body",
+        r#"{"note":{}}"#,
+        "a1646e6f7465a0",
     ),
     (
         "query.explain_reuse.body",
@@ -996,7 +1001,7 @@ fn every_registry_struct_round_trips_in_both_encodings() {
         );
         swept += 1;
     }
-    assert_eq!(OPERATIONS.len(), OPERATION_COUNT, "the registry is 73 rows");
+    assert_eq!(OPERATIONS.len(), OPERATION_COUNT, "the registry is 74 rows");
     assert_eq!(
         swept,
         OPERATION_COUNT * 2 + NAMED_STRUCTS.len(),
@@ -1055,14 +1060,16 @@ fn every_operation_the_families_serve_round_trips_through_the_codec() {
             Err(error) => panic!("`{}` failed to decode: {error}", operation.name),
         }
     }
-    // The split `codec::operations::decode_arguments` documents: 28 served, 45 whose
+    // The split `codec::operations::decode_arguments` documents: 29 served, 45 whose
     // families have not landed. It was 26/47 until bn-28jj (PR-11 / IMPL-04) landed the
     // `context` family, which serves `context.expand` and answers `context.compile` with
     // the typed refusal `rule errors.unsupported_surface` requires — both decode, so both
-    // are served here. A count that moves when a family lands is the point: it forces the
-    // landing to be visible in a file nobody editing a family would otherwise open.
-    assert_eq!(served, 28, "the operations the landed families serve");
-    assert_eq!(unserved, OPERATION_COUNT - 28);
+    // are served here, and 28/45 until bn-1as8e added `whiteboard.compile` at protocol
+    // 3.5, which grew the registry rather than the landed set alone. A count that moves
+    // when a family lands is the point: it forces the landing to be visible in a file
+    // nobody editing a family would otherwise open.
+    assert_eq!(served, 29, "the operations the landed families serve");
+    assert_eq!(unserved, OPERATION_COUNT - 29);
 }
 
 #[test]

@@ -797,7 +797,7 @@ fn a_class_whose_independent_checker_has_not_shipped_is_never_promoted() {
     let mut fixture = fixture();
     let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
     let mut inductive = node(&fixture, &handle);
-    inductive.evidence_kind = EvidenceKind::Inductive;
+    inductive.evidence_kind = Some(EvidenceKind::Inductive);
     let inductive_handle =
         EvidenceHandle::new("ev_inductive-fixture").expect("a well-formed handle");
     fixture
@@ -873,7 +873,8 @@ fn certificate_node(fixture: &mut Fixture, path: &str, bytes: Vec<u8>) -> Eviden
         .expect("the identity seam names the node");
     let record = EvidenceNode {
         kind: EvidenceNodeKind::Certificate,
-        evidence_kind: EvidenceKind::Certificate,
+        evidence_kind: Some(EvidenceKind::Certificate),
+        labels: Vec::new(),
         claim_id: "claim:die-hard-closure".to_owned(),
         artifact,
         // Not the verification service: INV-004's fourth dimension refuses a producer that

@@ -157,6 +157,71 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.9 — the whiteboard wire verb (bn-1as8e) and the single
+  ///         protocol-minor bump 3.4 → 3.5 that covers it. This is the
+  ///         second revision that moves the registry, and it moves it
+  ///         for the second reason a registry may move: not a defect
+  ///         paid with a verb (RFC 0027 correction 30 still forbids
+  ///         that) but a subsystem the dossier already named arriving
+  ///         on the wire. plan §11.5's whiteboard compiler, RFC 0038's
+  ///         W1–W9, `schemas/whiteboard-note.schema.json`, and
+  ///         `crates/continuum-evidence/src/whiteboard.rs` all landed
+  ///         at bn-2qa0u with the wire explicitly deferred — "There is
+  ///         no `whiteboard.compile` operation and no `EvidenceQuery`
+  ///         field that names one" — and `whiteboard.compile` is that
+  ///         paragraph paid. It is the **74th** operation and the
+  ///         **19th** namespace.
+  ///
+  ///         The declared surface was searched before the verb was
+  ///         minted, because serving already-declared vocabulary is a
+  ///         revision of the 1.7/1.8 shape and needs no bump at all.
+  ///         Nothing declared here serves it: no operation, no
+  ///         `EvidenceQuery` member, and no struct names a note. The
+  ///         two neighbours that read as candidates are neither.
+  ///         `forge.create` takes a `sketch: Opaque` and is unserved,
+  ///         but a sketch is RFC 0033's synthesis input — holes,
+  ///         objectives, diversity descriptors, an assurance target —
+  ///         and its response is a `ForgeHandle`, so serving a note
+  ///         through it would be one verb doing two acts, which the
+  ///         registry's "one act each" discipline forbids.
+  ///         `context.compile` runs the other way, evidence root to
+  ///         pack. A new operation was therefore the only honest
+  ///         artifact, exactly as F14 found for `evidence.link`, and
+  ///         per the F13 precedent the row arrives in plan §10.2, RFC
+  ///         0027's authority table, and this file together.
+  ///
+  ///         Two questions RFC 0038 recorded as open are decided here
+  ///         and stated as `rule whiteboard.compilation`. **Where the
+  ///         compiler runs**: daemon-side, because docs/44's
+  ///         "references must resolve" is a refusal only the holder of
+  ///         the graph can perform, and because a client-side compiler
+  ///         would put every proposal's node kind, claim identity, and
+  ///         provenance actor on the wire as caller-filled fields —
+  ///         which would make W2's "an author MUST NOT be able to name
+  ///         the kind directly" unenforceable and the seven headings
+  ///         decoration. **How the note crosses**: as an `Opaque`
+  ///         governed by `whiteboard-note.schema.json`, not as a
+  ///         declared struct, because INV-003 makes that schema
+  ///         normative for a note's shape and a second declaration
+  ///         here would be the second authority `rule
+  ///         conformance.registry_agreement` exists to prevent one
+  ///         namespace down. `IntentChangeSet.changes` and
+  ///         `context.compile`'s `pack` are the precedent. The field
+  ///         does **not** join RFC 0026 F3's four shapeless `Opaque`
+  ///         members: it names a schema, so `rule envelope.no_prose`
+  ///         is enforceable for it.
+  ///
+  ///         Counts, in the four places an operation cannot enter the
+  ///         protocol without moving: the registry is **74** rows in
+  ///         **19** namespaces, `propose` is **9**, `@mutation` is
+  ///         **46**, the `structural` verdict count is **27**. One
+  ///         struct arrives (`WhiteboardTaskProposal`, `@since("3.5")`,
+  ///         46 → 47) and one rule (`whiteboard.compilation`, 41 → 42).
+  ///         `@audit_recorded` stays 7 and `@task_starting` stays 26 —
+  ///         both are decisions, argued in RFC 0027. F1, F2, F3, F8,
+  ///         F9, F10, F11, F15, F16, F17, and F18 do **not** ride this
+  ///         bump; the flags-preamble paragraph of RFC 0026 records
+  ///         each reason, and F21 is raised there.
   ///   1.8 — the evidence-traversal rule (bn-35l6g), serving the last
   ///         declared-but-unserved clause of `EvidenceQuery`. `roots`
   ///         and `max_depth` have been declared since 3.0 and `roots`
@@ -390,8 +455,38 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.8";
+  idl_version = "1.9";
   /// The protocol version this document defines.
+  ///
+  /// 3.5 is the single minor bump for IDL 1.9, taken once at the end of
+  /// that revision, and it is the second minor that adds an operation.
+  /// `rule versioning.compatible_change` names "adding an operation"
+  /// first among the five compatible changes, so a registry that grows
+  /// by one is still a minor: `whiteboard.compile` is a name a 3.0
+  /// through 3.4 client never sends, and an operation it never names
+  /// cannot reach it. No existing declaration moves — no field is
+  /// added to an existing struct, no enum gains a member, no error
+  /// code is minted, and no server-side constraint is relaxed — so the
+  /// three later triggers stay unfired and the major window `[3, 2]`
+  /// is untouched, because a minor is not a window.
+  ///
+  /// Two things about this bump are worth naming, because both were
+  /// checked before it was taken rather than after. The first is that
+  /// it was not avoidable: revisions 1.5, 1.7, and 1.8 each left
+  /// `version` alone by *serving already-declared vocabulary*, and the
+  /// declared surface was searched for a whiteboard verb before one
+  /// was minted (see the 1.9 revision note). There is none. The
+  /// second is the new namespace. A nineteenth namespace holding one
+  /// operation is not a novelty: `benchmark` has held exactly one row
+  /// since 3.0. The alternative — folding `compile` into `evidence` —
+  /// was rejected because RFC 0027's reason for that namespace's
+  /// levels ("`evidence` is `read` except for `evidence.link`") is an
+  /// argument about a graph's own read/verify/link surface, and it
+  /// does not transfer to a note compiler whose authority is
+  /// `propose`; a namespace whose rows spanned `read`, `execute`, and
+  /// `propose` for three unrelated reasons would make R-1 ("a
+  /// namespace has no authority of its own") true by exhaustion
+  /// rather than by design.
   ///
   /// 3.4 is the single minor bump for IDL 1.6, taken once at the end of
   /// the bn-3jrtz bundle and covering both of its riders. F19 is an
@@ -462,8 +557,11 @@ protocol continuum.native {
   /// existing declaration moved. What makes the growth safe to state
   /// rather than to assume is the F13 discipline — the row exists in
   /// plan §10.2, in RFC 0027's authority table, and here, or it exists
-  /// nowhere (`rule conformance.registry_agreement`).
-  version = "3.4";
+  /// nowhere (`rule conformance.registry_agreement`). 3.5 is the second,
+  /// and the F13 discipline is now mechanically enforced rather than
+  /// remembered: the dossier validator parses all three sources and
+  /// fails closed on any disagreement, preferring none.
+  version = "3.5";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -2248,6 +2346,99 @@ rule evidence.traversal {
   """
 }
 
+@since("3.5")
+rule whiteboard.compilation {
+  """
+  What `whiteboard.compile` does with a note. plan §11.5 states the
+  seven headings, `schemas/whiteboard-note.schema.json` states the
+  note's shape, and RFC 0038 W1–W9 state what each section compiles to;
+  none of the three said anything about a wire, and RFC 0038 recorded
+  two questions as open. Both are decided here.
+
+  1. **Compilation is the daemon's, and the note is what crosses.** An
+     entry's `references` MUST each name an artifact the graph holds a
+     node about (docs/44 "references must resolve", W4), and a
+     conclusion's supporting edges are drawn to *every* node the graph
+     holds about each cited artifact (W6) — neither is computable by a
+     party that does not hold the graph, and a client resolving against
+     a stale `evidence.query` answer would be asserting a fact about
+     the graph rather than reading one. The stronger reason is what a
+     client-side compiler would have to put on the wire: a proposal
+     carries a node kind, a claim identity, and a `provenance.actor`,
+     so a wire of *proposals* is a wire of caller-filled fields, and a
+     field a caller can fill is a field a caller can lie in (RFC 0038
+     D3). W2 says "an author MUST NOT be able to name the kind
+     directly: if it could, the seven headings would be decoration",
+     and only a daemon that reads the sections itself can hold that.
+
+  2. **The note is an `Opaque` and its schema decides its shape.** The
+     request carries the note as `note: Opaque required`, governed by
+     `schemas/whiteboard-note.schema.json` — the third group of open
+     item 3 and `rule encoding.opaque_payloads`'s "a schema-governed
+     value carried verbatim". It is deliberately **not** declared as a
+     struct here: INV-003 makes that schema normative for a note, and a
+     second declaration of the same twelve-member document would create
+     exactly the disagreement `rule conformance.registry_agreement`
+     forbids one namespace down, with no source entitled to decide it.
+     `IntentChangeSet.changes` and `context.compile`'s `pack` are the
+     precedent. The field is not one of RFC 0026 F3's four shapeless
+     `Opaque` members, because it names a schema.
+
+     A daemon MUST validate the note against that schema **before
+     reading any member of it**, and MUST refuse a non-conforming note
+     with `MalformedRequest`. INV-016: a note is untrusted source, and
+     the order matters — a daemon that read `author` or `goal` first
+     would be acting on a document it had not yet decided was one.
+
+  3. **A note's `author` MUST be the admitted capability's actor.** A
+     mismatch is `CapabilityDenied`. The field cannot simply be
+     trusted: every node compiled from the note takes it as
+     `provenance.actor` (W9), so a trusting daemon would let a caller
+     append under another principal's name — the thing `observe.ingest`
+     and `evidence.link` both refuse by taking the actor from the grant
+     and declaring no request field for it. Nor can it be overwritten,
+     because the note is a document the caller holds and a daemon that
+     rewrote a member would be compiling something other than what it
+     was handed. Requiring agreement is RFC 0027 T4 at the note's
+     granularity, and its refusal is T4's: "an attempt to act as
+     another principal is an authorization failure and MUST NOT be
+     distinguishable from any other one."
+
+  4. **A compiled node's identity is what the node asserts.** The
+     preimage is the domain tag `whiteboard-note/v1`, the node's kind,
+     its subject handle, and its claim identity, each framed by its byte
+     length, resolved through the same `ContentIdentifier` seam at
+     artifact class `ev` that names every other evidence artifact
+     (`rule evidence.edge_identity`). The tag carries a `/`, which is
+     outside the artifact-handle character class, so no `observe.ingest`
+     node preimage can spell one of these and no edge preimage can
+     either.
+
+     The note handle, the author, and the time are outside it, as
+     `provenance` is outside a node's and an edge's identity: RFC 0038
+     D4 requires a replayed write to return the original node identity
+     "across processes and producers", and two agents who write the
+     same line about the same claim are making one assertion, not two.
+     Which section proposed a node is recoverable from its kind, because
+     the six proposing sections name six distinct kinds (W2) — so the
+     "known fact and candidate invariant about one claim are two
+     assertions" property W2 states survives an identity that names no
+     section. The `SUPPORTS` edges a decision draws take `rule
+     evidence.edge_identity` unchanged.
+
+  5. **Nothing a note says is a status, and nothing it proposes is
+     accepted.** Every compiled node lands at `proposed`. This
+     operation writes no status, mints no promotion, and cannot reach
+     RFC 0038's compare-and-set, so RFC 0027 A5's "no operation in the
+     registry sets a status" survives the addition verbatim. Refusal is
+     whole-note (W8): a daemon MUST return a complete compilation or
+     refuse, and MUST NOT append a subset — INV-017's per-artifact
+     atomicity read at the note's granularity, and the reason two
+     entries in tension stay two proposals rather than being resolved
+     by authoring order (plan §11.7).
+  """
+}
+
 rule errors.common {
   """
   Every operation MAY additionally return `MalformedRequest`,
@@ -2422,6 +2613,30 @@ struct IntentChangeSet {
   rationale: String required;
 }
 
+/// One `Experiment` line of a whiteboard note, compiled
+/// (RFC 0038 W3, docs/44 "experiments become task proposals").
+///
+/// plan §11.2's twenty node kinds have no task kind, so an experiment
+/// proposes a *task* rather than a node: it carries no claim identity,
+/// no subject, and therefore no handle — a task proposal is not a graph
+/// artifact and nothing publishes one. What it can honestly name is
+/// which line it came from and what that line would be run against.
+///
+/// The line's own prose is deliberately absent. It is the caller's text,
+/// the caller holds the note it sent, and echoing untrusted text back
+/// into a result is exactly what `rule envelope.no_prose` and INV-016
+/// forbid; `index` is how a client recovers the sentence from the
+/// document it already has.
+@since("3.5")
+struct WhiteboardTaskProposal {
+  /// Position in the note's `experiments` array, counting from zero.
+  index: U32 required;
+  /// The prior artifacts the experiment would be run against, in the
+  /// note's own order. Every one resolved before the compilation
+  /// happened (RFC 0038 W4).
+  references: list<Commitment> required;
+}
+
 /// A filter over the evidence graph.
 struct EvidenceQuery {
   node_kinds: list<EvidenceNodeKind> optional;
@@ -2442,7 +2657,7 @@ struct EvidenceQuery {
 // =====================================================================
 // 10. Operations
 //
-// The complete plan §10.2 registry: 73 operations in 18 namespaces.
+// The complete plan §10.2 registry: 74 operations in 19 namespaces.
 // Each operation's `authority` clause mirrors RFC 0027's registry table
 // exactly; a generator MUST fail if the two disagree.
 // =====================================================================
@@ -3784,6 +3999,57 @@ operation evidence.link {
     /// The checker's service identity (INV-004), from the admitted
     /// capability and never from the request.
     checker: String required;
+  };
+  verdict StructuralVerdictValue;
+  errors [InsufficientEvidence];
+}
+
+// --- whiteboard (RFC 0038, plan §11.5) -------------------------------
+
+/// Compile a structured whiteboard note into typed graph proposals: one
+/// proposed node per claim line, one `SUPPORTS` edge per artifact a
+/// decision cites, and one task proposal per experiment (plan §11.5,
+/// docs/44 "Whiteboard", RFC 0038 W1–W9). The semantics are
+/// `rule whiteboard.compilation`.
+///
+/// The note crosses as an `Opaque` governed by
+/// `schemas/whiteboard-note.schema.json` and is validated against it
+/// before any member is read (INV-016). Its `author` MUST be the
+/// admitted capability's actor; there is no other way for the daemon to
+/// write a truthful `provenance.actor` without either trusting a
+/// request field or rewriting the caller's document.
+///
+/// Everything a note proposes lands at `proposed`. The note format has
+/// **no status member** (RFC 0038 W5), this operation mints no
+/// promotion, and it cannot reach the compare-and-set — so a whiteboard
+/// is where an agent works and the graph is what it may claim, and this
+/// is the one-way door between them. Compilation is a function of the
+/// note and the graph: the note supplies its own `created_at`, so the
+/// daemon reads no clock (INV-005).
+///
+/// Refusal is whole-note. A reference the graph cannot resolve is
+/// `CapabilityDenied` and never a distinguishable not-found (RFC 0027
+/// X2); a note that is not a conforming note is `MalformedRequest`; a
+/// decision whose only support would be the decision itself is
+/// `InsufficientEvidence`, which is `evidence.link`'s self-edge refusal
+/// over the same graph.
+@mutation
+@since("3.5")
+operation whiteboard.compile {
+  authority propose;
+  request {
+    /// The note, in the form of `schemas/whiteboard-note.schema.json`.
+    note: Opaque required;
+  };
+  response {
+    /// The proposed nodes, in the note's own section and line order.
+    nodes: list<EvidenceHandle> required;
+    /// The `SUPPORTS` edges the note's decisions drew (RFC 0038 W6).
+    edges: list<EvidenceHandle> required;
+    /// One entry per `Experiment` line (RFC 0038 W3). Present and empty
+    /// when the note had none: an absent list and an empty list would be
+    /// two spellings of one answer.
+    tasks: list<WhiteboardTaskProposal> required;
   };
   verdict StructuralVerdictValue;
   errors [InsufficientEvidence];
