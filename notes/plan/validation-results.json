@@ -57,13 +57,13 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 754,
-      "active_edges": 1767,
-      "active_requirements": 645,
+      "active_bones": 757,
+      "active_edges": 1775,
+      "active_requirements": 649,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 663,
-      "requirements": 846
+      "leaf_bones": 666,
+      "requirements": 850
     },
     "program_status": {
       "execution_model": "autonomous-agent-swarm",
@@ -77,12 +77,28 @@
       ],
       "program_status": "ready"
     },
+    "protocol_registry_agreement": {
+      "authority_levels": {
+        "execute": 41,
+        "promote": 2,
+        "propose": 8,
+        "read": 18,
+        "revise_intent": 4
+      },
+      "namespaces": 18,
+      "operations": 73,
+      "sources": [
+        "schemas/continuumd-native-protocol.idl",
+        "plan.md \u00a710.2",
+        "rfcs/0027-agent-tool-protocol.md"
+      ]
+    },
     "python": {
       "files": 22
     },
     "register_rows": {
       "ratified_quotes_checked": 6,
-      "rows": 21
+      "rows": 25
     },
     "retired_names": {
       "files_scanned": 312
@@ -91,7 +107,8 @@
       "target_gate_lines": 20
     },
     "schemas": {
-      "pairs": 19
+      "external_instances": 2,
+      "pairs": 21
     },
     "spec_debt": {
       "open": [],
