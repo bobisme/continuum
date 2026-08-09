@@ -13,7 +13,7 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 326
+      "scanned_files": 328
     },
     "g0_matrix_counts": {
       "evidence": 6,
@@ -32,11 +32,11 @@
       "plan_bullets": 68
     },
     "handle_prefix_registry": {
-      "anchored_patterns": 50,
+      "anchored_patterns": 52,
       "registry_prefixes": 19
     },
     "json": {
-      "files": 47
+      "files": 49
     },
     "lean_source": {
       "files": 17,
@@ -46,7 +46,7 @@
       "files": 224
     },
     "markdown_links": {
-      "links": 416
+      "links": 419
     },
     "numbering": {
       "adr": 53,
@@ -101,14 +101,14 @@
       "rows": 25
     },
     "retired_names": {
-      "files_scanned": 312
+      "files_scanned": 314
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20
     },
     "schemas": {
-      "external_instances": 2,
-      "pairs": 21
+      "external_instances": 10,
+      "pairs": 30
     },
     "spec_debt": {
       "open": [],
