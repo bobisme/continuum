@@ -65,11 +65,16 @@
 //!   nothing appends a `REPAIRS` edge. *Semantic duplicates* needs semantic equality, which
 //!   is the one this crate can never have: ADR-0013 makes two records the same artifact
 //!   exactly when they encode identically, and that is syntactic by construction.
-//! - **now answerable from held content, one.** *Provenance* in docs/44's derivation sense
-//!   — "source retrievals, and derivation" — is a walk over `provenance.inputs`, which every
-//!   node carries and which `observe.ingest`, `evidence.link`, and `whiteboard.compile` all
-//!   write. [`EvidenceGraph::nodes_by_producer`] answers the who-produced-what grain; the
-//!   derivation closure is a legitimate slice and is carried, not shipped here.
+//! - **delivered since, one.** *Provenance* in docs/44's derivation sense — "source
+//!   retrievals, and derivation" — is a walk over `provenance.inputs`, which every node
+//!   carries and which `observe.ingest`, `evidence.link`, and `whiteboard.compile` all
+//!   write. [`EvidenceGraph::nodes_by_producer`] answers the who-produced-what grain, and
+//!   [`crate::derivation::DerivationClosure`] answers the derivation grain (RFC 0038 P1–P7,
+//!   bn-2w0h0). It resolves an input the same way [`crate::whiteboard`] does — the graph
+//!   holds zero or more nodes *about* an artifact — and an input that resolves to none is a
+//!   typed [`crate::derivation::AbsentInput`] rather than a silent skip, which is why it is
+//!   a crate-level surface: `evidence.query` answers `list<EvidenceHandle>` and an artifact
+//!   the graph does not hold has no handle to answer with.
 //! - **blocked on a different thing than was recorded, one.** *Task generation*'s seven
 //!   docs/44 forms are predicates over edge kinds the graph almost never holds: of the
 //!   thirteen, `whiteboard.compile` appends `SUPPORTS`, `evidence.link` appends
@@ -79,8 +84,8 @@
 //!   the empty-success shape rather than a query. What unblocks it is an operation that
 //!   records a refutation, not more content.
 //!
-//! None of the six is approximated here. Naming which of them is blocked on *what* is the
-//! difference between a deferral and a shrug.
+//! None of the five that remain is approximated here. Naming which of them is blocked on
+//! *what* is the difference between a deferral and a shrug.
 //!
 //! Every accessor iterates a [`std::collections::BTreeMap`] keyed by content identity, so
 //! iteration order is a function of the content and of nothing else (GOV-1-03, INV-005).

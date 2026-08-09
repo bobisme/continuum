@@ -104,6 +104,8 @@ Agents do not merge mutable branches of “reasoning.” They publish immutable 
 
 Every node records actor/tool/model version, prompts/tool inputs as policy permits, source retrievals, and derivation. This supports scientific credit, debugging, benchmark analysis, and reproduction without granting authority based on identity.
 
+The record itself is `provenance` in [`../schemas/evidence-graph-node.schema.json`](../schemas/evidence-graph-node.schema.json), which closes it at four members and is what `crates/continuum-evidence/src/provenance.rs` is transcribed from. Reading it back is two grains and two surfaces: *who produced what* is `EvidenceGraph::nodes_by_producer`, and *derivation* — the "source retrievals" half, the one reproduction needs — is the transitive closure over `provenance.inputs` in `crates/continuum-evidence/src/derivation.rs` (RFC 0038 P1–P7). The closure runs backward only, because "made from" and "used by" are two questions and only the first can state in what sense it is complete. An input that names an artifact the graph holds no node about is reported as a **typed absence** and never dropped: `provenance.inputs` is written for admitted actors but its entries are still names, and a note's own handle is in every node it compiles while never being a node itself, so a graph that names what it does not hold is the ordinary case rather than a malformed one (INV-016, INV-008). It has no wire verb: `evidence.query` answers handle lists, and an artifact the graph does not hold has no handle to answer with.
+
 ## Garbage collection
 
 Superseded proposals may be compacted but remain reachable from receipts/audits. Large derivations use content-addressed shared subgraphs.

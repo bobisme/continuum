@@ -37,6 +37,7 @@
 //! | [`claim_status`] | the plan §11.4 lattice and its compare-and-set | PR-1 / IMPL-06 |
 //! | [`whiteboard`] | plan §11.5's seven sections, and the compiler that turns them into proposals | PHASE-A-DEL-04 |
 //! | [`view`] | the other direction: held graph state, rendered into those seven sections | PHASE-A-DEL-04 |
+//! | [`derivation`] | RFC 0038's `provenance` query in docs/44's derivation sense: the transitive ancestry over `provenance.inputs` | PHASE-A-DEL-04 |
 //!
 //! # The whiteboard runs in two directions, and only one of them has a wire verb
 //!
@@ -56,6 +57,19 @@
 //! the order the compiler itself took. A view is deliberately **not** a note (RFC 0038 V6):
 //! the note format has no status member on purpose, and rendering held state into it would
 //! erase every status the graph holds.
+//!
+//! # Two of RFC 0038's seven queries are answered here
+//!
+//! [`graph::EvidenceGraph::contradictions`] is "conflicting candidates". [`derivation`] is
+//! "provenance", in docs/44's derivation sense — "source retrievals, and derivation" — as
+//! the transitive ancestry over `provenance.inputs`, which every node carries and which
+//! `observe.ingest`, `evidence.link`, and `whiteboard.compile` all write. It has no wire
+//! verb either, and for a sharper reason than the view's: `evidence.query` answers
+//! `list<EvidenceHandle>`, and an input naming an artifact the graph holds no node about has
+//! no `ev_` handle at all, so the typed absence INV-016 requires is not expressible there —
+//! nor is the relation itself, since no `EvidenceQuery` member names an artifact handle.
+//! Which of the other five remain blocked, and on what, is [`graph`]'s module documentation
+//! and RFC 0038's "Queries".
 //!
 //! # This is the library, not the wire
 //!
@@ -99,6 +113,7 @@ pub mod actor;
 pub mod authority;
 pub mod claim_status;
 pub mod conflict;
+pub mod derivation;
 pub mod edge;
 pub mod graph;
 pub mod identity;
