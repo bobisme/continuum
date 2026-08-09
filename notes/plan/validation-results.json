@@ -46,7 +46,7 @@
       "files": 224
     },
     "markdown_links": {
-      "links": 419
+      "links": 422
     },
     "numbering": {
       "adr": 53,
@@ -57,12 +57,12 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 757,
+      "active_bones": 758,
       "active_edges": 1776,
       "active_requirements": 649,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 665,
+      "leaf_bones": 666,
       "requirements": 850
     },
     "program_status": {
@@ -81,12 +81,12 @@
       "authority_levels": {
         "execute": 41,
         "promote": 2,
-        "propose": 8,
+        "propose": 9,
         "read": 18,
         "revise_intent": 4
       },
-      "namespaces": 18,
-      "operations": 73,
+      "namespaces": 19,
+      "operations": 74,
       "sources": [
         "schemas/continuumd-native-protocol.idl",
         "plan.md \u00a710.2",
