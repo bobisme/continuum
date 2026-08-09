@@ -1029,7 +1029,7 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 42, "rules");
+    assert_eq!(document.rules.len(), 43, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()

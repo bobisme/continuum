@@ -157,6 +157,79 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.10 — the context-compilation rule (bn-1y4qc), serving a verb
+  ///         that has been declared since 3.0 and refused for as long
+  ///         as no compiler existed. `context.compile` is not added
+  ///         here; it is *answered*. RFC 0028's ten-stage pipeline
+  ///         landed in `crates/continuum-context` (stages 1–8, with
+  ///         stage 9 the register row's declared-disabled fallback and
+  ///         stage 10 the byte packer), `continuumd`'s `context`
+  ///         family runs it, and `rule errors.unsupported_surface`'s
+  ///         reason for the old refusal — "an operation registered
+  ///         ahead of its producing subsystem" — has expired for this
+  ///         row.
+  ///
+  ///         The declared surface left four decisions open that no
+  ///         normative wire text fixed, and `rule context.compilation`
+  ///         states them: that `guarantees` is a request which never
+  ///         becomes a claim and whose unknown token is
+  ///         `MalformedRequest`; that `audience` selects rendering and
+  ///         MUST NOT reach `context_id`; that the declared
+  ///         `EvaluationVerdictValue` is the pack's own verdict and
+  ///         assurance class rather than a second opinion, with the
+  ///         envelope's `omissions` agreeing with the pack's manifest
+  ///         record for record; and which of the operation's three
+  ///         declared errors covers an absent producer
+  ///         (`UnsupportedSemanticFeature`, uniform over every root so
+  ///         it is not an existence oracle) against an absent input
+  ///         (`InsufficientEvidence`). Each is a decision a conforming
+  ///         daemon had to make and could previously have made two
+  ///         ways.
+  ///
+  ///         **`version` stays `"3.5"`.** `rule
+  ///         versioning.compatible_change` names the five changes that
+  ///         raise the protocol minor — adding an operation, an
+  ///         `optional` field, an `@open` enum member, an error code,
+  ///         or relaxing a server-side constraint — and this revision
+  ///         makes none of them. No field, member, code, struct, or
+  ///         operation is added, removed, or moved: the registry is 74
+  ///         rows in 19 namespaces, the named-struct count is 47,
+  ///         `propose` is 9, `@mutation` is 46, `@task_starting` is
+  ///         26, `@audit_recorded` is 7, and the `structural` verdict
+  ///         count is 27 — every count table unchanged. One rule
+  ///         arrives (`context.compilation`, 42 → 43).
+  ///
+  ///         The tempting fifth trigger is "relaxing a server-side
+  ///         constraint", and it does not fire, for the reason 1.7
+  ///         already gave and `rule errors.common` states as relaxed at
+  ///         3.2: **whether a lane has shipped is a property of a
+  ///         deployment, not of an operation.** A 3.0 client could
+  ///         always name `context.compile`; it was always entitled to
+  ///         an `ok`; what it got depended on the daemon it reached,
+  ///         and it still does. A deployment with no compiler keeps
+  ///         answering `UnsupportedSemanticFeature` after this revision
+  ///         and conforms. Nothing a client may send changes, nothing a
+  ///         conforming client could previously receive becomes
+  ///         unreceivable, and no negotiated version gates any of it —
+  ///         which is exactly the 1.7 and 1.8 argument, and is why
+  ///         serving declared vocabulary is a revision of this file
+  ///         rather than a bump of the protocol. It differs from 1.5,
+  ///         which wrote down behaviour every conforming daemon already
+  ///         had: here a daemon's answers do move, from a refusal to a
+  ///         pack, and the four clauses above are the decisions that
+  ///         move them.
+  ///
+  ///         No RFC 0026 flag is raised or paid. F6 (`guarantees` is
+  ///         `list<String>` where the pack's is a closed enum) is
+  ///         *touched* by clause 1 and deliberately not paid: paying it
+  ///         changes a declared field's type, which `rule
+  ///         versioning.breaking_change` makes a major, and the clause
+  ///         states the reading the closed vocabulary already forces
+  ///         inside the wider wire type — the correction-16 shape,
+  ///         where the reading lands first and the declaration follows
+  ///         a sweep that owns it. F10 (an `Opaque` pack payload naming
+  ///         its `schema_id`) is unmoved and defers with the IDL's open
+  ///         item 3.
   ///   1.9 — the whiteboard wire verb (bn-1as8e) and the single
   ///         protocol-minor bump 3.4 → 3.5 that covers it. This is the
   ///         second revision that moves the registry, and it moves it
@@ -455,7 +528,7 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.9";
+  idl_version = "1.10";
   /// The protocol version this document defines.
   ///
   /// 3.5 is the single minor bump for IDL 1.9, taken once at the end of
@@ -2436,6 +2509,70 @@ rule whiteboard.compilation {
      atomicity read at the note's granularity, and the reason two
      entries in tension stay two proposals rather than being resolved
      by authoring order (plan §11.7).
+  """
+}
+
+rule context.compilation {
+  """
+  What a daemon that *serves* `context.compile` answers with. The
+  operation has been declared since 3.0 and refused
+  `UnsupportedSemanticFeature` for as long as no compiler existed
+  (`rule errors.unsupported_surface`); serving it is the 1.7/1.8 shape —
+  already-declared vocabulary answered rather than refused — and the
+  declaration leaves four real decisions open that no wire text fixed.
+  All four are stated here; none of them adds, removes, or moves a
+  declaration.
+
+  1. **`guarantees` is a request and never becomes a claim.** The field
+     is `list<String>` (RFC 0028 F6) and shares its spelling with the
+     pack's own `guarantees`, which is a closed thirteen-member set of
+     *checked* claims. A daemon MUST NOT echo a requested guarantee it
+     did not achieve (RFC 0028 C1), MUST record a
+     requested-but-unachieved guarantee in the pack's omission manifest,
+     and MUST refuse a token outside the closed vocabulary with
+     `MalformedRequest` — forward compatibility here is achieved by
+     rejecting, never by ignoring, which is the same reading `rule
+     versioning.enums` gives a closed enum. The wire type cannot state
+     any of this, which is why the rule does.
+
+  2. **`audience` selects rendering and MUST NOT reach `context_id`.**
+     RFC 0028: "two `context.compile` requests differing only in
+     `audience` MUST produce the same `ctx_*`". A daemon MUST derive a
+     pack's identity from the compiled question and MUST NOT admit
+     `audience` — or the envelope's `budget`, which `rule
+     versioning.compatible_change`'s companion RFC 0030 places in
+     execution identity — into it. A caller that changes only the
+     audience is asking one question twice.
+
+  3. **The declared `verdict` is the pack's, not a second opinion.** The
+     operation declares `verdict EvaluationVerdictValue`; that value's
+     `verdict` MUST equal the pack's `verdict` and its
+     `assurance_class` MUST equal the pack's `assurance.class` (RFC
+     0028, "Wire surface"). A pack whose question is not about an
+     evaluation outcome carries `inconclusive` with a typed
+     `InconclusiveReason` and MUST NOT default to `satisfied`; a daemon
+     that has neither an evaluation verdict nor a typed reason MUST
+     refuse with `InsufficientEvidence` rather than choose one. The
+     envelope's `omissions` list is the wire projection of the pack's
+     manifest and MUST agree with it record for record.
+
+  4. **Which refusal covers an absent producer, and which an absent
+     input.** `UnsupportedSemanticFeature` is the answer where the
+     deployment holds no producer able to compile from the named root —
+     it is a fact about the deployment, uniform over every root, and a
+     daemon MUST answer it identically whether or not it holds the root
+     named, because a distinguishable answer would be the existence
+     oracle RFC 0027 X2 closes. `InsufficientEvidence` is the answer
+     where the deployment *can* compile but the named root selects
+     nothing to compile from. `BudgetExhausted` remains declared and is
+     the ceiling branch; a daemon that does not pack a root pack MUST
+     NOT repurpose it.
+
+  Serving is a property of a deployment, not of the operation (`rule
+  errors.common`, as relaxed at 3.2): a deployment holding a compiler
+  answers `ok`, one that does not keeps `UnsupportedSemanticFeature`,
+  and both conform. That is why this rule raises no flag and takes no
+  version.
   """
 }
 

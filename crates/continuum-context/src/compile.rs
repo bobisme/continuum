@@ -908,6 +908,13 @@ impl CausalCompile {
                 .collect::<Vec<_>>(),
         )?;
         let mut accounting = Accounting::over(candidates);
+        // The same dispositions the ledger records, kept beside it. `ClosedAccounting` derives
+        // the manifest by *counting* cells and does not retain which candidate fell in which,
+        // which is exactly what whole-pack assembly needs to pair a record with the items an
+        // expansion must return for it (`daemon::context`). Recording it here rather than
+        // recomputing it downstream keeps one authority: a second derivation could disagree
+        // with the ledger the manifest was read off.
+        let mut omissions: BTreeMap<Name, Omitted> = BTreeMap::new();
         let causal_reason = self.order.completeness().omission_reason();
         let property_reason = self
             .property
@@ -926,7 +933,9 @@ impl CausalCompile {
                 // Withheld, whether or not the slice wanted it. `expandable: false` and the
                 // reason that explains irretrievability — RFC 0028's expansion table's
                 // redacted row, read at compile time rather than at expansion time.
-                accounting.omit(id, Omitted::Irretrievable(IrretrievableReason::Redaction))?;
+                let omitted = Omitted::Irretrievable(IrretrievableReason::Redaction);
+                accounting.omit(id, omitted.clone())?;
+                omissions.insert(id.clone(), omitted);
                 continue;
             }
             if let Some(refusal) = proof_refusal
@@ -935,7 +944,9 @@ impl CausalCompile {
                 // Stage 5's column, and the only stage that could have put this item on a
                 // proof dependency slice. `unsupported`, and irretrievable because nothing in
                 // this deployment retrieves it.
-                accounting.omit(id, Omitted::Irretrievable(refusal.irretrievable_reason()))?;
+                let omitted = Omitted::Irretrievable(refusal.irretrievable_reason());
+                accounting.omit(id, omitted.clone())?;
+                omissions.insert(id.clone(), omitted);
                 continue;
             }
             // The reason names the stage that decided the drop; see the module
@@ -953,13 +964,12 @@ impl CausalCompile {
                 causal_reason
             };
             residual_used = true;
-            accounting.omit(
-                id,
-                Omitted::Expandable {
-                    reason,
-                    query: residual.clone(),
-                },
-            )?;
+            let omitted = Omitted::Expandable {
+                reason,
+                query: residual.clone(),
+            };
+            accounting.omit(id, omitted.clone())?;
+            omissions.insert(id.clone(), omitted);
         }
         let accounting = accounting.close()?;
         accounting.reconcile()?;
@@ -973,6 +983,7 @@ impl CausalCompile {
         Ok(Compilation {
             trail,
             accounting,
+            omissions,
             guarantees: guarantees.seal().map_err(|_| CompileError::Unreachable)?,
             closure_violation: violation,
             redaction_gap,
@@ -995,6 +1006,7 @@ impl CausalCompile {
 pub struct Compilation {
     trail: StageTrail,
     accounting: ClosedAccounting,
+    omissions: BTreeMap<Name, Omitted>,
     guarantees: SealedGuarantees,
     closure_violation: Option<ClosureViolation>,
     redaction_gap: BTreeSet<Name>,
@@ -1033,6 +1045,20 @@ impl Compilation {
     #[must_use]
     pub fn selected(&self) -> &[Name] {
         self.accounting.selected()
+    }
+
+    /// Why each unselected candidate is unselected, in canonical order.
+    ///
+    /// The manifest counts these; this is the membership behind the counts. Whole-pack assembly
+    /// needs it to pair a manifest record with the items an expansion of that record must
+    /// return, and RFC 0028's expansion protocol is only checkable against a record if the two
+    /// come from one ledger: "the result envelope's `omissions` list […] MUST agree with the
+    /// pack's manifest record for record". A consumer that re-derived the grouping from the
+    /// order and the selection would be a second authority able to disagree with the manifest
+    /// this compile published.
+    #[must_use]
+    pub const fn omissions(&self) -> &BTreeMap<Name, Omitted> {
+        &self.omissions
     }
 
     /// Why closure was not licensed, when it was not.

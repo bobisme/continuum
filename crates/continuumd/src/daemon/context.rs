@@ -2,17 +2,52 @@
 //!
 //! # What lands here, and what does not
 //!
-//! `context.expand` is served. `context.compile` reaches this family and is refused
-//! `UnsupportedSemanticFeature`, for the reason [`observe`](super::observe)'s two refusals
-//! give: RFC 0028's compiler is ten stages over the evidence graph, the property automaton,
-//! the correspondence graph and a minimizer, and none of those exist in this workspace. An
-//! operation "registered in plan §10.2 ahead of its producing subsystem […] MUST fail with
-//! the typed `UnsupportedSemanticFeature` rather than degrading, guessing, or returning an
-//! empty success" (`rule errors.unsupported_surface`), and a compiled-looking pack with no
-//! compiler behind it is exactly the degradation that rule names.
+//! **Both operations are served (bn-1y4qc).** `context.compile` runs `continuum-context`'s
+//! landed pipeline — the redaction pre-pass and RFC 0028 stages 1–8, with stage 9 disabled
+//! (the register row's own named fallback configuration) and stage 10 supplied by
+//! [`continuum_context::budget`] — and publishes the root document
+//! [`continuum_context::pack::RootPack`] writes. Until this bone the operation was refused
+//! `UnsupportedSemanticFeature` and this module said why: "RFC 0028's compiler is ten stages
+//! over the evidence graph, the property automaton, the correspondence graph and a minimizer,
+//! and none of those exist in this workspace." Six of those stages now exist, two of them
+//! refuse *inside* the pipeline with typed records rather than from the wire, and the
+//! difference between an unbuilt compiler and a compiler whose stage 5 has no proof service is
+//! precisely the difference `rule errors.unsupported_surface` draws between refusing an
+//! operation and answering it honestly.
 //!
-//! Expansion is a different operation, and that is why it can land while compilation
-//! cannot: it is **navigation over a published pack**, not compilation from evidence.
+//! # What a compile still needs from out of band, and why that is not a degradation
+//!
+//! Stage 2's declared input is "CIR causal order" and `continuum-cir` is a PR-17 scaffold, so
+//! nothing in this workspace turns an `ev_*` evidence root into a candidate order. This module
+//! does not invent one. A deployment registers the projection it holds —
+//! [`ContextCompileSource`] — through
+//! [`DaemonState::put_compile_source`](super::state::DaemonState::put_compile_source), the same
+//! out-of-band administration surface content staging, capability provisioning and pack
+//! registration already use ("content staging and capability provisioning are not operations in
+//! this protocol version (IDL §7)"). An `evidence_root` no source is registered for is refused
+//! `UnsupportedSemanticFeature`, uniformly — the same answer whether or not the daemon holds
+//! that root, so the refusal is not an existence oracle (RFC 0027 X2).
+//!
+//! What this buys is exactly what the exit owed: the *compiler* is the producer. The candidate
+//! order, the item bodies and the answer header are a deployment's registered facts; the
+//! selection, the guarantees, the manifest, the accounting and the document are the landed
+//! pipeline's.
+//!
+//! # `Audience` selects rendering, never content
+//!
+//! > Two `context.compile` requests differing only in `audience` MUST produce the same `ctx_*`.
+//! >
+//! > — RFC 0028, "Views and rendering"
+//!
+//! Held structurally rather than remembered: [`continuum_context::pack::RootIdentity::derive`]
+//! takes the question, the intent, the snapshot, the semantic epoch and the evidence roots, and
+//! `audience` is not among them and has no path to become one. This daemon renders one
+//! projection — the pack itself — so the field selects between renderings it does not have and
+//! changes nothing; a deployment that adds renderings adds them beside the artifact, never
+//! inside it.
+//!
+//! Expansion is still a different operation, and the reason it landed first stands: it is
+//! **navigation over a published pack**, not compilation from evidence.
 //!
 //! > `context.expand(context, anchor, relation, depth?)` returns a new immutable pack
 //! > referencing its parent. Everything beyond the default result is reachable by
@@ -30,14 +65,17 @@
 //!
 //! # Where a pack comes from, honestly
 //!
-//! [`DaemonState::put_context_pack`](super::state::DaemonState::put_context_pack), through
-//! [`Daemon::state_mut`](super::Daemon::state_mut) — the out-of-band administration surface
-//! content staging and capability provisioning already use, because "content staging and
-//! capability provisioning are not operations in this protocol version (IDL §7)". Pack
-//! *compilation* is not an operation this daemon serves either, so a deployment registers
-//! the packs it holds the same way it registers the models `verification.start` explores.
-//! When the compiler lands it will write through the same surface, and nothing in this file
-//! changes.
+//! Two ways, and they meet at one surface. A deployment may register a published pack directly
+//! through [`DaemonState::put_context_pack`](super::state::DaemonState::put_context_pack) — the
+//! out-of-band administration route that predates the compiler — or a caller may compile one,
+//! and [`compile`] then **writes through that same surface**, which is what this module
+//! predicted it would: "when the compiler lands it will write through the same surface, and
+//! nothing in this file changes." Nothing in [`expand`] did.
+//!
+//! A compiled pack is registered before it is answered with, so the `ctx_*` on the wire is
+//! immediately navigable and the manifest's promise — "`recoverable_by` carrying the exact
+//! `ctx_*` that record's query resolves to" — is true of this daemon at the moment it is made,
+//! not at some later administrative step.
 //!
 //! # The typed outcome table, and where each row is decided
 //!
@@ -86,31 +124,66 @@
 //! function that derived this child's own identity, so what the manifest promises and what
 //! a following `context.expand` returns are one value rather than two that agree today.
 //!
+//! # The compile's typed outcome table
+//!
+//! | Condition | Outcome | Where |
+//! |---|---|---|
+//! | no compile source is registered for the named `evidence_root` | `UnsupportedSemanticFeature` | [`compile`] — uniform, so it is not an existence oracle |
+//! | the envelope names a snapshot other than the source's | `StaleSnapshot` | [`stale_snapshot_check`] |
+//! | `question` is empty, untrimmed, or not printable ASCII | `MalformedRequest` | [`compile`], via `Question::compiled` |
+//! | a requested guarantee is not a member of the closed thirteen | `MalformedRequest` | [`compile`] — "fail closed on unrecognized tokens" (RFC 0028) |
+//! | the registered source names no root, or the compile has nothing to slice | `InsufficientEvidence` | [`compile`] |
+//! | the pipeline refuses the registered input (a redacted root, an unanchored residual, …) | `UnsupportedSemanticFeature` | [`compile_fault`] |
+//! | the assembled root would not reconcile, or violates its profile | `UnsupportedSemanticFeature` | [`pack_fault`] — nothing is published |
+//! | otherwise | **success**, with the pack, the verdict, and the manifest as envelope omissions | [`compile`] |
+//!
+//! `BudgetExhausted` is declared for `context.compile` and is **not** raised here: byte packing
+//! is stage 10 and is applied to expansions, where RFC 0028's two branches live. A compile in
+//! this deployment publishes the whole root or nothing, and a root too large for a caller's
+//! ceiling is a shortfall the *expansion* protocol answers. Naming a branch that no code takes
+//! would be worse than the absence.
+//!
 //! # What is declined here, and why
 //!
-//! **The child pack is not published into the reference store.** A store handle is the
-//! content identity of the bytes (`ContentIdentifier::identify`), and a pack's `context_id`
-//! is the identity of its *question* (RFC 0027 C2, RFC 0028's idempotency rule) — two
-//! spellings for one artifact unless something reconciles them, and reconciling them is a
-//! decision about pack assembly rather than about expansion. Publishing under a second
-//! identity would be the disagreement ADR-0013 forbids, so this bullet returns the pack on
-//! the wire, names no `ArtifactRef`, and leaves the store question to the bone that owns
-//! pack assembly. Nothing about the answer is weaker for it: the pack is
-//! self-describing, carries its own `content_hash`, and names its parent.
+//! **No pack is published into the reference store — and the identity question that decision
+//! left open is now settled** (bn-1y4qc). This module recorded the open question at IMPL-04:
+//! "a store handle is the content identity of the bytes (`ContentIdentifier::identify`), and a
+//! pack's `context_id` is the identity of its *question* — two spellings for one artifact
+//! unless something reconciles them, and reconciling them is a decision about pack assembly."
+//! [`continuum_context::pack`]'s "Root assembly, and the identity question it settles" answers
+//! it: they are two identities of two different things, and the pack carries **both** —
+//! `context_id` for the question, `content_hash` for the bytes — so a store handle and a `ctx_*`
+//! are one field lookup apart in either direction and no second identity is minted anywhere.
+//! Publishing would therefore add a *record*, never an identity, and the record is derivable
+//! from the pack; the handler holds `&ReferenceStore` and mutates nothing, which is the shape
+//! that reading is. Both operations return the pack on the wire and name no `ArtifactRef`.
 
+use continuum_context::accounting::Omitted;
+use continuum_context::assurance::Assurance;
 use continuum_context::budget::{BudgetError, BudgetPacker};
+use continuum_context::compile::{CausalCompile, Compilation, CompileError};
 use continuum_context::expansion::{
     Depth, ExpansionHandle, ExpansionPayload, ExpansionQuery, ExpansionRelation as PackRelation,
 };
+use continuum_context::guarantee::{Guarantee, RequestedGuarantees};
 use continuum_context::omission::{
     IrretrievableReason, Manifest, OmissionReason as PackReason, OmissionRecord, Retrievability,
 };
-use continuum_context::pack::{self, ChildPack, PackError};
-use continuum_context::selection::SelectedItem;
+use continuum_context::pack::{
+    self, ChildPack, PackError, PackProfile, RedactionStub, RootIdentity, RootPack,
+};
+use continuum_context::scope::ScopeVerdict;
+use continuum_context::selection::{SelectedItem, SelectionKind};
+use continuum_context::target::{Question, Target};
+use continuum_context::verdict::Verdict as PackVerdict;
 use continuum_intent::canonical_json::Json;
+use continuum_value::assurance::{
+    AssuranceDimension, AssuranceLevel, DimensionEvidence,
+    InconclusiveReason as ValueInconclusiveReason, UnsupportedReason,
+};
 use continuum_value::identity::Blake3Hasher;
 use continuum_value::value::Name;
-use continuum_workspace::artifact_path::ArtifactClass;
+use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle as StoreHandle};
 use continuum_workspace::publication::ReferenceStore;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -118,11 +191,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::Services;
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 use super::state::DaemonState;
-use crate::protocol::envelope::{Omission, RequestEnvelope};
-use crate::protocol::operations::context::{ContextExpandRequest, ContextExpandResponse};
+use crate::protocol::envelope::{EvaluationVerdictValue, Omission, RequestEnvelope, Verdict};
+use crate::protocol::operations::context::{
+    ContextCompileRequest, ContextCompileResponse, ContextExpandRequest, ContextExpandResponse,
+};
 use crate::protocol::scalar::{ArtifactHandle, ContextHandle, Opaque, WorkspaceHandle};
 use crate::protocol::spec::{Nullable, Optional};
-use crate::protocol::vocabulary::{ErrorCode, ExpansionRelation, OmissionReason};
+use crate::protocol::vocabulary::{
+    AssuranceClass, ErrorCode, EvaluationVerdict, ExpansionRelation, InconclusiveReason,
+    OmissionReason,
+};
 
 /// The `context` namespace's two operations.
 #[derive(Debug, Clone, Copy, Default)]
@@ -134,6 +212,9 @@ pub struct ContextFamily;
 /// `tests/daemon_context_operations.rs`, the way `observe::FAULTS` is by
 /// `tests/daemon_evidence.rs`.
 pub const FAULTS: &[(&str, ErrorCode)] = &[
+    ("context.compile", ErrorCode::InsufficientEvidence),
+    ("context.compile", ErrorCode::MalformedRequest),
+    ("context.compile", ErrorCode::StaleSnapshot),
     ("context.compile", ErrorCode::UnsupportedSemanticFeature),
     ("context.expand", ErrorCode::CapabilityDenied),
     ("context.expand", ErrorCode::MalformedRequest),
@@ -288,9 +369,166 @@ impl ContextPackRecord {
     }
 }
 
+/// Everything a deployment must register before this daemon can compile a pack from an
+/// evidence root, and nothing this daemon could have derived itself.
+///
+/// The split is deliberate and is the whole honesty of the wiring. What is registered is the
+/// **projection**: the candidate order stage 2 slices (whose producer, `continuum-cir`, is a
+/// PR-17 scaffold), a body for every candidate (whose typed constructors are PR-11/IMPL-02 and
+/// IMPL-03, but whose *contents* come from the evidence a deployment holds), and the answer
+/// header a pack states about the evaluation it explains (`intent`, `snapshot`,
+/// `semantic_epoch`, `evidence`, `replay`, `verdict`, `assurance`). What is **not** registered
+/// is anything a checker decides: the selection, the guarantees, the manifest, the counting
+/// equation and the document are the pipeline's, and a deployment cannot pre-state any of them.
+///
+/// A body for *every* node of the order is required rather than only for the ones a compile
+/// happens to select, because which those are is the compiler's answer and not the
+/// registrant's: a source that supplied bodies for a guessed selection would decide the
+/// selection. It is also what makes INV-007 answerable — an omitted candidate must be
+/// *expandable*, and an expansion returns items.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextCompileSource {
+    compile: CausalCompile,
+    roots: BTreeSet<Name>,
+    residual: ExpansionQuery,
+    items: BTreeMap<Name, SelectedItem>,
+    snapshot: WorkspaceHandle,
+    semantic_epoch: String,
+    intent: StoreHandle,
+    evidence: Vec<StoreHandle>,
+    replay: Option<continuum_context::replay::ReplayRef>,
+    verdict: Option<PackVerdict>,
+    assurance: Assurance,
+    profile: PackProfile,
+    redactions: Vec<RedactionStub>,
+}
+
+impl ContextCompileSource {
+    /// Register the projection one evidence root compiles from.
+    ///
+    /// # Errors
+    ///
+    /// [`ContextPackError::UnbodiedCandidate`] when a node of the order has no item body, and
+    /// [`ContextPackError::BodyFromNowhere`] when a body names something the order does not
+    /// carry or disagrees with that node's declared kind — the two directions of "the
+    /// registered bodies are exactly the candidate universe", checked at registration for the
+    /// reason [`ContextPackRecord::new`] checks its own: a source this daemon could not compile
+    /// from is refused when it is registered, never when a caller asks.
+    pub fn new(
+        compile: CausalCompile,
+        roots: impl IntoIterator<Item = Name>,
+        residual: ExpansionQuery,
+        items: impl IntoIterator<Item = SelectedItem>,
+        header: CompileHeader,
+    ) -> Result<Self, ContextPackError> {
+        let mut bodies: BTreeMap<Name, SelectedItem> = BTreeMap::new();
+        for item in items {
+            let Some(kind) = compile.order().kind(item.id()) else {
+                return Err(ContextPackError::BodyFromNowhere {
+                    id: item.id().clone(),
+                });
+            };
+            if kind != item.kind() {
+                return Err(ContextPackError::BodyFromNowhere {
+                    id: item.id().clone(),
+                });
+            }
+            bodies.insert(item.id().clone(), item);
+        }
+        for (id, _) in compile.order().nodes() {
+            if !bodies.contains_key(id) {
+                return Err(ContextPackError::UnbodiedCandidate { id: id.clone() });
+            }
+        }
+        Ok(Self {
+            compile,
+            roots: roots.into_iter().collect(),
+            residual,
+            items: bodies,
+            snapshot: header.snapshot,
+            semantic_epoch: header.semantic_epoch,
+            intent: header.intent,
+            evidence: header.evidence,
+            replay: header.replay,
+            verdict: header.verdict,
+            assurance: header.assurance,
+            profile: header.profile,
+            redactions: header.redactions,
+        })
+    }
+
+    /// The snapshot every pack compiled from this source is stated against.
+    #[must_use]
+    pub const fn snapshot(&self) -> &WorkspaceHandle {
+        &self.snapshot
+    }
+
+    /// The pipeline this source configures.
+    #[must_use]
+    pub const fn compile(&self) -> &CausalCompile {
+        &self.compile
+    }
+
+    /// Every registered item body, in canonical identity order.
+    pub fn items(&self) -> impl Iterator<Item = &SelectedItem> {
+        self.items.values()
+    }
+
+    /// The registered body of one candidate.
+    #[must_use]
+    pub fn item(&self, id: &Name) -> Option<&SelectedItem> {
+        self.items.get(id)
+    }
+}
+
+/// The answer header a compiled pack states, registered beside the projection.
+///
+/// A struct rather than nine parameters because every field is a *fact about the evaluation the
+/// pack explains* rather than about the compile, and grouping them keeps that boundary visible
+/// at the call site: nothing here is derived, and nothing here decides a guarantee.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompileHeader {
+    /// The sealed snapshot the pack is stated against.
+    pub snapshot: WorkspaceHandle,
+    /// The pinned semantic epoch.
+    pub semantic_epoch: String,
+    /// The `in_*` contract the question is about.
+    pub intent: StoreHandle,
+    /// The `ev_*` roots.
+    pub evidence: Vec<StoreHandle>,
+    /// The `crash_*` replay handle, where the deployment holds one.
+    pub replay: Option<continuum_context::replay::ReplayRef>,
+    /// The verdict of the evaluation, when the pack explains one.
+    ///
+    /// `None` is a pack whose question is not about an evaluation outcome, and RFC 0028 is
+    /// explicit about what that pack carries: "MUST carry `inconclusive` with the reason naming
+    /// why no verdict is available […] It MUST NOT default to `satisfied`." [`compile`] pairs
+    /// `None` with [`Compilation::inconclusive_reason`] and refuses `InsufficientEvidence` when
+    /// there is no reason either, because a verdict this daemon cannot name is not one it may
+    /// invent.
+    pub verdict: Option<PackVerdict>,
+    /// The `{class, envelope}` block the result reports. Its `observer` dimension is **not**
+    /// read from here — see [`observer_dimension`].
+    pub assurance: Assurance,
+    /// Which of RFC 0028's four profiles the compile is held to.
+    pub profile: PackProfile,
+    /// The withheld-content stubs the deployment's field policy earned.
+    pub redactions: Vec<RedactionStub>,
+}
+
 /// A pack, or a group, this daemon will not register.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextPackError {
+    /// A node of the causal order has no registered item body.
+    UnbodiedCandidate {
+        /// The candidate.
+        id: Name,
+    },
+    /// A registered body names a candidate the order does not carry, or a different kind.
+    BodyFromNowhere {
+        /// The body's identity.
+        id: Name,
+    },
     /// The document is not a pack this daemon can navigate.
     Malformed(PackError),
     /// A group's anchor resolves neither in the pack nor in another group's items.
@@ -319,6 +557,16 @@ pub enum ContextPackError {
 impl core::fmt::Display for ContextPackError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::UnbodiedCandidate { id } => write!(
+                f,
+                "the candidate `{id}` has no registered item body, so a compile that selected \
+                 or omitted it could publish neither the item nor its expansion"
+            ),
+            Self::BodyFromNowhere { id } => write!(
+                f,
+                "the registered body `{id}` names no candidate of this order, or a candidate of \
+                 another kind"
+            ),
             Self::Malformed(error) => write!(f, "{error}"),
             Self::DanglingAnchor { anchor } => write!(
                 f,
@@ -384,18 +632,398 @@ impl OperationFamily for ContextFamily {
     ) -> Result<Effect, Fault> {
         match call.arguments {
             Arguments::ContextExpand(request) => expand(call.envelope, request, state),
-            Arguments::ContextCompile(_) => Err(Fault::new(
-                ErrorCode::UnsupportedSemanticFeature,
-                "no Context Pack compiler is served by this daemon; a pack is compiled from \
-                 the evidence graph, the property automaton and the correspondence graph, \
-                 and none of those is wired here",
-            )),
+            Arguments::ContextCompile(request) => compile(call.envelope, request, state),
             // Unreachable: the dispatcher checked shape agreement before routing.
             _ => Err(Fault::new(
                 ErrorCode::MalformedRequest,
                 "the request body is not the shape this operation declares",
             )),
         }
+    }
+}
+
+/// `context.compile` — run the landed pipeline over a registered projection, assemble the root
+/// pack, register it for expansion, and answer with it.
+///
+/// The order of the steps is the order of the refusals: everything that is about the *request*
+/// is decided before any stage runs, so a malformed question or an unknown guarantee token
+/// never costs a compile, and everything that is about the *answer* is decided before anything
+/// is registered, so a pack that would not reconcile is never navigable.
+fn compile(
+    envelope: &RequestEnvelope,
+    request: &ContextCompileRequest,
+    state: &mut DaemonState,
+) -> Result<Effect, Fault> {
+    // Uniform in the root, so it answers the same whether or not this daemon holds one: the
+    // absent producer is `continuum-cir`, which is a property of the deployment and not of the
+    // caller's scope, and a distinguishable answer here would be the existence oracle RFC 0027
+    // X2 closes elsewhere in this file.
+    let source = state
+        .compile_source(&request.evidence_root)
+        .ok_or_else(|| {
+            Fault::new(
+                ErrorCode::UnsupportedSemanticFeature,
+                "this daemon holds no candidate order for that evidence root; stage 2's input \
+                 is a CIR causal order and no subsystem here derives one from an evidence graph",
+            )
+        })?
+        .clone();
+
+    stale_snapshot_check(envelope, source.snapshot())?;
+
+    let question = Question::compiled(&request.question).map_err(|_| {
+        Fault::new(
+            ErrorCode::MalformedRequest,
+            "`question` is empty, untrimmed, or carries a character outside printable ASCII; a \
+             question is part of the pack's identity and has one spelling",
+        )
+    })?;
+    // "Fail closed on unrecognized tokens" (RFC 0028, "Versioning and revision"): the wire type
+    // is `list<String>` (F6) over a closed thirteen-member vocabulary, so an unknown member is
+    // `MalformedRequest` and is never read as absent.
+    let requested = requested_guarantees(request)?;
+
+    if source.roots.is_empty() {
+        return Err(Fault::new(
+            ErrorCode::InsufficientEvidence,
+            "the registered projection for that evidence root names no root to slice from",
+        ));
+    }
+
+    let compilation = source
+        .compile
+        .run(&source.roots, &source.residual)
+        .map_err(compile_fault)?;
+
+    // --- the answer header ---------------------------------------------------------------
+    let target = Target::new(source.intent.clone(), question).map_err(|_| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the registered projection names an intent that is not an `in_*` contract",
+        )
+    })?;
+    let verdict = match source.verdict {
+        Some(verdict) => verdict,
+        None => PackVerdict::Inconclusive(compilation.inconclusive_reason().ok_or_else(|| {
+            Fault::new(
+                ErrorCode::InsufficientEvidence,
+                "the registered projection states no evaluation verdict and no stage refused, \
+                 so there is no typed reason to carry and a verdict may not be defaulted",
+            )
+        })?),
+    };
+    let assurance = Assurance::new(
+        source.assurance.class(),
+        source.assurance.envelope().clone().with(
+            AssuranceDimension::Observer,
+            observer_dimension(&compilation),
+        ),
+    );
+
+    let selected: Vec<SelectedItem> = compilation
+        .selected()
+        .iter()
+        .map(|id| {
+            source.items.get(id).cloned().ok_or_else(|| {
+                // Unreachable through `ContextCompileSource::new`, which refuses an unbodied
+                // candidate at registration; typed rather than unwrapped for the reason
+                // `malformed_pack` gives.
+                Fault::new(
+                    ErrorCode::UnsupportedSemanticFeature,
+                    "the compile selected a candidate this daemon holds no item body for",
+                )
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let unachieved: Vec<Guarantee> = requested
+        .members()
+        .into_iter()
+        .filter(|guarantee| !compilation.guarantees().members().contains(guarantee))
+        .collect();
+
+    let identity = RootIdentity::derive::<Blake3Hasher>(
+        &target,
+        source.snapshot.as_str(),
+        &source.semantic_epoch,
+        &source.evidence,
+    );
+    let assembly = RootPack {
+        identity: &identity,
+        snapshot: source.snapshot.as_str(),
+        semantic_epoch: &source.semantic_epoch,
+        target: &target,
+        verdict,
+        assurance: &assurance,
+        selected: &selected,
+        manifest: compilation.accounting().manifest(),
+        candidates: compilation.accounting().candidate_count(),
+        unachieved: &unachieved,
+        evidence: &source.evidence,
+        replay: source.replay.as_ref(),
+        guarantees: compilation.guarantees(),
+        redactions: &source.redactions,
+        profile: source.profile,
+    };
+    let document = assembly.to_json::<Blake3Hasher>().map_err(pack_fault)?;
+    let published = assembly.published_manifest().map_err(pack_fault)?;
+
+    // --- registration: the compiled pack is navigable the moment it is answered with -------
+    let context = ContextHandle::new(&identity.to_string()).map_err(|_| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the derived pack identity is not a well-formed context handle",
+        )
+    })?;
+    let record = ContextPackRecord::new(
+        document.clone(),
+        source.snapshot.clone(),
+        payloads(&source, &compilation)?,
+    )
+    .map_err(|_| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the assembled pack is not one this daemon could then navigate, so it is not \
+             published at all",
+        )
+    })?;
+    state.put_context_pack(context.clone(), record);
+
+    Ok(Effect::new(
+        Payload::ContextCompile(ContextCompileResponse {
+            context,
+            pack: Opaque::from_bytes(document.to_canonical_bytes()),
+        }),
+        // > `context.compile` is `@mutation @task_starting` with `authority read` and verdict
+        // > `EvaluationVerdictValue`; that verdict MUST equal the pack's `verdict`, and its
+        // > `assurance_class` MUST equal the pack's `assurance.class`.
+        // >
+        // > — RFC 0028, "Wire surface"
+        //
+        // Both are read off the values the document was written from, so the two cannot drift:
+        // there is one `verdict` and one `class` in this function, spelled twice.
+        Nullable::Value(Verdict::Evaluation(EvaluationVerdictValue {
+            verdict: wire_verdict(verdict),
+            inconclusive_reason: match verdict.inconclusive_reason() {
+                Some(reason) => Optional::Present(wire_reason_token(reason)),
+                None => Optional::Absent,
+            },
+            assurance_class: wire_class(assurance.class()),
+        })),
+    )
+    .with_omissions(project(&published, identity.handle())))
+}
+
+/// The `guarantees` request list, parsed against the closed vocabulary.
+fn requested_guarantees(request: &ContextCompileRequest) -> Result<RequestedGuarantees, Fault> {
+    let Optional::Present(tokens) = &request.guarantees else {
+        return Ok(RequestedGuarantees::none());
+    };
+    let mut members = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        members.push(Guarantee::from_wire_str(token).ok_or_else(|| {
+            Fault::new(
+                ErrorCode::MalformedRequest,
+                "`guarantees` names a token outside the closed thirteen-member vocabulary; \
+                 forward compatibility is achieved by rejecting, never by ignoring",
+            )
+        })?);
+    }
+    Ok(RequestedGuarantees::of(members))
+}
+
+/// The expansion payloads a compiled pack is registered with: one per expandable manifest
+/// record, carrying exactly the items that record counts.
+///
+/// The grouping is the compile's own — [`Compilation::omissions`] is the ledger the manifest
+/// was read off — so a record and the items an expansion returns for it cannot be two answers.
+/// Irretrievable groups get no payload and need none: they advertise no query, so no anchor in
+/// the published document reaches them.
+fn payloads(
+    source: &ContextCompileSource,
+    compilation: &Compilation,
+) -> Result<Vec<ExpansionPayload>, Fault> {
+    let mut groups: BTreeMap<(SelectionKind, Omitted), Vec<SelectedItem>> = BTreeMap::new();
+    for (id, omitted) in compilation.omissions() {
+        let Omitted::Expandable { .. } = omitted else {
+            continue;
+        };
+        let (Some(kind), Some(item)) = (source.compile.order().kind(id), source.items.get(id))
+        else {
+            return Err(Fault::new(
+                ErrorCode::UnsupportedSemanticFeature,
+                "the compile omitted a candidate this daemon holds no item body for",
+            ));
+        };
+        groups
+            .entry((kind, omitted.clone()))
+            .or_default()
+            .push(item.clone());
+    }
+    let mut queries: BTreeSet<ExpansionQuery> = BTreeSet::new();
+    let mut out = Vec::with_capacity(groups.len());
+    for ((kind, omitted), mut items) in groups {
+        let Omitted::Expandable { reason, query } = omitted else {
+            continue;
+        };
+        // One expansion query answers one group, because `context.expand` resolves an answer by
+        // its `(relation, anchor)` and two groups behind one query would make that resolution
+        // ambiguous. `CausalCompile::run` takes a single residual query, so a compile whose
+        // omissions span two kinds is refused here rather than registered as a pack advertising
+        // a query this daemon could only half answer. A per-kind residual plan is the expansion
+        // protocol's own bone, not this one's; what must not happen is a silent half-answer.
+        if !queries.insert(query.clone()) {
+            return Err(Fault::new(
+                ErrorCode::UnsupportedSemanticFeature,
+                "this compile's omissions span two selection kinds behind one residual \
+                 expansion query, and one query answers one group",
+            ));
+        }
+        items.sort();
+        let count = u32::try_from(items.len()).map_err(|_| {
+            Fault::new(
+                ErrorCode::UnsupportedSemanticFeature,
+                "an omitted group is larger than an exact count can carry",
+            )
+        })?;
+        out.push(
+            ExpansionPayload::new(
+                OmissionRecord::expandable(kind, count, reason, query),
+                items,
+            )
+            .map_err(|_| {
+                Fault::new(
+                    ErrorCode::UnsupportedSemanticFeature,
+                    "an omitted group's count and its items disagree",
+                )
+            })?,
+        );
+    }
+    Ok(out)
+}
+
+/// What the pack's `assurance.envelope.observer` dimension says, decided by whether stage 6
+/// ran and what the independent audit concluded.
+///
+/// This is the honest reconciliation bn-imhw2 flagged and left to this bone. `daemon::evidence`
+/// writes `Unsupported("no-observer-projection")` on every `evidence.verify` answer, and that
+/// was read as a statement about the *daemon*. It is not, and now cannot be mistaken for one:
+/// the dimension is a statement about the answer that carries it. An `evidence.verify`
+/// re-derivation projects no observer and says so; a compile that ran stage 6 over a registered
+/// projection *does* project one, and names [`continuum_context::observer`] as the engine that
+/// did — with the same token, `no-observer-projection`, on a compile that did not configure the
+/// stage. One reason token, two answers, neither of them a claim about the whole daemon.
+///
+/// An audit that found the reduction unjustified is **not** a producer: RFC 0028 makes stage 6
+/// "never a guarantee by itself", and a dimension that named an engine for a reduction the
+/// independent audit refused would be crediting the filter with the audit's verdict.
+fn observer_dimension(compilation: &Compilation) -> DimensionEvidence {
+    let unsupported = |token: &str| {
+        DimensionEvidence::Unsupported(
+            UnsupportedReason::new(token).expect("a plain lowercase token"),
+        )
+    };
+    match compilation.scope_verdict() {
+        None => unsupported("no-observer-projection"),
+        Some(ScopeVerdict::Inapplicable(_)) => unsupported("observer-projection-inapplicable"),
+        Some(ScopeVerdict::Unjustified(_)) => unsupported("observer-reduction-unjustified"),
+        Some(ScopeVerdict::Justified { .. }) => DimensionEvidence::produced(
+            "continuum-context::observer",
+            "stage 6 scoped the selection to the intent's named observers, and the independent \
+             scope audit found the reduction justified (INV-013)",
+        )
+        .expect("a non-empty engine and summary"),
+    }
+}
+
+/// The wire spelling of a pack verdict — exhaustive, so a member added to either closed
+/// four-token vocabulary is a compile error here rather than a mismatch on the wire.
+const fn wire_verdict(verdict: PackVerdict) -> EvaluationVerdict {
+    match verdict {
+        PackVerdict::Satisfied => EvaluationVerdict::Satisfied,
+        PackVerdict::Refuted => EvaluationVerdict::Refuted,
+        PackVerdict::Deadlock => EvaluationVerdict::Deadlock,
+        PackVerdict::Inconclusive(_) => EvaluationVerdict::Inconclusive,
+    }
+}
+
+/// The wire spelling of an INV-008 reason — exhaustive, for [`wire_verdict`]'s reason.
+const fn wire_reason_token(reason: ValueInconclusiveReason) -> InconclusiveReason {
+    match reason {
+        ValueInconclusiveReason::Unsupported => InconclusiveReason::Unsupported,
+        ValueInconclusiveReason::ResourceExhausted => InconclusiveReason::ResourceExhausted,
+        ValueInconclusiveReason::EngineError => InconclusiveReason::EngineError,
+        ValueInconclusiveReason::InsufficientTelemetry => InconclusiveReason::InsufficientTelemetry,
+        ValueInconclusiveReason::AbstractionAmbiguity => InconclusiveReason::AbstractionAmbiguity,
+        ValueInconclusiveReason::IncompleteProofSearch => InconclusiveReason::IncompleteProofSearch,
+    }
+}
+
+/// The wire spelling of an assurance class — exhaustive, for [`wire_verdict`]'s reason.
+const fn wire_class(class: AssuranceLevel) -> AssuranceClass {
+    match class {
+        AssuranceLevel::Observed => AssuranceClass::Observed,
+        AssuranceLevel::Sampled => AssuranceClass::Sampled,
+        AssuranceLevel::Bounded => AssuranceClass::Bounded,
+        AssuranceLevel::Validated => AssuranceClass::Validated,
+        AssuranceLevel::Proved => AssuranceClass::Proved,
+    }
+}
+
+/// The wire answer to a pipeline that refused its registered input.
+///
+/// Every arm is `UnsupportedSemanticFeature` and that is a decision rather than a default: each
+/// names a projection this daemon cannot compile from, which is the deployment's fact, not the
+/// caller's — the caller supplied a root, a question and a guarantee list, all of which were
+/// admitted before the pipeline ran. A `MalformedRequest` here would blame the caller for a
+/// registration they did not make.
+fn compile_fault(error: CompileError) -> Fault {
+    match error {
+        CompileError::RedactedRoot { .. } => Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "field policy withholds a root of the registered projection; a redacted root is \
+             not a root, and slicing from one leaks the shape of what it dropped",
+        ),
+        CompileError::AnchorNotSelected { .. } => Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the registered residual expansion query anchors at something this compile does \
+             not publish, and expansion is navigation over a published pack",
+        ),
+        CompileError::Causal(_)
+        | CompileError::NotACorrespondenceKind { .. }
+        | CompileError::Accounting(_)
+        | CompileError::Trail(_)
+        | CompileError::Unreachable => Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the registered projection is not one this daemon's pipeline can compile",
+        ),
+    }
+}
+
+/// The wire answer to a root the assembler refused to write.
+///
+/// Nothing is published on any arm, which is the point: INV-007's counting equation and the
+/// profile's content constraints are checked *before* the document exists, so a pack that could
+/// not name what it dropped is not a smaller answer but no answer.
+fn pack_fault(error: PackError) -> Fault {
+    match error {
+        PackError::Unreconciled { .. } => Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the assembled pack's selection and manifest do not account for its candidate set; \
+             a pack that cannot name what it dropped is malformed, not compact (INV-007)",
+        ),
+        PackError::ProfileViolation { .. } => Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the compile does not meet the content constraints of the pack profile it was \
+             registered under (RFC 0028, \"Pack profiles\")",
+        ),
+        PackError::ReplayPreservingWithoutReplay => Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "rule C2: a pack claiming `ReplayPreserving` MUST carry a non-null `replay`",
+        ),
+        _ => Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the registered projection does not assemble into a conforming root pack",
+        ),
     }
 }
 

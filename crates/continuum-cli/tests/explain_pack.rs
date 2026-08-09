@@ -257,9 +257,12 @@ fn the_unsupported_compiler_is_the_familys_own_typed_refusal() {
             rendered.text
         );
         // The family's own sentence, not the dispatcher's: this deployment *serves* the
-        // `context` namespace and refuses the compiler in particular.
+        // `context` namespace and both of its operations, and refuses *this evidence root*
+        // in particular, because no candidate order is registered for it (bn-1y4qc).
         assert!(
-            rendered.text.contains("no Context Pack compiler"),
+            rendered
+                .text
+                .contains("no candidate order for that evidence root"),
             "{format:?} carries the family's own detail:\n{}",
             rendered.text
         );
@@ -287,9 +290,9 @@ fn the_unsupported_json_document_is_pinned_byte_for_byte() {
             // `data` joined the refusal at protocol 3.4 (RFC 0026 F19, bn-3jrtz):
             // null for every code that declares no `Error.data` shape.
             r#""error":{"code":"UnsupportedSemanticFeature","continuation":null,"data":null,"#,
-            r#""detail":"no Context Pack compiler is served by this daemon; a pack is "#,
-            r#"compiled from the evidence graph, the property automaton and the "#,
-            r#"correspondence graph, and none of those is wired here",""#,
+            r#""detail":"this daemon holds no candidate order for that evidence root; "#,
+            r#"stage 2's input is a CIR causal order and no subsystem here derives one "#,
+            r#"from an evidence graph",""#,
             r#"non_resumable_reason":null,"recovery":[],"retryable":false},"#,
             r#""evidence_root":"ev_failure1","guarantees":["ReplayPreserving"],"#,
             r#""next_operations":[],"omissions":[],"#,

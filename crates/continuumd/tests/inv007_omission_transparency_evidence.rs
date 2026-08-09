@@ -595,9 +595,9 @@ mod citations {
             "fn a_budget_below_the_minimal_child_refuses_rather_than_truncating",
         ),
         (
-            "context.compile decodes and is refused with the typed reason, never a fake pack",
+            "a compile with no registered projection is refused uniformly, never a fake pack",
             "crates/continuumd/tests/daemon_context_operations.rs",
-            "fn context_compile_decodes_and_is_refused_with_the_typed_reason",
+            "fn context_compile_decodes_and_a_root_with_no_projection_is_refused_uniformly",
         ),
         (
             "an over-budget expansion publishes a smaller child and says what the ceiling cost",
@@ -642,7 +642,7 @@ mod citations {
         (
             "PR-11's own acceptance-criterion campaign states its honest grain up front",
             "crates/continuumd/tests/dx01_falsification.rs",
-            "RFC 0028's **ten-stage compiler is not wired anywhere in this workspace**",
+            "**The compiler is the producer (bn-1y4qc).**",
         ),
         (
             "the packed child is >=10x smaller under the packer's own counting rule",

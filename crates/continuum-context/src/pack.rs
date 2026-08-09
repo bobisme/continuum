@@ -1,14 +1,45 @@
-//! The expansion child document: what a `context.expand` answer *is*, as an artifact.
+//! The two pack documents: the **root** a compile publishes ([`RootPack`]) and the **child**
+//! an expansion derives ([`ChildPack`]).
 //!
-//! # This is derivation, not compilation
+//! # Root assembly, and the identity question it settles (bn-1y4qc)
 //!
-//! Assembling a Context Pack from evidence is the compiler — stages 1–10 of RFC 0028's
-//! pipeline, spread across PR-11's other bullets (target/verdict/assurance, the state and
-//! event slice, the replay reference, byte and token budgets) and no single bullet's fence.
-//! [`crate::selection`] recorded that decline when IMPL-03 landed, and this module does not
-//! reverse it: **nothing here synthesizes a pack field out of nothing.**
+//! Until this bone the module carried only the child, and said so: "assembling a Context Pack
+//! from evidence is the compiler […] nothing here synthesizes a pack field out of nothing."
+//! That decline was about *fabrication*, not about writing a document — and now that stages
+//! 1–8 are landed there is a compile to write the document *of*. [`RootPack`] therefore
+//! synthesizes nothing either: every one of the seventeen required keys is either handed to it
+//! as a typed value some checker produced ([`crate::guarantee::SealedGuarantees`],
+//! [`crate::omission::Manifest`], [`crate::verdict::Verdict`], [`crate::assurance::Assurance`],
+//! [`crate::target::Target`], [`crate::replay::ReplayRef`]) or is the document's own
+//! measurement of itself. There is no key it invents and no default it substitutes.
 //!
-//! What it does is the operation RFC 0028 actually specifies for an expansion:
+//! **`context_id` is the identity of the question; `content_hash` is the identity of the
+//! bytes.** `daemon::context` deliberately left this open — "a store handle is the content
+//! identity of the bytes (`ContentIdentifier::identify`), and a pack's `context_id` is the
+//! identity of its *question* […] two spellings for one artifact unless something reconciles
+//! them, and reconciling them is a decision about pack assembly" — and the reconciliation is
+//! that they are **not** two spellings of one thing and must not be made into one:
+//!
+//! - `context_id` answers *which question is this*. RFC 0028: "the question is part of the
+//!   identity", and "two `context.compile` requests differing only in `audience` MUST produce
+//!   the same `ctx_*`". It is therefore a function of the compile's question and of nothing
+//!   that only rendering depends on — [`RootIdentity::derive`] — exactly as
+//!   [`ExpansionHandle::derive`] is for a child. A digest of the bytes could not have this
+//!   property: two compiles of one question under different budgets have different bytes and
+//!   are required to be *frontier-comparable answers to one question*, not two questions.
+//! - `content_hash` answers *which bytes are these* (ADR-0013: "two packs are the same pack iff
+//!   their canonical encodings are byte-equal"), and it is exactly the value a content-addressed
+//!   store derives when the pack is published into it.
+//!
+//! Because the artifact carries **both**, a store handle and a `ctx_*` never need a third party
+//! to reconcile them: the mapping is one field lookup on a self-describing document, in either
+//! direction, and no second identity is minted anywhere. That is why this module publishes
+//! nothing into a store and why the daemon does not either — publication would add a *record*,
+//! never a new identity, and the record is derivable from the pack.
+//!
+//! # This is still derivation, not fabrication
+//!
+//! What [`ChildPack`] does is the operation RFC 0028 actually specifies for an expansion:
 //!
 //! > The child inherits identity, not guarantees. `snapshot`, `intent`, and
 //! > `semantic_epoch` MUST equal the parent's; a compile under a different semantic epoch
@@ -113,6 +144,13 @@
 //! | it is the *least* self-consistent length | this module's fixed-point reading | `the_recorded_size_is_the_least_self_consistent_one` |
 //! | the ceiling is not the measurement | RFC 0028 correction 17 | `the_ceiling_is_not_what_the_child_records` |
 //! | no token count is written without a tokenizer | RFC 0028 F4; the schema's conditional | `no_child_claims_a_token_count` |
+//! | a root carries the seventeen required keys | `context-pack.schema.json` `required` | `a_root_carries_every_required_key` |
+//! | `audience` cannot reach `context_id` | RFC 0028, "Views and rendering" | `the_root_identity_is_a_function_of_the_question_alone` |
+//! | the six list fields are deterministically ordered | `rule ordering.deterministic` | `the_six_list_fields_are_deterministically_ordered` |
+//! | a root whose counting equation is false is refused | INV-007; RFC 0028, "Omission manifest" | `an_unreconciled_root_is_refused` |
+//! | rule C1's record is in the manifest | RFC 0028 C1 | `an_unachieved_request_is_an_unsupported_omission` |
+//! | rule C2 is checked at the artifact | RFC 0028 C2 | `a_replay_preserving_root_without_a_replay_is_refused` |
+//! | each profile's content constraints | RFC 0028, "Pack profiles" | `each_profile_refuses_its_own_violation` |
 
 use core::fmt;
 use core::str::FromStr;
@@ -123,9 +161,35 @@ use continuum_value::identity::ContentHasher;
 use continuum_value::value::Name;
 use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
 
+use crate::assurance::Assurance;
+use crate::compile::RedactionReason;
 use crate::expansion::{ExpansionHandle, ExpansionQuestion};
-use crate::omission::Manifest;
-use crate::selection::SelectedItem;
+use crate::guarantee::{Guarantee, SealedGuarantees};
+use crate::omission::{Manifest, OmissionRecord};
+use crate::replay::ReplayRef;
+use crate::selection::{SelectedItem, SelectionKind};
+use crate::target::Target;
+use crate::verdict::Verdict;
+
+/// The `schema_id` every pack this crate writes declares.
+pub const SCHEMA_ID: &str = "https://continuum.dev/schema/context-pack.json";
+
+/// The `schema_epoch` this crate implements (RFC 0028, "Versioning and revision": "epoch 1 is
+/// the vocabulary specified here").
+pub const SCHEMA_EPOCH: i64 = 1;
+
+/// The compiler identity a root pack records at `compiler.compiler_version`.
+///
+/// > Version of the Context Pack compiler. Not a release counter: it advances whenever the
+/// > compiled output could change for any input.
+/// >
+/// > — `context-pack.schema.json`, `compiler.compiler_version`
+///
+/// It names the stage set this crate actually runs, because that is what "the compiled output
+/// could change" is a function of: RFC 0028's ten stages, with stage 9 disabled (the register
+/// row's named fallback, "plain causal slice + expansion") and stage 10 supplied by
+/// [`crate::budget`]. A bone that adds a stage, or changes what one licenses, moves this token.
+pub const COMPILER_VERSION: &str = "continuum-context/1.stages-1-8+10";
 
 /// The schema's `required` list, transcribed from `context-pack.schema.json`.
 pub const REQUIRED_KEYS: [&str; 17] = [
@@ -431,7 +495,559 @@ impl ChildPack<'_> {
     }
 }
 
-/// A document this module will not derive a child from.
+// =====================================================================================
+// the root document: what a `context.compile` answer *is*, as an artifact
+// =====================================================================================
+
+/// The `ctx_*` a compiled question resolves to.
+///
+/// Derived, never minted, for [`ExpansionHandle`]'s reason and one more of its own: RFC 0028
+/// requires that "two `context.compile` requests differing only in `audience` MUST produce the
+/// same `ctx_*`", and a *derived* identity makes that a property of the preimage rather than a
+/// rule a daemon has to remember. `audience` is not in the preimage, so it cannot reach the
+/// handle; nor can the budget, which RFC 0028 correction 11 puts in execution identity.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RootIdentity(ArtifactHandle);
+
+impl RootIdentity {
+    /// Derive the handle of the pack that answers this question.
+    ///
+    /// The preimage is the ID5 canonical encoding of
+    /// `{"evidence", "intent", "question", "semantic_epoch", "snapshot"}` — the five terms that
+    /// decide *which question this is*. One canonical object, so no pair of inputs can produce
+    /// another pair's preimage by concatenation, and the `evidence` array is sorted so that a
+    /// caller's ordering of its roots is not part of the question.
+    ///
+    /// `semantic_epoch` is in the preimage because "a compile under a different semantic epoch
+    /// is a recompile, not an expansion" (RFC 0028, "Expansion protocol") and `ReplayPreserving`
+    /// "is defined relative to the pinned epoch" (correction 9); `snapshot` is in it because a
+    /// pack is stated against one sealed snapshot (plan §4.2).
+    #[must_use]
+    pub fn derive<H: ContentHasher>(
+        target: &Target,
+        snapshot: &str,
+        semantic_epoch: &str,
+        evidence: &[ArtifactHandle],
+    ) -> Self {
+        let mut roots: Vec<String> = evidence.iter().map(ToString::to_string).collect();
+        roots.sort();
+        roots.dedup();
+        let preimage = Json::object([
+            (
+                "evidence".to_owned(),
+                Json::Array(roots.into_iter().map(Json::String).collect()),
+            ),
+            (
+                "intent".to_owned(),
+                Json::String(target.intent().to_string()),
+            ),
+            (
+                "question".to_owned(),
+                Json::String(target.question().as_str().to_owned()),
+            ),
+            (
+                "semantic_epoch".to_owned(),
+                Json::String(semantic_epoch.to_owned()),
+            ),
+            ("snapshot".to_owned(), Json::String(snapshot.to_owned())),
+        ])
+        .expect("the five keys above are pairwise distinct string literals")
+        .to_canonical_bytes();
+        let handle =
+            ArtifactHandle::new(ArtifactClass::ContextPack, &H::hash(&preimage).to_token())
+                .expect("a lowercase-hex digest token is a well-formed artifact identity");
+        Self(handle)
+    }
+
+    /// The handle, as an artifact handle.
+    #[must_use]
+    pub const fn handle(&self) -> &ArtifactHandle {
+        &self.0
+    }
+}
+
+impl fmt::Display for RootIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// One `redactions[]` entry: the `Redacted(redacted, reason, commitment, original_class)` stub
+/// [`crate::compile`] declined by name ("the pack's stub needs a commitment and an original
+/// class, which are properties of the artifact store and of whole-pack assembly").
+///
+/// The two fields the pre-pass could not supply are supplied here because they are the
+/// *store's* facts, not the slicer's: a commitment is the content identity of the original the
+/// policy withheld, and `original_class` is that original's plan §4.4 artifact class. Both are
+/// carried, never derived — deriving a commitment here would mean hashing content the policy
+/// just refused this caller, which is the exfiltration RFC 0028's "packs are an exfiltration
+/// surface" paragraph forbids.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RedactionStub {
+    redacted: Name,
+    reason: RedactionReason,
+    commitment: String,
+    original_class: ArtifactClass,
+}
+
+impl RedactionStub {
+    /// Record a withheld candidate.
+    ///
+    /// # Errors
+    ///
+    /// [`PackError::EmptyCommitment`] for a stub with no commitment: the schema requires the
+    /// key, and an empty string would be a stub asserting that *nothing* stands behind the
+    /// redaction, which is the silence plan §18.4 refuses.
+    pub fn new(
+        redacted: Name,
+        reason: RedactionReason,
+        commitment: &str,
+        original_class: ArtifactClass,
+    ) -> Result<Self, PackError> {
+        if commitment.trim().is_empty() {
+            return Err(PackError::EmptyCommitment);
+        }
+        Ok(Self {
+            redacted,
+            reason,
+            commitment: commitment.to_owned(),
+            original_class,
+        })
+    }
+
+    /// The candidate this stub stands for.
+    #[must_use]
+    pub const fn redacted(&self) -> &Name {
+        &self.redacted
+    }
+
+    /// Why it was withheld.
+    #[must_use]
+    pub const fn reason(&self) -> RedactionReason {
+        self.reason
+    }
+
+    /// The stub, as the schema's `$defs.redacted` object.
+    ///
+    /// `redacted` is `const: true` in the schema, so it is written as the literal it is
+    /// declared to be rather than as a value a caller could choose.
+    #[must_use]
+    pub fn to_json(&self) -> Json {
+        Json::object([
+            (
+                "commitment".to_owned(),
+                Json::String(self.commitment.clone()),
+            ),
+            (
+                "original_class".to_owned(),
+                Json::String(self.original_class.token().to_owned()),
+            ),
+            (
+                "reason".to_owned(),
+                Json::String(self.reason.as_wire_str().to_owned()),
+            ),
+            ("redacted".to_owned(), Json::Bool(true)),
+        ])
+        .expect("the four keys above are pairwise distinct string literals")
+    }
+}
+
+/// RFC 0028's four pack profiles, and the content constraints each one adds.
+///
+/// > One schema, four profiles. A profile constrains which fields and kinds MUST be present; it
+/// > is not a new artifact class and MUST NOT be encoded as a field the schema does not have.
+/// >
+/// > — RFC 0028, "Pack profiles"
+///
+/// So a profile is *not* written into the document. It is the check a compile is held to before
+/// its document is published, which is why it lives on [`RootPack`] as a field and nowhere in
+/// the JSON. Each arm below states only the profile's own MUSTs; the SHOULDs are not enforced,
+/// because a SHOULD refused at the type would be this crate legislating past its RFC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PackProfile {
+    /// "A question about a `refuted` or `deadlock` verdict. `replay` MUST be non-null."
+    Failure,
+    /// "A question about a search's coverage. `assurance.envelope.bounds` and `.schedules` MUST
+    /// name their producing engine — a reachability claim without bounds is not a claim."
+    Reachability,
+    /// "A question about a candidate invariant or abstraction. It MUST carry `assumption`
+    /// items, MUST carry the counterexample-to-induction as `counterfactual` or `state_delta`
+    /// items where one exists."
+    Invariant,
+    /// "A question about what blocks an obligation. […] It MUST claim `ProofRelevant` or state
+    /// why it cannot."
+    ProofTarget,
+}
+
+impl PackProfile {
+    /// All four, in the RFC's order.
+    pub const ALL: [Self; 4] = [
+        Self::Failure,
+        Self::Reachability,
+        Self::Invariant,
+        Self::ProofTarget,
+    ];
+
+    /// This profile's name, for a refusal that has to say which profile refused.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Failure => "failure",
+            Self::Reachability => "reachability",
+            Self::Invariant => "invariant",
+            Self::ProofTarget => "proof-target",
+        }
+    }
+
+    /// Whether an assembled root satisfies this profile's content constraints.
+    ///
+    /// # Errors
+    ///
+    /// [`PackError::ProfileViolation`] naming the profile and the clause it failed.
+    fn admits(self, root: &RootPack<'_>) -> Result<(), PackError> {
+        let violation = |clause: &'static str| {
+            Err(PackError::ProfileViolation {
+                profile: self,
+                clause,
+            })
+        };
+        let claims = |guarantee: Guarantee| root.guarantees.members().contains(&guarantee);
+        let carries = |kind: SelectionKind| root.selected.iter().any(|item| item.kind() == kind);
+        match self {
+            Self::Failure => {
+                if !matches!(root.verdict, Verdict::Refuted | Verdict::Deadlock) {
+                    return violation("a failure pack answers a `refuted` or `deadlock` verdict");
+                }
+                if root.replay.is_none() {
+                    return violation("a failure pack's `replay` MUST be non-null");
+                }
+                Ok(())
+            }
+            Self::Reachability => {
+                let envelope = root.assurance.envelope();
+                let names_an_engine = |dimension| {
+                    envelope
+                        .dimension(dimension)
+                        .engine()
+                        .is_some_and(|engine| !engine.is_empty())
+                };
+                if !names_an_engine(continuum_value::assurance::AssuranceDimension::Bounds)
+                    || !names_an_engine(continuum_value::assurance::AssuranceDimension::Schedules)
+                {
+                    return violation(
+                        "a reachability pack's `bounds` and `schedules` dimensions MUST name a \
+                         producing engine",
+                    );
+                }
+                Ok(())
+            }
+            Self::Invariant => {
+                if !carries(SelectionKind::Assumption) {
+                    return violation("an invariant pack MUST carry `assumption` items");
+                }
+                Ok(())
+            }
+            Self::ProofTarget => {
+                if !claims(Guarantee::ProofRelevant)
+                    && !matches!(root.verdict, Verdict::Inconclusive(_))
+                {
+                    return violation(
+                        "a proof-target pack MUST claim `ProofRelevant` or state why it cannot, \
+                         which is a typed `inconclusive` verdict",
+                    );
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl fmt::Display for PackProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The root pack a compile answers with, before it is written.
+///
+/// Every field is a value some checker or some registered input produced. This struct joins
+/// them; it decides nothing about their content.
+#[derive(Debug, Clone, Copy)]
+pub struct RootPack<'a> {
+    /// The identity of the question this pack answers.
+    pub identity: &'a RootIdentity,
+    /// The `ws_*` snapshot the pack is stated against.
+    pub snapshot: &'a str,
+    /// The pinned `semantic_epoch`.
+    pub semantic_epoch: &'a str,
+    /// The `in_*` contract and the question, type-checked together.
+    pub target: &'a Target,
+    /// The verdict of the evaluation this pack compiles evidence *for*.
+    pub verdict: Verdict,
+    /// The `{class, envelope}` block, as the result it explains reports it.
+    pub assurance: &'a Assurance,
+    /// The selected items. Order is imposed here (`rule ordering.deterministic`).
+    pub selected: &'a [SelectedItem],
+    /// The compile's own manifest, over the compile's own candidate set.
+    pub manifest: &'a Manifest,
+    /// How many candidates the compile considered — INV-007's left-hand side.
+    pub candidates: u32,
+    /// The guarantees requested and not achieved (rule C1).
+    pub unachieved: &'a [Guarantee],
+    /// The `ev_*` roots this pack was compiled from.
+    pub evidence: &'a [ArtifactHandle],
+    /// The `crash_*` replay handle, where one exists.
+    pub replay: Option<&'a ReplayRef>,
+    /// The guarantees the checkers established.
+    pub guarantees: &'a SealedGuarantees,
+    /// The withheld-content stubs the pre-pass earned.
+    pub redactions: &'a [RedactionStub],
+    /// Which profile's content constraints this compile is held to.
+    pub profile: PackProfile,
+}
+
+impl RootPack<'_> {
+    /// The manifest the *pack* publishes: the compile's, plus rule C1's record.
+    ///
+    /// > A requested-but-unachieved guarantee MUST appear in the omission manifest with reason
+    /// > `unsupported` (outside the engine's semantics) or `budget` (dropped by packing).
+    /// >
+    /// > — RFC 0028 C1
+    ///
+    /// [`crate::compile`] computed *what* is owed and declined to decide the shape, because "the
+    /// manifest's `kind` is the closed `SelectionKind` vocabulary and a guarantee is not a
+    /// selection kind". The shape is decided here, and it is `unknown`:
+    ///
+    /// > `unknown` carries plan §12.2's "uncertainty and incompleteness" as a typed item and is
+    /// > the pack-level form of INV-008. A compiler MUST use `unknown` rather than omitting a
+    /// > fact it detected but could not classify.
+    /// >
+    /// > — RFC 0028, "Required fields, reconciled with plan §6.2"
+    ///
+    /// A guarantee the compile ran a checker for and did not get is exactly such a fact: it was
+    /// detected (the checker declined) and it has no other kind. The reason is `unsupported` —
+    /// C1's first branch, "outside the engine's semantics" — and the record is **irretrievable**,
+    /// because no expansion in any deployment retrieves a claim that was never established.
+    ///
+    /// The candidate universe grows by one per owed record, and [`RootPack::to_json`] checks the
+    /// counting equation over the grown universe. That is the only reading under which both of
+    /// RFC 0028's MUSTs hold at once: a record outside the equation would make "candidate set =
+    /// selection + Σ manifest counts" false, and no record at all would fail C1.
+    ///
+    /// # Errors
+    ///
+    /// [`PackError::Manifest`] when the merged records overflow an exact count.
+    pub fn published_manifest(&self) -> Result<Manifest, PackError> {
+        if self.unachieved.is_empty() {
+            return Ok(self.manifest.clone());
+        }
+        let owed = u32::try_from(self.unachieved.len()).map_err(|_| PackError::Unreconciled {
+            candidates: u64::from(self.candidates),
+            accounted: u64::MAX,
+        })?;
+        Manifest::merged(self.manifest.records().iter().cloned().chain([
+            OmissionRecord::irretrievable(
+                SelectionKind::Unknown,
+                owed,
+                crate::omission::IrretrievableReason::Unsupported,
+            ),
+        ]))
+        .map_err(PackError::Manifest)
+    }
+
+    /// The candidate universe the published manifest partitions: the compile's, plus one per
+    /// owed rule-C1 record. See [`RootPack::published_manifest`].
+    ///
+    /// # Errors
+    ///
+    /// [`PackError::Unreconciled`] when the count leaves the exact-count width.
+    pub fn published_candidates(&self) -> Result<u64, PackError> {
+        Ok(u64::from(self.candidates) + self.unachieved.len() as u64)
+    }
+
+    /// Write the root document, measured.
+    ///
+    /// `content_budget.bytes` carries the byte length of the returned document's own canonical
+    /// encoding — the least self-consistent one, by exactly the fixed point
+    /// [`ChildPack::to_json`] uses and for exactly its reasons.
+    ///
+    /// # Errors
+    ///
+    /// [`PackError::Unreconciled`] when INV-007's counting equation is false — a pack whose
+    /// manifest does not account for its own candidate set is not published at all, which is the
+    /// direction `Accounting::close` already takes one layer down;
+    /// [`PackError::RepeatedSelection`] for one identity selected twice;
+    /// [`PackError::UnclassedHandle`] for an `evidence` entry that is not `ev_*` or a `snapshot`
+    /// that is not `ws_*`;
+    /// [`PackError::EmptyEpoch`] for an absent `semantic_epoch`;
+    /// [`PackError::ReplayPreservingWithoutReplay`] for rule C2's artifact half;
+    /// [`PackError::ProfileViolation`] when the profile's content constraints are not met;
+    /// [`PackError::Manifest`] from [`RootPack::published_manifest`]; and
+    /// [`PackError::UnmeasurableSize`] if the measurement does not settle.
+    pub fn to_json<H: ContentHasher>(&self) -> Result<Json, PackError> {
+        self.check()?;
+        let manifest = self.published_manifest()?;
+        let mut measured: u64 = 0;
+        for _ in 0..MEASUREMENT_ROUNDS {
+            let document = self.document_with::<H>(&manifest, measured);
+            let length = document.to_canonical_bytes().len() as u64;
+            if length == measured {
+                return Ok(document);
+            }
+            measured = length;
+        }
+        Err(PackError::UnmeasurableSize)
+    }
+
+    /// Every refusal that is about the *inputs* rather than about the writing.
+    fn check(&self) -> Result<(), PackError> {
+        if !self.snapshot.starts_with("ws_") {
+            return Err(PackError::UnclassedHandle { key: "snapshot" });
+        }
+        if self.semantic_epoch.trim().is_empty() {
+            return Err(PackError::EmptyEpoch);
+        }
+        for handle in self.evidence {
+            if handle.class() != ArtifactClass::Evidence {
+                return Err(PackError::UnclassedHandle { key: "evidence" });
+            }
+        }
+        let mut seen: BTreeSet<&Name> = BTreeSet::new();
+        for item in self.selected {
+            if !seen.insert(item.id()) {
+                return Err(PackError::RepeatedSelection {
+                    id: item.id().clone(),
+                });
+            }
+        }
+        // Rule C2's artifact half. `GuaranteeSet::seal` already refuses `ReplayPreserving`
+        // without `CausallyClosed`; the other conjunct — "and MUST carry a non-null `replay`" —
+        // is a statement about the document, so it is checked where the document is written.
+        if self
+            .guarantees
+            .members()
+            .contains(&Guarantee::ReplayPreserving)
+            && self.replay.is_none()
+        {
+            return Err(PackError::ReplayPreservingWithoutReplay);
+        }
+        let manifest = self.published_manifest()?;
+        let accounted = manifest.total().saturating_add(self.selected.len() as u64);
+        let candidates = self.published_candidates()?;
+        if accounted != candidates {
+            return Err(PackError::Unreconciled {
+                candidates,
+                accounted,
+            });
+        }
+        self.profile.admits(self)
+    }
+
+    /// The root document with `bytes` written at `content_budget.bytes`, whatever `bytes` is.
+    fn document_with<H: ContentHasher>(&self, manifest: &Manifest, bytes: u64) -> Json {
+        let mut fields: BTreeMap<String, Json> = BTreeMap::new();
+        fields.insert("schema_id".to_owned(), Json::String(SCHEMA_ID.to_owned()));
+        fields.insert("schema_epoch".to_owned(), Json::Integer(SCHEMA_EPOCH));
+        fields.insert(
+            "context_id".to_owned(),
+            Json::String(self.identity.to_string()),
+        );
+        fields.insert(
+            "snapshot".to_owned(),
+            Json::String(self.snapshot.to_owned()),
+        );
+        for (key, value) in self.target.to_json_fields() {
+            fields.insert(key, value);
+        }
+        for (key, value) in self.verdict.to_json_fields() {
+            fields.insert(key, value);
+        }
+        for (key, value) in self.assurance.to_json_fields() {
+            fields.insert(key, value);
+        }
+        // `rule ordering.deterministic`, one field at a time. `selected` sorts by the item's own
+        // canonical order (identity first); `evidence` by handle; `redactions` by the candidate
+        // they stand for; `omissions`/`expansions` are the manifest's own canonical order; and
+        // `guarantees` is the schema's declared enum order, which `SealedGuarantees` holds.
+        let mut selected: Vec<&SelectedItem> = self.selected.iter().collect();
+        selected.sort();
+        fields.insert(
+            "selected".to_owned(),
+            Json::Array(selected.into_iter().map(SelectedItem::to_json).collect()),
+        );
+        fields.insert("omissions".to_owned(), manifest.to_json());
+        fields.insert("expansions".to_owned(), manifest.expansions_json());
+        let mut evidence: Vec<String> = self.evidence.iter().map(ToString::to_string).collect();
+        evidence.sort();
+        evidence.dedup();
+        fields.insert(
+            "evidence".to_owned(),
+            Json::Array(evidence.into_iter().map(Json::String).collect()),
+        );
+        fields.insert(
+            "replay".to_owned(),
+            self.replay.map_or(Json::Null, ReplayRef::to_json),
+        );
+        fields.insert("guarantees".to_owned(), self.guarantees.to_json());
+        fields.insert(
+            "semantic_epoch".to_owned(),
+            Json::String(self.semantic_epoch.to_owned()),
+        );
+        // A root has no parent, and the schema's `parent` is nullable: `null` is the statement
+        // "this pack is a root", which an absent key would not make (RFC 0028 F1's own reading —
+        // "an absent `parent` is still indistinguishable from an unrecorded one").
+        fields.insert("parent".to_owned(), Json::Null);
+        if !self.redactions.is_empty() {
+            let mut stubs: Vec<&RedactionStub> = self.redactions.iter().collect();
+            stubs.sort();
+            fields.insert(
+                "redactions".to_owned(),
+                Json::Array(stubs.into_iter().map(RedactionStub::to_json).collect()),
+            );
+        }
+        // RFC 0028 F3, paid in the schema: the compile's own identity. `ranker_id` is `null`
+        // rather than absent because stage 9 being *disabled* is a fact — the register row's
+        // named fallback configuration — and the schema types the key `["string", "null"]`
+        // precisely to carry it; `ranker_config` is absent because there is no configuration of
+        // a ranker that did not run.
+        fields.insert(
+            "compiler".to_owned(),
+            Json::object([
+                (
+                    "compiler_version".to_owned(),
+                    Json::String(COMPILER_VERSION.to_owned()),
+                ),
+                ("ranker_id".to_owned(), Json::Null),
+            ])
+            .expect("two distinct string literals"),
+        );
+        // One key, for `ChildPack::document_with`'s reasons: no tokenizer exists in this
+        // workspace, and `nodes` is a ceiling nothing here is given.
+        fields.insert(
+            "content_budget".to_owned(),
+            Json::object([(
+                "bytes".to_owned(),
+                Json::Integer(i64::try_from(bytes).unwrap_or(i64::MAX)),
+            )])
+            .expect("one key"),
+        );
+
+        // The identity preimage: this document, `content_hash` absent, every other key present
+        // — the same reading `ChildPack` fixes, stated once in the module documentation.
+        let preimage = Json::Object(fields.clone()).to_canonical_bytes();
+        fields.insert(
+            "content_hash".to_owned(),
+            Json::String(format!(
+                "{}:{}",
+                H::ALGORITHM.token(),
+                H::hash(&preimage).to_token()
+            )),
+        );
+        Json::Object(fields)
+    }
+}
+
+/// A document this module will not derive a child from, or a root it will not write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackError {
     /// The document is not a JSON object.
@@ -471,6 +1087,38 @@ pub enum PackError {
         /// typed error carries no interpolated content (INV-016).
         length: usize,
     },
+    /// INV-007's counting equation is false for the root about to be written.
+    Unreconciled {
+        /// The candidate universe the manifest partitions.
+        candidates: u64,
+        /// What the selection and the manifest actually account for.
+        accounted: u64,
+    },
+    /// One identity is selected twice, so the selection is not a set.
+    RepeatedSelection {
+        /// The repeated identity.
+        id: Name,
+    },
+    /// A handle is not of the class the key requires.
+    UnclassedHandle {
+        /// The key.
+        key: &'static str,
+    },
+    /// `semantic_epoch` is absent, and `ReplayPreserving` is defined relative to it.
+    EmptyEpoch,
+    /// Rule C2's artifact half: `ReplayPreserving` with a null `replay`.
+    ReplayPreservingWithoutReplay,
+    /// A redaction stub with no commitment behind it.
+    EmptyCommitment,
+    /// The manifest the root would publish is not one manifest.
+    Manifest(crate::omission::ManifestError),
+    /// A profile's content constraints are not met by the compile it was asked of.
+    ProfileViolation {
+        /// The profile.
+        profile: PackProfile,
+        /// The clause it failed, verbatim from RFC 0028's "Pack profiles".
+        clause: &'static str,
+    },
 }
 
 impl fmt::Display for PackError {
@@ -503,6 +1151,36 @@ impl fmt::Display for PackError {
                 "an anchor of {length} bytes is not a canonical identifier, so nothing in \
                  the pack can carry it"
             ),
+            Self::Unreconciled {
+                candidates,
+                accounted,
+            } => write!(
+                f,
+                "INV-007 fails: {candidates} candidates against {accounted} accounted for by \
+                 the selection and the manifest; a pack that cannot name what it dropped is \
+                 malformed, not compact"
+            ),
+            Self::RepeatedSelection { id } => {
+                write!(f, "`{id}` is selected twice; a selection is a set")
+            }
+            Self::UnclassedHandle { key } => {
+                write!(f, "`{key}` names a handle of the wrong plan §4.4 class")
+            }
+            Self::EmptyEpoch => f.write_str(
+                "`semantic_epoch` is empty, and every preserved guarantee is defined relative \
+                 to it (RFC 0028 correction 9)",
+            ),
+            Self::ReplayPreservingWithoutReplay => f.write_str(
+                "rule C2: a pack claiming `ReplayPreserving` MUST carry a non-null `replay`",
+            ),
+            Self::EmptyCommitment => f.write_str(
+                "a `Redacted` stub with no commitment asserts that nothing stands behind the \
+                 redaction (plan §18.4)",
+            ),
+            Self::Manifest(error) => write!(f, "{error}"),
+            Self::ProfileViolation { profile, clause } => {
+                write!(f, "the {profile} profile requires that {clause}")
+            }
         }
     }
 }
@@ -579,6 +1257,429 @@ mod tests {
 
     fn name(text: &str) -> Name {
         Name::new(text).expect("well formed")
+    }
+
+    // --- the root document -------------------------------------------------------------
+
+    fn handle(class: ArtifactClass, token: &str) -> ArtifactHandle {
+        ArtifactHandle::new(class, &Blake3Hasher::hash(token.as_bytes()).to_token())
+            .expect("a digest token is a well-formed identity")
+    }
+
+    fn target() -> Target {
+        Target::new(
+            handle(ArtifactClass::IntentContract, "root-intent"),
+            crate::target::Question::compiled("why did AckImpliesDurable fail?")
+                .expect("a plain question"),
+        )
+        .expect("an in_* handle")
+    }
+
+    fn assurance() -> Assurance {
+        Assurance::new(
+            continuum_value::assurance::AssuranceLevel::Bounded,
+            continuum_value::assurance::AssuranceEnvelope::all_unsupported(
+                &continuum_value::assurance::UnsupportedReason::new("outside-this-test")
+                    .expect("a plain token"),
+            ),
+        )
+    }
+
+    fn item(id: &str) -> SelectedItem {
+        crate::state_delta::StateDeltaRef::new(
+            name("client_acked"),
+            crate::state_delta::StateDeltaClass::Concrete,
+            Some(continuum_value::value::Value::int(0)),
+            continuum_value::value::Value::int(1),
+        )
+        .expect("a real delta")
+        .into_selected_item(name(id))
+    }
+
+    fn replay() -> ReplayRef {
+        ReplayRef::new(handle(ArtifactClass::Crashpack, "root-crashpack")).expect("a crash_*")
+    }
+
+    /// The fixture: one selected item, one expandable omission of two, and nothing owed.
+    struct RootFixture {
+        identity: RootIdentity,
+        target: Target,
+        assurance: Assurance,
+        selected: Vec<SelectedItem>,
+        manifest: Manifest,
+        evidence: Vec<ArtifactHandle>,
+        replay: ReplayRef,
+        guarantees: SealedGuarantees,
+        redactions: Vec<RedactionStub>,
+    }
+
+    impl RootFixture {
+        fn new() -> Self {
+            let target = target();
+            let evidence = vec![handle(ArtifactClass::Evidence, "root-evidence")];
+            Self {
+                identity: RootIdentity::derive::<Blake3Hasher>(
+                    &target,
+                    "ws_root1",
+                    "sem3-root",
+                    &evidence,
+                ),
+                target,
+                assurance: assurance(),
+                selected: vec![item("d_ack")],
+                manifest: Manifest::new([OmissionRecord::expandable(
+                    SelectionKind::StateDelta,
+                    2,
+                    OmissionReason::SliceIrrelevant,
+                    query(),
+                )])
+                .expect("one cell"),
+                evidence,
+                replay: replay(),
+                guarantees: crate::guarantee::GuaranteeSet::empty()
+                    .seal()
+                    .expect("the empty set seals"),
+                redactions: Vec::new(),
+            }
+        }
+
+        fn pack(&self) -> RootPack<'_> {
+            RootPack {
+                identity: &self.identity,
+                snapshot: "ws_root1",
+                semantic_epoch: "sem3-root",
+                target: &self.target,
+                verdict: Verdict::Refuted,
+                assurance: &self.assurance,
+                selected: &self.selected,
+                manifest: &self.manifest,
+                candidates: 3,
+                unachieved: &[],
+                evidence: &self.evidence,
+                replay: Some(&self.replay),
+                guarantees: &self.guarantees,
+                redactions: &self.redactions,
+                profile: PackProfile::Failure,
+            }
+        }
+    }
+
+    #[test]
+    fn a_root_carries_every_required_key() {
+        let fixture = RootFixture::new();
+        let document = fixture
+            .pack()
+            .to_json::<Blake3Hasher>()
+            .expect("conforming");
+        required_keys_present(&document).expect("all seventeen required keys");
+        let fields = document.as_object().expect("object");
+        assert_eq!(fields["parent"], Json::Null, "a root has no parent");
+        assert_eq!(
+            identity_of(&document).expect("a pack handle"),
+            *fixture.identity.handle()
+        );
+        // The measurement is the document's own canonical length, exactly as a child's is.
+        assert_eq!(
+            budget_bytes_of(&document).expect("measured"),
+            document.to_canonical_bytes().len() as u64
+        );
+        // And it is deterministic.
+        assert_eq!(
+            document,
+            fixture
+                .pack()
+                .to_json::<Blake3Hasher>()
+                .expect("conforming")
+        );
+    }
+
+    #[test]
+    fn the_root_identity_is_a_function_of_the_question_alone() {
+        // RFC 0028: "two `context.compile` requests differing only in `audience` MUST produce
+        // the same `ctx_*`". `audience` has no path into the preimage at all — the strongest
+        // form of that rule — and the anti-vacuity half is that the five terms that *are* in
+        // it each move the handle.
+        let evidence = vec![handle(ArtifactClass::Evidence, "root-evidence")];
+        let base =
+            RootIdentity::derive::<Blake3Hasher>(&target(), "ws_root1", "sem3-root", &evidence);
+        // Root order is not part of the question.
+        let two = vec![
+            handle(ArtifactClass::Evidence, "b"),
+            handle(ArtifactClass::Evidence, "a"),
+        ];
+        let mut reversed = two.clone();
+        reversed.reverse();
+        assert_eq!(
+            RootIdentity::derive::<Blake3Hasher>(&target(), "ws_root1", "sem3-root", &two),
+            RootIdentity::derive::<Blake3Hasher>(&target(), "ws_root1", "sem3-root", &reversed)
+        );
+        // Each of the five terms moves it.
+        let other_question = Target::new(
+            handle(ArtifactClass::IntentContract, "root-intent"),
+            crate::target::Question::compiled("why did the replica stay durable?")
+                .expect("a plain question"),
+        )
+        .expect("an in_* handle");
+        assert_ne!(
+            base,
+            RootIdentity::derive::<Blake3Hasher>(
+                &other_question,
+                "ws_root1",
+                "sem3-root",
+                &evidence
+            )
+        );
+        assert_ne!(
+            base,
+            RootIdentity::derive::<Blake3Hasher>(&target(), "ws_other", "sem3-root", &evidence)
+        );
+        assert_ne!(
+            base,
+            RootIdentity::derive::<Blake3Hasher>(&target(), "ws_root1", "sem3-other", &evidence)
+        );
+        assert_ne!(
+            base,
+            RootIdentity::derive::<Blake3Hasher>(&target(), "ws_root1", "sem3-root", &two)
+        );
+    }
+
+    #[test]
+    fn the_six_list_fields_are_deterministically_ordered() {
+        // `rule ordering.deterministic`: the six list-valued fields are ordered by a declared
+        // sort key, so a caller's ordering of its inputs is not part of the artifact.
+        let mut fixture = RootFixture::new();
+        fixture.selected = vec![item("d_write"), item("d_ack"), item("d_begin")];
+        fixture.evidence = vec![
+            handle(ArtifactClass::Evidence, "z"),
+            handle(ArtifactClass::Evidence, "a"),
+        ];
+        fixture.identity = RootIdentity::derive::<Blake3Hasher>(
+            &fixture.target,
+            "ws_root1",
+            "sem3-root",
+            &fixture.evidence,
+        );
+        fixture.redactions = vec![
+            RedactionStub::new(
+                name("d_zeta"),
+                RedactionReason::Purged,
+                "blake3-256:zzzz",
+                ArtifactClass::Evidence,
+            )
+            .expect("a commitment"),
+            RedactionStub::new(
+                name("d_alpha"),
+                RedactionReason::Summarized,
+                "blake3-256:aaaa",
+                ArtifactClass::Evidence,
+            )
+            .expect("a commitment"),
+        ];
+        let mut pack = fixture.pack();
+        pack.candidates = 5;
+        let document = pack.to_json::<Blake3Hasher>().expect("conforming");
+        let fields = document.as_object().expect("object");
+        let ids: Vec<&str> = fields["selected"]
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|item| {
+                item.as_object().expect("object")["id"]
+                    .as_str()
+                    .expect("a string")
+            })
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort_by_key(|id| name(id));
+        assert_eq!(
+            ids, sorted,
+            "`selected` is in the items' own canonical order"
+        );
+        let evidence: Vec<&str> = fields["evidence"]
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|handle| handle.as_str().expect("a string"))
+            .collect();
+        let mut sorted_evidence = evidence.clone();
+        sorted_evidence.sort_unstable();
+        assert_eq!(evidence, sorted_evidence, "`evidence` is sorted");
+        let redacted: Vec<&str> = fields["redactions"]
+            .as_array()
+            .expect("array")
+            .iter()
+            .map(|stub| {
+                stub.as_object().expect("object")["commitment"]
+                    .as_str()
+                    .expect("a string")
+            })
+            .collect();
+        // `d_zeta` before `d_alpha`: `continuum_value::value::Name` orders **shortlex**
+        // (`compare_blobs`), so the shorter identity sorts first and this is the declared sort
+        // key doing its job rather than a lexicographic accident.
+        assert_eq!(
+            redacted,
+            ["blake3-256:zzzz", "blake3-256:aaaa"],
+            "`redactions` is sorted by the candidate each stands for, in `Name` order"
+        );
+        assert!(
+            name("d_zeta") < name("d_alpha"),
+            "shortlex, not lexicographic"
+        );
+    }
+
+    #[test]
+    fn an_unreconciled_root_is_refused() {
+        // INV-007 is checked before the document exists: a pack that cannot name what it
+        // dropped is no answer, not a smaller one.
+        let fixture = RootFixture::new();
+        let mut pack = fixture.pack();
+        pack.candidates = 4;
+        assert_eq!(
+            pack.to_json::<Blake3Hasher>(),
+            Err(PackError::Unreconciled {
+                candidates: 4,
+                accounted: 3
+            })
+        );
+        // Anti-vacuity: the honest count writes.
+        assert!(fixture.pack().to_json::<Blake3Hasher>().is_ok());
+    }
+
+    #[test]
+    fn an_unachieved_request_is_an_unsupported_omission() {
+        // Rule C1's record, and the candidate universe it grows.
+        let fixture = RootFixture::new();
+        let unachieved = [Guarantee::ReplayPreserving, Guarantee::PropertyPreserving];
+        let mut pack = fixture.pack();
+        pack.unachieved = &unachieved;
+        let manifest = pack.published_manifest().expect("merges");
+        let owed = manifest
+            .records()
+            .iter()
+            .find(|record| record.kind() == SelectionKind::Unknown)
+            .expect("rule C1's record");
+        assert_eq!(owed.count(), 2);
+        assert_eq!(owed.reason(), OmissionReason::Unsupported);
+        assert!(
+            !owed.retrievability().is_expandable(),
+            "no expansion retrieves a claim that was never established"
+        );
+        assert_eq!(pack.published_candidates().expect("counts"), 5);
+        let document = pack.to_json::<Blake3Hasher>().expect("conforming");
+        assert!(
+            !document.as_object().expect("object")["guarantees"]
+                .as_array()
+                .expect("array")
+                .iter()
+                .any(|claim| claim.as_str() == Some("ReplayPreserving")),
+            "a daemon MUST NOT echo a requested guarantee it did not achieve"
+        );
+    }
+
+    #[test]
+    fn a_replay_preserving_root_without_a_replay_is_refused() {
+        // Rule C2's artifact half. The other half — `ReplayPreserving` without
+        // `CausallyClosed` — is unspellable: `GuaranteeSet::seal` refuses it, so the only
+        // sealed set reaching here that claims replay preservation also claims closure.
+        let fixture = RootFixture::new();
+        let mut guarantees = crate::guarantee::GuaranteeSet::empty();
+        guarantees.claim(crate::guarantee::License::issue(Guarantee::CausallyClosed));
+        guarantees.claim(crate::guarantee::License::issue(
+            Guarantee::ReplayPreserving,
+        ));
+        let sealed = guarantees.seal().expect("C2 is satisfied");
+        let mut pack = fixture.pack();
+        pack.guarantees = &sealed;
+        pack.replay = None;
+        assert_eq!(
+            pack.to_json::<Blake3Hasher>(),
+            Err(PackError::ReplayPreservingWithoutReplay)
+        );
+        pack.replay = Some(&fixture.replay);
+        assert!(pack.to_json::<Blake3Hasher>().is_ok());
+    }
+
+    #[test]
+    fn each_profile_refuses_its_own_violation() {
+        let fixture = RootFixture::new();
+        let violated = |pack: RootPack<'_>, profile: PackProfile| match pack
+            .to_json::<Blake3Hasher>()
+        {
+            Err(PackError::ProfileViolation { profile: named, .. }) => assert_eq!(named, profile),
+            other => panic!("the {profile} profile must refuse: {other:?}"),
+        };
+        // Failure: a satisfied verdict is not a failure pack's question, and a null `replay`
+        // is not a failure pack's replay.
+        let mut pack = fixture.pack();
+        pack.verdict = Verdict::Satisfied;
+        violated(pack, PackProfile::Failure);
+        let mut pack = fixture.pack();
+        pack.replay = None;
+        violated(pack, PackProfile::Failure);
+        // Reachability: bounds and schedules must name a producing engine.
+        let mut pack = fixture.pack();
+        pack.profile = PackProfile::Reachability;
+        violated(pack, PackProfile::Reachability);
+        // Invariant: assumption items are required, and this fixture selects a delta.
+        let mut pack = fixture.pack();
+        pack.profile = PackProfile::Invariant;
+        violated(pack, PackProfile::Invariant);
+        // Proof-target: `ProofRelevant` or a typed `inconclusive`. This fixture is `refuted`
+        // and claims nothing, so it must refuse — and the typed-inconclusive escape admits it.
+        let mut pack = fixture.pack();
+        pack.profile = PackProfile::ProofTarget;
+        violated(pack, PackProfile::ProofTarget);
+        let mut pack = fixture.pack();
+        pack.profile = PackProfile::ProofTarget;
+        pack.verdict = Verdict::Inconclusive(
+            continuum_value::assurance::InconclusiveReason::IncompleteProofSearch,
+        );
+        assert!(
+            pack.to_json::<Blake3Hasher>().is_ok(),
+            "a proof-target pack that states why it cannot claim `ProofRelevant` is admitted"
+        );
+        // And the honest failure pack still writes.
+        assert!(fixture.pack().to_json::<Blake3Hasher>().is_ok());
+    }
+
+    #[test]
+    fn a_root_refuses_an_unclassed_handle_an_empty_epoch_and_a_repeated_selection() {
+        let fixture = RootFixture::new();
+        let mut pack = fixture.pack();
+        pack.snapshot = "not_a_snapshot";
+        assert_eq!(
+            pack.to_json::<Blake3Hasher>(),
+            Err(PackError::UnclassedHandle { key: "snapshot" })
+        );
+        let mut pack = fixture.pack();
+        pack.semantic_epoch = "  ";
+        assert_eq!(pack.to_json::<Blake3Hasher>(), Err(PackError::EmptyEpoch));
+        let not_evidence = vec![handle(ArtifactClass::Crashpack, "wrong-class")];
+        let mut pack = fixture.pack();
+        pack.evidence = &not_evidence;
+        assert_eq!(
+            pack.to_json::<Blake3Hasher>(),
+            Err(PackError::UnclassedHandle { key: "evidence" })
+        );
+        let twice = vec![item("d_ack"), item("d_ack")];
+        let mut pack = fixture.pack();
+        pack.selected = &twice;
+        pack.candidates = 4;
+        assert_eq!(
+            pack.to_json::<Blake3Hasher>(),
+            Err(PackError::RepeatedSelection { id: name("d_ack") })
+        );
+        // A redaction stub with no commitment asserts that nothing stands behind it.
+        assert_eq!(
+            RedactionStub::new(
+                name("d_x"),
+                RedactionReason::Lost,
+                "   ",
+                ArtifactClass::Evidence
+            ),
+            Err(PackError::EmptyCommitment)
+        );
     }
 
     fn query() -> ExpansionQuery {

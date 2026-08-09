@@ -64,10 +64,19 @@
 //! Σ manifest counts" holds by construction and an undispositioned candidate cannot be
 //! published at all.
 //!
-//! [`pack`] (PR-11 / IMPL-04, measured by IMPL-06) — the expansion *child document*: a
-//! parent pack's own bytes with the nine keys an expansion decides replaced and the rest
-//! inherited verbatim, and `content_budget.bytes` carrying the child's own measured
-//! canonical size (RFC 0028 correction 17). It derives; it does not compile.
+//! [`pack`] (PR-11 / IMPL-04, measured by IMPL-06; root assembly at bn-1y4qc) — the two pack
+//! documents. The expansion *child*: a parent pack's own bytes with the nine keys an expansion
+//! decides replaced and the rest inherited verbatim, and `content_budget.bytes` carrying the
+//! child's own measured canonical size (RFC 0028 correction 17). And the compile *root*
+//! ([`pack::RootPack`]): the seventeen required properties written as one document, from typed
+//! values the pipeline's checkers produced — it joins; it decides nothing about their content,
+//! and it refuses to write at all where INV-007's counting equation would be false or the
+//! declared [`pack::PackProfile`]'s content constraints are unmet. [`pack::RootIdentity`]
+//! settles the identity question `daemon::context` recorded as open: `context_id` is the
+//! identity of the *question* (so `audience` cannot reach it — RFC 0028's "Views and
+//! rendering") and `content_hash` is the identity of the *bytes*, both carried by the same
+//! self-describing artifact, so a store handle and a `ctx_*` never need a third party to
+//! reconcile them.
 //!
 //! [`replay`] (PR-11 / IMPL-05) — the pack's top-level `replay` field, not a
 //! `selected[].kind` member: [`replay::ReplayRef`], a typed, class-checked reference to a
@@ -182,11 +191,17 @@
 //! field, not kinds); a **token**
 //! count, which is advisory, model-relative, and owed a tokenizer identity this workspace
 //! does not have, so `content_budget.tokens` is absent rather than invented (`pack`'s module
-//! documentation); a utility **ranker** for stage 9, whose absence is why `budget` packs the
-//! declared canonical order's prefix and says so; and whole-pack *compilation* — the
-//! ten-stage pipeline that turns evidence into a first pack — which no IMPL bullet is by
-//! itself (see `selection`'s module documentation) and which `pack`'s own documentation is
-//! careful not to claim.
+//! documentation); and a utility **ranker** for stage 9, whose absence is why `budget` packs
+//! the declared canonical order's prefix and says so — the register row's own named fallback
+//! configuration, which every root pack records as `compiler.ranker_id: null`.
+//!
+//! Whole-pack *compilation* was the last of these and is no longer declined: stages 1–8 run in
+//! [`compile`], [`pack::RootPack`] writes the document, and `continuumd`'s `context.compile`
+//! serves it. What the pipeline still cannot get, it **refuses** rather than approximates —
+//! stage 5 has no proof service and stage 7 no §16 correspondence graph, both recorded as typed
+//! [`unsupported::StageRefusal`]s — and what stage 2 slices is a causal order a deployment
+//! supplies, because `continuum-cir` is a PR-17 scaffold and this crate may not import an
+//! engine.
 //!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 

@@ -44,8 +44,8 @@ use super::{OperationOutcome, ServiceError};
 use crate::protocol::envelope::{Budget, OutputPolicy, Page, Redacted, RequestEnvelope};
 use crate::protocol::handshake::CapabilityDescriptor;
 use crate::protocol::scalar::{
-    ActorId, CapabilityHandle, Commitment, ContextHandle, EvidenceHandle, IntentHandle, Timestamp,
-    WorkspaceHandle,
+    ActorId, ArtifactHandle, CapabilityHandle, Commitment, ContextHandle, EvidenceHandle,
+    IntentHandle, Timestamp, WorkspaceHandle,
 };
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::task::EvidenceEvent;
@@ -443,6 +443,7 @@ pub struct DaemonState {
     regions: super::region::TaskRegions,
     models: super::verification::ModelCatalog,
     context_packs: BTreeMap<ContextHandle, super::context::ContextPackRecord>,
+    compile_sources: BTreeMap<String, super::context::ContextCompileSource>,
 }
 
 impl DaemonState {
@@ -583,18 +584,43 @@ impl DaemonState {
 
     /// Register a published Context Pack this daemon can expand.
     ///
-    /// Compiling a pack is not an operation this protocol version serves — `context.compile`
-    /// is refused `UnsupportedSemanticFeature` — so a deployment registers the packs it
-    /// holds here, exactly as it stages content and provisions capabilities: out of band,
-    /// through [`Daemon::state_mut`](super::Daemon::state_mut) (IDL §7). The record's own
-    /// constructor is what refuses a pack this daemon could not navigate, so nothing
-    /// unexpandable can be registered.
+    /// Two callers, one surface. A deployment registers the packs it already holds here, out of
+    /// band through [`Daemon::state_mut`](super::Daemon::state_mut) (IDL §7), exactly as it
+    /// stages content and provisions capabilities; and since bn-1y4qc `context.compile` writes
+    /// through this same method, so a compiled pack is navigable the moment its `ctx_*` reaches
+    /// the wire. The record's own constructor is what refuses a pack this daemon could not
+    /// navigate, so nothing unexpandable can be registered by either route.
     pub fn put_context_pack(
         &mut self,
         handle: ContextHandle,
         record: super::context::ContextPackRecord,
     ) {
         self.context_packs.insert(handle, record);
+    }
+
+    /// Register the projection one `ev_*` evidence root compiles from.
+    ///
+    /// The out-of-band half of `context.compile`. Stage 2's declared input is a CIR causal
+    /// order and `continuum-cir` is a PR-17 scaffold, so nothing here derives a candidate order
+    /// from an evidence graph; a deployment registers the one it holds and the landed pipeline
+    /// does the rest. See [`context::ContextCompileSource`](super::context::ContextCompileSource)
+    /// for what is registered and what is emphatically not.
+    pub fn put_compile_source(
+        &mut self,
+        root: &ArtifactHandle,
+        source: super::context::ContextCompileSource,
+    ) {
+        self.compile_sources
+            .insert(root.as_str().to_owned(), source);
+    }
+
+    /// The compile projection `root` names, or [`None`].
+    #[must_use]
+    pub fn compile_source(
+        &self,
+        root: &ArtifactHandle,
+    ) -> Option<&super::context::ContextCompileSource> {
+        self.compile_sources.get(root.as_str())
     }
 
     /// The Context Pack `handle` names, or [`None`].

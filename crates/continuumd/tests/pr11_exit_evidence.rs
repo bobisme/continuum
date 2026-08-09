@@ -3,80 +3,58 @@
 //! `PR-11-EXIT`; `notes/plan/notes/START_HERE_IMPLEMENTATION.md`, PR 11's Exit line;
 //! the G0-DX-01 row's pass condition adds the third leg, *exact expansion handles*).
 //!
-//! # The adjudication this file records
+//! # The adjudication this file records, and the re-run that superseded it
 //!
-//! RFC 0028's ten-stage compiler is not wired anywhere in this workspace —
-//! `context.compile` is refused `UnsupportedSemanticFeature`, and the landed PR-11
-//! bullets say in their own text that "the compiler itself … is unbuilt". So the exit
-//! question is not whether the sentence's facts exist (bn-37gu's campaign established
-//! them adversarially) but whether the word *compiles* may be read at the campaign's
-//! declared grain, or demands the ten-stage pipeline as producer first. This bone
-//! adjudicated **declared grain**, from four texts:
+//! **The exit is now closed at production grain (bn-1y4qc).** Its first close (bn-3m65) was at
+//! the campaign's *declared* grain, with the ten-stage compiler named as the exit's owed
+//! producer and [`the_compiler_is_served_at_production_grain`] pinning `context.compile`'s
+//! refusal live — "so a landed compiler turns this file red and forces the exit evidence up to
+//! production grain instead of letting the declared-grain close linger silently". The compiler
+//! landed (bn-8g9uj's five children), the pin went red exactly as designed, and this file is
+//! the re-run it forced. Nothing here relaxes: the closure that rejects an artifact for hiding
+//! its grain, or for un-naming the producers it is still missing, is the same closure — only
+//! the grain being declared changed.
 //!
-//! 1. **RFC 0028 "Validation" makes every predicate of the sentence
-//!    compiler-independent.** "Every guarantee has a checker, and the checkers are
-//!    independent of the compiler that made the claim — INV-004's discipline applied
-//!    here"; C6 adds that a promotion-relevant consumer "MUST re-run the checker rather
-//!    than read the field". In this program *replay-preserving* is never something a
-//!    compiler confers by having run; it is what the checker establishes over the
-//!    artifact — and the campaign's replay/refutation checks, byte counting, and
-//!    expansion handles are all the production checkers' own answers.
-//! 2. **The exit-precedent conventions close a PR's sentence over the PR's delivered
-//!    surface with the boundary named at the point it is crossed.** PR-5's exit closed
-//!    with the CBOR half of every golden vector explicitly owed; PR-8's closed with the
-//!    crashpack producer absent ("the field exists, the producer does not") and the 96
-//!    corroborated one layer down under RFC 0026 F16; PR-6's quantifier was closed over
-//!    the wire-reachable phase set. A named, typed, routed absence does not block an
-//!    exit whose sentence is true at the delivered grain; a silent absence would.
-//! 3. **The PR's own scope defines "compiler v0", and every bullet of it is
-//!    delivered** — several of them compiler stages in substance: bn-38p2's
-//!    `BudgetPacker` is stage 10 with the RFC's packing MUSTs held as tests, the closed
-//!    accounting is the manifest-reconciliation validation row, the expansion protocol
-//!    is wire-live, and RFC 0028 itself names "plain causal slice + expansion, with
-//!    stage 9 disabled" as a configuration a deployment MUST be able to run. No bullet
-//!    claims stages 1–9, and none silently does here: the sentence closes at the grain
-//!    the annotation itself declares.
-//! 4. **The controlling instance already exists.** The G0-DX-01 row — this sentence in
-//!    the matrix's own words, under the heavier consequence ("redesign evidence
-//!    model") — was accepted at exactly these grains, with the compiler named in the
-//!    Decision cell's first sentence. Holding the PR's completion claim to a stricter
-//!    standard than the kill-criteria row it instantiates has no text demanding it.
+//! What moved, leg by leg: leg 1's *selection* is now RFC 0028 stages 1–2 running in
+//! `continuum_context::compile` (its checks were always production, which is the point RFC
+//! 0028's Validation section makes — "the checkers are independent of the compiler that made
+//! the claim"); leg 2's *assembly* is now `continuum_context::pack::RootPack` (its counting
+//! rule was always production); leg 3 was production end to end already, and the pack it
+//! navigates is now one `context.compile` produced. What has *not* moved is that a grain is
+//! declared at all: the campaign artifact states every leg's grain before any number, this
+//! closure requires each declaration by name, and
+//! [`anti_vacuity_doctored_campaign_artifacts_are_rejected`] proves each requirement can fire.
 //!
-//! The one text reading the sentence as compiler-demanding — the DX-01 row's routing
-//! parenthetical "whose sentence is this row's experiment run *by the compiler*" — is
-//! bn-37gu's routing gloss, submitted to this bone for adjudication rather than
-//! settled; no normative text (START_HERE's PR-11 section, RFC 0028, plan §21/§25)
-//! conditions the exit on the pipeline. Plan §25's own demonstration frames the case
-//! consumer-side: "Agent receives a 200-event failing run through a 4-event Context
-//! Pack". What stays true either way — and stays *said* — is that the ten-stage
-//! compiler is PR-11's undelivered center: it is the exit's named owed producer, and
-//! [`the_compiler_refusal_is_the_exits_grain_guard`] pins the refusal so a landed
-//! compiler turns this file red and forces the exit evidence up to production grain
-//! instead of letting the declared-grain close linger silently.
+//! The residual is smaller and still named. It is no longer "the compiler": it is the two
+//! subsystems stages 5 and 7 *configured and refused* for (`continuum-proof-client` and
+//! `continuum-refinement`, both PR-1/IMPL-01 scaffolds), the CIR causal-order producer that
+//! leaves stage 2's input declared rather than produced, the crashpack producer, and
+//! intent-registry resolution. A named, typed, routed absence does not block an exit whose
+//! sentence is true at the delivered grain — the PR-5 owed-CBOR, PR-8 F16 and PR-6
+//! wire-reachable-phase-set precedents — and a silent one would; so the closure rejects an
+//! artifact that stops naming them, exactly as it rejected one that stopped naming the compiler.
 //!
 //! # What this layer is, and is not
 //!
-//! The independent exit layer over the bn-37gu campaign (the bn-3jtr/bn-2hmk shape):
-//! it touches none of `dx01_falsification.rs`'s tests and none of `src/`, closes the
-//! sentence against the dossier's own texts rather than restating them, and re-derives
-//! every leg from the byte-pinned campaign artifact instead of trusting its recorded
-//! verdict flags — the closure recomputes the reduction ratio from the artifact's own
-//! byte counts, recomputes witness-equals-core from the two membership lines,
-//! recomputes the INV-007 conservation equation, and recomputes the promise equality
-//! from the two handles, so an artifact that lies about its own arithmetic is rejected
-//! by the same function the genuine artifact passes
-//! ([`anti_vacuity_doctored_campaign_artifacts_are_rejected`] proves each rejection
-//! arm fires). The campaign itself keeps the facts fresh: `dx01_falsification.rs`
-//! re-renders the artifact from two independent builds on every run and fails on
-//! drift, so citing its golden bytes here cites a live campaign, not a memory.
+//! The independent exit layer over the bn-37gu campaign (the bn-3jtr/bn-2hmk shape): it touches
+//! none of `dx01_falsification.rs`'s tests, closes the sentence against the dossier's own texts
+//! rather than restating them, and re-derives every leg from the byte-pinned campaign artifact
+//! instead of trusting its recorded verdict flags — the closure recomputes the reduction ratio
+//! from the artifact's own byte counts, recomputes witness-equals-core from the two membership
+//! lines, recomputes the INV-007 conservation equation, and recomputes the promise equality
+//! from the two handles, so an artifact that lies about its own arithmetic is rejected by the
+//! same function the genuine artifact passes
+//! ([`anti_vacuity_doctored_campaign_artifacts_are_rejected`] proves each rejection arm fires).
+//! The campaign itself keeps the facts fresh: `dx01_falsification.rs` re-renders the artifact
+//! from two independent builds on every run and fails on drift, so citing its golden bytes here
+//! cites a live campaign, not a memory.
 //!
-//! Grain, exactly as the campaign declares it inside the artifact (and this closure
-//! *requires* the declaration — a doctored artifact that stops declaring the harness
-//! grain or stops naming the missing compiler is rejected, because the declared-grain
-//! close is honest only while it is declared): leg 1's replay/refutation *checks* are
-//! production and its stage-2 core *selection* is harness; leg 2's counting rule is
-//! production (RFC 0028 correction 17) and its root assembly is harness; leg 3 is
-//! production end to end through `Daemon::dispatch`.
+//! The one thing this layer does *not* take from the campaign is the compiler's own liveness.
+//! [`the_compiler_is_served_at_production_grain`] builds its own daemon, its own three-node
+//! causal order and its own registered projection — sharing no fixture with the campaign — and
+//! compiles a pack through `Daemon::dispatch`. If `context.compile` ever stops being served, or
+//! starts answering without a checked guarantee set, this file goes red on evidence it produced
+//! itself.
 //!
 //! # Evidence map
 //!
@@ -87,7 +65,7 @@
 //! - the rejection arms, one doctored artifact per leg —
 //!   [`anti_vacuity_doctored_campaign_artifacts_are_rejected`];
 //! - the grain guard, live against a real daemon —
-//!   [`the_compiler_refusal_is_the_exits_grain_guard`];
+//!   [`the_compiler_is_served_at_production_grain`];
 //! - the whole exit rendered as one byte-stable artifact, pinned at
 //!   `tests/golden/pr11_exit_evidence.txt` —
 //!   [`the_exit_evidence_artifact_is_byte_stable_and_matches_the_golden`]. Golden
@@ -95,12 +73,26 @@
 //!   and then panics, so a blessing run is always red and the diff is always reviewed
 //!   as a contract change (INV-004).
 
+use continuum_context::assurance::Assurance;
+use continuum_context::causal::CausalOrder;
+use continuum_context::compile::{CausalCompile, RedactionPolicy};
+use continuum_context::expansion::{ExpansionQuery, ExpansionRelation as PackRelation};
+use continuum_context::pack::{self, PackProfile};
+use continuum_context::replay::ReplayRef;
+use continuum_context::selection::SelectionKind;
+use continuum_context::state_delta::{StateDeltaClass, StateDeltaRef};
+use continuum_context::verdict::Verdict as PackVerdict;
+use continuum_intent::canonical_json::Json;
+use continuum_value::assurance::{AssuranceEnvelope, AssuranceLevel, UnsupportedReason};
 use continuum_value::epoch::ProtocolWindow;
-use continuumd::daemon::context::ContextFamily;
+use continuum_value::identity::{Blake3Hasher, ContentHasher};
+use continuum_value::value::{Name, Value};
+use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle as StoreHandle};
+use continuumd::daemon::context::{CompileHeader, ContextCompileSource, ContextFamily};
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::{Daemon, OperationRequest};
-use continuumd::protocol::envelope::{Budget, EpochSet, RequestEnvelope};
+use continuumd::protocol::envelope::{Budget, EpochSet, RequestEnvelope, Verdict};
 use continuumd::protocol::handshake::{
     CapabilityDescriptor, CapabilityProfile, ClientHello, VersionRange, negotiate,
 };
@@ -108,10 +100,10 @@ use continuumd::protocol::operations::context::ContextCompileRequest;
 use continuumd::protocol::registry::ENCODINGS;
 use continuumd::protocol::scalar::{
     ActorId, ArtifactHandle, CapabilityHandle, EpochIdentity, OperationName, ProtocolVersion,
-    RequestId, Timestamp,
+    RequestId, Timestamp, WorkspaceHandle,
 };
 use continuumd::protocol::spec::{Nullable, Optional};
-use continuumd::protocol::vocabulary::{AuthorityLevel, Encoding, ErrorCode, ResultStatus};
+use continuumd::protocol::vocabulary::{AuthorityLevel, Encoding, EvaluationVerdict};
 
 // --- the governing texts, read at compile time -------------------------------------------
 
@@ -146,10 +138,16 @@ struct Closed {
     candidates: u64,
     selected: u64,
     omitted: u64,
+    expandable: u64,
+    unachieved: u64,
+    guarantees: String,
     promised: String,
     child_items: u64,
     packed_kept: u64,
     packed_dropped: u64,
+    compile_status: String,
+    compile_verdict: String,
+    compile_class: String,
 }
 
 fn line_with<'a>(campaign: &'a str, prefix: &str) -> Result<&'a str, String> {
@@ -299,10 +297,32 @@ fn close(campaign: &str) -> Result<Closed, String> {
     let candidates = number(pack_line, "candidates")?;
     let selected = number(pack_line, "selected")?;
     let omitted = number(pack_line, "omitted")?;
+    let expandable = number(pack_line, "expandable")?;
+    let unachieved = number(pack_line, "unachieved_guarantee")?;
     if candidates != selected + omitted {
         return Err(format!(
             "INV-007 conservation fails: {candidates} != {selected} + {omitted}"
         ));
+    }
+    if omitted != expandable + unachieved {
+        return Err(format!(
+            "the manifest does not split: {omitted} != {expandable} + {unachieved}"
+        ));
+    }
+    // Rule C1, at the artifact: a guarantee the caller requested and no checker established is
+    // an omission record, never an echoed claim. The closure requires the pack to *say* which
+    // guarantees it claims, and requires the requested-and-unachieved one to be absent from
+    // that list — the one direction C1's first sentence forbids.
+    let guarantee_line = line_with(campaign, "guarantees=")?;
+    let guarantees = field(guarantee_line, "guarantees")?;
+    let requested = field(guarantee_line, "requested")?;
+    if guarantees.split(',').any(|claimed| claimed == requested) {
+        return Err(format!(
+            "rule C1: the pack echoes the requested `{requested}` as a claim"
+        ));
+    }
+    if unachieved > 0 && field(guarantee_line, "unachieved_c1")? != "unknown:unsupported" {
+        return Err("rule C1's owed record is not the `unknown`/`unsupported` omission".to_owned());
     }
     let graded = line_with(campaign, "graded raw_named_json=")?;
     let raw_bytes = number(graded, "raw_named_json")?;
@@ -352,9 +372,10 @@ fn close(campaign: &str) -> Result<Closed, String> {
     }
     let child_line = line_with(campaign, "child_items=")?;
     let child_items = number(child_line, "child_items")?;
-    if child_items != omitted {
+    if child_items != expandable {
         return Err(format!(
-            "the expansion did not return the omitted items: {child_items} != {omitted}"
+            "the expansion did not return the expandable omissions: {child_items} != \
+             {expandable}"
         ));
     }
     if field(child_line, "exact_match")? != "true"
@@ -375,30 +396,78 @@ fn close(campaign: &str) -> Result<Closed, String> {
         return Err("the packed child's shortfall is not recoverable by the promise".to_owned());
     }
 
-    // The grain declaration is load-bearing: the declared-grain close is honest only
-    // while the artifact keeps declaring the harness grain and naming the missing
-    // producer. An artifact that stops is rejected, not accepted more strongly.
-    let leg1 = line_with(campaign, "leg1: ")?;
-    if !leg1.contains("selection=harness") || !leg1.contains("check=production") {
+    // The compile itself, wire-live: the grain that moved. `context.compile` answers `ok`,
+    // and the envelope's verdict and assurance class are the pack's own (RFC 0028, "Wire
+    // surface"), which is what makes the compiled pack and the answer about it one statement
+    // rather than two that agree today.
+    let compile_line = line_with(campaign, "context.compile=")?;
+    let compile_status = field(compile_line, "context.compile")?;
+    if compile_status != "ok" {
+        return Err(format!(
+            "`context.compile` answered `{compile_status}`; the production-grain close \
+             requires a served compiler"
+        ));
+    }
+    let compile_verdict = field(compile_line, "verdict")?;
+    if compile_verdict != verdict {
+        return Err(format!(
+            "the envelope verdict `{compile_verdict}` is not the evaluation's `{verdict}`"
+        ));
+    }
+    let compile_class = field(compile_line, "assurance_class")?;
+    if field(
+        line_with(campaign, "audience_invariant=")?,
+        "audience_invariant",
+    )? != "true"
+    {
         return Err(
-            "leg 1 no longer declares its selection=harness/check=production grain".to_owned(),
+            "`audience` no longer selects rendering only: two compiles differing in it \
+             disagree (RFC 0028, \"Views and rendering\")"
+                .to_owned(),
+        );
+    }
+
+    // The grain declaration is load-bearing, and it always was: the close is honest only while
+    // the artifact keeps declaring each leg's grain and naming the producers it is still
+    // missing. This is the same requirement bn-3m65 wrote, with the grain it demands moved from
+    // harness to production — an artifact that stops declaring, or that declares less than it
+    // has, is rejected rather than accepted more strongly.
+    let leg1 = line_with(campaign, "leg1: ")?;
+    if !leg1.contains("selection=production") || !leg1.contains("check=production") {
+        return Err(
+            "leg 1 no longer declares its selection=production/check=production grain".to_owned(),
+        );
+    }
+    if !leg1.contains("order=declared") {
+        return Err(
+            "leg 1 no longer declares that stage 2's causal order is a declared input — the \
+             CIR producer is still absent and the close requires the declaration"
+                .to_owned(),
         );
     }
     let leg2 = line_with(campaign, "leg2: ")?;
-    if !leg2.contains("counting=production") || !leg2.contains("assembly=harness") {
+    if !leg2.contains("counting=production") || !leg2.contains("assembly=production") {
         return Err(
-            "leg 2 no longer declares its counting=production/assembly=harness grain".to_owned(),
+            "leg 2 no longer declares its counting=production/assembly=production grain".to_owned(),
         );
     }
     if !line_with(campaign, "leg3: ")?.contains("production end-to-end") {
         return Err("leg 3 no longer declares production end-to-end".to_owned());
     }
-    if !line_with(campaign, "missing_producers:")?.contains("ten-stage compiler") {
-        return Err(
-            "the artifact no longer names the ten-stage compiler as the missing \
-                    producer — the declared-grain close requires the declaration"
-                .to_owned(),
-        );
+    let missing = line_with(campaign, "missing_producers:")?;
+    for producer in [
+        "proof service",
+        "correspondence graph",
+        "CIR causal-order producer",
+        "crashpack producer",
+        "intent registry",
+    ] {
+        if !missing.contains(producer) {
+            return Err(format!(
+                "the artifact no longer names the missing {producer} — the close requires \
+                 every absence to stay declared"
+            ));
+        }
     }
 
     Ok(Closed {
@@ -411,10 +480,16 @@ fn close(campaign: &str) -> Result<Closed, String> {
         candidates,
         selected,
         omitted,
+        expandable,
+        unachieved,
+        guarantees,
         promised,
         child_items,
         packed_kept,
         packed_dropped,
+        compile_status,
+        compile_verdict,
+        compile_class,
     })
 }
 
@@ -500,7 +575,81 @@ fn daemon() -> Daemon {
         .build()
 }
 
-fn compile_request() -> OperationRequest {
+/// The exit layer's **own** compile projection — three writes, one dependence chain, sharing no
+/// fixture with the campaign.
+///
+/// Small on purpose. What this has to establish is that `context.compile` is *served* at
+/// production grain and answers with a pack whose guarantee set a checker licensed; the
+/// campaign establishes the numbers. A fixture this layer built itself is what keeps the two
+/// independent, which is the whole shape of an exit layer (bn-3jtr/bn-2hmk).
+fn exit_projection() -> (ContextCompileSource, ArtifactHandle) {
+    let id = |text: &str| Name::new(text).expect("a canonical identifier");
+    let delta = |name: &str, variable: &str, before: i64, after: i64| {
+        StateDeltaRef::new(
+            id(variable),
+            StateDeltaClass::Concrete,
+            Some(Value::int(i128::from(before))),
+            Value::int(i128::from(after)),
+        )
+        .expect("a changed variable is a real delta")
+        .into_selected_item(id(name))
+    };
+    // d_begin -> d_write -> d_ack, and one write nothing downstream reads.
+    let order = CausalOrder::new(
+        [
+            (id("d_ack"), SelectionKind::StateDelta),
+            (id("d_begin"), SelectionKind::StateDelta),
+            (id("d_noise"), SelectionKind::StateDelta),
+            (id("d_write"), SelectionKind::StateDelta),
+        ],
+        [(id("d_ack"), id("d_write")), (id("d_write"), id("d_begin"))],
+    )
+    .expect("the order is a DAG");
+    let digest = |text: &str| Blake3Hasher::hash(text.as_bytes()).to_token();
+    let header = CompileHeader {
+        snapshot: WorkspaceHandle::new("ws_pr11exitlayer").expect("a workspace handle"),
+        semantic_epoch: "sem3-pr11-exit".to_owned(),
+        intent: StoreHandle::new(ArtifactClass::IntentContract, &digest("pr11-exit-intent"))
+            .expect("a digest token is a well-formed identity"),
+        evidence: vec![
+            StoreHandle::new(ArtifactClass::Evidence, &digest("pr11-exit-evidence"))
+                .expect("a digest token is a well-formed identity"),
+        ],
+        replay: Some(
+            ReplayRef::new(
+                StoreHandle::new(ArtifactClass::Crashpack, &digest("pr11-exit-crashpack"))
+                    .expect("a digest token is a well-formed identity"),
+            )
+            .expect("a crash_* handle"),
+        ),
+        verdict: Some(PackVerdict::Refuted),
+        assurance: Assurance::new(
+            AssuranceLevel::Bounded,
+            AssuranceEnvelope::all_unsupported(
+                &UnsupportedReason::new("outside-this-exit-layer").expect("a plain token"),
+            ),
+        ),
+        profile: PackProfile::Failure,
+        redactions: Vec::new(),
+    };
+    let root = ArtifactHandle::new(&header.evidence[0].to_string()).expect("an artifact handle");
+    let source = ContextCompileSource::new(
+        CausalCompile::new(order, RedactionPolicy::permitting_everything()),
+        [id("d_ack")],
+        ExpansionQuery::new(PackRelation::SameOwner, id("d_ack")),
+        [
+            delta("d_ack", "client_acked", 0, 1),
+            delta("d_begin", "txn", 0, 1),
+            delta("d_noise", "telemetry", 0, 1),
+            delta("d_write", "wal_buffered", 0, 1),
+        ],
+        header,
+    )
+    .expect("every candidate of the order has a registered body");
+    (source, root)
+}
+
+fn compile_request(root: &ArtifactHandle) -> OperationRequest {
     // The exit's own case, asked for at production grain: compile a pack from an
     // evidence root, requesting exactly the guarantee the sentence turns on.
     OperationRequest {
@@ -530,7 +679,7 @@ fn compile_request() -> OperationRequest {
             page: Optional::Absent,
         },
         arguments: Arguments::ContextCompile(ContextCompileRequest {
-            evidence_root: ArtifactHandle::new("ev_dx01").expect("an artifact handle"),
+            evidence_root: root.clone(),
             question: "why did AckImpliesDurable fail?".to_owned(),
             audience: Optional::Absent,
             guarantees: Optional::Present(vec!["ReplayPreserving".to_owned()]),
@@ -538,19 +687,60 @@ fn compile_request() -> OperationRequest {
     }
 }
 
-/// The refusal's error-code token, live off a real dispatch.
-fn live_compile_refusal() -> String {
+/// What a live `context.compile` answered, for rendering and for the guard.
+struct LiveCompile {
+    status: String,
+    guarantees: Vec<String>,
+    verdict: String,
+    unachieved: u64,
+}
+
+fn live_compile() -> LiveCompile {
+    let (source, root) = exit_projection();
     let mut daemon = daemon();
-    let outcome = daemon.dispatch(&compile_request());
-    assert_eq!(outcome.envelope.status, ResultStatus::Error);
-    assert!(matches!(outcome.payload, Payload::None));
-    let error = outcome
-        .envelope
-        .error
-        .value()
-        .expect("a refusal carries an error object")
-        .clone();
-    format!("{:?}", error.code)
+    daemon.state_mut().put_compile_source(&root, source);
+    let outcome = daemon.dispatch(&compile_request(&root));
+    let Payload::ContextCompile(response) = &outcome.payload else {
+        panic!(
+            "context.compile must be served at production grain: {:?}",
+            outcome.envelope.error
+        );
+    };
+    let document = Json::parse(response.pack.as_bytes()).expect("the pack is canonical JSON");
+    pack::required_keys_present(&document).expect("all seventeen required keys");
+    let fields = document.as_object().expect("object");
+    let guarantees: Vec<String> = fields["guarantees"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|token| token.as_str().expect("a string").to_owned())
+        .collect();
+    let unachieved: u64 = fields["omissions"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter(|record| record.as_object().expect("object")["kind"].as_str() == Some("unknown"))
+        .map(|record| {
+            u64::try_from(
+                record.as_object().expect("object")["count"]
+                    .as_integer()
+                    .expect("an exact count"),
+            )
+            .expect("a non-negative count")
+        })
+        .sum();
+    LiveCompile {
+        status: format!("{:?}", outcome.envelope.status).to_lowercase(),
+        guarantees,
+        verdict: match outcome.envelope.verdict.value().expect("a verdict") {
+            Verdict::Evaluation(value) => {
+                assert_eq!(value.verdict, EvaluationVerdict::Refuted);
+                fields["verdict"].as_str().expect("a string").to_owned()
+            }
+            other => panic!("context.compile answers with an evaluation verdict: {other:?}"),
+        },
+        unachieved,
+    }
 }
 
 // --- the tests ---------------------------------------------------------------------------
@@ -579,10 +769,25 @@ fn the_sentence_is_closed_against_the_dossier_not_restated() {
         exit_line.contains("(delivered: bn-3m65"),
         "the Exit line does not carry this bone's delivered annotation"
     );
+    // The annotation's residual, at the grain it now closes at. bn-3m65's assertion required
+    // the *compiler* to be named; the compiler is delivered, so what the close requires named
+    // is what is still absent — the same requirement, over the residual that is actually
+    // outstanding (the PR-5 owed-CBOR / PR-8 F16 precedent).
+    for producer in [
+        "proof service",
+        "correspondence graph",
+        "CIR causal-order producer",
+        "crashpack producer",
+        "intent-registry resolution",
+    ] {
+        assert!(
+            exit_line.contains(producer),
+            "the Exit annotation no longer names the missing {producer}"
+        );
+    }
     assert!(
-        exit_line.contains("ten-stage compiler"),
-        "the Exit annotation no longer names the compiler residual — the declared-grain \
-         close requires it (the PR-5 owed-CBOR / PR-8 F16 precedent)"
+        exit_line.contains("production grain"),
+        "the Exit annotation no longer declares the grain it closes at"
     );
 
     // The matrix twin: the G0-DX-01 row is the same experiment with the same legs, and
@@ -636,19 +841,37 @@ fn the_three_legs_close_over_the_pinned_campaign_artifact() {
     );
     assert_eq!(
         (closed.pack_bytes, closed.raw_bytes, closed.ratio_x100),
-        (2791, 48764, 1747),
+        (2423, 48764, 2012),
         "the reduction, recomputed under the packer's counting rule"
     );
     assert_eq!(
         (closed.candidates, closed.selected, closed.omitted),
-        (258, 10, 248),
+        (255, 5, 250),
         "INV-007 conservation"
     );
-    assert_eq!(closed.child_items, 248, "the exact expansion");
+    assert_eq!(
+        (closed.expandable, closed.unachieved),
+        (249, 1),
+        "the manifest splits into the expandable group and rule C1's owed record"
+    );
+    assert_eq!(
+        closed.guarantees, "CausallyClosed",
+        "the pack claims exactly what a checker licensed"
+    );
+    assert_eq!(closed.child_items, 249, "the exact expansion");
     assert_eq!(
         (closed.packed_kept, closed.packed_dropped),
-        (243, 5),
+        (244, 5),
         "the budget branch"
+    );
+    assert_eq!(
+        (
+            closed.compile_status.as_str(),
+            closed.compile_verdict.as_str(),
+            closed.compile_class.as_str()
+        ),
+        ("ok", "refuted", "bounded"),
+        "the compile is served and its wire answer is the pack's own"
     );
 }
 
@@ -694,67 +917,106 @@ fn anti_vacuity_doctored_campaign_artifacts_are_rejected() {
     // An artifact that lies about its own arithmetic: recorded ratio != recomputed.
     rejection(
         doctored(
-            "ratio_x100=1747 pass_10x=true",
-            "ratio_x100=2747 pass_10x=true",
+            "ratio_x100=2012 pass_10x=true",
+            "ratio_x100=3012 pass_10x=true",
         ),
         "does not recompute",
     );
-    // A consistently doctored sub-10x reduction: 27000*100/2791 = 967, arithmetic
+    // A consistently doctored sub-10x reduction: 24000*100/2423 = 990, arithmetic
     // agrees, the claim itself is below the bar — and the still-recorded pass_10x=true
     // cannot rescue it, because the closure grades the recomputation, not the flag.
     rejection(
         doctored(
-            "graded raw_named_json=48764 ratio_x100=1747",
-            "graded raw_named_json=27000 ratio_x100=967",
+            "graded raw_named_json=48764 ratio_x100=2012",
+            "graded raw_named_json=24000 ratio_x100=990",
         ),
         "below the 10x",
     );
     // A broken promise: the returned handle is not the one the record derived.
     rejection(
-        doctored("returned=ctx_4d77", "returned=ctx_dead"),
+        doctored("returned=ctx_dcb2", "returned=ctx_dead"),
         "promise is broken",
     );
-    // An artifact that stops declaring the harness grain.
+    // A manifest that does not split into its two halves.
     rejection(
-        doctored("selection=harness", "selection=production"),
-        "no longer declares",
+        doctored("omitted=250 expandable=249", "omitted=250 expandable=250"),
+        "does not split",
     );
-    // An artifact that stops naming the missing compiler: the declared-grain close
-    // must never quietly become a production-grain claim.
+    // Rule C1's first sentence: a daemon MUST NOT echo a requested guarantee it did not
+    // achieve. An artifact whose pack claims the requested one is rejected.
     rejection(
         doctored(
-            "missing_producers: ten-stage compiler",
+            "guarantees=CausallyClosed requested=ReplayPreserving",
+            "guarantees=CausallyClosed,ReplayPreserving requested=ReplayPreserving",
+        ),
+        "echoes the requested",
+    );
+    // An artifact that stops declaring the production grain. This is bn-3m65's own
+    // grain-hiding arm, unchanged in shape: only the grain it demands moved.
+    rejection(
+        doctored("selection=production", "selection=harness"),
+        "no longer declares",
+    );
+    // An artifact that stops declaring stage 2's order as a declared input — the one
+    // producer the *selection* leg is still missing.
+    rejection(
+        doctored("order=declared", "order=production"),
+        "no longer declares that stage 2's causal order is a declared input",
+    );
+    // An artifact that stops naming a missing producer: the production-grain close must
+    // never quietly become a claim that nothing is owed.
+    rejection(
+        doctored(
+            "missing_producers: proof service",
             "missing_producers: none",
         ),
-        "ten-stage compiler",
+        "no longer names the missing proof service",
+    );
+    // An artifact that claims the production grain while the compiler is not served: the
+    // trip-wire in the other direction, and the one this bone's own re-run turns on.
+    rejection(
+        doctored("context.compile=ok", "context.compile=refused"),
+        "requires a served compiler",
+    );
+    // And an artifact whose envelope verdict disagrees with the evaluation's.
+    rejection(
+        doctored(
+            "context.compile=ok verdict=refuted",
+            "context.compile=ok verdict=satisfied",
+        ),
+        "is not the evaluation's",
     );
 }
 
 #[test]
-fn the_compiler_refusal_is_the_exits_grain_guard() {
-    // The declared-grain close rests on `context.compile` being genuinely refused —
-    // "a compiled-looking pack with no compiler behind it is exactly the degradation
-    // that rule names" (`daemon::context`). Re-pinned here, live, so the day a
-    // compiler lands this file goes red and the exit evidence is re-run at production
-    // grain instead of the declared-grain close lingering silently.
-    let mut daemon = daemon();
-    let outcome = daemon.dispatch(&compile_request());
-    assert_eq!(outcome.envelope.status, ResultStatus::Error);
-    let error = outcome
-        .envelope
-        .error
-        .value()
-        .expect("a refusal carries an error object");
+fn the_compiler_is_served_at_production_grain() {
+    // The pin bn-3m65 left here read: "`context.compile` is now served: upgrade this exit
+    // layer to production grain before touching this pin." It went red when the compiler
+    // landed, that upgrade is this file, and the pin now points the other way — a compiler
+    // that stops being served turns the exit red again, on evidence this layer produced.
+    let live = live_compile();
+    assert_eq!(live.status, "ok", "context.compile is served");
+
+    // A served compiler is not enough: the answer has to be a *checked* one. Stage 2's
+    // independent closure checker licensed `CausallyClosed` over the selection actually
+    // published, and nothing else is claimed — no stage 3 automaton, no stage 8 transcript,
+    // and `ProofRelevant` is unreachable by construction (`continuum_context::proof`).
     assert_eq!(
-        error.code,
-        ErrorCode::UnsupportedSemanticFeature,
-        "context.compile is now served: upgrade this exit layer to production grain \
-         before touching this pin"
+        live.guarantees,
+        ["CausallyClosed"],
+        "the pack claims exactly the guarantees a checker licensed"
     );
+    // Rule C1, live: the requested `ReplayPreserving` is not echoed, and what it owes the
+    // manifest is there.
     assert!(
-        matches!(outcome.payload, Payload::None),
-        "a refusal serves nothing"
+        !live
+            .guarantees
+            .iter()
+            .any(|claim| claim == "ReplayPreserving"),
+        "a daemon MUST NOT echo a requested guarantee it did not achieve (C1)"
     );
+    assert_eq!(live.unachieved, 1, "C1's owed omission record");
+    assert_eq!(live.verdict, "refuted", "the pack's own verdict");
 }
 
 // --- the rendered exit artifact ----------------------------------------------------------
@@ -763,10 +1025,13 @@ fn render_exit_evidence() -> String {
     use std::fmt::Write as _;
 
     let closed = close(CAMPAIGN).expect("the campaign artifact closes the sentence");
-    let refusal = live_compile_refusal();
+    let live = live_compile();
 
     let mut out = String::new();
-    let _ = writeln!(out, "PR-11 exit evidence (bn-3m65)");
+    let _ = writeln!(
+        out,
+        "PR-11 exit evidence (bn-3m65; re-run at production grain, bn-1y4qc)"
+    );
     let _ = writeln!(out, "sentence: {SENTENCE}");
     let _ = writeln!(
         out,
@@ -776,8 +1041,8 @@ fn render_exit_evidence() -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "adjudication: closed at the declared grain; the ten-stage compiler is the \
-         exit's named owed producer"
+        "adjudication: closed at PRODUCTION grain; the ten-stage compiler is delivered and \
+         is the producer of every leg's selection and assembly"
     );
     let _ = writeln!(
         out,
@@ -793,8 +1058,12 @@ fn render_exit_evidence() -> String {
     );
     let _ = writeln!(
         out,
-        "- grain guard: context.compile -> {refusal} (re-pinned live in this file); a \
-         landed compiler turns the pin red and this exit re-runs at production grain"
+        "- grain guard: context.compile -> {} (live, on this layer's own projection); \
+         guarantees={} (C1: requested ReplayPreserving not echoed, {} owed omission); a \
+         compiler that stops being served turns this pin red",
+        live.status,
+        live.guarantees.join(","),
+        live.unachieved
     );
     let _ = writeln!(out);
     let _ = writeln!(
@@ -807,22 +1076,25 @@ fn render_exit_evidence() -> String {
         out,
         "[replay-preserving core] core={} ({} events); replay refutes; witness::shortest \
          == core; 4 drop-one controls + reorder + textual control held; \
-         check=production, selection=harness(stage 2)",
+         check=production, selection=production(stages 1-2), order=declared(no CIR producer)",
         closed.core.join(","),
         closed.core.len()
     );
     let _ = writeln!(
         out,
         "[substantial reduction] pack={} B vs graded raw={} B = {}.{:02}x (recomputed; \
-         graded at the row's >=10x); conservation {} = {} + {}; \
-         counting=production(correction 17), assembly=harness",
+         graded at the row's >=10x); conservation {} = {} + {} ({} expandable + {} rule-C1); \
+         guarantees={}; counting=production(correction 17), assembly=production(RootPack)",
         closed.pack_bytes,
         closed.raw_bytes,
         closed.ratio_x100 / 100,
         closed.ratio_x100 % 100,
         closed.candidates,
         closed.selected,
-        closed.omitted
+        closed.omitted,
+        closed.expandable,
+        closed.unachieved,
+        closed.guarantees
     );
     let _ = writeln!(
         out,
@@ -831,13 +1103,20 @@ fn render_exit_evidence() -> String {
          dropped); production end-to-end (Daemon::dispatch)",
         closed.promised, closed.child_items, closed.packed_kept, closed.packed_dropped
     );
+    let _ = writeln!(
+        out,
+        "[the compile] context.compile={} verdict={} assurance_class={} (both equal the \
+         pack's, RFC 0028 \"Wire surface\"); audience selects rendering only",
+        closed.compile_status, closed.compile_verdict, closed.compile_class
+    );
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "residual, owed to the compiler's own bone: ten-stage compiler (candidate-set \
-         construction, stage-2 slicing licensing CausallyClosed/ReplayPreserving, \
-         auditable intermediates per RFC 0030 compared artifact 5); root-pack \
-         assembly; crashpack producer; intent-registry resolution"
+        "residual, named and routed rather than paid: the proof service (stage 5 \
+         configured and refused) and the §16 correspondence graph (stage 7 configured and \
+         refused), both PR-1/IMPL-01 scaffolds; the CIR causal-order producer, which \
+         leaves stage 2's input declared; the crashpack producer; intent-registry \
+         resolution"
     );
     out
 }

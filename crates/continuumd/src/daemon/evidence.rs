@@ -1954,6 +1954,17 @@ fn verify_envelope(
         values: produced,
         schedules: unsupported_dimension("no-schedule-exploration"),
         memory_model: unsupported_dimension("sequential-consistency-only"),
+        // Reconciled at bn-1y4qc, and the token is unchanged because the reading behind it
+        // was always the narrow one. A dimension is a statement about *the answer that
+        // carries it*, never about the daemon: this envelope describes an `evidence.verify`
+        // re-derivation, which projects no observer and has no observer set to project over
+        // — the node it re-derives names a commitment and an instrumentation profile, not an
+        // intent. Since `context.compile` landed, this daemon *does* run RFC 0028's stage 6
+        // over a registered observer projection, and the pack it publishes names
+        // `continuum-context::observer` in its own envelope's `observer` dimension
+        // (`daemon::context::observer_dimension`) — with this same token on a compile that
+        // configured no projection. One token, two answers, and neither of them the claim
+        // "this daemon has no observer projection".
         observer: unsupported_dimension("no-observer-projection"),
         proof_status,
         unknowns: unsupported_dimension("not-enumerated"),

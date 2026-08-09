@@ -18,7 +18,7 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.9";
+pub const IDL_VERSION: &str = "1.10";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///

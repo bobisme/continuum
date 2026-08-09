@@ -1,15 +1,16 @@
-PR-11 exit evidence (bn-3m65)
+PR-11 exit evidence (bn-3m65; re-run at production grain, bn-1y4qc)
 sentence: the synthetic 200-event durability case compiles to a replay-preserving core with substantial reduction
 source: notes/plan/notes/START_HERE_IMPLEMENTATION.md, PR 11 Exit; matrix twin: G0-DX-01 pass condition (adds: exact expansion handles)
 
-adjudication: closed at the declared grain; the ten-stage compiler is the exit's named owed producer
+adjudication: closed at PRODUCTION grain; the ten-stage compiler is delivered and is the producer of every leg's selection and assembly
 - RFC 0028 Validation: checkers are independent of the compiler that made the claim (INV-004), and C6 forbids trusting the producer, so every predicate the sentence asserts is checker-established
 - precedent: PR-5 closed with the CBOR codec owed; PR-8 closed with the crashpack producer absent and the 96 corroborated one layer down (RFC 0026 F16); PR-6 closed over the wire-reachable phase set
-- grain guard: context.compile -> UnsupportedSemanticFeature (re-pinned live in this file); a landed compiler turns the pin red and this exit re-runs at production grain
+- grain guard: context.compile -> ok (live, on this layer's own projection); guarantees=CausallyClosed (C1: requested ReplayPreserving not echoed, 1 owed omission); a compiler that stops being served turns this pin red
 
 [the case] events=225 (>=200), synthetic durability failure through the production engine; verdict=refuted over 5248 reachable states
-[replay-preserving core] core=begin_txn,submit_write,ack_before_flush,power_loss (4 events); replay refutes; witness::shortest == core; 4 drop-one controls + reorder + textual control held; check=production, selection=harness(stage 2)
-[substantial reduction] pack=2791 B vs graded raw=48764 B = 17.47x (recomputed; graded at the row's >=10x); conservation 258 = 10 + 248; counting=production(correction 17), assembly=harness
-[exact expansion handles] promised == returned (ctx_4d77c9cd4eb8aa87bb37155c74a9197a9d35488399c6ae816721f43a7f3c532b); 248 items exact under an empty residual manifest; budget branch keeps the promise (243 kept / 5 dropped); production end-to-end (Daemon::dispatch)
+[replay-preserving core] core=begin_txn,submit_write,ack_before_flush,power_loss (4 events); replay refutes; witness::shortest == core; 4 drop-one controls + reorder + textual control held; check=production, selection=production(stages 1-2), order=declared(no CIR producer)
+[substantial reduction] pack=2423 B vs graded raw=48764 B = 20.12x (recomputed; graded at the row's >=10x); conservation 255 = 5 + 250 (249 expandable + 1 rule-C1); guarantees=CausallyClosed; counting=production(correction 17), assembly=production(RootPack)
+[exact expansion handles] promised == returned (ctx_dcb2c0b565ae7f5d827d93faa8ef54750d0217050eee42b1e1d4c3fa4127c0f9); 249 items exact under an empty residual manifest; budget branch keeps the promise (244 kept / 5 dropped); production end-to-end (Daemon::dispatch)
+[the compile] context.compile=ok verdict=refuted assurance_class=bounded (both equal the pack's, RFC 0028 "Wire surface"); audience selects rendering only
 
-residual, owed to the compiler's own bone: ten-stage compiler (candidate-set construction, stage-2 slicing licensing CausallyClosed/ReplayPreserving, auditable intermediates per RFC 0030 compared artifact 5); root-pack assembly; crashpack producer; intent-registry resolution
+residual, named and routed rather than paid: the proof service (stage 5 configured and refused) and the §16 correspondence graph (stage 7 configured and refused), both PR-1/IMPL-01 scaffolds; the CIR causal-order producer, which leaves stage 2's input declared; the crashpack producer; intent-registry resolution

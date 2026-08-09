@@ -17,22 +17,27 @@ drop_power_loss=completes_without_refuting pre_registered=completes_without_refu
 textual_selection: admits_noise=67 misses=begin_txn,power_loss strict=disabled_at_telemetry_flush forgiving=completes_without_refuting
 
 [leg2 reduction, measured under the packer's counting rule]
-pack_bytes=2791 (== published canonical length) candidates=258 selected=10 omitted=248
-graded raw_named_json=48764 ratio_x100=1747 pass_10x=true
-sensitivity raw_engine_display=13736 ratio_x100=492
-sensitivity raw_positional_json=12573 ratio_x100=450
-sensitivity raw_delta_log=10986 ratio_x100=393
-sensitivity raw_action_names=4023 ratio_x100=144
-pack_decomposition selected=1110 manifest+expansions=183 header=1498
+pack_bytes=2423 (== published canonical length) candidates=255 selected=5 omitted=250 expandable=249 unachieved_guarantee=1
+guarantees=CausallyClosed requested=ReplayPreserving unachieved_c1=unknown:unsupported
+graded raw_named_json=48764 ratio_x100=2012 pass_10x=true
+sensitivity raw_engine_display=13736 ratio_x100=566
+sensitivity raw_positional_json=12573 ratio_x100=518
+sensitivity raw_delta_log=10986 ratio_x100=453
+sensitivity raw_action_names=4023 ratio_x100=166
+pack_decomposition selected=578 manifest+expansions=280 header=1565
 
 [leg3 exact expansion handles, wire-live]
-parent=ctx_6eaca9f8da97b66cd49e98bb6745164c5a72d93e487c15b36bfa32f9efbd6c9f
-promised=ctx_4d77c9cd4eb8aa87bb37155c74a9197a9d35488399c6ae816721f43a7f3c532b returned=ctx_4d77c9cd4eb8aa87bb37155c74a9197a9d35488399c6ae816721f43a7f3c532b equal=true
-child_items=248 exact_match=true child_manifest_empty=true child_bytes=29968
-packed(ceiling=child-400): kept=243 dropped=5 recoverable_by_promised=true
+parent=ctx_9c320256e235672d18a4d181335e346a941e01f4e0540a9b42233ad1f1586b0a
+promised=ctx_dcb2c0b565ae7f5d827d93faa8ef54750d0217050eee42b1e1d4c3fa4127c0f9 returned=ctx_dcb2c0b565ae7f5d827d93faa8ef54750d0217050eee42b1e1d4c3fa4127c0f9 equal=true
+child_items=249 exact_match=true child_manifest_empty=true child_bytes=30180
+packed(ceiling=child-400): kept=244 dropped=5 recoverable_by_promised=true
+
+[compile, wire-live]
+context.compile=ok verdict=refuted assurance_class=bounded envelope_omissions=2 stages=1,2,4,5,7 refused=5,7
+audience_invariant=true (agent vs human: same ctx_*, byte-identical pack)
 
 [grain]
-leg1: selection=harness(stage-2 dynamic dependence slice; no compiler) check=production(engine successors+check+witness)
-leg2: counting=production(RFC 0028 correction 17) assembly=harness(no root assembler)
-leg3: production end-to-end (Daemon::dispatch)
-missing_producers: ten-stage compiler (context.compile refused); root pack assembly; crashpack producer; intent registry resolution
+leg1: selection=production(RFC 0028 stages 1-2 in continuum-context::compile) check=production(engine successors+check+witness) order=declared(last-writer dependence; continuum-cir is a PR-17 scaffold)
+leg2: counting=production(RFC 0028 correction 17) assembly=production(continuum-context::pack::RootPack)
+leg3: production end-to-end (Daemon::dispatch), and so is the compile that made the pack it navigates
+missing_producers: proof service (stage 5 configured and refused); §16 correspondence graph (stage 7 configured and refused); CIR causal-order producer; crashpack producer; intent registry resolution

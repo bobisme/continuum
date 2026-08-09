@@ -887,19 +887,36 @@ fn an_envelope_naming_another_snapshot_is_stale() {
 }
 
 #[test]
-fn context_compile_decodes_and_is_refused_with_the_typed_reason() {
+fn context_compile_decodes_and_a_root_with_no_projection_is_refused_uniformly() {
+    // `context.compile` is served since bn-1y4qc, but a compile needs a candidate order and
+    // `continuum-cir` is a PR-17 scaffold, so a deployment registers the projection it holds
+    // (`DaemonState::put_compile_source`). This daemon registers none, and the refusal is a
+    // fact about the *deployment*: it is the same answer for every root, held or not, which is
+    // what keeps it from being the existence oracle RFC 0027 X2 closes. The served path is
+    // evidenced end to end in `dx01_falsification.rs` and `pr11_exit_evidence.rs`.
     let mut daemon = daemon();
-    let outcome = daemon.dispatch(&OperationRequest {
-        envelope: envelope("context.compile", "req_1"),
-        arguments: Arguments::ContextCompile(ContextCompileRequest {
-            evidence_root: ArtifactHandle::new("ev_failure1").expect("an artifact handle"),
-            question: "why did AckImpliesDurable fail?".to_owned(),
-            audience: Optional::Absent,
-            guarantees: Optional::Present(vec!["ReplayPreserving".to_owned()]),
-        }),
-    });
-    assert_eq!(refusal(&outcome).0, ErrorCode::UnsupportedSemanticFeature);
-    assert!(matches!(outcome.payload, Payload::None));
+    let ask = |daemon: &mut Daemon, root: &str, request_id: &str| {
+        let outcome = daemon.dispatch(&OperationRequest {
+            envelope: envelope("context.compile", request_id),
+            arguments: Arguments::ContextCompile(ContextCompileRequest {
+                evidence_root: ArtifactHandle::new(root).expect("an artifact handle"),
+                question: "why did AckImpliesDurable fail?".to_owned(),
+                audience: Optional::Absent,
+                guarantees: Optional::Present(vec!["ReplayPreserving".to_owned()]),
+            }),
+        });
+        assert!(matches!(outcome.payload, Payload::None));
+        let error = refusal(&outcome);
+        (error.0, error.1)
+    };
+    let one = ask(&mut daemon, "ev_failure1", "req_1");
+    let other = ask(&mut daemon, "ev_nobodyhome", "req_2");
+    assert_eq!(one.0, ErrorCode::UnsupportedSemanticFeature);
+    assert_eq!(
+        one, other,
+        "a root this daemon holds no projection for and a root that does not exist get one \
+         byte-identical refusal"
+    );
 }
 
 // --- the two vocabularies, and the fault union -------------------------------------------

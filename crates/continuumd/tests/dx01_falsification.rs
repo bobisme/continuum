@@ -19,36 +19,46 @@
 //!
 //! # Honest scope: each leg's grain, stated before any number
 //!
-//! RFC 0028's **ten-stage compiler is not wired anywhere in this workspace** —
-//! `context.compile` is refused `UnsupportedSemanticFeature` by
-//! `daemon::context::ContextFamily`, and `continuum-context::pack`'s own documentation
-//! declines whole-pack compilation by name. A campaign that hid that behind a hand-built
-//! pack and called it production would be a finite artifact-shape spike wearing a costume.
-//! Instead, each leg runs at its deepest honestly available grain, declared here:
+//! **The compiler is the producer (bn-1y4qc).** The previous revision of this campaign declared
+//! two harness halves — the stage-2 core *selection* and the root-pack *assembly* — because
+//! "RFC 0028's ten-stage compiler is not wired anywhere in this workspace". It is wired now:
+//! `continuumd`'s `context.compile` runs `continuum-context`'s pipeline and publishes
+//! `continuum_context::pack::RootPack`'s document, and this campaign compiles through
+//! `Daemon::dispatch` like any caller. One declared input remains, and it is named rather than
+//! hidden:
 //!
-//! | leg | grain | what is production | what is harness, and why |
+//! | leg | grain | what is production | what is declared, and why |
 //! |---|---|---|---|
-//! | causal core replay-preserving | **partial** | the replay *check*: `continuum-engine-reference`'s own `Model::action_successors` decides whether the core replays step for step, and its own `checking::check`/`evaluate_predicate` decides whether the failure reproduces — RFC 0028 "Validation" makes every guarantee checker independent of the compiler by design, so the check side is exactly what production runs | the core *selection*: stage 2 (backward causal slicing) belongs to the unbuilt compiler, so [`causal_core`] implements dynamic dependence slicing in harness code over the model's own declared read/write sets (the production expression AST, `BoolExpr::variables`/`IntExpr::variables`) |
-//! | ≥10× context reduction | **partial** | the counting rule: measured bytes = the whole published canonical encoding (RFC 0028 correction 17, `continuum-context::pack`), checked here via `pack::budget_bytes_of` against the document's own length; and every fragment of the pack — `SelectedItem`, `Manifest`, `Target`, `Verdict`, `Assurance`, `ReplayRef` canonical JSON — is the production rendering | root-pack *assembly*: no landed bullet claims the 17-key root document writer, so [`assemble_root_pack`] joins the production fragments and applies the packer's own least-fixed-point measurement reading |
-//! | exact expansion handles | **production, end to end** | the parent pack is registered through `DaemonState::put_context_pack` (the same out-of-band surface a deployment uses), every expansion runs through `Daemon::dispatch`, the promise is derived from the published omission record alone, and the answer is the daemon's own | nothing |
+//! | causal core replay-preserving | **production selection, declared order** | the *selection*: RFC 0028 stage 1 (root selection) and stage 2 (backward causal slicing) run in `continuum_context::compile::CausalCompile`, the `CausallyClosed` licence is issued by the *independent* closure checker over the selection actually published, and the replay *check* is `continuum-engine-reference`'s own `Model::action_successors` and `checking::check` — RFC 0028 "Validation" makes every guarantee checker independent of the compiler by design | the *order* stage 2 slices: RFC 0028 gives stage 2 the input "CIR causal order" and `continuum-cir` is a PR-17 scaffold, so [`declared_order`] builds a last-writer dependence order over the production model's own declared read/write sets (`BoolExpr::variables`/`IntExpr::variables`) and declares it **complete**, which is what makes a stage-2 drop `slice-irrelevant` rather than `heuristic-cutoff` |
+//! | ≥10× context reduction | **production, end to end** | the counting rule (RFC 0028 correction 17) *and* the assembly: the seventeen-key root document is written by `continuum_context::pack::RootPack`, measured at its own least self-consistent canonical length, with INV-007's counting equation checked *before* the document exists — a pack that would not reconcile is not a smaller answer but no answer | nothing |
+//! | exact expansion handles | **production, end to end** | the pack is the one `context.compile` published and registered, every expansion runs through `Daemon::dispatch`, and the promise is derived from the published omission record alone | nothing |
 //!
-//! **Missing producers, named and routed** (the residual of this row): (1) the ten-stage
-//! compiler — `context.compile`'s producer; it must provide candidate-set construction
-//! from the evidence graph and stage-2 backward causal slicing licensing
-//! `CausallyClosed`/`ReplayPreserving`, with auditable intermediates (RFC 0030, compared
-//! artifact 5); (2) whole-pack root assembly — the writer that reconciles the `ctx_*`
-//! question identity with the store's content identity (`daemon::context`'s declined
-//! publication decision); (3) the crashpack producer — "nothing in this workspace builds
-//! a crashpack" (`daemon::task`), so the pack's `replay` names a class-checked `crash_*`
-//! handle derived from the core replay recipe with no artifact behind it, and the
-//! `in_*` intent handle names the contract a PR-5 registry would resolve, which none
-//! does. All three route to bn-3m65 (the PR-11 exit bone) and the compiler's own bone.
-//! Two typed-vocabulary absences recorded the same way: `EventRole` is docs/38's
-//! two-member *causal-core* split, so a slice-irrelevant trace event has no truthful
-//! `event`-kind spelling — the omitted noise is therefore accounted as its concrete
-//! per-variable transitions (`StateDeltaRef`, statements that are true), a shape choice
-//! the compiler bone revisits; and no landed producer serializes a trace, so the raw
-//! baseline is defined below rather than read off an artifact.
+//! **Missing producers, named and routed** (the residual of this row): (1) the **proof
+//! service** — `continuum-proof-client` is a PR-1/IMPL-01 scaffold, so stage 5 is *configured
+//! and refuses*, `ProofRelevant` is declined, and the refusal is recorded in the pack's typed
+//! `inconclusive_reason` machinery rather than papered over; (2) the **§16 correspondence
+//! graph** — `continuum-refinement` is likewise a scaffold, so stage 7 is configured and
+//! refuses, and deliberately invents no manifest cell; (3) the **CIR causal-order producer**,
+//! the one declared input above; (4) the **crashpack producer** — "nothing in this workspace
+//! builds a crashpack" (`daemon::task`), so the pack's `replay` names a class-checked `crash_*`
+//! handle with no artifact behind it; (5) **intent-registry resolution** — the `in_*` handle
+//! names a contract a PR-5 registry would resolve, which none does. Three stages are not
+//! configured at all, which is a different fact from a stage that refused: no property
+//! automaton (stage 3), observer projection (stage 6), or minimizer input (stage 8) is
+//! registered for this model, and "a stage whose input the deployment does not have must not be
+//! simulated with a default" (`continuum_context::compile`). The consequence is visible in the
+//! artifact: the pack claims exactly `CausallyClosed`, and the requested `ReplayPreserving` is
+//! carried as rule C1's `unknown`/`unsupported` omission rather than echoed.
+//!
+//! One shape decision this bone owed and takes here. bn-37gu recorded that "`EventRole` is
+//! docs/38's two-member *causal-core* split, so a slice-irrelevant trace event has no truthful
+//! `event`-kind spelling", and routed the choice to the compiler bone. The resolution is that
+//! **the causal node is the write, not the event**: candidates are the trace's concrete
+//! per-variable transitions (`state_delta`) plus one `model` candidate, because INV-007
+//! requires every omitted candidate to be *expandable* and an expansion has to publish it as an
+//! item — so a compile must not create a candidate whose omitted form it could not truthfully
+//! spell. The core's events are not lost; each selected delta names the event that made it, and
+//! [`delta_index`] reads them back.
 //!
 //! # The experiment
 //!
@@ -88,6 +98,15 @@
 //! | L3b | under a ceiling the full answer exceeds, the packed child's `budget` shortfall is recoverable by the *same* promised handle, conservation holds at every publishing ceiling, and below the minimal child nothing is published (`BudgetExhausted`, typed `non_resumable_reason`) | the production packer keeps the promise |
 //! | D | two independent builds of the whole campaign render byte-identical evidence, pinned against a golden artifact | deterministic |
 //!
+//! Three added when the compiler landed (bn-1y4qc), fixed from RFC 0028's "Wire surface" and
+//! "Views and rendering" before the wiring ran:
+//!
+//! | id | claim | required outcome |
+//! |---|---|---|
+//! | L4 | the envelope's `verdict` equals the pack's and its `assurance_class` equals the pack's `assurance.class`; the envelope's `omissions` agree with the manifest record for record; the compiled `ctx_*` is immediately expandable | the wire answer and the artifact are one statement |
+//! | A06 | two compiles differing only in `audience` return one `ctx_*` and byte-identical bytes, and a different *question* returns a different pack | `audience` selects rendering, never content — and the identity is not constant in everything |
+//! | A07 | an unregistered evidence root, an unknown guarantee token, an untrimmed question and a foreign snapshot each land on their own code | `UnsupportedSemanticFeature`, `MalformedRequest`, `MalformedRequest`, `StaleSnapshot` |
+//!
 //! # The reduction baseline, defined before the numbers
 //!
 //! No trace serializer is landed, so the baseline is defined here, conservatively, and
@@ -103,8 +122,10 @@
 //!
 //! # House rules
 //!
-//! - `src/` is untouched by this file, and no existing test anywhere is edited (the
-//!   bn-21dd precedent).
+//! - This file drives `src/` and does not reach around it: every number below comes off an
+//!   answer `Daemon::dispatch` produced. (The bn-21dd freeze applied to the campaign that
+//!   *falsified* the landed surface; this revision is the production re-run the PR-11 exit
+//!   owed, and its own `src/` changes are bn-1y4qc's wiring, reviewed as such.)
 //! - Deterministic (INV-005): no clock, no entropy, no float, `BTree`-ordered
 //!   everything; the whole campaign renders to one byte-stable evidence artifact pinned
 //!   at `tests/golden/dx01_falsification_evidence.txt`.
@@ -119,7 +140,7 @@
 //! - **The trace**: 225 events, 221 noise, through the production engine; the complete
 //!   exploration (5,248 reachable states) refutes `AckImpliesDurable`, and the engine's
 //!   own `witness::shortest` finds exactly the four core actions, in order — an
-//!   independent production corroboration of the harness slice.
+//!   independent production corroboration of the compiler's own slice.
 //! - **Leg 1**: the 4-event core replays through `Model::action_successors` and
 //!   reproduces the refutation (`client_acked=1, wal_durable=0, wal_buffered=0`); every
 //!   drop-one mutant fails its pre-registered way (two disabled steps, two lost
@@ -127,38 +148,57 @@
 //!   reordered core is disabled; the textual-relevance control admits 67 noise events,
 //!   misses `begin_txn` and `power_loss`, is not strictly replayable, and does not
 //!   refute even forgivingly — C2's exclusion, demonstrated.
-//! - **Leg 2**: pack 2,791 bytes (equal to its own published canonical length — the
-//!   packer's counting rule, checked), raw trace 48,764 bytes under the graded
-//!   self-describing witness-form baseline: **17.47×**. The sensitivity table is the
-//!   honest half: under the engine's positional `Display` the ratio is 4.92×, under a
-//!   positional-vector JSON 4.50×, under a changed-variables delta log 3.93×, under a
-//!   bare action-name log 1.44× — the 10× margin's sign flips below the self-describing
-//!   form, none of which any landed producer emits, and the pack's fixed answer header
-//!   (1,498 of 2,791 bytes) is where a redesign would look first.
+//! - **Leg 2**: pack 2,423 bytes (equal to its own published canonical length — the
+//!   packer's counting rule, checked, and now written by the production assembler), raw
+//!   trace 48,764 bytes under the graded self-describing witness-form baseline:
+//!   **20.12×**. The sensitivity table is the honest half: under the engine's positional
+//!   `Display` the ratio is 5.66×, under a positional-vector JSON 5.18×, under a
+//!   changed-variables delta log 4.53×, under a bare action-name log 1.66× — the 10×
+//!   margin's sign flips below the self-describing form, none of which any landed
+//!   producer emits, and the pack's fixed answer header (1,565 of 2,423 bytes) is where a
+//!   redesign would look first.
 //! - **Leg 3**: promised `ctx_*` = returned `ctx_*` through `Daemon::dispatch`; the
-//!   expansion returns exactly the 248 omitted transition items, byte for byte, under
+//!   expansion returns exactly the 249 omitted transition items, byte for byte, under
 //!   an empty residual manifest; a second idempotency key returns the same handle and
 //!   byte-identical pack; the packed branch (ceiling = answer − 400) keeps the promise
-//!   in its `recoverable_by` and conserves all 248; below the minimal child, a typed
+//!   in its `recoverable_by` and conserves all 249; below the minimal child, a typed
 //!   `BudgetExhausted` publishes nothing.
+//! - **The compile itself**: `context.compile` answers `ok` with the pack, an
+//!   `EvaluationVerdictValue` whose `verdict` and `assurance_class` equal the pack's, and
+//!   the manifest projected onto the envelope record for record; two requests differing
+//!   only in `audience` return one `ctx_*` and byte-identical bytes, while a different
+//!   question returns a different pack; and the four hostile requests land on their own
+//!   typed codes (unregistered root → `UnsupportedSemanticFeature`, unknown guarantee
+//!   token → `MalformedRequest`, untrimmed question → `MalformedRequest`, foreign snapshot
+//!   → `StaleSnapshot`).
 //!
-//! The row's residual is the compiler, not the artifact contract.
+//! The row's residual is now the two absent *subsystems* stages 5 and 7 refuse for, the CIR
+//! order producer, the crashpack producer and the intent registry — not the compiler, and
+//! not the artifact contract.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_context::accounting::{Accounting, CandidateSet, Omitted};
 use continuum_context::assurance::Assurance;
-use continuum_context::event::{EventRef, EventRole};
+use continuum_context::causal::CausalOrder;
+use continuum_context::compile::{CausalCompile, RedactionPolicy};
+use continuum_context::correspondence::CorrespondenceMapping;
+use continuum_context::dependence::{
+    CorrespondenceClaim, CorrespondenceRef, DependenceJoin, ExecutionDependence,
+    SourceCorrespondence,
+};
 use continuum_context::expansion::{
     Depth, ExpansionHandle, ExpansionPayload, ExpansionQuery, ExpansionRelation as PackRelation,
 };
 use continuum_context::model::ModelActionRef;
-use continuum_context::omission::{OmissionReason as PackReason, OmissionRecord};
-use continuum_context::pack;
+use continuum_context::omission::{
+    IrretrievableReason, OmissionReason as PackReason, OmissionRecord,
+};
+use continuum_context::pack::{self, PackProfile};
+use continuum_context::proof::ProofSlicing;
 use continuum_context::replay::{ReplayRef, ReplayRefError};
 use continuum_context::selection::{SelectedItem, SelectionKind};
 use continuum_context::state_delta::{StateDeltaClass, StateDeltaRef, StateDeltaRefError};
-use continuum_context::target::{Question, Target};
 use continuum_context::verdict::Verdict as PackVerdict;
 use continuum_engine_reference::checking::{DeadlockPolicy, Obligations, Verdict as EngineVerdict};
 use continuum_engine_reference::witness::Target as WitnessTarget;
@@ -174,23 +214,23 @@ use continuum_value::epoch::ProtocolWindow;
 use continuum_value::identity::{Blake3Hasher, ContentHasher};
 use continuum_value::value::{Name, Value};
 use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
-use continuumd::daemon::context::{ContextFamily, ContextPackRecord};
+use continuumd::daemon::context::{CompileHeader, ContextCompileSource, ContextFamily};
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest};
-use continuumd::protocol::envelope::{Budget, EpochSet, RequestEnvelope};
+use continuumd::protocol::envelope::{Budget, EpochSet, EvaluationVerdictValue, RequestEnvelope};
 use continuumd::protocol::handshake::{
     CapabilityDescriptor, CapabilityProfile, ClientHello, VersionRange, negotiate,
 };
-use continuumd::protocol::operations::context::ContextExpandRequest;
+use continuumd::protocol::operations::context::{ContextCompileRequest, ContextExpandRequest};
 use continuumd::protocol::registry::ENCODINGS;
 use continuumd::protocol::scalar::{
-    ActorId, ByteCount, CapabilityHandle, ContextHandle, EpochIdentity, OperationName,
-    ProtocolVersion, RequestId, Timestamp, WorkspaceHandle,
+    ActorId, ArtifactHandle as WireArtifactHandle, ByteCount, CapabilityHandle, ContextHandle,
+    EpochIdentity, OperationName, ProtocolVersion, RequestId, Timestamp, WorkspaceHandle,
 };
-use continuumd::protocol::spec::{Nullable, Optional};
+use continuumd::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use continuumd::protocol::vocabulary::{
-    AuthorityLevel, Encoding, ErrorCode, ExpansionRelation, OmissionReason, ResultStatus,
+    Audience, AuthorityLevel, Encoding, ErrorCode, ExpansionRelation, OmissionReason, ResultStatus,
 };
 
 // =====================================================================================
@@ -550,18 +590,6 @@ fn reads(model: &Model, action: usize) -> BTreeSet<String> {
     names.into_iter().collect()
 }
 
-/// The variables one action writes.
-fn writes(model: &Model, action: usize) -> BTreeSet<String> {
-    let declared = &model.actions()[action];
-    let mut names: BTreeSet<String> = BTreeSet::new();
-    for outcome in declared.outcomes() {
-        for assignment in outcome.assignments() {
-            names.insert(assignment.variable().as_str().to_owned());
-        }
-    }
-    names
-}
-
 /// The variables the invariant reads — the demand the slice starts from.
 fn property_reads(model: &Model) -> BTreeSet<String> {
     let index = model
@@ -572,25 +600,18 @@ fn property_reads(model: &Model) -> BTreeSet<String> {
     names.into_iter().collect()
 }
 
-/// **Harness stage 2** (declared): dynamic backward dependence slicing over the trace.
+/// The variables the *check* has to compare, given a core the compiler selected.
 ///
-/// Walk the trace backwards with a demand set seeded from the property's reads; keep an
-/// event iff it writes a demanded variable, and when keeping it, demand everything it
-/// reads. Every affirmative *check* of what this returns — replay, closure, refutation —
-/// runs through the production engine, and [`a01_dropping_any_causal_event_fails`] shows
-/// the checks reject this function's own plausible mutants (a slicer that ignored guard
-/// reads returns exactly the drop-`begin_txn` core, which fails replay).
-fn causal_core(model: &Model, trace: &[TraceEvent]) -> (Vec<usize>, BTreeSet<String>) {
+/// A check-side computation, not a producer: it is handed the core the production pipeline
+/// published and reports which state slots a causal-closure witness must agree on — the
+/// property's own reads together with everything the core's actions read. Nothing here
+/// chooses what is in the core.
+fn demanded_variables(model: &Model, core: &[usize], trace: &[TraceEvent]) -> BTreeSet<String> {
     let mut demand = property_reads(model);
-    let mut kept: Vec<usize> = Vec::new();
-    for event in trace.iter().rev() {
-        if writes(model, event.action).intersection(&demand).count() > 0 {
-            kept.push(event.index);
-            demand.extend(reads(model, event.action));
-        }
+    for index in core {
+        demand.extend(reads(model, trace[*index].action));
     }
-    kept.reverse();
-    (kept, demand)
+    demand
 }
 
 /// What replaying a projected action sequence through the production engine produced.
@@ -662,7 +683,7 @@ fn replay_skipping_disabled(model: &Model, actions: &[usize]) -> Replay {
 }
 
 // =====================================================================================
-// the compile: candidates, dispositions, and the assembled root pack
+// the compile: the production pipeline, through `context.compile`
 // =====================================================================================
 
 fn name(text: &str) -> Name {
@@ -673,188 +694,135 @@ fn delta_id(index: usize, variable: &str) -> Name {
     name(&format!("d_{index:04}_{variable}"))
 }
 
-/// Everything the compile produced, kept together so every test reads one construction.
-struct Compile {
-    model: Model,
-    trace: Vec<TraceEvent>,
-    core: Vec<usize>,
-    /// The pack's `selected[]`, in canonical order.
-    selected: Vec<SelectedItem>,
-    /// The omitted noise transitions, exactly as the expansion must return them.
-    omitted_items: Vec<SelectedItem>,
-    /// The one manifest record the accounting derived.
-    record: OmissionRecord,
-    /// The query that retrieves the omitted group.
-    query: ExpansionQuery,
-    candidate_count: u32,
-    /// The measured root pack document.
-    root: Json,
-    root_id: ArtifactHandle,
+/// The trace index a delta identity names, or `None` for a candidate that is not a delta.
+fn delta_index(id: &Name) -> Option<usize> {
+    id.as_str()
+        .strip_prefix("d_")?
+        .split_once('_')?
+        .0
+        .parse()
+        .ok()
 }
 
-/// The expansion anchor: the violation's own event — the last causal event.
-fn anchor_of(core: &[usize], trace: &[TraceEvent]) -> Name {
-    trace[*core.last().expect("a non-empty core")].id()
+/// The `model`-kind candidate: the buggy action itself.
+const MODEL_ITEM: &str = "m_ack_before_flush";
+
+/// **The one declared input left** (grain: declared): the candidate order stage 2 slices.
+///
+/// RFC 0028 gives stage 2 the input "CIR causal order", and `continuum-cir` is a PR-17
+/// scaffold — so the order is built here, from the production model's own declared read/write
+/// sets (`BoolExpr::variables`/`IntExpr::variables`) and the production engine's own trace. It
+/// is *declared complete*, and that declaration is what makes a stage-2 drop `slice-irrelevant`
+/// rather than `heuristic-cutoff` (`continuum_context::causal::Completeness`): every action's
+/// reads and writes are declared exhaustively by the model, so non-ancestry here is a proof.
+///
+/// The nodes are the trace's **concrete writes**, one `state_delta` candidate per changed
+/// variable per event, plus one `model` candidate. Trace *events* are deliberately not
+/// candidates, and that settles the shape concern bn-37gu recorded for this bone: `EventRole`
+/// is docs/38's two-member causal-core split (`Observed`, `CausalPredecessor`), so a candidate
+/// outside the core has no truthful `event`-kind spelling — and INV-007 requires that every
+/// omitted candidate be *expandable*, which means an expansion has to be able to publish it as
+/// an item. A compile must not create a candidate whose omitted form it could not publish, so
+/// the causal node here is the write, which `StateDeltaRef` can always state truthfully. The
+/// core's events are not lost: each selected delta names the event that made it.
+///
+/// Edges are last-writer dependences: a write by event *i* is preceded by the most recent
+/// earlier write of every variable event *i* reads. Strictly earlier, so the relation is a
+/// DAG by construction.
+struct DeclaredOrder {
+    order: CausalOrder,
+    roots: BTreeSet<Name>,
+    items: Vec<SelectedItem>,
+    /// The anchor the residual expansion query hangs off: the last write of the variable the
+    /// violated invariant observes. It is a root, so stage 2 always publishes it.
+    anchor: Name,
 }
 
-fn compile() -> Compile {
-    let model = durability_model();
-    let trace = drive(&model);
-    let (core, _) = causal_core(&model, &trace);
-    let core_set: BTreeSet<usize> = core.iter().copied().collect();
-    let property = property_reads(&model);
-    let anchor = anchor_of(&core, &trace);
-    let query = ExpansionQuery::new(PackRelation::SameOwner, anchor);
+fn declared_order(model: &Model, trace: &[TraceEvent]) -> DeclaredOrder {
+    let mut nodes: Vec<(Name, SelectionKind)> = Vec::new();
+    let mut edges: Vec<(Name, Name)> = Vec::new();
+    let mut items: Vec<SelectedItem> = Vec::new();
+    let mut last_write: BTreeMap<String, Name> = BTreeMap::new();
 
-    // --- typed items, every one through a production constructor -----------------------
-    let mut selected: Vec<SelectedItem> = Vec::new();
-    let mut candidates: Vec<(Name, SelectionKind)> = Vec::new();
-    let mut core_ids: Vec<Name> = Vec::new();
-    let mut omitted: Vec<(Name, SelectedItem)> = Vec::new();
-
-    for event in &trace {
-        if core_set.contains(&event.index) {
-            // A core event is an `event`-kind item: docs/38's split decides its role.
-            let role = if writes(&model, event.action).intersection(&property).count() > 0 {
-                EventRole::Observed
-            } else {
-                EventRole::CausalPredecessor
-            };
-            candidates.push((event.id(), SelectionKind::Event));
-            core_ids.push(event.id());
-            selected.push(EventRef::new(name(&event.name), role).into_selected_item(event.id()));
-            // Its concrete state deltas are items too — the diagnosis substance.
-            for (variable, before, after) in event.changed(&model) {
-                let id = delta_id(event.index, &variable);
-                candidates.push((id.clone(), SelectionKind::StateDelta));
-                core_ids.push(id.clone());
-                selected.push(
-                    StateDeltaRef::new(
-                        name(&variable),
-                        StateDeltaClass::Concrete,
-                        Some(Value::int(i128::from(before))),
-                        Value::int(i128::from(after)),
-                    )
-                    .expect("a changed variable is a real delta")
-                    .into_selected_item(id),
-                );
+    for event in trace {
+        let read_set = reads(model, event.action);
+        let predecessors: Vec<Name> = read_set
+            .iter()
+            .filter_map(|variable| last_write.get(variable).cloned())
+            .collect();
+        let changed = event.changed(model);
+        for (variable, before, after) in &changed {
+            let id = delta_id(event.index, variable);
+            nodes.push((id.clone(), SelectionKind::StateDelta));
+            for predecessor in &predecessors {
+                edges.push((id.clone(), predecessor.clone()));
             }
-        } else {
-            // A noise event has no truthful `event`-kind spelling — `EventRole` is the
-            // causal-core split — so it is candidate as its concrete transitions, which
-            // are statements the typed constructors can make truthfully (module doc).
-            for (variable, before, after) in event.changed(&model) {
-                let id = delta_id(event.index, &variable);
-                candidates.push((id.clone(), SelectionKind::StateDelta));
-                omitted.push((
-                    id.clone(),
-                    StateDeltaRef::new(
-                        name(&variable),
-                        StateDeltaClass::Concrete,
-                        Some(Value::int(i128::from(before))),
-                        Value::int(i128::from(after)),
-                    )
-                    .expect("a changed variable is a real delta")
-                    .into_selected_item(id),
-                ));
-            }
+            items.push(
+                StateDeltaRef::new(
+                    name(variable),
+                    StateDeltaClass::Concrete,
+                    Some(Value::int(i128::from(*before))),
+                    Value::int(i128::from(*after)),
+                )
+                .expect("a changed variable is a real delta")
+                .into_selected_item(id),
+            );
+        }
+        // After the predecessors, never before: an event does not read its own new value.
+        for (variable, _, _) in &changed {
+            last_write.insert(variable.clone(), delta_id(event.index, variable));
         }
     }
-    // The buggy action itself, as a `model`-kind item.
-    let model_item_id = name("m_ack_before_flush");
-    candidates.push((model_item_id.clone(), SelectionKind::Model));
-    core_ids.push(model_item_id.clone());
-    selected.push(
-        ModelActionRef::action_only(name("ack_before_flush")).into_selected_item(model_item_id),
-    );
 
-    // --- the production accounting: one ledger, closed, reconciled ---------------------
-    let candidate_set = CandidateSet::new(candidates).expect("no candidate repeats");
-    let candidate_count = u32::try_from(candidate_set.len()).expect("a small set");
-    let mut accounting = Accounting::over(candidate_set);
-    for id in &core_ids {
-        accounting.select(id).expect("a core item is a candidate");
-    }
-    for (id, _) in &omitted {
-        accounting
-            .omit(
-                id,
-                Omitted::Expandable {
-                    reason: PackReason::SliceIrrelevant,
-                    query: query.clone(),
-                },
-            )
-            .expect("a noise transition is a candidate");
-    }
-    let closed = accounting.close().expect("every candidate dispositioned");
-    closed.reconcile().expect("the counting equation holds");
-    assert_eq!(closed.candidate_count(), candidate_count);
-    let manifest = closed.manifest().clone();
-    assert_eq!(manifest.records().len(), 1, "one omitted group");
-    let record = manifest.records()[0].clone();
+    // The buggy action, as a `model`-kind candidate. It is not a causal node — nothing
+    // *happened before* a model action — so it carries no edge and stage 2 never reaches it.
+    // Stage 4 is the only stage that can admit it, and only against a corroborated dependence.
+    let model_item = name(MODEL_ITEM);
+    nodes.push((model_item.clone(), SelectionKind::Model));
+    items
+        .push(ModelActionRef::action_only(name("ack_before_flush")).into_selected_item(model_item));
 
-    // The selection, in the accounting's own canonical order.
-    let order: BTreeMap<Name, usize> = closed
-        .selected()
+    // Stage 1's roots: the last write of every variable the invariant reads. A variable the
+    // trace never wrote (`wal_durable` — the flush that lost the race) contributes no root,
+    // which is itself part of the diagnosis.
+    let roots: BTreeSet<Name> = property_reads(model)
         .iter()
-        .enumerate()
-        .map(|(position, id)| (id.clone(), position))
+        .filter_map(|variable| last_write.get(variable).cloned())
         .collect();
-    selected.sort_by_key(|item| order[item.id()]);
-    let mut omitted_items: Vec<SelectedItem> = omitted.into_iter().map(|(_, item)| item).collect();
-    omitted_items.sort();
+    let anchor = last_write
+        .get("client_acked")
+        .cloned()
+        .expect("the trace acknowledged the write");
 
-    // --- the root pack: harness assembly of production fragments -----------------------
-    let root_id = ArtifactHandle::new(
-        ArtifactClass::ContextPack,
-        &Blake3Hasher::hash(
-            &Json::object([
-                ("question".to_owned(), Json::String(QUESTION.to_owned())),
-                ("snapshot".to_owned(), Json::String(SNAPSHOT.to_owned())),
-            ])
-            .expect("distinct keys")
-            .to_canonical_bytes(),
-        )
-        .to_token(),
-    )
-    .expect("a digest token is a well-formed identity");
+    DeclaredOrder {
+        order: CausalOrder::new(nodes, edges).expect("the dependence order is a DAG"),
+        roots,
+        items,
+        anchor,
+    }
+}
 
-    let intent = ArtifactHandle::new(
-        ArtifactClass::IntentContract,
-        &Blake3Hasher::hash(format!("{INVARIANT}:ackwal-v1").as_bytes()).to_token(),
+/// The dependence join stage 4 decides the `model` candidate against.
+///
+/// The untrusted half claims that `ack_before_flush` bears on the acknowledgement's own write;
+/// the trusted half attests it, because the production engine's trace shows that action
+/// producing exactly that write. Stage 4 admits only where both agree (INV-016).
+fn dependence_join(anchor: &Name) -> DependenceJoin {
+    let model_item = name(MODEL_ITEM);
+    let claim = CorrespondenceClaim::new(
+        CorrespondenceRef::Model(ModelActionRef::action_only(name("ack_before_flush"))),
+        [anchor.clone()],
+    );
+    DependenceJoin::new(
+        SourceCorrespondence::of([(model_item.clone(), claim)]).expect("one claim"),
+        ExecutionDependence::attesting([(model_item, BTreeSet::from([anchor.clone()]))])
+            .expect("one attestation"),
     )
-    .expect("a digest token is a well-formed identity");
-    let target = Target::new(
-        intent,
-        Question::compiled(QUESTION).expect("a plain question"),
-    )
-    .expect("an in_* handle");
+}
 
-    let crashpack = ArtifactHandle::new(
-        ArtifactClass::Crashpack,
-        &Blake3Hasher::hash(
-            &Json::object([(
-                "core".to_owned(),
-                Json::Array(
-                    core.iter()
-                        .map(|index| Json::String(trace[*index].name.clone()))
-                        .collect(),
-                ),
-            )])
-            .expect("one key")
-            .to_canonical_bytes(),
-        )
-        .to_token(),
-    )
-    .expect("a digest token is a well-formed identity");
-    let replay_ref = ReplayRef::new(crashpack).expect("a crash_* handle");
-
-    let evidence_handle = ArtifactHandle::new(
-        ArtifactClass::Evidence,
-        &Blake3Hasher::hash(&raw_named_json(&model, &trace)).to_token(),
-    )
-    .expect("a digest token is a well-formed identity");
-
+/// The assurance the *evaluation* reports — the envelope the pack states, before the compile's
+/// own `observer` dimension is written into it by `daemon::context`.
+fn declared_assurance() -> Assurance {
     let unsupported = |token: &str| {
         DimensionEvidence::Unsupported(UnsupportedReason::new(token).expect("a plain token"))
     };
@@ -881,50 +849,202 @@ fn compile() -> Compile {
         AssuranceDimension::MemoryModel,
         unsupported(UnsupportedReason::SEQUENTIAL_CONSISTENCY_ONLY),
     );
-    let assurance = Assurance::new(AssuranceLevel::Bounded, envelope);
+    Assurance::new(AssuranceLevel::Bounded, envelope)
+}
 
-    let mut fields: BTreeMap<String, Json> = BTreeMap::new();
-    fields.insert(
-        "schema_id".to_owned(),
-        Json::String("https://continuum.dev/schema/context-pack.json".to_owned()),
-    );
-    fields.insert("schema_epoch".to_owned(), Json::Integer(1));
-    fields.insert("context_id".to_owned(), Json::String(root_id.to_string()));
-    fields.insert("snapshot".to_owned(), Json::String(SNAPSHOT.to_owned()));
-    for (key, value) in target.to_json_fields() {
-        fields.insert(key, value);
-    }
-    for (key, value) in PackVerdict::Refuted.to_json_fields() {
-        fields.insert(key, value);
-    }
-    for (key, value) in assurance.to_json_fields() {
-        fields.insert(key, value);
-    }
-    fields.insert(
-        "selected".to_owned(),
-        Json::Array(selected.iter().map(SelectedItem::to_json).collect()),
-    );
-    fields.insert("omissions".to_owned(), manifest.to_json());
-    fields.insert("expansions".to_owned(), manifest.expansions_json());
-    fields.insert(
-        "evidence".to_owned(),
-        Json::Array(vec![Json::String(evidence_handle.to_string())]),
-    );
-    fields.insert("replay".to_owned(), replay_ref.to_json());
-    fields.insert(
-        "guarantees".to_owned(),
-        Json::Array(vec![
-            Json::String("ReplayPreserving".to_owned()),
-            Json::String("CausallyClosed".to_owned()),
-        ]),
-    );
-    fields.insert(
-        "semantic_epoch".to_owned(),
-        Json::String(SEMANTIC_EPOCH.to_owned()),
-    );
-    fields.insert("parent".to_owned(), Json::Null);
+/// The evidence root the campaign compiles from, and the projection registered behind it.
+///
+/// The handle is derived from the raw trace's own bytes, so the root names the evidence the
+/// pack is compiled from rather than a label chosen for the test.
+fn evidence_handle(model: &Model, trace: &[TraceEvent]) -> ArtifactHandle {
+    ArtifactHandle::new(
+        ArtifactClass::Evidence,
+        &Blake3Hasher::hash(&raw_named_json(model, trace)).to_token(),
+    )
+    .expect("a digest token is a well-formed identity")
+}
 
-    let root = assemble_root_pack(fields);
+/// Everything the compile produced, kept together so every test reads one construction.
+struct Compile {
+    model: Model,
+    trace: Vec<TraceEvent>,
+    /// The trace indices of the core's events, read back off the pack's own selection.
+    core: Vec<usize>,
+    /// The pack's `selected[]`, in canonical order — parsed back off the published document.
+    selected: Vec<SelectedItem>,
+    /// The omitted noise transitions, exactly as the expansion must return them.
+    omitted_items: Vec<SelectedItem>,
+    /// The expandable manifest record the accounting derived.
+    record: OmissionRecord,
+    /// The rule-C1 record: the requested guarantee no checker established.
+    unachieved: OmissionRecord,
+    /// The query that retrieves the omitted group.
+    query: ExpansionQuery,
+    candidate_count: u32,
+    /// The measured root pack document, as `context.compile` published it.
+    root: Json,
+    root_id: ArtifactHandle,
+    /// The registered projection, so a test can build a second daemon over it.
+    source: ContextCompileSource,
+    evidence_root: WireArtifactHandle,
+    /// The guarantees the pipeline's own checkers established.
+    guarantees: Vec<String>,
+    /// The wire verdict `context.compile` answered with.
+    verdict: EvaluationVerdictValue,
+    /// The envelope's omission projection.
+    omissions: Vec<continuumd::protocol::envelope::Omission>,
+}
+
+/// The projection a deployment registers for this campaign's evidence root.
+fn compile_source(model: &Model, trace: &[TraceEvent]) -> (ContextCompileSource, ExpansionQuery) {
+    let declared = declared_order(model, trace);
+    let query = ExpansionQuery::new(PackRelation::SameOwner, declared.anchor.clone());
+    let crashpack = ArtifactHandle::new(
+        ArtifactClass::Crashpack,
+        &Blake3Hasher::hash(
+            &Json::object([(
+                "core".to_owned(),
+                Json::Array(
+                    CORE_ACTIONS
+                        .iter()
+                        .map(|action| Json::String((*action).to_owned()))
+                        .collect(),
+                ),
+            )])
+            .expect("one key")
+            .to_canonical_bytes(),
+        )
+        .to_token(),
+    )
+    .expect("a digest token is a well-formed identity");
+    let intent = ArtifactHandle::new(
+        ArtifactClass::IntentContract,
+        &Blake3Hasher::hash(format!("{INVARIANT}:ackwal-v1").as_bytes()).to_token(),
+    )
+    .expect("a digest token is a well-formed identity");
+
+    // Stages 5 and 7 are *configured* and refuse: there is no proof service and no §16
+    // correspondence graph in this workspace, and configuring a refusing stage is how the pack
+    // records the typed absence rather than leaving it unsaid (RFC 0026
+    // `rule errors.unsupported_surface`). Stage 3, 6 and 8 are not configured: no property
+    // automaton, observer projection or minimizer input is registered for this model, and a
+    // stage whose input a deployment does not have must not be simulated with a default.
+    let compile = CausalCompile::new(declared.order, RedactionPolicy::permitting_everything())
+        .with_dependence(dependence_join(&declared.anchor))
+        .with_proof_slicing(ProofSlicing::nothing_named())
+        .with_correspondence_mapping(CorrespondenceMapping::nothing_named());
+
+    let source = ContextCompileSource::new(
+        compile,
+        declared.roots,
+        query.clone(),
+        declared.items,
+        CompileHeader {
+            snapshot: WorkspaceHandle::new(SNAPSHOT).expect("a workspace handle"),
+            semantic_epoch: SEMANTIC_EPOCH.to_owned(),
+            intent,
+            evidence: vec![evidence_handle(model, trace)],
+            replay: Some(ReplayRef::new(crashpack).expect("a crash_* handle")),
+            verdict: Some(PackVerdict::Refuted),
+            assurance: declared_assurance(),
+            profile: PackProfile::Failure,
+            redactions: Vec::new(),
+        },
+    )
+    .expect("every candidate of the order has a registered body");
+    (source, query)
+}
+
+/// Run the campaign's compile through `Daemon::dispatch`, and read everything back off the
+/// published answer.
+fn compile() -> Compile {
+    let model = durability_model();
+    let trace = drive(&model);
+    let (source, query) = compile_source(&model, &trace);
+    let evidence_root =
+        WireArtifactHandle::new(&evidence_handle(&model, &trace).to_string()).expect("a handle");
+
+    let mut daemon = daemon_holding(source.clone(), &evidence_root);
+    let outcome = daemon.dispatch(&compile_request(&evidence_root, "req_compile"));
+    assert_eq!(
+        outcome.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        outcome.envelope.error
+    );
+    let Payload::ContextCompile(response) = &outcome.payload else {
+        panic!(
+            "expected a context.compile payload: {:?}",
+            outcome.envelope.error
+        );
+    };
+    let root = Json::parse(response.pack.as_bytes()).expect("the pack is canonical JSON");
+    let root_id = pack::identity_of(&root).expect("a pack handle");
+    assert_eq!(response.context.as_str(), root_id.to_string());
+
+    // Everything below is read off the *published artifact*, never off the construction — the
+    // campaign grades what a caller receives. The selection is the document's own `id` list,
+    // resolved through the registered bodies; `leg2` then checks that the document's bytes are
+    // exactly those bodies', so the resolution cannot quietly substitute anything.
+    let selected: Vec<SelectedItem> = array(&root, "selected")
+        .iter()
+        .map(|item| {
+            let id = name(
+                item.as_object().expect("object")["id"]
+                    .as_str()
+                    .expect("a string"),
+            );
+            source
+                .item(&id)
+                .unwrap_or_else(|| panic!("the pack selected `{id}`, which nothing registered"))
+                .clone()
+        })
+        .collect();
+    let mut core: Vec<usize> = selected
+        .iter()
+        .filter_map(|item| delta_index(item.id()))
+        .collect();
+    core.sort_unstable();
+    core.dedup();
+
+    let manifest = parse_manifest(&root);
+    let record = manifest
+        .iter()
+        .find(|record| record.retrievability().is_expandable())
+        .expect("one expandable group")
+        .clone();
+    let unachieved = manifest
+        .iter()
+        .find(|record| record.kind() == SelectionKind::Unknown)
+        .expect("rule C1's record")
+        .clone();
+    let omitted_total: u64 = manifest
+        .iter()
+        .map(|record| u64::from(record.count()))
+        .sum();
+    let candidate_count =
+        u32::try_from(selected.len() as u64 + omitted_total).expect("a small candidate set");
+
+    // The omitted items, as the registered projection holds them — this is what leg 3 checks
+    // the expansion returns byte for byte.
+    let selected_ids: BTreeSet<Name> = selected.iter().map(|item| item.id().clone()).collect();
+    let mut omitted_items: Vec<SelectedItem> = source
+        .items()
+        .filter(|item| {
+            item.kind() == SelectionKind::StateDelta && !selected_ids.contains(item.id())
+        })
+        .cloned()
+        .collect();
+    omitted_items.sort();
+
+    let guarantees: Vec<String> = array(&root, "guarantees")
+        .iter()
+        .map(|token| token.as_str().expect("a string").to_owned())
+        .collect();
+    let verdict = match outcome.envelope.verdict.value().expect("a verdict") {
+        continuumd::protocol::envelope::Verdict::Evaluation(value) => value.clone(),
+        other => panic!("context.compile answers with an evaluation verdict: {other:?}"),
+    };
 
     Compile {
         model,
@@ -933,47 +1053,56 @@ fn compile() -> Compile {
         selected,
         omitted_items,
         record,
+        unachieved,
         query,
         candidate_count,
         root,
         root_id,
+        source,
+        evidence_root,
+        guarantees,
+        verdict,
+        omissions: outcome.envelope.omissions.clone(),
     }
 }
 
-/// **Harness assembly** (declared): write `content_budget.bytes` and `content_hash`
-/// under the packer's own two readings — the *least* self-consistent size (RFC 0028
-/// correction 17, `pack.rs`'s fixed-point section) and the identity-with-the-key-absent
-/// preimage. Both readings are then *checked* against production: `pack::budget_bytes_of`
-/// must read back exactly the published document's own canonical length.
-fn assemble_root_pack(base: BTreeMap<String, Json>) -> Json {
-    let mut measured: u64 = 0;
-    for _ in 0..24 {
-        let mut fields = base.clone();
-        fields.insert(
-            "content_budget".to_owned(),
-            Json::object([(
-                "bytes".to_owned(),
-                Json::Integer(i64::try_from(measured).expect("a small document")),
-            )])
-            .expect("one key"),
-        );
-        let preimage = Json::Object(fields.clone()).to_canonical_bytes();
-        fields.insert(
-            "content_hash".to_owned(),
-            Json::String(format!(
-                "{}:{}",
-                Blake3Hasher::ALGORITHM.token(),
-                Blake3Hasher::hash(&preimage).to_token()
-            )),
-        );
-        let document = Json::Object(fields);
-        let length = document.to_canonical_bytes().len() as u64;
-        if length == measured {
-            return document;
-        }
-        measured = length;
-    }
-    panic!("the root pack's size did not settle");
+/// The published manifest, back as typed records.
+fn parse_manifest(root: &Json) -> Vec<OmissionRecord> {
+    array(root, "omissions")
+        .iter()
+        .map(|record| {
+            let fields = record.as_object().expect("object");
+            let kind = SelectionKind::from_wire_str(fields["kind"].as_str().expect("a string"))
+                .expect("a closed-vocabulary token");
+            let count = u32::try_from(fields["count"].as_integer().expect("an exact count"))
+                .expect("a small count");
+            let reason = PackReason::from_wire_str(fields["reason"].as_str().expect("a string"))
+                .expect("a closed-vocabulary token");
+            if fields["expandable"].as_bool() == Some(true) {
+                let expansion = fields["expansion"].as_object().expect("object");
+                let relation =
+                    PackRelation::from_wire_str(expansion["relation"].as_str().expect("a string"))
+                        .expect("a closed-vocabulary token");
+                let anchor = name(expansion["anchor"].as_str().expect("a string"));
+                OmissionRecord::expandable(
+                    kind,
+                    count,
+                    reason,
+                    ExpansionQuery::new(relation, anchor),
+                )
+            } else {
+                OmissionRecord::irretrievable(
+                    kind,
+                    count,
+                    match reason {
+                        PackReason::Unsupported => IrretrievableReason::Unsupported,
+                        PackReason::Redaction => IrretrievableReason::Redaction,
+                        other => panic!("`{other}` does not explain irretrievability"),
+                    },
+                )
+            }
+        })
+        .collect()
 }
 
 // =====================================================================================
@@ -1162,17 +1291,12 @@ fn grant() -> CapabilityDescriptor {
     }
 }
 
-/// A daemon holding the compiled root pack and the omitted group behind its one query.
-fn daemon_with(compile: &Compile) -> Daemon {
-    let payload = ExpansionPayload::new(compile.record.clone(), compile.omitted_items.clone())
-        .expect("the record's count is the number of omitted items");
-    let record = ContextPackRecord::new(
-        compile.root.clone(),
-        WorkspaceHandle::new(SNAPSHOT).expect("a workspace handle"),
-        [payload],
-    )
-    .expect("the assembled root is a pack the daemon can navigate");
-
+/// A daemon serving the `context` namespace with one compile projection registered.
+///
+/// Nothing about the pack is registered here: the projection is, and the pack arrives only
+/// because `context.compile` produced it. That is the whole difference between this campaign
+/// and its predecessor — the pack a test navigates is the one the pipeline wrote.
+fn daemon_holding(source: ContextCompileSource, root: &WireArtifactHandle) -> Daemon {
     let negotiated = negotiate(
         &[
             ProtocolVersion::new(3, 0),
@@ -1190,9 +1314,44 @@ fn daemon_with(compile: &Compile) -> Daemon {
         .capability(grant(), None)
         .family(ContextFamily)
         .build();
-    daemon.state_mut().put_context_pack(
-        ContextHandle::new(&compile.root_id.to_string()).expect("a context handle"),
-        record,
+    daemon.state_mut().put_compile_source(root, source);
+    daemon
+}
+
+/// One `context.compile` request over the campaign's evidence root.
+fn compile_request(root: &WireArtifactHandle, request_id: &str) -> OperationRequest {
+    compile_request_with(root, request_id, Optional::Absent)
+}
+
+fn compile_request_with(
+    root: &WireArtifactHandle,
+    request_id: &str,
+    audience: Optional<Audience>,
+) -> OperationRequest {
+    OperationRequest {
+        envelope: RequestEnvelope {
+            operation: OperationName::new("context.compile").expect("a declared operation"),
+            ..envelope(request_id, Optional::Absent)
+        },
+        arguments: Arguments::ContextCompile(ContextCompileRequest {
+            evidence_root: root.clone(),
+            question: QUESTION.to_owned(),
+            audience,
+            guarantees: Optional::Present(vec!["ReplayPreserving".to_owned()]),
+        }),
+    }
+}
+
+/// A daemon that has already compiled this campaign's pack, so the pack it holds is the one
+/// `context.compile` published.
+fn daemon_with(compile: &Compile) -> Daemon {
+    let mut daemon = daemon_holding(compile.source.clone(), &compile.evidence_root);
+    let outcome = daemon.dispatch(&compile_request(&compile.evidence_root, "req_register"));
+    assert_eq!(
+        outcome.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        outcome.envelope.error
     );
     daemon
 }
@@ -1446,7 +1605,7 @@ fn leg1_the_causal_core_is_replay_preserving_and_noise_free() {
 
     // Causal closure, witnessed: at every core step, the projected replay's demanded
     // sub-state equals the original trace's — every writer that matters was kept.
-    let (_, demand) = causal_core(&compile.model, &compile.trace);
+    let demand = demanded_variables(&compile.model, &compile.core, &compile.trace);
     let demand_indexes: Vec<usize> = compile
         .model
         .variables()
@@ -1628,11 +1787,59 @@ fn leg2_the_pack_is_ten_times_smaller_under_the_packers_own_counting_rule() {
         compile.root_id
     );
 
-    // INV-007 before any ratio: the reduction is not bought by dropping accounting.
+    // INV-007 before any ratio: the reduction is not bought by dropping accounting. The
+    // equation is over the *published* manifest, which is the compile's manifest plus rule
+    // C1's record — the requested `ReplayPreserving` no checker in this deployment
+    // established, accounted as an `unknown`-kind `unsupported` omission
+    // (`continuum_context::pack::RootPack::published_manifest`).
+    let manifest_total: u64 = parse_manifest(&compile.root)
+        .iter()
+        .map(|record| u64::from(record.count()))
+        .sum();
     assert_eq!(
-        compile.selected.len() as u64 + u64::from(compile.record.count()),
+        compile.selected.len() as u64 + manifest_total,
         u64::from(compile.candidate_count),
         "candidate set = selection + Σ manifest counts"
+    );
+    assert_eq!(
+        compile.unachieved.kind(),
+        SelectionKind::Unknown,
+        "C1's kind"
+    );
+    assert_eq!(
+        compile.unachieved.reason(),
+        PackReason::Unsupported,
+        "C1's reason"
+    );
+    assert_eq!(
+        compile.unachieved.count(),
+        1,
+        "one requested, none achieved"
+    );
+    assert!(
+        !compile.unachieved.retrievability().is_expandable(),
+        "no expansion retrieves a claim that was never established"
+    );
+    assert_eq!(
+        compile.guarantees,
+        ["CausallyClosed"],
+        "the pack claims exactly what a checker licensed: stage 2's closure check.          `ReplayPreserving` was requested and is not echoed (C1); `PropertyPreserving` needs          stage 3, which no registered automaton configures; `ProofRelevant` is unreachable by          construction; no minimality class is claimed, because stage 8 did not run"
+    );
+
+    // The bytes a caller receives are the items the projection registered — the selection
+    // resolution in `compile()` cannot have substituted anything.
+    let published: Vec<Vec<u8>> = array(&compile.root, "selected")
+        .iter()
+        .map(Json::to_canonical_bytes)
+        .collect();
+    let registered: Vec<Vec<u8>> = compile
+        .selected
+        .iter()
+        .map(SelectedItem::to_canonical_bytes)
+        .collect();
+    assert_eq!(
+        published, registered,
+        "the published items are the registered bodies"
     );
 
     // The graded baseline.
@@ -1925,6 +2132,164 @@ fn leg3b_the_budget_branch_keeps_the_promise() {
     assert!(matches!(floor.payload, Payload::None), "nothing published");
 }
 
+#[test]
+fn l4_the_wire_answer_agrees_with_the_pack_it_carries() {
+    // > `context.compile` is `@mutation @task_starting` with `authority read` and verdict
+    // > `EvaluationVerdictValue`; that verdict MUST equal the pack's `verdict`, and its
+    // > `assurance_class` MUST equal the pack's `assurance.class`.
+    // >
+    // > — RFC 0028, "Wire surface"
+    let compile = compile();
+    let fields = compile.root.as_object().expect("object");
+    assert_eq!(
+        compile.verdict.verdict.as_wire(),
+        fields["verdict"].as_str().expect("a string"),
+        "the envelope verdict is the pack's"
+    );
+    assert_eq!(
+        compile.verdict.assurance_class.as_wire(),
+        fields["assurance"].as_object().expect("object")["class"]
+            .as_str()
+            .expect("a string"),
+        "the envelope assurance class is the pack's"
+    );
+    assert!(
+        compile.verdict.inconclusive_reason.is_absent(),
+        "a decided verdict carries no INV-008 reason"
+    );
+
+    // > The result envelope's `omissions` list […] is the wire projection of the same facts
+    // > and MUST agree with the pack's manifest record for record.
+    let manifest = parse_manifest(&compile.root);
+    assert_eq!(compile.omissions.len(), manifest.len());
+    for (wire, record) in compile.omissions.iter().zip(&manifest) {
+        assert_eq!(wire.reason.as_wire(), record.reason().as_wire_str());
+        assert_eq!(wire.subject, format!("selected.{}", record.kind()));
+        assert_eq!(
+            wire.recoverable_by.value().is_some(),
+            record.retrievability().is_expandable(),
+            "an irretrievable record promises no recovery, and an expandable one does"
+        );
+    }
+
+    // The compiled pack is registered: the `ctx_*` on the wire is navigable at once, which is
+    // what makes the manifest's own promise true of this daemon rather than of a later step.
+    let mut daemon = daemon_holding(compile.source.clone(), &compile.evidence_root);
+    let compiled = daemon.dispatch(&compile_request(&compile.evidence_root, "req_then_expand"));
+    assert_eq!(compiled.envelope.status, ResultStatus::Ok);
+    let expanded = expand_full(&mut daemon, &compile, "req_expand_after_compile");
+    assert_eq!(
+        expanded.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        expanded.envelope.error
+    );
+
+    // The pack names its own producer and the fallback configuration it ran under (RFC 0028
+    // F3, paid in the schema): stage 9 disabled is the register row's named fallback.
+    let compiler = fields["compiler"].as_object().expect("object");
+    assert_eq!(
+        compiler["compiler_version"].as_str().expect("a string"),
+        continuum_context::pack::COMPILER_VERSION
+    );
+    assert_eq!(compiler["ranker_id"], Json::Null, "stage 9 is disabled");
+    assert_eq!(fields["parent"], Json::Null, "a compiled pack is a root");
+}
+
+#[test]
+fn a06_audience_selects_rendering_never_content() {
+    // > Two `context.compile` requests differing only in `audience` MUST produce the same
+    // > `ctx_*`.
+    // >
+    // > — RFC 0028, "Views and rendering"
+    assert!(audience_invariance());
+
+    // Anti-vacuity: the identity is not constant in everything. A different *question* is a
+    // different pack, because "the question is part of the identity".
+    let model = durability_model();
+    let trace = drive(&model);
+    let (source, _) = compile_source(&model, &trace);
+    let root =
+        WireArtifactHandle::new(&evidence_handle(&model, &trace).to_string()).expect("a handle");
+    let mut daemon = daemon_holding(source, &root);
+    let mut other = compile_request(&root, "req_other_question");
+    let Arguments::ContextCompile(request) = &mut other.arguments else {
+        panic!("a compile request");
+    };
+    request.question = "why did the replica stay durable?".to_owned();
+    let outcome = daemon.dispatch(&other);
+    let Payload::ContextCompile(response) = &outcome.payload else {
+        panic!(
+            "expected a context.compile payload: {:?}",
+            outcome.envelope.error
+        );
+    };
+    let baseline = daemon.dispatch(&compile_request(&root, "req_same_question"));
+    let Payload::ContextCompile(same) = &baseline.payload else {
+        panic!("expected a context.compile payload");
+    };
+    assert_ne!(
+        response.context.as_str(),
+        same.context.as_str(),
+        "a different question is a different pack"
+    );
+}
+
+#[test]
+fn a07_the_compile_refuses_hostile_requests_with_typed_codes() {
+    let model = durability_model();
+    let trace = drive(&model);
+    let (source, _) = compile_source(&model, &trace);
+    let root =
+        WireArtifactHandle::new(&evidence_handle(&model, &trace).to_string()).expect("a handle");
+    let mut daemon = daemon_holding(source, &root);
+    let refusal = |daemon: &mut Daemon, request: OperationRequest| {
+        let outcome = daemon.dispatch(&request);
+        assert!(
+            matches!(outcome.payload, Payload::None),
+            "a refusal serves nothing"
+        );
+        outcome.envelope.error.value().expect("a refusal").code
+    };
+
+    // An evidence root no projection is registered for: `UnsupportedSemanticFeature`, and the
+    // *same* answer whether or not the daemon holds that root — never an existence oracle.
+    let elsewhere = WireArtifactHandle::new("ev_nobodyhome").expect("a handle");
+    assert_eq!(
+        refusal(&mut daemon, compile_request(&elsewhere, "req_unregistered")),
+        ErrorCode::UnsupportedSemanticFeature
+    );
+
+    // A guarantee token outside the closed thirteen: `MalformedRequest`. "Forward
+    // compatibility is achieved by rejecting, never by ignoring" (RFC 0028).
+    let mut unknown_token = compile_request(&root, "req_unknown_guarantee");
+    let Arguments::ContextCompile(request) = &mut unknown_token.arguments else {
+        panic!("a compile request");
+    };
+    request.guarantees = Optional::Present(vec!["MostlyRelevant".to_owned()]);
+    assert_eq!(
+        refusal(&mut daemon, unknown_token),
+        ErrorCode::MalformedRequest
+    );
+
+    // A question that is not a canonical identity-bearing string.
+    let mut untrimmed = compile_request(&root, "req_untrimmed_question");
+    let Arguments::ContextCompile(request) = &mut untrimmed.arguments else {
+        panic!("a compile request");
+    };
+    request.question = "  why?  ".to_owned();
+    assert_eq!(refusal(&mut daemon, untrimmed), ErrorCode::MalformedRequest);
+
+    // An envelope naming a snapshot other than the projection's.
+    let mut elsewhere_snapshot = compile_request(&root, "req_other_snapshot");
+    elsewhere_snapshot.envelope.snapshot =
+        Nullable::Value(WorkspaceHandle::new("ws_somewhereelse").expect("a handle"));
+    assert_eq!(
+        refusal(&mut daemon, elsewhere_snapshot),
+        ErrorCode::StaleSnapshot
+    );
+}
+
 // =====================================================================================
 // the evidence artifact
 // =====================================================================================
@@ -2093,10 +2458,19 @@ fn evidence() -> String {
     let _ = writeln!(
         out,
         "pack_bytes={pack_size} (== published canonical length) candidates={} selected={} \
-         omitted={}",
+         omitted={} expandable={} unachieved_guarantee={}",
         compile.candidate_count,
         compile.selected.len(),
-        compile.record.count()
+        u64::from(compile.record.count()) + u64::from(compile.unachieved.count()),
+        compile.record.count(),
+        compile.unachieved.count()
+    );
+    let _ = writeln!(
+        out,
+        "guarantees={} requested=ReplayPreserving unachieved_c1={}:{}",
+        compile.guarantees.join(","),
+        compile.unachieved.kind(),
+        compile.unachieved.reason()
     );
     let _ = writeln!(
         out,
@@ -2166,23 +2540,76 @@ fn evidence() -> String {
             .unwrap_or(false)
     );
     let _ = writeln!(out);
+    let _ = writeln!(out, "[compile, wire-live]");
+    let _ = writeln!(
+        out,
+        "context.compile={} verdict={} assurance_class={} envelope_omissions={} \
+         stages=1,2,4,5,7 refused=5,7",
+        ResultStatus::Ok.as_wire(),
+        compile.verdict.verdict.as_wire(),
+        compile.verdict.assurance_class.as_wire(),
+        compile.omissions.len()
+    );
+    let _ = writeln!(
+        out,
+        "audience_invariant={} (agent vs human: same ctx_*, byte-identical pack)",
+        audience_invariance()
+    );
+    let _ = writeln!(out);
     let _ = writeln!(out, "[grain]");
     let _ = writeln!(
         out,
-        "leg1: selection=harness(stage-2 dynamic dependence slice; no compiler) \
-         check=production(engine successors+check+witness)"
+        "leg1: selection=production(RFC 0028 stages 1-2 in continuum-context::compile) \
+         check=production(engine successors+check+witness) \
+         order=declared(last-writer dependence; continuum-cir is a PR-17 scaffold)"
     );
     let _ = writeln!(
         out,
-        "leg2: counting=production(RFC 0028 correction 17) assembly=harness(no root assembler)"
+        "leg2: counting=production(RFC 0028 correction 17) \
+         assembly=production(continuum-context::pack::RootPack)"
     );
-    let _ = writeln!(out, "leg3: production end-to-end (Daemon::dispatch)");
     let _ = writeln!(
         out,
-        "missing_producers: ten-stage compiler (context.compile refused); root pack \
-         assembly; crashpack producer; intent registry resolution"
+        "leg3: production end-to-end (Daemon::dispatch), and so is the compile that made the \
+         pack it navigates"
+    );
+    let _ = writeln!(
+        out,
+        "missing_producers: proof service (stage 5 configured and refused); §16 \
+         correspondence graph (stage 7 configured and refused); CIR causal-order producer; \
+         crashpack producer; intent registry resolution"
     );
     out
+}
+
+/// Two compiles differing only in `audience`, compared (RFC 0028, "Views and rendering").
+fn audience_invariance() -> bool {
+    let model = durability_model();
+    let trace = drive(&model);
+    let (source, _) = compile_source(&model, &trace);
+    let root =
+        WireArtifactHandle::new(&evidence_handle(&model, &trace).to_string()).expect("a handle");
+    let mut daemon = daemon_holding(source, &root);
+    let answer = |daemon: &mut Daemon, id: &str, audience: Audience| {
+        let outcome = daemon.dispatch(&compile_request_with(
+            &root,
+            id,
+            Optional::Present(audience),
+        ));
+        let Payload::ContextCompile(response) = &outcome.payload else {
+            panic!(
+                "expected a context.compile payload: {:?}",
+                outcome.envelope.error
+            );
+        };
+        (
+            response.context.as_str().to_owned(),
+            response.pack.as_bytes().to_vec(),
+        )
+    };
+    let agent = answer(&mut daemon, "req_aud_agent", Audience::Agent);
+    let human = answer(&mut daemon, "req_aud_human", Audience::Human);
+    agent == human
 }
 
 #[test]
