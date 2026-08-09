@@ -127,8 +127,11 @@ protocol_struct! {
         /// Claim identity or property identifier to scope the query to.
         claim_id: String optional;
         /// Roots to traverse from; empty means the whole graph in scope.
+        /// The traversal is `rule evidence.traversal`: an edge is walked in
+        /// either direction, because an edge's direction is what it asserts.
         roots: list<EvidenceHandle> optional;
-        /// IDL `max_depth: U32 optional`.
+        /// IDL `max_depth: U32 optional`. The traversal's bound, in edges.
+        /// Absent is unbounded; `0` selects the roots alone.
         max_depth: U32 optional;
     }
 }

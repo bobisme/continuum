@@ -561,17 +561,145 @@ fn selected(
     query: &EvidenceQuery,
     state: &DaemonState,
 ) -> (Vec<EvidenceHandle>, Vec<EvidenceHandle>) {
+    let reach = Reach::of(query, state);
     let nodes = state
         .evidence_nodes()
-        .filter(|(handle, node)| matches(query, handle, node))
+        .filter(|(handle, node)| matches(query, &reach, handle, node))
         .map(|(handle, _)| handle.clone())
         .collect();
     let edges = state
         .evidence_edges()
-        .filter(|(handle, edge)| matches_edge(query, handle, edge))
+        .filter(|(handle, edge)| matches_edge(query, &reach, handle, edge))
         .map(|(handle, _)| handle.clone())
         .collect();
     (nodes, edges)
+}
+
+/// The depth of every artifact an [`EvidenceQuery`]'s `roots` reach, or [`Reach::Whole`]
+/// when the query names no root (`rule evidence.traversal`).
+///
+/// This is the traversal half of the query predicate, computed once per query and consulted
+/// per artifact — a `roots` clause is a statement about the *graph*, and re-deriving it for
+/// each candidate would be re-walking the graph once per node.
+///
+/// # Why an edge is walked in both directions
+///
+/// An edge's direction is what it **asserts**, not which way relevance runs. Every
+/// `SUPPORTS`, `REFUTES`, and `COUNTEREXAMPLE_TO` edge names the claim as its `to`, so a
+/// forward-only walk from a claim would reach *none* of the evidence offered to it — which
+/// is the one question the graph exists to answer ("one counterexample refutes several
+/// candidates; one invariant supports many properties", RFC 0038 "Why a graph"). Reverse-only
+/// would fail the mirror case: `certificate CHECKED_BY receipt` points away from its subject.
+/// Picking either arrow would be inventing an answer no source took, so an edge is an
+/// adjacency (`rule evidence.traversal`, clause 1).
+///
+/// # Why an edge takes the greater of its endpoints' depths
+///
+/// So that an answer names no dangling edge. `depth(edge) = max(depth(from), depth(to)) <=
+/// max_depth` implies both endpoints are within the bound too, which is "references must
+/// resolve" — the graph's own structural refusal (RFC 0038's whiteboard compiler, docs/44) —
+/// holding for a *query answer* and not only for a write. An edge named directly in `roots`
+/// is at 0 with both its endpoints, for the same reason: half of an assertion is not an
+/// assertion.
+#[derive(Debug)]
+enum Reach {
+    /// `roots` is absent or empty: "the whole graph in scope", the field's declared
+    /// sentence. There is no root to measure a depth from, so `max_depth` excludes nothing
+    /// (`rule evidence.traversal`, clause 6).
+    Whole,
+    /// The depth of each reached artifact, keyed by handle. A handle absent from the map was
+    /// not reached at all and is out of scope whatever `max_depth` says.
+    From(BTreeMap<EvidenceHandle, u32>),
+}
+
+impl Reach {
+    /// Walk the graph from `query`'s roots, breadth-first, recording each artifact's depth.
+    fn of(query: &EvidenceQuery, state: &DaemonState) -> Self {
+        let roots = match &query.roots {
+            Optional::Present(roots) if !roots.is_empty() => roots,
+            _ => return Self::Whole,
+        };
+        // `max_depth` absent is unbounded, and `u32::MAX` is that bound expressed in the
+        // field's own type: the graph is finite and append-only, so a walk terminates on
+        // exhausting it long before the counter could saturate.
+        let bound = query.max_depth.value().copied().unwrap_or(u32::MAX);
+
+        // Adjacency is built once, from the edge set, and is symmetric by construction:
+        // clause 1 is a property of this map rather than a branch in the loop below.
+        let mut incident: BTreeMap<&EvidenceHandle, Vec<&EvidenceHandle>> = BTreeMap::new();
+        for (_, edge) in state.evidence_edges() {
+            incident.entry(&edge.from).or_default().push(&edge.to);
+            incident.entry(&edge.to).or_default().push(&edge.from);
+        }
+
+        let mut depth: BTreeMap<EvidenceHandle, u32> = BTreeMap::new();
+        let mut frontier: Vec<EvidenceHandle> = Vec::new();
+        for root in roots {
+            // A root naming an edge seeds that edge *and both its endpoints* at 0. A root
+            // naming a node, or a handle the graph does not hold, seeds only itself — an
+            // unheld handle then reaches nothing, which is a refusal to invent a
+            // neighborhood around an artifact that does not exist.
+            if let Some(edge) = state.evidence_edge(root) {
+                for endpoint in [&edge.from, &edge.to] {
+                    if depth.insert(endpoint.clone(), 0).is_none() {
+                        frontier.push(endpoint.clone());
+                    }
+                }
+            }
+            if depth.insert(root.clone(), 0).is_none() && state.evidence_edge(root).is_none() {
+                frontier.push(root.clone());
+            }
+        }
+
+        // Breadth-first, so the first depth recorded for a node is the least one — the
+        // shortest undirected path from any root, which is what clause 2 defines.
+        let mut current = 0_u32;
+        while !frontier.is_empty() && current < bound {
+            let mut next = Vec::new();
+            for handle in &frontier {
+                for other in incident.get(handle).into_iter().flatten() {
+                    if !depth.contains_key(*other) {
+                        depth.insert((*other).clone(), current + 1);
+                        next.push((*other).clone());
+                    }
+                }
+            }
+            frontier = next;
+            current += 1;
+        }
+
+        // An edge's own depth is the greater of its endpoints', assigned after the node walk
+        // so that both are final. An edge already at 0 by being a root keeps that: it is the
+        // lesser of the two derivations, and a root is a root.
+        let edge_depths: Vec<(EvidenceHandle, u32)> = state
+            .evidence_edges()
+            .filter_map(|(handle, edge)| {
+                let from = *depth.get(&edge.from)?;
+                let to = *depth.get(&edge.to)?;
+                Some((handle.clone(), from.max(to)))
+            })
+            .collect();
+        for (handle, at) in edge_depths {
+            let entry = depth.entry(handle).or_insert(at);
+            *entry = (*entry).min(at);
+        }
+        Self::From(depth)
+    }
+
+    /// Whether one artifact is within the traversal's bound.
+    ///
+    /// The bound is re-applied here rather than trusted from the walk because the walk stops
+    /// expanding at `max_depth` but still assigns edge depths afterwards, and an edge across
+    /// the frontier can land one past it.
+    fn holds(&self, query: &EvidenceQuery, handle: &EvidenceHandle) -> bool {
+        match self {
+            Self::Whole => true,
+            Self::From(depth) => {
+                let bound = query.max_depth.value().copied().unwrap_or(u32::MAX);
+                depth.get(handle).is_some_and(|at| *at <= bound)
+            }
+        }
+    }
 }
 
 /// Whether one edge satisfies an [`EvidenceQuery`].
@@ -579,9 +707,15 @@ fn selected(
 /// The clauses that name *node* properties — `node_kinds`, `statuses`, `claim_id` — select
 /// no edge when they are present, because an edge has none of them and answering "matches"
 /// would be answering a question that was not asked. `edge_kinds` and `roots` are the two
-/// that apply, and `roots` matches an edge whose own handle or either endpoint is named,
-/// which is the reading "roots to traverse from" has for a relation.
-fn matches_edge(query: &EvidenceQuery, handle: &EvidenceHandle, edge: &EvidenceEdge) -> bool {
+/// that apply, and `roots` is the traversal of `rule evidence.traversal` rather than handle
+/// membership: an edge is in scope when its depth — the greater of its two endpoints' — is
+/// within `max_depth`.
+fn matches_edge(
+    query: &EvidenceQuery,
+    reach: &Reach,
+    handle: &EvidenceHandle,
+    edge: &EvidenceEdge,
+) -> bool {
     for absent in [
         query.node_kinds.value().map(|kinds| kinds.is_empty()),
         query.statuses.value().map(|statuses| statuses.is_empty()),
@@ -598,25 +732,32 @@ fn matches_edge(query: &EvidenceQuery, handle: &EvidenceHandle, edge: &EvidenceE
             return false;
         }
     }
-    if let Optional::Present(roots) = &query.roots {
-        if !roots.is_empty()
-            && !roots.contains(handle)
-            && !roots.contains(&edge.from)
-            && !roots.contains(&edge.to)
-        {
-            return false;
-        }
-    }
-    true
+    reach.holds(query, handle)
 }
 
 /// Whether one node satisfies an [`EvidenceQuery`].
 ///
 /// Every clause is a conjunction and an absent clause filters nothing, which is the reading
 /// the IDL fixes by declaring each field `optional` and by documenting `roots` as "empty
-/// means the whole graph in scope". `max_depth` bounds a traversal and this graph has no
-/// edges to traverse, so it selects nothing away — stated rather than silently ignored.
-fn matches(query: &EvidenceQuery, handle: &EvidenceHandle, node: &EvidenceNode) -> bool {
+/// means the whole graph in scope". `roots` and `max_depth` are the traversal
+/// `rule evidence.traversal` states — an undirected walk from the roots, bounded in edges —
+/// and it is computed over the **whole** graph by [`Reach::of`], not over the sub-graph the
+/// other clauses admit: a walk that could only pass through nodes matching `statuses` would
+/// mean "paths through `validated` nodes", which is one clause changing another's meaning
+/// rather than a conjunction (clause 5).
+///
+/// Until bn-35l6g this read `roots` as exact handle membership and ignored `max_depth`
+/// outright, on the recorded ground that "this graph has no edges to traverse". That was
+/// true when it was written and stopped being true at protocol 3.3, when `evidence.link`
+/// gave the graph its first edges — so the bound was silently dropped rather than served,
+/// which is the "degrading, guessing" `rule errors.unsupported_surface` forbids. The
+/// membership reading is still expressible, and is now `max_depth = 0`.
+fn matches(
+    query: &EvidenceQuery,
+    reach: &Reach,
+    handle: &EvidenceHandle,
+    node: &EvidenceNode,
+) -> bool {
     if let Optional::Present(kinds) = &query.node_kinds {
         if !kinds.is_empty() && !kinds.contains(&node.kind) {
             return false;
@@ -633,12 +774,7 @@ fn matches(query: &EvidenceQuery, handle: &EvidenceHandle, node: &EvidenceNode) 
             return false;
         }
     }
-    if let Optional::Present(roots) = &query.roots {
-        if !roots.is_empty() && !roots.contains(handle) {
-            return false;
-        }
-    }
-    true
+    reach.holds(query, handle)
 }
 
 // --- evidence.subscribe -----------------------------------------------------------------
@@ -726,21 +862,30 @@ fn subscribe(request: &EvidenceSubscribeRequest, state: &DaemonState) -> Result<
 /// append-only, so that is unreachable today; it is written as a refusal rather than an
 /// assumption because "unreachable" is a property of the current write set and not of this
 /// function.
+///
+/// The traversal of `rule evidence.traversal` is part of that predicate and so is re-walked
+/// here, per delta, against the graph as it stands. That is the same "evaluated ONCE per
+/// delta per subscription, at the first delivery after that delta was committed" the rule
+/// already states, read for a scope whose selection depends on the *edge set*: an edge
+/// committed after a delta can bring a later delta inside a scope, and does not retroactively
+/// deliver an earlier one. A subscription is a cursor, and re-reading is what recovers the
+/// difference.
 #[must_use]
 pub fn in_scope(scope: &EvidenceQuery, event: &EvidenceEvent, state: &DaemonState) -> bool {
+    let reach = Reach::of(scope, state);
     match event.kind {
         EvidenceEventKind::NodePublished
         | EvidenceEventKind::StatusTransition
         | EvidenceEventKind::ConflictMaterialized => match &event.node {
             Optional::Present(handle) => state
                 .evidence(handle)
-                .is_some_and(|node| matches(scope, handle, node)),
+                .is_some_and(|node| matches(scope, &reach, handle, node)),
             Optional::Absent => false,
         },
         EvidenceEventKind::EdgePublished => match &event.edge {
             Optional::Present(handle) => state
                 .evidence_edge(handle)
-                .is_some_and(|edge| matches_edge(scope, handle, edge)),
+                .is_some_and(|edge| matches_edge(scope, &reach, handle, edge)),
             Optional::Absent => false,
         },
     }

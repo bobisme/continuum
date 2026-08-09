@@ -157,6 +157,57 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.8 — the evidence-traversal rule (bn-35l6g), serving the last
+  ///         declared-but-unserved clause of `EvidenceQuery`. `roots`
+  ///         and `max_depth` have been declared since 3.0 and `roots`
+  ///         has read "roots to traverse from" since 3.0, but nothing
+  ///         said which way a traversal walks a *directed* edge, what
+  ///         `max_depth` counts, or where an edge sits in that count —
+  ///         so a daemon could serve `roots` as bare handle membership,
+  ///         which is `max_depth = 0` and no traversal at all, and
+  ///         silently drop the bound. Silently dropping a declared
+  ///         bound is the "degrading, guessing" `rule
+  ///         errors.unsupported_surface` forbids, and it was defensible
+  ///         only while the graph held no edges to traverse: 3.3 added
+  ///         `evidence.link`, so it holds them now and the old reason
+  ///         has expired. `rule evidence.traversal` states it in six
+  ///         clauses: an edge is an adjacency and is walked in either
+  ///         direction, because an edge's direction is what it ASSERTS
+  ///         and every `SUPPORTS`/`REFUTES`/`COUNTEREXAMPLE_TO` edge
+  ///         names the claim as `to`, so a forward-only walk from a
+  ///         claim would reach none of its own evidence; depth counts
+  ///         edges, a root is 0, and an edge takes the GREATER of its
+  ///         endpoints' depths, which is what makes an answer name no
+  ///         dangling edge; absent `max_depth` is unbounded and `0` is
+  ///         exactly the membership reading, so nothing a client could
+  ///         previously ask becomes unaskable; the traversal walks the
+  ///         whole graph and the other clauses filter what it reached,
+  ///         since one clause changing another's meaning is not a
+  ///         conjunction; and an absent or empty `roots` stays the
+  ///         whole graph, the field's own declared sentence.
+  ///         `evidence.subscribe` inherits all of it through `rule
+  ///         subscription.delivery`'s "the same predicate
+  ///         `evidence.query` answers with", which is why the daemon
+  ///         serves one predicate and not two.
+  ///         No field, member, code, struct, or operation is added,
+  ///         removed, or moved: the registry is 73 rows, the
+  ///         named-struct count is 46, and every count table is
+  ///         unchanged. `rule versioning.compatible_change` names the
+  ///         five changes that raise the protocol minor — adding an
+  ///         operation, an `optional` field, an `@open` enum member, an
+  ///         error code, or relaxing a server-side constraint — and
+  ///         this revision makes none of them, so `version` stays
+  ///         `"3.4"`. It is the 1.7 shape and its argument: what moves
+  ///         is not a declaration but which of an operation's
+  ///         already-declared answers a scenario lands on, the reading
+  ///         1.6's F20 rider took for `verification.start` and 3.2's
+  ///         item 9 took before it. It differs from 1.5, which wrote
+  ///         down behavior every conforming daemon already had: here a
+  ///         daemon's answers do move, from a strict subset of what
+  ///         `roots` selects to what the declared word "traverse" says,
+  ///         and a client that meant the subset writes `max_depth = 0`
+  ///         and gets it. A client that never sends `roots` cannot
+  ///         observe the revision at all.
   ///   1.7 — the subscription-delivery rule (bn-3080b), closing the
   ///         gap `evidence.subscribe` refused rather than papered
   ///         over. `@streaming` says an operation "delivers `events`
@@ -339,7 +390,7 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.7";
+  idl_version = "1.8";
   /// The protocol version this document defines.
   ///
   /// 3.4 is the single minor bump for IDL 1.6, taken once at the end of
@@ -2121,6 +2172,82 @@ rule evidence.edge_identity {
   """
 }
 
+rule evidence.traversal {
+  """
+  What `EvidenceQuery.roots` and `EvidenceQuery.max_depth` select. The
+  two fields have been declared since 3.0 and `roots` has said
+  "roots to traverse from" since 3.0, but nothing said which way a
+  traversal walks a directed edge, what `max_depth` counts, or where an
+  edge sits in the count — so a daemon could serve `roots` only as
+  handle membership, which is `max_depth = 0` and no traversal at all.
+  This rule states it. It adds no field, member, code, struct, or
+  operation, and changes no response shape: what moves is which handles
+  an already-declared scope selects.
+
+  1. **Scope is a neighborhood, and an edge is an adjacency.** A
+     traversal reaches an artifact from a root across an edge in EITHER
+     direction. An edge's direction is what it ASSERTS, not which way
+     relevance runs: `counterexample REFUTES claim` is evidence about
+     the claim and evidence about the counterexample both, and a
+     forward-only walk from a claim would reach none of the evidence
+     offered to it — every `SUPPORTS`, `REFUTES`, and `COUNTEREXAMPLE_TO`
+     edge names the claim as `to`. This is RFC 0038's own reason for a
+     graph ("one counterexample refutes several candidates; one
+     invariant supports many properties") and docs/44's "each task
+     contains only relevant graph slice and handles" — a slice around a
+     subject is a neighborhood. Picking one arrow as "the" direction
+     would be inventing an answer no source took.
+
+  2. **Depth counts edges.** An artifact named in `roots` is at depth 0.
+     A node is at depth `d + 1` when an edge incident to a depth-`d`
+     node names it, and its depth is the least such value — the
+     shortest undirected path from any root. An edge's depth is the
+     GREATER of its two endpoints' depths, or 0 if the edge is itself
+     named in `roots`, in which case both its endpoints are at depth 0
+     too. An artifact is in scope when its depth is at most `max_depth`.
+
+  3. **`max_depth` absent is unbounded; `max_depth = 0` is membership.**
+     Absent, the traversal reaches every artifact connected to a root.
+     Zero selects the roots and nothing else, so a client that means
+     handle membership can still say so — the reading a pre-rule daemon
+     served for every `roots` is still expressible, and is now the
+     bound it always was rather than the whole of the field.
+
+  4. **An answer names no dangling edge.** Because an edge's depth is
+     the greater of its endpoints', an edge in scope has both its
+     endpoints in scope. A returned edge whose endpoints the same answer
+     omitted would be a reference the client cannot resolve, and
+     "references must resolve" is the graph's own structural refusal
+     (RFC 0038's whiteboard compiler, docs/44). The node-property
+     clauses — `node_kinds`, `statuses`, `claim_id` — select no edge at
+     all when present, so they cannot break this.
+
+  5. **The traversal walks the whole graph; the other clauses filter
+     what it reached.** Every clause of an `EvidenceQuery` is a
+     conjunction. Depth is computed over the graph as it stands, not
+     over the sub-graph the other clauses admit: a walk that could only
+     pass through nodes matching `statuses` would mean "paths through
+     `validated` nodes", which no source declared and which would make
+     one clause change another's meaning.
+
+  6. **Empty or absent `roots` is the whole graph, and `max_depth` then
+     selects nothing away.** This is the field's own declared sentence.
+     With no root there is nothing to measure a depth from, and a bound
+     on a distance that does not exist cannot exclude anything; a daemon
+     MUST NOT read an absent `roots` as an empty neighborhood.
+
+  `evidence.subscribe` inherits all of this unchanged, because `rule
+  subscription.delivery` says a delta is in scope exactly when the
+  scope's `EvidenceQuery` selects the artifact "by the same predicate
+  `evidence.query` answers with". As that rule already states, the
+  predicate is evaluated against the graph as it stands when the frame
+  is written, so an edge committed after a delta can bring a later
+  delta inside a scope and does not retroactively deliver an earlier
+  one — a subscription is a cursor, and re-reading is what recovers the
+  difference.
+  """
+}
+
 rule errors.common {
   """
   Every operation MAY additionally return `MalformedRequest`,
@@ -2303,7 +2430,11 @@ struct EvidenceQuery {
   /// Claim identity or property identifier to scope the query to.
   claim_id: String optional;
   /// Roots to traverse from; empty means the whole graph in scope.
+  /// Which way a traversal walks an edge, and where an edge sits in the
+  /// depth count, are `rule evidence.traversal`.
   roots: list<EvidenceHandle> optional;
+  /// The traversal's bound, in edges (`rule evidence.traversal`).
+  /// Absent is unbounded; `0` selects the roots alone.
   max_depth: U32 optional;
 }
 

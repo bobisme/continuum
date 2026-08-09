@@ -1000,11 +1000,23 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // decides the three things a transport needs (what an event frame is, that one
     // delta is one frame however many of a connection's scopes select it, and which
     // deltas a scope selects) rather than reporting them.
+    //
+    // IDL 1.8 (bn-35l6g) adds one rule, `evidence.traversal`, and nothing else:
+    // 40 -> 41, with no operation, alias, enum, struct, or union moving, so `version`
+    // stays "3.4". It is the 1.7 shape again — a rule over surface the file already
+    // declares. `EvidenceQuery.roots` has read "roots to traverse from" since 3.0 and
+    // `max_depth` has been declared beside it just as long, but nothing said which way
+    // a traversal walks a directed edge or what the bound counts, so a daemon could
+    // serve `roots` as bare handle membership and drop `max_depth` on the floor. The
+    // rule says an edge is walked in either direction, that depth counts edges from a
+    // depth-0 root, and that an edge takes the greater of its endpoints' depths; the
+    // count assertions see none of it, which is the point of stating the versioning
+    // argument here rather than inferring it from a diff.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 46, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 40, "rules");
+    assert_eq!(document.rules.len(), 41, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()

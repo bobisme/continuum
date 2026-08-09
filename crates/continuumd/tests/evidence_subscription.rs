@@ -25,6 +25,7 @@
 //! | a delta selected by two scopes on one connection is delivered once | [`a_delta_two_scopes_select_is_delivered_once`] |
 //! | a subscription delivers only what was committed after it opened | [`the_frontier_covers_what_came_before_and_the_frames_what_came_after`] |
 //! | a delta is in scope exactly when the scope's query selects the artifact its kind names | [`a_delta_outside_the_declared_scope_reaches_no_frame`], [`a_scope_clause_is_read_against_the_graph_when_the_frame_is_written`] |
+//! | …including the `roots`/`max_depth` traversal of `rule evidence.traversal` (IDL 1.8) | [`a_rooted_scope_delivers_the_deltas_its_traversal_reaches_and_no_others`], [`a_zero_depth_scope_is_membership_and_a_new_neighbor_reaches_no_frame`] |
 //! | the predicate runs once per delta, and an unselected delta is not reconsidered | [`a_delta_the_scope_did_not_select_when_examined_is_not_reconsidered`] |
 //!
 //! The daemon-side half — that the frontier and `evidence.query` are one predicate — lives in
@@ -653,6 +654,106 @@ fn a_scope_naming_another_node_kind_reaches_no_frame() {
         ))
         .is_empty()
     );
+}
+
+/// `rule evidence.traversal` at the byte boundary: `roots` and `max_depth` decide which
+/// committed deltas reach a client, over a real connection.
+///
+/// `rule subscription.delivery` binds a scope to "the same predicate `evidence.query` answers
+/// with", so the traversal IDL 1.8 declared is a subscription's selection too — and the place
+/// that is worth checking is here, where the scope was decoded from bytes the server did not
+/// construct. The append that lands one edge from the root is delivered; the append that
+/// lands in no neighborhood of it is not.
+#[test]
+fn a_rooted_scope_delivers_the_deltas_its_traversal_reaches_and_no_others() {
+    let mut world = world(Encoding::CanonicalJson);
+    let trace = world.trace.clone();
+    let other = world.other.clone();
+
+    // The root exists before the subscription, so it is frontier rather than delta.
+    let subject = ingested(&ingest::<Json>(
+        &mut world,
+        &trace,
+        "req_ingest",
+        "idem-ingest",
+    ));
+    let opened = subscribe::<Json>(
+        &mut world,
+        EvidenceQuery {
+            roots: Optional::Present(vec![subject.clone()]),
+            max_depth: Optional::Present(1),
+            ..empty_scope()
+        },
+        "req_sub",
+    );
+    assert_eq!(result(&opened).status, ResultStatus::Ok);
+    assert_eq!(frontier(&opened), vec![subject.clone()]);
+
+    // An unrelated append: committed, and in no neighborhood of the root.
+    let unrelated = ingest::<Json>(&mut world, &other, "req_other", "idem-other");
+    assert_eq!(result(&unrelated).status, ResultStatus::Ok);
+    assert!(
+        deltas(&unrelated).is_empty(),
+        "no edge connects this node to the root"
+    );
+
+    // The check: a receipt one edge from the root, and the edge that reaches it. Both are
+    // inside `max_depth = 1` — the receipt at depth 1, the edge at the greater of its two
+    // endpoints' depths, which is also 1.
+    let checked = link::<Json>(&mut world, &subject, &other, "req_link", "idem-link");
+    assert_eq!(result(&checked).status, ResultStatus::Ok);
+    let kinds: Vec<EvidenceEventKind> = deltas(&checked).iter().map(|event| event.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            EvidenceEventKind::NodePublished,
+            EvidenceEventKind::EdgePublished
+        ],
+        "the receipt and the edge that reaches it"
+    );
+}
+
+/// The boundary, over the wire: `max_depth = 0` is exactly handle membership, so an artifact
+/// one edge away reaches no frame.
+///
+/// This is the reading a pre-1.8 daemon served for every `roots`, and it is still expressible
+/// — it is now the bound it always was rather than the whole of the field.
+#[test]
+fn a_zero_depth_scope_is_membership_and_a_new_neighbor_reaches_no_frame() {
+    let mut world = world(Encoding::CanonicalJson);
+    let trace = world.trace.clone();
+    let other = world.other.clone();
+
+    let subject = ingested(&ingest::<Json>(
+        &mut world,
+        &trace,
+        "req_ingest",
+        "idem-ingest",
+    ));
+    let opened = subscribe::<Json>(
+        &mut world,
+        EvidenceQuery {
+            roots: Optional::Present(vec![subject.clone()]),
+            max_depth: Optional::Present(0),
+            ..empty_scope()
+        },
+        "req_sub",
+    );
+    assert_eq!(frontier(&opened), vec![subject.clone()]);
+
+    let checked = link::<Json>(&mut world, &subject, &other, "req_link", "idem-link");
+    assert_eq!(result(&checked).status, ResultStatus::Ok);
+    assert!(
+        deltas(&checked).is_empty(),
+        "the receipt and the edge are one step out, and the scope declared none"
+    );
+
+    // A promotion of the root itself is still delivered: the bound excludes the neighborhood,
+    // not the root.
+    let verified = verify::<Json>(&mut world, &subject, "req_verify", "idem-verify");
+    assert_eq!(result(&verified).status, ResultStatus::Ok);
+    let kinds: Vec<EvidenceEventKind> = deltas(&verified).iter().map(|event| event.kind).collect();
+    assert_eq!(kinds, [EvidenceEventKind::StatusTransition]);
 }
 
 /// A connection that never subscribed is sent no event frames, however much the graph grows.

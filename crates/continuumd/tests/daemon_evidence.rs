@@ -256,6 +256,19 @@ fn daemon_with(clock: Option<Timestamp>) -> Daemon {
             ),
             root.clone(),
         )
+        // A *second* checker, so the graph can hold a two-edge chain: a receipt produced by
+        // `service:kernel-core` cannot be checked by `service:kernel-core` (INV-004), and a
+        // path of length two is what tells a bounded traversal from an unbounded one.
+        .capability(
+            grant(
+                "cap_checker_smt",
+                "service:kernel-smt",
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(traced(&[DataGrant::ProductionTrace])),
+            ),
+            root.clone(),
+        )
         // Registered so it can be revoked mid-connection (RFC 0027 R1).
         .capability(
             grant(
@@ -1868,7 +1881,439 @@ fn a_query_filters_by_status_kind_claim_and_roots_and_returns_no_edges() {
         },
         "req_root",
     );
+    // With no edge to cross, a root's neighborhood is the root. The traversal
+    // `rule evidence.traversal` states is exercised over a graph that has edges, below.
     assert_eq!(nodes(&by_root), vec![second]);
+}
+
+// --- `rule evidence.traversal` (IDL 1.8, bn-35l6g) ---------------------------------------
+//
+// `roots` has read "roots to traverse from" since protocol 3.0 and `max_depth` has been
+// declared beside it just as long, but until 3.3 the graph held no edges and the daemon
+// served `roots` as bare handle membership with the bound dropped on the floor. 3.3's
+// `evidence.link` gave the graph edges; `rule evidence.traversal` says how they are walked,
+// and the tests below are what says the daemon walks them that way.
+
+/// A two-edge chain plus one artifact nothing connects to it.
+///
+/// ```text
+///   a --E1--> r1 --E2--> r2          b
+/// ```
+///
+/// `a` is `agent:observer`'s ingest, `r1` is `service:kernel-core`'s receipt for checking it,
+/// and `r2` is `service:kernel-smt`'s receipt for checking *that* — a second checker, because
+/// `kernel-core` producing `r1` is exactly what INV-004 forbids it from checking. `b` is a
+/// second ingest, in the graph and out of every neighborhood the chain has.
+struct Chain {
+    a: EvidenceHandle,
+    r1: EvidenceHandle,
+    r2: EvidenceHandle,
+    e1: EvidenceHandle,
+    e2: EvidenceHandle,
+    b: EvidenceHandle,
+}
+
+fn linked(outcome: &OperationOutcome) -> (EvidenceHandle, EvidenceHandle) {
+    match &outcome.payload {
+        Payload::EvidenceLink(response) => (response.edge.clone(), response.receipt.clone()),
+        other => panic!("expected an evidence.link payload, got {other:?}"),
+    }
+}
+
+fn chain(fixture: &mut Fixture) -> Chain {
+    let trace = fixture.trace.clone();
+    let other = fixture.other.clone();
+    let a = ingested_handle(&ingest_with(
+        fixture,
+        "agent:observer",
+        "cap_observer",
+        &trace,
+        "req_chain_a",
+        "idem-chain-a",
+    ));
+    let b = ingested_handle(&ingest_with(
+        fixture,
+        "agent:second-observer",
+        "cap_second",
+        &other,
+        "req_chain_b",
+        "idem-chain-b",
+    ));
+    let first = link_under(
+        fixture,
+        "service:kernel-core",
+        "cap_checker",
+        &a,
+        &other,
+        "kernel-core/1",
+        "req_chain_e1",
+        "idem-chain-e1",
+    );
+    assert_eq!(
+        first.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        first.envelope.error
+    );
+    let (e1, r1) = linked(&first);
+    let second = link_under(
+        fixture,
+        "service:kernel-smt",
+        "cap_checker_smt",
+        &r1,
+        &other,
+        "kernel-smt/1",
+        "req_chain_e2",
+        "idem-chain-e2",
+    );
+    assert_eq!(
+        second.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        second.envelope.error
+    );
+    let (e2, r2) = linked(&second);
+    Chain {
+        a,
+        r1,
+        r2,
+        e1,
+        e2,
+        b,
+    }
+}
+
+/// The nodes and edges one query selects, as sorted sets, so an assertion names membership
+/// rather than the container's key order (which `rule ordering.deterministic` already holds).
+fn answered(outcome: &OperationOutcome) -> (Vec<String>, Vec<String>) {
+    match &outcome.payload {
+        Payload::EvidenceQuery(response) => {
+            let mut nodes: Vec<String> = response
+                .nodes
+                .iter()
+                .map(|handle| handle.as_str().to_owned())
+                .collect();
+            let mut edges: Vec<String> = response
+                .edges
+                .iter()
+                .map(|handle| handle.as_str().to_owned())
+                .collect();
+            nodes.sort();
+            edges.sort();
+            (nodes, edges)
+        }
+        other => panic!("expected an evidence.query payload, got {other:?}"),
+    }
+}
+
+fn set(handles: &[&EvidenceHandle]) -> Vec<String> {
+    let mut sorted: Vec<String> = handles
+        .iter()
+        .map(|handle| (*handle).as_str().to_owned())
+        .collect();
+    sorted.sort();
+    sorted
+}
+
+fn rooted(roots: &[&EvidenceHandle], depth: Optional<u32>) -> EvidenceQuery {
+    EvidenceQuery {
+        roots: Optional::Present(roots.iter().map(|handle| (*handle).clone()).collect()),
+        max_depth: depth,
+        ..empty_query()
+    }
+}
+
+/// Clause 1: an edge is walked in **either** direction, because an edge's direction is what
+/// it asserts and not which way relevance runs.
+///
+/// `a --CHECKED_BY--> r1` is the only edge between them. Rooting at `a` must reach `r1`
+/// (with the arrow) and rooting at `r1` must reach `a` (against it). A forward-only walk
+/// would fail the second; a reverse-only walk would fail the first. The RFC's own reason for
+/// a graph is the general case — every `SUPPORTS`, `REFUTES`, and `COUNTEREXAMPLE_TO` edge
+/// names its claim as `to`, so a forward-only walk from a claim reaches none of the evidence
+/// offered to it.
+#[test]
+fn a_traversal_crosses_an_edge_in_either_direction() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+
+    let forward = query(
+        &mut fixture,
+        rooted(&[&chain.a], Optional::Present(1)),
+        "req_forward",
+    );
+    let (nodes, edges) = answered(&forward);
+    assert_eq!(nodes, set(&[&chain.a, &chain.r1]), "with the arrow");
+    assert_eq!(edges, set(&[&chain.e1]));
+
+    let backward = query(
+        &mut fixture,
+        rooted(&[&chain.r1], Optional::Present(1)),
+        "req_backward",
+    );
+    let (nodes, edges) = answered(&backward);
+    assert_eq!(
+        nodes,
+        set(&[&chain.a, &chain.r1, &chain.r2]),
+        "against the arrow, and with the next one"
+    );
+    assert_eq!(edges, set(&[&chain.e1, &chain.e2]));
+}
+
+/// Clause 2 and clause 3, at every boundary the bound has: `0`, each interior value, the
+/// value that saturates the graph, and absent.
+///
+/// `0` is exactly the handle-membership reading a pre-1.8 daemon served for every `roots`,
+/// so nothing a client could previously ask became unaskable — it just has to say the bound
+/// it always meant.
+#[test]
+fn max_depth_bounds_the_traversal_in_edges() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+
+    for (bound, want_nodes, want_edges) in [
+        (Optional::Present(0), set(&[&chain.a]), Vec::new()),
+        (
+            Optional::Present(1),
+            set(&[&chain.a, &chain.r1]),
+            set(&[&chain.e1]),
+        ),
+        (
+            Optional::Present(2),
+            set(&[&chain.a, &chain.r1, &chain.r2]),
+            set(&[&chain.e1, &chain.e2]),
+        ),
+        (
+            Optional::Present(9),
+            set(&[&chain.a, &chain.r1, &chain.r2]),
+            set(&[&chain.e1, &chain.e2]),
+        ),
+        (
+            Optional::Absent,
+            set(&[&chain.a, &chain.r1, &chain.r2]),
+            set(&[&chain.e1, &chain.e2]),
+        ),
+    ] {
+        let label = format!("req_depth_{}", bound.value().copied().unwrap_or(99));
+        let outcome = query(&mut fixture, rooted(&[&chain.a], bound), &label);
+        let (nodes, edges) = answered(&outcome);
+        assert_eq!(nodes, want_nodes, "nodes at {bound:?}");
+        assert_eq!(edges, want_edges, "edges at {bound:?}");
+        // Whatever the bound, `b` is connected to nothing and is in no neighborhood.
+        assert!(
+            !nodes.contains(&chain.b.as_str().to_owned()),
+            "at {bound:?}"
+        );
+    }
+}
+
+/// Clause 4: an answer names no dangling edge, at every bound.
+///
+/// This is a property of the depth rule rather than of a filter — an edge takes the *greater*
+/// of its endpoints' depths, so an edge within the bound has both endpoints within it. A
+/// returned edge whose endpoints the same answer omitted would be a reference the client
+/// cannot resolve, and "references must resolve" is the graph's own structural refusal.
+#[test]
+fn a_rooted_answer_names_no_dangling_edge() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+    let endpoints = |fixture: &Fixture, handle: &EvidenceHandle| {
+        let edge = fixture
+            .daemon
+            .state()
+            .evidence_edge(handle)
+            .expect("the graph holds the edge")
+            .clone();
+        (edge.from, edge.to)
+    };
+
+    for bound in [0_u32, 1, 2, 3] {
+        for root in [&chain.a, &chain.r1, &chain.r2, &chain.b] {
+            let label = format!("req_closed_{bound}_{}", root.as_str());
+            let outcome = query(
+                &mut fixture,
+                rooted(&[root], Optional::Present(bound)),
+                &label,
+            );
+            let (nodes, edges) = answered(&outcome);
+            for edge in &edges {
+                let handle = EvidenceHandle::new(edge).expect("a returned handle is well-formed");
+                let (from, to) = endpoints(&fixture, &handle);
+                for endpoint in [from, to] {
+                    assert!(
+                        nodes.contains(&endpoint.as_str().to_owned()),
+                        "edge {edge} at depth {bound} from {} names {} , which the answer omits",
+                        root.as_str(),
+                        endpoint.as_str()
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The negative: an artifact no edge connects to a root is out of the scope, at every bound
+/// including an unbounded one. A traversal that reached it would be a traversal of nothing.
+#[test]
+fn an_artifact_no_edge_connects_to_a_root_is_out_of_scope() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+
+    let unbounded = query(
+        &mut fixture,
+        rooted(&[&chain.b], Optional::Absent),
+        "req_isolated",
+    );
+    let (nodes, edges) = answered(&unbounded);
+    assert_eq!(nodes, set(&[&chain.b]));
+    assert!(edges.is_empty(), "no edge is incident to it");
+
+    let from_chain = query(
+        &mut fixture,
+        rooted(&[&chain.a], Optional::Absent),
+        "req_isolated_other_way",
+    );
+    let (nodes, _) = answered(&from_chain);
+    assert!(!nodes.contains(&chain.b.as_str().to_owned()));
+}
+
+/// The boundary that is not an artifact: a root the graph does not hold seeds nothing, so it
+/// reaches nothing. The alternative — treating an unknown handle as a wildcard, or as an
+/// absent clause — would invent a neighborhood around an artifact that does not exist, and
+/// would make an unheld handle a probe for the graph's contents.
+#[test]
+fn a_root_the_graph_does_not_hold_reaches_nothing() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+    let absent =
+        EvidenceHandle::new("ev_0000000000000000000000000000000000000000000000000000000000000000")
+            .expect("a well-formed handle the graph does not hold");
+
+    let outcome = query(
+        &mut fixture,
+        rooted(&[&absent], Optional::Absent),
+        "req_unheld_root",
+    );
+    let (nodes, edges) = answered(&outcome);
+    assert!(nodes.is_empty(), "{nodes:?}");
+    assert!(edges.is_empty(), "{edges:?}");
+
+    // And it does not widen a root that *is* held: the clause is a union of neighborhoods.
+    let beside = query(
+        &mut fixture,
+        rooted(&[&absent, &chain.a], Optional::Present(1)),
+        "req_unheld_beside",
+    );
+    let (nodes, _) = answered(&beside);
+    assert_eq!(nodes, set(&[&chain.a, &chain.r1]));
+}
+
+/// Clause 6: absent or empty `roots` is "the whole graph in scope" — the field's own declared
+/// sentence — and `max_depth` then selects nothing away, because there is no root to measure
+/// a distance from. A daemon that read an empty list as an empty neighborhood would answer
+/// nothing to a query the IDL says answers everything.
+#[test]
+fn an_empty_roots_list_is_the_whole_graph_and_a_depth_bound_selects_nothing_away() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+    let every_node = set(&[&chain.a, &chain.b, &chain.r1, &chain.r2]);
+    let every_edge = set(&[&chain.e1, &chain.e2]);
+
+    for (label, scope) in [
+        (
+            "req_roots_absent",
+            EvidenceQuery {
+                max_depth: Optional::Present(0),
+                ..empty_query()
+            },
+        ),
+        (
+            "req_roots_empty",
+            EvidenceQuery {
+                roots: Optional::Present(Vec::new()),
+                max_depth: Optional::Present(0),
+                ..empty_query()
+            },
+        ),
+    ] {
+        let outcome = query(&mut fixture, scope, label);
+        let (nodes, edges) = answered(&outcome);
+        assert_eq!(nodes, every_node, "{label}");
+        assert_eq!(edges, every_edge, "{label}");
+    }
+}
+
+/// Clause 2's other half: a root naming an **edge** seeds that edge and both its endpoints at
+/// depth 0, so `max_depth = 0` over an edge root answers the whole assertion rather than a
+/// handle whose endpoints the answer omits. Half of an assertion is not an assertion.
+#[test]
+fn a_root_naming_an_edge_seeds_the_edge_and_both_its_endpoints() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+
+    let exact = query(
+        &mut fixture,
+        rooted(&[&chain.e1], Optional::Present(0)),
+        "req_edge_root",
+    );
+    let (nodes, edges) = answered(&exact);
+    assert_eq!(nodes, set(&[&chain.a, &chain.r1]));
+    assert_eq!(edges, set(&[&chain.e1]));
+
+    // And one step further reaches what `r1` is adjacent to.
+    let wider = query(
+        &mut fixture,
+        rooted(&[&chain.e1], Optional::Present(1)),
+        "req_edge_root_wider",
+    );
+    let (nodes, edges) = answered(&wider);
+    assert_eq!(nodes, set(&[&chain.a, &chain.r1, &chain.r2]));
+    assert_eq!(edges, set(&[&chain.e1, &chain.e2]));
+}
+
+/// Clause 5: the traversal walks the whole graph and the other clauses filter what it
+/// reached — they do not restrict the walk.
+///
+/// `a` is promoted to `observed`; `r1` and `r2` stay at the bottom of the lattice. A scope
+/// rooted at `r2` with `statuses: [observed]` must still answer `a`, two edges away *through*
+/// `r1`, which the status clause excludes. A daemon that walked only through matching nodes
+/// would answer nothing, and would have made one clause change another's meaning rather than
+/// conjoin with it.
+#[test]
+fn the_traversal_walks_the_whole_graph_and_the_other_clauses_filter_what_it_reached() {
+    let mut fixture = fixture();
+    let chain = chain(&mut fixture);
+    let promoted = verify(&mut fixture, &chain.a, "req_promote", "idem-promote");
+    assert_eq!(promoted.envelope.status, ResultStatus::Ok);
+    assert_eq!(node(&fixture, &chain.a).status(), ClaimStatus::Observed);
+    assert_eq!(node(&fixture, &chain.r1).status(), ClaimStatus::BOTTOM);
+
+    let outcome = query(
+        &mut fixture,
+        EvidenceQuery {
+            statuses: Optional::Present(vec![EvidenceStatus::Observed]),
+            ..rooted(&[&chain.r2], Optional::Present(2))
+        },
+        "req_through_excluded",
+    );
+    let (nodes, _) = answered(&outcome);
+    assert_eq!(
+        nodes,
+        set(&[&chain.a]),
+        "the walk passed through `r1`, which the status clause excludes from the answer"
+    );
+
+    // The bound is still real: one edge short of `a`, the same scope answers nothing.
+    let short = query(
+        &mut fixture,
+        EvidenceQuery {
+            statuses: Optional::Present(vec![EvidenceStatus::Observed]),
+            ..rooted(&[&chain.r2], Optional::Present(1))
+        },
+        "req_through_excluded_short",
+    );
+    let (nodes, _) = answered(&short);
+    assert!(nodes.is_empty(), "{nodes:?}");
 }
 
 /// A subscription's frontier is `evidence.query`'s answer over the identical scope, and one
@@ -2483,6 +2928,32 @@ fn link_as(
     request: &str,
     key: &str,
 ) -> OperationOutcome {
+    link_under(
+        fixture,
+        actor,
+        capability,
+        subject,
+        receipt,
+        "kernel-core/1",
+        request,
+        key,
+    )
+}
+
+/// `evidence.link` with the checker profile named, because a receipt node's identity is a
+/// function of (content, profile): two checks of one artifact under two profiles are two
+/// receipt nodes, which is what lets a test build a chain out of one staged blob.
+#[expect(clippy::too_many_arguments, reason = "one parameter per wire field")]
+fn link_under(
+    fixture: &mut Fixture,
+    actor: &str,
+    capability: &str,
+    subject: &EvidenceHandle,
+    receipt: &Commitment,
+    checker_profile: &str,
+    request: &str,
+    key: &str,
+) -> OperationOutcome {
     let mut envelope = envelope("evidence.link", actor, capability, request);
     envelope.idempotency_key = Optional::Present(key.to_owned());
     fixture.daemon.dispatch(&OperationRequest {
@@ -2490,7 +2961,7 @@ fn link_as(
         arguments: Arguments::EvidenceLink(EvidenceLinkRequest {
             subject: subject.clone(),
             receipt: receipt.clone(),
-            checker_profile: "kernel-core/1".to_owned(),
+            checker_profile: checker_profile.to_owned(),
         }),
     })
 }
