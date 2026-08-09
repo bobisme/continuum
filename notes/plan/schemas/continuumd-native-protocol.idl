@@ -157,6 +157,41 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.7 — the subscription-delivery rule (bn-3080b), closing the
+  ///         gap `evidence.subscribe` refused rather than papered
+  ///         over. `@streaming` says an operation "delivers `events`
+  ///         frames on the same connection" and each operation's
+  ///         `events` clause says which struct they carry, but nothing
+  ///         said what an event frame IS, how a client tells one from
+  ///         a result, or which deltas a scope selects — so a daemon
+  ///         that answered a `frontier` would have claimed a channel
+  ///         no client could read, which is the empty success `rule
+  ///         errors.unsupported_surface` forbids, and the daemon
+  ///         refused the operation instead. `rule
+  ///         subscription.delivery` states it: an event frame is the
+  ///         declared event struct itself, framed and encoded like
+  ///         every other frame and told apart from a `ResultEnvelope`
+  ///         by its required members (the `ServerWelcome`/
+  ///         `ServerReject` device); a delta selected by two
+  ///         subscriptions on one connection is delivered once,
+  ///         because an event names no subscription; a subscription
+  ///         delivers only what was committed after it opened, since
+  ///         everything earlier is the `frontier`; and a delta is in
+  ///         scope exactly when the scope's `EvidenceQuery` selects
+  ///         the artifact the delta's own kind names, by the predicate
+  ///         `evidence.query` answers with. No field, member, code,
+  ///         struct, or operation is added, removed, or moved: the
+  ///         registry is 73 rows, the named-struct count is 46, and
+  ///         every count table is unchanged. `rule
+  ///         versioning.compatible_change` names the five changes that
+  ///         raise the protocol minor and this revision makes none of
+  ///         them, so `version` stays `"3.4"` — the IDL 1.5 precedent
+  ///         exactly. What makes the rule statable now rather than a
+  ///         flag is that whether a lane has shipped is a property of
+  ///         a deployment, not of an operation (`rule errors.common`,
+  ///         as relaxed at 3.2): a deployment that serves the channel
+  ///         answers `ok`, one that does not keeps
+  ///         `UnsupportedSemanticFeature`, and both conform.
   ///   1.6 — the fourth protocol-minor bundle, 3.3 → 3.4 (bn-3jrtz),
   ///         paying RFC 0026's F19 and F20 together under the
   ///         deferred-and-bundled discipline. F19: `Error.data` gains
@@ -304,7 +339,7 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.6";
+  idl_version = "1.7";
   /// The protocol version this document defines.
   ///
   /// 3.4 is the single minor bump for IDL 1.6, taken once at the end of
@@ -335,6 +370,19 @@ protocol continuum.native {
   /// what raises the minor and this revision does none of it, so a 3.3
   /// client and daemon are unaffected by the revision that documents
   /// what they already do.
+  ///
+  /// IDL 1.7 (`rule subscription.delivery`, bn-3080b) does not move it
+  /// either, on the same reading and with one difference worth
+  /// naming. The rule states how a frame the `@streaming` annotation
+  /// has declared since 3.0 is spelled, and it declares no field,
+  /// member, struct, or operation, so none of the five triggers fires.
+  /// The difference from 1.5 is that 1.5 wrote down what every
+  /// conforming daemon already did, whereas nothing had delivered an
+  /// `events` frame at all — which is why the rule takes the three
+  /// open decisions explicitly rather than reporting them. A 3.4
+  /// client that never subscribes is unaffected, and one that does was
+  /// already required by `@streaming` to expect frames it did not
+  /// request.
   ///
   /// 3.1 was the single minor bump for IDL 1.1's compatible fixes and
   /// IDL 1.2's F1–F8 sweep together, ratified by the user on
@@ -1993,6 +2041,64 @@ rule subscription.hints_only {
   """
 }
 
+rule subscription.delivery {
+  """
+  How a `@streaming` operation's `events` frames reach the client. The
+  annotation says they are delivered "on the same connection" and each
+  operation's `events` clause says which struct they carry; this rule
+  states the three things a transport needs and no normative source
+  fixed.
+
+  1. An event frame IS the declared event struct — `EvidenceEvent` for
+  `evidence.subscribe`, `TaskEvent` for `task.subscribe` — framed
+  exactly as every other frame on the connection and spelled in the
+  negotiated encoding, written after the operation's initial response.
+  There is no event envelope: a frame and a `ResultEnvelope` are told
+  apart by their required members, which is the device `ServerWelcome`
+  and `ServerReject` already use (`rule handshake.rejection`).
+  `ResultEnvelope` requires `request_id` and `status`, which no event
+  struct declares; `EvidenceEvent` requires `at` and `kind`, which
+  `ResultEnvelope` does not.
+
+  2. An event therefore carries no subscription identity, and that
+  decides two questions it would otherwise leave open. A delta selected
+  by more than one subscription open on one connection is delivered
+  ONCE, because two frames naming one committed artifact are
+  indistinguishable from two committed artifacts. And a subscription
+  delivers only deltas committed after it was opened: everything
+  committed before is the initial response's `frontier`, so no artifact
+  is both reported as frontier and delivered as a delta.
+
+  3. A delta names an artifact — the `node` for `node_published`,
+  `status_transition`, and `conflict_materialized`, the `edge` for
+  `edge_published` — and it is in a subscription's scope exactly when
+  that scope's `EvidenceQuery` selects that artifact, by the same
+  predicate `evidence.query` answers with. A delta whose kind's member
+  is absent names no artifact and is in no scope.
+
+  The predicate is evaluated against the graph as it stands when the
+  frame is written, not against the graph at the instant of the delta:
+  the graph is authoritative and a delta is a pointer into it, never a
+  copy of it (`rule subscription.hints_only`). It is evaluated ONCE per
+  delta per subscription, at the first delivery after that delta was
+  committed, and a delta the scope did not select then is not
+  reconsidered — a subscription is a cursor, not a filter re-run over
+  history. So a scope whose clauses a later write would have brought an
+  earlier delta inside MAY be silent about that delta, and the client
+  recovers it by re-reading rather than by replay. That is the same
+  guarantee `task.subscribe` gives from the other direction and the
+  reason both are stated as hints: what a stream delivers is never more
+  than a subset of what the graph holds, and MUST NOT be relied on as
+  more.
+
+  None of this is session state in the sense INV-002 forbids. A
+  subscription is a delivery cursor over an append-only, daemon-held
+  log of committed deltas, so dropping the connection loses the cursor
+  and no artifact, and re-reading yields a superset of what the stream
+  delivered.
+  """
+}
+
 @since("3.3")
 rule evidence.edge_identity {
   """
@@ -3490,7 +3596,9 @@ operation evidence.verify {
 
 /// Stream committed evidence-graph deltas for a declared scope. Distinct
 /// from `task.subscribe`: deltas reference committed artifacts
-/// (`rule subscription.hints_only`).
+/// (`rule subscription.hints_only`). What an `EvidenceEvent` frame is,
+/// which deltas a scope selects, and why one delta is one frame however
+/// many scopes select it, are `rule subscription.delivery`.
 @readonly @streaming
 operation evidence.subscribe {
   authority read;

@@ -991,11 +991,20 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // `verification.start`'s two declared answer shapes a terminal identity lands on
     // and therefore moves no declaration at all. The operation count stays 73; the
     // struct count is the one number this bump moves, 45 -> 46.
+    //
+    // IDL 1.7 (bn-3080b) adds one rule, `subscription.delivery`, and nothing else:
+    // 39 -> 40, with no operation, alias, enum, struct, or union moving. It is the
+    // 1.5 shape — a rule and no declaration, so `version` stays "3.4" — with one
+    // difference the rule's own body records: 1.5 wrote down what every conforming
+    // daemon already did, while nothing had ever delivered an `events` frame, so 1.7
+    // decides the three things a transport needs (what an event frame is, that one
+    // delta is one frame however many of a connection's scopes select it, and which
+    // deltas a scope selects) rather than reporting them.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 46, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 39, "rules");
+    assert_eq!(document.rules.len(), 40, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()

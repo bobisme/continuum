@@ -18,7 +18,7 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.6";
+pub const IDL_VERSION: &str = "1.7";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
@@ -67,6 +67,20 @@ pub const IDL_VERSION: &str = "1.6";
 /// did" (correction 45) — the same nature of change as 3.2's item 9, which is
 /// the precedent that made the lanes reachable at all. The registry is
 /// untouched: 73 operations, every count table unchanged.
+///
+/// IDL 1.7 (`rule subscription.delivery`, bn-3080b) does **not** bump this
+/// value either, and the reason is IDL 1.5's with one honest difference. 1.5
+/// wrote down what the transport already did; nothing had ever delivered an
+/// `events` frame, so 1.7 *decides* rather than reports — what an event frame
+/// is (the declared event struct, told apart from a `ResultEnvelope` by its
+/// required members), that one delta is one frame however many of a
+/// connection's scopes select it, and which deltas a scope selects. Still none
+/// of `rule versioning.compatible_change`'s five triggers fires: no operation,
+/// field, enum member, error code, or relaxed constraint. And no flag is
+/// raised, because `rule errors.common` as relaxed at 3.2 already makes
+/// "whether a lane has shipped" a property of a deployment rather than of an
+/// operation — a daemon that serves the channel answers `ok`, one that does not
+/// keeps `UnsupportedSemanticFeature`, and both conform.
 pub const PROTOCOL_VERSION: &str = "3.4";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1

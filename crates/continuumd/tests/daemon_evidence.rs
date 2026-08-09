@@ -1871,10 +1871,22 @@ fn a_query_filters_by_status_kind_claim_and_roots_and_returns_no_edges() {
     assert_eq!(nodes(&by_root), vec![second]);
 }
 
+/// A subscription's frontier is `evidence.query`'s answer over the identical scope, and one
+/// list because one handle class names both halves of the graph.
+///
+/// Until bn-3080b this operation was refused with `UnsupportedSemanticFeature`, and the
+/// refusal was right: nothing delivered an `events` frame, so a frontier would have been the
+/// "empty success" `rule errors.unsupported_surface` forbids. `rule subscription.delivery`
+/// (IDL 1.7) fixed what a frame is and the transport now writes them, so the operation is
+/// served — and this test holds the half that lives at *this* layer, which is that the
+/// frontier and a query cannot disagree about what a scope selects. The channel itself is
+/// `tests/evidence_subscription.rs`.
 #[test]
-fn a_subscription_is_refused_because_its_event_channel_is_not_served() {
+fn a_subscription_answers_the_scope_its_query_would_answer() {
     let mut fixture = fixture();
-    let refused = fixture.daemon.dispatch(&OperationRequest {
+    let handle = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    let answered = fixture.daemon.dispatch(&OperationRequest {
         envelope: envelope(
             "evidence.subscribe",
             "agent:reader",
@@ -1885,9 +1897,57 @@ fn a_subscription_is_refused_because_its_event_channel_is_not_served() {
             scope: empty_query(),
         }),
     });
-    // A frontier returned by a subscription that can never deliver an event is the "empty
-    // success" `rule errors.unsupported_surface` forbids.
-    assert_eq!(code(&refused), ErrorCode::UnsupportedSemanticFeature);
+    assert_eq!(answered.envelope.status, ResultStatus::Ok);
+    let Payload::EvidenceSubscribe(body) = &answered.payload else {
+        panic!("the subscription answers its declared response body");
+    };
+    assert_eq!(body.frontier, vec![handle]);
+
+    // The same scope, through the other operation that answers it.
+    let frontier = body.frontier.clone();
+    let queried = query(&mut fixture, empty_query(), "req_query");
+    let Payload::EvidenceQuery(listed) = &queried.payload else {
+        panic!("the query answers its declared response body");
+    };
+    let mut expected = listed.nodes.clone();
+    expected.extend(listed.edges.clone());
+    assert_eq!(
+        frontier, expected,
+        "the frontier and the query are one predicate, not two"
+    );
+}
+
+/// A scope that selects nothing answers an empty frontier — and that is not the empty
+/// success `rule errors.unsupported_surface` forbids.
+///
+/// The two are different facts and the difference is worth pinning: "the channel is not
+/// served" is a refusal, while "you are subscribed and nothing is in scope yet" is an
+/// answer, and a client acts on them differently — the first by giving up, the second by
+/// waiting for the frames `tests/evidence_subscription.rs` shows arriving.
+#[test]
+fn a_scope_that_selects_nothing_answers_an_empty_frontier_rather_than_a_refusal() {
+    let mut fixture = fixture();
+    let _ = ingested_handle(&ingest(&mut fixture, "req_ingest", "idem-ingest"));
+
+    let answered = fixture.daemon.dispatch(&OperationRequest {
+        envelope: envelope(
+            "evidence.subscribe",
+            "agent:reader",
+            "cap_reader",
+            "req_sub",
+        ),
+        arguments: Arguments::EvidenceSubscribe(EvidenceSubscribeRequest {
+            scope: EvidenceQuery {
+                claim_id: Optional::Present("no-claim-has-this-identity".to_owned()),
+                ..empty_query()
+            },
+        }),
+    });
+    assert_eq!(answered.envelope.status, ResultStatus::Ok);
+    let Payload::EvidenceSubscribe(body) = &answered.payload else {
+        panic!("the subscription answers its declared response body");
+    };
+    assert!(body.frontier.is_empty());
 }
 
 #[test]

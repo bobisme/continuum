@@ -147,12 +147,13 @@ use crate::protocol::envelope::{
 };
 use crate::protocol::operations::evidence::{
     EvidenceGetRequest, EvidenceGetResponse, EvidenceLinkRequest, EvidenceLinkResponse,
-    EvidenceQueryRequest, EvidenceQueryResponse, EvidenceSubscribeRequest, EvidenceVerifyRequest,
-    EvidenceVerifyResponse,
+    EvidenceQueryRequest, EvidenceQueryResponse, EvidenceSubscribeRequest,
+    EvidenceSubscribeResponse, EvidenceVerifyRequest, EvidenceVerifyResponse,
 };
 use crate::protocol::scalar::{ActorId, EvidenceHandle, Opaque};
 use crate::protocol::shared::EvidenceQuery;
 use crate::protocol::spec::{Nullable, Optional, ProtocolEnum};
+use crate::protocol::task::EvidenceEvent;
 use crate::protocol::vocabulary::{
     AssuranceClass, ErrorCode, EvidenceEdgeKind, EvidenceEventKind, EvidenceKind, EvidenceNodeKind,
     EvidenceStatus, InconclusiveReason, OmissionReason, SemanticVerdict, StructuralOutcome,
@@ -250,7 +251,13 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     // clause since protocol 3.0 and unreachable until bn-dtg61 gave the daemon a certificate
     // checker to route to; see [`certificate_check`].
     ("evidence.verify", ErrorCode::EpochUnsupported),
-    ("evidence.subscribe", ErrorCode::UnsupportedSemanticFeature),
+    // `evidence.subscribe` names no row. It carried
+    // `UnsupportedSemanticFeature` while the channel was unserved, and as of bn-3080b it is
+    // served, so the only codes it can answer with are `rule errors.common`'s five — which
+    // this table does not enumerate for any operation. Its `errors` clause keeps the code,
+    // because a deployment without the transport half still owes that refusal
+    // (`rule errors.unsupported_surface`), and a clause that names a code the operation does
+    // not currently produce is a permission, not an obligation.
     ("evidence.link", ErrorCode::CapabilityDenied),
     ("evidence.link", ErrorCode::InsufficientEvidence),
     ("evidence.link", ErrorCode::UnsupportedSemanticFeature),
@@ -350,7 +357,7 @@ impl OperationFamily for EvidenceFamily {
             Arguments::EvidenceGet(request) => get(request, state),
             Arguments::EvidenceQuery(request) => query(request, state),
             Arguments::EvidenceVerify(request) => self.verify(request, state, services),
-            Arguments::EvidenceSubscribe(request) => subscribe(request),
+            Arguments::EvidenceSubscribe(request) => subscribe(request, state),
             Arguments::EvidenceLink(request) => link(call, request, state, services, store),
             // Unreachable: the dispatcher checked shape agreement against the registry
             // before routing. A typed refusal rather than an `unreachable!`, because a
@@ -535,21 +542,36 @@ fn redacted_json(redaction: &Redacted) -> Json {
 // --- evidence.query ---------------------------------------------------------------------
 
 fn query(request: &EvidenceQueryRequest, state: &DaemonState) -> Result<Effect, Fault> {
-    let nodes: Vec<EvidenceHandle> = state
-        .evidence_nodes()
-        .filter(|(handle, node)| matches(&request.query, handle, node))
-        .map(|(handle, _)| handle.clone())
-        .collect();
-    let edges: Vec<EvidenceHandle> = state
-        .evidence_edges()
-        .filter(|(handle, edge)| matches_edge(&request.query, handle, edge))
-        .map(|(handle, _)| handle.clone())
-        .collect();
-
+    let (nodes, edges) = selected(&request.query, state);
     Ok(Effect::new(
         Payload::EvidenceQuery(EvidenceQueryResponse { nodes, edges }),
         Nullable::Null,
     ))
+}
+
+/// Every node and edge one [`EvidenceQuery`] selects, in the graph's own order.
+///
+/// Factored out because two operations answer with it and they must not drift:
+/// `evidence.query` returns it as its two lists, and `evidence.subscribe` returns it as the
+/// `frontier` its declared scope stands at. `rule subscription.delivery` makes that agreement
+/// normative — "a delta is in scope exactly when the scope's `EvidenceQuery` selects the
+/// artifact the delta's own kind names, by the same predicate `evidence.query` answers with"
+/// — so a second spelling of the filter would be a second answer to one question.
+fn selected(
+    query: &EvidenceQuery,
+    state: &DaemonState,
+) -> (Vec<EvidenceHandle>, Vec<EvidenceHandle>) {
+    let nodes = state
+        .evidence_nodes()
+        .filter(|(handle, node)| matches(query, handle, node))
+        .map(|(handle, _)| handle.clone())
+        .collect();
+    let edges = state
+        .evidence_edges()
+        .filter(|(handle, edge)| matches_edge(query, handle, edge))
+        .map(|(handle, _)| handle.clone())
+        .collect();
+    (nodes, edges)
 }
 
 /// Whether one edge satisfies an [`EvidenceQuery`].
@@ -621,24 +643,107 @@ fn matches(query: &EvidenceQuery, handle: &EvidenceHandle, node: &EvidenceNode) 
 
 // --- evidence.subscribe -----------------------------------------------------------------
 
-/// The typed refusal `evidence.subscribe` returns, and why it is a refusal.
+/// `evidence.subscribe` — the scope's frontier now; the deltas are the committed writes
+/// that follow.
 ///
-/// The response body is a frontier and the *operation* is a stream: `events EvidenceEvent`
-/// is where the deltas go, and delivering them is the transport half of PR 5, which this
-/// layer deliberately does not contain (see [`daemon`](super)'s "no codec"). A frontier
-/// returned by a subscription that can never deliver an event is the "empty success"
-/// `rule errors.unsupported_surface` names, and it would be worse than a refusal: a client
-/// would believe it was subscribed.
+/// > `evidence.subscribe` streams typed evidence-graph deltas for a declared scope; the
+/// > graph itself remains authoritative on reconnect. A dropped subscription changes
+/// > nothing (INV-002); a client MUST be able to recover the same state by re-reading.
+/// >
+/// > — `rule subscription.hints_only`
 ///
-/// The daemon-side half of the stream *is* built — every committed delta is recorded in
-/// [`DaemonState::evidence_events`](super::state::DaemonState::evidence_events) — so what
-/// is missing is exactly the channel, and nothing here has to be redone when it lands.
-fn subscribe(_request: &EvidenceSubscribeRequest) -> Result<Effect, Fault> {
-    Err(Fault::new(
-        ErrorCode::UnsupportedSemanticFeature,
-        "the event channel an evidence subscription delivers deltas on is not served by \
-         this daemon",
+/// # Why this was a refusal until bn-3080b, and what changed
+///
+/// It answered `UnsupportedSemanticFeature`, and that was the right answer at the time: the
+/// *operation* is a stream, `events EvidenceEvent` is where the deltas go, and nothing on
+/// the wire delivered one. A frontier returned by a subscription whose deltas no client
+/// could read is the "empty success" `rule errors.unsupported_surface` forbids — worse than
+/// a refusal, because a client would believe it was subscribed.
+///
+/// What was missing was never daemon-side state: every committed delta has been recorded in
+/// [`DaemonState::evidence_events`](super::state::DaemonState::evidence_events) since the
+/// graph landed. It was the *spelling* of the channel — what an event frame is, how a client
+/// tells one from a `ResultEnvelope`, which deltas a scope selects — and no normative source
+/// fixed it. `rule subscription.delivery` (IDL 1.7) does, so this operation is now served,
+/// and `UnsupportedSemanticFeature` remains the answer of a deployment that does not carry
+/// the transport half: "whether a lane has shipped is a property of a deployment, not of an
+/// operation" (`rule errors.common`, as relaxed at 3.2).
+///
+/// # What this layer answers, and what it deliberately does not
+///
+/// The IDL's response body is exactly one field — "the scope's current frontier at
+/// subscription time" — and that is what this answers, through [`selected`]: the same
+/// predicate `evidence.query` answers with, so the frontier and a query over the identical
+/// scope cannot disagree. The frames that follow are the transport's, because a *stream* is
+/// a transport object and this layer emits no wire bytes (see [`daemon`](super)'s "no
+/// codec"); [`in_scope`] is the predicate it filters the delta log with, exported here so
+/// the rule lives beside the query it is defined in terms of rather than being restated at
+/// the byte boundary.
+///
+/// The subscription's cursor is not held here either, and that is INV-002 rather than an
+/// omission: a cursor is per-connection, the log it points into is the daemon's, and a
+/// daemon that remembered which client had read how far would be holding exactly the session
+/// state RFC 0026 says it holds none of. Dropping a connection loses the cursor and no
+/// artifact.
+fn subscribe(request: &EvidenceSubscribeRequest, state: &DaemonState) -> Result<Effect, Fault> {
+    // One list on the wire: `frontier: list<EvidenceHandle>`, and the handle class names
+    // both halves of the graph. Nodes before edges, each in the graph's own order, so two
+    // calls over one scope answer identically.
+    let (mut frontier, edges) = selected(&request.scope, state);
+    frontier.extend(edges);
+    Ok(Effect::new(
+        Payload::EvidenceSubscribe(EvidenceSubscribeResponse { frontier }),
+        // `evidence.subscribe` declares no `verdict` clause, so its result carries none.
+        Nullable::Null,
     ))
+}
+
+/// Whether one committed delta is in a subscription's declared scope
+/// (`rule subscription.delivery`, clause 3).
+///
+/// The delta's `kind` decides which member names its artifact, and nothing else does:
+/// `node_published`, `status_transition`, and `conflict_materialized` name the `node`,
+/// `edge_published` names the `edge`. Reading whichever member happens to be present would
+/// let a mislabeled event reach a scope by filling the other one, and the vocabulary already
+/// says which artifact each kind is about — so the vocabulary decides, and an event whose
+/// kind's member is absent names no artifact and is in no scope.
+///
+/// The selection itself is [`matches`]/[`matches_edge`] — `evidence.query`'s own predicate,
+/// applied to the graph **as it stands now** rather than as it stood when the delta was
+/// committed. That is the rule's own choice and it is the honest one: the graph is
+/// authoritative and a delta is a pointer into it, never a copy of it
+/// (`rule subscription.hints_only`), so a scope naming `statuses: [validated]` follows the
+/// claim rather than freezing a status the claim has since left behind.
+///
+/// "Now" is the delivery pass, and a caller asks *once per delta*: the transport's cursor
+/// moves past a delta whether or not this answered `true` for it, which is what makes a
+/// subscription a cursor rather than a filter re-run over history. The consequence is a real
+/// limit and the rule states it rather than hiding it — a delta a later write would have
+/// brought inside a scope may simply not be delivered, and the client recovers it by
+/// re-reading. A stream that promised otherwise would be promising to be the graph.
+///
+/// A delta naming an artifact the graph does not hold is in no scope. The graph is
+/// append-only, so that is unreachable today; it is written as a refusal rather than an
+/// assumption because "unreachable" is a property of the current write set and not of this
+/// function.
+#[must_use]
+pub fn in_scope(scope: &EvidenceQuery, event: &EvidenceEvent, state: &DaemonState) -> bool {
+    match event.kind {
+        EvidenceEventKind::NodePublished
+        | EvidenceEventKind::StatusTransition
+        | EvidenceEventKind::ConflictMaterialized => match &event.node {
+            Optional::Present(handle) => state
+                .evidence(handle)
+                .is_some_and(|node| matches(scope, handle, node)),
+            Optional::Absent => false,
+        },
+        EvidenceEventKind::EdgePublished => match &event.edge {
+            Optional::Present(handle) => state
+                .evidence_edge(handle)
+                .is_some_and(|edge| matches_edge(scope, handle, edge)),
+            Optional::Absent => false,
+        },
+    }
 }
 
 // --- evidence.verify --------------------------------------------------------------------

@@ -750,6 +750,12 @@ impl DaemonState {
     }
 
     /// Every committed evidence-graph delta so far, in commit order.
+    ///
+    /// Append-only and never truncated, which is what lets a subscription be a *cursor*
+    /// rather than a queue: an index into this slice means the same thing across the life of
+    /// the daemon, so a connection can hold one and the daemon can hold no per-connection
+    /// state at all (`rule subscription.delivery`, and INV-002 behind it). The transport
+    /// reads it through [`Server::deliver`](crate::transport::Server::deliver).
     #[must_use]
     pub fn evidence_events(&self) -> &[EvidenceEvent] {
         &self.evidence_events
