@@ -87,6 +87,8 @@ A human-friendly whiteboard view permits provisional notes. Compilation rules:
 - conclusions require supporting edges;
 - unresolved contradictions remain visible.
 
+The note format itself is [`../schemas/whiteboard-note.schema.json`](../schemas/whiteboard-note.schema.json) — plan §11.5's seven headings as a schema, since prose cannot be an input format (INV-003). Which heading proposes which node kind, and how each rule above is met by the shape of the format rather than by a check, is RFC 0038 W1–W9; `crates/continuum-evidence/src/whiteboard.rs` is the library surface. There is deliberately no wire operation.
+
 ## Merging agent work
 
 Agents do not merge mutable branches of “reasoning.” They publish immutable candidates. The integrator computes:

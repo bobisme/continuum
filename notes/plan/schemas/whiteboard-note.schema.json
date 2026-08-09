@@ -1,0 +1,204 @@
+{
+  "$id": "https://continuum.dev/schema/v1/whiteboard-note.json",
+  "schema_epoch": 1,
+  "schema_kind": "artifact",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "The input format of the plan §11.5 whiteboard compiler. plan §11.5 states seven section headings as prose in a code block; INV-003 makes this document — not that prose — normative for the shape, and RFC 0038 'Whiteboard compiler' records why each undecided question is decided the way it is here.",
+  "$defs": {
+    "handle": {
+      "$comment": "The artifact-handle spelling of evidence-graph-node.schema.json's `artifact` and `provenance.inputs[]`, transcribed rather than narrowed: a handle a note names must be a handle the graph could publish.",
+      "pattern": "^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$",
+      "type": "string"
+    },
+    "entry": {
+      "additionalProperties": false,
+      "description": "One line of a whiteboard section. There is deliberately no status, confidence, verdict, or assurance member: docs/44 'status words in prose do not promote status', and a field a producer can fill is a field a producer can lie in (RFC 0038 D3). Everything compiled from an entry lands at `proposed`.",
+      "properties": {
+        "claim": {
+          "description": "The claim identity this entry is about, as evidence-graph-node.schema.json `claim_id`. Required and explicit: status promotion is linearized per claim identity (plan §11.7), and a claim identity derived from the entry's wording would make 'is this the same claim the graph already holds?' a function of phrasing.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "references": {
+          "description": "Prior artifacts this entry is derived from. docs/44 'references must resolve': the compiler refuses the whole note when the graph holds no node about one of these. They become the compiled node's `provenance.inputs` — derivation, never assertion.",
+          "items": {
+            "$ref": "#/$defs/handle"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "subject": {
+          "$ref": "#/$defs/handle",
+          "description": "The artifact this entry is about, which becomes the compiled node's `artifact`. Deliberately NOT required to resolve in the graph: an entry whose subject the graph already held could propose nothing new, and proposing is what a whiteboard is for."
+        },
+        "text": {
+          "description": "The human sentence. Carried beside the compiled node and never inside it — INV-003: 'human text may accompany a machine result, never define it'. The compiler never parses it, so no wording in it can reach the graph.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim",
+        "subject",
+        "text",
+        "references"
+      ],
+      "type": "object"
+    },
+    "decision": {
+      "additionalProperties": false,
+      "description": "A plan §11.5 `Decision` entry. docs/44 'conclusions require supporting edges', so `references` is non-empty here and only here, and each reference becomes a SUPPORTS edge into the compiled decision node.",
+      "properties": {
+        "claim": {
+          "$ref": "#/$defs/entry/properties/claim"
+        },
+        "references": {
+          "description": "At least one supporting artifact. An empty list is what docs/44 forbids: a conclusion with no supporting edge.",
+          "items": {
+            "$ref": "#/$defs/handle"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "subject": {
+          "$ref": "#/$defs/handle"
+        },
+        "text": {
+          "$ref": "#/$defs/entry/properties/text"
+        }
+      },
+      "required": [
+        "claim",
+        "subject",
+        "text",
+        "references"
+      ],
+      "type": "object"
+    },
+    "experiment": {
+      "additionalProperties": false,
+      "description": "A plan §11.5 `Experiment` entry. docs/44 'experiments become task proposals', and plan §11.2's twenty node kinds have no task kind, so an experiment compiles to a task proposal rather than to a node — which is why it carries neither `claim` nor `subject`.",
+      "properties": {
+        "references": {
+          "description": "Prior artifacts the experiment would be run against. Held to the same 'references must resolve' rule as an entry's.",
+          "items": {
+            "$ref": "#/$defs/handle"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "text": {
+          "$ref": "#/$defs/entry/properties/text"
+        }
+      },
+      "required": [
+        "text",
+        "references"
+      ],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "author": {
+      "description": "Who wrote the note, in evidence-graph-node.schema.json's actor vocabulary (RFC 0038 'Authority'). Pinned to the four schemes here rather than left an open string, because RFC 0038 D3's rule that an agent/human/ci actor may not appear as a checker requires the scheme to be readable from the bytes. Every scheme may author a note: everything a note compiles to is `proposed`, which docs/44 gives to 'any authorized human/agent'.",
+      "pattern": "^(agent|human|service|ci):[A-Za-z0-9._:-]+$",
+      "type": "string"
+    },
+    "candidate_invariants": {
+      "description": "plan §11.5 `Candidate invariant`. Compiles to `invariant_candidate` nodes (plan §11.2).",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "type": "array"
+    },
+    "counterexamples": {
+      "description": "plan §11.5 `Counterexample`. Compiles to `counterexample` nodes (plan §11.2). No REFUTES or COUNTEREXAMPLE_TO edge is emitted: whether a counterexample actually refutes a candidate is a semantic judgement the compiler cannot make, and asserting it from a section heading would be the empty-success shape the dossier rejects.",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "type": "array"
+    },
+    "created_at": {
+      "description": "When the note was written. Becomes every compiled node's `provenance.created_at`, so the compiler reads no clock (INV-005, ADR-0003). `format` and nothing more, exactly as evidence-graph-node.schema.json spells `provenance.created_at`; the canonical byte spelling is the daemon's Timestamp scalar and this document does not invent a third one.",
+      "format": "date-time",
+      "type": "string"
+    },
+    "decisions": {
+      "description": "plan §11.5 `Decision`. Compiles to `decision` nodes (plan §11.2 `ReviewDecision`) plus the SUPPORTS edges docs/44 requires of a conclusion.",
+      "items": {
+        "$ref": "#/$defs/decision"
+      },
+      "type": "array"
+    },
+    "experiments": {
+      "description": "plan §11.5 `Experiment`. Compiles to task proposals, not to nodes.",
+      "items": {
+        "$ref": "#/$defs/experiment"
+      },
+      "type": "array"
+    },
+    "goal": {
+      "$ref": "#/$defs/entry",
+      "description": "plan §11.5 `Goal`. Exactly one, and required: §11.5 opens 'for complex invention tasks', singular, and a note with two goals is two notes. Compiles to a `property` node — plan §11.2 `Property` is 'a property to be established', which is what a whiteboard goal is; `proof_goal` is reserved for the obligations below, which are what a proof worker is handed."
+    },
+    "known_facts": {
+      "description": "plan §11.5 `Known facts`. Compiles to `assumption` nodes (plan §11.2): what an author knows is, to the graph, what the author's claims are conditional on. Reading it as `observed` evidence would be exactly the promotion docs/44 forbids prose from performing.",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "type": "array"
+    },
+    "note_id": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/handle"
+        },
+        {
+          "$comment": "A whiteboard note is provisional (docs/44) and is deliberately not one of plan §4.4's content-addressed artifact classes, so it mints no new class prefix; the generic handle spelling is the one intent-registry-record.record_id and synthesis-candidate.candidate_id already use. The two exclusions are the classes it must not be able to impersonate: `ev_` names an evidence node or edge, and this note appears in `provenance.inputs` where an `ev_` handle would read as graph content; `cap_` tokens confer authority, and a note confers none.",
+          "not": {
+            "pattern": "^(ev|cap)_"
+          }
+        }
+      ],
+      "description": "The handle whoever holds the note names it by. It is an input, not an authority: it appears in every compiled node's `provenance.inputs` so the derivation is recorded, and nothing else."
+    },
+    "schema_epoch": {
+      "const": 1,
+      "description": "Schema epoch this instance was written against (schemas/README.md). It advances only on a breaking change to this artifact class, is not one of the six independently versioned epochs (RFC 0026 `rule versioning.epoch_independence`), and pins no semantics."
+    },
+    "schema_id": {
+      "const": "https://continuum.dev/schema/whiteboard-note.json",
+      "description": "Artifact-class identity of the governing schema: its `$id` with the `v<schema_epoch>/` segment removed (schemas/README.md). Stable across schema epochs."
+    },
+    "tool": {
+      "description": "The tool or model version that produced the note (docs/44 'Credit and provenance': actor/tool/model version). Optional, and the one member of the note that is optional rather than empty-able: `provenance.tool` is itself present exactly when a tool was named.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "unresolved_obligations": {
+      "description": "plan §11.5 `Unresolved obligation`. Compiles to `proof_goal` nodes (plan §11.2 `ProofGoal`, 'a goal handed to a proof worker'), which is what an unresolved obligation is.",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_epoch",
+    "note_id",
+    "author",
+    "created_at",
+    "goal",
+    "known_facts",
+    "candidate_invariants",
+    "counterexamples",
+    "unresolved_obligations",
+    "experiments",
+    "decisions"
+  ],
+  "title": "Whiteboard Note",
+  "type": "object"
+}

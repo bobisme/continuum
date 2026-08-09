@@ -1,0 +1,22 @@
+{
+  "artifact": "model_storage_v3",
+  "claim_id": "claim-storage-fsync-ordering",
+  "idempotency_key": "wb_ack_ordering_1:known_facts:0",
+  "kind": "assumption",
+  "labels": [
+    "whiteboard:known_facts"
+  ],
+  "node_id": "ev_139811334da646ace6db3d488e1dea0cf84aa3f13979e3d56ffe28603e7717c7",
+  "provenance": {
+    "actor": "agent:swarm-invariant-1",
+    "created_at": "2026-08-01T12:00:00.000Z",
+    "inputs": [
+      "in_ack_v1",
+      "wb_ack_ordering_1"
+    ],
+    "tool": "continuum-forge"
+  },
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/evidence-graph-node.json",
+  "status": "proposed"
+}

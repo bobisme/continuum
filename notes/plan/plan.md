@@ -1383,6 +1383,8 @@ Decision
 
 The compiler turns whiteboard entries into typed graph proposals, rejecting references to nonexistent artifacts or unsupported status claims.
 
+The seven headings above are a map, not the format: the note's normative shape is `schemas/whiteboard-note.schema.json` (INV-003), the section-to-node-kind mapping and the rest of what this prose leaves open are RFC 0038 W1–W9, and the library surface is `crates/continuum-evidence/src/whiteboard.rs`.
+
 ### 11.6 Swarm roles
 
 Recommended role decomposition:

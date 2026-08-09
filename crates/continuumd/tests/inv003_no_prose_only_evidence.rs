@@ -686,6 +686,10 @@ mod artifact_classes {
             file: "verification-task.schema.json",
         },
         SchemaBound {
+            class: "whiteboard-note",
+            file: "whiteboard-note.schema.json",
+        },
+        SchemaBound {
             class: "workspace-snapshot",
             file: "workspace-snapshot.schema.json",
         },

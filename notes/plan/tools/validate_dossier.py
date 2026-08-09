@@ -41,6 +41,7 @@ SCHEMA_PAIRS = {
     "schemas/intent-registry-record.schema.json": "schemas/examples/intent-registry-record.example.json",
     "schemas/redacted.schema.json": "schemas/examples/redacted.example.json",
     "schemas/promotion-receipt.schema.json": "schemas/examples/promotion-receipt.example.json",
+    "schemas/whiteboard-note.schema.json": "schemas/examples/whiteboard-note.example.json",
 }
 
 # Instances that live outside the dossier but are still governed by a dossier
@@ -48,10 +49,30 @@ SCHEMA_PAIRS = {
 # The `continuum-intent` fixtures are the contracts the Rust suite parses, and
 # INV-003 makes `schemas/` — not the parser — normative for their shape, so
 # their conformance belongs in this gate rather than in a hand-run command.
+#
+# The `continuum-evidence` whiteboard fixtures are the other direction of the
+# same rule: they are the records the plan §11.5 whiteboard compiler *emits*,
+# and `tests/whiteboard_compiler.rs` asserts the library renders exactly these
+# bytes. Validating them here is what makes "the compiler emits schema-conforming
+# proposals" a checked claim rather than a Rust assertion about itself; the note
+# the same suite compiles is `schemas/examples/whiteboard-note.example.json`,
+# already validated above.
 EXTERNAL_SCHEMA_PAIRS = {
     "schemas/intent-contract.schema.json": (
         "crates/continuum-intent/tests/fixtures/die-hard-contract.json",
         "crates/continuum-intent/tests/fixtures/replicated-register-contract.json",
+    ),
+    "schemas/evidence-graph-node.schema.json": (
+        "crates/continuum-evidence/tests/fixtures/whiteboard/node-goal.json",
+        "crates/continuum-evidence/tests/fixtures/whiteboard/node-known-fact.json",
+        "crates/continuum-evidence/tests/fixtures/whiteboard/node-candidate-invariant.json",
+        "crates/continuum-evidence/tests/fixtures/whiteboard/node-counterexample.json",
+        "crates/continuum-evidence/tests/fixtures/whiteboard/node-unresolved-obligation.json",
+        "crates/continuum-evidence/tests/fixtures/whiteboard/node-decision.json",
+    ),
+    "schemas/evidence-graph-edge.schema.json": (
+        "crates/continuum-evidence/tests/fixtures/whiteboard/edge-supports-crash.json",
+        "crates/continuum-evidence/tests/fixtures/whiteboard/edge-supports-model.json",
     ),
 }
 

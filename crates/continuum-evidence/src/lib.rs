@@ -35,6 +35,17 @@
 //! | [`conflict`] | conflicts as nodes, and resolution as a recorded transition | IMPL-04 |
 //! | [`graph`] | the append-only store, its refusals, and its queries | all four |
 //! | [`claim_status`] | the plan §11.4 lattice and its compare-and-set | PR-1 / IMPL-06 |
+//! | [`whiteboard`] | plan §11.5's seven sections, and the compiler that turns them into proposals | PHASE-A-DEL-04 |
+//!
+//! # The whiteboard compiler is here, and its wire verb is not
+//!
+//! plan §11.5's whiteboard is an *input* format, and INV-003 says an input format is a
+//! schema: `notes/plan/schemas/whiteboard-note.schema.json` is the normative one and
+//! [`whiteboard`] is transcribed from it. What the module deliberately does not carry is a
+//! wire operation — `whiteboard.compile` does not exist, because adding an operation moves
+//! the IDL, plan §10.2 and RFC 0027's authority table together and raises the protocol
+//! minor. The crate-level typed surface lands first and the wire spelling lands when its RFC
+//! decides it; that is the same order `continuum-forge` took.
 //!
 //! # This is the library, not the wire
 //!
@@ -83,3 +94,4 @@ pub mod graph;
 pub mod identity;
 pub mod node;
 pub mod provenance;
+pub mod whiteboard;

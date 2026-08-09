@@ -1,0 +1,22 @@
+{
+  "artifact": "goal_ack_durable_induction",
+  "claim_id": "claim-ack-after-durable",
+  "idempotency_key": "wb_ack_ordering_1:unresolved_obligations:0",
+  "kind": "proof_goal",
+  "labels": [
+    "whiteboard:unresolved_obligations"
+  ],
+  "node_id": "ev_6b3dcb0eb90cf25e56897af8417494395ddf28d739b651083a2dd0e01133dd8e",
+  "provenance": {
+    "actor": "agent:swarm-invariant-1",
+    "created_at": "2026-08-01T12:00:00.000Z",
+    "inputs": [
+      "model_storage_v3",
+      "wb_ack_ordering_1"
+    ],
+    "tool": "continuum-forge"
+  },
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/evidence-graph-node.json",
+  "status": "proposed"
+}

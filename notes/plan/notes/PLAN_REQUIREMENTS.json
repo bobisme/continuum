@@ -18,7 +18,7 @@
       "coverage": "any",
       "id": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "active",
@@ -30,7 +30,7 @@
       "id": "PHASE-A-DEL-01",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -42,7 +42,7 @@
       "id": "PHASE-A-DEL-02",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -54,7 +54,7 @@
       "id": "PHASE-A-DEL-03",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -66,7 +66,7 @@
       "id": "PHASE-A-DEL-04",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "active",
@@ -78,7 +78,7 @@
       "id": "PHASE-A-DEL-05",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "active",
@@ -90,7 +90,7 @@
       "id": "PHASE-A-DEL-06",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -102,7 +102,7 @@
       "id": "PHASE-A-DEL-07",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -114,7 +114,7 @@
       "id": "PHASE-A-DEL-08",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -126,7 +126,7 @@
       "id": "PHASE-A-DEL-09",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "active",
@@ -138,7 +138,7 @@
       "id": "PHASE-A-DEL-10",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -150,7 +150,7 @@
       "id": "PHASE-A-EXIT",
       "parent": "PHASE-A",
       "source": {
-        "line": 2100,
+        "line": 2102,
         "path": "plan.md"
       },
       "status": "active",
@@ -161,7 +161,7 @@
       "coverage": "any",
       "id": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -173,7 +173,7 @@
       "id": "PHASE-B-DEL-01",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -185,7 +185,7 @@
       "id": "PHASE-B-DEL-02",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -197,7 +197,7 @@
       "id": "PHASE-B-DEL-03",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -209,7 +209,7 @@
       "id": "PHASE-B-DEL-04",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -221,7 +221,7 @@
       "id": "PHASE-B-DEL-05",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -233,7 +233,7 @@
       "id": "PHASE-B-DEL-06",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -245,7 +245,7 @@
       "id": "PHASE-B-DEL-07",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -257,7 +257,7 @@
       "id": "PHASE-B-DEL-08",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -269,7 +269,7 @@
       "id": "PHASE-B-DEL-09",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -281,7 +281,7 @@
       "id": "PHASE-B-EXIT",
       "parent": "PHASE-B",
       "source": {
-        "line": 2198,
+        "line": 2200,
         "path": "plan.md"
       },
       "status": "active",
@@ -292,7 +292,7 @@
       "coverage": "any",
       "id": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -304,7 +304,7 @@
       "id": "PHASE-C-DEL-01",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -316,7 +316,7 @@
       "id": "PHASE-C-DEL-02",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -328,7 +328,7 @@
       "id": "PHASE-C-DEL-03",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -340,7 +340,7 @@
       "id": "PHASE-C-DEL-04",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -352,7 +352,7 @@
       "id": "PHASE-C-DEL-05",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -364,7 +364,7 @@
       "id": "PHASE-C-DEL-06",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -376,7 +376,7 @@
       "id": "PHASE-C-DEL-07",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -388,7 +388,7 @@
       "id": "PHASE-C-DEL-08",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -400,7 +400,7 @@
       "id": "PHASE-C-EXIT",
       "parent": "PHASE-C",
       "source": {
-        "line": 2233,
+        "line": 2235,
         "path": "plan.md"
       },
       "status": "active",
@@ -411,7 +411,7 @@
       "coverage": "any",
       "id": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -423,7 +423,7 @@
       "id": "PHASE-D-DEL-01",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -435,7 +435,7 @@
       "id": "PHASE-D-DEL-02",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -447,7 +447,7 @@
       "id": "PHASE-D-DEL-03",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -459,7 +459,7 @@
       "id": "PHASE-D-DEL-04",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -471,7 +471,7 @@
       "id": "PHASE-D-DEL-05",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -483,7 +483,7 @@
       "id": "PHASE-D-DEL-06",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -495,7 +495,7 @@
       "id": "PHASE-D-DEL-07",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -507,7 +507,7 @@
       "id": "PHASE-D-DEL-08",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -519,7 +519,7 @@
       "id": "PHASE-D-DEL-09",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -531,7 +531,7 @@
       "id": "PHASE-D-EXIT",
       "parent": "PHASE-D",
       "source": {
-        "line": 2272,
+        "line": 2274,
         "path": "plan.md"
       },
       "status": "active",
@@ -542,7 +542,7 @@
       "coverage": "any",
       "id": "PHASE-E",
       "source": {
-        "line": 2302,
+        "line": 2304,
         "path": "plan.md"
       },
       "status": "active",
@@ -554,7 +554,7 @@
       "id": "PHASE-E-DEL-01",
       "parent": "PHASE-E",
       "source": {
-        "line": 2302,
+        "line": 2304,
         "path": "plan.md"
       },
       "status": "active",
@@ -566,7 +566,7 @@
       "id": "PHASE-E-DEL-02",
       "parent": "PHASE-E",
       "source": {
-        "line": 2302,
+        "line": 2304,
         "path": "plan.md"
       },
       "status": "active",
@@ -578,7 +578,7 @@
       "id": "PHASE-E-DEL-03",
       "parent": "PHASE-E",
       "source": {
-        "line": 2302,
+        "line": 2304,
         "path": "plan.md"
       },
       "status": "active",
@@ -590,7 +590,7 @@
       "id": "PHASE-E-DEL-04",
       "parent": "PHASE-E",
       "source": {
-        "line": 2302,
+        "line": 2304,
         "path": "plan.md"
       },
       "status": "active",
@@ -602,7 +602,7 @@
       "id": "PHASE-E-DEL-05",
       "parent": "PHASE-E",
       "source": {
-        "line": 2302,
+        "line": 2304,
         "path": "plan.md"
       },
       "status": "active",
@@ -614,7 +614,7 @@
       "id": "PHASE-E-EXIT",
       "parent": "PHASE-E",
       "source": {
-        "line": 2302,
+        "line": 2304,
         "path": "plan.md"
       },
       "status": "active",
@@ -625,7 +625,7 @@
       "coverage": "any",
       "id": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -637,7 +637,7 @@
       "id": "PHASE-F-DEL-01",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -649,7 +649,7 @@
       "id": "PHASE-F-DEL-02",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -661,7 +661,7 @@
       "id": "PHASE-F-DEL-03",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -673,7 +673,7 @@
       "id": "PHASE-F-DEL-04",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -685,7 +685,7 @@
       "id": "PHASE-F-DEL-05",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -697,7 +697,7 @@
       "id": "PHASE-F-DEL-06",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -709,7 +709,7 @@
       "id": "PHASE-F-DEL-07",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -721,7 +721,7 @@
       "id": "PHASE-F-DEL-08",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -733,7 +733,7 @@
       "id": "PHASE-F-EXIT",
       "parent": "PHASE-F",
       "source": {
-        "line": 2318,
+        "line": 2320,
         "path": "plan.md"
       },
       "status": "active",
@@ -6830,7 +6830,7 @@
         "threshold": "ablation design per research/25 (raw trace vs pack on the agent benchmark); ratified win margin, quote-id=context-compilation-win-margin \"The Context Pack condition wins the general context-compilation ablation only if, on the held-out ContinuumBench diagnosis-and-repair split graded by the independent grader of research/33 with model, scaffold, and token budget held equal, it beats the raw-trace baseline by at least 10 percentage points of absolute task success with a 95 percent bootstrap confidence interval on the paired difference excluding zero, while delivering at least a 10x median per-task reduction in context bytes counting every expansion and staying within 2 percentage points of the raw-trace baseline on hidden-variant generalization.\"; kill (research/32): compact packs repeatedly induce incorrect repairs despite preservation checks"
       },
       "source": {
-        "line": 2653,
+        "line": 2655,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -6846,7 +6846,7 @@
         "threshold": "research/01 (stated there as a kill): at least an order-of-magnitude reduction on a non-artificial subset without a serious regression on dependent workloads (the \"explored classes\" denominator is a proposed ratification, to be fixed in research/01 before this row leaves draft); observer-indexed (docs/31): median \u22655\u00d7 on the observer-sensitive class, *checker* overhead <20% (distinct from the certificate-overhead row), zero mutation loss; kill (docs/31, research/13): witness cost dominates, or observer/property changes invalidate cached independence so often that reuse never pays for its witness cost \u2014 draft"
       },
       "source": {
-        "line": 2654,
+        "line": 2656,
         "path": "plan.md"
       },
       "status": "active",
@@ -6862,7 +6862,7 @@
         "threshold": "soundness gate per research/04: property-directed reduction is proven preserving (for the full property class it is applied to, fair cycles included) or disabled; speedup target and liveness corpus subset fixed at lane opening \u2014 draft"
       },
       "source": {
-        "line": 2655,
+        "line": 2657,
         "path": "plan.md"
       },
       "status": "active",
@@ -6878,7 +6878,7 @@
         "threshold": "ratified (research/26) quote-id=causal-minimization-core-ratio \"On the research/26 experiment corpus of real failures \u2014 traces produced by an actual defect, excluding any trace padded with semantically inert events (plan \u00a725) \u2014 the replay-preserving causal core must be \u226410% of trace length at the corpus median.\"; kill if minimization cost dominates verification"
       },
       "source": {
-        "line": 2656,
+        "line": 2658,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -6894,7 +6894,7 @@
         "threshold": "ratified (research/33) quote-id=neighborhood-adequacy-catch-rate \"On the docs/50-classified gaming corpus \u2014 at least 20 hidden mutations for each of the five docs/50 attack classes (intent, instrumentation, evidence, overfitting, resource), so at least 100 mutations in total \u2014 the \u00a78.3 neighborhood is adequate only if it catches at least 90 percent of the mutations overall with the one-sided 95 percent exact binomial lower bound on that rate above 80 percent and no single attack class below 75 percent, counting a mutation as caught only when property-directed neighboring exploration surfaces a neighbor on which the gaming patch fails and the receipt discloses that neighbor, with every mutation drawn from a family-level held-out split and graded by the independent grader of research/33.\"; the corpus is a Phase B G3 deliverable and does not exist today, so the ratified threshold binds when it lands; kill (research/33): hidden variants are too easy to leak or too hard to grade independently"
       },
       "source": {
-        "line": 2657,
+        "line": 2659,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -6910,7 +6910,7 @@
         "threshold": "clean-mismatch rate at the \u00a79.5 sampled audit rate (rate derives from \u00a78.6's confidence target) \u2014 draft; kill if dependency capture cannot be made trustworthy below file/module granularity"
       },
       "source": {
-        "line": 2658,
+        "line": 2660,
         "path": "plan.md"
       },
       "status": "active",
@@ -6926,7 +6926,7 @@
         "threshold": "rediscovery suite (named algorithms and count fixed at ratification \u2014 draft); kills (research/29): joint space overwhelms coupled-feedback gains; proof-complexity objective biases toward trivial designs; abstractions overfit finite bounds; agent proposals dominate and cannot be reproduced by structured search; kill (research/30): QD discovers nothing beyond multi-objective Pareto search on known benchmarks"
       },
       "source": {
-        "line": 2659,
+        "line": 2661,
         "path": "plan.md"
       },
       "status": "active",
@@ -6942,7 +6942,7 @@
         "threshold": "draft pending ratification: faithful Lab reproduction of \u226570% of curated known incidents under injected telemetry loss and clock uncertainty; always-on overhead \u22641%; \u22652\u00d7 reduction in surviving symmetry orbits per synthesized probe set; kill if most target properties are monitorable only as `Inconclusive` on two real systems, or the overhead budgets cannot be met"
       },
       "source": {
-        "line": 2660,
+        "line": 2662,
         "path": "plan.md"
       },
       "status": "active",
@@ -6958,7 +6958,7 @@
         "threshold": "draft pending ratification: 10/10 mutation-corpus mutants detected with zero false alarms on the correct implementation; machine-checked drain ranking for the replicated register; kill (research/09): invariant annotations become pervasive in real code, or the calculus cannot express asupersync's actual cancellation semantics"
       },
       "source": {
-        "line": 2661,
+        "line": 2663,
         "path": "plan.md"
       },
       "status": "active",
@@ -6974,7 +6974,7 @@
         "threshold": "ambiguity rate := fraction of abstract edits on the drift corpus yielding multiple or no concrete candidates (metric per research/31; the drift corpus is the lane deliverable; the numeric target is fixed in the note at ratification and quoted here) \u2014 draft; kill if most real mappings are too ambiguous, or users mistake candidate synchronization for verified preservation (measured under the G8 instruments)"
       },
       "source": {
-        "line": 2662,
+        "line": 2664,
         "path": "plan.md"
       },
       "status": "active",
@@ -6990,7 +6990,7 @@
         "threshold": "vs source/LSP loop baseline (qualitative; margin fixed at ratification \u2014 draft); kill if repair proposes weakening"
       },
       "source": {
-        "line": 2663,
+        "line": 2665,
         "path": "plan.md"
       },
       "status": "active",
@@ -7006,7 +7006,7 @@
         "threshold": "checking \u226410% of search time for large finite proofs, or acceptable asynchronous CI latency (docs/31); research/12 must gain a criteria section before this row leaves draft \u2014 draft"
       },
       "source": {
-        "line": 2664,
+        "line": 2666,
         "path": "plan.md"
       },
       "status": "active",
@@ -7022,7 +7022,7 @@
         "threshold": "docs/31's stated promote/kill pair (unbounded session/request protocol with tractable orbit growth and Lean-proved equivariance)"
       },
       "source": {
-        "line": 2665,
+        "line": 2667,
         "path": "plan.md"
       },
       "status": "active",
@@ -7038,7 +7038,7 @@
         "threshold": "docs/31's stated promote/kill pair"
       },
       "source": {
-        "line": 2666,
+        "line": 2668,
         "path": "plan.md"
       },
       "status": "active",
@@ -7054,7 +7054,7 @@
         "threshold": "docs/31's stated promote/defer pair; not a 1.0 goal (ADR-0029)"
       },
       "source": {
-        "line": 2667,
+        "line": 2669,
         "path": "plan.md"
       },
       "status": "deferred",
@@ -7070,7 +7070,7 @@
         "threshold": "reproduces the standard litmus corpus under the declared model before any envelope upgrade; until then every memory dimension reads `Unsupported(sequential-consistency-only)`; defer: SC-only is a declared 1.0 non-goal"
       },
       "source": {
-        "line": 2668,
+        "line": 2670,
         "path": "plan.md"
       },
       "status": "deferred",
@@ -7086,7 +7086,7 @@
         "threshold": "per-ADR staging; until shipped, timing fields in Intent Contracts remain declarative assumptions (B11); defer: post-1.0"
       },
       "source": {
-        "line": 2669,
+        "line": 2671,
         "path": "plan.md"
       },
       "status": "deferred",
@@ -7102,7 +7102,7 @@
         "threshold": "native ACI vs a disciplined-shell baseline (harness per research/25) on the agent benchmark: success-rate, cost, and invalid-action margins ratified \u2014 quote-id=aci-benchmark-margins \"On the agent benchmark, with an identical base model, task set, and per-task budget, native ACI must beat the disciplined-shell baseline by at least 10 percentage points of absolute task success, at least 30% fewer interface bytes per solved task (bytes, not tokens, are the graded cost denominator per RFC 0027), and at least a 50% relative reduction in invalid-action rate, with every metric paired per task over at least 3 seeds and the success margin's one-sided 95% lower bound above zero; missing any one of the three margins fails G0-DX-10 and forces protocol redesign before freeze.\"; kills (research/25): typed surface loses to disciplined shell; schema churn dominates agent cost; handles do not reduce invalid-action rate"
       },
       "source": {
-        "line": 2670,
+        "line": 2672,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7118,7 +7118,7 @@
         "threshold": "diagnosis accuracy/time vs raw-trace baseline under the G8 instruments and Phase C formative sessions; thresholds fixed in the docs/48 preregistration \u2014 draft; kills (research/34): experts prefer raw output and newcomers gain no accuracy; assistance raises confidence faster than correctness"
       },
       "source": {
-        "line": 2671,
+        "line": 2673,
         "path": "plan.md"
       },
       "status": "active",
@@ -7134,7 +7134,7 @@
         "threshold": "ratified promotion gate (research/35) \u2014 quote-id=workbench-security-promotion-gate \"Autonomous promotion stays disabled until a single red-team corpus run against the current build and dependency epoch clears every case, where the corpus contains at least three cases for each of the ten red-team classes of research/35, one per prohibited outcome named in its kill criterion (unprivileged intent-status alteration, unprivileged evidence-status alteration, isolation escape), plus one case for each of the seven intent-policy blocks and one escape attempt against each of the eight worker-isolation controls of docs/49, for at least 45 cases in total; the run clears only if every case is refused by a trusted authority check and recorded in the append-only audit log, with zero unprivileged intent-status or evidence-status alterations and zero isolation escapes, and any later case that succeeds re-locks autonomous promotion until the corpus, enlarged with that case and its regression test, clears again in full, leaving human-approved promotion as the standing fallback.\"; no project kill for an individual vulnerability (research/35): a successful case re-locks autonomous promotion and falls back to human approval"
       },
       "source": {
-        "line": 2672,
+        "line": 2674,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7150,7 +7150,7 @@
         "threshold": "concurrent authority enforcement validated beyond the finite spike (docs/53: \"authority table only, not enforcement\") \u2014 ratified (research/08) quote-id=evidence-graph-enforcement \"Multi-agent evidence-graph enforcement is validated only when four \u00a711.7 properties \u2014 promotion restricted to trusted service identities, per-claim linearized compare-and-set with no lattice regression and no lost promotion, deterministic conflict materialization, and idempotent retry \u2014 hold with zero counterexamples under both exhaustive exploration of a bounded model of the \u00a711.7 write protocol at 3 concurrent writers over 2 claim identities and an adversarial campaign against a persistent continuumd of at least 1,000 distinct seeded schedules per configuration across the docs/19 \u00a77 determinism matrix (writer counts 1, 2, 8, and 32 contending on a single claim identity, debug and release, with process restarts), in which every losing promotion returns the typed StatusConflict of plan \u00a710.3 rather than a generic error, every replayed idempotency key returns the original node identity, every injected contradictory claim pair materializes exactly one Conflict node whose content identity is byte-identical across all schedules, seeds, worker counts, and restarts, and every recorded per-claim promotion history is accepted by an independent linearizability checker against the \u00a711.4 lattice, one violation in one trial failing the lane.\"; kill (research/08): the four properties hold only by serializing every writer behind one global lock, or conflict artifacts cannot be made deterministic; fallback below applies if enforcement cannot be validated"
       },
       "source": {
-        "line": 2673,
+        "line": 2675,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7166,7 +7166,7 @@
         "threshold": "baseline: the optimal-DPOR and unfolding exploration of RFC 0004 on the same high-width workload, never raw interleaving \u2014 docs/31's hypothesis is that cells beat *optimal* DPOR and unfoldings, and C015 grades it on a preregistered benchmark; promote (docs/31): \u22653\u00d7 memory or time improvement on at least two real protocol classes, with a preservation theorem for the property class it is applied to, and no regression worse than 25% on the dependent workloads, which is docs/07 \u00a77's non-regression clause retained; kill (docs/31): only synthetic grid benchmarks win, or counterexample explanations worsen materially \u2014 draft. Reconciled against docs/07 \u00a77, which states the weaker pair \u22652\u00d7 on 3 of 5 target benchmarks with no preservation theorem: docs/31 wins on both magnitude and the theorem, because a reduction with no preservation proof cannot carry a property-scoped assurance claim (INV-013), while docs/07's non-regression clause survives as an added conjunct docs/31 lacks. The residual disagreement \u2014 \"at least two real protocol classes\" against \"3 of 5 target benchmarks\" \u2014 is what research/01 must settle at ratification with matching quote-id markers. This \u22653\u00d7 is a representation-level bar against an already-reduced baseline; it does not restate the \u226510\u00d7 lane-level bar of the exploration-reduction row above, and neither absorbs the other."
       },
       "source": {
-        "line": 2674,
+        "line": 2676,
         "path": "plan.md"
       },
       "status": "active",
@@ -7182,7 +7182,7 @@
         "threshold": "baseline: each analysis's specialized hand-written traversal \u2014 research/19's experiment compares one generic acyclic dynamic-programming kernel against those specialized implementations on both code complexity and performance, and C034 is graded on specialized-baseline equivalence; promote (docs/31): at least three production analyses share the one kernel and each stays within 15% of its specialized baseline; kill (docs/31): the algebra obscures numerical or game semantics, or introduces hot-path abstraction cost \u2014 and per research/19's probability warning and ADR-0030, a result that needs probability treated as an ordinary commutative semiring where nondeterminism or a scheduler adversary requires MDP or stochastic-game semantics is a kill signal, never a narrower promotion \u2014 draft. Reconciled with research/19: docs/31 counts three production analyses, research/19 enumerates four kernels \u2014 reachability, shortest causal witness, equivalence-class-representative counting, minimal fault-set provenance \u2014 and ADR-0030 names five algebras. The note's enumeration wins on which analyses are in scope, because a bare count names nothing measurable, and docs/31's three is read as a floor over that enumeration rather than a cap. research/19 states only the qualitative \"promote only if the abstraction pays rent\", so docs/31's 15% is this lane's only number and research/19 must fix the margin, the workload, and the code-complexity metric with matching quote-id markers before this row leaves draft."
       },
       "source": {
-        "line": 2675,
+        "line": 2677,
         "path": "plan.md"
       },
       "status": "active",
@@ -7198,7 +7198,7 @@
         "threshold": "baseline: the hand-written minimal assumptions C028 names, on the \u00a77.2 liveness corpus subset; promote (docs/31): weaker, deployable assumptions or repairs on at least five liveness cases, where \"deployable\" is research/15's operational assumption type \u2014 all four interpretations present: logical formula, simulator adversary restriction, production monitor or SLO, and deployment mechanism or human procedure \u2014 so an assumption with no operational interpretation is non-deployable by the note's own rule and does not count toward the five, and \"weaker\" is Pareto-minimality in research/15's assumption-strength lattice over logical strength, implementation cost, observability, availability impact and security; the five are counted on synthesis output only, because research/15 ships counterstrategies first and lets synthesis follow once users trust the game semantics; kill (docs/31): grammars require hand-encoding the answer, or synthesized assumptions are operationally meaningless; kill also (research/15) if parity or Streett solving state-explodes on that corpus subset \u2014 draft: research/15 records risks but no criteria section, so the five-case count, the corpus subset, and the weakness metric must be fixed there with matching quote-id markers before this row leaves draft."
       },
       "source": {
-        "line": 2676,
+        "line": 2678,
         "path": "plan.md"
       },
       "status": "active",
@@ -7214,7 +7214,7 @@
         "threshold": "baseline: human-authored abstraction variables and refinement maps, compared on total human plus compute cost over the same projects (docs/07 \u00a77); promote (docs/31 with docs/07 \u00a77): proposed views and refinement maps survive independent checking and reduce that total cost on multiple projects, where independent checking is research/24's anti-overfitting set \u2014 held-out schedules and faults, semantic mutants, neighboring causal classes, stronger bounds, differential reference execution, and a simulation proof or a clearly bounded evidence class, with agreement on a finite trace set explicitly not refinement; kill as an assurance feature (docs/31): results require manual semantic repair, in which case the capability is retained as suggestion-only, promoted only with a receipt per research/24's agent workflow, and no assurance claim may depend on it \u2014 DRAFT, AND QUALITATIVE IN EVERY SOURCE: no number exists for this lane in docs/31, docs/07 \u00a77, or research/24, and this register does not invent one on the lane's behalf. Reconciled: docs/31 says \"reduce human work\" and docs/07 \u00a77 says \"total human+compute cost\"; docs/07's denominator wins, because a map that halves human effort while multiplying checking compute has not reduced cost. Ratification must fix that denominator, the meaning of \"multiple projects\", and the survival rate in research/24 with matching quote-id markers."
       },
       "source": {
-        "line": 2677,
+        "line": 2679,
         "path": "plan.md"
       },
       "status": "active",
@@ -7228,7 +7228,7 @@
         "ledger_status": "paid, `schemas/continuumd-native-protocol.idl`"
       },
       "source": {
-        "line": 2776,
+        "line": 2778,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7242,7 +7242,7 @@
         "ledger_status": "paid, PR 0"
       },
       "source": {
-        "line": 2778,
+        "line": 2780,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7256,7 +7256,7 @@
         "ledger_status": "paid, PR 0"
       },
       "source": {
-        "line": 2781,
+        "line": 2783,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7270,7 +7270,7 @@
         "ledger_status": "paid, PR 0"
       },
       "source": {
-        "line": 2790,
+        "line": 2792,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7284,7 +7284,7 @@
         "ledger_status": "paid, PR 0"
       },
       "source": {
-        "line": 2804,
+        "line": 2806,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7298,7 +7298,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2814,
+        "line": 2816,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7312,7 +7312,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2819,
+        "line": 2821,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7326,7 +7326,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2823,
+        "line": 2825,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7340,7 +7340,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2826,
+        "line": 2828,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7354,7 +7354,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2828,
+        "line": 2830,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7368,7 +7368,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2830,
+        "line": 2832,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7382,7 +7382,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2839,
+        "line": 2841,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7396,7 +7396,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2846,
+        "line": 2848,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -7410,7 +7410,7 @@
         "ledger_status": "paid, review 5"
       },
       "source": {
-        "line": 2852,
+        "line": 2854,
         "path": "plan.md"
       },
       "status": "satisfied",
@@ -10767,7 +10767,7 @@
       "coverage": "leaf",
       "id": "METRIC-PRODUCT-01",
       "source": {
-        "line": 2551,
+        "line": 2553,
         "path": "plan.md"
       },
       "status": "active",
@@ -10778,7 +10778,7 @@
       "coverage": "leaf",
       "id": "METRIC-PRODUCT-02",
       "source": {
-        "line": 2551,
+        "line": 2553,
         "path": "plan.md"
       },
       "status": "active",
@@ -10789,7 +10789,7 @@
       "coverage": "leaf",
       "id": "METRIC-PRODUCT-03",
       "source": {
-        "line": 2551,
+        "line": 2553,
         "path": "plan.md"
       },
       "status": "active",
@@ -10800,7 +10800,7 @@
       "coverage": "leaf",
       "id": "METRIC-PRODUCT-04",
       "source": {
-        "line": 2551,
+        "line": 2553,
         "path": "plan.md"
       },
       "status": "active",
@@ -10811,7 +10811,7 @@
       "coverage": "leaf",
       "id": "METRIC-PRODUCT-05",
       "source": {
-        "line": 2551,
+        "line": 2553,
         "path": "plan.md"
       },
       "status": "active",
@@ -10822,7 +10822,7 @@
       "coverage": "leaf",
       "id": "METRIC-PRODUCT-06",
       "source": {
-        "line": 2551,
+        "line": 2553,
         "path": "plan.md"
       },
       "status": "active",
@@ -10833,7 +10833,7 @@
       "coverage": "leaf",
       "id": "METRIC-VERIFICATION-01",
       "source": {
-        "line": 2560,
+        "line": 2562,
         "path": "plan.md"
       },
       "status": "active",
@@ -10844,7 +10844,7 @@
       "coverage": "leaf",
       "id": "METRIC-VERIFICATION-02",
       "source": {
-        "line": 2560,
+        "line": 2562,
         "path": "plan.md"
       },
       "status": "active",
@@ -10855,7 +10855,7 @@
       "coverage": "leaf",
       "id": "METRIC-VERIFICATION-03",
       "source": {
-        "line": 2560,
+        "line": 2562,
         "path": "plan.md"
       },
       "status": "active",
@@ -10866,7 +10866,7 @@
       "coverage": "leaf",
       "id": "METRIC-VERIFICATION-04",
       "source": {
-        "line": 2560,
+        "line": 2562,
         "path": "plan.md"
       },
       "status": "active",
@@ -10877,7 +10877,7 @@
       "coverage": "leaf",
       "id": "METRIC-VERIFICATION-05",
       "source": {
-        "line": 2560,
+        "line": 2562,
         "path": "plan.md"
       },
       "status": "active",
@@ -10888,7 +10888,7 @@
       "coverage": "leaf",
       "id": "METRIC-VERIFICATION-06",
       "source": {
-        "line": 2560,
+        "line": 2562,
         "path": "plan.md"
       },
       "status": "active",
@@ -10899,7 +10899,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-01",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10910,7 +10910,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-02",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10921,7 +10921,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-03",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10932,7 +10932,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-04",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10943,7 +10943,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-05",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10954,7 +10954,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-06",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10965,7 +10965,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-07",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10976,7 +10976,7 @@
       "coverage": "leaf",
       "id": "METRIC-AGENTS-08",
       "source": {
-        "line": 2569,
+        "line": 2571,
         "path": "plan.md"
       },
       "status": "active",
@@ -10987,7 +10987,7 @@
       "coverage": "leaf",
       "id": "METRIC-FORGE-01",
       "source": {
-        "line": 2580,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -10998,7 +10998,7 @@
       "coverage": "leaf",
       "id": "METRIC-FORGE-02",
       "source": {
-        "line": 2580,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -11009,7 +11009,7 @@
       "coverage": "leaf",
       "id": "METRIC-FORGE-03",
       "source": {
-        "line": 2580,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -11020,7 +11020,7 @@
       "coverage": "leaf",
       "id": "METRIC-FORGE-04",
       "source": {
-        "line": 2580,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -11031,7 +11031,7 @@
       "coverage": "leaf",
       "id": "METRIC-FORGE-05",
       "source": {
-        "line": 2580,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -11042,7 +11042,7 @@
       "coverage": "leaf",
       "id": "METRIC-FORGE-06",
       "source": {
-        "line": 2580,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -11053,7 +11053,7 @@
       "coverage": "leaf",
       "id": "METRIC-FORGE-07",
       "source": {
-        "line": 2580,
+        "line": 2582,
         "path": "plan.md"
       },
       "status": "active",
@@ -11064,7 +11064,7 @@
       "coverage": "leaf",
       "id": "KILL-01",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11075,7 +11075,7 @@
       "coverage": "leaf",
       "id": "KILL-02",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11086,7 +11086,7 @@
       "coverage": "leaf",
       "id": "KILL-03",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11097,7 +11097,7 @@
       "coverage": "leaf",
       "id": "KILL-04",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11108,7 +11108,7 @@
       "coverage": "leaf",
       "id": "KILL-05",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11119,7 +11119,7 @@
       "coverage": "leaf",
       "id": "KILL-06",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11130,7 +11130,7 @@
       "coverage": "leaf",
       "id": "KILL-07",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11141,7 +11141,7 @@
       "coverage": "leaf",
       "id": "KILL-08",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11152,7 +11152,7 @@
       "coverage": "leaf",
       "id": "KILL-09",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11163,7 +11163,7 @@
       "coverage": "leaf",
       "id": "KILL-10",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11174,7 +11174,7 @@
       "coverage": "leaf",
       "id": "KILL-11",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11185,7 +11185,7 @@
       "coverage": "leaf",
       "id": "KILL-12",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11196,7 +11196,7 @@
       "coverage": "leaf",
       "id": "KILL-13",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11207,7 +11207,7 @@
       "coverage": "leaf",
       "id": "KILL-14",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11218,7 +11218,7 @@
       "coverage": "leaf",
       "id": "KILL-15",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11229,7 +11229,7 @@
       "coverage": "leaf",
       "id": "KILL-16",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11240,7 +11240,7 @@
       "coverage": "leaf",
       "id": "KILL-17",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11251,7 +11251,7 @@
       "coverage": "leaf",
       "id": "KILL-18",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",
@@ -11262,7 +11262,7 @@
       "coverage": "leaf",
       "id": "KILL-19",
       "source": {
-        "line": 2592,
+        "line": 2594,
         "path": "plan.md"
       },
       "status": "active",

@@ -1,0 +1,75 @@
+{
+  "author": "agent:swarm-invariant-1",
+  "candidate_invariants": [
+    {
+      "claim": "claim-ack-after-durable",
+      "references": [
+        "model_storage_v3"
+      ],
+      "subject": "inv_ack_implies_durable",
+      "text": "For every ack, the corresponding write is already in the durable set."
+    }
+  ],
+  "counterexamples": [
+    {
+      "claim": "claim-ack-after-durable",
+      "references": [
+        "model_storage_v3"
+      ],
+      "subject": "crash_ack_before_fsync",
+      "text": "A schedule that publishes the reply between the buffer write and the fsync."
+    }
+  ],
+  "created_at": "2026-08-01T12:00:00.000Z",
+  "decisions": [
+    {
+      "claim": "claim-observer-contract",
+      "references": [
+        "crash_ack_before_fsync",
+        "model_storage_v3"
+      ],
+      "subject": "dec_observer_durable",
+      "text": "Adopt the durable-visibility observer contract for this property."
+    }
+  ],
+  "experiments": [
+    {
+      "references": [
+        "crash_ack_before_fsync"
+      ],
+      "text": "Re-run the DPOR exploration with the observer that distinguishes buffer-visible from durable."
+    }
+  ],
+  "goal": {
+    "claim": "claim-ack-after-durable",
+    "references": [
+      "in_ack_v1"
+    ],
+    "subject": "prop_ack_after_durable",
+    "text": "Establish that a reply is published only after the write it acknowledges is durable."
+  },
+  "known_facts": [
+    {
+      "claim": "claim-storage-fsync-ordering",
+      "references": [
+        "in_ack_v1"
+      ],
+      "subject": "model_storage_v3",
+      "text": "The storage domain pack orders fsync before the completion event."
+    }
+  ],
+  "note_id": "wb_ack_ordering_1",
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/whiteboard-note.json",
+  "tool": "continuum-forge",
+  "unresolved_obligations": [
+    {
+      "claim": "claim-ack-after-durable",
+      "references": [
+        "model_storage_v3"
+      ],
+      "subject": "goal_ack_durable_induction",
+      "text": "The induction step for the multi-writer case is not discharged."
+    }
+  ]
+}

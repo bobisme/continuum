@@ -1,0 +1,22 @@
+{
+  "artifact": "inv_ack_implies_durable",
+  "claim_id": "claim-ack-after-durable",
+  "idempotency_key": "wb_ack_ordering_1:candidate_invariants:0",
+  "kind": "invariant_candidate",
+  "labels": [
+    "whiteboard:candidate_invariants"
+  ],
+  "node_id": "ev_dd2c8681a5230f2e3f2587c42f303959b0b1ffaf4054b121e74589dd8aa88da4",
+  "provenance": {
+    "actor": "agent:swarm-invariant-1",
+    "created_at": "2026-08-01T12:00:00.000Z",
+    "inputs": [
+      "model_storage_v3",
+      "wb_ack_ordering_1"
+    ],
+    "tool": "continuum-forge"
+  },
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/evidence-graph-node.json",
+  "status": "proposed"
+}

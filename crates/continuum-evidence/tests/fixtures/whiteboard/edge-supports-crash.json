@@ -1,0 +1,21 @@
+{
+  "edge_id": "ev_bf879ec1ef56904eb84da93d8464dd746cab3c9eb02934e68fbbb9a81624b55b",
+  "evidence": [
+    "crash_ack_before_fsync"
+  ],
+  "from": "ev_d25ee972dde2d7e201cef105bbaa8031ac5c2971809823bb63e504929fe07833",
+  "kind": "SUPPORTS",
+  "provenance": {
+    "actor": "agent:swarm-invariant-1",
+    "created_at": "2026-08-01T12:00:00.000Z",
+    "inputs": [
+      "crash_ack_before_fsync",
+      "model_storage_v3",
+      "wb_ack_ordering_1"
+    ],
+    "tool": "continuum-forge"
+  },
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/evidence-graph-edge.json",
+  "to": "ev_22f0209b0e6bf796d2583cd67a3f0fb71008297f7b811afcb6fea7021cfb79a9"
+}
