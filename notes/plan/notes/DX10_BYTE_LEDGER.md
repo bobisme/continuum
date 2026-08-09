@@ -49,6 +49,16 @@ against the ratified margin, and an implementation order.
    sum-check fails by more, and the set now costs no extra round trip for any client rather
    than none on this mix alone. §3 C7 carries the falsification, §4 the corrected sum-check,
    §6 the corrected order.
+7. **Erratum, 2026-08-09 — the wire-visibility column is falsified for the whole set, and the
+   3.6 bundle is near-empty.** `bn-2in7i` falsified C5's class the same way `bn-6fuu5`
+   falsified C7's, and commissioned a presence-marker pre-check of the five that were never
+   checked. `bn-d2bdi` ran it: **C1, C2, C3, C4a and C6 are major-gated**, and the only
+   survivor is **C4b in a modified form — a new operation, not the declared trim — worth 494 B
+   per solved task**, 6.2% of the gap the ratified floor needs. Of the corrected six-item 3.6
+   set's 4,060 B per solved task, **3,566 B (87.8%) moves to the 4.0 horizon**. §8 carries the
+   verdicts, the quoted declarations, the round-2 errata and the restated sum-check. Both
+   conclusions of points 4 and 5 hold unchanged; what changes is the *version* at which any of
+   it is available, and that is a decision above this note.
 
 ---
 
@@ -724,3 +734,383 @@ bundled — §4 for the arithmetic.
   are computed against *this* mix; a client population that reads full task records or builds
   snapshots from unregistered components pays more, and the break-evens in §3 are where to
   check that.
+
+---
+
+## 8. Round-2 wire-visibility pre-check — C1, C2, C3, C4, C6
+
+**Amendment, `bn-d2bdi`, 2026-08-09.** Nothing above this heading is rewritten. §3's mechanisms
+and §4's and §6's arithmetic stay as the record of what was projected; this section states what
+each mechanism's own declaration permits, and it changes the *version* at which the projections
+are collectable, not the projections.
+
+**Why it exists.** Two consecutive items had their wire-visibility class falsified in the same
+direction — C7 by `bn-6fuu5`, C5 by `bn-2in7i` — and both fell on the same rule: a mechanism
+that suppresses or restructures a member moves a presence marker, which
+`rule versioning.breaking_change` makes a MAJOR. The remaining five were classified by the same
+method and none had been checked against that rule. `bn-2in7i`'s recommendation was to check all
+five before any was commissioned. This is that check.
+
+**Label note.** The bone text that commissioned this section swapped two labels. The ledger's
+labels govern and the bone IDs disambiguate: **C4 is `SnapshotComponents`, `bn-2ug29`**, and
+**C6 is connection-scoped handle aliases, `bn-h7vn7`**.
+
+### 8.1 Method
+
+Three steps per item, and the third is what makes a verdict rather than a reading.
+
+1. **Quote the declaration.** `notes/plan/schemas/continuumd-native-protocol.idl` is the verdict
+   source — the member, its presence marker, its owning struct and its line.
+2. **Apply both rules in full.** `rule versioning.compatible_change` at line 650 opens "Within a
+   protocol major, only compatible changes are permitted, and each MUST raise the minor version"
+   and then names exactly five: adding an operation; adding an `optional` field; adding an enum
+   member to an `@open` enum; relaxing a server-side constraint; adding an error code. **A
+   mechanism that is none of the five is not permitted within major 3 at all** — the rule is a
+   closed list, not a set of examples. `rule versioning.breaking_change` at line 662 names what
+   must advance the major, "changing a field's type or presence marker" first among them, and
+   requires the plan §4.6 typed `Preserved | Revalidate | Incompatible` statement **before** the
+   change is applied.
+3. **Take the verdict mechanically.** Where presence is the question, a real recorded value is
+   re-encoded with `continuumd`'s own codec, the member is removed by `variants::without_member`
+   — the tested canonical-JSON surgery `bn-2in7i` built — and the frame is fed back to the
+   decoder **this repo generates from that declaration**. What the decoder does is the verdict.
+   Measurements below were taken over the same 172-answer recording sweep as §2, and the landed
+   anchors were reproduced first: 172 answers, 170,584 result B, 17,208 B of
+   `SnapshotComponents` over 24 `workspace.create` calls, 144 `ArtifactRef` values, 324 omission
+   records, 628 digest occurrences at 40,192 B.
+
+### 8.2 The verdict table
+
+| item | bone | mechanism as specified | declaration it touches | verdict | 3.6 B/solved |
+|---|---|---|---|---|---:|
+| **C1** | `bn-1xy9r` | drop `kind`; drop `commitment` on a repeat; carry a ref on first mention only | `ArtifactRef.kind: String required` — IDL 1421 | **major-gated** | **0** |
+| **C2** | `bn-1sxds` | omission profile in `ServerWelcome`, one record in place of the enumeration | `ResultEnvelope.omissions: list<Omission> required` — IDL 1659; `enum OmissionReason` closed — IDL 1183 | **eligible-with-modified-mechanism, worth 0 B** | **0** |
+| **C3** | `bn-2iyci` | assurance profile by reference, partition by value | `AssuranceEnvelope` nine members `required` — IDL 1407-1415 | **eligible-with-modified-mechanism, worth 0 B** | **0** |
+| **C4a** | `bn-2ug29` | drop `files`, let the empty required lists be absent | `SnapshotComponents.files: list<Commitment> required` — IDL 2653, and eight peers | **major-gated** | **0** |
+| **C4b** | `bn-2ug29` | `workspace.create` naming a registered corpus port by commitment | no declaration moves — a **new operation** under `compatible_change` clause 1 | **eligible-with-modified-mechanism, and it is the only survivor** | **494** |
+| **C6** | `bn-h7vn7` | class prefix plus a connection-local ordinal after first mention | `rule handshake.no_session_state` — IDL 2124; `rule versioning.handle_stability` — IDL 708 | **major-gated, and blocked by INV-002 above the version question** | **0** |
+
+Two rows carry a shape the C7 precedent named and this pre-check found twice more: a mechanism
+whose conforming version is admissible and **worth nothing**. C7's conforming ceiling measured
+−49 to −255 B per solved task; C1's move 2 measures **−236 B over the matrix**; C2's and C3's
+conforming halves measure **exactly 0 B**. An "eligible-with-modified-mechanism" verdict is not
+a saving until the modified mechanism is priced, and three of the four here price at zero or
+below.
+
+### 8.3 C1 — `artifacts` first-mention and handle-only — MAJOR-GATED
+
+**Declarations.**
+
+```text
+/// A typed artifact reference in a result.
+struct ArtifactRef {                                    // IDL 1419
+  /// Artifact class, the plan §4.4 prefix without the underscore.
+  kind: String required;                                // IDL 1421
+  handle: ArtifactHandle required;                      // IDL 1422
+  /// Content commitment, when the artifact is content-addressed.
+  commitment: Commitment optional;                      // IDL 1424
+  redacted: Redacted optional;                          // IDL 1426
+}
+```
+
+**Move 1, drop `kind` — MAJOR.** `kind` is `required`. Taken mechanically: a real recorded ref,
+re-encoded and stripped, comes back
+`CodecError::MissingField { declared_by: "ArtifactRef", field: "kind" }`. RFC 0026 also polices
+this member twice by hand — its result-envelope table reads "typed refs
+`kind`, `handle`, `commitment?`, `redacted?`, **not bare handles**", and its correction 25
+corrects docs/36 for spelling a `kind` value wrongly. A member the RFC corrects other documents
+about is not a member a minor may delete. **Measured worth: 1,896 B over the matrix, 77 B per
+solved task** — see the erratum in §8.7, the ledger's 2,040 is 1 B per ref too high.
+
+**Move 2, drop `commitment` on a repeat — admissible-shaped and NEGATIVE.** The member is
+`optional`, so the decoder accepts its absence and this is the one move in the whole set that
+moves no marker. It fails on two other grounds and the second is measured.
+
+- *It states something false.* The declaration conditions absence — "Content commitment, when
+  the artifact is content-addressed". On today's wire `commitment` is present on all 84 `task`
+  refs and absent on all 60 `ws` refs, so absence already means "not content-addressed". Making
+  it also mean "you already have it" is the same species of move as writing null over a pinnable
+  epoch, which `rule envelope.epochs_named` forbids and which `bn-2in7i` refused. RFC 0026's
+  redaction section states the general principle outright: "a client MUST be able to tell
+  'withheld' from 'absent' structurally, without inference."
+- *Conforming, it loses.* INV-007 requires a deliberate omission to be recorded. The cheapest
+  record the codec will encode measures **58 B** and the elided commitments measure **5,100 B
+  over 92 repeat refs**, so the conforming form is **−236 B over the matrix**. It cannot even be
+  spelled: `enum OmissionReason` at IDL 1183 is **closed** with five members — `budget`,
+  `redaction`, `unsupported`, `heuristic-cutoff`, `slice-irrelevant` — none of which means
+  "already carried", and `rule versioning.breaking_change` makes adding a member to a closed enum
+  a MAJOR.
+
+**Move 3, first mention only — MAJOR, and its premise is false on this deployment.** The list
+stays `required` and present, so the decoder accepts a shorter one; the gate is elsewhere, and
+this is the finding worth carrying forward:
+
+> **8 of the 92 repeat refs are not byte-identical to their first mention.** They carry a
+> *different* `commitment` under the *same* `handle`, on `task.status` and `task.resume` — a
+> task's content identity advances as the task does. C1's premise, "the third copy carries no
+> information the client does not hold", is false on 8.7% of the repeats it would elide.
+
+That is C5's hazard exactly, and worse: `bn-2in7i` found 172 of 172 epoch sets identical, so
+suppression there would have elided only repetition. Here suppression would elide a **change**,
+on this very mix, with no rule requiring the daemon to notice. Restricted to the 84 genuinely
+byte-identical repeats the move is worth **12,440 B, 506 B per solved task** — and it still
+needs `rule artifacts.first_mention` to fix what an elided repeat means, which is none of
+`compatible_change`'s five and therefore not permitted within major 3. RFC 0026 additionally
+requires the list to be complete in the one case it discusses — "A redacted artifact still
+appears in `artifacts` with its `kind` and `handle`; it is not removed from the list" — and its
+existence-oracle section refuses to let the list vary with what the daemon has already sent: "A
+dedup that is invisible in `artifacts` but visible in reported cost is still an oracle."
+
+**One theory checked and refused.** `commitment` is not a second spelling of `handle` the way
+`kind` is a prefix of it: **0 of 84** task refs carry a commitment equal to their handle. There
+is no third derivable member here.
+
+**C1 at 3.6: 0 B.** At a major, moves 1 and 3 together are worth **14,336 B, 583 B per solved
+task**, against §3's projected 672.
+
+### 8.4 C2 and C3 — the two `ServerWelcome` profiles — ELIGIBLE-WITH-MODIFIED-MECHANISM, WORTH 0 B
+
+Both split the same way, and the split is the point: **the welcome half is a compatible change
+and the answer half is not.**
+
+**The welcome half is clean.** `ServerWelcome` at IDL 1878 declares nine members, all `required`;
+adding a **tenth as `optional`** is `compatible_change` clause 2 verbatim, and it is how every
+member ever added to this protocol arrived — `ResultEnvelope.audit` at 3.1,
+`SnapshotComponents.file_components` at 3.2, `CapabilityDescriptor.profile` at 3.1. A 3.6 daemon
+may publish an omission profile and an assurance profile in the welcome today.
+
+**C2's answer half is not.** The saving is not in the welcome, it is in replacing the
+enumeration:
+
+```text
+  /// The INV-007 omission manifest. Empty list means nothing was
+  /// omitted; the field is never absent.
+  omissions: list<Omission> required;                   // IDL 1659
+struct Omission {                                       // IDL 1430
+  reason: OmissionReason required;                      // IDL 1431
+  subject: String required;                             // IDL 1434
+  recoverable_by: ArtifactHandle optional;              // IDL 1436
+}
+```
+
+Measured: **324 records over 100 answers, 16,756 B; collapsing each manifest to one record saves
+10,656 B, 434 B per solved task** — against §3 C2's projected 12,456 B and 506, an erratum of
+1,800 B in the ledger's disfavour. Three separate blocks, any one of them decisive.
+
+- **`OmissionReason` is closed.** Five members, `OPEN = false`, asserted structurally. No member
+  means "see the profile", and adding one is a MAJOR.
+- **`subject` is declared "What was omitted, in typed terms — never free-form prose".** A profile
+  reference is not what was omitted; it names where to look it up. Making `subject` carry it
+  changes what an existing required member means, which is none of the five.
+- **A shorter manifest is a shorter statement.** `rule context.compilation` clause 3 already
+  fixes the relation for one operation — "The envelope's `omissions` list is the wire projection
+  of the pack's manifest and MUST agree with it **record for record**" — and INV-007 is that
+  requirement generalized. The plan's own INV-007 delivery evidence is the same decoder-strip
+  this section uses: "a real `ResultEnvelope.omissions` cannot be dropped from the wire".
+
+**C3's answer half is not, and for a sharper reason.** `ResultEnvelope.assurance` at IDL 1650 is
+`optional`, so — measured — the decoder **accepts** an answer with no assurance at all, and
+removing it saves 655 B on each of the 24 carriers, the 15,720 B of §2.4 exactly. The gate is
+not the decoder, it is `rule envelope.assurance_required` at IDL 1748: "A result whose `verdict`
+is `semantic` or `evaluation` MUST carry the nine-dimension `assurance` envelope … Hiding
+uncertainty to save tokens is prohibited." And inside it there is no room: all nine members of
+`AssuranceEnvelope` at IDL 1407-1415 are `required`, and stripping **any one of the nine** from
+a real recorded envelope returns `MissingField`. A form carrying "the profile reference plus the
+partition" is either a new type on `assurance` — "changing a field's type", the second thing
+`breaking_change` names — or `assurance` absent on a verdict, which the rule forbids. Rewriting
+that rule is the C5 shape: `bn-2in7i` had to put "rewrite `rule envelope.epochs_named`" on its
+4.0 checklist for the same reason.
+
+**Modified mechanism, stated precisely, for both:** *publish the profile in `ServerWelcome` as a
+new `optional` member and change nothing in the answer.* That is admissible at 3.6 and its
+measured saving is **0 B**, because every byte of C2 and C3 is in the answer. It is worth landing
+only if a later major will collect on it; on its own it adds bytes to the handshake, which §2.1
+already shows is the typed arm's worst line at 875 B per solved task.
+
+### 8.5 C4 — `SnapshotComponents` — C4a MAJOR-GATED, C4b THE ONE SURVIVOR
+
+**C4a is refused by the IDL in its own words.** Every member the trim touches is `required` —
+`files` at IDL 2653 and eight peer lists, `epochs` at 2661, `intent` at 2664 — and stripping each
+from a real request returns `MissingField`. The measurement confirms §3's C4a exactly: `files`
+150 B and six empty required lists 117 B per request, **267 B x 24 = 6,408 B**, §3's figure to
+the byte. But the decisive citation is not the marker, it is that
+`rule snapshot.file_components` at IDL 2698 **already answered this question and answered no**:
+
+> The field is `optional` rather than replacing `files`, because changing that field's type is a
+> breaking change under `rule versioning.breaking_change` and this revision is a minor.
+
+RFC 0026's correction 43 records the same decision. C4a proposes at 3.6 the exact move 3.2
+considered and declined, and nothing has changed since.
+
+**C4b is eligible, in a modified form, and it is the only item in this pre-check that is.**
+§3 calls C4b "declaration-moving … a new request form". A new request form on the existing
+operation would be — but it does not have to be one. `rule versioning.compatible_change` names
+**"adding an operation" first among the five**, and RFC 0026 has taken exactly that route twice
+with a stated precedent: "'Adding an operation' is the first compatible change
+`rule versioning.compatible_change` lists, so the minor is raised once at the end of the work and
+the major window is untouched: a 3.0, 3.1, or 3.2 client is served exactly what its version
+defines, and an operation it never names cannot reach it." F13's rule applies — the registry edit
+lands in plan §10.2, RFC 0027's authority table and the IDL together.
+
+> **Modified mechanism.** Do **not** touch `workspace.create` or `SnapshotComponents`. Declare a
+> new operation that creates a snapshot from a registered corpus port named by its content
+> commitment, plus whatever registration verb RFC 0019's manifest needs, and leave every existing
+> declaration exactly where it is. `workspace.create` keeps all eleven members and every 3.x
+> client keeps its answer.
+
+**Priced by §1's method.** A by-reference request carries what a port cannot: the intent handle
+and the snapshot epochs, 132 B measured, plus a port commitment at 77 B, plus braces — **211 B
+against 718 B for Die Hard and 660 B for Philosophers**. Over the 24 recorded calls:
+**17,208 − 5,064 = 12,144 B, 494 B per solved task.** Charging two port registrations at the full
+recorded argument cost of one create each, 1,378 B, the net is **10,766 B, 438 B per solved
+task**. Both figures are projections re-priced by the ledger's own method, not landed
+measurements, and the registration charge is an upper bound: on this mix the daemon already holds
+both ports.
+
+**Correction this section carries forward.** §3 C4b's 12,888 B is superseded by the measured
+12,144 B, and §3's warning stands — the landed `redesign_reducible` figure of 17,208 B is an
+upper bound and not an available saving, because the intent handle and the snapshot epochs must
+travel whatever the mechanism.
+
+### 8.6 C6 — connection-scoped handle aliases — MAJOR-GATED, AND BLOCKED ABOVE THE VERSION QUESTION
+
+**The decoder cannot help here, and that is the finding.** IDL §4 declares a handle as
+`<prefix><opaque>` where the opaque part matches `[A-Za-z0-9_-]+`, and
+`alias ArtifactHandle = String @pattern("^[a-z][a-z0-9_]*_[A-Za-z0-9_-]+$")` at IDL 952.
+Measured: `TaskHandle::new("task_7")` **succeeds**, `ArtifactHandle::new("task_7")` **succeeds**,
+and a real recorded answer with its task handle rewritten to `task_7` **decodes**, 189 B smaller
+on an 819 B frame. So unlike C5, where a conforming reader refuses the frame, **no conforming
+reader can refuse an alias** — an un-upgraded 3.5 client accepts it silently and stores a
+session-scoped ordinal as an artifact identity. A minor whose failure mode is silent
+misinterpretation by conforming clients is worse than one the decoder rejects.
+
+**Two rules forbid it, and they are not version rules.**
+
+```text
+rule handshake.no_session_state {                       // IDL 2124
+  The handshake establishes version, encoding, and authority only. No
+  semantic state is session-scoped: a dropped connection MUST NOT change
+  the meaning of anything (INV-002). Reconnecting with the same handles
+  and a valid capability continues the work.
+}
+rule versioning.handle_stability {                      // IDL 708
+  Handles remain valid across daemon upgrades within a protocol major.
+}
+```
+
+An alias is a name whose meaning is session-scoped by construction, and it is not valid on a
+reconnection. IDL §4's own header adds a third: "Handles carry a kind prefix and are otherwise
+**structureless**" — an ordinal is structure. Rewriting `handshake.no_session_state` is not a
+version question at all: it is INV-002, and it is the same constraint §3 C6 already recorded
+against INV-004, "a certificate is checked from its wire form". **A major does not unblock this
+item; an invariant decision does, and that is above the redesign.**
+
+**And the INV-004 constraint costs most of the prize anyway.** §3 C6 restricts aliasing to
+envelope-level references, never inside a `payload` that is stored, published or checked.
+Measured over the matrix, splitting the 628 digest occurrences by whether they sit inside
+`payload`: **envelope-level 336 occurrences at 21,504 B, payload-level 292 at 18,688 B.** Of the
+envelope-level bytes, 88 occurrences at 5,632 B are first mentions and **248 at 15,872 B are
+re-sends** — so the conforming ceiling is 15,872 B, **646 B per solved task**, before any overlap
+with C1 and C5 is removed, and **46.5% of the digest bytes are out of reach by invariant.**
+
+**C6 at 3.6: 0 B.** Nothing of it is available, and a negotiated feature identifier does not
+rescue it: `ClientHello.features` and `ServerWelcome.features` would make both parties agree to
+alias, and the aliased frame would still be a frame whose meaning dies with the connection.
+
+### 8.7 Round-2 errata
+
+**Carried from `bn-2in7i` and adopted here.**
+
+1. **C5's bytes are CONFIRMED, not falsified — only its class was wrong.** 27,864 B of `epochs`
+   exactly as §2.6 projected, plus 5,332 B of empty-member skeleton against §3 C5's 5,160 — a
+   **172 B erratum in the ledger's favour**, the skeleton is 31 B per answer and not 30. Total
+   **1,383 B per solved task** against the projected 1,344. C5 is worth more than C1, C2, C3, C4
+   and C6 combined, and none of it is collectable before a major.
+2. **The 8,084 B protocol-only `epochs` credit is UNCOLLECTABLE.** §2.6 reads it as an
+   understatement of the 27,864 B prize by 3.4x, and the arithmetic is right — 27,864 / 8,084 =
+   3.4 — but the reading is beside the point, because **the 8,084 B is not a saving anyone may
+   take**. Reducing the set to `protocol` plus six explicit nulls moves no presence marker, and
+   five of those six nulls would be **false**: this daemon pins `semantic`, `intent`, `proof`,
+   `corpus` and `engine`, and only `evidence` is genuinely unpinned and already null.
+   `rule envelope.epochs_named` gives null exactly one meaning — "an epoch the result cannot pin
+   reads null; it is never an absent field" — so writing it over a pinnable epoch is a claim
+   about the daemon, not an encoding choice, and RFC 0027's Safety section names that trade.
+   Measured available-at-3.5 for the whole of C5: **0 B**.
+3. **RFC 0027's correction-31 addendum headline is overstated by the two largest items in the
+   ledger.** C7's 1,114 B per solved task and C5's 1,383 B are both off the 3.6 table — 2,497 B
+   per solved task of the 47.6% headline. This note does not edit the RFC; a follow-up owns the
+   addendum correction, and after this section it must also carry the four items below.
+
+**New, from this pre-check.**
+
+4. **§2.2's per-member `artifacts` table over-charges by 1 B per member instance.** Measured with
+   the same decoder-strip method: `kind` is **1,896 B** and not 2,040; `commitment` is
+   **7,140 B** and not 7,224. Both errata are in the ledger's disfavour and neither changes a
+   verdict.
+5. **§3 C2's projection is 1,800 B high.** The manifest collapse measures **10,656 B, 434 B per
+   solved task**, against the projected 12,456 B and 506.
+6. **§3 C4b's projection is 744 B high.** A by-reference request measures 211 B, so the saving is
+   **12,144 B, 494 B per solved task**, against the projected 12,888 B and 524.
+7. **§3 C1's premise is false on this deployment.** "A later answer about the same artifact …
+   carries no information the client does not hold" fails on **8 of 92 repeat refs**, which carry
+   a changed `commitment` under an unchanged `handle`. Restricted to the 84 that are genuinely
+   byte-identical, move 3 is worth 12,440 B and not 16,524 B.
+
+### 8.8 The sum-check, restated once more
+
+The target is unchanged and is restated so no reader has to reconstruct it. The ratified margin
+is +30% and the baseline spends 4,118 B per solved task, so a passing native arm must land at
+**native ≤ 4,118 x 0.70 = 2,882 B per solved task**, which from today's 10,859 requires giving
+back **7,977 B per solved task**.
+
+| candidate set | saved over the matrix | saved / solved | native after | margin |
+|---|---:|---:|---:|---:|
+| landed measurement | — | — | 10,859 | **−163%** |
+| §4's five commissioned items, as projected | 83,676 | 3,405 | 7,454 | −81% |
+| §4's corrected six-item 3.6 set, C5 skeleton bundled | 104,940 | 4,270 | 6,589 | −60% |
+| **the 3.6 bundle after this pre-check — C4b alone** | **12,144** | **494** | **10,365** | **−152%** |
+| the same, charging two port registrations | 10,766 | 438 | 10,421 | −153% |
+| everything, 3.6 plus the 4.0 horizon, best case | ~100,900 | ~4,107 | ~6,752 | −64% |
+| **required for the ratified floor** | — | **7,977** | **≤ 2,882** | **+30%** |
+
+Read three ways, and all three matter.
+
+- **The 3.6 bundle recovers 494 B of the 7,977 B the floor needs — 6.2% of the gap** — and
+  removes **4.5% of the native arm's total wire spend**, against §5 route 4's corrected 37.4% and
+  its original 47.6%.
+- **3,566 B per solved task, 87.8% of the corrected six-item set, moves to the 4.0 horizon.**
+  With the C5 skeleton counted the figure is 3,776 B and 88.4%.
+- **The verdict of §4 and §5 is unchanged and is now unreachable at two removes.** Even granting
+  every item at a major — C5's 1,383, C1's 583, C2's 434, C3's 567, C4b's 494 and C6's 646 —
+  the set reaches about 4,107 B per solved task and lands at −64%, which is §4's −65% within
+  rounding. No redesign of this encoding clears the margin; §5's algebra is why, and it is
+  untouched by anything in this section.
+
+### 8.9 Recommendation
+
+**What remains for a 3.6 bundle is one item, in a form the ledger did not specify, worth 6.2% of
+the gap.** That is C4b as a **new operation** — `bn-2ug29`, §8.5 — and it is worth commissioning
+on its own merits, because it is a real saving, it needs no declaration to move, and RFC 0026 has
+twice taken the same route with a stated precedent. Two zero-byte companions may ride it if a
+major is later intended: C2's and C3's `ServerWelcome` profiles as new `optional` members, which
+are admissible today and collect nothing until the answer side follows them at 4.0.
+
+**Everything else is a 4.0 question, and the lead should escalate it.** C1, C4a and C6 are
+major-gated on their own declarations; C2's and C3's savings live entirely in the answer half
+that a major must carry; C5 was already ruled a major by `bn-2in7i`; C7 is withdrawn. That is
+**six of the seven ledger items on the far side of a protocol major**, which is a different
+decision from the one the redesign was commissioned as. It is not a byte question any more:
+
+- **A major must publish the plan §4.6 typed `Preserved | Revalidate | Incompatible` statement
+  per artifact class before it is applied**, and the daemon serves majors N and N−1, so every
+  suppressed member must still reach a 3.x client on the same daemon. `bn-2in7i`'s bone comment
+  carries the seven-step activation checklist for C5; C1, C2, C3 and C4a each need their own.
+- **C6 does not become available at 4.0.** It is blocked by INV-002 and INV-004, not by a version
+  rule, and it needs an invariant decision that no redesign bone may take.
+- **The exit sentence is still satisfied by the redesign having happened**, which is §5 route 4's
+  reading and is unchanged. What this section removes is the claim that 37.4% of the typed arm's
+  wire spend can be recovered inside major 3. The available figure inside major 3 is **4.5%**.
+
+**Do not dispatch C1, C2, C3, C4a or C6 against the §3 or §6 tables.** Both stay above as the
+record of what was projected, and both are superseded on wire visibility by §8.2. Each of the
+five bones carries a comment naming its verdict and the declaration that blocks it.
