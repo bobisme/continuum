@@ -44,7 +44,7 @@ use continuumd::codec::operations::decode_error_data;
 use continuumd::codec::{CodecError, from_bytes};
 use continuumd::daemon::family::{Arguments, ErrorData};
 use continuumd::daemon::is_mutation;
-use continuumd::protocol::envelope::{Budget, RequestEnvelope, ResultEnvelope};
+use continuumd::protocol::envelope::{Budget, OutputPolicy, RequestEnvelope, ResultEnvelope};
 use continuumd::protocol::handshake::{ClientHello, ServerWelcome};
 use continuumd::protocol::operations::task::{
     TaskCancelRequest, TaskResumeRequest, TaskStatusRequest,
@@ -56,7 +56,7 @@ use continuumd::protocol::operations::workspace::{
     WorkspaceCreateRequest, WorkspaceForkRequest, WorkspaceSealRequest,
 };
 use continuumd::protocol::scalar::{
-    ActorId, CapabilityHandle, ContinuationHandle, IntentHandle, Opaque, OperationName,
+    ActorId, ByteCount, CapabilityHandle, ContinuationHandle, IntentHandle, Opaque, OperationName,
     ProtocolVersion, RequestId, TaskHandle, WorkspaceHandle,
 };
 use continuumd::protocol::shared::{FileOverlay, SnapshotComponents, Target};
@@ -70,12 +70,16 @@ use crate::answer::{
 use crate::link::Transport;
 use crate::register::{self, AgentContext};
 
-/// One typed call: the arguments, plus the three envelope fields that are not arguments.
+/// One typed call: the arguments, plus the four envelope fields that are not arguments.
 ///
-/// `snapshot`, `intent` and `budget` live on the envelope rather than in any operation's
-/// request struct (RFC 0026), so a call is not fully described by its arguments alone. This
-/// struct is that description, and it is borrowed rather than owned because a caller
-/// building one already holds every part.
+/// `snapshot`, `intent`, `budget` and `output_policy` live on the envelope rather than in any
+/// operation's request struct (RFC 0026), so a call is not fully described by its arguments
+/// alone. This struct is that description, and it is borrowed rather than owned because a
+/// caller building one already holds every part.
+///
+/// The two ceilings are different bounds and are deliberately separate fields: `budget` bounds
+/// what the daemon may *spend* answering, `output_policy` bounds what it may *return* — "an
+/// `OutputPolicy` member, not a `Budget` dimension" (RFC 0026 correction 27).
 #[derive(Debug)]
 pub struct Call<'a> {
     /// The operation's typed request body.
@@ -86,6 +90,8 @@ pub struct Call<'a> {
     pub intent: Option<&'a IntentHandle>,
     /// The declared ceiling, required for a `@task_starting` operation.
     pub budget: Option<Budget>,
+    /// The bound on what the answer may carry back.
+    pub output_policy: Option<OutputPolicy>,
 }
 
 impl<'a> Call<'a> {
@@ -97,6 +103,7 @@ impl<'a> Call<'a> {
             snapshot: None,
             intent: None,
             budget: None,
+            output_policy: None,
         }
     }
 
@@ -111,6 +118,24 @@ impl<'a> Call<'a> {
     #[must_use]
     pub fn within(mut self, budget: Budget) -> Self {
         self.budget = Some(budget);
+        self
+    }
+
+    /// The same call, with a byte ceiling on the answer's payload.
+    ///
+    /// `max_bytes` is the enforced half of `OutputPolicy` (RFC 0026); a daemon that cannot
+    /// answer inside it trims what its response shape declares trimmable and records the
+    /// remainder as an INV-007 omission naming the retrieval route, or refuses. This client
+    /// states the bound and reads the manifest; it never has to guess which happened, because
+    /// both are typed.
+    #[must_use]
+    pub fn bounded(mut self, max_bytes: u64) -> Self {
+        self.output_policy = Some(OutputPolicy {
+            max_bytes: Optional::Present(ByteCount::new(max_bytes)),
+            max_tokens: Optional::Absent,
+            max_nodes: Optional::Absent,
+            audience: Optional::Absent,
+        });
         self
     }
 }
@@ -300,7 +325,10 @@ impl AgentClient {
                 Some(budget) => Optional::Present(budget.clone()),
                 None => Optional::Absent,
             },
-            output_policy: Optional::Absent,
+            output_policy: match &call.output_policy {
+                Some(policy) => Optional::Present(policy.clone()),
+                None => Optional::Absent,
+            },
             trace: Optional::Absent,
             page: Optional::Absent,
         }
@@ -425,6 +453,29 @@ impl AgentClient {
     ) -> Result<Answer, ClientError> {
         let arguments = Arguments::TaskStatus(TaskStatusRequest { task: task.clone() });
         self.invoke(link, context, &Call::new(&arguments))
+    }
+
+    /// `task.status` — read a task record, inside a stated byte ceiling.
+    ///
+    /// The same operation as [`AgentClient::task_status`] with `output_policy.max_bytes`
+    /// declared, which is what makes the daemon's enforcement reachable from this client. A
+    /// ceiling the record does not fit is answered with a smaller record and an INV-007
+    /// manifest naming what was left out and the handle that recovers it; a ceiling nothing
+    /// conforming fits is a typed refusal. Both arrive as an ordinary [`Answer`], because both
+    /// are ordinary protocol outcomes.
+    ///
+    /// # Errors
+    ///
+    /// [`ClientError`] as [`AgentClient::invoke`].
+    pub fn task_status_bounded(
+        &mut self,
+        link: &mut dyn Transport,
+        context: &AgentContext,
+        task: &TaskHandle,
+        max_bytes: u64,
+    ) -> Result<Answer, ClientError> {
+        let arguments = Arguments::TaskStatus(TaskStatusRequest { task: task.clone() });
+        self.invoke(link, context, &Call::new(&arguments).bounded(max_bytes))
     }
 
     /// `task.cancel` — close a campaign, keeping whatever it committed.

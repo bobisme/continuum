@@ -87,6 +87,7 @@ pub mod identity;
 pub mod intent;
 pub mod obligation;
 pub mod observe;
+pub mod output;
 pub mod recovery;
 pub mod region;
 pub mod result;

@@ -791,3 +791,226 @@ pub fn split_arms(runs: &[ArmRun]) -> (Vec<ArmRun>, Vec<ArmRun>) {
         .collect();
     (native, shell)
 }
+
+// --- C7: what an enforced `OutputPolicy` ceiling is actually worth --------------------------
+
+/// What a stated byte ceiling on `task.status` costs and saves, measured over the matrix.
+///
+/// The row `DX10_BYTE_LEDGER.md` §3 C7 projected at **+27,376 B over the matrix, 1,114 B per
+/// solved task, "behavior-only, no bump"**, re-measured against the mechanism that was
+/// actually admissible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CeilingProjection {
+    /// `task.status` answers the matrix produced.
+    pub polls: u32,
+    /// Their payloads, summed, untrimmed.
+    pub payload_bytes: u64,
+    /// Their result frames, summed, untrimmed.
+    pub frame_bytes: u64,
+    /// The best interface-byte saving any stated ceiling reaches, summed over the polls.
+    ///
+    /// **Per-poll best**, which no real client could achieve: the optimum is taken
+    /// independently for each answer, as if the caller had known that answer's sizes before
+    /// asking. It is therefore an *upper bound* on what the mechanism is worth, and it is
+    /// the bound this measurement exists to report.
+    pub best_saving: i64,
+    /// The saving at the tightest conforming ceiling — the summary a client that reads only
+    /// `task`, `status`, `cost` and `continuation` would ask for.
+    pub floor_saving: i64,
+    /// What declaring the ceiling costs on the request frame, summed over the polls.
+    pub declaration_bytes: u64,
+    /// INV-007 trim records the best case produced.
+    pub trims: u32,
+}
+
+impl CeilingProjection {
+    /// The best saving per solved task, over the matrix's 24 solved tasks.
+    #[must_use]
+    pub const fn best_per_solved(&self) -> i64 {
+        self.best_saving / 24
+    }
+}
+
+/// What `"output_policy":{"max_bytes":<n>}` adds to a request frame, measured.
+///
+/// Measured rather than counted by hand: one request envelope is encoded with the member and
+/// without it, and the difference is the member's cost. Canonical JSON's key order and
+/// separators make that difference independent of the rest of the envelope, so one
+/// measurement is the cost on every frame that carries the same `n`.
+#[must_use]
+pub fn ceiling_declaration_bytes(max_bytes: u64) -> u64 {
+    use continuumd::protocol::envelope::{OutputPolicy, RequestEnvelope};
+    use continuumd::protocol::scalar::{
+        ActorId, ByteCount, CapabilityHandle, Opaque, OperationName, ProtocolVersion, RequestId,
+    };
+
+    let bare = RequestEnvelope {
+        protocol_version: ProtocolVersion::new(3, 4),
+        request_id: RequestId::new("req_1").expect("a request id"),
+        idempotency_key: Optional::Absent,
+        actor: ActorId::new("agent:reader").expect("an actor"),
+        capability: CapabilityHandle::new("cap_reader").expect("a capability"),
+        operation: OperationName::new("task.status").expect("a name"),
+        snapshot: Nullable::Null,
+        intent: Nullable::Null,
+        arguments: Opaque::from_bytes(b"{}".to_vec()),
+        budget: Optional::Absent,
+        output_policy: Optional::Absent,
+        trace: Optional::Absent,
+        page: Optional::Absent,
+    };
+    let mut bounded = bare.clone();
+    bounded.output_policy = Optional::Present(OutputPolicy {
+        max_bytes: Optional::Present(ByteCount::new(max_bytes)),
+        max_tokens: Optional::Absent,
+        max_nodes: Optional::Absent,
+        audience: Optional::Absent,
+    });
+    let before = to_bytes(&bare).map_or(0, |bytes| bytes.len() as u64);
+    let after = to_bytes(&bounded).map_or(0, |bytes| bytes.len() as u64);
+    after.saturating_sub(before)
+}
+
+/// Re-measure C7 against the mechanism `continuumd::daemon::output` actually delivers.
+///
+/// # Method
+///
+/// The recorded answers are the daemon's own (`shell_sweep` in recording mode), and the
+/// transform is the **landed** one: [`continuumd::daemon::output::fit_task_record`], called
+/// here exactly as `task.status` calls it. Nothing is modelled. For each poll the four
+/// answers the mechanism can produce — the whole record, and the record with each prefix of
+/// the declared elision order taken — are built, the envelope is rebuilt around each with the
+/// INV-007 records the mechanism emits, the whole frame is re-encoded, and the request-side
+/// cost of stating the ceiling is charged against the result-side saving.
+///
+/// # What it finds, and why the number matters
+///
+/// C7 was commissioned as "behavior-only, no bump" worth 1,114 B per solved task. The saving
+/// it projected comes from eliding `operation`, `snapshot`, `intent`, `epochs`,
+/// `priority_class` and `budget` from the answer — and `TaskRecord` declares five of those
+/// `required` and two `nullable`, so eliding them changes a presence marker, which
+/// `rule versioning.breaking_change` makes a **major** change. Not behavior-only, and not
+/// eligible for the bundled 3.6 minor either.
+///
+/// What the declaration *does* permit a ceiling to take is the contents of two `required`
+/// lists and the nine `optional` members of `Budget`. That is what this function measures,
+/// and it comes out **negative**: a conforming INV-007 omission carrying `recoverable_by`
+/// costs more than the members the declaration permits eliding are worth. Populating the
+/// retrieval half — the thing C7 existed to do first — is what makes the trade lose.
+///
+/// # Errors
+///
+/// [`SurfaceError`] as [`shell_sweep`].
+pub fn ceiling_projection() -> Result<CeilingProjection, SurfaceError> {
+    use continuumd::codec::operations::{decode_payload, encode_payload};
+    use continuumd::daemon::family::Payload;
+    use continuumd::daemon::output::{self, Ceiling, TASK_RECORD_ELISION_ORDER};
+    use continuumd::protocol::vocabulary::Encoding;
+
+    let cells = shell_sweep(Renderer::Standard, Disciplines::ALL, true)?;
+    let mut projection = CeilingProjection {
+        polls: 0,
+        payload_bytes: 0,
+        frame_bytes: 0,
+        best_saving: 0,
+        floor_saving: 0,
+        declaration_bytes: 0,
+        trims: 0,
+    };
+
+    for cell in &cells {
+        for recorded in &cell.recorded {
+            if recorded.operation != "task.status" {
+                continue;
+            }
+            let Nullable::Value(carried) = &recorded.envelope.payload else {
+                continue;
+            };
+            let Ok(Payload::TaskStatus(record)) = decode_payload("task.status", carried) else {
+                continue;
+            };
+            projection.polls += 1;
+            projection.payload_bytes += carried.as_bytes().len() as u64;
+            let whole = to_bytes(&recorded.envelope).map_or(0, |bytes| bytes.len() as u64);
+            projection.frame_bytes += whole;
+
+            // The ceilings worth trying are exactly the sizes of the four answers the
+            // mechanism can produce: asking for less than an answer's size is asking for the
+            // next one down, and asking for more is asking for the same one.
+            let mut best: Option<(i64, u32)> = None;
+            let mut floor_saving = 0;
+            let mut floor_declaration = 0;
+            for depth in 0..=TASK_RECORD_ELISION_ORDER.len() {
+                let mut candidate = record.clone();
+                for subject in TASK_RECORD_ELISION_ORDER.iter().take(depth) {
+                    take(&mut candidate, subject);
+                }
+                let Ok(ceiling) = output::measure(&candidate, Encoding::CanonicalJson) else {
+                    continue;
+                };
+                let Ok(fitted) = output::fit_task_record(
+                    record.clone(),
+                    Ceiling::of_bytes(ceiling),
+                    Encoding::CanonicalJson,
+                ) else {
+                    continue;
+                };
+                let Ok(Some(payload)) = encode_payload(&Payload::TaskStatus(fitted.record)) else {
+                    continue;
+                };
+                let mut envelope = recorded.envelope.clone();
+                envelope.payload = Nullable::Value(payload);
+                envelope.omissions.extend(fitted.omissions.iter().cloned());
+                let after = to_bytes(&envelope).map_or(whole, |bytes| bytes.len() as u64);
+                // The declaration is charged at every depth, including the one that trims
+                // nothing: a caller that states a ceiling pays for the member whatever the
+                // ceiling turns out to admit. The alternative — stating none — is the zero
+                // this whole projection is compared against.
+                let declaration = ceiling_declaration_bytes(ceiling);
+                let saving = whole as i64 - after as i64 - declaration as i64;
+                if depth == TASK_RECORD_ELISION_ORDER.len() {
+                    floor_saving = saving;
+                    floor_declaration = declaration;
+                }
+                if best.is_none_or(|(current, _)| saving > current) {
+                    best = Some((saving, u32::try_from(fitted.omissions.len()).unwrap_or(0)));
+                }
+            }
+            let (saving, trims) = best.unwrap_or((0, 0));
+            projection.best_saving += saving;
+            projection.floor_saving += floor_saving;
+            projection.declaration_bytes += floor_declaration;
+            projection.trims += trims;
+        }
+    }
+    Ok(projection)
+}
+
+/// The elision the daemon's declared order names, applied here to build a candidate ceiling.
+///
+/// A second spelling of `continuumd::daemon::output::elide`, which is private to the daemon
+/// because nothing outside it decides what a ceiling may take. This one only *chooses a
+/// ceiling to ask for*; the answer is always built by the daemon's own function, so the two
+/// cannot drift into disagreeing about the wire.
+fn take(record: &mut continuumd::protocol::task::TaskRecord, subject: &str) {
+    use continuumd::protocol::envelope::Budget;
+
+    match subject {
+        "task.milestones" => record.milestones = Vec::new(),
+        "task.committed_evidence" => record.committed_evidence = Vec::new(),
+        "task.budget" => {
+            record.budget = Budget {
+                wall_ms: Optional::Absent,
+                cpu_ms: Optional::Absent,
+                memory_bytes: Optional::Absent,
+                states: Optional::Absent,
+                solver_ms: Optional::Absent,
+                proof_ms: Optional::Absent,
+                tokens: Optional::Absent,
+                candidates: Optional::Absent,
+                bytes: Optional::Absent,
+            };
+        }
+        _ => {}
+    }
+}

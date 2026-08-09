@@ -90,6 +90,7 @@ use continuum_workspace::staleness::check_current;
 
 use super::budget::{self, Publications};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::output;
 use super::region::{self, Scope, TaskRegions};
 use super::state::DaemonState;
 use super::{Services, verification};
@@ -783,7 +784,7 @@ impl OperationFamily for TaskFamily {
         store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
-            Arguments::TaskStatus(request) => status(request, state),
+            Arguments::TaskStatus(request) => status(call, request, state, services),
             Arguments::TaskCancel(request) => cancel(request, state, services),
             Arguments::TaskResume(request) => resume(call, request, state, services, store),
             Arguments::TaskSubscribe(request) => subscribe(request, state),
@@ -799,19 +800,46 @@ impl OperationFamily for TaskFamily {
     }
 }
 
-/// `task.status` — project the entry onto the wire.
+/// `task.status` — project the entry onto the wire, inside the ceiling the caller stated.
 ///
 /// `errors []`, so the codes available are `rule errors.common`'s five and no more. A task
 /// the daemon does not hold is [`Fault::denied`], byte-identical with every other denial:
 /// RFC 0027 X2 forbids a distinguishable not-found, and there is no `UnknownTask` code to
 /// build one out of.
-fn status(request: &TaskStatusRequest, state: &DaemonState) -> Result<Effect, Fault> {
+///
+/// # The ceiling, and why it is read here rather than at the envelope
+///
+/// `OutputPolicy.max_bytes` is "the enforced contract" (RFC 0026) and until bn-6fuu5 no
+/// handler enforced it. [`output::fit_task_record`] does, and it is called *here* because
+/// what a ceiling may legally take out of an answer is a property of that answer's declared
+/// shape: `TaskRecord`'s `required` members are on every conforming answer whatever a caller
+/// asks for, and only the operation that knows the shape can say which values may be smaller.
+/// [`output`](super::output) states the whole rule — the elision order, the floor, the typed
+/// refusal below it, and the two questions it does not answer.
+///
+/// A caller that states no ceiling is answered exactly as before, without a byte being
+/// measured: [`output::Ceiling::of`] reads the envelope and [`output::fit_task_record`]
+/// returns early. That is why this change moves no number in the landed benchmark matrix.
+///
+/// The manifest is *extended*, never replaced. [`TaskEntry::omissions`] says what this
+/// deployment could not produce (`unsupported`); the fitting says what this ceiling took
+/// (`budget`, with `recoverable_by` naming the task). Two different statements about two
+/// different things, and `OmissionReason` is the vocabulary that keeps them apart.
+fn status(
+    call: &Call<'_>,
+    request: &TaskStatusRequest,
+    state: &DaemonState,
+    services: &Services,
+) -> Result<Effect, Fault> {
     let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
-    Ok(reported(
-        Payload::TaskStatus(entry.record()),
-        Nullable::Null,
-        entry,
-    ))
+    let fitted = output::fit_task_record(
+        entry.record(),
+        output::Ceiling::of(call.envelope),
+        services.negotiated().encoding(),
+    )?;
+    let mut effect = reported(Payload::TaskStatus(fitted.record), Nullable::Null, entry);
+    effect.omissions.extend(fitted.omissions);
+    Ok(effect)
 }
 
 /// `task.subscribe` — the record now; the events are the recorded transitions.

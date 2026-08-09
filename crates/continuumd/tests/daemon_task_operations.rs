@@ -46,9 +46,11 @@ use continuumd::daemon::task::{
 };
 use continuumd::daemon::verification::{ModelCatalog, VerificationFamily, model_source};
 use continuumd::daemon::workspace::WorkspaceFamily;
-use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest, errors, task, verification};
+use continuumd::daemon::{
+    Daemon, OperationOutcome, OperationRequest, errors, output, task, verification,
+};
 use continuumd::protocol::envelope::{
-    Budget, EnvelopeDimension, EpochSet, RequestEnvelope, Verdict,
+    Budget, EnvelopeDimension, EpochSet, OutputPolicy, RequestEnvelope, Verdict,
 };
 use continuumd::protocol::handshake::{
     CapabilityDescriptor, CapabilityProfile, ClientHello, Negotiated, VersionRange, negotiate,
@@ -64,14 +66,16 @@ use continuumd::protocol::operations::verification::{
 use continuumd::protocol::operations::workspace::{WorkspaceCreateRequest, WorkspaceForkRequest};
 use continuumd::protocol::registry::{self, ENCODINGS};
 use continuumd::protocol::scalar::{
-    ActorId, CapabilityHandle, Commitment, ContinuationHandle, EpochIdentity, IntentHandle, Opaque,
-    OperationName, ProtocolVersion, RequestId, TaskHandle, Timestamp, WorkspaceHandle,
+    ActorId, ByteCount, CapabilityHandle, Commitment, ContinuationHandle, EpochIdentity,
+    IntentHandle, Opaque, OperationName, ProtocolVersion, RequestId, TaskHandle, Timestamp,
+    WorkspaceHandle,
 };
 use continuumd::protocol::shared::{FileOverlay, SnapshotComponents, SnapshotEpochs, Target};
 use continuumd::protocol::spec::{Nullable, Optional};
 use continuumd::protocol::vocabulary::{
-    AssuranceClass, AuthorityLevel, Encoding, ErrorCode, InconclusiveReason, Portfolio,
-    PriorityClass, ResultStatus, SemanticVerdict, StructuralOutcome, TargetKind, TaskStatus,
+    AssuranceClass, AuthorityLevel, Encoding, ErrorCode, InconclusiveReason, OmissionReason,
+    Portfolio, PriorityClass, ResultStatus, SemanticVerdict, StructuralOutcome, TargetKind,
+    TaskStatus,
 };
 
 use continuum_workspace::snapshot::WorkspacePath;
@@ -2051,4 +2055,275 @@ fn a_started_task_names_the_intent_its_snapshot_binds() {
     let record = record(&status(&mut fixture, &task, "req_status"));
     assert_eq!(record.intent, Nullable::Value(intent));
     assert_eq!(record.snapshot, Nullable::Value(fixture.snapshot.clone()));
+}
+
+// --- `OutputPolicy.max_bytes`, enforced (bn-6fuu5) -----------------------------------------
+//
+// `max_bytes` is declared "the enforced contract" (RFC 0026) and until this bone no handler
+// read it. These are the end-to-end half of `continuumd::daemon::output`'s algebra: the same
+// four dispositions, driven through `Daemon::dispatch` with a real campaign's record rather
+// than a synthetic one, so the numbers below are the fixture's own measured sizes and not
+// constants anybody chose.
+
+/// `task.status` under a stated byte ceiling.
+fn bounded_status(
+    fixture: &mut Fixture,
+    task: &TaskHandle,
+    request: &str,
+    max_bytes: u64,
+) -> OperationOutcome {
+    let mut envelope = envelope("task.status", "agent:reader", "cap_reader", request);
+    envelope.output_policy = Optional::Present(OutputPolicy {
+        max_bytes: Optional::Present(ByteCount::new(max_bytes)),
+        max_tokens: Optional::Absent,
+        max_nodes: Optional::Absent,
+        audience: Optional::Absent,
+    });
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope,
+        arguments: Arguments::TaskStatus(TaskStatusRequest { task: task.clone() }),
+    })
+}
+
+/// The size of a record in the encoding this fixture negotiated.
+fn measured(record: &continuumd::protocol::task::TaskRecord) -> u64 {
+    output::measure(record, negotiated().encoding()).expect("a measurable record")
+}
+
+/// The trim records this answer carries — the ones a *ceiling* produced, as against the ones
+/// the deployment's own limits produce.
+fn trims(outcome: &OperationOutcome) -> Vec<&continuumd::protocol::envelope::Omission> {
+    outcome
+        .envelope
+        .omissions
+        .iter()
+        .filter(|omission| omission.reason == OmissionReason::Budget)
+        .collect()
+}
+
+/// A campaign whose record carries something a ceiling could take.
+fn fixture_with_task() -> (Fixture, TaskHandle) {
+    let mut fixture = fixture();
+    let task = started_task(&start(
+        &mut fixture,
+        "req_start",
+        "idem-start",
+        Some(64),
+        target(TargetKind::AllClaims, "DieHard"),
+    ));
+    (fixture, task)
+}
+
+/// **The control.** A caller that states no ceiling is answered exactly as it was before this
+/// mechanism existed: the whole record, and a manifest carrying only the deployment's own
+/// `unsupported` statements.
+#[test]
+fn a_status_with_no_stated_ceiling_is_the_whole_record_and_carries_no_trim() {
+    let (mut fixture, task) = fixture_with_task();
+    let outcome = status(&mut fixture, &task, "req_status");
+    let record = record(&outcome);
+
+    assert!(
+        !record.milestones.is_empty(),
+        "the fixture's campaign reached milestones, so there is something to take"
+    );
+    assert!(trims(&outcome).is_empty(), "nothing was trimmed");
+    assert!(
+        outcome
+            .envelope
+            .omissions
+            .iter()
+            .all(|omission| omission.reason == OmissionReason::Unsupported),
+        "and every record on the manifest is a statement about the deployment"
+    );
+}
+
+/// **At the bound.** `max_bytes` is a maximum, so a ceiling equal to the record's own size
+/// serves it whole — and one byte less takes the first member of the declared order and no
+/// more, naming the handle that recovers it.
+#[test]
+fn a_ceiling_at_the_record_size_serves_it_whole_and_one_byte_below_summarizes() {
+    let (mut fixture, task) = fixture_with_task();
+    let whole = record(&status(&mut fixture, &task, "req_status"));
+    let size = measured(&whole);
+
+    let at = bounded_status(&mut fixture, &task, "req_at", size);
+    assert_eq!(at.envelope.status, ResultStatus::Ok);
+    assert_eq!(
+        record(&at),
+        whole,
+        "the answer at the ceiling is the record"
+    );
+    assert!(trims(&at).is_empty());
+
+    let below = bounded_status(&mut fixture, &task, "req_below", size - 1);
+    assert_eq!(below.envelope.status, ResultStatus::Ok);
+    let summary = record(&below);
+    assert!(summary.milestones.is_empty(), "the first member goes");
+    assert!(
+        measured(&summary) < size,
+        "and the answer is inside the ceiling it was given"
+    );
+
+    // The four members a poll is for are all still there.
+    assert_eq!(summary.task, whole.task);
+    assert_eq!(summary.status, whole.status);
+    assert_eq!(summary.cost, whole.cost);
+    assert_eq!(summary.continuation, whole.continuation);
+    // And the three the rule forbids a trim from touching.
+    assert_eq!(summary.epochs, whole.epochs, "no epoch was dropped");
+    assert_eq!(summary.snapshot, whole.snapshot);
+    assert_eq!(summary.intent, whole.intent);
+
+    let trims = trims(&below);
+    assert_eq!(trims.len(), 1, "one record for the one member taken");
+    assert_eq!(trims[0].subject, "task.milestones");
+    assert_eq!(trims[0].reason, OmissionReason::Budget);
+    assert_eq!(
+        trims[0]
+            .recoverable_by
+            .value()
+            .map(|handle| handle.as_str()),
+        Some(task.as_str()),
+        "INV-007's retrieval half, populated: the same question asked with more room"
+    );
+}
+
+/// **Over the bound.** Below the floor there is no conforming answer, and the daemon says so
+/// with a typed refusal rather than delivering a payload over the ceiling it was handed —
+/// which is what "enforced" has to mean if it means anything.
+#[test]
+fn a_ceiling_below_the_floor_is_a_typed_refusal_and_never_an_answer_over_the_bound() {
+    let (mut fixture, task) = fixture_with_task();
+    let whole = record(&status(&mut fixture, &task, "req_status"));
+
+    // The floor: every elidable member taken. Measured, not assumed.
+    let floor = {
+        let below = bounded_status(&mut fixture, &task, "req_floor_probe", 1_u64);
+        assert_eq!(below.envelope.status, ResultStatus::Error);
+        // A ceiling of one byte refuses, so the floor is read by asking for the smallest
+        // ceiling that does not: the record with every elidable member gone.
+        let mut candidate = whole.clone();
+        candidate.milestones = Vec::new();
+        candidate.committed_evidence = Vec::new();
+        candidate.budget = Budget {
+            wall_ms: Optional::Absent,
+            cpu_ms: Optional::Absent,
+            memory_bytes: Optional::Absent,
+            states: Optional::Absent,
+            solver_ms: Optional::Absent,
+            proof_ms: Optional::Absent,
+            tokens: Optional::Absent,
+            candidates: Optional::Absent,
+            bytes: Optional::Absent,
+        };
+        measured(&candidate)
+    };
+
+    let at_floor = bounded_status(&mut fixture, &task, "req_at_floor", floor);
+    assert_eq!(
+        at_floor.envelope.status,
+        ResultStatus::Ok,
+        "the floor is an answer"
+    );
+    assert!(measured(&record(&at_floor)) <= floor);
+
+    let refused = bounded_status(&mut fixture, &task, "req_under_floor", floor - 1);
+    assert_eq!(refused.envelope.status, ResultStatus::Error);
+    assert_eq!(code(&refused), ErrorCode::MalformedRequest);
+    let error = refused
+        .envelope
+        .error
+        .value()
+        .expect("an error result carries its error");
+    assert_eq!(error.detail, output::CEILING_BELOW_FLOOR);
+    assert!(!error.retryable, "the same request gets the same answer");
+    assert!(
+        matches!(refused.payload, Payload::None),
+        "and no payload travelled: a refusal is not a smaller answer"
+    );
+    assert!(
+        errors::admits(
+            registry::operation("task.status").expect("a registered operation"),
+            ErrorCode::MalformedRequest,
+        ),
+        "and the code is inside the union `errors []` leaves this operation"
+    );
+}
+
+/// **INV-009.** A summary is a wire economy, never an information reduction: re-reading the
+/// same task without the ceiling recovers everything the summary left out, and the manifest
+/// said where to look before the caller asked.
+#[test]
+fn re_reading_without_the_ceiling_yields_a_superset_of_the_summary() {
+    let (mut fixture, task) = fixture_with_task();
+    let whole = record(&status(&mut fixture, &task, "req_status"));
+    let size = measured(&whole);
+
+    let summarized = bounded_status(&mut fixture, &task, "req_summary", size - 1);
+    let summary = record(&summarized);
+    let route = trims(&summarized)[0]
+        .recoverable_by
+        .value()
+        .expect("the retrieval route is named")
+        .as_str()
+        .to_owned();
+    assert_eq!(route, task.as_str());
+
+    // Follow the route the manifest named: the same handle, read again with more room.
+    let expanded = record(&status(&mut fixture, &task, "req_expand"));
+    assert_eq!(expanded, whole, "the re-read is the whole record");
+    for milestone in &summary.milestones {
+        assert!(expanded.milestones.contains(milestone));
+    }
+    for handle in &summary.committed_evidence {
+        assert!(expanded.committed_evidence.contains(handle));
+    }
+    assert!(
+        expanded.milestones.len() > summary.milestones.len(),
+        "and strictly more than the summary carried"
+    );
+}
+
+/// The two omission reasons are two statements, and a ceiling never rewrites the deployment's.
+#[test]
+fn a_ceiling_records_budget_and_never_relabels_the_deployments_unsupported() {
+    let (mut fixture, task) = fixture_with_task();
+    let whole = record(&status(&mut fixture, &task, "req_status"));
+    let outcome = bounded_status(&mut fixture, &task, "req_bounded", measured(&whole) - 1);
+
+    let unsupported: Vec<&str> = outcome
+        .envelope
+        .omissions
+        .iter()
+        .filter(|omission| omission.reason == OmissionReason::Unsupported)
+        .map(|omission| omission.subject.as_str())
+        .collect();
+    assert_eq!(
+        unsupported,
+        vec!["task.committed_evidence"],
+        "the deployment commits no evidence, and a ceiling does not change that"
+    );
+    assert!(
+        unsupported
+            .iter()
+            .all(|subject| *subject != "task.milestones"),
+        "the milestones this campaign *did* reach are trimmed, never reported unproduced"
+    );
+    assert_eq!(
+        trims(&outcome)
+            .iter()
+            .map(|omission| omission.subject.as_str())
+            .collect::<Vec<_>>(),
+        vec!["task.milestones"]
+    );
+    assert!(
+        outcome
+            .envelope
+            .omissions
+            .iter()
+            .filter(|omission| omission.reason == OmissionReason::Unsupported)
+            .all(|omission| omission.recoverable_by.is_absent()),
+        "an `unsupported` record still names no route, because there is none to name"
+    );
 }
