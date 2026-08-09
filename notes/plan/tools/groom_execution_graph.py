@@ -554,6 +554,34 @@ def _frontier_and_debt(
             "B",
             "bn-2k6q",
         ),
+        # The four docs/31 residual rows merged into §24.5 by bn-2uh80. Each
+        # entered the register as draft, so each owes the same ratification act
+        # as the rows above; the consumer is the claim or Forge Bone that first
+        # spends the lane's output, and the deadline phase is that consumer's.
+        "FR-22": (
+            "Ratify cubical-reduction magnitude and benchmark denominator",
+            "D",
+            "B",
+            "bn-twd9",
+        ),
+        "FR-23": (
+            "Ratify semiring-analysis margin, workload, and kernel set",
+            "F",
+            "D",
+            "bn-3ldj",
+        ),
+        "FR-24": (
+            "Ratify assumption-synthesis case count, corpus, and weakness metric",
+            "D",
+            "B",
+            "bn-3vo7",
+        ),
+        "FR-25": (
+            "Quantify automatic-abstraction-discovery cost denominator and survival rate",
+            "E",
+            "C",
+            "bn-kg2",
+        ),
     }
     for req_id, (title, deadline_phase, barrier_phase, consumer) in lane_specs.items():
         requirement = requirements[req_id]

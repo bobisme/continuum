@@ -64,3 +64,16 @@ Boundary-pushing ideas must be easy to kill. Otherwise the project becomes a mus
 
 **Promote if:** users bring significant existing specs and importer maintenance remains bounded.  
 **Defer indefinitely if:** corpus ports and SANY oracle export satisfy migration needs more cheaply.
+
+## Where lane status is decided
+
+This document states the hypotheses and their promote/kill pairs; it does not
+carry lane status. Plan §24.5's frontier register is the program's single lane
+authority, and every pair above now has a row there — cubical reduction,
+semiring-valued analysis, assumption synthesis games, and automatic abstraction
+discovery were the last four merged. Each register row cites this document as a
+source, names its baseline and fallback, and records which side won where this
+document and a research note or docs/07 §7 disagree. A pair stated here is not
+promotable until its register row is ratified, and a qualitative pair here — the
+abstraction-discovery one especially — stays a draft row until its lane owner
+fixes a number in the research note.

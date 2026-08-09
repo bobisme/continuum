@@ -245,6 +245,16 @@ No “Rust vs Java” marketing benchmark without data-layout and semantic analy
 | portfolio ML | improves solved instances/time, never changes claim soundness |
 | rare-event guidance | orders-of-magnitude improvement for at least one realistic failure with calibrated bounds |
 
+These are this document's benchmark-side statements of the thresholds, not
+the lane authority. Plan §24.5's frontier register is authoritative for lane
+status, and it records the reconciliation where this table and docs/31
+disagree: the cubical row there takes docs/31's ≥3× on at least two real
+protocol classes plus a preservation theorem over this table's ≥2× on 3/5
+target benchmarks, and keeps this table's "no regressions >25% elsewhere"
+clause, which docs/31 lacks; the abstraction row there takes this table's
+total human+compute denominator over docs/31's "human work". A lane whose
+row in the register is draft is not promotable on this table alone.
+
 ## 8. Artifact reproducibility
 
 Every result bundle contains:
