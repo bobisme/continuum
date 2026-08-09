@@ -39,6 +39,16 @@ against the ratified margin, and an implementation order.
    arm's total wire spend, drops no protocol guarantee, and costs zero extra round trips on
    all 24 solved tasks of the instrument's mix.** §4 states this as the honest deliverable
    and §5 states what the lead must decide before anyone implements toward a passing row.
+6. **Erratum, 2026-08-09 — item C7 is falsified by measurement.** `bn-6fuu5` re-ran C7's
+   projection against the mechanism the declaration actually admits, and found the saving
+   negative and the wire-visibility class wrong. Points 4 and 5 stay above as the record of
+   what was projected. Corrected: the candidate set is the **six-item 3.6 set**, worth
+   **99,780 B over the matrix = 4,060 B per solved task**, which lands the native arm at
+   **6,799 B per solved task** and a **−65%** margin, and removes **37.4%** of the native
+   arm's total wire spend, not 47.6%. Both conclusions hold and both get stronger: the
+   sum-check fails by more, and the set now costs no extra round trip for any client rather
+   than none on this mix alone. §3 C7 carries the falsification, §4 the corrected sum-check,
+   §6 the corrected order.
 
 ---
 
@@ -273,7 +283,10 @@ characters in the result frames:
 of the epoch set), `intent`, `milestones`, `operation`, `priority_class` and `snapshot` are
 fixed for the task's life. `OutputPolicy.max_bytes` is declared "Enforced byte ceiling on the
 result payload" and **no handler in `continuumd::daemon` enforces it** — the field is
-accepted, keyed into the idempotency state, and ignored.
+accepted, keyed into the idempotency state, and ignored. *Erratum: that was the state at
+measurement. `bn-6fuu5` landed enforcement on `task.status`. The 34,800 B measured here is
+unmoved, because the instrument declares no ceiling and the summary that would take one is
+falsified — §3 C7.*
 
 ---
 
@@ -424,7 +437,7 @@ conformance test, not a comment.
 **Wire-visibility.** **Declaration-moving** (handles gain an alias form and a rule binding
 it). Bundled 3.6.
 
-### C7 — `task.status`: honor `OutputPolicy`, summarize with an expansion route
+### C7 — `task.status`: honor `OutputPolicy`, summarize with an expansion route — FALSIFIED BY MEASUREMENT
 
 **Mechanism.** `OutputPolicy.max_bytes` is already declared "Enforced byte ceiling on the
 result payload" and no handler enforces it. Enforce it: when the ceiling binds, return the
@@ -447,6 +460,47 @@ for a client that needs the full record on more than half its polls.
 **Wire-visibility.** **Behavior-only. No bump.** Both `OutputPolicy.max_bytes` and
 `Omission.recoverable_by` are declared today; honoring them is conformance, not redesign.
 This candidate can and should land before the bundled 3.6 exists.
+
+**ERRATUM — FALSIFIED BY MEASUREMENT.** `bn-6fuu5`, 2026-08-09. Everything above this line
+stays as the record of what was projected. Both of its headline claims are wrong: the
+mechanism is not behavior-only, and the saving is not positive.
+
+- **Not behavior-only — it is a MAJOR.** An answer carrying `task`, `status`, `cost` and
+  `continuation` and nothing else is an answer without `operation`, `snapshot`, `intent`,
+  `epochs`, `priority_class`, `budget`, `milestones` and `committed_evidence`. `TaskRecord`
+  declares six of those `required` and two `nullable`. `rule versioning.breaking_change`
+  lists "changing a field's type or presence marker" among the changes that MUST advance the
+  MAJOR and publish the plan §4.6 per-artifact-class compatibility statement. The summary
+  mechanism is therefore not a 3.6-minor item either: it cannot ride the bundled minor with
+  items 2-7, and it cannot land first. This correction is larger than the byte number,
+  because the whole seven-item set was accepted on the record that item 1 needed no
+  declaration to move.
+- **The measured saving is negative.** `bn-6fuu5` re-ran this note's own method — recorded
+  envelopes re-encoded with `continuumd`'s codec, driven through landed enforcement code
+  rather than a model of it — over the matrix's 48 `task.status` answers, 35,368 B of
+  payload. Best case, taking each poll's optimum ceiling independently and so an optimum no
+  real caller can pick, the set loses **1,196 B over the matrix = −49 B per solved task**. At
+  the tightest conforming ceiling, which is the summary this candidate describes, it loses
+  **6,128 B = −255 B per solved task**. The counterfactual that does reach +1,114 has to be
+  built by string surgery, because the Rust type cannot express the absence, and every byte
+  of it is a presence marker moving.
+- **Why it loses.** What the declaration leaves a ceiling to take is the contents of two
+  `required` lists plus the nine `optional` members of `Budget`: **122-289 B per poll**. A
+  conforming INV-007 record carrying `recoverable_by` measures **136 B**, 47 B without it,
+  and `recoverable_by`'s value is a **fourth** copy of the same 69-byte task handle the
+  answer already carries three times — §2.2. Stating the ceiling costs a further 34 B on the
+  request frame. Populating INV-007's retrieval half for the first time on this wire, which
+  is the reason this candidate was ordered first, is exactly what makes the trade lose. The
+  projected 1,114 charged neither the omission record nor the request-side declaration.
+- **What survives, and is landed.** `OutputPolicy.max_bytes` was declared "the enforced
+  contract" and read by no handler. It is now enforced on `task.status` with three typed
+  dispositions — answered whole, shortest-prefix elision with an INV-007 omission naming the
+  retrieval route, or a typed refusal when nothing conforming fits. That is conformance, it
+  moves no declaration, and it stays. The instrument declares no ceiling, so the landed
+  native figure is unchanged at 10,859 B per solved task and no control moved.
+- **Re-scoped to the major horizon.** The `task.status` summary is deferred to the MAJOR
+  horizon. It is not in the 3.6 bundle, it is no longer this note's item 1, and it
+  contributes **0 B** to the corrected set total in §4.
 
 ---
 
@@ -481,6 +535,37 @@ payload and the digest re-transmission, which the landed maximal did not model. 
 therefore a genuinely better redesign than the falsification campaign's floor assumed — and
 it still fails, by a wider margin than the shortfall it closed.
 
+### Erratum to the sum-check — the corrected total
+
+`bn-6fuu5` falsified C7 after the table above was written; see the erratum in §3. C7
+contributes nothing, so the set is the **six-item 3.6 set** — C1, C2, C3, C4b, C5 and C6.
+The rows above stay as the record of what was projected. These are the numbers that hold:
+
+| candidate set | saved over the matrix | saved / solved | native after | margin |
+|---|---:|---:|---:|---:|
+| landed measurement | — | — | 10,859 | **−163%** |
+| the five commissioned ledger items C1, C2, C3, C4b, C5 | 83,676 | 3,405 | 7,454 | **−81%** |
+| **+ C6, the one surviving discovery — the six-item 3.6 set** | **99,780** | **4,060** | **6,799** | **−65%** |
+| + the empty-member skeleton bundled with C5 | 104,940 | 4,270 | 6,589 | **−60%** |
+| C7, withdrawn — measured −49 to −255 B per solved task | **0** | **0** | — | — |
+| landed instrument's "maximal encoding redesign" | — | — | 7,668 | −86% |
+| **required for the ratified floor** | — | **7,977** | **<= 2,882** | **+30%** |
+
+Restated at the corrected total. The six-item set recovers **4,060 B of the 7,977 B per
+solved task the ratified floor needs — 51% of the gap**, not 65%, and lands the native arm
+at **6,799 B per solved task**, a **−65%** margin. With the empty-member skeleton bundled
+into C5 it reaches 4,270 B, 54% of the gap, and −60%. The set removes **37.4% of the native
+arm's total wire spend**, not 47.6%. The shortfall is **3,917 B per solved task**, not 2,803.
+
+**The verdict is unchanged and stronger.** The candidates cannot clear the margin, and
+neither can any redesign of this encoding. Two secondary readings do change. The set no
+longer beats the landed instrument's own "maximal encoding redesign" bound by as much —
+6,799 against 7,668 rather than 5,685 against 7,668 — and it is still past that bound
+because it cuts the payload and the digest re-transmission the landed maximal did not model.
+And the zero-round-trip claim is now unconditional: C7 was the one candidate whose cost was
+an extra round trip for a client that needs the full record from a poll, so with it withdrawn
+the six-item set costs no extra round trip for **any** client, not merely none on this mix.
+
 ### The round-trip lever, tested and rejected
 
 The obvious remaining move is fewer exchanges rather than smaller ones, and the protocol
@@ -490,7 +575,9 @@ and `workspace.create` already takes `seal`. Collapsing `start` + `poll*` + `res
 `await`, and `create` + `seal` into one call, takes the matrix from 172 dispatches to 60.
 
 Applied to the typed arm alone and combined with every candidate above, that lands at 3,072 B
-per solved task — a +25% margin, which *looks* like it nearly clears the floor.
+per solved task — a +25% margin, which *looks* like it nearly clears the floor. C7's
+withdrawal does not move this figure: the compound sequence collapses `start` + `poll*` +
+`result` into one `await`, so the `task.status` polls C7 acts on are not in it.
 
 **It does not, and the reason must be recorded so nobody re-derives the mistake.** The
 compound sequence is available to the baseline too — a CLI projects the same operations — and
@@ -560,6 +647,16 @@ Four routes remain, and none of them is this bone's to take:
    mix**. The G0-DX-10 bytes row will still read as measured; the exit is satisfied by the
    redesign having happened, and the honest artifact is this note plus the re-run.
 
+**Erratum to this section, `bn-6fuu5`, 2026-08-09.** C7 is withdrawn, so two figures above
+move and neither conclusion does. The demonstrated post-redesign floor is **above** the 679 B
+per call quoted here, by C7's withdrawn 27,376 B spread over the matrix, and the six-item set
+therefore travels **less** than 68% of the distance from 1,551 to 277 before it stops on the
+request envelope, the response skeleton and the payload. Route 4's set figure is **37.4% of
+the typed arm's total wire spend**, not 47.6% — §4 carries the corrected arithmetic — and the
+zero-round-trip half of that sentence gets stronger rather than weaker, because C7 was the
+one candidate that could cost a round trip and it is gone. The structural statement, the
+unreachability finding and the recommendation are unchanged.
+
 **Recommendation to the lead:** commission the candidate set on route 4, and record in the
 RFC 0027 correction that the +30% bytes margin is **unreachable under the pinned accounting
 by any lossless protocol**, with the algebra of this section as the reason. Do not commission
@@ -585,6 +682,29 @@ both block `bn-h7vn7`. Everything else is independent.
 C7 is deliberately first because it is the only item that delivers a measured saving with no
 declaration change, and because populating `Omission.recoverable_by` for the first time on
 this wire is what makes the expansion protocol a real trade rather than a design intention.
+
+**Erratum to the order, `bn-6fuu5`, 2026-08-09 — item 1 is withdrawn and the reason it was
+first is the reason it fails.** The table above stays as the record of what was ordered. C7
+is falsified by measurement, so it leads nothing and rides nothing; see the erratum in §3.
+Populating `Omission.recoverable_by` for the first time on this wire is what makes the trade
+lose, because that record costs 136 B per poll against a 122-289 B ceiling, and the summary
+that would pay for it moves presence markers `rule versioning.breaking_change` makes a MAJOR.
+The corrected order is the six 3.6 items, and **C5 under `bn-2in7i` now leads**:
+
+| # | candidate | bone | B/solved | bump | why here |
+|---|---|---|---:|---|---|
+| 1 | **C5** epochs pinned at the handshake, plus empty-member skeleton | `bn-2in7i` | 1,344 | 3.6 | largest single item; one `required` → `optional` flip, the welcome already carries the value |
+| 2 | **C1** `artifacts` first-mention/handle-only | `bn-1xy9r` | 672 | 3.6, move 2 is free | must precede C6 so the overlap is attributed once |
+| 3 | **C2** omission profile in `ServerWelcome` | `bn-1sxds` | 506 | 3.6 | establishes the welcome-profile mechanism C3 reuses |
+| 4 | **C3** assurance profile by reference | `bn-2iyci` | 567 | 3.6 | reuses C2's mechanism; carries the B11 conformance test |
+| 5 | **C6** connection-scoped handle aliases | `bn-h7vn7` | 655 | 3.6 | measured net of C1 and C5, so it lands after both |
+| 6 | **C4** `SnapshotComponents` trim, then port-by-reference | `bn-2ug29` | 260 / 524 | 3.6 | request-side, independent of everything above |
+| — | **one bundled protocol-minor 3.6** | — | — | — | raised once, at the end, covering all six |
+| — | **C7** `task.status` summary | `bn-6fuu5`, enforcement half only | 0 | MAJOR | deferred to the major horizon; the landed half is `OutputPolicy` enforcement, which moves no declaration |
+
+The dependencies are unchanged, and the set no longer has an item that ships before the
+bundled minor exists. Six items, one bump, 4,270 B per solved task with the C5 skeleton
+bundled — §4 for the arithmetic.
 
 ---
 
