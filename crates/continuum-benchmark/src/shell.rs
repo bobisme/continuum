@@ -436,6 +436,35 @@ impl ShellSurface {
         Ok((command, text, envelope, payload))
     }
 
+    /// Write a command whose argument the agent got wrong, and read the tool's usage back.
+    ///
+    /// The daemon is never contacted: no frame, no idempotency key, no audit record — which
+    /// is why the hidden ledger records an invocation and no frame bytes. The agent is
+    /// charged for what it wrote and what it read, exactly as it is for a successful command.
+    fn misrender(
+        &mut self,
+        task: &BenchmarkTask,
+        step: &Step,
+        mistake: crate::families::Mistake,
+    ) -> Observation {
+        let intended = command_line(task, step);
+        let (written, printed) = crate::families::mistaken_command(&intended, mistake);
+        let before = self.bytes;
+        self.bytes += written.len() as u64 + printed.len() as u64;
+        self.hidden.agent_tokens += structural_tokens(&written) + structural_tokens(&printed);
+        self.hidden.invocations += 1;
+        let bytes = self.bytes - before;
+        Observation {
+            admitted: false,
+            code: None,
+            local_refusal: false,
+            unrepresentable: false,
+            bytes,
+            reading: Reading::default(),
+            line: crate::families::mistake_line(step, mistake, true, bytes),
+        }
+    }
+
     fn render(
         &mut self,
         command: &str,
@@ -507,6 +536,14 @@ impl Surface for ShellSurface {
         task: &BenchmarkTask,
         step: &Step,
     ) -> Result<Observation, SurfaceError> {
+        // A mistake in how the call is *written* never reaches the daemon: a CLI refuses an
+        // unknown or missing argument in its own parser. The agent still wrote a command and
+        // still read the tool's answer, so it is charged for both — which is the fair
+        // counterpart of the typed client's own zero-byte local refusal, priced rather than
+        // assumed. See `crate::families`.
+        if let Some(mistake) = step.mistake.filter(|mistake| mistake.written()) {
+            return Ok(self.misrender(task, step, mistake));
+        }
         let before = self.bytes;
         let (command, mut text, envelope, _payload) = self.run_command(rig, task, step)?;
         self.bytes += command.len() as u64 + text.len() as u64;
@@ -575,6 +612,7 @@ impl Surface for ShellSurface {
             admitted,
             code,
             local_refusal: false,
+            unrepresentable: false,
             bytes: self.bytes - before,
             reading,
             line: transcript_line(step, admitted, code, self.bytes - before),

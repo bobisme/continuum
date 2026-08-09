@@ -120,6 +120,18 @@ pub struct Observation {
     /// low-cost local feedback". It is still a failed attempt and is counted as one; what it
     /// is not is a *cost*, and [`Observation::bytes`] is zero on it.
     pub local_refusal: bool,
+    /// Whether the surface had **no channel** for the mistake the policy decided on.
+    ///
+    /// Different from [`Observation::local_refusal`] in the way that decides a metric: a
+    /// local refusal is an operation the agent composed and the interface declined, and it
+    /// leaves a value behind (`continuum_mcp::register::Unmet`) that can be inspected; an
+    /// unrepresentable mistake leaves nothing, because there is no call through which it
+    /// could be made. [`crate::run`] counts the first as an attempt and does not count the
+    /// second, and [`crate::families`] says why counting it would be charging for a
+    /// counterfactual.
+    ///
+    /// `false` on every landed run: only a [`crate::families::MistakeFamily`] can set it.
+    pub unrepresentable: bool,
     /// Interface bytes this attempt spent, both directions.
     pub bytes: u64,
     /// What the arm read back.

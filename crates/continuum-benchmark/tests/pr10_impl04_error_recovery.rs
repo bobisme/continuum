@@ -303,6 +303,7 @@ fn the_daemon_offers_no_prefilled_recovery_operations_and_this_file_says_so() {
         },
         principal: Principal::READER,
         fault: Some(Fault::WrongPrincipal),
+        mistake: None,
     };
     let observation = surface
         .perform(&mut rig, &DIE_HARD_ALL, &denied)

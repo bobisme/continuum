@@ -40,6 +40,7 @@
 use continuumd::protocol::scalar::{ContinuationHandle, TaskHandle, WorkspaceHandle};
 use continuumd::protocol::vocabulary::{ErrorCode, SemanticVerdict, TaskStatus};
 
+use crate::families::{Injection, Mistake, MistakeClass, MistakeFamily};
 use crate::rig::Principal;
 use crate::surface::Reading;
 use crate::task::BenchmarkTask;
@@ -178,6 +179,12 @@ pub struct Step {
     pub principal: Principal,
     /// The fault this step embodies, when it is a deliberate mistake.
     pub fault: Option<Fault>,
+    /// The fallible-policy family mistake this step embodies, when a family injected one.
+    ///
+    /// [`None`] on every landed run: a family is selected explicitly, and
+    /// [`Policy::new`] selects none. See [`crate::families`] for what a mistake is and why
+    /// the same one is handed to both arms.
+    pub mistake: Option<Mistake>,
 }
 
 impl Step {
@@ -189,6 +196,7 @@ impl Step {
             call,
             principal,
             fault: None,
+            mistake: None,
         }
     }
 }
@@ -362,6 +370,14 @@ pub struct AgentView {
     pub last_admitted: bool,
     /// Faults fired so far, in order.
     pub fired: Vec<Fault>,
+    /// Family mistakes made so far, in order.
+    ///
+    /// Separate from [`AgentView::fired`] because a fault and a family mistake are different
+    /// injections with different owners: the four faults are IMPL-04's landed schedule, and a
+    /// mistake is a [`crate::families::MistakeFamily`]'s. Keeping them apart is what lets a
+    /// family sweep run *over* the landed matrix without either injection rewriting the
+    /// other's step.
+    pub mistakes: Vec<MistakeClass>,
     /// How many times the agent has re-issued a read because the answer was unreadable.
     pub rereads: u32,
 }
@@ -447,6 +463,12 @@ pub struct Policy {
     pub kind: PolicyKind,
     /// The seed's declared schedule.
     pub schedule: Schedule,
+    /// The fallible-policy family this policy is injecting, when one was selected.
+    ///
+    /// [`None`] on every landed run, which is what keeps the five landed metrics exactly
+    /// where bn-134i left them: a family is an *addition* beside them, never a repurposing
+    /// of one.
+    pub injection: Option<Injection>,
 }
 
 impl Policy {
@@ -462,7 +484,30 @@ impl Policy {
             .iter()
             .find(|schedule| schedule.seed == seed)
             .expect("a declared seed");
-        Self { kind, schedule }
+        Self {
+            kind,
+            schedule,
+            injection: None,
+        }
+    }
+
+    /// The same policy, injecting one fallible-policy family's mistake.
+    ///
+    /// # Panics
+    ///
+    /// As [`Policy::new`].
+    #[must_use]
+    pub fn injecting(kind: PolicyKind, seed: u16, injection: Injection) -> Self {
+        Self {
+            injection: Some(injection),
+            ..Self::new(kind, seed)
+        }
+    }
+
+    /// The family this policy injects, when it injects one.
+    #[must_use]
+    pub fn family(&self) -> Option<MistakeFamily> {
+        self.injection.map(|injection| injection.family)
     }
 
     /// Decide the next operation.
@@ -474,7 +519,21 @@ impl Policy {
         let Some(step) = self.faithful(task, view) else {
             return Decision::Done;
         };
-        Decision::Call(Box::new(self.perturb(view, step)))
+        let step = self.perturb(view, step);
+        Decision::Call(Box::new(self.mislead(task, view, step)))
+    }
+
+    /// Turn the decided step into the selected family's mistake, once per run.
+    ///
+    /// Applied after [`Policy::perturb`] so the two injections cannot rewrite one step, and
+    /// applied identically on both arms because it happens *here*, above the surface seam:
+    /// the arms are handed one [`Step`] carrying one [`Mistake`], and what differs is only
+    /// whether the surface has a channel for it.
+    fn mislead(&self, task: &BenchmarkTask, view: &AgentView, step: Step) -> Step {
+        match self.injection {
+            Some(injection) => injection.apply(task, view, step),
+            None => step,
+        }
     }
 
     /// The step a faultless agent would take, or [`None`] when the task is finished.
@@ -548,6 +607,7 @@ impl Policy {
                 call,
                 principal: Principal::READER,
                 fault: Some(fault),
+                mistake: None,
             },
             (Fault::UnsealedStart, Call::SealWorkspace { snapshot }) => Step {
                 call: Call::StartVerification {
@@ -556,6 +616,7 @@ impl Policy {
                 },
                 principal: Principal::RUNNER,
                 fault: Some(fault),
+                mistake: None,
             },
             (Fault::TightBudget, Call::StartVerification { snapshot, .. }) => Step {
                 call: Call::StartVerification {
@@ -564,11 +625,13 @@ impl Policy {
                 },
                 principal: Principal::RUNNER,
                 fault: Some(fault),
+                mistake: None,
             },
             (Fault::UnregisteredModel, Call::SealWorkspace { snapshot }) => Step {
                 call: Call::ForkModule { base: snapshot },
                 principal: Principal::BUILDER,
                 fault: Some(fault),
+                mistake: None,
             },
             (_, call) => Step::faithful(call),
         }

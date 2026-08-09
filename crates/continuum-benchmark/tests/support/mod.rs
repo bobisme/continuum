@@ -38,6 +38,7 @@
 // no single binary uses every helper. The alternative is five copies of this file.
 #![allow(dead_code)]
 
+use continuum_benchmark::families::{self, MistakeFamily};
 use continuum_benchmark::policy::{Call, Policy, PolicyKind, SCHEDULES, Step};
 use continuum_benchmark::rig::{Principal, Rig};
 use continuum_benchmark::run::{self, ArmRun};
@@ -116,6 +117,24 @@ impl Surface for NativeSurface {
         step: &Step,
     ) -> Result<Observation, SurfaceError> {
         let operation = step.call.operation();
+        // A mistake in how a call is *written* has no channel here. `AgentClient` reaches
+        // every one of its eight operations through a method whose parameters are typed
+        // values: an argument's name is a struct field the compiler resolves, and a missing
+        // parameter is a compile error rather than a call. There is nothing to compose and
+        // nothing to refuse, so nothing is attempted — see
+        // `continuum_benchmark::surface::Observation::unrepresentable` for why that is not
+        // the same as this arm's own zero-cost local refusal.
+        if let Some(mistake) = step.mistake.filter(|mistake| mistake.written()) {
+            return Ok(Observation {
+                admitted: false,
+                code: None,
+                local_refusal: false,
+                unrepresentable: true,
+                bytes: 0,
+                reading: Reading::default(),
+                line: families::mistake_line(step, mistake, false, 0),
+            });
+        }
         let components = rig.components(task.source);
         let hello = continuum_benchmark::rig::hello();
         let target = Target {
@@ -196,6 +215,7 @@ impl Surface for NativeSurface {
             admitted,
             code,
             local_refusal: answer.unmet().is_some(),
+            unrepresentable: false,
             bytes,
             reading: read(operation, &answer),
             line: run::line(step, admitted, code, bytes),
@@ -299,6 +319,47 @@ pub fn native_sweep() -> Vec<ArmRun> {
         }
     }
     runs
+}
+
+/// Drive the native arm over one fallible-policy family's whole matrix.
+///
+/// The mirror of `continuum_benchmark::families::shell_sweep`, and it has to live here for
+/// the same plan §20 reason the rest of this file does. The cell enumeration is
+/// `families::cells`, shared with the baseline, so neither arm decides which cell is which.
+///
+/// # Panics
+///
+/// As [`native_sweep`].
+#[must_use]
+pub fn native_family_sweep(family: MistakeFamily) -> Vec<ArmRun> {
+    let mut runs = Vec::new();
+    for (task, seed, kind, cell) in families::cells() {
+        let mut rig = Rig::fresh();
+        let mut surface = NativeSurface::new();
+        runs.push(
+            run::drive(
+                &mut surface,
+                &mut rig,
+                task,
+                families::policy_for(family, seed, kind, cell),
+            )
+            .expect("the native arm attempts every operation"),
+        );
+    }
+    runs
+}
+
+/// Both arms over one family's matrix: `(native, shell)`.
+///
+/// # Panics
+///
+/// As [`native_sweep`].
+#[must_use]
+pub fn family_arms(family: MistakeFamily) -> (Vec<ArmRun>, Vec<ArmRun>) {
+    (
+        native_family_sweep(family),
+        families::shell_sweep(family).expect("the shell arm attempts every operation"),
+    )
 }
 
 /// Drive both arms over the whole matrix.

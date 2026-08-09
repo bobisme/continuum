@@ -150,6 +150,18 @@ pub struct ArmRun {
     pub stuck: Option<Stuck>,
     /// The faults the policy fired.
     pub faults: Vec<Fault>,
+    /// The fallible-policy family mistakes the policy decided on, in order.
+    ///
+    /// Identical on both arms by construction — the policy is shared and the mistakes are
+    /// decided above the surface seam — so a difference between the arms is a difference in
+    /// what the surface could *express*, never in what the agent tried to do. Empty on every
+    /// landed run.
+    pub mistakes: Vec<crate::families::MistakeClass>,
+    /// Mistakes this surface had no channel for, and therefore never attempted.
+    ///
+    /// Counted separately from `invalid` and never folded into it: see
+    /// [`crate::surface::Observation::unrepresentable`]. Zero on every landed run.
+    pub prevented: u32,
     /// Whether a run that made mistakes reached the frozen answer anyway.
     pub recovered: bool,
     /// The reachable-state count the arm read, when it read one.
@@ -219,6 +231,8 @@ pub fn drive(
         solved: false,
         stuck: None,
         faults: Vec::new(),
+        mistakes: Vec::new(),
+        prevented: 0,
         recovered: false,
         states_read: None,
         verdict_read: None,
@@ -240,7 +254,23 @@ pub fn drive(
                     view.fired.push(fault);
                     run.faults.push(fault);
                 }
+                // A family mistake is recorded when it is *decided*, not when it lands, and
+                // on both arms alike. That is what makes the injection arm-blind: the typed
+                // arm that has no channel for it still knows the agent tried, so it does not
+                // decide the same mistake again on the next iteration.
+                if let Some(mistake) = step.mistake {
+                    view.mistakes.push(mistake.class());
+                    run.mistakes.push(mistake.class());
+                }
                 let observation = surface.perform(rig, task, &step)?;
+                // No channel, no composition, no refusal: nothing was attempted, so nothing
+                // is counted. The trace still records the intent, which is what lets an
+                // independent grader recompute both arms' counts from the transcript alone.
+                if observation.unrepresentable {
+                    run.prevented += 1;
+                    run.transcript.push(observation.line.clone());
+                    continue;
+                }
                 run.attempted += 1;
                 run.bytes += observation.bytes;
                 if observation.admitted {

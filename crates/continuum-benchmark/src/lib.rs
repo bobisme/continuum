@@ -73,6 +73,21 @@
 //! additive: `ShellSurface::new` is the landed baseline, and nothing the campaign records
 //! enters an interface-byte total.
 //!
+//! # What bn-2phq3's fallible-policy families added
+//!
+//! That campaign's second surviving conclusion left the invalid-action margin a **tie that is
+//! a property of the policy**: one shared policy can only make mistakes both surfaces can
+//! express, and research/25's own mechanism for the margin — a machine-readable action
+//! grammar and the argument channel a typed surface does not have — was named unexercised.
+//! [`families`] exercises it: five declared, seeded, deterministic mistake classes, injected
+//! into the *same* shared policy, handed to both arms as one [`policy::Step`], with the
+//! surfaces differing only in whether they have a channel for the mistake.
+//!
+//! It is additive in the same way the falsification campaign was. [`policy::Policy::new`]
+//! selects no family, so every landed run decides exactly the steps it decided before; a
+//! family sweep is a *second* matrix beside the landed one, and
+//! [`families::FamilyReport`] is a third artifact beside the two above.
+//!
 //! # Dependency-boundary contract
 //!
 //! - May depend on Forge and on verifier interfaces — it is a harness, not part of the
@@ -86,6 +101,7 @@
 
 pub mod corpus;
 pub mod falsification;
+pub mod families;
 pub mod philosophers;
 pub mod policy;
 pub mod report;
