@@ -49,11 +49,38 @@
 //! What this module ships is the **traversal and selection layer** those seven are written
 //! in — by kind, by status, by claim, by producer, and the incident edges of a node — plus
 //! [`EvidenceGraph::contradictions`], which is "conflicting candidates" and is
-//! [`crate::conflict`]'s input. The other six are *semantic* queries that need artifact
-//! content this crate does not hold (a proof frontier needs proof obligations, semantic
-//! duplicates need semantic equality), and inventing them over handles alone would be the
-//! empty-success shape the dossier rejects. They are named here as not-delivered rather than
-//! silently approximated.
+//! [`crate::conflict`]'s input.
+//!
+//! The previous revision of this paragraph said the other six "need artifact content this
+//! crate does not hold". That was true when it was written and is now too strong, and RFC
+//! 0038's "Queries" section carries the corrected reading (bn-xsuz2). Re-verified against
+//! the graph as it stands, the six split three ways:
+//!
+//! - **still content-blocked, four.** *Missing obligations* needs to decide that a claim
+//!   requires an obligation nobody wrote, which means reading the claim, and a node holds a
+//!   commitment rather than a formula. A *proof frontier* needs the judgement that a
+//!   receipt discharges an obligation, which RFC 0038 D3 explicitly withholds from a
+//!   `CHECKED_BY` edge — "an edge is not a promotion […] what that evidence licenses is a
+//!   later, separate decision". A *repair frontier* needs patch and failure content, and
+//!   nothing appends a `REPAIRS` edge. *Semantic duplicates* needs semantic equality, which
+//!   is the one this crate can never have: ADR-0013 makes two records the same artifact
+//!   exactly when they encode identically, and that is syntactic by construction.
+//! - **now answerable from held content, one.** *Provenance* in docs/44's derivation sense
+//!   — "source retrievals, and derivation" — is a walk over `provenance.inputs`, which every
+//!   node carries and which `observe.ingest`, `evidence.link`, and `whiteboard.compile` all
+//!   write. [`EvidenceGraph::nodes_by_producer`] answers the who-produced-what grain; the
+//!   derivation closure is a legitimate slice and is carried, not shipped here.
+//! - **blocked on a different thing than was recorded, one.** *Task generation*'s seven
+//!   docs/44 forms are predicates over edge kinds the graph almost never holds: of the
+//!   thirteen, `whiteboard.compile` appends `SUPPORTS`, `evidence.link` appends
+//!   `CHECKED_BY`, and [`crate::conflict`] appends `CONFLICTS_WITH` and `SUPERSEDES` — no
+//!   operation appends `DEPENDS_ON`, `REPAIRS`, `REFUTES`, or `COUNTEREXAMPLE_TO`. So "find
+//!   counterexample to candidate" would answer *every* candidate in every graph, which is
+//!   the empty-success shape rather than a query. What unblocks it is an operation that
+//!   records a refutation, not more content.
+//!
+//! None of the six is approximated here. Naming which of them is blocked on *what* is the
+//! difference between a deferral and a shrug.
 //!
 //! Every accessor iterates a [`std::collections::BTreeMap`] keyed by content identity, so
 //! iteration order is a function of the content and of nothing else (GOV-1-03, INV-005).

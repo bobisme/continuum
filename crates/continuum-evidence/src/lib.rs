@@ -36,16 +36,26 @@
 //! | [`graph`] | the append-only store, its refusals, and its queries | all four |
 //! | [`claim_status`] | the plan §11.4 lattice and its compare-and-set | PR-1 / IMPL-06 |
 //! | [`whiteboard`] | plan §11.5's seven sections, and the compiler that turns them into proposals | PHASE-A-DEL-04 |
+//! | [`view`] | the other direction: held graph state, rendered into those seven sections | PHASE-A-DEL-04 |
 //!
-//! # The whiteboard compiler is here, and its wire verb is not
+//! # The whiteboard runs in two directions, and only one of them has a wire verb
 //!
 //! plan §11.5's whiteboard is an *input* format, and INV-003 says an input format is a
 //! schema: `notes/plan/schemas/whiteboard-note.schema.json` is the normative one and
-//! [`whiteboard`] is transcribed from it. What the module deliberately does not carry is a
-//! wire operation — `whiteboard.compile` does not exist, because adding an operation moves
-//! the IDL, plan §10.2 and RFC 0027's authority table together and raises the protocol
-//! minor. The crate-level typed surface lands first and the wire spelling lands when its RFC
-//! decides it; that is the same order `continuum-forge` took.
+//! [`whiteboard`] is transcribed from it. When that module landed it carried no wire
+//! operation and this paragraph said `whiteboard.compile` did not exist; it does now, at
+//! protocol 3.5 under `rule whiteboard.compilation` (RFC 0038 W10–W12), and the library
+//! keeps its own compiler because the two resolve against two different graphs — the
+//! daemon's, keyed by `ev_` handles, and this crate's, keyed by the within-graph content
+//! keys RFC 0038 D4 says never reach the wire.
+//!
+//! [`view`] is the reverse direction, docs/44's "human-friendly whiteboard view", and it has
+//! no wire verb: nothing in the IDL can carry a sectioned, status-bearing report without a
+//! response member that does not exist, so the crate-level typed surface lands first and the
+//! wire spelling lands when its RFC decides it. That is the order `continuum-forge` took and
+//! the order the compiler itself took. A view is deliberately **not** a note (RFC 0038 V6):
+//! the note format has no status member on purpose, and rendering held state into it would
+//! erase every status the graph holds.
 //!
 //! # This is the library, not the wire
 //!
@@ -94,4 +104,5 @@ pub mod graph;
 pub mod identity;
 pub mod node;
 pub mod provenance;
+pub mod view;
 pub mod whiteboard;

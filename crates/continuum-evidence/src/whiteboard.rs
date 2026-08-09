@@ -11,8 +11,11 @@
 //!
 //! The direction is note → proposals. A whiteboard is where an agent *works*; the graph is
 //! what it may *claim*, and this module is the one-way door between them. Nothing here reads
-//! the graph back out into a note: docs/44's "human-friendly whiteboard view" is a rendering
-//! surface and is not delivered here.
+//! the graph back out: docs/44's "human-friendly whiteboard view" is the opposite direction
+//! and is [`crate::view`], which shares this module's [`Section`] vocabulary and nothing
+//! else. That module states why a view is not a note (RFC 0038 V6) — the shortest form of
+//! the reason is that this format has no status member on purpose, so rendering held graph
+//! state into one would erase every status the graph holds.
 //!
 //! # The seven sections are a schema, not a heading list
 //!
@@ -84,13 +87,19 @@
 //! proposal set: publication is per-artifact atomic (INV-017), and a half-compiled note
 //! would make "what did the note say" depend on which entries happened to resolve.
 //!
-//! # This is the library, not the wire
+//! # This is the library, and the wire is `whiteboard.compile`
 //!
-//! There is no `whiteboard.compile` operation. Adding one would move the IDL, plan §10.2 and
-//! RFC 0027's authority table together and raise the protocol minor; that is a separate,
-//! deliberate act (bn-1dsih's precedent: a crate-level typed surface now, the wire spelling
-//! when its RFC decides it). What a caller gets here is the compiler as a value: build a
-//! note, [`WhiteboardNote::compile`] it against a graph, inspect the proposals, and
+//! When this module landed there was no `whiteboard.compile` operation, and the paragraph
+//! here said so. There is one now: RFC 0038 W10–W12 decided the wire at protocol 3.5, and
+//! `continuumd`'s `daemon::whiteboard` serves it under `rule whiteboard.compilation`. The
+//! two are deliberately not one implementation. That module compiles against the *daemon's*
+//! graph, whose keys are the wire's `ev_` handles, while [`WhiteboardNote::compile`] below
+//! resolves against an [`EvidenceGraph`], whose keys are the within-graph content keys
+//! RFC 0038 D4 says never reach the wire; what it *does* borrow is every decision — the
+//! section list, [`Section::node_kind`], [`Section::label`], and the constructors that
+//! refuse an unsupported conclusion and a reserved note class — so the mapping cannot
+//! drift. What a caller gets here is the compiler as a value: build a note,
+//! [`WhiteboardNote::compile`] it against a graph, inspect the proposals, and
 //! [`Compilation::apply`] them.
 //!
 //! # Clause → test
@@ -98,6 +107,7 @@
 //! | Clause | Source | Test |
 //! |---|---|---|
 //! | seven sections, the schema's keys | plan §11.5, note schema | `the_sections_are_the_seven_plan_11_5_headings`, `every_section_names_its_schema_key` |
+//! | the heading → kind map is invertible | RFC 0038 W2, V2 | `the_kind_map_is_injective_so_it_inverts` |
 //! | every claim becomes a proposed node | docs/44 | `every_compiled_node_is_proposed` |
 //! | references must resolve | docs/44, RFC 0038 | `an_unresolved_reference_refuses_the_whole_note`, `a_resolved_reference_compiles` |
 //! | a subject need not resolve | this module | `a_subject_the_graph_does_not_hold_is_not_a_refusal` |
@@ -245,6 +255,25 @@ impl Section {
             Self::Experiment => None,
             Self::Decision => Some(NodeKind::Decision),
         }
+    }
+
+    /// The section that proposes a node kind, which is [`Section::node_kind`] read backwards.
+    ///
+    /// Total on the six kinds W2 names and [`None`] on the other fourteen, because
+    /// [`Section::node_kind`] is injective: six proposing sections name six distinct kinds,
+    /// which is the same fact `rule whiteboard.compilation` clause 4 rests a proposal's
+    /// identity on. That injectivity is what makes a *view* possible at all
+    /// ([`crate::view`], RFC 0038 V2) — an ambiguous inverse would mean a held node
+    /// belonged in two sections and the view would have to choose, which is the semantic
+    /// judgement W7 says this vocabulary may not make.
+    ///
+    /// [`Section::Experiment`] is unreachable here, and so is any kind outside the six: an
+    /// experiment is a task proposal and never a node (W3), so no held node maps to it.
+    #[must_use]
+    pub fn of_kind(kind: NodeKind) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|section| section.node_kind() == Some(kind))
     }
 
     /// The label a node compiled from this section carries: `whiteboard:<schema key>`.
@@ -1185,6 +1214,36 @@ pub(crate) mod tests {
             .filter(|it| it.node_kind().is_none())
             .collect();
         assert_eq!(kindless, [Section::Experiment]);
+    }
+
+    #[test]
+    fn the_kind_map_is_injective_so_it_inverts() {
+        // W2 maps six sections onto six kinds, and `Section::of_kind` is that map read
+        // backwards. Injectivity is what makes the inverse a function rather than a choice,
+        // and it is the premise RFC 0038 V2 rests the view's section membership on — so it
+        // is asserted here, at the mapping, and not only where it is used.
+        let mut proposed: Vec<NodeKind> = Section::ALL
+            .into_iter()
+            .filter_map(Section::node_kind)
+            .collect();
+        assert_eq!(proposed.len(), 6);
+        let before = proposed.len();
+        proposed.sort_unstable();
+        proposed.dedup();
+        assert_eq!(proposed.len(), before, "two sections named one kind");
+        for section in Section::ALL {
+            assert_eq!(
+                section.node_kind().and_then(Section::of_kind),
+                section.node_kind().map(|_| section),
+                "{section}"
+            );
+        }
+        // The fourteen kinds no section names invert to nothing, rather than to a default.
+        let unmapped = NodeKind::ALL
+            .into_iter()
+            .filter(|kind| Section::of_kind(*kind).is_none())
+            .count();
+        assert_eq!(unmapped, 14);
     }
 
     #[test]
