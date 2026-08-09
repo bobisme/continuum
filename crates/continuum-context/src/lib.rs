@@ -80,6 +80,23 @@
 //! manifest is derived from. Below the smallest conforming child the branch flips: nothing
 //! is published and the caller is refused.
 //!
+//! [`guarantee`], [`causal`], [`stage`], [`compile`] (bn-21vno — the compiler's **stage
+//! group 1**, RFC 0028 stages 1–2 with the redaction pre-pass) — the ten-stage pipeline
+//! begins here. [`guarantee`] carries the closed thirteen-member `guarantees` vocabulary and
+//! makes rule C1 a type: a request has no path into a claim, and a claim needs a
+//! [`guarantee::License`] no code outside this crate can mint. [`causal`] is the
+//! engine-independent causal order stage 2 slices over — `continuum-cir` is a stub and this
+//! crate may not import an engine — together with the *independent* closure checker RFC 0028's
+//! Validation section requires and a declared [`causal::Completeness`] that decides whether a
+//! stage-2 drop is `slice-irrelevant` (a proof) or `heuristic-cutoff` (an undecided). [`stage`]
+//! is the auditable-intermediate spine: all ten stages named, the redaction pre-pass ordered
+//! before stage 1 as RFC 0028 correction 12 requires, and a per-phase retrievable record for
+//! RFC 0030's compared artifact 5. [`compile`] runs the group — pre-pass, root selection,
+//! backward causal slicing — publishing through [`accounting`] so INV-007's counting equation
+//! holds by construction, and refusing a redacted root, a hole redaction punched in a core
+//! (the guarantee is dropped, never the honesty), and a residual expansion query nothing
+//! published anchors.
+//!
 //! Declined here, and left to their own bones: typed construction for the remaining
 //! seven `SelectionKind` members (`proof`, `assumption`, `counterfactual`,
 //! `obligation_flow`, `order_constraint`, `repair_surface`, `unknown`) —
@@ -102,14 +119,18 @@
 pub mod accounting;
 pub mod assurance;
 pub mod budget;
+pub mod causal;
+pub mod compile;
 pub mod event;
 pub mod expansion;
+pub mod guarantee;
 pub mod model;
 pub mod omission;
 pub mod pack;
 pub mod replay;
 pub mod selection;
 pub mod source;
+pub mod stage;
 pub mod state_delta;
 pub mod target;
 pub mod verdict;
