@@ -26,7 +26,7 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 - requests are idempotent under idempotency keys; (delivered: bn-3huh7 — all 18 servable mutations probed with world-fingerprint reads under fresh-request_id retries, 29 unservable proven key-unspent at dispatch; replay request_id and audit-correlation echo defect tracked bn-1ybn3)
 - continuation resume validates epochs and inputs before any reuse; (delivered: bn-16v3x — 13 input classes zero-trace-fingerprinted, guarantee measured wider than declared on six epoch axes; model-availability ordering gap and engine error code tracked bn-3oocz; pinned intent never revalidated, recorded on the bone)
 - cancellation closes obligations and publishes no partial finality; (delivered: bn-1tkrp — obligation census by kind and subject with wire-derived shadow ledger, store read bit-for-bit across cancels, post-cancel re-drive byte-identical; scope: one of 26 task classes servable in this build, single-threaded dispatch grain)
-- artifact publication is transactional (INV-017);
+- artifact publication is transactional (INV-017); (delivered: bn-2vbqm — closed census of all five publisher sites verified load-bearing by injected mutant, full abort taxonomy, 15-phase stroboscopic sweep, no tear found; INV-017 holds per artifact, and the RFC 0026 operation-grain wording is adjudicated under bn-12plt)
 - authorization is checked independently of handle possession;
 - daemon crash recovery leaves no stale index entries or orphan tasks (plan §4.5).
 
