@@ -44,8 +44,24 @@ continuum-workspace = { path = "../continuum-workspace" }
 continuumd = { path = "../continuumd" }
 
 # Repeated because integration tests in `tests/` are separate crates and do not inherit the
-# library's dependencies. `continuum-mcp` appears only here: see above.
+# library's dependencies. `continuum-mcp` and `continuum-cli` appear only here: see above.
+#
+# `continuum-cli` joined them on bn-id4, for the same reason and under the same rule.
+# Plan §21's Phase A exit names three surfaces — "Die Hard and Dining Philosophers can be
+# checked through native API, CLI, and an agent client with identical artifacts" — and
+# `tests/phase_a_triple_surface_identity.rs` is the one place all three are driven against one
+# provisioning. Two of the three are adapters, so the file can only live where a
+# dev-dependency on an adapter is already the documented arrangement; that is here.
+# `Rig::fresh` is also the only landed function that stages *both* corpus ports and registers
+# both models, and INV-005 makes "the three surfaces got the same inputs" the load-bearing
+# precondition of the whole check — re-provisioning that by hand elsewhere would put the thing
+# under test into fixture code. The alternative homes were both worse on this crate's own
+# terms: `continuumd/tests/` would have spelled `continuumd -> continuum-cli`, which is
+# verbatim the edge `tools/check_crate_boundaries.py`'s self-test injects as its canonical
+# adapters-are-sinks violation, and `continuum-cli/tests/` would have taken the same
+# adapter-to-adapter edge with none of the corpus provisioning.
 [dev-dependencies]
+continuum-cli = { path = "../continuum-cli" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
 continuum-mcp = { path = "../continuum-mcp" }
