@@ -22,10 +22,10 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 ## G1 — Workbench identity and lifecycle
 
 - snapshots, intent contracts, handles, and artifacts are immutable and content-addressed; (delivered: bn-1k1s8 — spec-derived second BLAKE3 recomputes every address off the wire; narrowing on the bone: in_* and campaign identities are preimage digests, cap_* by design not content-addressed, 16 of plan §4.4's 19 classes have no minting path)
-- explicit handles across native API;
-- requests are idempotent under idempotency keys;
-- continuation resume validates epochs and inputs before any reuse;
-- cancellation closes obligations and publishes no partial finality;
+- explicit handles across native API; (delivered: bn-3j01v — second IDL reader by a different strategy, 75 of 75 operations, all 666 leaves adjudicated, 239 resource-naming leaves all handles or content identities; exact-set narrowing of 6 raw-string leaves tracked bn-ah1k8)
+- requests are idempotent under idempotency keys; (delivered: bn-3huh7 — all 18 servable mutations probed with world-fingerprint reads under fresh-request_id retries, 29 unservable proven key-unspent at dispatch; replay request_id and audit-correlation echo defect tracked bn-1ybn3)
+- continuation resume validates epochs and inputs before any reuse; (delivered: bn-16v3x — 13 input classes zero-trace-fingerprinted, guarantee measured wider than declared on six epoch axes; model-availability ordering gap and engine error code tracked bn-3oocz; pinned intent never revalidated, recorded on the bone)
+- cancellation closes obligations and publishes no partial finality; (delivered: bn-1tkrp — obligation census by kind and subject with wire-derived shadow ledger, store read bit-for-bit across cancels, post-cancel re-drive byte-identical; scope: one of 26 task classes servable in this build, single-threaded dispatch grain)
 - artifact publication is transactional (INV-017);
 - authorization is checked independently of handle possession;
 - daemon crash recovery leaves no stale index entries or orphan tasks (plan §4.5).

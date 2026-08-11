@@ -3443,7 +3443,7 @@
         "line": 22,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "explicit handles across native API"
     },
     {
@@ -3455,7 +3455,7 @@
         "line": 22,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "requests are idempotent under idempotency keys"
     },
     {
@@ -3467,7 +3467,7 @@
         "line": 22,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "continuation resume validates epochs and inputs before any reuse"
     },
     {
@@ -3479,7 +3479,7 @@
         "line": 22,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "cancellation closes obligations and publishes no partial finality"
     },
     {
