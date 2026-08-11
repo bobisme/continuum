@@ -126,8 +126,10 @@ governance:
     python3 tools/governance/check_revision_delta.py --self-test
     python3 tools/governance/check_revision_delta.py
 
-# Mechanical validation of the architecture/research dossier.
+# Mechanical validation of the architecture/research dossier. The traceability
+# self-test runs first so the extractor semantics cannot regress vacuously.
 dossier:
+    python3 notes/plan/tools/traceability.py --self-test
     cd notes/plan && uv run --with jsonschema python3 tools/validate_dossier.py
 
 # Lean metatheory gate: build the RFC 0012 T0/T1 rungs and verify the ADR-0035

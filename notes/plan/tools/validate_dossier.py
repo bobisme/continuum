@@ -402,7 +402,12 @@ def _parse_gate_sections(text: str) -> dict[int, list[str]]:
 
     def flush() -> None:
         if current is not None and bullet:
-            gates[current].append(" ".join(bullet))
+            # Correspondence is over the normative text: a "(delivered: bn-…)"
+            # annotation is a completion record, stripped exactly as the
+            # traceability extractors strip it.
+            gates[current].append(
+                re.sub(r"\s*\(delivered:[^)]*\)", "", " ".join(bullet))
+            )
         bullet.clear()
 
     for line in text.splitlines():

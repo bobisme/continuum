@@ -13,7 +13,7 @@
     },
     "empty_files": {
       "empty_files": 0,
-      "scanned_files": 332
+      "scanned_files": 333
     },
     "g0_matrix_counts": {
       "closed": 1,
@@ -58,12 +58,12 @@
       "phases": 6
     },
     "plan_bones_traceability": {
-      "active_bones": 752,
-      "active_edges": 1779,
-      "active_requirements": 643,
+      "active_bones": 747,
+      "active_edges": 1771,
+      "active_requirements": 639,
       "coverage": "complete",
       "dependency_layers": 14,
-      "leaf_bones": 663,
+      "leaf_bones": 658,
       "requirements": 850
     },
     "program_status": {
@@ -95,14 +95,14 @@
       ]
     },
     "python": {
-      "files": 23
+      "files": 24
     },
     "register_rows": {
       "ratified_quotes_checked": 6,
       "rows": 25
     },
     "retired_names": {
-      "files_scanned": 318
+      "files_scanned": 319
     },
     "rev2_target_gate_qualifiers": {
       "target_gate_lines": 20

@@ -17,11 +17,11 @@
 
 All load-bearing experiments in [`../notes/G0_SPIKE_MATRIX.md`](../notes/G0_SPIKE_MATRIX.md) have evidence or an explicit redesign decision, recorded in the matrix itself. A failed or unexecuted freeze-blocking item blocks interface freeze.
 
-Staging rule: G0 closes in Phase A for every item whose required experiment runs against Phase A machinery — the freeze-blocking subset DX-01–03, 10, 12, 13, 14. An unexecuted or failed item in this subset blocks interface freeze. Items whose experiments require later subsystems are re-homed to the gates that own them — DX-04 (causal debugger) → G4, DX-05 (incrementality) → G5, DX-06 (neighborhood/mutation campaign) → G4, DX-07 (Forge non-vacuity) → G7, DX-08 (lens ambiguity) → G6, DX-09 (human diagnosis study) → G8, DX-11 (proof-service isolation) → G6, DX-15 (benchmark leakage) → G9 — with the Phase A spike results for DX-04, 05, 07, and 08 recorded as artifact-shape evidence only, and each re-homing recorded in the matrix as that item's explicit decision. The Phase A benchmark subset used for DX-10 and the G2 Context Pack ablation must itself pass the plan §19.4 family/source-hash separation check before either result is accepted; full leakage validation remains DX-15 at G9. The matrix carries Status, Evidence, and Decision columns; plan §0.3's counts are derived from it, not asserted beside it.
+Staging rule: G0 closes in Phase A for every item whose required experiment runs against Phase A machinery — the freeze-blocking subset DX-01–03, 10, 12, 13, 14. An unexecuted or failed item in this subset blocks interface freeze. Items whose experiments require later subsystems are re-homed to the gates that own them — DX-04 (causal debugger) → G4, DX-05 (incrementality) → G5, DX-06 (neighborhood/mutation campaign) → G4, DX-07 (Forge non-vacuity) → G7, DX-08 (lens ambiguity) → G6, DX-09 (human diagnosis study) → G8, DX-11 (proof-service isolation) → G6, DX-15 (benchmark leakage) → G9 — with the Phase A spike results for DX-04, 05, 07, and 08 recorded as artifact-shape evidence only, and each re-homing recorded in the matrix as that item's explicit decision. The Phase A benchmark subset used for DX-10 and the G2 Context Pack ablation must itself pass the plan §19.4 family/source-hash separation check before either result is accepted; full leakage validation remains DX-15 at G9. The matrix carries Status, Evidence, and Decision columns; plan §0.3's counts are derived from it, not asserted beside it. (delivered: bn-31yxg — independent mechanical audit, tools/check_g0_matrix.py, 0 errors across all 15 rows, every pointer resolved, §0.3 re-derived; two Evidence-cell count defects corrected under bn-3tp78)
 
 ## G1 — Workbench identity and lifecycle
 
-- snapshots, intent contracts, handles, and artifacts are immutable and content-addressed;
+- snapshots, intent contracts, handles, and artifacts are immutable and content-addressed; (delivered: bn-1k1s8 — spec-derived second BLAKE3 recomputes every address off the wire; narrowing on the bone: in_* and campaign identities are preimage digests, cap_* by design not content-addressed, 16 of plan §4.4's 19 classes have no minting path)
 - explicit handles across native API;
 - requests are idempotent under idempotency keys;
 - continuation resume validates epochs and inputs before any reuse;
@@ -32,11 +32,11 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 
 ## G2 — Agent-computer interface
 
-- generated clients and schemas ship for the native protocol;
+- generated clients and schemas ship for the native protocol; (delivered: bn-2wypi — shipping inventory plus 11-mutant conformance audit; zero generated artifacts, hand transcription held by checkers one deep at field level; whether checked-hand-written satisfies generated is routed to the gate close)
 - no terminal parsing required;
 - explicit handles and resumability;
 - stale state rejected;
-- Context Packs are bounded, carry omission manifests and expansion handles, and improve agent benchmark effectiveness;
+- Context Packs are bounded, carry omission manifests and expansion handles, and improve agent benchmark effectiveness; (delivered: bn-1iljt — boundedness and manifest probes exact at both boundaries, handles dereferenced live; context.compile byte ceiling unenforced, tracked bn-2ga1c; the benchmark-effectiveness conjunct is typed unsupported, instrument unbuilt, ablation spec on the bone)
 - native ACI beats the disciplined shell baseline on success and cost, or the protocol is redesigned before freeze (G0-DX-10);
 - prompt injection corpus cannot trigger privileged operations.
 
