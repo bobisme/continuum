@@ -160,6 +160,12 @@ const PROOF_CLIENT_LIB: &str = include_str!("../../continuum-proof-client/src/li
 /// `tools/check_crate_boundaries.py` uses, per docs/03 §8's diversity rule.
 const FORGE_MANIFEST: &str = include_str!("../../continuum-forge/Cargo.toml");
 
+/// `continuum-security`'s manifest — the same posture as [`FORGE_MANIFEST`], and for the
+/// same reason: bn-ymw landed the plan §18.1 prompt-injection corpus there, so the crate
+/// stopped being a zero-pub-item scaffold and what is swept about it is its declared
+/// dependency set rather than its emptiness.
+const SECURITY_MANIFEST: &str = include_str!("../../continuum-security/Cargo.toml");
+
 /// `continuumd`'s own manifest — the other end of the same edge: whether the daemon
 /// links Forge at all.
 const CONTINUUMD_MANIFEST: &str = include_str!("../Cargo.toml");
@@ -249,6 +255,21 @@ fn forge_sources() -> Vec<(PathBuf, String)> {
     assert!(
         !sources.is_empty(),
         "the walk found no continuum-forge source; the crate moved and this sweep is \
+         reporting nothing rather than checking something"
+    );
+    sources
+}
+
+/// Every source file of `continuum-security`, walked rather than listed — the same device
+/// as [`forge_sources`], so a module added to the corpus crate is swept without anyone
+/// remembering to name it here.
+fn security_sources() -> Vec<(PathBuf, String)> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../continuum-security/src");
+    let mut sources = Vec::new();
+    rust_sources(&root, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "the walk found no continuum-security source; the crate moved and this sweep is \
          reporting nothing rather than checking something"
     );
     sources
@@ -743,8 +764,9 @@ mod no_widening {
     use super::{
         ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
         EFFECTS_PROCESS_LIB, EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_MANIFEST,
-        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, administrative_callers, continuumd_sources,
-        declared_dependencies, forge_sources, host_effect_lines, pin, pub_items,
+        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST, administrative_callers,
+        continuumd_sources, declared_dependencies, forge_sources, host_effect_lines, pin,
+        pub_items, security_sources,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -813,8 +835,13 @@ mod no_widening {
     /// [`boundary_forge_grew_a_task_assembly_lane_and_it_reaches_no_host_effect`], where
     /// the property this sweep actually guards — that no crate on this list can execute
     /// a host effect on an agent's behalf — is re-established for a surface that now
-    /// exists, instead of being asserted by emptiness. The six rows below keep the
-    /// original, stricter form because their substance genuinely has not arrived.
+    /// exists, instead of being asserted by emptiness.
+    ///
+    /// `continuum-security` left on the same terms when bn-ymw landed the plan §18.1
+    /// prompt-injection corpus in it, and is re-established the same way, in
+    /// [`boundary_security_grew_an_injection_corpus_and_it_reaches_no_host_effect`]. The
+    /// five rows below keep the original, stricter form because their substance genuinely
+    /// has not arrived.
     #[test]
     fn boundary_the_host_effect_surface_has_not_arrived_and_its_crates_are_scaffolds() {
         let scaffolds = [
@@ -823,7 +850,6 @@ mod no_widening {
             ("continuum-effects-storage", EFFECTS_STORAGE_LIB),
             ("continuum-effects-time", EFFECTS_TIME_LIB),
             ("continuum-proof-client", PROOF_CLIENT_LIB),
-            ("continuum-security", SECURITY_LIB),
         ];
         for (name, source) in scaffolds {
             let items = pub_items(source);
@@ -837,13 +863,6 @@ mod no_widening {
                 "{name} no longer declares itself a scaffold"
             );
         }
-        // The crate plan §18 names for the capability model / sandboxing / audit is
-        // one of them, and it names this invariant as its own contract.
-        pin(
-            "continuum-security/src/lib.rs",
-            SECURITY_LIB,
-            &["INV-015 — agent least authority."],
-        );
     }
 
     /// `continuum-forge`'s recorded public surface, sorted — every `pub` item across
@@ -1019,6 +1038,151 @@ mod no_widening {
                 path.display()
             );
         }
+    }
+
+    /// `continuum-security`'s recorded public surface, sorted — every `pub` item across
+    /// every source file of the crate, as [`pub_items`] reads them.
+    ///
+    /// The same shape as [`FORGE_PUBLIC_SURFACE`] and for the same reason: the crate is no
+    /// longer empty, so the tripwire becomes an inventory. An unrecorded public item fails
+    /// the audit below, so this surface cannot grow past what INV-015 has examined without
+    /// the examination being redone.
+    const SECURITY_PUBLIC_SURFACE: [&str; 31] = [
+        "pub carrier: &'static str,",
+        "pub const ALL: [Self; 10] = [",
+        "pub const ALL: [Self; 3] = [",
+        "pub const ALL: [Self; 7] = [",
+        "pub const ALL: [Self; 8] = [",
+        "pub const CASES: &[Case] = &[",
+        "pub const MAX_PAYLOAD_BYTES: usize = 4096;",
+        "pub const fn bullet(self) -> &'static str {",
+        "pub const fn bullet(self) -> &'static str {",
+        "pub const fn bullet(self) -> &'static str {",
+        "pub const fn bullet(self) -> &'static str {",
+        "pub const fn readability(class: ArtifactClass) -> Readability {",
+        "pub const fn token(self) -> &'static str {",
+        "pub enum IntentPolicyBlock {",
+        "pub enum IsolationControl {",
+        "pub enum ProhibitedOutcome {",
+        "pub enum Readability {",
+        "pub enum RedTeamClass {",
+        "pub enum Vector {",
+        "pub fn case(id: &str) -> Option<&'static Case> {",
+        "pub fn isolation_cases() -> impl Iterator<Item = &'static Case> {",
+        "pub fn policy_block_cases() -> impl Iterator<Item = &'static Case> {",
+        "pub fn red_team_cases() -> impl Iterator<Item = &'static Case> {",
+        "pub id: &'static str,",
+        "pub mod injection;",
+        "pub operation: &'static str,",
+        "pub outcome: ProhibitedOutcome,",
+        "pub payload: &'static str,",
+        "pub struct Case {",
+        "pub surface: ArtifactClass,",
+        "pub vector: Vector,",
+    ];
+
+    /// `continuum-security` stopped being a zero-pub-item scaffold when bn-ymw landed the
+    /// plan §18.1 / docs/49 / research/35 prompt-injection corpus in it. It is *not*
+    /// silently dropped from the sweep above: the property that sweep actually guards — no
+    /// crate on that list can execute a host effect on an agent's behalf — is
+    /// re-established here against the surface that now exists.
+    ///
+    /// The crate that plan §18 names for the capability model, sandboxing, privacy and the
+    /// audit trail is exactly the one where a growing public surface would matter most, so
+    /// the four legs are the Forge audit's, applied to what actually landed:
+    ///
+    /// 1. the audited surface is exactly [`SECURITY_PUBLIC_SURFACE`];
+    /// 2. no host-effect facility is named anywhere in the crate's code — the corpus is
+    ///    *data about* attacks, never a means of performing one;
+    /// 3. one declared dependency, and it is the model-side one the corpus enumerates its
+    ///    surfaces against, so the crate cannot reach an effect through a neighbour;
+    /// 4. it is unreachable from an agent connection.
+    ///
+    /// Leg 4 differs from Forge's in exactly one way, recorded rather than wished away:
+    /// `continuumd` *does* declare this crate, in `[dev-dependencies]`, because
+    /// `tests/g2_injection_corpus_evidence.rs` drives every case through the wire boundary.
+    /// What makes the lane unreachable is that the edge is dev-position only — nothing
+    /// `continuumd` ships links it, and no `continuumd` `src/` source names it — so no
+    /// request can reach any code in that crate. Both halves are swept live.
+    ///
+    /// Any of the four legs turning red means the corpus crate has acquired authority the
+    /// docs/49 audit below has never examined, and that audit must be redone before the
+    /// change lands.
+    #[test]
+    fn boundary_security_grew_an_injection_corpus_and_it_reaches_no_host_effect() {
+        // 1. The audited surface, exactly.
+        let mut items: Vec<String> = security_sources()
+            .iter()
+            .flat_map(|(_, text)| {
+                pub_items(text)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<String>>()
+            })
+            .collect();
+        items.sort();
+        let audited: Vec<String> = SECURITY_PUBLIC_SURFACE
+            .iter()
+            .map(|it| (*it).to_owned())
+            .collect();
+        assert_eq!(
+            items, audited,
+            "continuum-security's public surface is not the one INV-015 audited; record \
+             the new items here and re-derive this test's four legs against them"
+        );
+
+        // 2. No host-effect facility is named anywhere in the crate's code. This is the
+        // load-bearing leg for a red-team corpus specifically: its payloads are prose
+        // *describing* exfiltration and process spawning, and the crate must carry them as
+        // inert bytes without ever naming a facility that could perform one.
+        for (path, text) in security_sources() {
+            let effects = host_effect_lines(&text);
+            assert!(
+                effects.is_empty(),
+                "{} names host-effect facilities {effects:?}; the corpus is supposed to be \
+                 inert data about attacks, not a means of performing one",
+                path.display()
+            );
+        }
+
+        // 3. One declared dependency, and it is model-side. `continuum-workspace` owns the
+        // closed plan §4.4 `ArtifactClass` the corpus classifies its surfaces against; an
+        // effect crate, an engine, or the daemon among them would give the corpus authority
+        // through a neighbour.
+        assert_eq!(
+            declared_dependencies(SECURITY_MANIFEST),
+            vec!["continuum-workspace".to_owned()],
+            "continuum-security's dependency set widened; re-derive what the corpus can \
+             now reach"
+        );
+
+        // 4. Unreachable from an agent connection. The edge into this crate is
+        // dev-position only, so nothing the daemon ships links it.
+        assert!(
+            !declared_dependencies(CONTINUUMD_MANIFEST).contains(&"continuum-security".to_owned()),
+            "continuumd now links continuum-security outside [dev-dependencies]; the corpus \
+             is one call away from the wire"
+        );
+        for (path, text) in continuumd_sources() {
+            let callers: Vec<&str> = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_security"))
+                .collect();
+            assert!(
+                callers.is_empty(),
+                "{} names continuum_security: {callers:?}",
+                path.display()
+            );
+        }
+
+        // And the crate still declares the contract this file holds it to.
+        pin(
+            "continuum-security/src/lib.rs",
+            SECURITY_LIB,
+            &["INV-015 — agent least authority."],
+        );
     }
 }
 
@@ -1295,8 +1459,8 @@ mod mutants {
 
     use super::{
         ADMISSION, CAPABILITY, DOCS_49, EFFECTS_PROCESS_LIB, EVIDENCE, FORGE_MANIFEST,
-        administrative_callers, declared_dependencies, forge_sources, host_effect_lines,
-        isolation_bullets, missing_pin, pub_items,
+        SECURITY_MANIFEST, administrative_callers, declared_dependencies, forge_sources,
+        host_effect_lines, isolation_bullets, missing_pin, pub_items, security_sources,
     };
     use crate::privileged_perimeter::{PRIVILEGED, privileged_names};
 
@@ -1440,6 +1604,66 @@ mod mutants {
                 .map(str::trim_start)
                 .filter(|line| !line.starts_with("//"))
                 .filter(|line| line.contains("continuum_forge"))
+                .count(),
+            1
+        );
+    }
+
+    /// The corpus crate's audit is held to the same standard as Forge's: each of its four
+    /// legs is re-run against a doctored copy of a real input and shown to fail.
+    ///
+    /// Leg 2 carries the extra weight here. `continuum-security`'s payloads are prose
+    /// *about* spawning processes and exfiltrating files, so the predicate has to separate
+    /// a payload that talks about an effect from code that performs one — and the real
+    /// corpus has to be clean under it, which is asserted rather than assumed.
+    #[test]
+    fn negative_the_security_corpus_audit_detects_its_mutants() {
+        // Leg 2: a planted effect is found, prose about an effect is not, and a corpus
+        // payload describing an escape is not mistaken for one.
+        let planted =
+            "fn exfiltrate() {\n    let _ = std::process::Command::new(\"nc\").status();\n}\n";
+        assert_eq!(host_effect_lines(planted).len(), 1);
+        assert!(
+            host_effect_lines("// the corpus never calls std::process::Command\n").is_empty(),
+            "a comment about an effect is not an effect"
+        );
+        // And the real crate is clean by the same predicate — the corpus's hostile strings
+        // included.
+        for (_, text) in security_sources() {
+            assert!(host_effect_lines(&text).is_empty());
+        }
+
+        // Leg 1: an added public item is detected.
+        let (_, first) = security_sources()
+            .into_iter()
+            .next()
+            .expect("continuum-security has at least one source");
+        let grown = format!("{first}\npub fn run_payload() {{}}\n");
+        assert!(
+            pub_items(&grown).contains(&"pub fn run_payload() {}"),
+            "an added public item must be visible to the inventory"
+        );
+
+        // Leg 3: a widened dependency set is detected.
+        let widened = SECURITY_MANIFEST.replacen(
+            "[dependencies]\ncontinuum-workspace",
+            "[dependencies]\ncontinuum-effects-process = { path = \"../continuum-effects-process\" }\ncontinuum-workspace",
+            1,
+        );
+        assert_ne!(widened, SECURITY_MANIFEST, "the doctoring did nothing");
+        assert!(
+            declared_dependencies(&widened).contains(&"continuum-effects-process".to_owned()),
+            "a planted effect dependency must be visible to the manifest read"
+        );
+
+        // Leg 4: a planted daemon caller is detected by the same line predicate.
+        let caller = "fn dispatch() {\n    continuum_security::injection::CASES.len();\n}\n";
+        assert_eq!(
+            caller
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_security"))
                 .count(),
             1
         );

@@ -6,5 +6,21 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# One workspace edge, and it exists so that the injection corpus does not restate a closed
+# set the dossier already fixes:
+#
+# - `continuum-workspace` owns `ArtifactClass`, plan §4.4's nineteen artifact classes as a
+#   closed enum. The corpus's acceptance criterion is "across every agent-readable artifact
+#   class", which is only checkable against that enum — `injection::readability` classifies
+#   each of the nineteen and the corpus's own suite fails if a class it calls readable has
+#   no case. A second list here would be the second spelling ADR-0013 forbids, and it would
+#   silently miss a class the plan adds.
+#
+# The direction is the islands': `continuum-workspace` declares no `continuum-security`
+# edge, so no cycle and no forbidden edge is created, and nothing here imports an engine, an
+# adapter, or `continuum-forge` (this crate's own boundary contract, `src/lib.rs`).
+[dependencies]
+continuum-workspace = { path = "../continuum-workspace" }
+
 [lints]
 workspace = true

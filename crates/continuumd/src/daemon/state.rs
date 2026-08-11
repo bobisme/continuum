@@ -731,6 +731,24 @@ impl DaemonState {
         self.intents.get_mut(handle)
     }
 
+    /// Every Intent Contract this daemon holds, in handle order.
+    ///
+    /// The sibling of [`evidence_nodes`](Self::evidence_nodes), and deterministic for the
+    /// same reason: a [`BTreeMap`]'s iteration order is a function of the keys present and
+    /// of nothing else.
+    ///
+    /// No wire operation is served from this — [`intent`](Self::intent) is what the family
+    /// reads, one handle at a time, because "a caller learns nothing about any artifact" is
+    /// what RFC 0027 X2's existence-oracle rule protects and an enumeration would be exactly
+    /// such an oracle if a request could reach it. It exists for the *out-of-band* reader
+    /// [`Daemon::state`](super::Daemon::state) already is: the G2 prompt-injection corpus's
+    /// evidence has to assert "no intent's registry status moved" over the whole registry,
+    /// and a check that could only look at the handles the test already knew would be blind
+    /// to a status alteration that minted a record.
+    pub fn intents(&self) -> impl Iterator<Item = (&IntentHandle, &IntentRecord)> {
+        self.intents.iter()
+    }
+
     /// Drop an intent record. `intent.reject` is the only caller: a rejected proposal never
     /// became a registry record, and the schema's `status` vocabulary has no `rejected`
     /// member to record it as.

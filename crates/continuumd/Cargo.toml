@@ -113,12 +113,23 @@ continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 
+# One dev-only edge, and it is deliberately not a `[dependencies]` one:
+#
+# - `continuum-security` owns the plan §18.1 / docs/49 / research/35 prompt-injection
+#   corpus, at the shape plan §24.5's ratified promotion gate fixes.
+#   `tests/g2_injection_corpus_evidence.rs` runs every case of it through this crate's own
+#   wire boundary and holds the daemon to the Phase A exit condition "the prompt-injection
+#   corpus cannot trigger privileged operations" (G2). The corpus is inert data and states
+#   no expectation about any daemon; the daemon ships nothing from it, which is why the edge
+#   is dev-only and why `continuum-security` appears in no `[dependencies]` table here. The
+#   direction is the islands': that crate declares no `continuumd` edge.
 [dev-dependencies]
 continuum-certificate = { path = "../continuum-certificate" }
 continuum-context = { path = "../continuum-context" }
 continuum-evidence = { path = "../continuum-evidence" }
 continuum-engine-reference = { path = "../continuum-engine-reference" }
 continuum-intent = { path = "../continuum-intent" }
+continuum-security = { path = "../continuum-security" }
 continuum-task = { path = "../continuum-task" }
 continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
