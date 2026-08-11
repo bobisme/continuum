@@ -2639,7 +2639,31 @@ Continuum must narrow or redesign if:
   reference workload (docs/08 R21's kill signal);
 - model/program correspondence remains mostly manual and fragile;
 - Context Packs frequently omit defect causes;
-- agent-native API does not beat disciplined CLI use;
+- agent-native API does not beat disciplined CLI use; (delivered: bn-3ety
+  — checkpoint in `notes/KILL08_CHECKPOINT.md`.
+  The criterion fired as measured. The §24.5 `aci-benchmark-margins`
+  sentence grades three margins and the native ACI clears one of them:
+  interface bytes lose at −152% per solved task against a +30% floor,
+  and RFC 0027 correction 31's addendum proves that floor unreachable
+  by any lossless protocol under the pinned agent-visible accounting;
+  task success is a measured tie at 24/24 on both arms; invalid actions
+  are a measured pass at 61% against the ratified 50% floor, once
+  bn-2phq3's fallible-policy families replaced the shared scripted
+  policy whose tie was a floor artifact. This section's consequence is
+  narrow or redesign, and the §24.5 row's own fallback names protocol
+  redesign before freeze. That redesign was executed to the protocol
+  major-3 boundary — `OutputPolicy.max_bytes` enforcement on bn-6fuu5
+  and 3.6's `workspace.create_by_reference` on bn-3of5h — with the
+  remaining 3,566 B per solved task ratified as the standing 4.0 plan
+  on bn-3861i and Phase A's protocol frozen at 3.6. The decision is
+  continue with redesign-as-waste-removal, taken by the user on
+  2026-08-11 as option 1 of bn-762i's freeze adjudication package; no
+  agent took it. Instrument bn-134i, bn-23gm, bn-3awq, bn-1udt and
+  bn-26tb; two-sided falsification bn-2c0a; byte ledger
+  `notes/DX10_BYTE_LEDGER.md`; trend data in the three byte-stable
+  artifacts `continuum-benchmark aci-report v1`, `continuum-benchmark
+  dx10-falsification v1` and `continuum-benchmark
+  fallible-policy-families v1`)
 - intent diff cannot reliably expose gaming in supported fragments;
 - incremental trust overhead erases interactivity;
 - Lean/certificate integration makes ordinary checks unusably slow;

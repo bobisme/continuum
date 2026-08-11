@@ -562,6 +562,15 @@ def _extract_metrics_and_kills(requirements: list[dict[str, Any]]) -> None:
         raise AssertionError("plan.md: kill criteria missing")
     line = _line_number(text, kills.start())
     for ordinal, summary in enumerate(_top_level_bullets(kills.group(1)), 1):
+        # Same completion convention as every other annotated source in this
+        # registry: a "(delivered: bn-…)" annotation on the bullet is the
+        # checkpoint record. A kill criterion is discharged when its assay has
+        # run, its evidence is retained, and the privileged continue/narrow/
+        # defer/kill decision has been taken and recorded — the annotation
+        # cites the bone that binds those three, never the agent's own reading
+        # of the numbers.
+        status = "satisfied" if "(delivered:" in summary else ACTIVE
+        summary = re.sub(r"\s*\(delivered:[^)]*\)", "", summary)
         requirements.append(
             _requirement(
                 f"KILL-{ordinal:02d}",
@@ -569,6 +578,7 @@ def _extract_metrics_and_kills(requirements: list[dict[str, Any]]) -> None:
                 summary,
                 path,
                 line,
+                status=status,
             )
         )
 
