@@ -3503,7 +3503,7 @@
         "line": 22,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "authorization is checked independently of handle possession"
     },
     {
