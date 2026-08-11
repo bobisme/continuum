@@ -2149,7 +2149,21 @@ Deliver:
   `just sanitizers` ASan/TSan lane over the daemon and publication paths, nightly-gated
   outside `just check`, with armed-canary anti-vacuity)
 - evidence graph;
-- Context Pack v0;
+- Context Pack v0; (delivered: the bn-8g9uj family closed RFC 0028's ten-stage
+  compiler — bn-21vno the pipeline spine, the closed guarantee vocabulary, the
+  auditable-intermediate trail, the redaction pre-pass, root selection and backward
+  causal slicing with its independent closure checker; bn-1kj2n stages 3-4,
+  property-automaton relevance filtering and the static/dynamic dependence join;
+  bn-imhw2 stages 5-7, proof-dependency slicing, INV-013 observer projection and the
+  abstraction/refinement correspondence map; bn-3ub6i stage 8, the minimal
+  unsatisfied core and correction-set analysis with per-class minimality
+  transcripts; and bn-1y4qc the context.compile daemon wiring, production root-pack
+  assembly and the G0-DX-01 re-run at production grain, which retired the grain
+  guard that had pinned context.compile's refusal live. Absences stated: stage 9
+  runs disabled, which RFC 0028 itself blesses as runnable for slice plus
+  expansion, and the budget packer is stage 10 in substance rather than a tenth
+  stage of this pipeline — the schema and that packer landed earlier under bn-3m65's
+  PR-11 exit.)
 - semantic diff v0; (delivered: the PR 12 campaign — bn-b8ru, bn-8mlg, bn-7vg7,
   bn-ycn6, bn-1sdp, bn-3vxp landed the classifier family (equality shortcut plus
   the seven classified fields, one formula authority, fail-closed everywhere
