@@ -5,9 +5,17 @@ The source documents remain authoritative.  This module extracts their
 stable, implementation-relevant obligations into a generated registry and
 projects the append-only Bones event log so coverage can be checked without
 depending on a local Bones database.
+
+The module is imported by the generator, the dossier validator, and the
+grooming tool.  Run directly it executes its fixture controls, which are the
+only way to observe an extractor rule the checked-in documents do not yet
+exercise:
+
+    python3 notes/plan/tools/traceability.py --self-test
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import re
@@ -265,9 +273,11 @@ def _extract_prs(requirements: list[dict[str, Any]]) -> None:
                 pr_requirement["status"] = "satisfied"
 
 
-def _extract_gates(requirements: list[dict[str, Any]]) -> None:
+def _extract_gates(
+    requirements: list[dict[str, Any]], *, text: str | None = None
+) -> None:
     path = "docs/52_RELEASE_GATES_REV3.md"
-    text = _text(path)
+    text = _text(path) if text is None else text
     matches = list(re.finditer(r"^## G(\d+)\s+[—–-]\s+(.+)$", text, re.MULTILINE))
     for match in matches:
         gate, title = match.groups()
@@ -288,6 +298,14 @@ def _extract_gates(requirements: list[dict[str, Any]]) -> None:
             ]
             bullets = [" ".join(paragraphs)]
         for ordinal, summary in enumerate(bullets, 1):
+            # Same living-document completion record as PR and Deliver bullets:
+            # "(delivered: bn-…)" on a criterion names the Bone that owns its
+            # evidence, so the criterion no longer needs an active carrier.
+            # The parent gate keeps its own status either way — a gate closes
+            # when its goal:manual gate Bone closes, never because one of its
+            # criteria was delivered.
+            status = "satisfied" if "(delivered:" in summary else ACTIVE
+            summary = re.sub(r"\s*\(delivered:[^)]*\)", "", summary)
             requirements.append(
                 _requirement(
                     f"{gate_id}-{ordinal:02d}",
@@ -296,6 +314,7 @@ def _extract_gates(requirements: list[dict[str, Any]]) -> None:
                     path,
                     line,
                     parent=gate_id,
+                    status=status,
                 )
             )
 
@@ -1452,3 +1471,213 @@ def validate_checked_traceability() -> dict[str, Any]:
         "dependency_layers": graph["layers"],
         "coverage": "complete",
     }
+
+
+# ---------------------------------------------------------------------------
+# Fixture controls.
+#
+# `validate_dossier.py` checks this module against the real dossier, so it can
+# only observe rules the checked-in documents already exercise.  No gate
+# criterion in `docs/52_RELEASE_GATES_REV3.md` carries a "(delivered: bn-…)"
+# annotation yet, and the first one to carry it must not be the first test of
+# the rule that reads it (bn-37o0d).  The fixture below is that test, in the
+# idiom of `tools/check_g0_matrix.py`: run by hand, not from `just check`,
+# because it audits the dossier tooling rather than the tree.
+#
+#     python3 notes/plan/tools/traceability.py --self-test
+# ---------------------------------------------------------------------------
+
+_SELF_TEST_GATES = """# Revision 3 Release Gates
+
+## G1 — Workbench identity and lifecycle
+
+- snapshots, intent contracts, and artifacts are immutable and content-addressed{g1_01};
+- explicit handles across the native API;
+
+## G2 — Agent-computer interface
+
+Generated clients and schemas ship for the native protocol{g2_01}. No terminal
+parsing is required.
+
+Stale state is rejected.
+"""
+
+_SELF_TEST_ANNOTATIONS = {
+    "g1_01": " (delivered: bn-aaaa — content addressing landed in PR 2)",
+    "g2_01": " (delivered: bn-bbbb — generated clients shipped in PR 6)",
+}
+
+
+def _self_test_gates(**annotations: str) -> dict[str, dict[str, Any]]:
+    """Extract the fixture's gate requirements, keyed by requirement id."""
+    requirements: list[dict[str, Any]] = []
+    _extract_gates(
+        requirements,
+        text=_SELF_TEST_GATES.format(
+            **{key: annotations.get(key, "") for key in _SELF_TEST_ANNOTATIONS}
+        ),
+    )
+    return {item["id"]: item for item in requirements}
+
+
+def _self_test_bone(
+    item_id: str, labels: set[str], *, kind: str = "task"
+) -> dict[str, Any]:
+    return {
+        "id": item_id,
+        "title": item_id,
+        "description": "",
+        "kind": kind,
+        "parent": None,
+        "size": "s",
+        "labels": labels,
+        "state": "open",
+        "deleted": False,
+    }
+
+
+def _self_test_gate_wiring(
+    requirements: list[dict[str, Any]],
+    bones: dict[str, dict[str, Any]],
+    links: set[tuple[str, str]],
+    coverage: dict[str, set[str]],
+) -> list[str]:
+    """Return `gate_failures` for a synthetic graph, without touching the log.
+
+    `graph_contract_state` reads the Bones event log through the two module
+    projections, so the fixture swaps them to stay hermetic.
+    """
+    global project_bones, project_blocking_links
+    saved = (project_bones, project_blocking_links)
+    project_bones = lambda: bones  # noqa: E731
+    project_blocking_links = lambda: set(links)  # noqa: E731
+    try:
+        return graph_contract_state(
+            {"requirements": requirements},
+            {
+                "bones": bones,
+                "leaves": set(bones),
+                "coverage": defaultdict(set, coverage),
+            },
+        )["gate_failures"]
+    finally:
+        project_bones, project_blocking_links = saved
+
+
+def self_test() -> int:
+    """Exercise the gate-criterion controls. Returns a process exit code."""
+    failures: list[str] = []
+
+    def check(name: str, holds: bool, detail: str) -> None:
+        if holds:
+            print(f"  holds     {name}")
+        else:
+            failures.append(f"{name}: {detail}")
+
+    annotated = _self_test_gates(**_SELF_TEST_ANNOTATIONS)
+    plain = _self_test_gates()
+
+    print("self-test: delivered annotations on gate criteria")
+    check(
+        "C1 delivered bullet criterion is satisfied",
+        annotated["G1-01"]["status"] == "satisfied",
+        f"status={annotated['G1-01']['status']}",
+    )
+    check(
+        "C2 delivered bullet summary drops the annotation",
+        "(delivered:" not in annotated["G1-01"]["summary"]
+        and annotated["G1-01"]["summary"] == plain["G1-01"]["summary"],
+        f"summary={annotated['G1-01']['summary']!r}",
+    )
+    check(
+        "C3 undelivered sibling criterion stays active",
+        annotated["G1-02"]["status"] == ACTIVE,
+        f"status={annotated['G1-02']['status']}",
+    )
+    check(
+        "C4 parent gate of a delivered criterion stays active",
+        annotated["G1"]["status"] == ACTIVE
+        and annotated["G1"]["category"] == "gate",
+        f"status={annotated['G1']['status']}",
+    )
+    check(
+        "C5 delivered paragraph-form criterion is satisfied",
+        annotated["G2-01"]["status"] == "satisfied",
+        f"status={annotated['G2-01']['status']}",
+    )
+    check(
+        "C6 paragraph-form summary drops the annotation and keeps its prose",
+        "(delivered:" not in annotated["G2-01"]["summary"]
+        and annotated["G2-01"]["summary"] == plain["G2-01"]["summary"]
+        and "Stale state is rejected" in annotated["G2-01"]["summary"],
+        f"summary={annotated['G2-01']['summary']!r}",
+    )
+    check(
+        "C7 parent gate of a delivered paragraph criterion stays active",
+        annotated["G2"]["status"] == ACTIVE,
+        f"status={annotated['G2']['status']}",
+    )
+
+    print("self-test: unannotated control")
+    check(
+        "C8 an unannotated gate section yields only active requirements",
+        all(item["status"] == ACTIVE for item in plain.values()),
+        f"statuses={ {item_id: item['status'] for item_id, item in plain.items()} }",
+    )
+
+    # The consequence the rule exists for: the gate-wiring contract demands one
+    # active carrier Bone per ACTIVE criterion, so a criterion that can never
+    # leave ACTIVE can never let its carrier close.  G1-02 keeps its carrier;
+    # G1-01's carrier is closed, which is exactly its absence from the graph.
+    print("self-test: gate wiring consequence")
+    carrier = _self_test_bone("bn-c102", {"req:g1-02", "plan-key:gate-g1-02"})
+    anchor = _self_test_bone("bn-inta", {"plan-key:phase-exit-a-integration"})
+    bones = {item["id"]: item for item in (carrier, anchor)}
+    links = {(anchor["id"], carrier["id"])}
+    coverage = {"G1-02": {carrier["id"]}}
+    delivered = [annotated["G1"], annotated["G1-01"], annotated["G1-02"]]
+    stale = [
+        dict(item, status=ACTIVE) if item["id"] == "G1-01" else item
+        for item in delivered
+    ]
+    check(
+        "C9 a satisfied criterion needs no carrier Bone",
+        _self_test_gate_wiring(delivered, bones, links, coverage) == [],
+        f"gate_failures={_self_test_gate_wiring(delivered, bones, links, coverage)}",
+    )
+    check(
+        "C10 an active criterion with a closed carrier still fails the wiring",
+        any(
+            failure.startswith("G1-01:")
+            for failure in _self_test_gate_wiring(stale, bones, links, coverage)
+        ),
+        f"gate_failures={_self_test_gate_wiring(stale, bones, links, coverage)}",
+    )
+
+    if failures:
+        print("self-test: FAILED")
+        for failure in failures:
+            print(f"  {failure}")
+        return 1
+    print("self-test: gate criteria honor delivered annotations, gates do not")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Plan-to-Bones traceability library. The registry and report are "
+            "regenerated by tools/generate_traceability.py."
+        )
+    )
+    parser.add_argument(
+        "--self-test", action="store_true", help="run the fixture controls"
+    )
+    args = parser.parse_args(argv)
+    if not args.self_test:
+        parser.error("this module is imported, not run: pass --self-test")
+    return self_test()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
