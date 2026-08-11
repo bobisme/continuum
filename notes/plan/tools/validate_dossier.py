@@ -1015,8 +1015,14 @@ def check_g0_matrix_counts() -> dict[str, Any]:
     evidence = {d for d, s in statuses.items() if s.startswith("Evidence")}
     open_blocking = {d for d, s in statuses.items() if s.startswith("Open")}
     rehomed = {d for d, s in statuses.items() if s.startswith("Re-homed")}
-    assert evidence | open_blocking | rehomed == set(statuses), (
-        f"unclassified statuses: { {d: s for d, s in statuses.items() if d not in evidence | open_blocking | rehomed} }"
+    # "Closed" is the terminal state of a freeze-blocking row that ran and did
+    # not pass: the experiment is finished and the failure consequence the row
+    # names has been carried out and adjudicated, so the row is neither open
+    # nor carrying evidence of a pass (G0-DX-10, bn-762i).
+    closed = {d for d, s in statuses.items() if s.startswith("Closed")}
+    classified = evidence | open_blocking | rehomed | closed
+    assert classified == set(statuses), (
+        f"unclassified statuses: { {d: s for d, s in statuses.items() if d not in classified} }"
     )
 
     plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
@@ -1042,6 +1048,15 @@ def check_g0_matrix_counts() -> dict[str, Any]:
     assert rehomed_match, "plan section 0.3 re-homed sentence not found"
     plan_rehomed = set(re.findall(r"DX-\d+", rehomed_match.group(1)))
     assert plan_rehomed == rehomed, f"plan re-homed set {sorted(plan_rehomed)} != matrix {sorted(rehomed)}"
+    # The closed set is reconciled the same way, and in both directions: the
+    # sentence is required only when the matrix has a closed row, and a row
+    # named closed in the plan but not in the matrix fails too. `[^.]*?` keeps
+    # the item list inside its own sentence.
+    closed_match = re.search(r"([^.]*?) (?:are|is) closed as failed", norm)
+    plan_closed = (
+        set(re.findall(r"DX-\d+", closed_match.group(1))) if closed_match else set()
+    )
+    assert plan_closed == closed, f"plan closed set {sorted(plan_closed)} != matrix {sorted(closed)}"
 
     # The freeze-blocking subset line must be identical across the three sources.
     subset = "DX-01–03, 10, 12, 13, 14"
@@ -1053,6 +1068,7 @@ def check_g0_matrix_counts() -> dict[str, Any]:
         "evidence": len(evidence),
         "open_freeze_blocking": len(open_blocking),
         "rehomed": len(rehomed),
+        "closed": len(closed),
     }
 
 

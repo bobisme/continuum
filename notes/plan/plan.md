@@ -170,14 +170,22 @@ The following are explicitly weaker:
   not engines, scale, concurrency, persistence, or soundness (`docs/53`,
   "What remains unproven").
 - G0 status: DX-01, DX-02, DX-03, DX-12, DX-13, and DX-14 carry spike
-  evidence. DX-10 is open and freeze-blocking (Phase A).
+  evidence. No item is open and freeze-blocking (Phase A).
   DX-04, DX-05, DX-06, DX-07, DX-08, DX-09, DX-11, and DX-15 are
   re-homed to the gates owning their machinery (G4, G5, G4, G7, G6,
   G8, G6, G9 respectively — see §22 G0); each re-homing is that item's
   recorded decision, and the four re-homed items with Phase A spike
   results (DX-04, 05, 07, 08) carry them as artifact-shape evidence
-  only. Statuses live in `notes/G0_SPIKE_MATRIX.md`, from which these
-  counts derive.
+  only. DX-10 is closed as failed: the ACI ablation ran, the
+  interface-bytes margin failed as measured and is unreachable by any
+  lossless protocol at the ratified floor, success is a tie, the
+  invalid-action margin later cleared at 61% under fallible-policy
+  families, and the failure consequence the row names — rework the ACI,
+  redesign the protocol before freeze — is discharged by the
+  user-ratified redesign of 2026-08-11 (bn-762i), which freezes Phase
+  A's protocol at 3.6 and ratifies the remainder as the standing 4.0
+  plan (bn-3861i). Statuses live in `notes/G0_SPIKE_MATRIX.md`, from
+  which these counts derive.
 - Program status: `READY` for autonomous-agent dispatch. Section §21.1
   defines an elastic swarm execution model with no named-owner or
   headcount prerequisite. `notes/START_HERE_IMPLEMENTATION.md` maps
@@ -2186,7 +2194,22 @@ Deliver:
   which states its counting method, runs in `just check`, and measures 10,667
   non-test lines across the four crates — 8,495 as landed plus the receipt
   modules bn-2he added — against the 15,000 budget)
-- agent protocol spike parity;
+- agent protocol spike parity; (delivered: bn-762i — the PR-10 agent
+  client drives `continuumd`'s real wire against a disciplined
+  shell-projection baseline over the same daemon, and both arms
+  reproduce the frozen spike answers on the Die Hard and Dining
+  Philosophers ports — 16 states and the depth-6 solution, 573 states,
+  2,365 transitions and the depth-10 deadlock — so parity holds at the
+  harness's own grain, with the instrument and its five metrics on
+  bn-134i, bn-23gm, bn-3awq, bn-1udt and bn-26tb. The ACI ablation then
+  ran at production grain and its three ratified margins were
+  adjudicated: interface bytes failed as measured and are unreachable
+  by any lossless protocol at the floor, success is a tie, invalid
+  actions cleared at 61% once the fallible-policy families landed on
+  bn-2phq3. The PR-10 exit is discharged on its second disjunct by the
+  user-ratified package of 2026-08-11 — redesign executed to the
+  protocol major-3 boundary, remainder ratified as the 4.0 plan on
+  bn-3861i, Phase A frozen at 3.6)
 - Lean environment pinned and seed modules kernel-checked; T0/T1 theorems
   (transition-system safety, stuttering simulation, finite-closure
   certificate soundness) compile with no `sorry` and empty axiom manifests,

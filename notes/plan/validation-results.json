@@ -16,8 +16,9 @@
       "scanned_files": 329
     },
     "g0_matrix_counts": {
+      "closed": 1,
       "evidence": 6,
-      "open_freeze_blocking": 1,
+      "open_freeze_blocking": 0,
       "rehomed": 8
     },
     "g10_two_system": {
@@ -59,7 +60,7 @@
     "plan_bones_traceability": {
       "active_bones": 755,
       "active_edges": 1775,
-      "active_requirements": 649,
+      "active_requirements": 645,
       "coverage": "complete",
       "dependency_layers": 14,
       "leaf_bones": 664,

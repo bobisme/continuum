@@ -320,13 +320,20 @@ def _extract_g0_matrix(requirements: list[dict[str, Any]]) -> None:
                 # bn-…)" is for a bullet: "Evidence (reference implementation)"
                 # means the campaign ran against production code and its
                 # retained artifacts are named in the Evidence column, so the
-                # requirement no longer needs an active carrier Bone. Spike
-                # evidence and re-homed rows stay active — a finite spike is
-                # explicitly insufficient, and a re-homed row's obligation
-                # lives at its target gate.
+                # requirement no longer needs an active carrier Bone. "Closed"
+                # is the same record for a row that ran and did *not* pass: the
+                # experiment is finished and the failure consequence the row
+                # itself names has been carried out and adjudicated, so no
+                # carrier Bone has work left either. The row keeps the failure
+                # in its own words — it does not borrow the Evidence wording it
+                # did not earn (G0-DX-10, bn-762i). Spike evidence and re-homed
+                # rows stay active — a finite spike is explicitly insufficient,
+                # and a re-homed row's obligation lives at its target gate.
                 status=(
                     "satisfied"
-                    if status.startswith("Evidence (reference implementation)")
+                    if status.startswith(
+                        ("Evidence (reference implementation)", "Closed")
+                    )
                     else ACTIVE
                 ),
                 metadata={
