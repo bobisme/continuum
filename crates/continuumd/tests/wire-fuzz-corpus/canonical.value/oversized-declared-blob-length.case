@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.value
+class = oversized
+expect = value::length-too-large
+origin = seed
+note = a byte string declaring 2^64 bytes above no payload: eleven bytes, and one past what any 64-bit target can index
+bytes =
+  0609010000000000000000

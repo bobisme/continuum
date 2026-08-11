@@ -1,0 +1,13 @@
+# continuum wire-fuzz case, format 1
+target = frame.request-envelope.cbor
+class = well-formed
+expect = accepted
+origin = seed
+note = the same workspace.create envelope in canonical CBOR. Its `arguments` differ from the JSON envelope's by contract, not by accident: an Opaque is carried verbatim as a canonical value of the negotiated encoding.
+bytes =
+  aa656163746f726a6167656e743a66757a7a69617267756d656e7473a0666275
+  64676574a16673746174657318406a6361706162696c697479686361705f6675
+  7a7a6f6964656d706f74656e63795f6b6579666964656d2d3166696e74656e74
+  f6696f7065726174696f6e70776f726b73706163652e6372656174657070726f
+  746f636f6c5f76657273696f6e63332e326a726571756573745f696465726571
+  5f3168736e617073686f74f6

@@ -39,6 +39,30 @@ test:
 build:
     cargo build --workspace --locked
 
+# The extended wire-fuzz lane (bn-3tz3).
+#
+# `just check` already runs the wire-fuzz harness — the short campaign, the whole
+# committed corpus, the anti-vacuity mutants, and the crash-to-minimized-regression
+# round trip are ordinary `#[test]`s in `crates/continuumd/tests/wire_fuzz.rs`. This
+# recipe runs the one test that lane marks `#[ignore]`: the same generator over eight
+# committed seeds and 2048 inputs per seed per target, which is two orders of
+# magnitude more ground and a couple of seconds more wall clock.
+#
+# It is NOT a different kind of run. Same pinned toolchain, same seeds in the source,
+# same xorshift, so a finding here reproduces from the seed alone (INV-005) exactly as
+# one from the gate campaign does. There is deliberately no coverage-guided lane: a
+# libFuzzer target cannot satisfy the workspace-wide `unsafe_code = "forbid"`, cannot
+# run on the pinned stable toolchain, and would need `libfuzzer-sys` and `arbitrary`
+# entries in `tools/governance/dependency-rationale.toml` and full audits in
+# `dependency-audits.toml`. The harness's module documentation states that absence in
+# full.
+#
+# CI can schedule this on its own cadence; the gate does not require it, because a
+# lane whose value is *more inputs* is a lane whose absence delays a finding rather
+# than admitting a wrong one.
+fuzz:
+    cargo test --locked -p continuumd --test wire_fuzz -- --ignored --nocapture
+
 # Enforce the plan §20 crate list and the forbidden dependency edges.
 # The self-test runs first so the check cannot pass vacuously.
 boundaries:

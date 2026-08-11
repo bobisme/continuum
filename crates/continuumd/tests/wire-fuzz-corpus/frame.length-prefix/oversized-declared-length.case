@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = frame.length-prefix
+class = oversized
+expect = frame::too-large
+origin = seed
+note = a prefix declaring MAX_FRAME_BYTES + 1 above a one-byte body: five bytes total
+bytes =
+  0100000100

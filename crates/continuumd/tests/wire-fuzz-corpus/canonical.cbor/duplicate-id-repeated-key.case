@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.cbor
+class = duplicate-id
+expect = cbor::key-order
+origin = seed
+note = a two-entry map whose keys are the same text string: refused on strict ascent, one entry before the map would notice the repeat
+bytes =
+  a2616101616102

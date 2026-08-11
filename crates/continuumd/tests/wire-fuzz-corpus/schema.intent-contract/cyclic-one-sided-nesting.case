@@ -1,0 +1,12 @@
+# continuum wire-fuzz case, format 1
+target = schema.intent-contract
+class = cyclic
+expect = ijson::too-deep
+origin = seed
+note = MAX_DEPTH + 1 nested arrays: the contract decoder's JSON layer is where the depth bound lives, and this asserts it is reached before any group runs
+bytes =
+  5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b
+  5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b
+  5b6e756c6c5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+  5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+  5d5d5d5d5d5d

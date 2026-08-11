@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.value
+class = duplicate-id
+expect = value::not-ascending
+origin = seed
+note = a record naming one field twice: strict ascent is what forbids the duplicate
+bytes =
+  0d01020101610101016101

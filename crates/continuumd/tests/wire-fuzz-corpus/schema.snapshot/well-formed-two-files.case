@@ -1,0 +1,10 @@
+# continuum wire-fuzz case, format 1
+target = schema.snapshot
+class = well-formed
+expect = accepted
+origin = seed
+note = a real Merkle snapshot of two files, encoded by the production encoder
+bytes =
+  6377736e6170010100000000000000020000000000000005612e747874000000
+  000000000005616c706861000000000000000364697201000000000000000100
+  00000000000005622e74787400000000000000000462657461

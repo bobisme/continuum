@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = schema.intent-contract
+class = oversized
+expect = ijson::integer-out-of-range
+origin = seed
+note = a magnitude past the reader's carrier, refused before the schema is consulted
+bytes =
+  3939393939393939393939393939393939393939

@@ -1,0 +1,12 @@
+# continuum wire-fuzz case, format 1
+target = canonical.intent-json
+class = cyclic
+expect = ijson::too-deep
+origin = seed
+note = MAX_DEPTH + 1 nested arrays, one side only
+bytes =
+  5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b
+  5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b
+  5b6e756c6c5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+  5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+  5d5d5d5d5d5d

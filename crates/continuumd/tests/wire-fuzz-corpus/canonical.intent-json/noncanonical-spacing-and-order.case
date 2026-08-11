@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.intent-json
+class = noncanonical
+expect = accepted
+origin = seed
+note = whitespace and unordered keys: this reader normalizes rather than refusing, so the case is accepted and the harness checks the normal form is a fixpoint
+bytes =
+  7b20226222203a20312c20226122203a2032207d

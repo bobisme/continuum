@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.json
+class = noncanonical
+expect = json::leading-zero
+origin = seed
+note = the integer 1 written `01`: a second spelling of one number
+bytes =
+  3031

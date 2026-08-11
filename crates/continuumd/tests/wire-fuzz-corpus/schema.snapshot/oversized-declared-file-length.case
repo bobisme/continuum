@@ -1,0 +1,9 @@
+# continuum wire-fuzz case, format 1
+target = schema.snapshot
+class = oversized
+expect = snapshot::length-out-of-range
+origin = seed
+note = a file node declaring u64::MAX bytes of content above no content
+bytes =
+  6377736e61700101000000000000000100000000000000016100ffffffffffff
+  ffff

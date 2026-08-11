@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.cbor
+class = noncanonical
+expect = cbor::key-order
+origin = seed
+note = map keys out of the protocol's ascending order
+bytes =
+  a2616201616102

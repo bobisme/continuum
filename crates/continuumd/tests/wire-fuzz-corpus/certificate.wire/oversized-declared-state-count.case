@@ -1,0 +1,11 @@
+# continuum wire-fuzz case, format 1
+target = certificate.wire
+class = oversized
+expect = cert::core::rejected::count-out-of-range
+origin = seed
+note = a four-byte state count declaring MAX_STATES + 1 above two states
+bytes =
+  434f4e54434552540001000200056d6f64656c000573656d2d31000470726f70
+  000573636f70650006617373756d650008656e67696e652d3100010000000100
+  0276300000000000000000000000000000001000100001000000000000000000
+  00000000000001

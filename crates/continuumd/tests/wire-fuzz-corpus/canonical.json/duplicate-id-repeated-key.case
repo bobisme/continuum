@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.json
+class = duplicate-id
+expect = json::key-order
+origin = seed
+note = two members with one key. Last-writer-wins would be a silent reinterpretation; the reader refuses on strict ascent, which an equal key fails before the map is consulted.
+bytes =
+  7b2261223a312c2261223a327d

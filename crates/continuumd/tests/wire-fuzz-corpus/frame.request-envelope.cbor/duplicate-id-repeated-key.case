@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = frame.request-envelope.cbor
+class = duplicate-id
+expect = cbor::key-order
+origin = seed
+note = a two-entry map whose keys are the same text string. As in JSON, strict ascent fires first: `CborError::DuplicateKey` is reachable only through the `Cbor::map` constructor.
+bytes =
+  a2616101616102

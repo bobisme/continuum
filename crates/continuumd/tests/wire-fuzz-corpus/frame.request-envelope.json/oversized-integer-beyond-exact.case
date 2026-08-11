@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = frame.request-envelope.json
+class = oversized
+expect = json::integer-range
+origin = seed
+note = 2^53 as a JSON number: beyond MAX_EXACT_INTEGER, where a U64 must be a string
+bytes =
+  7b22627564676574223a393030373139393235343734303939327d

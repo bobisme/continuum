@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.json
+class = noncanonical
+expect = json::key-order
+origin = seed
+note = members out of ascending code-point order: a second spelling of one document
+bytes =
+  7b2262223a312c2261223a327d

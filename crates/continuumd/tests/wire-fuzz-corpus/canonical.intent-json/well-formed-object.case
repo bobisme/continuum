@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.intent-json
+class = well-formed
+expect = accepted
+origin = seed
+note = a minimal admissible document
+bytes =
+  7b2261223a317d

@@ -1,0 +1,11 @@
+# continuum wire-fuzz case, format 1
+target = certificate.wire
+class = noncanonical
+expect = cert::core::rejected::not-strictly-ascending
+origin = seed
+note = a state table listing 1 before 0: a second spelling of one state set
+bytes =
+  434f4e54434552540001000200056d6f64656c000573656d2d31000470726f70
+  000573636f70650006617373756d650008656e67696e652d3100010000000100
+  0276300000000000000000000000000000001000000002000000000000000100
+  00000000000000

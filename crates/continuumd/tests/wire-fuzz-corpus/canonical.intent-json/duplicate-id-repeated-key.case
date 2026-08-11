@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.intent-json
+class = duplicate-id
+expect = ijson::duplicate-key
+origin = seed
+note = two members with one key: refused even though this reader is otherwise lenient
+bytes =
+  7b2261223a312c2261223a327d

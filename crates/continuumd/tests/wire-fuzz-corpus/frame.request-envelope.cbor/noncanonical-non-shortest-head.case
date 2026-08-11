@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = frame.request-envelope.cbor
+class = noncanonical
+expect = cbor::non-shortest-head
+origin = seed
+note = zero written with a one-byte argument: a second spelling of major type 0
+bytes =
+  1800

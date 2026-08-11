@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.json
+class = well-formed
+expect = accepted
+origin = seed
+note = an object with an array, an integer, and a named absence
+bytes =
+  7b2261223a5b312c325d2c2262223a6e756c6c7d

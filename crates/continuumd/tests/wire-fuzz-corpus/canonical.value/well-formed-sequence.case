@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.value
+class = well-formed
+expect = accepted
+origin = seed
+note = a two-element sequence of naturals
+bytes =
+  0a0102030101030102

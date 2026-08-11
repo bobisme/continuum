@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.cbor
+class = oversized
+expect = cbor::truncated
+origin = seed
+note = a byte-string head declaring u64::MAX above no payload
+bytes =
+  5bffffffffffffffff

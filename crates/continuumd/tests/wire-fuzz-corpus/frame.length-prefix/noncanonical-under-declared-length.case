@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = frame.length-prefix
+class = noncanonical
+expect = frame::trailing-bytes
+origin = seed
+note = a prefix that under-declares its body, so the stream has two readings
+bytes =
+  000000017b7d

@@ -1,0 +1,9 @@
+# continuum wire-fuzz case, format 1
+target = frame.request-envelope.json
+class = duplicate-id
+expect = json::key-order
+origin = seed
+note = one object with two `request_id` members. It lands on the ordering rule and not on `DuplicateKey`, because an equal key is not *strictly* ascending and the reader checks ascent on the way in: strict ascent is what forbids the duplicate, and `JsonError::DuplicateKey` is reachable only through the `Json::object` constructor.
+bytes =
+  7b22726571756573745f6964223a227265715f31222c22726571756573745f69
+  64223a227265715f32227d

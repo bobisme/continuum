@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.json
+class = oversized
+expect = json::integer-range
+origin = seed
+note = 2^53 as a number: one past MAX_EXACT_INTEGER
+bytes =
+  39303037313939323534373430393932

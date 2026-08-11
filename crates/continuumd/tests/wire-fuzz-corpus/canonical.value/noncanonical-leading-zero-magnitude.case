@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.value
+class = noncanonical
+expect = value::non-minimal-integer
+origin = seed
+note = the natural 1 written with a leading zero byte: a second spelling of one number
+bytes =
+  03020001

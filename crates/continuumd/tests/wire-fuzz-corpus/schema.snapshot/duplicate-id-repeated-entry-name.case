@@ -1,0 +1,9 @@
+# continuum wire-fuzz case, format 1
+target = schema.snapshot
+class = duplicate-id
+expect = snapshot::name-order
+origin = seed
+note = a directory listing one name twice: strict ascent is what forbids the duplicate
+bytes =
+  6377736e61700101000000000000000200000000000000016100000000000000
+  00017800000000000000016100000000000000000178

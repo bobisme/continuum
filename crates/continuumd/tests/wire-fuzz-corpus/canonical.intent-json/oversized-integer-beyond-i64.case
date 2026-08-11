@@ -1,0 +1,8 @@
+# continuum wire-fuzz case, format 1
+target = canonical.intent-json
+class = oversized
+expect = ijson::integer-out-of-range
+origin = seed
+note = a magnitude past this reader's i64 carrier
+bytes =
+  3939393939393939393939393939393939393939
