@@ -28,7 +28,7 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 - cancellation closes obligations and publishes no partial finality; (delivered: bn-1tkrp — obligation census by kind and subject with wire-derived shadow ledger, store read bit-for-bit across cancels, post-cancel re-drive byte-identical; scope: one of 26 task classes servable in this build, single-threaded dispatch grain)
 - artifact publication is transactional (INV-017); (delivered: bn-2vbqm — closed census of all five publisher sites verified load-bearing by injected mutant, full abort taxonomy, 15-phase stroboscopic sweep, no tear found; INV-017 holds per artifact, and the RFC 0026 operation-grain wording is adjudicated under bn-12plt)
 - authorization is checked independently of handle possession;
-- daemon crash recovery leaves no stale index entries or orphan tasks (plan §4.5).
+- daemon crash recovery leaves no stale index entries or orphan tasks (plan §4.5). (delivered: bn-q80m7 — split verdict: no-stale-index re-derived through the declared identity seam at dropped-value grain; no-orphan-tasks typed UNSUPPORTED, the §4.5 startup resolution pass is unbuilt and tracked bn-1z09m with the debt spec; fsck identity blindness tracked bn-k99dt)
 
 ## G2 — Agent-computer interface
 

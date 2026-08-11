@@ -3515,7 +3515,7 @@
         "line": 22,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "daemon crash recovery leaves no stale index entries or orphan tasks (plan \u00a74.5)."
     },
     {
