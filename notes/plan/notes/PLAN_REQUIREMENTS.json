@@ -3550,7 +3550,7 @@
         "line": 33,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "no terminal parsing required"
     },
     {
@@ -3562,7 +3562,7 @@
         "line": 33,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "explicit handles and resumability"
     },
     {
@@ -3574,7 +3574,7 @@
         "line": 33,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "stale state rejected"
     },
     {
@@ -3598,7 +3598,7 @@
         "line": 33,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "native ACI beats the disciplined shell baseline on success and cost, or the protocol is redesigned before freeze (G0-DX-10)"
     },
     {
@@ -3610,7 +3610,7 @@
         "line": 33,
         "path": "docs/52_RELEASE_GATES_REV3.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "prompt injection corpus cannot trigger privileged operations."
     },
     {
