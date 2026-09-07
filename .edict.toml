@@ -43,12 +43,6 @@ checkpoint_interval_sec = 30
 model = "fast"
 timeout = 900
 
-[agents.reviewer]
-model = "strong"
-max_loops = 100
-pause = 2
-timeout = 900
-
 # Model tier pools for load balancing
 # Each tier maps to a list of "provider/model:thinking" strings
 [models]
