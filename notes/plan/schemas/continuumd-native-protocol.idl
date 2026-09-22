@@ -157,6 +157,48 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.13 — the artifact-class spelling rule (bn-3ncfp); `version`
+  ///         stays "3.6". Plan §4.4's class vocabulary travels in three
+  ///         places — `Redacted.original_class`, `ArtifactRef.kind`, and
+  ///         `CapabilityDescriptor.artifact_classes` — plus the keys of
+  ///         `EpochAdvanceNotice`'s two maps, all as bare `String`. The
+  ///         spelling was fixed only by doc comments, and they disagreed:
+  ///         `ArtifactRef.kind` said "the plan §4.4 prefix without the
+  ///         underscore", the other two said "prefix", and plan §4.4
+  ///         writes a prefix with its `_`. The G2-02 acceptance campaign
+  ///         (bn-1slz1, finding F3) showed the cost: a capability
+  ///         provisioned with `ws_` was silently scoped to nothing, and
+  ///         the same call under `ws` was admitted.
+  ///
+  ///         `rule artifact_class.spelling` now decides it. The canonical
+  ///         spelling is the class **token** — the prefix without its
+  ///         `_` — because that is what `ArtifactRef.kind` already
+  ///         said, what `schemas/redacted.schema.json` already shows
+  ///         (`crash`, `ctx`, `proof`), and what every conforming daemon
+  ///         already emits. The rule lists the nineteen tokens, so the
+  ///         vocabulary is declared in this file and not only in plan
+  ///         prose. A prefix spelling or an unlisted token is a typed
+  ///         refusal at provisioning and never an empty scope.
+  ///
+  ///         **Why not a closed enum.** Retyping the three fields from
+  ///         `String` to an enum changes a declared field's type, which
+  ///         `rule versioning.breaking_change` makes a major — the same
+  ///         reason 1.11 gave for F6. The compatible form is a validated
+  ///         string: the field keeps its type, and the rule fixes its
+  ///         members. RFC 0026 F22 records the retype as owed at the next
+  ///         major.
+  ///
+  ///         **Why no minor.** None of `rule
+  ///         versioning.compatible_change`'s five changes occurs: no
+  ///         operation, field, enum member, or error code is added, and
+  ///         no server-side constraint is relaxed. No client request
+  ///         carries a class — all three fields are daemon-emitted, and
+  ///         capabilities are provisioned out of band (RFC 0026
+  ///         "Capability administration") — so no request a client may
+  ///         send is refused where it was admitted before. Every emission
+  ///         site already spelled the token. One rule arrives
+  ///         (`artifact_class.spelling`, 44 → 45); every count table is
+  ///         unchanged.
   ///   1.12 — the `PublicationAborted` doc-comment correction
   ///         (bn-12plt), doc comments only; `version` stays "3.6".
   ///         The code's comment read "Nothing was published", which the
@@ -636,7 +678,7 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.12";
+  idl_version = "1.13";
   /// The protocol version this document defines.
   ///
   /// 3.6 is the single minor bump for IDL 1.11, taken once at the end of
@@ -1525,7 +1567,8 @@ struct Redacted {
   redacted: Bool required;
   reason: RedactionReason required;
   commitment: Commitment required;
-  /// Artifact class of the redacted original (plan §4.4 prefix).
+  /// Artifact class of the redacted original: a plan §4.4 class token,
+  /// per `rule artifact_class.spelling`.
   original_class: String required;
 }
 
@@ -1567,7 +1610,8 @@ struct AssuranceEnvelope {
 
 /// A typed artifact reference in a result.
 struct ArtifactRef {
-  /// Artifact class, the plan §4.4 prefix without the underscore.
+  /// Artifact class: a plan §4.4 class token, per
+  /// `rule artifact_class.spelling`.
   kind: String required;
   handle: ArtifactHandle required;
   /// Content commitment, when the artifact is content-addressed.
@@ -2094,9 +2138,10 @@ struct EpochAdvanceNotice {
   from: EpochIdentity required;
   to: EpochIdentity required;
   /// Compatibility statement per artifact class, keyed by the plan §4.4
-  /// class prefix.
+  /// class token (`rule artifact_class.spelling`).
   compatibility: map<String, Compatibility> required;
-  /// Estimated invalidation blast radius by artifact class.
+  /// Estimated invalidation blast radius by artifact class, keyed by
+  /// class token (`rule artifact_class.spelling`).
   blast_radius: map<String, U64> required;
 }
 
@@ -2110,7 +2155,8 @@ struct CapabilityDescriptor {
   snapshots: list<WorkspaceHandle> required;
   /// Intents in scope; empty means unrestricted within `level`.
   intents: list<IntentHandle> required;
-  /// Artifact classes in scope, as plan §4.4 prefixes; empty means all.
+  /// Artifact classes in scope, as plan §4.4 class tokens
+  /// (`rule artifact_class.spelling`); empty means all.
   artifact_classes: list<String> required;
   expires_at: Timestamp nullable;
   /// Whether the holder may delegate, and how deeply.
@@ -2274,6 +2320,36 @@ rule capability.profile_narrowing {
   The profile is what the connection's capability confers and is reported
   in `ServerWelcome.grant`; it is never inferred from a successful call
   and never widened by one (RFC 0027 A7, A9).
+  """
+}
+
+rule artifact_class.spelling {
+  """
+  Every field this file documents as an artifact class carries a class
+  token: `Redacted.original_class`, `ArtifactRef.kind`, each member of
+  `CapabilityDescriptor.artifact_classes`, and each key of
+  `EpochAdvanceNotice.compatibility` and `.blast_radius`. A class token
+  is the plan §4.4 prefix without its trailing `_`. The tokens at this
+  protocol version are exactly: `ws`, `in`, `inb`, `model`, `cir`,
+  `crash`, `ctx`, `proof`, `ps`, `task`, `ev`, `dbg`, `receipt`, `rt`,
+  `forge`, `cont`, `cap`, `diff`, `defect`. The prefix spelling (`ws_`)
+  names no class and is not an alias: one class has one spelling
+  (ADR-0013).
+
+  A daemon MUST NOT emit any other string in these positions. A
+  capability whose `artifact_classes` names a string that is not a token
+  MUST be refused where it is provisioned, with a refusal that names the
+  string and, for a prefix spelling, the token it meant. A daemon MUST
+  NOT register such a capability, and MUST NOT serve it as an empty or
+  narrowed scope: a scope that silently matches nothing is a
+  mis-provisioning the deployment cannot see.
+
+  A client receiving a string outside the list treats it as an unknown
+  member of an `@open` enum (`rule versioning.enums`): it MUST NOT infer
+  semantics from it and MUST surface it verbatim as unknown. A new class
+  is added by revising this list, and that raises the protocol minor.
+  The fields stay `String` within major 3, because narrowing a declared
+  field's type is `rule versioning.breaking_change` (RFC 0026 F22).
   """
 }
 

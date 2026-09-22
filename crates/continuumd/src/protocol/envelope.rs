@@ -136,7 +136,8 @@ protocol_struct! {
         reason: RedactionReason required;
         /// IDL `commitment: Commitment required`.
         commitment: Commitment required;
-        /// Artifact class of the redacted original (plan §4.4 prefix).
+        /// Artifact class of the redacted original: a plan §4.4 class token,
+        /// per `rule artifact_class.spelling`.
         original_class: String required;
     }
 }
@@ -193,7 +194,8 @@ protocol_struct! {
 protocol_struct! {
     /// A typed artifact reference in a result.
     struct ArtifactRef {
-        /// Artifact class, the plan §4.4 prefix without the underscore.
+        /// Artifact class: a plan §4.4 class token, per
+        /// `rule artifact_class.spelling`.
         kind: String required;
         /// IDL `handle: ArtifactHandle required`.
         handle: ArtifactHandle required;

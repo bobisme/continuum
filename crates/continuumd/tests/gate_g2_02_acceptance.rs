@@ -66,8 +66,8 @@
 //! this a handle?* This file does not repeat that sweep and does not re-derive its numbers.
 //! Its question is the other one: *is prose ever the only carrier of a machine-needed fact?*
 //! Its table 6 flagged that plan §4.4's artifact-class vocabulary travels as a bare `String`
-//! in three places "as a G2-02 concern". [`the_artifact_class_vocabulary_is_spelled_by_a_doc_comment_and_not_by_a_type`]
-//! adjudicates it: see finding **F3** below.
+//! in three places "as a G2-02 concern". [`the_artifact_class_spelling_is_a_typed_refusal_at_provisioning`]
+//! guards its repair: see finding **F3** below.
 //!
 //! # The census, in numbers
 //!
@@ -81,15 +81,15 @@
 //! | of those, recovered from a position the IDL declares as the needed type | **27** |
 //! | of those, available **only** inside a human-text field | **0** |
 //! | facts entering a workflow from outside the protocol | 3 ([`OUT_OF_BAND`]) |
-//! | answers swept for the two declared recovery channels | 40 |
-//! | of those carrying a non-empty `next_operations` or `Error.recovery` | **0** |
-//! | refusal probes driven live | 15 |
+//! | answers swept for the two declared recovery channels | 39 |
+//! | of those carrying a non-empty `next_operations` or `Error.recovery` | **2** (stale-handle `Error.recovery` offers, bn-27mx7; `next_operations` on none) |
+//! | refusal probes driven live | 14 |
 //! | distinct `ErrorCode`s reached | 6 |
 //! | probes decided by the typed answer alone | 2 |
 //! | probes decided by the answer plus the agent's own request and the registry | 10 |
 //! | probes decided only by a typed re-probe | 0 |
 //! | probes decided **only by reading `detail`** | **0** |
-//! | probes no channel decides — `detail` included | **3** (finding F2) |
+//! | probes no channel decides — `detail` included | **2** (finding F2) |
 //! | IDL fields matching the human-text lexicon | 23 |
 //! | of those, already carried by a closed enum | 5 |
 //! | of those, `Opaque` schema-governed sub-documents | 4 |
@@ -102,22 +102,22 @@
 //!
 //! **SATISFIED-AT-NARROWER-SCOPE.** No workflow this build can drive requires an agent to
 //! parse human-oriented text, and no refusal it can raise is decided by prose. The narrowing
-//! is not softened, and it is three findings wide.
+//! is not softened, and it is two findings wide; the third, F3, is repaired and kept as a guard.
 //!
 //! | # | Scope statement | Test |
 //! |---|---|---|
 //! | 1 | Forward closure is **total** over the eight workflows: all 27 inter-step facts sit at a position whose *declared IDL type* is the type the next step needs, and the workflows are literally driven from the values recovered there | [`workflow_closure_is_total_over_every_workflow_this_build_can_drive`] |
 //! | 2 | Terminal outcomes are typed too. A budget that cannot hold the model's own initial states is not an envelope refusal at all — it starts a task and fails it — and the record says `status = failed`, `failed_reason = BudgetExhausted` (an `ErrorCode`, not a sentence) with **no** continuation. The three facts an agent branches on are three typed fields | [`a_non_resumable_task_failure_is_typed_without_reading_its_sentence`] |
 //! | 3 | The CLI is a strict subset — 16 commands, all 16 registry operations, none CLI-only — and its shipped binary carries `NullTransport`, so it reaches no daemon at all. An agent needing the terminal here is not merely unnecessary; it is impossible | [`the_cli_reaches_nothing_the_typed_protocol_does_not`], [`the_shipped_cli_binary_reaches_no_daemon_at_all`] |
-//! | 4 | **FINDING F1**: the two typed recovery channels the IDL declares — `ResultEnvelope.next_operations` and `Error.recovery` — were empty on **all 40 answers** this file collects, success and refusal alike, because the daemon's own `Fault` type had no field that could fill `recovery`. bn-27mx7 wired `Error.recovery` for stale-handle refusals (RFC 0027 H8), so the pin is now a probe: every offer is executable as given. `next_operations` is still empty | [`next_operations_is_empty_and_every_recovery_offer_is_executable_as_given`] |
-//! | 5 | **FINDING F2**: `retryable` is `false` on every refusal, `Error.data` present on none, `Error.continuation` on none. The per-occurrence typed discriminator is therefore the code alone, and **three** probes — an under-authorized principal, an absent handle, and a mis-spelled capability scope — collapse onto one `CapabilityDenied` whose `detail` is byte-identical. **No channel separates them, `detail` included.** This is deliberate (RFC 0027 X1–X2, no existence oracle) and it is *not* a prose dependency; it is a typed underdetermination whose honest reading is that the recovery is a disjunction, not a lookup | [`the_only_undetermined_refusals_are_the_ones_prose_does_not_rescue_either`], [`no_refusal_carries_a_typed_discriminator_beyond_its_code`] |
-//! | 6 | **FINDING F3**: plan §4.4's artifact-class vocabulary is a bare `String` in three places, and the *spelling* — `ws` or `ws_` — is fixed only by a doc comment, differently in two of the three. A capability scoped with the plan's own literal prefix is silently scoped to nothing; the same call under the token spelling is admitted. The refusal is the same `CapabilityDenied` as sixty-one other conditions and its `detail` names neither class nor scope. The fact is carried by neither a type nor a message | [`the_artifact_class_vocabulary_is_spelled_by_a_doc_comment_and_not_by_a_type`] |
+//! | 4 | **FINDING F1**: the two typed recovery channels the IDL declares — `ResultEnvelope.next_operations` and `Error.recovery` — were empty on every answer this file collected (40 then, 39 since bn-3ncfp removed the `ws_` probe), success and refusal alike, because the daemon's own `Fault` type had no field that could fill `recovery`. bn-27mx7 wired `Error.recovery` for stale-handle refusals (RFC 0027 H8), so the pin is now a probe: every offer is executable as given. `next_operations` is still empty | [`next_operations_is_empty_and_every_recovery_offer_is_executable_as_given`] |
+//! | 5 | **FINDING F2**: `retryable` is `false` on every refusal, `Error.data` present on none, `Error.continuation` on none. The per-occurrence typed discriminator is therefore the code alone, and **two** probes — an under-authorized principal and an absent handle — collapse onto one `CapabilityDenied` whose `detail` is byte-identical. **No channel separates them, `detail` included.** This is deliberate (RFC 0027 X1–X2, no existence oracle) and it is *not* a prose dependency; it is a typed underdetermination whose honest reading is that the recovery is a disjunction, not a lookup | [`the_only_undetermined_refusals_are_the_ones_prose_does_not_rescue_either`], [`no_refusal_carries_a_typed_discriminator_beyond_its_code`] |
+//! | 6 | **FINDING F3, repaired (bn-3ncfp)**: plan §4.4's artifact-class vocabulary was a bare `String` in three places, with the *spelling* — `ws` or `ws_` — fixed only by doc comments that disagreed, so a capability scoped with the plan's literal prefix was silently scoped to nothing. IDL 1.13's `rule artifact_class.spelling` now fixes the class token (`ws`) and lists all nineteen, every site cites it, and the rule's list equals `ArtifactClass::ALL`. The prefix spelling is a typed `ProvisioningRefusal::ArtifactClass` at `Builder::try_build` and `register_capability`, which names the capability, the spelling, and the class it meant; the capability is never registered. The wire fields stay `String` inside major 3 (RFC 0026 F22) | [`the_artifact_class_spelling_is_a_typed_refusal_at_provisioning`] |
 //! | 7 | The live surface is **30 of 75** operations. The other 45 have no `Arguments` variant and are refused by the codec before a body is read, so forward closure over them is **untested, not evidenced** | [`the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which`] |
 //! | 8 | Three facts enter the workflows from outside the protocol — staged content commitments, the initial intent handle, and the registered model catalog. No operation mints them. They are not prose either; they are absences | [`the_facts_that_enter_from_outside_the_protocol_are_exactly_these`] |
 //!
 //! # Why the coarse codes are not failures, stated precisely
 //!
-//! Ten of the fifteen probes share a code with a probe needing a different recovery, and none
+//! Ten of the fourteen probes share a code with a probe needing a different recovery, and none
 //! of the ten is a G2-02 failure, for a reason worth naming rather than assuming. Two examples
 //! carry it:
 //!
@@ -1153,6 +1153,32 @@ struct Lane {
     components: SnapshotComponents,
 }
 
+/// A `propose` capability scoped to the snapshot and intent classes, spelled as class
+/// tokens.
+fn tokened() -> CapabilityDescriptor {
+    let mut token = grant(
+        "cap_tokened",
+        "agent:tokened",
+        AuthorityLevel::Propose,
+        Optional::Absent,
+    );
+    token.artifact_classes = vec!["ws".to_owned(), "in".to_owned()];
+    token
+}
+
+/// The same descriptor under another handle, scoped with plan §4.4's literal prefix
+/// spelling. Finding F3's instrument.
+fn prefixed() -> CapabilityDescriptor {
+    let mut literal = grant(
+        "cap_prefixed",
+        "agent:prefixed",
+        AuthorityLevel::Propose,
+        Optional::Absent,
+    );
+    literal.artifact_classes = vec!["ws_".to_owned(), "in_".to_owned()];
+    literal
+}
+
 /// Build the verification lane.
 fn lane() -> Lane {
     let root = Some(cap("cap_root"));
@@ -1210,35 +1236,11 @@ fn lane() -> Lane {
             ),
             root.clone(),
         )
-        // Scoped with plan §4.4's literal prefix spelling, `ws_`, rather than the token
-        // spelling the store uses. Finding F3's instrument.
-        .capability(
-            {
-                let mut literal = grant(
-                    "cap_prefixed",
-                    "agent:prefixed",
-                    AuthorityLevel::Propose,
-                    Optional::Absent,
-                );
-                literal.artifact_classes = vec!["ws_".to_owned(), "in_".to_owned()];
-                literal
-            },
-            root.clone(),
-        )
-        // The same descriptor, spelled the way `ArtifactClass::token` spells it.
-        .capability(
-            {
-                let mut token = grant(
-                    "cap_tokened",
-                    "agent:tokened",
-                    AuthorityLevel::Propose,
-                    Optional::Absent,
-                );
-                token.artifact_classes = vec!["ws".to_owned(), "in".to_owned()];
-                token
-            },
-            root,
-        )
+        // Scoped with class tokens, the one spelling `rule artifact_class.spelling` admits.
+        // The plan's literal prefix spelling, `ws_`, cannot be provisioned at all: finding
+        // F3 is now a typed refusal at `try_build`, driven in
+        // `the_artifact_class_spelling_is_a_typed_refusal_at_provisioning`.
+        .capability(tokened(), root)
         .family(WorkspaceFamily)
         .family(IntentFamily)
         .family(TaskFamily)
@@ -2882,38 +2884,16 @@ fn refusal_probes() -> Vec<Probe> {
         ),
     });
 
-    // --- finding F3's instrument: the same call under two spellings of one vocabulary.
-    let mut spelled = lane();
-    prime(&mut spelled);
-    probes.push(Probe {
-        name: "a capability scoped with plan §4.4's literal `ws_` prefix",
-        operation: "workspace.create",
-        self_evident: false,
-        action: Action::Escalate,
-        answer: ask(
-            &mut spelled.server,
-            envelope(
-                "workspace.create",
-                "agent:prefixed",
-                "cap_prefixed",
-                "req_p13",
-            ),
-            &Arguments::WorkspaceCreate(WorkspaceCreateRequest {
-                components: spelled.components.clone(),
-                overlay: Optional::Absent,
-                seal: Optional::Present(true),
-            }),
-        ),
-    });
-
     // --- an operation this deployment registers no family for.
+    let mut unserved = lane();
+    prime(&mut unserved);
     probes.push(Probe {
         name: "an operation whose subsystem this daemon does not serve",
         operation: "evidence.get",
         self_evident: true,
         action: Action::Unshipped,
         answer: ask(
-            &mut spelled.server,
+            &mut unserved.server,
             envelope("evidence.get", "agent:reader", "cap_reader", "req_p14"),
             &Arguments::EvidenceGet(EvidenceGetRequest {
                 evidence: EvidenceHandle::new(
@@ -3012,8 +2992,9 @@ fn the_only_undetermined_refusals_are_the_ones_prose_does_not_rescue_either() {
         .collect();
     assert_eq!(
         undetermined.len(),
-        3,
-        "finding F2 is exactly three probes wide: {undetermined:?}"
+        2,
+        "finding F2 is exactly two probes wide; the third, a mis-spelled capability scope, \
+         became a typed provisioning refusal (bn-3ncfp): {undetermined:?}"
     );
     // And the reason they are undetermined rather than prose-bound is that their `detail` is
     // the same string. Parsing it recovers nothing, which is why this is a typed-coarseness
@@ -3227,55 +3208,136 @@ fn no_refusal_carries_a_typed_discriminator_beyond_its_code() {
     }
 }
 
+/// The token list `rule artifact_class.spelling` declares, read out of the rule body.
+fn declared_class_tokens(idl: &str) -> Vec<String> {
+    let start = idl
+        .find("rule artifact_class.spelling {")
+        .expect("the IDL declares `rule artifact_class.spelling`");
+    let body = &idl[start..];
+    let body = &body[..body.find("\n}\n").expect("the rule closes")];
+    let list = &body[body
+        .find("are exactly:")
+        .expect("the rule lists the tokens")..];
+    let list = &list[..list.find('.').expect("the list ends with a full stop")];
+    list.split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect()
+}
+
 #[test]
-fn the_artifact_class_vocabulary_is_spelled_by_a_doc_comment_and_not_by_a_type() {
-    // The IDL declares the class in three places as a bare `String`, and fixes the spelling
-    // only in prose — differently in two of the three.
+fn the_artifact_class_spelling_is_a_typed_refusal_at_provisioning() {
+    use continuum_workspace::artifact_path::ArtifactClass;
+    use continuumd::daemon::provisioning::{ArtifactClassRefusal, ProvisioningRefusal};
+
+    // The IDL decides the spelling in a rule, and every site cites that rule. The two doc
+    // comments that disagreed are gone.
     let text = read(IDL);
-    let mut sites = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        for name in ["original_class:", "kind:", "artifact_classes:"] {
-            if trimmed.starts_with(name)
-                && (trimmed.contains("String required")
-                    || trimmed.contains("list<String> required"))
-            {
-                sites.push(index + 1);
-            }
-        }
+    assert!(
+        !text.contains("the plan §4.4 prefix without the underscore")
+            && !text.contains("Artifact class of the redacted original (plan §4.4 prefix)."),
+        "the disagreeing doc comments are corrected"
+    );
+    for site in [
+        "original_class: String required;",
+        "kind: String required;",
+        "artifact_classes: list<String> required;",
+    ] {
+        let at = text.find(site).expect("the site is declared");
+        let preceding = &text[text[..at].rfind("\n\n").unwrap_or(0)..at];
+        let doc = &preceding[preceding.rfind(";\n").map_or(0, |end| end + 2)..];
+        assert!(
+            doc.contains("class token") && doc.contains("rule artifact_class.spelling"),
+            "`{site}` cites the spelling rule: {doc}"
+        );
     }
-    assert!(
-        sites.len() >= 3,
-        "plan §4.4's vocabulary must still be three bare-String sites: {sites:?}"
+
+    // The rule's list is the store's class table, token for token and in plan §4.4 order,
+    // so neither can drift from the other.
+    let declared = declared_class_tokens(&text);
+    let store: Vec<String> = ArtifactClass::ALL
+        .into_iter()
+        .map(|class| class.token().to_owned())
+        .collect();
+    assert_eq!(declared, store, "the rule and `ArtifactClass::ALL` agree");
+
+    // The plan's own prefix spelling is a typed refusal where it is provisioned. It names the
+    // capability, the spelling, and the class it meant.
+    let refused = Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
+        .epochs(epochs())
+        .now(now())
+        .capability(
+            grant(
+                "cap_root",
+                "service:continuumd",
+                AuthorityLevel::Promote,
+                Optional::Absent,
+            ),
+            None,
+        )
+        .capability(tokened(), Some(cap("cap_root")))
+        .capability(prefixed(), Some(cap("cap_root")))
+        .try_build()
+        .expect_err("the prefix spelling is refused, not provisioned as an empty scope");
+    assert_eq!(
+        refused,
+        ProvisioningRefusal::ArtifactClass {
+            capability: cap("cap_prefixed"),
+            refusal: ArtifactClassRefusal::PrefixSpelling {
+                given: "ws_".to_owned(),
+                meant: ArtifactClass::WorkspaceSnapshot,
+            },
+        }
     );
+    let message = refused.to_string();
     assert!(
-        text.contains("Artifact class, the plan §4.4 prefix without the underscore."),
-        "one site says `without the underscore`"
-    );
-    assert!(
-        text.contains("Artifact class of the redacted original (plan §4.4 prefix)."),
-        "and another says only `prefix`, which plan §4.4 spells with the underscore"
+        message.contains("cap_prefixed") && message.contains("`ws_`") && message.contains("`ws`"),
+        "the refusal's rendering carries what its fields carry: {message}"
     );
 
-    // The two readings behave differently, and nothing typed says which is meant. A capability
-    // scoped with the literal prefix is scoped to nothing; the same call with the token
-    // spelling is admitted.
+    // A spelling that is neither a token nor a prefix is the other refusal, not the same one.
+    let mut unknown = prefixed();
+    unknown.artifact_classes = vec!["workspace".to_owned()];
+    let refused = Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
+        .capability(unknown, None)
+        .try_build()
+        .expect_err("an unknown spelling is refused");
+    assert!(matches!(
+        refused,
+        ProvisioningRefusal::ArtifactClass {
+            refusal: ArtifactClassRefusal::Unknown { ref given },
+            ..
+        } if given == "workspace"
+    ));
+
+    // The post-build provisioning surface refuses the same spelling, and registers nothing.
     let mut fixture = lane();
     prime(&mut fixture);
-    let literal = ask(
-        &mut fixture.server,
-        envelope(
-            "workspace.create",
-            "agent:prefixed",
-            "cap_prefixed",
-            "req_f3_a",
-        ),
-        &Arguments::WorkspaceCreate(WorkspaceCreateRequest {
-            components: fixture.components.clone(),
-            overlay: Optional::Absent,
-            seal: Optional::Present(true),
-        }),
+    let refused = fixture
+        .server
+        .daemon_mut()
+        .state_mut()
+        .register_capability(prefixed(), Some(cap("cap_root")))
+        .expect_err("the prefix spelling is refused after build too");
+    assert!(matches!(
+        refused,
+        ProvisioningRefusal::ArtifactClass {
+            refusal: ArtifactClassRefusal::PrefixSpelling { .. },
+            ..
+        }
+    ));
+    assert!(
+        fixture
+            .server
+            .daemon_mut()
+            .state_mut()
+            .grant(&cap("cap_prefixed"))
+            .is_none(),
+        "a refused capability is not registered"
     );
+
+    // The token spelling is still admitted for the call the prefix spelling used to fail.
     let token = ask(
         &mut fixture.server,
         envelope(
@@ -3291,23 +3353,10 @@ fn the_artifact_class_vocabulary_is_spelled_by_a_doc_comment_and_not_by_a_type()
         }),
     );
     assert_eq!(
-        literal.status(),
-        ResultStatus::Error,
-        "the plan's own prefix spelling scopes a capability to nothing"
-    );
-    assert_eq!(literal.code(), Some(ErrorCode::CapabilityDenied));
-    assert_eq!(
         token.status(),
         ResultStatus::Ok,
-        "the token spelling is the one the store reads: {:?}",
+        "the token spelling is the canonical one: {:?}",
         token.detail()
-    );
-    // And the refusal says nothing about spelling, in any channel.
-    let detail = literal.detail().expect("a refusal carries a detail");
-    assert!(
-        !detail.contains("class") && !detail.contains("prefix") && !detail.contains("scope"),
-        "if the detail now names the condition, F3 has become a prose dependency rather than \
-         an absence: {detail}"
     );
 }
 

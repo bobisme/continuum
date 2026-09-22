@@ -134,9 +134,10 @@ protocol_struct! {
         /// IDL `to: EpochIdentity required`.
         to: EpochIdentity required;
         /// Compatibility statement per artifact class, keyed by the plan §4.4
-        /// class prefix.
+        /// class token (`rule artifact_class.spelling`).
         compatibility: map<String,Compatibility> required;
-        /// Estimated invalidation blast radius by artifact class.
+        /// Estimated invalidation blast radius by artifact class, keyed by
+        /// class token (`rule artifact_class.spelling`).
         blast_radius: map<String,U64> required;
     }
 }
@@ -155,7 +156,8 @@ protocol_struct! {
         snapshots: list<WorkspaceHandle> required;
         /// Intents in scope; empty means unrestricted within `level`.
         intents: list<IntentHandle> required;
-        /// Artifact classes in scope, as plan §4.4 prefixes; empty means all.
+        /// Artifact classes in scope, as plan §4.4 class tokens
+        /// (`rule artifact_class.spelling`); empty means all.
         artifact_classes: list<String> required;
         /// IDL `expires_at: Timestamp nullable`.
         expires_at: Timestamp nullable;

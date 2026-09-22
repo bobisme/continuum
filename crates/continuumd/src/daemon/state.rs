@@ -40,6 +40,7 @@ use continuum_workspace::lineage::{Fork, ForkName};
 use continuum_workspace::snapshot::WorkspacePath;
 
 use super::family::Arguments;
+use super::provisioning::{ProvisioningRefusal, scoped_classes};
 use super::{OperationOutcome, ServiceError};
 use crate::protocol::envelope::{Budget, OutputPolicy, Page, Redacted, RequestEnvelope};
 use crate::protocol::handshake::CapabilityDescriptor;
@@ -467,15 +468,24 @@ impl DaemonState {
     /// the surface a deployment provisions through. It performs no narrowing check: D6/D7
     /// are enforced at admission time, on the chain, so a mis-provisioned child is denied
     /// rather than silently trusted.
+    ///
+    /// # Errors
+    ///
+    /// [`ProvisioningRefusal::ArtifactClass`] when `artifact_classes` names a string that is
+    /// not a class token (`rule artifact_class.spelling`). The descriptor is then not
+    /// registered: a scope that matches nothing is refused here, where the deployment can
+    /// see it, and never served as an empty scope.
     pub fn register_capability(
         &mut self,
         descriptor: CapabilityDescriptor,
         parent: Option<CapabilityHandle>,
-    ) {
+    ) -> Result<(), ProvisioningRefusal> {
+        scoped_classes(&descriptor)?;
         self.capabilities.insert(
             descriptor.capability.clone(),
             CapabilityGrant { descriptor, parent },
         );
+        Ok(())
     }
 
     /// Revoke a capability.

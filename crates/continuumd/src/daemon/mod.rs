@@ -88,6 +88,7 @@ pub mod intent;
 pub mod obligation;
 pub mod observe;
 pub mod output;
+pub mod provisioning;
 pub mod recovery;
 pub mod region;
 pub mod result;
@@ -113,6 +114,7 @@ use crate::protocol::vocabulary::{ErrorCode, ResultStatus};
 
 use family::{Arguments, Call, Fault, OperationFamily, Payload, ScopeClaim};
 use identity::{AuditCorrelator, HashedCorrelation};
+use provisioning::ProvisioningRefusal;
 use recovery::{CrashInjector, CrashPoint, Killed, NoCrash};
 use state::{AdmissionRecord, DaemonState, Replay, ReplayKey, store_level};
 
@@ -1014,17 +1016,44 @@ impl Builder {
 
     /// Assemble the daemon.
     ///
+    /// [`try_build`](Builder::try_build) with the refusal turned into a panic, for a
+    /// deployment whose capabilities are literals it controls.
+    ///
+    /// # Panics
+    ///
+    /// When a provisioned capability is refused (see [`try_build`](Builder::try_build)).
+    /// The panic message is the refusal's [`Display`](core::fmt::Display), which names the
+    /// capability and the spelling.
+    #[must_use]
+    pub fn build(self) -> Daemon {
+        self.try_build()
+            .unwrap_or_else(|refusal| panic!("daemon provisioning refused: {refusal}"))
+    }
+
+    /// Assemble the daemon, or refuse a mis-provisioned capability, typed.
+    ///
     /// A capability whose handle is not a well-formed `cap_*` store token is registered in
     /// the wire registry and not in the store's: it can be admitted and it cannot publish,
     /// which is fail-closed in the only direction that matters.
-    #[must_use]
-    pub fn build(mut self) -> Daemon {
+    ///
+    /// # Errors
+    ///
+    /// [`ProvisioningRefusal::ArtifactClass`] when a descriptor's `artifact_classes` names a
+    /// string that is not a class token (`rule artifact_class.spelling`) — the plan §4.4
+    /// prefix spelling `ws_` included. Every descriptor is checked before any is
+    /// registered, so a refused build registers nothing.
+    pub fn try_build(mut self) -> Result<Daemon, ProvisioningRefusal> {
+        let mut scopes = Vec::with_capacity(self.capabilities.len());
+        for (descriptor, _) in &self.capabilities {
+            scopes.push(provisioning::scoped_classes(descriptor)?);
+        }
+
         // A restart adopts the surviving store and provisions the wire registry only; a cold
         // start builds a store and provisions both. The two paths differ in exactly that,
         // which is the durable/volatile split spelled as control flow.
         if let Some(durable) = self.durable {
             for (descriptor, parent) in self.capabilities {
-                self.state.register_capability(descriptor, parent);
+                self.state.register_capability(descriptor, parent)?;
             }
             // The startup task-resolution pass (plan §4.5 O2), before any dispatch can run.
             // It reads the adopted store under the connection capability and writes only the
@@ -1041,14 +1070,14 @@ impl Builder {
                 }
                 Err(denied) => recovery::Startup::Refused(denied),
             };
-            return Daemon {
+            return Ok(Daemon {
                 services: self.services,
                 state: self.state,
                 store: durable.store,
                 store_audit: durable.audit,
                 families: self.families,
                 startup,
-            };
+            });
         }
 
         let store_audit = Arc::new(AuditLog::new());
@@ -1060,7 +1089,7 @@ impl Builder {
         if let Some(faults) = self.store_faults {
             store = store.faults(BoxedFaults(faults));
         }
-        for (descriptor, parent) in self.capabilities {
+        for ((descriptor, parent), classes) in self.capabilities.into_iter().zip(scopes) {
             if let Ok(token) = identity::capability_to_store(&descriptor.capability) {
                 store = store.capability(
                     continuum_workspace::publication::CapabilityDescriptor::new(
@@ -1068,39 +1097,20 @@ impl Builder {
                         identity::actor_to_store(&descriptor.actor),
                         store_level(descriptor.level),
                     )
-                    .scoped_to(store_classes(&descriptor)),
+                    .scoped_to(classes),
                 );
             }
-            self.state.register_capability(descriptor, parent);
+            self.state.register_capability(descriptor, parent)?;
         }
-        Daemon {
+        Ok(Daemon {
             services: self.services,
             state: self.state,
             store: store.build(),
             store_audit,
             families: self.families,
             startup: recovery::Startup::Cold,
-        }
+        })
     }
-}
-
-/// The artifact classes a wire descriptor scopes to, as the store names them.
-///
-/// A class the store does not know is dropped rather than approximated: the wire's
-/// `artifact_classes` is "plan §4.4 prefixes", the store's [`ArtifactClass`] is the closed
-/// set of those prefixes, and a prefix outside it names no class the store could scope to.
-/// The wire-side test in [`admission`] still sees the full list, so nothing is widened by
-/// the omission.
-///
-/// [`ArtifactClass`]: continuum_workspace::artifact_path::ArtifactClass
-fn store_classes(
-    descriptor: &CapabilityDescriptor,
-) -> Vec<continuum_workspace::artifact_path::ArtifactClass> {
-    descriptor
-        .artifact_classes
-        .iter()
-        .filter_map(|token| continuum_workspace::artifact_path::ArtifactClass::from_token(token))
-        .collect()
 }
 
 /// Adapts an owned `Box<dyn StorageFaults>` back into the by-value seam the store's builder

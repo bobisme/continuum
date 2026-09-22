@@ -611,7 +611,9 @@ fn principals() -> Vec<(CapabilityDescriptor, Option<CapabilityHandle>)> {
 /// Replay [`principals`] into a bare [`DaemonState`].
 fn register_principals(state: &mut DaemonState) {
     for (descriptor, parent) in principals() {
-        state.register_capability(descriptor, parent);
+        state
+            .register_capability(descriptor, parent)
+            .expect("every principal is scoped with class tokens");
     }
 }
 
@@ -2183,7 +2185,8 @@ mod declared_scope {
         fixture
             .daemon
             .state_mut()
-            .register_capability(scoped, Some(cap(ROOT.capability)));
+            .register_capability(scoped, Some(cap(ROOT.capability)))
+            .expect("an instance-scoped capability names no class");
 
         let probes = probes(&fixture.handles);
         let seal = probes

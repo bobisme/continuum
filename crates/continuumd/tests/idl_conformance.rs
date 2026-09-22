@@ -1036,11 +1036,16 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // depth-0 root, and that an edge takes the greater of its endpoints' depths; the
     // count assertions see none of it, which is the point of stating the versioning
     // argument here rather than inferring it from a diff.
+    //
+    // IDL 1.13 (bn-3ncfp) adds one rule, `artifact_class.spelling`, and nothing else:
+    // 44 -> 45. It fixes the spelling of plan §4.4's class vocabulary in fields that stay
+    // `String`, because retyping them to an enum is `rule versioning.breaking_change`.
+    // No operation, alias, enum, struct, or union moves, so `version` stays "3.6".
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 44, "rules");
+    assert_eq!(document.rules.len(), 45, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
