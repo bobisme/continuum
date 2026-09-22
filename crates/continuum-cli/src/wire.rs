@@ -889,7 +889,7 @@ fn refusal_of(
     let data = match error.data.value() {
         None => None,
         Some(opaque) => match codec::operations::decode_error_data(error.code, opaque)? {
-            continuumd::daemon::family::ErrorData::CertificateRejection(body) => Some(body),
+            continuumd::daemon::family::ErrorData::CertificateRejection(body) => Some(*body),
             continuumd::daemon::family::ErrorData::None => None,
         },
     };

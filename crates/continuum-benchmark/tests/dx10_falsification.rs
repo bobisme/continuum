@@ -27,7 +27,7 @@
 //!
 //! | # | Harness choice attacked | Test | Verdict |
 //! |---|---|---|---|
-//! | S1 | the baseline is not charged for the CLI's own protocol frames | [`s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged`] | **LANDED** — worth 10,162 bytes/solved task; margin −152% → +27%, still short of +30% |
+//! | S1 | the baseline is not charged for the CLI's own protocol frames | [`s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged`] | **LANDED** — worth 10,189 bytes/solved task; margin −152% → +27%, still short of +30% |
 //! | S2 | nor for the handshake each CLI process would perform | [`s2_the_baseline_is_not_charged_a_handshake_per_process_invocation`] | **LANDED** — margin → +49%, which *clears* the floor |
 //! | S3 | the expansion command is answered from an envelope the harness already holds | [`s3_the_expansion_command_never_leaves_the_harness`] | **LANDED** — margin → +55% |
 //! | S4 | the adapter renders from the very answer the daemon just produced | [`s4_the_adapter_is_never_a_beat_behind_the_daemon`] | **LANDED** — one stale rendering costs the baseline 4/24 tasks and 502‰ of invalid-action rate |
@@ -58,6 +58,14 @@
 //! asserted in `tests/pr10_c4b_port_by_reference.rs`. Every attack below was re-run
 //! against the new matrix and every verdict is unchanged: eight LANDED, four HELD, one
 //! INCONCLUSIVE. What moved is the size of the loss, not any conclusion about it.
+//!
+//! **They moved a second time, below the landed line only.** bn-27mx7 made every
+//! stale-handle refusal carry an `Error.recovery` offer that names the lineage head (RFC
+//! 0027 H8). That adds bytes to the refusal frames the CLI exchanges underneath the
+//! baseline and to the decomposed result frames: 170,584 → 171,220 result B, S1's handicap
+//! 10,162 → 10,189 B per solved task, S7's JSON density 309 → 308 tokens per thousand
+//! bytes and its non-affine margin −437% → −435%. The landed figures above, both arms'
+//! interface bytes, and every verdict are unchanged.
 //! - [`control_the_hidden_ledger_never_enters_an_interface_byte_total`] — the instrumentation
 //!   this campaign added is beside the measurement, not inside it.
 //! - [`control_a_decomposed_answer_re_encodes_to_the_frame_that_carried_it`] — the byte
@@ -184,7 +192,7 @@ fn s1_the_baseline_is_not_charged_for_the_frames_its_cli_actually_exchanged() {
     );
     assert_eq!(
         per_solved(&charged, Arm::Shell) - per_solved(&landed, Arm::Shell),
-        10_162,
+        10_189,
         "what the handicap is worth, per solved task"
     );
     // The one thing the handicap cannot touch: it is a cost, not a capability.
@@ -465,7 +473,7 @@ fn s6_where_the_typed_arms_bytes_go_and_how_far_a_redesign_reaches() {
     };
 
     assert_eq!(decomposition.answers, 172);
-    assert_eq!(decomposition.result_bytes, 170_584);
+    assert_eq!(decomposition.result_bytes, 171_220);
     assert_eq!(decomposition.request_bytes, 73_318);
 
     // The correction: two of the five named causes cost nothing.
@@ -536,9 +544,9 @@ fn s6_where_the_typed_arms_bytes_go_and_how_far_a_redesign_reaches() {
 /// **HELD.** Any `bytes/k` rule is affine in bytes with the *same* divisor on both arms, so
 /// the relative margin is identical for every k — asserted here for 3, 4, 5 and 8, all
 /// −152%. The declared rule cannot be hiding anything. And the one rule tried that is *not*
-/// affine — words and punctuation counted separately, under which canonical JSON costs 309
+/// affine — words and punctuation counted separately, under which canonical JSON costs 308
 /// tokens per thousand bytes against the projection's 145 — moves the margin from −152% to
-/// **-437%**, further against the typed arm. No counting rule available to this campaign
+/// **-435%**, further against the typed arm. No counting rule available to this campaign
 /// improves the typed arm's position.
 #[test]
 fn s7_the_declared_token_rule_cannot_move_the_margin_and_the_one_that_could_moves_it_the_other_way()
@@ -568,7 +576,7 @@ fn s7_the_declared_token_rule_cannot_move_the_margin_and_the_one_that_could_move
     let json_density = frame_tokens * 1000 / frames;
     let prose_density = agent_tokens * 1000 / agent_bytes;
     assert_eq!(
-        json_density, 309,
+        json_density, 308,
         "structural tokens per 1000 bytes of wire"
     );
     assert_eq!(prose_density, 145, "and per 1000 bytes of projection");
@@ -576,7 +584,7 @@ fn s7_the_declared_token_rule_cannot_move_the_margin_and_the_one_that_could_move
     let native_tokens = native * json_density / 1000;
     let shell_tokens = shell * prose_density / 1000;
     let margin = ((shell_tokens as i64 - native_tokens as i64) * 100) / shell_tokens as i64;
-    assert_eq!(margin, -437);
+    assert_eq!(margin, -435);
     assert!(
         margin < -152,
         "the only non-affine rule tried moves the margin further against the typed arm"
@@ -1149,7 +1157,7 @@ fn campaign_report() -> FalsificationReport {
             outcome: Outcome::Held,
             evidence: "research/25 declares no alternative rule; every bytes/k rule is \
                        affine and gives -152% for k in {3,4,5,8}; the one non-affine rule \
-                       tried gives -437%, further against the typed arm"
+                       tried gives -435%, further against the typed arm"
                 .to_owned(),
         },
         Attack {

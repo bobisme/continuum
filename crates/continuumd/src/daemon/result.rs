@@ -29,12 +29,16 @@
 //! (`rule encoding.opaque_payloads`; IDL open item 3, whose misgrouping of this field
 //! bn-i4aem corrected).
 //!
-//! `next_operations` and `Error.recovery` are empty for a different reason again, and it
-//! is now the only one left: `NextOperation.arguments` is a required `Opaque` that the
-//! codec *can* encode as of 3.2, so what is missing is not the encoding but the offer —
-//! this daemon has no typed recovery to propose from these states, and an empty list is
-//! the statement RFC 0026 says it is ("no typed recovery exists from this state"), not a
-//! placeholder.
+//! `Error.recovery` reads empty here for the same reason again: each entry's `arguments`
+//! is `Opaque`. A fault's typed offers travel beside the envelope as
+//! [`RecoveryOffer`](super::family::RecoveryOffer)s on the outcome, filtered under RFC 0027
+//! N2 in the dispatch, and the transport encodes them. That lane carries RFC 0027 H8's
+//! stale-handle recovery (bn-27mx7). A failure with no offer reaches the wire with an empty
+//! list, which is the statement RFC 0026 says it is ("no typed recovery exists from this
+//! state"), not a placeholder.
+//!
+//! `next_operations` is empty for the reason that is left: this daemon has no typed next
+//! step to propose from a success, and an empty list states that.
 
 use crate::protocol::envelope::{Cost, EpochSet, Error, ResultEnvelope};
 use crate::protocol::scalar::{AuditCorrelationId, RequestId};

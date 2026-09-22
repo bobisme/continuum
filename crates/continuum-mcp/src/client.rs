@@ -580,7 +580,7 @@ fn classify(
                 Optional::Absent => None,
                 Optional::Present(opaque) => match decode_error_data(error.code, opaque) {
                     Ok(ErrorData::CertificateRejection(body)) => {
-                        Some(RefusalData::CertificateRejection(body))
+                        Some(RefusalData::CertificateRejection(*body))
                     }
                     Ok(ErrorData::None) => None,
                     Err(CodecError::UndeclaredErrorData) => {

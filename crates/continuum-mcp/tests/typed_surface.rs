@@ -911,7 +911,7 @@ fn a_kernel_certificate_rejection_arrives_typed_on_the_clients_refusal() {
         });
         assert_eq!(outcome.envelope.status, ResultStatus::Error);
         match outcome.data {
-            ErrorData::CertificateRejection(body) => body,
+            ErrorData::CertificateRejection(body) => *body,
             ErrorData::None => panic!("a CertificateRejected outcome carries its declared data"),
         }
     };

@@ -923,6 +923,28 @@ impl DaemonState {
         self.workspaces.get(handle)
     }
 
+    /// The one `ws_*` handle whose record sits at `source` in the lineage `lineage`, or
+    /// [`None`] when no record or more than one does.
+    ///
+    /// A lineage advances over a snapshot's *source* identity, while the wire names a
+    /// snapshot by the content identity of its whole descriptor (finding F7 of
+    /// `tests/gate_g2_04_acceptance.rs`). So the head a `LineageError::Stale` names is not
+    /// presentable until it is mapped back to a `ws_*` handle, and this is that mapping. It
+    /// answers only when the answer is unique: two records at one source identity in one
+    /// lineage would be two candidate heads, and picking one would be a guess.
+    #[must_use]
+    pub fn workspace_at(
+        &self,
+        lineage: &ForkName,
+        source: &continuum_workspace::artifact_path::ArtifactHandle,
+    ) -> Option<&WorkspaceHandle> {
+        let mut found = self.workspaces.iter().filter(|(_, record)| {
+            &record.lineage == lineage && record.descriptor.source().identity() == source
+        });
+        let (handle, _) = found.next()?;
+        found.next().is_none().then_some(handle)
+    }
+
     /// The workspace record `handle` names, mutably.
     pub fn workspace_mut(&mut self, handle: &WorkspaceHandle) -> Option<&mut WorkspaceRecord> {
         self.workspaces.get_mut(handle)

@@ -338,7 +338,7 @@ pub fn decode_cbor_payload(operation: &str, payload: &Opaque) -> Result<Payload,
 pub fn encode_error_data_in<D: Document>(data: &ErrorData) -> Result<Option<Opaque>, CodecError> {
     Ok(Some(match data {
         ErrorData::None => return Ok(None),
-        ErrorData::CertificateRejection(body) => to_opaque_in::<D, _>(body)?,
+        ErrorData::CertificateRejection(body) => to_opaque_in::<D, _>(body.as_ref())?,
     }))
 }
 
@@ -360,10 +360,14 @@ pub fn decode_error_data_in<D: Document>(
     data: &Opaque,
 ) -> Result<ErrorData, CodecError> {
     match code {
-        ErrorCode::CertificateRejected => Ok(ErrorData::CertificateRejection(from_opaque_in::<
-            D,
-            crate::protocol::envelope::CertificateRejection,
-        >(data)?)),
+        ErrorCode::CertificateRejected => {
+            Ok(ErrorData::CertificateRejection(Box::new(from_opaque_in::<
+                D,
+                crate::protocol::envelope::CertificateRejection,
+            >(
+                data
+            )?)))
+        }
         _ => Err(CodecError::UndeclaredErrorData),
     }
 }

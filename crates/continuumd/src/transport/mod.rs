@@ -748,6 +748,32 @@ impl Server {
                 );
             }
         }
+        // And where the typed recovery offers become `Error.recovery` (RFC 0027 H8,
+        // bn-27mx7). `NextOperation.arguments` is an `Opaque` resolved by the entry's own
+        // `operation` (`rule encoding.opaque_payloads`), so it is encoded here in the
+        // negotiated encoding, by the same encoder a client uses for a request body. The
+        // offers were filtered under N2 in the dispatch, so nothing is decided here.
+        if let Optional::Present(error) = &mut result.error {
+            for offer in &outcome.recovery {
+                let Ok(operation) =
+                    crate::protocol::scalar::OperationName::new(offer.arguments.operation())
+                else {
+                    continue;
+                };
+                error
+                    .recovery
+                    .push(crate::protocol::envelope::NextOperation {
+                        operation,
+                        arguments: encode_arguments_in::<D>(&offer.arguments)?,
+                        rationale: Optional::Present(offer.rationale.to_owned()),
+                    });
+            }
+        } else {
+            debug_assert!(
+                outcome.recovery.is_empty(),
+                "a recovery offer can only arrive on a failure outcome"
+            );
+        }
         Ok(write_in::<D, _>(&result)?)
     }
 }

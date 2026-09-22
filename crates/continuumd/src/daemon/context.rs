@@ -1129,7 +1129,20 @@ fn expand(
 
     // The one snapshot test an expansion runs — see [`stale_snapshot_check`] for the two
     // `task.resume` runs that this deliberately does not.
-    stale_snapshot_check(envelope, record.snapshot())?;
+    //
+    // It is an *agreement* test, not a currency test, and the refusal says so in typed
+    // terms (finding F6 of `tests/gate_g2_04_acceptance.rs`, bn-27mx7). Both answer
+    // `StaleSnapshot`. A currency refusal offers `workspace.seal` of the lineage head under
+    // `RATIONALE_RESEAL_LINEAGE_HEAD`; this one offers the caller's own request under
+    // `RATIONALE_REISSUE_WITHOUT_SNAPSHOT_PIN`, because the pack is readable as history and
+    // what has to change is only the envelope's pin. The offered body is the request the
+    // caller sent, so it carries nothing the caller did not already hold (S1).
+    stale_snapshot_check(envelope, record.snapshot()).map_err(|fault| {
+        fault.with_recovery(vec![super::family::RecoveryOffer {
+            arguments: Arguments::ContextExpand(request.clone()),
+            rationale: super::family::RATIONALE_REISSUE_WITHOUT_SNAPSHOT_PIN,
+        }])
+    })?;
 
     let anchor = Name::new(&request.anchor).map_err(|_| {
         Fault::new(

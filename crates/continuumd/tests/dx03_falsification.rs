@@ -1378,8 +1378,8 @@ fn regression_the_replay_key_covers_the_envelope_budget() {
 
 /// **Attack 6.** Every operation that consumes a snapshot, against a handle the lineage has
 /// superseded: `verification.start`, `task.resume`, `workspace.fork`, and `workspace.seal`
-/// all answer `StaleSnapshot`, and `workspace.diff` answers `UnsupportedSemanticFeature`
-/// rather than computing a partial answer over stale inputs. No path silently runs against
+/// all answer `StaleSnapshot`, and `workspace.diff` answers `StaleSnapshot` for the unsealed
+/// derived snapshot (RFC 0031's sealed-input rule) rather than computing a partial answer. No path silently runs against
 /// the new tree, and no path silently runs against the old one.
 #[test]
 fn attack_staleness_every_snapshot_consuming_operation_refuses_a_superseded_handle() {
@@ -1434,9 +1434,9 @@ fn attack_staleness_every_snapshot_consuming_operation_refuses_a_superseded_hand
     let diff_refusal = diff(&mut parked.fixture.daemon, &old, &derived, "req_diff");
     assert_eq!(
         diff_refusal.error_code(),
-        Some(ErrorCode::UnsupportedSemanticFeature),
-        "the RFC 0031 diff lane refuses rather than degrading over two snapshots one of \
-         which is stale"
+        Some(ErrorCode::StaleSnapshot),
+        "the diff consults its carriers (bn-27mx7): the derived snapshot is unsealed, and \
+         RFC 0031 requires both inputs sealed"
     );
 
     // Nothing advanced. Every refusal above was a refusal, not a partial effect.

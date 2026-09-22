@@ -82,7 +82,7 @@ use continuum_workspace::publication::{
     CapabilityToken, ContentIdentifier, PublishRefusal, ReferenceStore,
 };
 use continuum_workspace::snapshot::Snapshot;
-use continuum_workspace::staleness::check_current;
+use continuum_workspace::staleness::{LineageError, check_current};
 
 use super::Services;
 use super::budget::{self, Publications};
@@ -897,7 +897,11 @@ fn start(
         return Err(Fault::new(
             ErrorCode::StaleSnapshot,
             "a verification campaign runs over a sealed snapshot",
-        ));
+        )
+        .with_recovery(super::workspace::reseal_current_head(
+            state,
+            &record.lineage,
+        )));
     }
     let intent = record.intent.clone();
     let lineage_name = record.lineage.clone();
@@ -909,11 +913,17 @@ fn start(
     // no existence-oracle question left to protect, only a currency one — RFC 0026's "An
     // unplaceable lineage identity" disposition (bn-10wdo), which also documents why
     // `daemon::workspace`'s guarded writes answer the same `Unknown` arm `CapabilityDenied`.
-    check_current(lineage, &head).map_err(|_| {
-        Fault::new(
+    //
+    // A `Stale` refusal names the head that superseded the snapshot, as a recovery offer
+    // (RFC 0027 H8, bn-27mx7); an `Unknown` one has no head to name.
+    check_current(lineage, &head).map_err(|error| match error {
+        LineageError::Stale(stale) => {
+            super::workspace::superseded(state, &lineage_name, stale.current())
+        }
+        LineageError::Unknown(_) => Fault::new(
             ErrorCode::StaleSnapshot,
             "the named snapshot has been superseded in its lineage",
-        )
+        ),
     })?;
 
     let source = model_source(

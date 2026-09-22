@@ -12,7 +12,7 @@
 //! | `workspace.create_by_reference` | [`DaemonState::components`] resolves the reference, then **`create` itself** |
 //! | `workspace.fork` | [`staleness::advance_current`] — the compare-and-set advance — then [`rebind_components`] |
 //! | `workspace.seal` | [`staleness::seal_current`] |
-//! | `workspace.diff` | none: see "The diff lane" below |
+//! | `workspace.diff` | the held-and-sealed input check only: see "The diff lane" below |
 //!
 //! # Lineages, and where `StaleSnapshot` comes from
 //!
@@ -127,8 +127,10 @@
 //!
 //! # The diff lane
 //!
-//! `workspace.diff` returns [`ErrorCode::UnsupportedSemanticFeature`] — the code its own
-//! `errors` clause declares — and does not compute a partial answer. Its response requires
+//! `workspace.diff` first consults its two snapshot carriers — each must be held and sealed,
+//! RFC 0031's input contract (see [`diff`]) — and then returns
+//! [`ErrorCode::UnsupportedSemanticFeature`] — the code its own `errors` clause declares —
+//! and does not compute a partial answer. Its response requires
 //! `summary`, "the diff artifact, inline, in the form of `schemas/semantic-diff.schema.json`",
 //! and that schema requires `intent_changes`, `semantic_changes`, `impact`, and `policy`:
 //! RFC 0031's classification, which `crates/continuum-semantic-diff` has not shipped.
@@ -164,14 +166,17 @@ use continuum_workspace::staleness::{
     GuardedAdvanceError, GuardedSealError, LineageError, advance_current, seal_current,
 };
 
-use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::family::{
+    Arguments, Call, Effect, Fault, OperationFamily, Payload, RATIONALE_RESEAL_LINEAGE_HEAD,
+    RecoveryOffer, ScopeClaim,
+};
 use super::state::{DaemonState, RegistryStatus, WorkspaceRecord};
 use super::{Services, identity};
 use crate::protocol::envelope::{ArtifactRef, StructuralVerdictValue, Verdict};
 use crate::protocol::operations::workspace::{
     WorkspaceCreateByReferenceRequest, WorkspaceCreateByReferenceResponse, WorkspaceCreateRequest,
-    WorkspaceCreateResponse, WorkspaceForkRequest, WorkspaceForkResponse, WorkspaceSealRequest,
-    WorkspaceSealResponse,
+    WorkspaceCreateResponse, WorkspaceDiffRequest, WorkspaceForkRequest, WorkspaceForkResponse,
+    WorkspaceSealRequest, WorkspaceSealResponse,
 };
 use crate::protocol::scalar::{ArtifactHandle, Commitment, WorkspaceHandle};
 use crate::protocol::shared::SnapshotComponents;
@@ -251,6 +256,8 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("workspace.fork", ErrorCode::UnsupportedSemanticFeature),
     ("workspace.fork", ErrorCode::MalformedRequest),
     ("workspace.fork", ErrorCode::PublicationAborted),
+    ("workspace.diff", ErrorCode::CapabilityDenied),
+    ("workspace.diff", ErrorCode::StaleSnapshot),
     ("workspace.diff", ErrorCode::UnsupportedSemanticFeature),
     ("workspace.seal", ErrorCode::CapabilityDenied),
     ("workspace.seal", ErrorCode::StaleSnapshot),
@@ -310,11 +317,7 @@ impl OperationFamily for WorkspaceFamily {
                 create_by_reference(call, request, state, services, store)
             }
             Arguments::WorkspaceFork(request) => fork(request, state, services),
-            Arguments::WorkspaceDiff(_) => Err(Fault::new(
-                ErrorCode::UnsupportedSemanticFeature,
-                "the RFC 0031 diff lane this operation's `summary` artifact comes from has \
-                 not shipped",
-            )),
+            Arguments::WorkspaceDiff(request) => diff(request, state),
             Arguments::WorkspaceSeal(request) => seal(call, request, state, store),
             // Unreachable: the dispatcher checked shape agreement against the registry
             // before routing. A typed refusal rather than an `unreachable!`, because a
@@ -561,7 +564,7 @@ fn fork(
     };
     let advanced = advance_current(&lineage, &expected_head, &overlay, services.identifier())
         .map_err(|error| match error {
-            GuardedAdvanceError::Lineage(lineage) => lineage_fault(&lineage),
+            GuardedAdvanceError::Lineage(error) => lineage_fault(&error, state, &lineage_name),
             GuardedAdvanceError::Overlay(_) => Fault::new(
                 ErrorCode::MalformedRequest,
                 "the overlay does not apply to the base snapshot",
@@ -605,6 +608,49 @@ fn fork(
     .with_artifacts(vec![artifact(&handle)?]))
 }
 
+/// `workspace.diff`: consult both staleness carriers, then answer that the lane has not
+/// shipped.
+///
+/// > Both snapshots MUST be sealed. An unsealed snapshot is rejected (`StaleSnapshot`, RFC
+/// > 0026); the diff MUST NOT classify against a mutable input.
+/// >
+/// > — RFC 0031, "Inputs"
+///
+/// The two carriers are checked for what RFC 0031 requires of them, and for nothing else:
+///
+/// - **held** — a handle this daemon does not hold is [`Fault::denied`], as everywhere in
+///   this family (X2);
+/// - **sealed** — an unsealed input is `StaleSnapshot`, with a [`reseal_current_head`]
+///   offer for its lineage;
+/// - **not current** — deliberately *not* checked. A diff compares two points in history,
+///   and "what changed since the snapshot I hold" is its main use, so a superseded `before`
+///   is the ordinary case rather than a stale one. `context.expand` reads a superseded pack
+///   for the same reason (RFC 0028).
+///
+/// Only after both carriers pass does the operation answer `UnsupportedSemanticFeature`:
+/// the classification is RFC 0031's, which `crates/continuum-semantic-diff` has not
+/// shipped, and `rule errors.unsupported_surface` forbids a degraded answer. The checks
+/// before it are not a degraded answer. They are the input contract the shipped lane will
+/// have, and they are what makes this operation's staleness behaviour observable today
+/// (`tests/gate_g2_04_acceptance.rs`, which found it consulted neither carrier).
+fn diff(request: &WorkspaceDiffRequest, state: &DaemonState) -> Result<Effect, Fault> {
+    for snapshot in [&request.before, &request.after] {
+        let record = state.workspace(snapshot).ok_or_else(Fault::denied)?;
+        if !record.sealed {
+            return Err(Fault::new(
+                ErrorCode::StaleSnapshot,
+                "a diff classifies only sealed snapshots",
+            )
+            .with_recovery(reseal_current_head(state, &record.lineage)));
+        }
+    }
+    Err(Fault::new(
+        ErrorCode::UnsupportedSemanticFeature,
+        "the RFC 0031 diff lane this operation's `summary` artifact comes from has not \
+         shipped",
+    ))
+}
+
 fn seal(
     call: &Call<'_>,
     request: &WorkspaceSealRequest,
@@ -624,7 +670,7 @@ fn seal(
 
     let sealed =
         seal_current(descriptor, &lineage, store, &token).map_err(|error| match error {
-            GuardedSealError::Lineage(lineage) => lineage_fault(&lineage),
+            GuardedSealError::Lineage(error) => lineage_fault(&error, state, lineage.name()),
             GuardedSealError::Seal(seal) => seal_fault(&seal),
         })?;
 
@@ -777,14 +823,84 @@ fn build_overlay(overlays: &[crate::protocol::shared::FileOverlay]) -> Result<Ov
 }
 
 /// The two lineage answers, mapped. See this module's documentation for why they differ.
-fn lineage_fault(error: &LineageError) -> Fault {
+///
+/// `LineageError::Stale` carries the head that superseded the named snapshot
+/// ([`StaleSnapshot::current`](continuum_workspace::staleness::StaleSnapshot::current)).
+/// That value is carried through to the refusal as a [`reseal_at_head`] offer rather than
+/// dropped, which is RFC 0027 H8 (bn-27mx7). `Unknown` carries nothing: it is a denial,
+/// and a denial that named a head would be the existence oracle X2 forbids.
+fn lineage_fault(error: &LineageError, state: &DaemonState, lineage: &ForkName) -> Fault {
     match error {
-        LineageError::Stale(_) => Fault::new(
-            ErrorCode::StaleSnapshot,
-            "the named snapshot has been superseded in its lineage",
-        ),
+        LineageError::Stale(stale) => superseded(state, lineage, stale.current()),
         LineageError::Unknown(_) => Fault::denied(),
     }
+}
+
+/// The `StaleSnapshot` a *currency* refusal answers: the named snapshot is not its lineage's
+/// head, and the refusal names the head that is.
+///
+/// Shared by every family that asks the currency question — `workspace.fork`,
+/// `workspace.seal`, `verification.start`, `task.resume` — so the refusal an agent reads is
+/// one shape whichever operation it came from.
+pub(super) fn superseded(
+    state: &DaemonState,
+    lineage: &ForkName,
+    current: &continuum_workspace::artifact_path::ArtifactHandle,
+) -> Fault {
+    Fault::new(
+        ErrorCode::StaleSnapshot,
+        "the named snapshot has been superseded in its lineage",
+    )
+    .with_recovery(reseal_at_head(state, lineage, current))
+}
+
+/// The recovery a stale or unsealed snapshot has: `workspace.seal` of its lineage's head.
+///
+/// > **H8 — a stale-handle failure is recoverable and says so.** […] "re-seal", "re-base"
+/// > […] is executable rather than described.
+/// >
+/// > — RFC 0027, "Stale handles and stale capabilities"
+///
+/// # Why `workspace.seal`, and not a re-issued fork or run
+///
+/// - It names the head as a `ws_*` handle, which is the one thing the refused caller lacks
+///   (findings F1 and F3 of `tests/gate_g2_04_acceptance.rs`).
+/// - It is executable as given. Sealing an unsealed head publishes it; sealing a sealed
+///   head converges on the records that exist (G0-DX-13). Every snapshot-pinned run needs
+///   the head sealed before it is re-issued against it.
+/// - Its arguments are a handle and nothing else. A re-issued `workspace.fork` would have
+///   to echo the caller's overlay content, and RFC 0027 S1 forbids source content in a
+///   `recovery` argument. A re-issued `verification.start` or `task.resume` cannot carry
+///   the head at all, because both name their snapshot on the envelope or in the
+///   continuation, never in the request body `NextOperation.arguments` pre-fills.
+///
+/// An empty list when the head maps to no unique `ws_*` handle
+/// ([`DaemonState::workspace_at`]): an empty `recovery` is the typed statement that no
+/// recovery exists (RFC 0026), and a guessed handle would be worse than none.
+pub(super) fn reseal_at_head(
+    state: &DaemonState,
+    lineage: &ForkName,
+    current: &continuum_workspace::artifact_path::ArtifactHandle,
+) -> Vec<RecoveryOffer> {
+    state
+        .workspace_at(lineage, current)
+        .map(|head| RecoveryOffer {
+            arguments: Arguments::WorkspaceSeal(WorkspaceSealRequest {
+                snapshot: head.clone(),
+            }),
+            rationale: RATIONALE_RESEAL_LINEAGE_HEAD,
+        })
+        .into_iter()
+        .collect()
+}
+
+/// [`reseal_at_head`] for the head `lineage` holds now, for a refusal that is about
+/// sealedness rather than currency and so has no `LineageError::Stale` in hand.
+pub(super) fn reseal_current_head(state: &DaemonState, lineage: &ForkName) -> Vec<RecoveryOffer> {
+    state
+        .lineage(lineage)
+        .map(|fork| reseal_at_head(state, lineage, fork.identity()))
+        .unwrap_or_default()
 }
 
 /// A seal publishes a composite one record at a time, children first and the root last, so

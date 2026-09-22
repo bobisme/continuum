@@ -595,6 +595,51 @@ pub enum Resumption {
     NonResumable(&'static str),
 }
 
+/// One typed recovery offer: an operation, its pre-filled request body, and why it is offered.
+///
+/// > **H8 — a stale-handle failure is recoverable and says so.** Every row above carries a
+/// > `recovery` list computed under N2, so "re-seal", "re-base", "re-page under the current
+/// > epoch", or "resume under the pinned epoch" is executable rather than described.
+/// >
+/// > — RFC 0027, "Stale handles and stale capabilities"
+///
+/// This is the typed form of one `Error.recovery` entry (`NextOperation`). The wire field
+/// `NextOperation.arguments` is `Opaque` — bytes of the *negotiated* encoding — so the
+/// daemon layer, which is encoding-free, carries the typed [`Arguments`] here, and
+/// [`crate::transport::Server::answer`] encodes them where the encoding is known. That is
+/// the same seam [`ErrorData`] and [`Payload`] use.
+///
+/// The operation is not a separate field: it is `arguments.operation()`, so an offer whose
+/// name and body disagree cannot be built.
+///
+/// The dispatcher filters every offer under RFC 0027 N2 before it reaches the envelope: an
+/// offer the presenting capability would be denied is dropped, never shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryOffer {
+    /// The pre-filled request body of the offered operation.
+    pub arguments: Arguments,
+    /// The typed reason, one of the `RATIONALE_*` tokens. Never interpolated (S1).
+    pub rationale: &'static str,
+}
+
+/// The rationale of a *currency* refusal's offer: the named snapshot is no longer its
+/// lineage's head, and the offered `workspace.seal` names the head that superseded it.
+///
+/// "Re-seal" in H8's own words. Sealing the head is the step every snapshot-pinned run
+/// needs before it is re-issued against the head, and it is convergent when the head is
+/// already sealed, so the offer is executable as given in both cases.
+pub const RATIONALE_RESEAL_LINEAGE_HEAD: &str = "reseal_lineage_head";
+
+/// The rationale of an *agreement* refusal's offer: the envelope's `snapshot` disagrees
+/// with the snapshot the named artifact is stated against, and currency is not in
+/// question.
+///
+/// The offer is the same request body, to re-issue with the envelope `snapshot` null or
+/// equal to the artifact's own. Finding F6 of `tests/gate_g2_04_acceptance.rs` is why this
+/// token exists: both predicates answer `StaleSnapshot`, and the rationale is what tells an
+/// agent which one refused it.
+pub const RATIONALE_REISSUE_WITHOUT_SNAPSHOT_PIN: &str = "reissue_without_snapshot_pin";
+
 /// The typed `Error.data` value a fault carries, when its code declares a shape.
 ///
 /// The wire field is `Opaque` — bytes of the *negotiated* encoding — so the daemon
@@ -613,7 +658,11 @@ pub enum ErrorData {
     None,
     /// The declared shape for `code = CertificateRejected` (RFC 0026 F19, 3.4):
     /// the rejecting kernel and its own reason token, relayed verbatim.
-    CertificateRejection(CertificateRejection),
+    ///
+    /// Boxed so [`Fault`], which carries an `ErrorData`, stays under
+    /// `clippy::result_large_err`'s 128-byte bound now that it also carries recovery
+    /// offers (bn-27mx7).
+    CertificateRejection(Box<CertificateRejection>),
 }
 
 impl ErrorData {
@@ -647,6 +696,8 @@ pub struct Fault {
     pub resumption: Resumption,
     /// The typed `Error.data` specifics, for the codes that declare a shape.
     pub data: ErrorData,
+    /// The typed `Error.recovery` offers, before the dispatcher's N2 filter.
+    pub recovery: Vec<RecoveryOffer>,
 }
 
 impl Fault {
@@ -660,7 +711,17 @@ impl Fault {
             retryable: false,
             resumption: Resumption::NotApplicable,
             data: ErrorData::None,
+            recovery: Vec::new(),
         }
+    }
+
+    /// The same fault, carrying typed recovery offers (RFC 0027 H8).
+    ///
+    /// The dispatcher filters them under N2 before any reaches the envelope.
+    #[must_use]
+    pub fn with_recovery(mut self, recovery: Vec<RecoveryOffer>) -> Self {
+        self.recovery = recovery;
+        self
     }
 
     /// The same fault, carrying the typed `Error.data` value its code declares.
@@ -693,6 +754,7 @@ impl Fault {
             retryable: false,
             resumption: Resumption::NonResumable(detail),
             data: ErrorData::None,
+            recovery: Vec::new(),
         }
     }
 
@@ -705,6 +767,7 @@ impl Fault {
             retryable: false,
             resumption: Resumption::From(continuation),
             data: ErrorData::None,
+            recovery: Vec::new(),
         }
     }
 

@@ -5,7 +5,7 @@ budget_states  64
 error.code  StaleSnapshot
 error.detail  the snapshot the continuation pinned is not the current sealed snapshot
 error.retryable  false
-error.recovery  0
+error.recovery  1
 error.continuation  none
 error.non_resumable_reason  none
 error.data  none
@@ -13,4 +13,4 @@ error.data.checker  none
 error.data.reason  none
 error.data.field  none
 omissions  0
-next_operations  0
+next_operations  1

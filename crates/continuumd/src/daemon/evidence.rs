@@ -1403,14 +1403,16 @@ fn certificate_rejected(
             }
         },
     )
-    .with_data(ErrorData::CertificateRejection(CertificateRejection {
-        checker: family.checker_crate().to_owned(),
-        reason: reason.to_owned(),
-        field: match field {
-            Some(token) => Optional::Present(token.to_owned()),
-            None => Optional::Absent,
+    .with_data(ErrorData::CertificateRejection(Box::new(
+        CertificateRejection {
+            checker: family.checker_crate().to_owned(),
+            reason: reason.to_owned(),
+            field: match field {
+                Some(token) => Optional::Present(token.to_owned()),
+                None => Optional::Absent,
+            },
         },
-    }))
+    )))
 }
 
 /// The `EpochUnsupported` a routing failure produces, one detail per [`RoutingFault`].

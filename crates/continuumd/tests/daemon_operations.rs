@@ -835,13 +835,28 @@ fn a_task_starting_operation_without_a_budget_is_malformed() {
         ErrorCode::MalformedRequest
     );
 
-    // With the budget the annotation requires, the same call reaches the handler and gets
-    // the typed refusal the unshipped diff lane owes it.
+    // With the budget the annotation requires, the same call reaches the handler. The
+    // handler consults both snapshot carriers first (bn-27mx7): handles this daemon does
+    // not hold are a denial (X2)...
     let mut envelope = request.envelope.clone();
     envelope.budget = Optional::Present(budget());
     let served = fixture.daemon.dispatch(&OperationRequest {
-        envelope,
+        envelope: envelope.clone(),
         arguments: request.arguments,
+    });
+    assert_eq!(code(&served), ErrorCode::CapabilityDenied);
+
+    // ...and two held, sealed snapshots get the typed refusal the unshipped diff lane owes
+    // them.
+    accept_intent(&mut fixture, "req_accept", "idem-accept");
+    let snapshot = created_handle(&create_workspace(&mut fixture, "req_create", "idem-create"));
+    let served = fixture.daemon.dispatch(&OperationRequest {
+        envelope,
+        arguments: Arguments::WorkspaceDiff(WorkspaceDiffRequest {
+            before: snapshot.clone(),
+            after: snapshot,
+            layers: vec![DiffLayer::Textual],
+        }),
     });
     assert_eq!(code(&served), ErrorCode::UnsupportedSemanticFeature);
 }

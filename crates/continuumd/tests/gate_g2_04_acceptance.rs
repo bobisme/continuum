@@ -31,7 +31,7 @@
 //! refusal an agent cannot act on without out-of-band knowledge fails the half of the
 //! criterion that makes it a G2 bullet rather than a G1 one. This file reads what each
 //! refusal actually carries and reports, per carrier, whether it is enough to recover
-//! from ([`recovery_the_stale_snapshot_refusal_names_neither_the_current_head_nor_a_way_to_find_it`]).
+//! from ([`recovery_the_stale_snapshot_refusal_names_the_current_head_as_an_executable_offer`]).
 //!
 //! | Delivering evidence | This file |
 //! |---|---|
@@ -39,8 +39,8 @@
 //! | one carrier (a superseded snapshot identity) | **six carriers**, K1–K6 below, each probed on every operation that consults it |
 //! | asserts an error code | asserts the code **and** that the daemon's whole effect surface is byte-identical across the refusal ([`Fingerprint`]) |
 //! | no control that the no-effect check can fail | rewinds the lineage through a real state seam so the refused write **lands**, and shows the fingerprint catches it ([`negative_control_rewinding_the_lineage_lets_the_refused_write_land_and_the_fingerprint_sees_it`]); and drives the *admitted* form of the heaviest probe so every equality is a measurement ([`control_a_resume_that_is_admitted_moves_the_fingerprint`]) |
-//! | no complement | probes the operations that legitimately do **not** consult a view, so the criterion is not met by refusing everything ([`complement_reads_on_explicit_handles_do_not_refuse_after_the_world_moves`], [`complement_expanding_a_pack_pinned_to_a_superseded_snapshot_is_not_stale`]) |
-//! | no recovery reading | reads `Error.recovery`, `Error.data`, `Error.detail`, `next_operations` and `epochs` on every refusal and states, per carrier, whether recovery needs out-of-band knowledge |
+//! | no complement | probes the operations that legitimately do **not** consult a view, so the criterion is not met by refusing everything ([`complement_reads_on_explicit_handles_do_not_refuse_after_the_world_moves`], [`complement_expanding_a_pack_pinned_to_a_superseded_snapshot_is_not_stale`], and `workspace.diff` over a superseded sealed `before`) |
+//! | no recovery reading | reads the typed recovery offers, `Error.data`, `Error.detail`, `next_operations` and `epochs` on every refusal, **executes** the offer, and states, per carrier, whether recovery needs out-of-band knowledge |
 //!
 //! # The carriers, enumerated
 //!
@@ -50,7 +50,7 @@
 //! | Key | Carrier | Where it is declared | Consulted by | Refusal |
 //! |---|---|---|---|---|
 //! | K1 | the envelope's snapshot pin | `RequestEnvelope.snapshot: WorkspaceHandle nullable` | `verification.start`, `task.resume`, `context.expand` (and `context.compile`, not driven here) | `StaleSnapshot` |
-//! | K2 | a snapshot identity in a request body | `WorkspaceHandle` fields | `workspace.fork` (`base`), `workspace.seal` (`snapshot`), `workspace.diff` (`before`/`after`) | `StaleSnapshot` |
+//! | K2 | a snapshot identity in a request body | `WorkspaceHandle` fields | `workspace.fork` (`base`), `workspace.seal` (`snapshot`), `workspace.diff` (`before`/`after`, sealedness only — RFC 0031) | `StaleSnapshot` |
 //! | K3 | a continuation's pinned world | `ContinuationHandle` fields | `task.resume` | `StaleSnapshot`, `ContinuationEpochMismatch`, `EpochUnsupported` |
 //! | K4 | declared snapshot epochs | `SnapshotEpochs`, inline and nested in `SnapshotComponents` | `workspace.create`, `workspace.create_by_reference` | `EpochUnsupported` |
 //! | K5 | a remembered claim status | `expected_status: EvidenceStatus optional` | `evidence.verify` | `StatusConflict` |
@@ -64,41 +64,50 @@
 //!
 //! **SATISFIED-AT-NARROWER-SCOPE.** The rejection half of the criterion holds on every
 //! carrier this build implements, at a far stronger no-effect reading than the delivering
-//! evidence used. The narrowing has four parts, each an executable assertion:
+//! evidence used. The narrowing has three parts, each an executable assertion:
 //!
 //! 1. **The criterion is satisfied for K1, K2, K3-at-the-snapshot-dimension, K4, K5 and
 //!    K6.** Every one is refused with the code its clause declares, and every refusal
 //!    leaves the effect surface byte-identical.
-//! 2. **`workspace.diff` cannot be probed at all.** It declares two K2 carriers and answers
-//!    `UnsupportedSemanticFeature` uniformly, superseded or current, because the RFC 0031
-//!    lane has not shipped. Its staleness behaviour is therefore *undetermined*, not
-//!    satisfied — [`scope_workspace_diff_answers_uniformly_and_so_cannot_be_probed`].
+//! 2. **`workspace.diff` is probed at the one staleness predicate RFC 0031 gives it.** It
+//!    refuses an unsealed input with `StaleSnapshot` and serves a superseded sealed one,
+//!    because a diff compares history. Past that check it answers
+//!    `UnsupportedSemanticFeature`, because the RFC 0031 lane has not shipped —
+//!    [`carrier_k2_workspace_diff_refuses_an_unsealed_input_and_serves_a_superseded_sealed_one`].
+//!    Until bn-27mx7 it consulted neither carrier and was *undetermined* here.
 //! 3. **K3's epoch dimension is delegated, not re-derived.** `gate_g1_04_acceptance.rs`
 //!    closed it over twelve probes; repeating it would be the thing this bone is not for.
 //!    What is asserted here is only that the carrier declares the dimension
 //!    ([`census_the_continuation_carrier_declares_an_epoch_dimension_probed_under_g1_04`]).
-//! 4. **Recovery from a K1/K2/K3 refusal is not possible from the refusal.** This is the
-//!    finding, below.
+//!
+//! Recovery from a K1/K2/K3 refusal **is** now possible from the refusal, for a caller
+//! whose capability admits the offered step (RFC 0027 N2). Until bn-27mx7 it was not; the
+//! findings below record both states.
 //!
 //! # Findings this file states rather than papers over (INV-007, INV-008)
 //!
-//! - **F1 — a `StaleSnapshot` refusal is a bare refusal, and RFC 0027 H8 says it must not
-//!   be.** H8: "a stale-handle failure is recoverable and says so. Every row above carries
-//!   a `recovery` list computed under N2, so 're-seal', 're-base' […] is executable rather
-//!   than described." What the daemon returns is `recovery: []`, `data: absent`, and a
-//!   `&'static str` `detail` that cannot name an identity. The current head appears nowhere
-//!   in the refusal. See [`recovery_the_stale_snapshot_refusal_names_neither_the_current_head_nor_a_way_to_find_it`].
-//! - **F2 — the value layer computes the identity the wire drops.**
-//!   `continuum_workspace::staleness::check_current` returns `LineageError::Stale`, whose
-//!   `current()` "names exactly the identity `Fork::advance`/`advance_to` need to redo the
-//!   caller's step against". `daemon::workspace::lineage_fault` maps that value to
-//!   `Fault::new(StaleSnapshot, <constant>)` and discards it. This is not a missing
-//!   computation; it is a discarded one, one function call from the wire. See
-//!   [`recovery_the_value_layer_computes_the_current_head_that_the_wire_refusal_drops`].
-//! - **F3 — and no servable operation reports it either.** Recovery is therefore not merely
-//!   absent from the refusal but absent from the protocol surface a refused agent can
-//!   reach: no `@readonly` servable operation answers "what is this lineage's head now".
-//!   `task.status` reports the task's *pinned* snapshot, which is the stale one. See
+//! - **F1 — FIXED by bn-27mx7, now a guard.** A `StaleSnapshot` refusal was a bare refusal —
+//!   `recovery: []`, `data: absent`, a `&'static str` `detail` — while RFC 0027 H8 says "a
+//!   stale-handle failure is recoverable and says so […] 're-seal', 're-base' […] is
+//!   executable rather than described". Every currency refusal (`workspace.fork`,
+//!   `workspace.seal`, `verification.start`, `task.resume`) now carries one `Error.recovery`
+//!   offer: `workspace.seal` of the lineage's head, as a `ws_*` handle, under the typed
+//!   rationale `reseal_lineage_head`. `Error.data` stays absent, because `StaleSnapshot`
+//!   declares no shape. The offer is filtered under N2, and executing it as given then
+//!   re-issuing against its head is admitted. See
+//!   [`recovery_the_stale_snapshot_refusal_names_the_current_head_as_an_executable_offer`],
+//!   [`recovery_executing_the_offer_then_re_issuing_against_its_head_is_admitted`] and
+//!   [`recovery_an_offer_the_capability_would_be_denied_is_not_made`].
+//! - **F2 — FIXED by bn-27mx7, now a guard.** `check_current`'s `LineageError::Stale`
+//!   carries `current()`, and `daemon::workspace::lineage_fault` used to replace it with a
+//!   constant. It now carries it through to the offer. See
+//!   [`recovery_the_value_layer_current_head_reaches_the_refusal_as_a_ws_handle`].
+//! - **F3 — still true, and no longer a recovery gap.** No servable operation answers "what
+//!   is this lineage's head now": `task.status` reports the task's *pinned* snapshot, which
+//!   is the stale one. But a refused agent no longer needs such a query, because the
+//!   refusal names the head (F1). What remains is a *proactive* head query, which the
+//!   guarded operations answer by refusing, and the N2 case: a capability that may not seal
+//!   gets no offer and still has no way to learn the head. See
 //!   [`recovery_no_servable_operation_reports_a_lineages_current_head`].
 //! - **F4 — the epoch carrier is recovery-sufficient, and it is the only one that is.**
 //!   `rule envelope.epochs_named` puts all six current epochs on *every* result including
@@ -116,17 +125,21 @@
 //!   head" (currency). The `context` family asks "does the envelope's pin equal the
 //!   artifact's pin" (agreement), and deliberately serves a pack whose snapshot has been
 //!   superseded, because RFC 0028 requires history to stay readable. Both answer
-//!   `StaleSnapshot`. An agent cannot tell from the code which predicate refused it. See
-//!   [`complement_expanding_a_pack_pinned_to_a_superseded_snapshot_is_not_stale`].
+//!   `StaleSnapshot`, and until bn-27mx7 an agent could not tell which predicate refused
+//!   it. **FIXED without a new code**: `context.expand`'s agreement refusal offers the
+//!   caller's own request under the rationale `reissue_without_snapshot_pin`, and every
+//!   currency refusal's offer is `reseal_lineage_head`. The code stays one; the declared
+//!   `NextOperation.rationale` tells them apart. See
+//!   [`complement_expanding_a_pack_pinned_to_a_superseded_snapshot_is_not_stale`] and
+//!   [`f6_currency_and_agreement_refusals_are_told_apart_by_their_recovery_rationale`].
 //! - **F7 — one snapshot has two identities, and the lineage holds the one the caller does
 //!   not speak.** A lineage advances over `descriptor.source().identity()`; the wire names a
 //!   snapshot by the content identity of its whole *descriptor*, which is what a `ws_*`
-//!   handle is. So the value F2 says is discarded is not even directly presentable: publishing
-//!   it would need a source-identity-to-`ws_*` mapping no operation in this protocol
-//!   exposes. That sharpens F1 from "a field was dropped" to "the recovery channel is not
-//!   one field away". Asserted at
-//!   [`recovery_the_value_layer_computes_the_current_head_that_the_wire_refusal_drops`]
-//!   (`assert_ne!` between the two spellings) and again at
+//!   handle is. The two spellings still differ. The F1 fix maps one to the other inside the
+//!   daemon (`DaemonState::workspace_at`, which answers only when the mapping is unique), so
+//!   the offer names a `ws_*` handle the caller can present. Asserted at
+//!   [`recovery_the_value_layer_current_head_reaches_the_refusal_as_a_ws_handle`]
+//!   (`assert_ne!` between the two spellings, then the mapping) and again at
 //!   [`recovery_no_servable_operation_reports_a_lineages_current_head`].
 //!
 //! # Absences — what this file does not probe (INV-007)
@@ -179,7 +192,10 @@ use continuum_workspace::snapshot::WorkspacePath;
 use continuum_workspace::staleness::{LineageError, check_current};
 use continuumd::daemon::context::{ContextFamily, ContextPackRecord};
 use continuumd::daemon::evidence::EvidenceFamily;
-use continuumd::daemon::family::{Arguments, Payload};
+use continuumd::daemon::family::{
+    Arguments, Payload, RATIONALE_REISSUE_WITHOUT_SNAPSHOT_PIN, RATIONALE_RESEAL_LINEAGE_HEAD,
+    RecoveryOffer,
+};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
 use continuumd::daemon::observe::ObserveFamily;
@@ -402,6 +418,23 @@ fn daemon_serving(served: &EpochSet) -> Daemon {
                 AuthorityLevel::Execute,
                 3,
                 Optional::Absent,
+            ),
+            root.clone(),
+        )
+        .capability(
+            // Propose, with `workspace.seal` denied by profile: the capability N2 must not
+            // offer a re-seal to.
+            grant(
+                "cap_forker",
+                "agent:forker",
+                AuthorityLevel::Propose,
+                3,
+                Optional::Present(CapabilityProfile {
+                    privileged_operations: Vec::new(),
+                    denied_operations: vec![name("workspace.seal")],
+                    data_grants: Vec::new(),
+                    cross_principal_sharing: true,
+                }),
             ),
             root.clone(),
         )
@@ -1717,38 +1750,57 @@ fn carrier_k5_evidence_verify_refuses_a_lost_compare_and_set() {
 }
 
 #[test]
-fn scope_workspace_diff_answers_uniformly_and_so_cannot_be_probed() {
-    // `workspace.diff` declares two K2 carriers and consults neither, because the RFC 0031
-    // lane has not shipped. That is not staleness handling — it is the absence of a lane —
-    // and the honest reading is that the criterion is *undetermined* for this operation
-    // rather than satisfied by it. The assertion is that the answer is the same for a
-    // current pair and for a superseded one, which is what makes it uninformative.
+fn carrier_k2_workspace_diff_refuses_an_unsealed_input_and_serves_a_superseded_sealed_one() {
+    // Until bn-27mx7 `workspace.diff` consulted neither K2 carrier and answered
+    // `UnsupportedSemanticFeature` uniformly, so this file could only call it undetermined.
+    // It now checks the one staleness predicate RFC 0031 gives it — "Both snapshots MUST be
+    // sealed. An unsealed snapshot is rejected (`StaleSnapshot`)" — and deliberately not
+    // currency: a diff compares two points of history, and a superseded `before` is its
+    // ordinary input.
     let mut world = world();
     let origin = world.origin.clone();
     let head = world.advance(&origin, "# moved on\n", "req_advance");
 
     let ask = |world: &mut World, before: &WorkspaceHandle, after: &WorkspaceHandle, id: &str| {
-        world
-            .dispatch(&OperationRequest {
-                envelope: budgeted(
-                    envelope("workspace.diff", "agent:builder", "cap_builder", id),
-                    0,
-                ),
-                arguments: Arguments::WorkspaceDiff(WorkspaceDiffRequest {
-                    before: before.clone(),
-                    after: after.clone(),
-                    layers: vec![DiffLayer::Textual],
-                }),
-            })
-            .error_code()
+        world.dispatch(&OperationRequest {
+            envelope: budgeted(
+                envelope("workspace.diff", "agent:builder", "cap_builder", id),
+                0,
+            ),
+            arguments: Arguments::WorkspaceDiff(WorkspaceDiffRequest {
+                before: before.clone(),
+                after: after.clone(),
+                layers: vec![DiffLayer::Textual],
+            }),
+        })
     };
-    let superseded = ask(&mut world, &origin, &head, "req_diff_stale");
-    let current = ask(&mut world, &head, &head, "req_diff_current");
-    assert_eq!(superseded, Some(ErrorCode::UnsupportedSemanticFeature));
+
+    // The fork's head is unsealed: refused, with no effect, and the refusal offers the seal.
+    let refused = refuses_with_no_effect(
+        &mut world,
+        ErrorCode::StaleSnapshot,
+        "workspace.diff with an unsealed `after`",
+        |world| ask(world, &origin, &head, "req_diff_unsealed"),
+    );
     assert_eq!(
-        superseded, current,
-        "the answer does not depend on the currency of what was named, so this operation \
-         carries no evidence either way for G2-04"
+        refused.recovery,
+        vec![RecoveryOffer {
+            arguments: Arguments::WorkspaceSeal(WorkspaceSealRequest {
+                snapshot: head.clone(),
+            }),
+            rationale: RATIONALE_RESEAL_LINEAGE_HEAD,
+        }],
+        "the unsealed input is its lineage's head, and sealing it is the recovery"
+    );
+
+    // Seal the head. The superseded-but-sealed `origin` is now a legitimate `before`: the
+    // diff passes both carriers and reaches the unshipped lane.
+    ok(&world.try_seal(&head, "req_seal_head"));
+    let served = ask(&mut world, &origin, &head, "req_diff_sealed");
+    assert_eq!(
+        code(&served),
+        Some(ErrorCode::UnsupportedSemanticFeature),
+        "a superseded sealed snapshot is history, not stale, for a diff"
     );
 }
 
@@ -1773,18 +1825,34 @@ fn a_refused_stale_write_is_still_audited() {
 // F — recovery sufficiency: is the refusal enough to act on?
 // =========================================================================================
 
-/// Every place a refusal could carry a machine-readable specific, as one string.
+/// Every place a refusal could carry a machine-readable specific, as one string: the
+/// envelope, the typed `Error.data`, and the typed recovery offers.
 ///
 /// `Error.detail` is included deliberately even though `rule envelope.no_prose` makes it a
 /// `&'static str`: if the daemon *had* interpolated the head into it, this search would
-/// find it, and the finding would be "recoverable, but through prose" rather than "not
-/// recoverable". It finds neither.
+/// find it, and the finding would be "recoverable, but through prose".
 fn refusal_surface(outcome: &OperationOutcome) -> String {
-    format!("{:?} | {:?}", outcome.envelope, outcome.data)
+    format!(
+        "{:?} | {:?} | {:?}",
+        outcome.envelope, outcome.data, outcome.recovery
+    )
+}
+
+/// The one offer every currency refusal in this file makes: re-seal `head`.
+fn reseal(head: &WorkspaceHandle) -> Vec<RecoveryOffer> {
+    vec![RecoveryOffer {
+        arguments: Arguments::WorkspaceSeal(WorkspaceSealRequest {
+            snapshot: head.clone(),
+        }),
+        rationale: RATIONALE_RESEAL_LINEAGE_HEAD,
+    }]
 }
 
 #[test]
-fn recovery_the_stale_snapshot_refusal_names_neither_the_current_head_nor_a_way_to_find_it() {
+fn recovery_the_stale_snapshot_refusal_names_the_current_head_as_an_executable_offer() {
+    // F1, as a regression guard. RFC 0027 H8: "every row above carries a `recovery` list
+    // computed under N2, so 're-seal', 're-base' […] is executable rather than described".
+    // Until bn-27mx7 the list was empty and the head appeared nowhere in the refusal.
     let mut world = world();
     let origin = world.origin.clone();
     let head = world.advance(&origin, "# moved on\n", "req_advance");
@@ -1805,11 +1873,21 @@ fn recovery_the_stale_snapshot_refusal_names_neither_the_current_head_nor_a_way_
             .value()
             .expect("a refusal carries an error object");
 
-        // RFC 0027 H8: "every row above carries a `recovery` list computed under N2, so
-        // 're-seal', 're-base' […] is executable rather than described". It is empty.
+        assert_eq!(
+            refused.recovery,
+            reseal(&head),
+            "{what}: the refusal offers the re-seal of the head that superseded the snapshot"
+        );
+        assert!(
+            refusal_surface(&refused).contains(head.as_str()),
+            "{what}: the refusal names the current head"
+        );
+        // The typed offers travel beside the envelope, as `Error.data` does: the envelope's
+        // own list is filled by the transport in the negotiated encoding, and
+        // `gate_g2_02_acceptance.rs` checks that on the wire.
         assert!(
             error.recovery.is_empty(),
-            "{what}: F1 has been fixed — update this file's verdict"
+            "{what}: the encoding-free layer leaves `Error.recovery` to the transport"
         );
         assert!(
             error.data.is_absent(),
@@ -1817,30 +1895,85 @@ fn recovery_the_stale_snapshot_refusal_names_neither_the_current_head_nor_a_way_
         );
         assert!(
             refused.envelope.next_operations.is_empty(),
-            "{what}: no next operation is offered either"
+            "{what}: a refusal's channel is `recovery`, not `next_operations`"
         );
         assert!(
             !error.retryable,
-            "{what}: an identical retry cannot succeed, which is correct and is also why \
-             the caller needs something to change *to*"
-        );
-
-        // And the identity a caller would have to re-base onto appears nowhere in the
-        // whole refusal — not in `detail`, not in `data`, not in any envelope field.
-        assert!(
-            !refusal_surface(&refused).contains(head.as_str()),
-            "{what}: the refusal names the current head somewhere after all — update this \
-             file's verdict"
+            "{what}: an identical retry cannot succeed; the offer is what changes"
         );
     }
 }
 
 #[test]
-fn recovery_the_value_layer_computes_the_current_head_that_the_wire_refusal_drops() {
-    // F2. This is the load-bearing half of F1: the daemon is not missing a computation, it
-    // is discarding one. `check_current` — the exact call `daemon::workspace`,
+fn recovery_executing_the_offer_then_re_issuing_against_its_head_is_admitted() {
+    // H8's "executable rather than described", driven: the refused caller runs the offer as
+    // given under its own capability, then re-issues its campaign against the head the
+    // offer named. No out-of-band knowledge enters.
+    let mut world = world();
+    let origin = world.origin.clone();
+    world.advance(&origin, "# moved on\n", "req_advance");
+
+    let refused = world.try_start(&origin, "req_stale_start");
+    assert_eq!(code(&refused), Some(ErrorCode::StaleSnapshot));
+    let [offer] = refused.recovery.as_slice() else {
+        panic!("one offer: {:?}", refused.recovery);
+    };
+    let Arguments::WorkspaceSeal(sealing) = &offer.arguments else {
+        panic!("the offer is a re-seal: {offer:?}");
+    };
+    let named = sealing.snapshot.clone();
+
+    let sealed = world.dispatch(&OperationRequest {
+        envelope: keyed(
+            envelope("workspace.seal", "agent:runner", "cap_runner", "req_offer"),
+            "idem-offer",
+        ),
+        arguments: offer.arguments.clone(),
+    });
+    ok(&sealed);
+
+    let rerun = world.try_start(&named, "req_rerun");
+    assert_eq!(
+        code(&rerun),
+        None,
+        "the campaign re-issued against the offered head is admitted: {:?}",
+        rerun.envelope.error
+    );
+}
+
+#[test]
+fn recovery_an_offer_the_capability_would_be_denied_is_not_made() {
+    // RFC 0027 N2: "a daemon MUST NOT offer an operation the presenting capability would
+    // deny". `cap_forker` may fork and may not seal, so its currency refusal carries no
+    // offer — the typed statement that no recovery exists *for this caller*.
+    let mut world = world();
+    let origin = world.origin.clone();
+    world.advance(&origin, "# moved on\n", "req_advance");
+
+    let refused = world.dispatch(&OperationRequest {
+        envelope: keyed(
+            envelope("workspace.fork", "agent:forker", "cap_forker", "req_n2"),
+            "idem-n2",
+        ),
+        arguments: Arguments::WorkspaceFork(WorkspaceForkRequest {
+            base: origin,
+            overlay: Optional::Absent,
+            patches: Optional::Absent,
+        }),
+    });
+    assert_eq!(code(&refused), Some(ErrorCode::StaleSnapshot));
+    assert!(
+        refused.recovery.is_empty(),
+        "a re-seal offer to a capability that may not seal would widen authority: {:?}",
+        refused.recovery
+    );
+}
+
+#[test]
+fn recovery_the_value_layer_current_head_reaches_the_refusal_as_a_ws_handle() {
+    // F2, as a regression guard. `check_current` — the exact call `daemon::workspace`,
     // `daemon::task` and `daemon::verification` all make — returns the identity the caller
-    // needs, and the wire mapping replaces it with a constant string.
+    // needs. Until bn-27mx7 the wire mapping replaced it with a constant string.
     let mut world = world();
     let origin = world.origin.clone();
     let head = world.advance(&origin, "# moved on\n", "req_advance");
@@ -1863,29 +1996,31 @@ fn recovery_the_value_layer_computes_the_current_head_that_the_wire_refusal_drop
         "the value layer names the identity a caller has to re-derive against"
     );
 
-    // And that value reaches no wire field. Two spellings are searched for, because the
-    // identity the lineage holds and the `ws_*` the caller would have to present are
-    // different values of the same snapshot — F2's sting: even the discarded value is not
-    // directly presentable, so publishing it would need a mapping this protocol has no
-    // operation for.
+    // F7: the two spellings still differ, so the refusal cannot carry `current()` as is.
     assert_ne!(
         current_identity.identity(),
         head.as_str(),
         "the lineage head identity and the `ws_*` handle are distinct spellings"
     );
-    let refused = world.try_fork(&origin, "req_drop");
+    // It carries the `ws_*` handle `current()` maps to, which is the one the caller can
+    // present, and the mapping is exact.
+    let refused = world.try_fork(&origin, "req_carry");
     assert_eq!(code(&refused), Some(ErrorCode::StaleSnapshot));
-    let surface = refusal_surface(&refused);
-    assert!(!surface.contains(current_identity.identity()));
-    assert!(!surface.contains(head.as_str()));
+    assert_eq!(refused.recovery, reseal(&head));
+    assert_eq!(
+        &source_identity_of(&world.daemon, &head),
+        stale.current(),
+        "the offered handle is the value layer's `current()`, mapped to the wire"
+    );
 }
 
 #[test]
 fn recovery_no_servable_operation_reports_a_lineages_current_head() {
-    // F3. If the refusal does not carry the head, the remaining question is whether a
-    // refused agent can *ask*. It cannot: `task.status` is the only servable read that
-    // returns a `WorkspaceHandle` at all, and the one it returns is the task's pinned
-    // snapshot — the stale one.
+    // F3. Still true after bn-27mx7: no servable read reports a lineage's head.
+    // `task.status` is the only servable read that returns a `WorkspaceHandle` at all, and
+    // the one it returns is the task's pinned snapshot — the stale one. It is no longer a
+    // recovery gap, because the refusal itself now names the head (F1); it is the absence
+    // of a *proactive* query, and it still binds a capability N2 gives no offer to.
     let mut world = world();
     let origin = world.origin.clone();
     let head = world.advance(&origin, "# moved on\n", "req_advance");
@@ -1930,18 +2065,18 @@ fn recovery_no_servable_operation_reports_a_lineages_current_head() {
     ] {
         assert!(
             !format!("{:?} | {:?}", outcome.envelope, outcome.payload).contains(head.as_str()),
-            "{what} names the current head after all — update this file's verdict"
+            "{what} names the current head — F3 has closed; update this file's verdict"
         );
     }
 
     // Stated mechanically as well as by probe: the daemon's own view of the head is
-    // reachable from the state surface and from nowhere on the wire. The head it holds is
-    // the *source* identity of the record the new `ws_*` names — a third spelling again,
-    // and one no response struct in the registry declares a field for.
+    // reachable from the state surface, and on the wire only through a refusal's offer. The
+    // head it holds is the *source* identity of the record the new `ws_*` names — a third
+    // spelling again, and one no response struct in the registry declares a field for.
     assert_eq!(
         world.head(),
         source_identity_of(&world.daemon, &head),
-        "the head exists in state; nothing on the wire reports it"
+        "the head exists in state; no read on the wire reports it"
     );
     assert!(
         registry::OPERATIONS
@@ -2159,13 +2294,66 @@ fn complement_expanding_a_pack_pinned_to_a_superseded_snapshot_is_not_stale() {
     );
 
     // And the *current* head is what this operation calls stale, because it disagrees with
-    // the pack. The inversion is the finding.
+    // the pack. The inversion is the finding, and
+    // [`f6_currency_and_agreement_refusals_are_told_apart_by_their_recovery_rationale`] is
+    // how an agent now tells the two apart.
     let pinned_to_current = world.try_expand(Some(&head), "req_x3");
     assert_eq!(
         code(&pinned_to_current),
         Some(ErrorCode::StaleSnapshot),
         "naming the lineage's actual head is what `context.expand` refuses"
     );
+}
+
+#[test]
+fn f6_currency_and_agreement_refusals_are_told_apart_by_their_recovery_rationale() {
+    // F6, as a regression guard. Both predicates answer `StaleSnapshot`, and RFC 0026's
+    // vocabulary has no second code for either — nor needs one: `NextOperation.rationale`
+    // is the declared typed field that says why an offer is made. A currency refusal offers
+    // the re-seal of the lineage head; an agreement refusal offers the caller's own request,
+    // to re-issue without the envelope pin.
+    let mut world = world();
+    let origin = world.origin.clone();
+    let head = world.advance(&origin, "# moved on\n", "req_advance");
+
+    let currency = world.try_fork(&origin, "req_f6_fork");
+    assert_eq!(code(&currency), Some(ErrorCode::StaleSnapshot));
+    let agreement = world.try_expand(Some(&head), "req_f6_expand");
+    assert_eq!(code(&agreement), Some(ErrorCode::StaleSnapshot));
+
+    let rationales = |outcome: &OperationOutcome| {
+        outcome
+            .recovery
+            .iter()
+            .map(|offer| offer.rationale)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rationales(&currency), vec![RATIONALE_RESEAL_LINEAGE_HEAD]);
+    assert_eq!(
+        rationales(&agreement),
+        vec![RATIONALE_REISSUE_WITHOUT_SNAPSHOT_PIN]
+    );
+
+    // The agreement offer is executable as given: the same body, with no envelope pin, is
+    // served — the pack is history and stays readable.
+    let [offer] = agreement.recovery.as_slice() else {
+        panic!("one offer: {:?}", agreement.recovery);
+    };
+    assert!(
+        matches!(offer.arguments, Arguments::ContextExpand(_)),
+        "the offer is the caller's own `context.expand`: {offer:?}"
+    );
+    let mut request_envelope = keyed(
+        envelope("context.expand", "agent:reader", "cap_reader", "req_f6_x"),
+        "idem-req_f6_x",
+    );
+    request_envelope.budget =
+        Optional::Present(budget(0, Optional::Present(ByteCount::new(16384))));
+    let reissued = world.dispatch(&OperationRequest {
+        envelope: request_envelope,
+        arguments: offer.arguments.clone(),
+    });
+    ok(&reissued);
 }
 
 // =========================================================================================

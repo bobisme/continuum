@@ -109,7 +109,7 @@
 //! | 1 | Forward closure is **total** over the eight workflows: all 27 inter-step facts sit at a position whose *declared IDL type* is the type the next step needs, and the workflows are literally driven from the values recovered there | [`workflow_closure_is_total_over_every_workflow_this_build_can_drive`] |
 //! | 2 | Terminal outcomes are typed too. A budget that cannot hold the model's own initial states is not an envelope refusal at all — it starts a task and fails it — and the record says `status = failed`, `failed_reason = BudgetExhausted` (an `ErrorCode`, not a sentence) with **no** continuation. The three facts an agent branches on are three typed fields | [`a_non_resumable_task_failure_is_typed_without_reading_its_sentence`] |
 //! | 3 | The CLI is a strict subset — 16 commands, all 16 registry operations, none CLI-only — and its shipped binary carries `NullTransport`, so it reaches no daemon at all. An agent needing the terminal here is not merely unnecessary; it is impossible | [`the_cli_reaches_nothing_the_typed_protocol_does_not`], [`the_shipped_cli_binary_reaches_no_daemon_at_all`] |
-//! | 4 | **FINDING F1**: the two typed recovery channels the IDL declares — `ResultEnvelope.next_operations` and `Error.recovery` — are empty on **all 40 answers** this file collects, success and refusal alike. The daemon's own `Fault` type has no field that could fill `recovery`. The channel is not under-used; it is unwired | [`the_two_declared_recovery_channels_are_empty_on_every_answer`] |
+//! | 4 | **FINDING F1**: the two typed recovery channels the IDL declares — `ResultEnvelope.next_operations` and `Error.recovery` — were empty on **all 40 answers** this file collects, success and refusal alike, because the daemon's own `Fault` type had no field that could fill `recovery`. bn-27mx7 wired `Error.recovery` for stale-handle refusals (RFC 0027 H8), so the pin is now a probe: every offer is executable as given. `next_operations` is still empty | [`next_operations_is_empty_and_every_recovery_offer_is_executable_as_given`] |
 //! | 5 | **FINDING F2**: `retryable` is `false` on every refusal, `Error.data` present on none, `Error.continuation` on none. The per-occurrence typed discriminator is therefore the code alone, and **three** probes — an under-authorized principal, an absent handle, and a mis-spelled capability scope — collapse onto one `CapabilityDenied` whose `detail` is byte-identical. **No channel separates them, `detail` included.** This is deliberate (RFC 0027 X1–X2, no existence oracle) and it is *not* a prose dependency; it is a typed underdetermination whose honest reading is that the recovery is a disjunction, not a lookup | [`the_only_undetermined_refusals_are_the_ones_prose_does_not_rescue_either`], [`no_refusal_carries_a_typed_discriminator_beyond_its_code`] |
 //! | 6 | **FINDING F3**: plan §4.4's artifact-class vocabulary is a bare `String` in three places, and the *spelling* — `ws` or `ws_` — is fixed only by a doc comment, differently in two of the three. A capability scoped with the plan's own literal prefix is silently scoped to nothing; the same call under the token spelling is admitted. The refusal is the same `CapabilityDenied` as sixty-one other conditions and its `detail` names neither class nor scope. The fact is carried by neither a type nor a message | [`the_artifact_class_vocabulary_is_spelled_by_a_doc_comment_and_not_by_a_type`] |
 //! | 7 | The live surface is **30 of 75** operations. The other 45 have no `Arguments` variant and are refused by the codec before a body is read, so forward closure over them is **untested, not evidenced** | [`the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which`] |
@@ -1474,7 +1474,7 @@ fn decided(
     leaf.text
 }
 
-/// Every answer this file collects, kept so [`the_two_declared_recovery_channels_are_empty_on_every_answer`]
+/// Every answer this file collects, kept so [`next_operations_is_empty_and_every_recovery_offer_is_executable_as_given`]
 /// can measure the recovery channels over all of them at once.
 fn all_answers() -> Vec<Answer> {
     let mut collected = workflow_answers();
@@ -3116,7 +3116,13 @@ fn a_non_resumable_task_failure_is_typed_without_reading_its_sentence() {
 }
 
 #[test]
-fn the_two_declared_recovery_channels_are_empty_on_every_answer() {
+fn next_operations_is_empty_and_every_recovery_offer_is_executable_as_given() {
+    // `Error.recovery` became populated under bn-27mx7 (RFC 0027 H8: a stale-handle
+    // refusal names the head it has to be re-derived against). This is the probe the
+    // earlier as-is pin asked this file to grow: every offer on the wire names a registered
+    // operation, its `arguments` decode as that operation's request struct in the
+    // negotiated encoding, and its `rationale` is one of the daemon's declared tokens —
+    // never prose (RFC 0026 N1, RFC 0027 S1).
     let answers = all_answers();
     assert!(
         answers.len() >= 30,
@@ -3124,24 +3130,71 @@ fn the_two_declared_recovery_channels_are_empty_on_every_answer() {
         answers.len()
     );
     let mut offered = 0_usize;
-    let mut recoveries = 0_usize;
     for answer in &answers {
         offered += answer.envelope.next_operations.len();
-        recoveries += answer
-            .envelope
-            .error
-            .value()
-            .map_or(0, |error| error.recovery.len());
+        let Some(error) = answer.envelope.error.value() else {
+            continue;
+        };
+        for offer in &error.recovery {
+            assert!(
+                continuumd::protocol::registry::operation(offer.operation.as_str()).is_some(),
+                "{}: a recovery offer names an operation the registry declares",
+                answer.operation
+            );
+            continuumd::codec::operations::decode_arguments(
+                offer.operation.as_str(),
+                &offer.arguments,
+            )
+            .unwrap_or_else(|failure| {
+                panic!(
+                    "{}: a recovery offer's arguments decode as its operation's request \
+                     struct: {failure:?}",
+                    answer.operation
+                )
+            });
+            let rationale = offer
+                .rationale
+                .value()
+                .expect("every offer this daemon makes states its typed rationale");
+            assert!(
+                [
+                    continuumd::daemon::family::RATIONALE_RESEAL_LINEAGE_HEAD,
+                    continuumd::daemon::family::RATIONALE_REISSUE_WITHOUT_SNAPSHOT_PIN,
+                ]
+                .contains(&rationale.as_str()),
+                "{}: `{rationale}` is not a declared rationale token",
+                answer.operation
+            );
+        }
     }
     assert_eq!(
         offered, 0,
         "`ResultEnvelope.next_operations` is populated; the typed discovery surface is now \
          checkable and this file must grow a probe for it"
     );
+
+    // Not vacuous: the superseded-snapshot probe carries its offer on the wire, and the
+    // offer names a snapshot other than the one the refused campaign pinned.
+    let probes = refusal_probes();
+    let moved = probes
+        .iter()
+        .find(|probe| probe.name == "a campaign over a snapshot its lineage moved past")
+        .expect("the superseded-snapshot probe is in the set");
+    let error = moved
+        .answer
+        .envelope
+        .error
+        .value()
+        .expect("a refusal carries an error");
+    assert_eq!(error.code, ErrorCode::StaleSnapshot);
     assert_eq!(
-        recoveries, 0,
-        "`Error.recovery` is populated; the typed recovery channel is now checkable and this \
-         file must grow a probe for it"
+        error
+            .recovery
+            .iter()
+            .map(|offer| offer.operation.as_str())
+            .collect::<Vec<_>>(),
+        vec!["workspace.seal"],
+        "a superseded-snapshot refusal offers exactly the re-seal of its lineage head"
     );
 }
 

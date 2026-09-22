@@ -86,7 +86,7 @@ use continuum_task::region::RegionId;
 use continuum_task::region::worker::{WorkerId, WorkerStep};
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
-use continuum_workspace::staleness::check_current;
+use continuum_workspace::staleness::{LineageError, check_current};
 
 use super::budget::{self, Publications};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
@@ -1259,7 +1259,10 @@ fn resume(
         .workspace(&continuation.snapshot)
         .ok_or_else(Fault::denied)?;
     if !record.sealed {
-        return Err(stale());
+        return Err(stale().with_recovery(super::workspace::reseal_current_head(
+            state,
+            &record.lineage,
+        )));
     }
     let lineage_name = record.lineage.clone();
     let head = record.descriptor.source().identity().clone();
@@ -1270,7 +1273,19 @@ fn resume(
     // identity" disposition (bn-10wdo). See `daemon::workspace`'s module doc for the paired
     // half: the same `Unknown` arm reached validating a caller-declared identity about to be
     // spent on a write answers `CapabilityDenied` there, and both are ratified, not aligned.
-    check_current(lineage, &head).map_err(|_| stale())?;
+    //
+    // A `Stale` refusal names the head that superseded the pinned snapshot, as a recovery
+    // offer (RFC 0027 H8, bn-27mx7). The continuation itself cannot be re-based — it pins
+    // the world it ran against — so the offer is the step a fresh campaign over the head
+    // needs, not a resume.
+    check_current(lineage, &head).map_err(|error| match error {
+        LineageError::Stale(superseded) => stale().with_recovery(super::workspace::reseal_at_head(
+            state,
+            &lineage_name,
+            superseded.current(),
+        )),
+        LineageError::Unknown(_) => stale(),
+    })?;
 
     admissible_epochs(&continuation.pinned, services.epochs())?;
 

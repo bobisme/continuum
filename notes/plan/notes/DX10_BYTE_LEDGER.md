@@ -78,7 +78,7 @@ The landed anchors this note reproduced exactly before drilling any further:
 | anchor | value | asserted at |
 |---|---|---|
 | answers decomposed | 172 | `dx10_falsification.rs::s6_*` |
-| result-frame bytes | 170,584 | `dx10_falsification.rs::s6_*` |
+| result-frame bytes | 170,584 (171,220 after bn-27mx7 added recovery offers to stale-handle refusals) | `dx10_falsification.rs::s6_*` |
 | request-frame bytes | 73,318 | `dx10_falsification.rs::s6_*` |
 | `artifacts` | 20,732 | `dx10_falsification.rs::s6_*` |
 | `omissions` | 16,656 | `dx10_falsification.rs::s6_*` |

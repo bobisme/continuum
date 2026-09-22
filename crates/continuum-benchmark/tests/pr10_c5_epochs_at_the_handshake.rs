@@ -91,7 +91,7 @@ fn the_prize_is_real_and_slightly_larger_than_the_ledger_said() {
 
     // The landed anchors, reproduced first, as the ledger's method requires.
     assert_eq!(projection.answers, 172, "the matrix's answers");
-    assert_eq!(projection.frame_bytes, 170_584, "their result frames");
+    assert_eq!(projection.frame_bytes, 171_220, "their result frames");
 
     assert_eq!(
         projection.distinct_epoch_sets, 1,

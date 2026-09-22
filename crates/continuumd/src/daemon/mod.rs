@@ -224,6 +224,13 @@ pub struct OperationOutcome {
     /// so [`crate::transport::Server::answer`] encodes it where the encoding is known
     /// (RFC 0026 F19, protocol 3.4).
     pub data: family::ErrorData,
+    /// The typed `Error.recovery` offers, already filtered under RFC 0027 N2, or empty.
+    ///
+    /// `Error.recovery` on the envelope reads empty at this layer for the reason `data`
+    /// reads absent: each entry's `arguments` is `Opaque` — bytes of the *negotiated*
+    /// encoding — so [`crate::transport::Server::answer`] encodes these offers into it
+    /// where the encoding is known. Read this field, not the envelope's list, in process.
+    pub recovery: Vec<family::RecoveryOffer>,
 }
 
 impl OperationOutcome {
@@ -527,6 +534,7 @@ impl Daemon {
                 envelope: result::denial(&envelope.request_id, &services.epochs, &audit),
                 payload: Payload::None,
                 data: family::ErrorData::None,
+                recovery: Vec::new(),
             });
         };
 
@@ -607,9 +615,16 @@ impl Daemon {
                     ),
                     payload: effect.payload,
                     data: family::ErrorData::None,
+                    recovery: Vec::new(),
                 }
             }
-            Err(fault) => raise(services, envelope, fault, &audit, audit_required),
+            Err(fault) => raise(
+                services,
+                envelope,
+                offer_under_n2(fault, envelope, families, state, services),
+                &audit,
+                audit_required,
+            ),
         };
 
         // The last boundary: the handler ran — store writes and all — and the replay record
@@ -753,11 +768,64 @@ fn raise(
     // encoding — and this layer is encoding-free (RFC 0026 F19; see
     // `OperationOutcome::data`).
     let data = fault.data.clone();
+    let recovery = fault.recovery.clone();
     OperationOutcome {
         envelope: result::failure(&envelope.request_id, fault, &services.epochs, attached),
         payload: Payload::None,
         data,
+        recovery,
     }
+}
+
+/// Drop every recovery offer the presenting capability would be denied.
+///
+/// > **N2 — a daemon MUST NOT offer an operation the presenting capability would deny.**
+/// > `next_operations` and `Error.recovery` are computed against the request's capability,
+/// > so a recovery surface never widens authority (A7) and never advertises the existence of
+/// > a privileged path to a principal that does not hold it.
+/// >
+/// > — RFC 0027, "`next_operations` and recovery are capability-relative"
+///
+/// Each offer is put through the same [`admission::admit`] a real call would meet: the
+/// offered operation's registry entry, the scope claim its own family computes from the
+/// offered arguments, and the request's envelope with its `snapshot` cleared — an offer
+/// names its snapshot in its body, and the envelope a client re-issues it under is the
+/// client's. An offer for an operation no family here serves is dropped too: it would be
+/// answered `UnsupportedSemanticFeature`, which is not a recovery.
+///
+/// Pure: admission reads state and writes nothing, and no admission record is written for
+/// an offer, because an offer is not a request.
+fn offer_under_n2(
+    mut fault: Fault,
+    envelope: &RequestEnvelope,
+    families: &[Box<dyn OperationFamily>],
+    state: &DaemonState,
+    services: &Services,
+) -> Fault {
+    fault.recovery.retain(|offer| {
+        let Some(spec) = registry::operation(offer.arguments.operation()) else {
+            return false;
+        };
+        let Some(family) = families
+            .iter()
+            .find(|family| Some(family.namespace()) == namespace(spec.name))
+        else {
+            return false;
+        };
+        let claim = family.scope(&offer.arguments);
+        let mut offered = envelope.clone();
+        offered.snapshot = crate::protocol::spec::Nullable::Null;
+        admission::admit(
+            spec,
+            &offered,
+            &claim,
+            state,
+            &services.connection,
+            services.now.as_ref(),
+        )
+        .is_ok()
+    });
+    fault
 }
 
 /// The refusal an operation registered ahead of its subsystem gets.
