@@ -347,7 +347,7 @@ fn summarize_with(view: &StoreAudit<'_>, names: PublisherNames) -> String {
     format!(
         "identities={identities:?} attribution={:?} defects={:?} aborts={aborts:?} receipts={receipts:?}",
         view.storage_attribution(),
-        view.fsck(),
+        view.fsck(&Fnv1aIdentifier),
     )
 }
 
@@ -407,7 +407,11 @@ fn assert_one_identity_and_every_receipt(
         );
     }
 
-    assert_eq!(view.fsck(), Vec::new(), "index verifier found defects");
+    assert_eq!(
+        view.fsck(&Fnv1aIdentifier),
+        Vec::new(),
+        "index verifier found defects"
+    );
 }
 
 // --- axis 1: contention ------------------------------------------------------------------
@@ -572,7 +576,7 @@ fn identical_bytes_in_different_classes_never_converge_under_contention() {
             .collect::<BTreeMap<_, _>>(),
         "attribution must stay per class (plan §4.5)"
     );
-    assert_eq!(view.fsck(), Vec::new());
+    assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
 }
 
 // --- axis 2: abandoned work interleaved with commits -------------------------------------
@@ -860,7 +864,7 @@ fn a_universally_refused_index_commit_leaves_only_reclaimable_residue() {
         "nothing was published, so nothing reads"
     );
     assert_eq!(
-        view.fsck(),
+        view.fsck(&Fnv1aIdentifier),
         vec![StoreDefect::UnreachableContent(handle.clone())],
         "the residue must be classified as unreachable content, not as a missing referent"
     );
@@ -869,7 +873,7 @@ fn a_universally_refused_index_commit_leaves_only_reclaimable_residue() {
     let reclaimed = store.collect_garbage(&operator).expect("operator");
     assert_eq!(reclaimed, vec![handle]);
     let view = store.audit_view(&operator).expect("operator");
-    assert_eq!(view.fsck(), Vec::new());
+    assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     assert_eq!(view.storage_attribution(), BTreeMap::new());
 }
 
@@ -985,7 +989,7 @@ fn concurrent_publication_of_colliding_distinct_values_never_conflates_them() {
             THREADS,
             "a publication neither succeeded nor was refused"
         );
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&FirstByteIdentifier), Vec::new());
     }
 }
 
@@ -1054,7 +1058,7 @@ fn a_total_hash_collision_under_contention_admits_exactly_one_artifact() {
             THREADS - winners.len(),
             "every loser must leave exactly one abort record"
         );
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&TotalColliderIdentifier), Vec::new());
     }
 }
 
@@ -1140,7 +1144,7 @@ fn readers_and_fsck_running_against_a_publishing_store_never_see_a_half_artifact
                 let mut complaints = Vec::new();
                 for _ in 0..PROBES {
                     let view = store.audit_view(&operator).expect("operator");
-                    for defect in view.fsck() {
+                    for defect in view.fsck(&Fnv1aIdentifier) {
                         match defect {
                             // A publication between its two commits. Expected.
                             StoreDefect::UnreachableContent(_) => {}
@@ -1235,7 +1239,7 @@ fn idempotent_replay_under_contention_appends_a_receipt_per_attempt() {
             BTreeMap::from([(CLASS, payload.len() as u64)]),
             "a replay must not re-store the content"
         );
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
 
         let costs: BTreeSet<_> = view
             .receipts(&identity)
@@ -1333,7 +1337,7 @@ fn capability_administration_racing_publication_leaves_a_consistent_store() {
             Vec::new(),
             "a capability denial must never be recorded as an abort"
         );
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     }
 }
 
@@ -1440,7 +1444,7 @@ fn baseline_garbage_collection_of_a_quiescent_store_reclaims_only_crash_residue(
         b"kept"
     );
     let view = store.audit_view(&operator).expect("operator");
-    assert_eq!(view.fsck(), Vec::new());
+    assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     assert_eq!(view.published_count(), 1);
     assert_eq!(
         view.storage_attribution(),
@@ -1531,7 +1535,7 @@ fn a_receipt_must_name_a_readable_artifact_when_gc_runs_concurrently() {
         "a receipt was issued for an artifact the store cannot read back"
     );
     assert_eq!(
-        view.fsck(),
+        view.fsck(&Fnv1aIdentifier),
         Vec::new(),
         "the store's own garbage collector produced a defect its ordering calls impossible"
     );
@@ -1694,7 +1698,7 @@ fn unassisted_concurrent_gc_and_publication_lose_committed_content() {
         for defect in store
             .audit_view(&token("operator"))
             .expect("operator")
-            .fsck()
+            .fsck(&Fnv1aIdentifier)
         {
             if let StoreDefect::MissingReferent(path) = defect {
                 complaints.push(format!(

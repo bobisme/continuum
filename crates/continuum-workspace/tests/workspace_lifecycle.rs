@@ -363,7 +363,7 @@ fn positive_sealing_publishes_children_before_parents() {
     // And the store agrees it holds exactly those artifacts and no others.
     let audit = store.audit_view(&operator).expect("audit");
     assert_eq!(audit.published_count(), published.len());
-    assert!(audit.fsck().is_empty());
+    assert!(audit.fsck(&HexIdentity).is_empty());
 }
 
 #[test]
@@ -402,7 +402,7 @@ fn positive_two_seals_of_identical_trees_converge() {
         "both publications are in the ledger",
     );
     assert_eq!(second.receipts().len(), first.receipts().len());
-    assert!(audit.fsck().is_empty());
+    assert!(audit.fsck(&HexIdentity).is_empty());
 }
 
 #[test]
@@ -659,7 +659,7 @@ fn positive_import_fork_overlay_seal_end_to_end() {
             store
                 .audit_view(&operator)
                 .expect("audit")
-                .fsck()
+                .fsck(&HexIdentity)
                 .is_empty()
         );
         sealed

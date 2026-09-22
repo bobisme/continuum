@@ -361,14 +361,19 @@ fn check_exact_comparison(
 struct ReferenceUnderTest {
     store: ReferenceStore,
     publishers: usize,
+    /// The declared identifier `fsck` is checked against — a copy of the same seam the
+    /// store was built with, since this harness tests the store's own mechanics rather
+    /// than a substituted-seam scenario.
+    declared: Box<dyn ContentIdentifier>,
 }
 
 impl ReferenceUnderTest {
     fn new(
-        identifier: impl ContentIdentifier + 'static,
+        identifier: impl ContentIdentifier + Clone + 'static,
         faults: impl StorageFaults + 'static,
         publishers: usize,
     ) -> Self {
+        let declared: Box<dyn ContentIdentifier> = Box::new(identifier.clone());
         let mut builder = ReferenceStore::builder(identifier, Arc::new(AuditLog::new()))
             .faults(faults)
             .capability(CapabilityDescriptor::new(
@@ -386,6 +391,7 @@ impl ReferenceUnderTest {
         Self {
             store: builder.build(),
             publishers,
+            declared,
         }
     }
 }
@@ -431,7 +437,7 @@ impl PublicationUnderTest for ReferenceUnderTest {
         self.store
             .audit_view(&mint("operator"))
             .expect("operator may audit")
-            .fsck()
+            .fsck(self.declared.as_ref())
             .iter()
             .map(StoreDefect::to_string)
             .collect()

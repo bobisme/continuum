@@ -433,7 +433,7 @@ fn positive_two_clients_fork_and_analyze_independently_while_shared_subtrees_con
         &ActorId::new("client-bob"),
     );
 
-    assert_eq!(view.fsck(), Vec::new());
+    assert_eq!(view.fsck(&HexIdentity), Vec::new());
     assert!(
         store
             .read(alice_sealed.descriptor_identity(), &alice_cap)
@@ -582,7 +582,7 @@ fn positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes(
     let todo_identity = a.node(&todo_path).expect("todo").identity().clone();
     let view = store.audit_view(&operator).expect("operator");
     assert_eq!(view.receipts(&todo_identity).len(), 2);
-    assert_eq!(view.fsck(), Vec::new());
+    assert_eq!(view.fsck(&HexIdentity), Vec::new());
 
     cleanup(&root);
 }

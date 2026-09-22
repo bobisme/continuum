@@ -254,7 +254,7 @@ fn summarize(view: &StoreAudit<'_>, identity: &ArtifactHandle) -> String {
         "identities={:?} attribution={:?} defects={:?} aborts={:?} receipts={:?}",
         view.identities(),
         view.storage_attribution(),
-        view.fsck(),
+        view.fsck(&Fnv1aIdentifier),
         view.aborts(),
         receipts
     )
@@ -333,7 +333,7 @@ fn positive_concurrent_publication_of_byte_identical_artifacts_yields_one_identi
             store.read(&identity, &token("reader")).expect("published"),
             PAYLOAD
         );
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
         assert_eq!(view.aborts(), Vec::new());
 
         summaries.push(summarize(&view, &identity));
@@ -456,7 +456,7 @@ fn negative_artificial_hash_collision_between_distinct_payloads_is_refused_not_c
         stored,
         "the winning identity's bytes changed after resolving the surrounding collisions"
     );
-    assert_eq!(view.fsck(), Vec::new());
+    assert_eq!(view.fsck(&CollidingIdentifier), Vec::new());
 }
 
 // --- PR-2-EXIT, boundary: the same collision under GC pressure --------------------------
@@ -541,6 +541,6 @@ fn boundary_artificial_collision_under_gc_pressure_leaves_the_refusal_unchanged(
         "the first writer's receipt names bytes it never wrote"
     );
     let view = store.audit_view(&token("operator")).expect("operator");
-    assert_eq!(view.fsck(), Vec::new());
+    assert_eq!(view.fsck(&CollidingIdentifier), Vec::new());
     assert_eq!(view.receipts(first.handle()).len(), 1);
 }

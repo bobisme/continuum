@@ -186,12 +186,15 @@ impl StorageFaults for ArmedFault {
     }
 }
 
-/// An identity seam that stops agreeing with itself after `honest` calls.
+/// An identity seam that stops agreeing with the declared seam after `honest` calls.
 ///
 /// The mutation control. It violates [`ContentIdentifier`]'s purity contract deliberately —
 /// "two calls with equal arguments, in any process, must return equal handles" — which is
 /// exactly the corruption docs/35's `identity mismatch` class exists to name: "content that
-/// does not hash to the identity it is filed under. This is corruption."
+/// does not hash to the identity it is filed under. This is corruption." While honest, it
+/// derives exactly what [`Blake3Identity`] derives — recovery now checks fsck's finding
+/// against the *declared* seam, not the store's configured one, so a control built on a seam
+/// that merely disagrees with itself would no longer demonstrate corruption at all.
 #[derive(Debug)]
 struct DriftingIdentity {
     honest: u64,
@@ -214,16 +217,15 @@ impl ContentIdentifier for DriftingIdentity {
         content: &[u8],
     ) -> Result<ArtifactHandle, IdentityUnavailable> {
         let drifted = self.seen.fetch_add(1, Ordering::SeqCst) >= self.honest;
+        if !drifted {
+            return Blake3Identity.identify(class, content);
+        }
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
         for byte in content {
             hash ^= u64::from(*byte);
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
         }
-        let token = if drifted {
-            format!("{hash:016x}drift")
-        } else {
-            format!("{hash:016x}")
-        };
+        let token = format!("{hash:016x}drift");
         ArtifactHandle::new(class, &token).map_err(|_| IdentityUnavailable)
     }
 }
@@ -1449,6 +1451,12 @@ fn control_the_receipt_count_is_read_from_the_ledger() {
 /// [`DriftingIdentity`] violates [`ContentIdentifier`]'s purity contract after a fixed number
 /// of calls, which is the only way this corruption is reachable: the store never rewrites
 /// content, so an identity mismatch cannot be produced by any legal sequence of operations.
+/// The store's own identifier is invoked exactly once per artifact, at publish, so the
+/// threshold is checked against the single call the one publication below makes — `recover`
+/// (bn-k99dt) checks `fsck` against the *declared* `Blake3Identity`, never the store's own
+/// configured seam, so a control that only drifted *after* publish would no longer
+/// demonstrate anything: the corruption has to be baked into the identity the content was
+/// filed under in the first place.
 /// The control is the same store built with the same identity seam set never to drift, which
 /// recovers `clean` — so the catch is the mutation's, not the fixture's.
 #[test]
@@ -1472,14 +1480,17 @@ fn mutant_a_corrupted_identity_seam_flips_the_verdict_to_defective() {
         store
     };
 
-    // The control: the seam never drifts, so fsck re-derives the identity it published under.
+    // The control: the seam's one call never reaches its drift threshold, so the content is
+    // filed under the real BLAKE3 digest and `fsck` — checked against declared
+    // `Blake3Identity` — confirms it.
     let faithful = build(u64::MAX);
     let clean = recovery::recover(&faithful, &operator()).expect("audit");
     assert_eq!(clean.verdict(), Verdict::Clean);
     assert!(clean.defects().is_empty());
 
-    // The mutant: the seam is honest for the publication and drifts before the verification.
-    let corrupt = build(1);
+    // The mutant: the seam's one call reaches the threshold immediately, so the content is
+    // filed under a plain, non-BLAKE3 hash from the start.
+    let corrupt = build(0);
     let defective = recovery::recover(&corrupt, &operator()).expect("audit");
     assert_eq!(defective.verdict(), Verdict::Defective);
     assert!(

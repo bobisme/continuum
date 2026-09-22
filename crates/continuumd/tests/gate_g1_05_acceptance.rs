@@ -550,7 +550,7 @@ impl PublishedNamespace {
         for (class, bytes) in view.storage_attribution() {
             out.push_str(&format!("attribution {} {bytes}\n", class.token()));
         }
-        let defects = view.fsck();
+        let defects = view.fsck(&Blake3Identity);
         out.push_str(&format!("fsck {}\n", defects.len()));
         for defect in &defects {
             out.push_str(&format!("defect {defect}\n"));
@@ -1850,10 +1850,10 @@ fn scope_no_publication_is_staged_at_rest_and_why_that_is_a_bound_not_a_proof() 
                 view.aborts()
             );
             assert!(
-                view.fsck().is_empty(),
+                view.fsck(&Blake3Identity).is_empty(),
                 "{}/{when}: the store's index verifier found {:?}",
                 profile.token,
-                view.fsck()
+                view.fsck(&Blake3Identity)
             );
         };
 
@@ -1925,7 +1925,7 @@ fn negative_control_an_injected_storage_fault_leaves_content_no_reader_can_reach
     assert_eq!(aborts[0].phase(), PublicationPhase::CommittingIndex);
     assert_eq!(aborts[0].reason(), AbortReason::StorageExhausted);
 
-    let defects = view.fsck();
+    let defects = view.fsck(&Blake3Identity);
     assert_eq!(
         defects.len(),
         1,

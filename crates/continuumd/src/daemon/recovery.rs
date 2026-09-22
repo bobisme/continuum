@@ -104,6 +104,8 @@ use continuum_workspace::publication::{
 
 use crate::protocol::scalar::{TaskHandle, WorkspaceHandle};
 
+use super::identity::Blake3Identity;
+
 // --- crash points ------------------------------------------------------------------------
 
 /// A boundary in [`Daemon::dispatch`](super::Daemon::dispatch) at which a harness may kill
@@ -696,7 +698,11 @@ pub fn recover(
 ) -> Result<RecoveryReport, CapabilityDenied> {
     let audit = store.audit_view(operator)?;
 
-    let defects = audit.fsck();
+    // The declared seam, not the store's configured one (`StoreAudit::fsck`'s own
+    // contract): this daemon always declares `Blake3Identity` (ADR-0013,
+    // `daemon::identity`), so recovery checks against it explicitly rather than letting a
+    // substituted store seam pass its own audit.
+    let defects = audit.fsck(&Blake3Identity);
     let published: Vec<ArtifactHandle> = audit.identities();
     let indexed: BTreeSet<ArtifactHandle> = published.iter().cloned().collect();
     let mut quarantined: Vec<ArtifactHandle> = defects

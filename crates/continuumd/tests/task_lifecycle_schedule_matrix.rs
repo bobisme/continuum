@@ -710,7 +710,10 @@ fn run_render(fixture: &Fixture, tasks: &[(&str, &TaskHandle)]) -> String {
         .map(|identity| format!("{identity}×{}", view.receipts(&identity).len()))
         .collect();
     ledger.sort();
-    render.push_str(&format!("store: {ledger:?} fsck={:?}\n", view.fsck()));
+    render.push_str(&format!(
+        "store: {ledger:?} fsck={:?}\n",
+        view.fsck(&Blake3Identity)
+    ));
     render
 }
 

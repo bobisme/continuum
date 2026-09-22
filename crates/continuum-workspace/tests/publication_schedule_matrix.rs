@@ -272,7 +272,7 @@ fn summarize(store: &ReferenceStore) -> String {
         "identities={:?} receipts={receipts:?} attribution={:?} fsck={:?} aborts={aborts:?}",
         view.identities(),
         view.storage_attribution(),
-        view.fsck(),
+        view.fsck(&Fnv1aIdentifier),
     )
 }
 
@@ -324,7 +324,7 @@ fn positive_identical_publishers_converge_at_every_interleaving() {
             .map(|receipt| receipt.actor().to_string())
             .collect();
         assert_eq!(actors.len(), 3, "two receipts name one publisher");
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
         assert_eq!(view.aborts(), Vec::new());
 
         summaries.insert(summarize(&store));
@@ -406,7 +406,7 @@ fn positive_a_reader_sees_the_artifact_exactly_from_the_index_commit_on() {
 
         let view = store.audit_view(&mint("operator")).expect("operator");
         assert_eq!(view.published_count(), 2);
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     }
 
     // Anti-vacuity: the sweep saw both answers, or it swept one behavior.
@@ -444,7 +444,7 @@ fn positive_collection_never_reclaims_a_pinned_publication_at_any_position() {
                     // index entry names. fsck classifies it; collection must still leave it.
                     let view = store.audit_view(&mint("operator")).expect("operator");
                     assert_eq!(
-                        view.fsck(),
+                        view.fsck(&Fnv1aIdentifier),
                         vec![StoreDefect::UnreachableContent(fnv1a_identity(
                             CLASS, PAYLOAD
                         ))],
@@ -476,7 +476,7 @@ fn positive_collection_never_reclaims_a_pinned_publication_at_any_position() {
             PAYLOAD
         );
         let view = store.audit_view(&mint("operator")).expect("operator");
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     }
     assert!(
         collected_between_the_commits,
@@ -558,7 +558,7 @@ fn positive_an_abandoned_publication_is_typed_residue_wherever_collection_lands(
             store
                 .audit_view(&mint("operator"))
                 .expect("operator")
-                .fsck(),
+                .fsck(&Fnv1aIdentifier),
             Vec::new()
         );
     }
@@ -625,7 +625,7 @@ fn positive_a_collision_has_one_winner_and_a_typed_loser_at_every_interleaving()
         let view = store.audit_view(&mint("operator")).expect("operator");
         assert_eq!(view.published_count(), 1);
         assert_eq!(view.receipts(receipt.handle()).len(), 1);
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&CollidingIdentifier), Vec::new());
     }
     // Anti-vacuity: both publishers won somewhere, or the sweep pinned one order.
     assert_eq!(

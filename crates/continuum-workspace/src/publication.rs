@@ -1867,11 +1867,20 @@ impl StoreAudit<'_> {
         attribution
     }
 
-    /// Run the index verifier, offline, over the whole store.
+    /// Run the index verifier, offline, over the whole store, against `declared` — the
+    /// identity seam the caller asserts the store is supposed to be filed under.
+    ///
+    /// `declared` is deliberately not `self.store.identifier`: a store that re-derives with
+    /// its own configured seam only ever checks that seam against itself, so a store built
+    /// over a seam that is pure and internally consistent but is *not* the one the system
+    /// declares (per ADR-0013, `Blake3Identity`) would pass its own audit with every entry
+    /// misnamed. Passing the declared seam in makes that class of defect visible: content
+    /// filed under an identity `declared` does not derive is [`StoreDefect::IdentityMismatch`]
+    /// whether the drift is corruption or a substituted seam.
     ///
     /// Returns docs/35's three defect classes, in a deterministic order.
     #[must_use]
-    pub fn fsck(&self) -> Vec<StoreDefect> {
+    pub fn fsck(&self, declared: &dyn ContentIdentifier) -> Vec<StoreDefect> {
         // Snapshot under the lock, verify outside it: the identifier is caller-supplied
         // code and must not run while the store is locked.
         let (content, index) = {
@@ -1886,7 +1895,7 @@ impl StoreAudit<'_> {
             if !reachable.contains(handle) {
                 defects.push(StoreDefect::UnreachableContent(handle.clone()));
             }
-            match self.store.identifier.identify(handle.class(), bytes) {
+            match declared.identify(handle.class(), bytes) {
                 Ok(derived) if &derived == handle => {}
                 _ => defects.push(StoreDefect::IdentityMismatch(handle.clone())),
             }
@@ -2159,7 +2168,7 @@ mod tests {
             );
 
             // Nothing was left half-done and nothing aborted.
-            assert_eq!(view.fsck(), Vec::new());
+            assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
             assert_eq!(view.aborts(), Vec::new());
 
             // Every publisher authorized exactly once, and every decision was audited.
@@ -2196,7 +2205,7 @@ mod tests {
             "identities={:?} attribution={:?} defects={:?} aborts={:?} receipts={:?}",
             view.identities(),
             view.storage_attribution(),
-            view.fsck(),
+            view.fsck(&Fnv1aIdentifier),
             view.aborts(),
             receipts
         )
@@ -2238,7 +2247,7 @@ mod tests {
 
         let view = f.store.audit_view(&f.operator).expect("operator");
         assert_eq!(view.published_count(), contents.len());
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     }
 
     #[test]
@@ -2282,7 +2291,7 @@ mod tests {
         for handle in &handles {
             assert_eq!(view.receipts(handle).len(), 1);
         }
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     }
 
     #[test]
@@ -2376,7 +2385,7 @@ mod tests {
         let view = f.store.audit_view(&f.operator).expect("operator");
         assert_eq!(view.published_count(), 0);
         assert!(view.receipts(&handle).is_empty());
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
         assert_eq!(view.storage_attribution(), BTreeMap::new());
         assert_eq!(view.aborts().len(), 1);
     }
@@ -2408,7 +2417,7 @@ mod tests {
 
         // What is left is exactly docs/35's crash residue, classified and reclaimable.
         assert_eq!(
-            view.fsck(),
+            view.fsck(&Fnv1aIdentifier),
             vec![StoreDefect::UnreachableContent(handle.clone())]
         );
 
@@ -2418,7 +2427,7 @@ mod tests {
             .expect("operator may collect");
         assert_eq!(reclaimed, vec![handle]);
         let view = f.store.audit_view(&f.operator).expect("operator");
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
         assert_eq!(view.storage_attribution(), BTreeMap::new());
     }
 
@@ -2441,7 +2450,10 @@ mod tests {
         let view = f.store.audit_view(&f.operator).expect("operator");
         assert_eq!(view.published_count(), 0);
         assert!(view.receipts(&handle).is_empty());
-        assert_eq!(view.fsck(), vec![StoreDefect::UnreachableContent(handle)]);
+        assert_eq!(
+            view.fsck(&Fnv1aIdentifier),
+            vec![StoreDefect::UnreachableContent(handle)]
+        );
         assert_eq!(
             view.aborts(),
             vec![PublicationAborted::new(
@@ -2465,7 +2477,7 @@ mod tests {
         assert_eq!(f.store.read(&handle, &f.reader), Err(CapabilityDenied));
         let view = f.store.audit_view(&f.operator).expect("operator");
         assert_eq!(view.published_count(), 0);
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
         assert_eq!(view.storage_attribution(), BTreeMap::new());
         assert_eq!(
             view.aborts(),
@@ -2509,7 +2521,7 @@ mod tests {
             "a receipt was issued for an artifact the store cannot read back"
         );
         let view = f.store.audit_view(&f.operator).expect("operator");
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     }
 
     #[test]
@@ -2550,7 +2562,7 @@ mod tests {
             "the pin outlived every publication holding it: residue is not reclaimable"
         );
         let view = f.store.audit_view(&f.operator).expect("operator");
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
         assert_eq!(view.storage_attribution(), BTreeMap::new());
     }
 
@@ -2578,7 +2590,7 @@ mod tests {
         );
         let view = f.store.audit_view(&f.operator).expect("operator");
         assert_eq!(view.receipts(receipt.handle()).len(), 1);
-        assert_eq!(view.fsck(), Vec::new());
+        assert_eq!(view.fsck(&Fnv1aIdentifier), Vec::new());
     }
 
     // --- possession-independent authorization ------------------------------------------

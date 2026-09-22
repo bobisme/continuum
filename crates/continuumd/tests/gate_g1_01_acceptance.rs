@@ -15,22 +15,29 @@
 //! > re-derivation.
 //!
 //! Re-running a delivering suite proves the suite still passes. It does not re-derive the
-//! property, because every check in it is written against the same identity seam the
-//! daemon uses: `every_published_address_is_the_blake3_identity_of_its_own_bytes`
+//! property, because every check in it is written against the same identity
+//! *implementation* the daemon uses: `every_published_address_is_the_blake3_identity_of_its_own_bytes`
 //! (`crates/continuum-benchmark/tests/phase_a_triple_surface_identity.rs`) recomputes each
 //! address "through the daemon's own `ContentIdentifier`", and
-//! [`StoreAudit::fsck`](continuum_workspace::publication::StoreAudit::fsck) verifies the
-//! index by calling `self.store.identifier` — the very seam under test. Both answer "is
-//! the store self-consistent?", which is a strictly weaker question than "is the identity
-//! a content hash a second party can recompute?".
+//! [`StoreAudit::fsck`](continuum_workspace::publication::StoreAudit::fsck) — which now takes
+//! the declared identifier as an explicit argument (bn-k99dt) rather than the store's own
+//! configured seam, so it catches a *substituted* `ContentIdentifier` — is still handed
+//! `continuumd::daemon::identity::Blake3Identity` itself as that declared identifier, the very
+//! implementation under test here. Both answer "does this content hash to what
+//! `Blake3Identity` says it should?", which is a strictly weaker question than "is the
+//! identity a content hash a second, independent implementation of BLAKE3 can recompute?".
 //!
 //! This file asks the stronger question. Its instrument is [`spec_blake3`]: a second,
 //! from-scratch BLAKE3 written here from the specification, sharing no line of code with
 //! the vendored `blake3` crate, with `continuum_value::identity::Blake3Hasher`, or with
 //! `continuumd::daemon::identity::Blake3Identity`. Every address this file checks is
 //! recomputed with that implementation from bytes that came off the wire or out of the
-//! store. A daemon whose identity seam stopped being BLAKE3 would keep every existing
-//! suite green — `fsck` would still agree with itself — and would fail here.
+//! store. A daemon whose `Blake3Identity`/`Blake3Hasher` implementation stopped being
+//! genuine BLAKE3 — while every store still declared and filed under that same
+//! implementation — would keep every existing suite green, including `fsck` (bn-k99dt:
+//! `fsck` now checks against a declared identifier, but the declared identifier a real
+//! daemon hands it *is* `Blake3Identity`, so a bug in `Blake3Identity` itself agrees with
+//! itself there too) — and would fail here.
 //!
 //! # Method, stated so the difference from the delivering suites is checkable
 //!
@@ -40,11 +47,14 @@
 //! | anchors the hash to the published vectors *inside the crate that vendors it* (`continuum-value`'s `blake3_matches_the_published_test_vectors`) | anchors the *independent* implementation to the same published vectors, and shows a one-round-short variant fails them ([`control_a_round_short_variant_of_the_instrument_fails_the_published_vectors`]) |
 //! | asserts equality of artifacts across three surfaces | attacks the artifacts: re-publication, convergent re-creation, acceptance, lock, and a colliding identity seam |
 //! | reads identities out of the store's own audit view | reads them out of the store *and* off the wire, and checks the two agree with the independent digest |
-//! | runs the campaign that produced the evidence | runs a fresh campaign and additionally runs the whole script against a daemon whose seam is deliberately not BLAKE3, asserting that store's `fsck` is *clean* and that this file's predicate *fails* on every artifact it published ([`negative_control_a_non_blake3_seam_is_self_consistent_and_fails_this_files_predicate`]) |
+//! | runs the campaign that produced the evidence | runs a fresh campaign and additionally runs the whole script against a daemon whose seam is deliberately not BLAKE3, asserting that store's `fsck` — checked against the declared `Blake3Identity` — now finds every artifact defective too, and that this file's independent predicate *fails* on every artifact it published ([`negative_control_a_non_blake3_seam_is_self_consistent_and_fails_this_files_predicate`]) |
 //!
 //! That last row is the one that decides whether this file was worth writing. The
-//! counterfeit daemon is self-consistent by every measure the tree already applies to
-//! itself, and this file rejects every artifact it publishes.
+//! counterfeit daemon is caught by the declared-seam `fsck` check (bn-k99dt) precisely
+//! because its `ContentIdentifier` is a wholesale substitution, not `Blake3Identity` with a
+//! flaw — the gap this file closes is the one measure the tree still cannot apply to
+//! itself: whether `Blake3Identity`'s own output is genuine BLAKE3. This file rejects every
+//! artifact the counterfeit publishes on that independent ground.
 //!
 //! # The three identity levels, and which this file covers
 //!
@@ -125,7 +135,7 @@ use continuum_intent::contract::IntentContract;
 use continuum_value::epoch::ProtocolWindow;
 use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
 use continuum_workspace::publication::{
-    CapabilityToken, ContentIdentifier, IdentityUnavailable, PublishRefusal,
+    CapabilityToken, ContentIdentifier, IdentityUnavailable, PublishRefusal, StoreDefect,
 };
 use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::family::{Arguments, Payload};
@@ -1138,12 +1148,16 @@ fn control_distinct_contents_never_share_an_identity_and_equal_contents_always_d
 /// [`ContentIdentifier`] holds: it is pure in its arguments, injective in practice over the
 /// inputs this file feeds it, and its tokens are inside the identity character class. A
 /// daemon built over it therefore behaves exactly like the production one at every seam a
-/// *self*-check can see — its
-/// [`fsck`](continuum_workspace::publication::StoreAudit::fsck) is clean, its publications
-/// converge, and its handles round-trip.
+/// *self*-check can see — its publications converge and its handles round-trip. A check
+/// against the *declared* identifier —
+/// [`fsck`](continuum_workspace::publication::StoreAudit::fsck), since bn-k99dt — does catch
+/// this particular substitution, because it is a wholesale swap of `ContentIdentifier` and
+/// not a flaw inside `Blake3Identity` itself.
 ///
 /// It exists so this file can state what it is really claiming. The claim is not "the
-/// store agrees with itself"; it is "the identity is the BLAKE3 digest of the content", and
+/// store agrees with the declared seam"; it is "the identity is the BLAKE3 digest of the
+/// content", which survives even a declared-seam check that happens to be `Blake3Identity`
+/// itself, and
 /// [`negative_control_a_non_blake3_seam_is_self_consistent_and_fails_this_files_predicate`]
 /// is what separates the two.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1907,18 +1921,22 @@ fn negative_control_a_single_flipped_bit_in_any_stored_artifact_is_detected() {
 /// **Negative control — the falsification of this file's own predicate.**
 ///
 /// A daemon built over [`Fnv1a256Identity`] runs the entire script successfully and is
-/// **perfectly self-consistent**: `fsck` — the store's own index verifier, which recomputes
-/// every address through the store's identifier — reports no defect at all. Every existing
-/// self-referential check in the tree would pass against it. Its addresses are nonetheless
-/// not BLAKE3 digests of anything, and this file's predicate rejects every one of them.
+/// **perfectly self-consistent**: every self-referential check in the tree — one that
+/// compares the store to its own configured seam — would pass against it. Checked against
+/// the *declared* identifier instead, `fsck` (bn-k99dt) does catch it, because
+/// `Fnv1a256Identity` is a wholesale substitution of `ContentIdentifier` and not a flaw
+/// hiding inside `Blake3Identity` itself. Its addresses are nonetheless not BLAKE3 digests
+/// of anything, and this file's independent predicate rejects every one of them too, on
+/// different ground than `fsck`'s.
 ///
 /// That contrast is the whole argument for this file existing, so it is asserted rather
 /// than described:
 ///
 /// 1. the script succeeds and publishes artifacts;
-/// 2. `fsck` is clean — the counterfeit passes the self-check;
-/// 3. every published artifact fails the independent-digest predicate;
-/// 4. and the real daemon passes it, in the same test, over the same script.
+/// 2. `fsck`, checked against the declared `Blake3Identity`, reports every artifact as an
+///    identity mismatch — the substituted seam does not survive a declared-seam audit;
+/// 3. every published artifact also fails the independent-digest predicate;
+/// 4. and the real daemon passes both, in the same test, over the same script.
 ///
 /// If a future change made the independent predicate vacuous — comparing a value to itself,
 /// or comparing nothing — step 3 fails immediately.
@@ -1937,11 +1955,18 @@ fn negative_control_a_non_blake3_seam_is_self_consistent_and_fails_this_files_pr
         .store()
         .audit_view(&token)
         .expect("`cap_root` confers audit")
-        .fsck();
+        .fsck(&Blake3Identity);
+    assert_eq!(
+        defects.len(),
+        published.len(),
+        "fsck, checked against the declared seam, must flag every substituted entry: \
+         {defects:?}"
+    );
     assert!(
-        defects.is_empty(),
-        "the counterfeit store is not self-consistent ({defects:?}), so it does not \
-         demonstrate the gap between self-consistency and content addressing"
+        defects
+            .iter()
+            .all(|defect| matches!(defect, StoreDefect::IdentityMismatch(_))),
+        "and flag it as an identity mismatch, not any other class: {defects:?}"
     );
 
     for (handle, content) in &published {
@@ -1953,8 +1978,18 @@ fn negative_control_a_non_blake3_seam_is_self_consistent_and_fails_this_files_pr
         );
     }
 
-    // And the production seam, over the same script, passes.
+    // And the production seam, over the same script, passes both checks.
     let real = rig();
+    let real_defects = real
+        .daemon
+        .store()
+        .audit_view(&Rig::root_token())
+        .expect("`cap_root` confers audit")
+        .fsck(&Blake3Identity);
+    assert!(
+        real_defects.is_empty(),
+        "the production daemon's own declared seam failed its own audit: {real_defects:?}"
+    );
     for (handle, content) in real.published() {
         assert_eq!(
             handle.identity(),

@@ -374,7 +374,7 @@ fn read_store(daemon: &Daemon) -> Stored {
         published.push((handle, bytes));
     }
     assert!(
-        audit.fsck().is_empty(),
+        audit.fsck(&Blake3Identity).is_empty(),
         "a deployment this check reads must have no store defects"
     );
     Stored {

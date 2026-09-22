@@ -761,7 +761,7 @@ impl Namespace {
             published_count: view.published_count(),
             receipts,
             attribution: view.storage_attribution(),
-            defects: view.fsck(),
+            defects: view.fsck(&Blake3Identity),
         }
     }
 

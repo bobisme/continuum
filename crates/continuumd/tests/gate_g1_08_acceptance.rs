@@ -115,9 +115,10 @@
 //! 1. **the index** — `StoreAudit::identities` and `StoreAudit::published_count`;
 //! 2. **the content** — `ReferenceStore::read` for every identity, under an operator
 //!    capability that covers every class, with the bytes re-derived through `Blake3Identity`,
-//!    the daemon's *declared* ADR-0013 seam. This is deliberately not the store's own
-//!    identifier: `fsck` asks the identity seam to check itself, so a substituted seam is
-//!    invisible to it and visible here ([`negative_control_a_substituted_identity_seam_is_caught_by_the_census_and_missed_by_fsck`]);
+//!    the daemon's *declared* ADR-0013 seam. `fsck` (bn-k99dt) now takes that same declared
+//!    seam as an explicit argument rather than the store's own configured identifier, so a
+//!    substituted seam is caught by both instruments
+//!    ([`regression_a_substituted_identity_seam_is_caught_by_fsck_against_the_declared_seam`]);
 //! 3. **the ledger** — `StoreAudit::receipts` per identity, checking the count *and* that
 //!    each receipt names the identity it is filed under.
 //!
@@ -143,11 +144,13 @@
 //!
 //! # Four findings this re-derivation produced that the delivering evidence does not carry
 //!
-//! 1. **`fsck` cannot see a substituted identity seam.** It re-derives with the store's own
-//!    identifier, so a store whose identifier is pure, self-consistent and *not* the declared
-//!    `Blake3Identity` passes its own audit with every entry misnamed. A census pinned to the
-//!    declared seam catches all of them. This is a property of the instrument, not a defect of
-//!    this build — every daemon in this tree supplies `Blake3Identity`.
+//! 1. **`fsck` could not see a substituted identity seam (fixed, bn-k99dt).** It used to
+//!    re-derive with the store's own identifier, so a store whose identifier was pure,
+//!    self-consistent and *not* the declared `Blake3Identity` passed its own audit with every
+//!    entry misnamed — only the census, pinned to the declared seam, caught it. `fsck` now
+//!    takes the declared identifier as an explicit argument, so it catches the same substitution
+//!    the census does
+//!    ([`regression_a_substituted_identity_seam_is_caught_by_fsck_against_the_declared_seam`]).
 //! 2. **Residue is derivable without a defect list.** `storage_attribution` minus the read
 //!    path's bytes prices unreachable content per class, with no access to `fsck` at all, and
 //!    agrees with `fsck` handle for handle on the driven case.
@@ -1760,7 +1763,7 @@ fn the_independent_census_and_the_stores_own_fsck_agree() {
         .store()
         .audit_view(&operator())
         .expect("`cap_root` audits")
-        .fsck();
+        .fsck(&Blake3Identity);
     assert!(clean.findings.is_empty());
     assert!(clean_defects.is_empty(), "{clean_defects:?}");
     assert_eq!(clean.residue_total(), 0);
@@ -1797,7 +1800,7 @@ fn the_independent_census_and_the_stores_own_fsck_agree() {
         .store()
         .audit_view(&operator())
         .expect("`cap_root` audits")
-        .fsck();
+        .fsck(&Blake3Identity);
 
     // The census, alone: residue exists, it is `task`-class, and the predicted identity is
     // exactly what does not resolve.
@@ -2145,7 +2148,7 @@ fn negative_control_a_planted_orphan_task_is_detected() {
         .store()
         .audit_view(&operator())
         .expect("`cap_root` audits")
-        .fsck();
+        .fsck(&Blake3Identity);
     assert!(
         defects.is_empty(),
         "an orphan task is not a store defect: {defects:?}"
@@ -2201,21 +2204,22 @@ fn negative_control_residue_is_detected_by_arithmetic_alone() {
     );
 }
 
-/// **Negative control — a substituted identity seam is caught by the census and missed by
-/// fsck.**
+/// **Regression — a substituted identity seam is caught by fsck against the declared seam.**
 ///
-/// `StoreAudit::fsck` re-derives each artifact's identity with the store's *own* identifier,
-/// so a store whose identifier is internally consistent but is not the declared one passes its
-/// own audit. The census re-derives with `Blake3Identity` — the seam `Daemon::builder` is
-/// always handed in this tree — and therefore sees what `fsck` cannot.
+/// `StoreAudit::fsck` used to re-derive each artifact's identity with the store's *own*
+/// identifier, so a store whose identifier was internally consistent but not the declared one
+/// passed its own audit with every entry misnamed — the census, re-derived with
+/// `Blake3Identity`, caught what `fsck` could not. `fsck` now takes the declared identifier as
+/// an explicit argument instead of trusting `self.store.identifier`, so it is checked here
+/// against `Blake3Identity` — the seam `Daemon::builder` is always handed in this tree — and
+/// the gap is closed: both instruments now agree.
 ///
 /// Both stores are built here, over the same bytes, and the assertions run both ways: the
-/// Blake3 store is clean under both instruments; the substituted store is clean under `fsck`
-/// and flagged, entry for entry, by the census. This is the one place the census is strictly
-/// stronger than the delivered recovery pass, and it is a statement about the *instrument*,
-/// not a defect report against this build — every daemon in this tree supplies `Blake3Identity`.
+/// Blake3 store is clean under both instruments; the substituted store is flagged, entry for
+/// entry, by both. This is the flip side of the bug this test used to pin — it now guards
+/// against `fsck` regressing back to auditing a store with itself.
 #[test]
-fn negative_control_a_substituted_identity_seam_is_caught_by_the_census_and_missed_by_fsck() {
+fn regression_a_substituted_identity_seam_is_caught_by_fsck_against_the_declared_seam() {
     /// One store, one capability, the same three payloads.
     fn stocked(identifier: impl ContentIdentifier + 'static) -> ReferenceStore {
         let token = operator();
@@ -2240,7 +2244,7 @@ fn negative_control_a_substituted_identity_seam_is_caught_by_the_census_and_miss
     let honest_defects = honest
         .audit_view(&operator())
         .expect("`cap_root` audits")
-        .fsck();
+        .fsck(&Blake3Identity);
     assert_eq!(honest_census.entries.len(), 3);
     assert!(
         honest_census.findings.is_empty(),
@@ -2255,11 +2259,24 @@ fn negative_control_a_substituted_identity_seam_is_caught_by_the_census_and_miss
     let substituted_defects = substituted
         .audit_view(&operator())
         .expect("`cap_root` audits")
-        .fsck();
+        .fsck(&Blake3Identity);
 
-    assert!(
-        substituted_defects.is_empty(),
-        "fsck asks the substituted seam to check itself, so it finds nothing: {substituted_defects:?}"
+    let mismatched: Vec<&ArtifactHandle> = substituted_defects
+        .iter()
+        .filter_map(|defect| match defect {
+            StoreDefect::IdentityMismatch(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        mismatched.len(),
+        3,
+        "fsck, checked against the declared seam, flags every entry: {substituted_defects:?}"
+    );
+    assert_eq!(
+        substituted_defects.len(),
+        3,
+        "and flags nothing else: {substituted_defects:?}"
     );
     assert_eq!(
         substituted_census.entries.len(),
