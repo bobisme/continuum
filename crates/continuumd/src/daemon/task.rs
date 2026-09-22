@@ -566,6 +566,12 @@ impl TaskEntry {
 pub struct TaskTable {
     tasks: BTreeMap<TaskHandle, TaskEntry>,
     continuations: BTreeMap<ContinuationHandle, Continuation>,
+    /// Tasks a startup resolution pass found in the store (plan §4.5 O2, bn-1z09m).
+    ///
+    /// Kept apart from `tasks` on purpose. A resolved task is not a `TaskEntry`: its
+    /// operation, epochs, budget and report were never durable, and a `TaskEntry` cannot be
+    /// built without them except by inference.
+    resolved: BTreeMap<TaskHandle, super::recovery::ResolvedTask>,
 }
 
 impl TaskTable {
@@ -607,6 +613,30 @@ impl TaskTable {
     #[must_use]
     pub fn continuation(&self, handle: &ContinuationHandle) -> Option<&Continuation> {
         self.continuations.get(handle)
+    }
+
+    /// Record what the startup resolution pass concluded about one task.
+    pub fn resolve(&mut self, resolved: super::recovery::ResolvedTask) {
+        self.resolved.insert(resolved.task.clone(), resolved);
+    }
+
+    /// The startup resolution of `handle`, or [`None`] when the pass found no record of it.
+    #[must_use]
+    pub fn resolution(&self, handle: &TaskHandle) -> Option<&super::recovery::ResolvedTask> {
+        self.resolved.get(handle)
+    }
+
+    /// Remove the startup resolution of `handle`, because a live entry now answers for it.
+    ///
+    /// The one way a resolution leaves the table, and only for a `Settled` task that a fresh
+    /// `verification.start` re-runs (see `verification::start`). Returns what was removed.
+    pub fn supersede(&mut self, handle: &TaskHandle) -> Option<super::recovery::ResolvedTask> {
+        self.resolved.remove(handle)
+    }
+
+    /// Every task the startup resolution pass resolved, in identity order.
+    pub fn resolved(&self) -> impl Iterator<Item = &super::recovery::ResolvedTask> {
+        self.resolved.values()
     }
 }
 

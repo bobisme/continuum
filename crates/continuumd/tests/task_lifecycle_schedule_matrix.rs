@@ -67,7 +67,7 @@ use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
-use continuumd::daemon::recovery::{CrashInjector, CrashPoint, Verdict};
+use continuumd::daemon::recovery::{CrashInjector, CrashPoint, Resolution, Verdict};
 use continuumd::daemon::region::TaskRegions;
 use continuumd::daemon::state::{IntentRecord, RegistryStatus};
 use continuumd::daemon::task::TaskFamily;
@@ -1094,8 +1094,9 @@ impl CrashInjector for KillAt {
 ///   every position of a running lifecycle;
 /// - a daemon restarted over the survivor re-prepares its volatile facts and re-runs the
 ///   whole lane to a final record **byte-identical** to a cold daemon's, with total
-///   regions: what survived a crash at any boundary of any position never changes what
-///   the lifecycle computes.
+///   regions, whenever the survivor holds no parked record. Where it does, the startup
+///   pass (bn-1z09m) resolved the task to `Failed`, which is final (RFC 0026 "Task
+///   lifecycle"): the restarted start observes it, runs nothing, and creates no live entry.
 #[test]
 fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_record() {
     // The cold baseline: the lane run to completion on a daemon that never crashed.
@@ -1109,6 +1110,8 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
     };
 
     let mut runs = 0_usize;
+    let mut resolved_failed = 0_usize;
+    let mut reran = 0_usize;
     for position in 0..DPOR.beats.len() {
         let mut images: Vec<(CrashPoint, String)> = Vec::new();
         for point in CrashPoint::ALL {
@@ -1156,7 +1159,34 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
 
             // The restart, over the survivor, re-running the whole lane.
             let mut restarted = fixture_over(restart(durable));
+            let failed = restarted
+                .daemon
+                .state()
+                .tasks()
+                .resolved()
+                .find(|resolved| matches!(resolved.resolution, Resolution::Failed(_)))
+                .map(|resolved| resolved.task.clone());
             let mut task = None;
+            if let Some(failed) = failed {
+                // The survivor held a parked record, so the startup pass resolved the task
+                // to `Failed` (plan §4.5 O2, bn-1z09m). That status is final (RFC 0026
+                // "Task lifecycle"): the lane's start answers the observing lane at `ok`,
+                // runs nothing, and creates no live entry, so the resume beats have no
+                // continuation to name and the lane stops there.
+                resolved_failed += 1;
+                play_beat_strict(&mut restarted, &DPOR, 0, &mut task, "");
+                assert_eq!(
+                    task.as_ref(),
+                    Some(&failed),
+                    "the start names the resolved task"
+                );
+                assert!(
+                    restarted.daemon.state().tasks().get(&failed).is_none(),
+                    "position {position}, {point}: a live entry appeared beside a resolution"
+                );
+                assert_total(&restarted, "after the restarted start");
+                continue;
+            }
             for index in 0..DPOR.beats.len() {
                 play_beat_strict(&mut restarted, &DPOR, index, &mut task, "");
             }
@@ -1166,6 +1196,7 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
                 cold,
                 "position {position}, {point}: the restarted lifecycle diverged from cold"
             );
+            reran += 1;
         }
 
         // The step function, per position (g1's claim, at every lifecycle position).
@@ -1195,6 +1226,11 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
         );
     }
     assert_eq!(runs, 27, "three positions × nine boundaries");
+    // Position 0 before the handler: nothing durable, the lane re-runs from scratch (8).
+    // Position 2 at `AfterHandler`: the head record closed, so the task is `Settled`, the
+    // start supersedes it, and the lane re-runs (1). Every other run has a parked head and
+    // resolves to `Failed` (18). Both arms are exercised, so neither is vacuous.
+    assert_eq!((reran, resolved_failed), (9, 18));
 }
 
 // --- determinism -----------------------------------------------------------------------------

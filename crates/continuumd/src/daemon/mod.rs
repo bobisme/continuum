@@ -244,6 +244,7 @@ pub struct Daemon {
     store: ReferenceStore,
     store_audit: Arc<AuditLog>,
     families: Vec<Box<dyn OperationFamily>>,
+    startup: recovery::Startup,
 }
 
 impl fmt::Debug for Daemon {
@@ -335,6 +336,16 @@ impl Daemon {
     #[must_use]
     pub fn store_audit(&self) -> &AuditLog {
         &self.store_audit
+    }
+
+    /// What this daemon did about tasks when it started (plan §4.5 O2).
+    ///
+    /// [`Startup::Cold`](recovery::Startup::Cold) for a cold start. On a restart, the
+    /// typed output of [`recovery::resolve_tasks`], or the typed refusal when the connection
+    /// capability could not audit the adopted store.
+    #[must_use]
+    pub const fn startup(&self) -> &recovery::Startup {
+        &self.startup
     }
 
     /// The typed refusal for a request this daemon could not *read*.
@@ -924,12 +935,28 @@ impl Builder {
             for (descriptor, parent) in self.capabilities {
                 self.state.register_capability(descriptor, parent);
             }
+            // The startup task-resolution pass (plan §4.5 O2), before any dispatch can run.
+            // It reads the adopted store under the connection capability and writes only the
+            // task table's resolved set.
+            let startup = match identity::capability_to_store(&self.services.connection)
+                .map_err(|_| continuum_workspace::publication::CapabilityDenied)
+                .and_then(|operator| recovery::resolve_tasks(&durable.store, &operator))
+            {
+                Ok(resolution) => {
+                    for resolved in resolution.tasks() {
+                        self.state.tasks_mut().resolve(resolved.clone());
+                    }
+                    recovery::Startup::Resolved(resolution)
+                }
+                Err(denied) => recovery::Startup::Refused(denied),
+            };
             return Daemon {
                 services: self.services,
                 state: self.state,
                 store: durable.store,
                 store_audit: durable.audit,
                 families: self.families,
+                startup,
             };
         }
 
@@ -961,6 +988,7 @@ impl Builder {
             store: store.build(),
             store_audit,
             families: self.families,
+            startup: recovery::Startup::Cold,
         }
     }
 }

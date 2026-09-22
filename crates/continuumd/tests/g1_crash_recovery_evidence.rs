@@ -60,7 +60,8 @@ use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
 use continuumd::daemon::recovery::{
-    self, CrashInjector, CrashPoint, Disposition, RecoveryReport, Verdict, VolatileFact,
+    self, CrashInjector, CrashPoint, Disposition, FailureReason, RecoveryReport, Resolution,
+    Verdict, VolatileFact,
 };
 use continuumd::daemon::state::{IntentRecord, RegistryStatus};
 use continuumd::daemon::task::TaskFamily;
@@ -988,11 +989,11 @@ fn a_retry_after_the_restart_converges_on_the_records_that_landed() {
 /// half: the record those bytes are of is published into the store, so after the daemon is
 /// killed the identity still resolves, is receipted, and reads back.
 ///
-/// What does **not** survive is the task record, and the report says so rather than implying
-/// otherwise: [`VolatileFact::TaskTable`] is `declared`, and the restarted daemon denies
+/// What does **not** survive is the live task record: the restarted daemon denies
 /// `task.status` on the handle. That is docs/35's own rule — a restart "MUST NOT reconstruct
-/// task state by inference" — and it is the honest scope of this conjunct: the *evidence*
-/// survives, which is what the criterion names.
+/// task state by inference". Since bn-1z09m, [`VolatileFact::TaskTable`] is `resolved`: the
+/// startup pass reads the surviving record and resolves the task to `Failed` with a typed
+/// reason, which is a resolution and not a reconstructed `TaskEntry`.
 #[test]
 fn a_parked_tasks_committed_publication_survives_the_crash() {
     let mut prepared = prepare(daemon());
@@ -1040,9 +1041,24 @@ fn a_parked_tasks_committed_publication_survives_the_crash() {
     );
     assert_eq!(
         VolatileFact::TaskTable.disposition(),
-        Disposition::Declared,
-        "the record itself is declared lost, not reconstructed"
+        Disposition::Resolved,
+        "the live record is not reconstructed; its durable trace is resolved at startup"
     );
+    let restarted = restart(durable);
+    assert!(
+        restarted.state().tasks().get(&task).is_none(),
+        "no live entry comes back"
+    );
+    let resolved = restarted
+        .state()
+        .tasks()
+        .resolution(&task)
+        .expect("the startup pass resolves the parked task from its record");
+    assert_eq!(
+        resolved.resolution,
+        Resolution::Failed(FailureReason::ContinuationNotDurable)
+    );
+    assert_eq!(resolved.claims(), published);
 }
 
 /// **IMPL-02, second conjunct.** An uncommitted partial is absent after recovery, never
@@ -1116,7 +1132,9 @@ fn an_uncommitted_partial_is_absent_after_recovery() {
 ///
 /// "Orphan" at this grain has two readings and both are checked: no surviving task artifact
 /// is dangling (each resolves through the index and carries its receipts), and no task
-/// *record* is fabricated to go with one — the restarted daemon holds no tasks and says so.
+/// *record* is fabricated to go with one — the restarted daemon holds no live task. Since
+/// bn-1z09m its startup pass resolves each task from its surviving record instead, so each
+/// artifact also has a claimant.
 #[test]
 fn every_surviving_task_artifact_is_reconciled_and_receipted() {
     let mut prepared = prepare(daemon());
@@ -1159,6 +1177,32 @@ fn every_surviving_task_artifact_is_reconciled_and_receipted() {
     }
     assert!(report.receiptless().is_empty());
     assert!(report.orphan_receipts().is_empty());
+
+    let restarted = restart(durable);
+    assert!(
+        restarted.state().tasks().handles().is_empty(),
+        "no live task record is fabricated"
+    );
+    let mut claimed: Vec<ArtifactHandle> = Vec::new();
+    for task in [&first, &second] {
+        let resolved = restarted
+            .state()
+            .tasks()
+            .resolution(task)
+            .expect("each parked task is resolved from its record");
+        assert_eq!(
+            resolved.resolution,
+            Resolution::Failed(FailureReason::ContinuationNotDurable)
+        );
+        claimed.extend(resolved.claims());
+    }
+    claimed.sort();
+    let mut expected = surviving.clone();
+    expected.sort();
+    assert_eq!(
+        claimed, expected,
+        "every surviving task artifact has a claimant"
+    );
 }
 
 // --- D. the volatile declaration is real --------------------------------------------------

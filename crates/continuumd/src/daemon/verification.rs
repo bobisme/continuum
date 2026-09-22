@@ -90,6 +90,7 @@ use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, Sc
 // `Scope` is `continuum_engine_reference::checking::Scope` in this module — the exploration's
 // completeness — so the region scope is imported under a name that says which of the two it
 // is rather than shadowing the engine's vocabulary.
+use super::recovery::{Resolution, ResolvedTask};
 use super::region::{self, Scope as RegionScope};
 use super::state::DaemonState;
 use super::task::{
@@ -97,13 +98,13 @@ use super::task::{
     continuation_handle, epochs_preimage, published, task_handle, unsupported,
 };
 use crate::protocol::envelope::{
-    AssuranceEnvelope, Budget, EnvelopeDimension, Omission, ProducedDimension,
+    ArtifactRef, AssuranceEnvelope, Budget, EnvelopeDimension, Omission, ProducedDimension,
     SemanticVerdictValue, UnsupportedDimension, Verdict,
 };
 use crate::protocol::operations::verification::{
     VerificationStartRequest, VerificationStartResponse,
 };
-use crate::protocol::scalar::{Commitment, TaskHandle};
+use crate::protocol::scalar::{ArtifactHandle as WireArtifactHandle, Commitment, TaskHandle};
 use crate::protocol::shared::{Target, VerificationResult};
 use crate::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use crate::protocol::vocabulary::{
@@ -941,6 +942,27 @@ fn start(
         &budget,
     )?;
 
+    // A task the startup resolution pass resolved (plan §4.5 O2, bn-1z09m). One handle has
+    // exactly one state, so this is decided before the live table is consulted:
+    //
+    // - `Failed(_)` is terminal. RFC 0026 "Task lifecycle": "a terminal status never
+    //   changes", and a terminal non-`Completed` identity is answered on the observing lane
+    //   at `ok`, running nothing (F20, paid at 3.4). So a re-issued start is that answer, and
+    //   no live entry is created beside the resolution.
+    // - `Settled` is a task that reached `Completed` before the crash, whose report was not
+    //   durable. The cached-result lane has no result to hand back, and re-running a
+    //   completed identity "could only produce the same answer" (the `Completed` arm below).
+    //   So the resolution is superseded explicitly and the campaign runs again under the same
+    //   identity. It republishes the same records and reaches `Completed` again.
+    if let Some(resolved) = state.tasks().resolution(&handle) {
+        match resolved.resolution {
+            Resolution::Failed(_) => return resolved_terminal(resolved),
+            Resolution::Settled => {
+                state.tasks_mut().supersede(&handle);
+            }
+        }
+    }
+
     // The terminal short-circuit, ahead of the cached/started split (RFC 0026 F20, paid
     // at protocol 3.4 by bn-3jrtz). `task.resume` answers "this identity is already
     // terminal" on the task-observing lane at `status = ok`, and until 3.4 this operation
@@ -1084,6 +1106,43 @@ fn terminal(entry: &TaskEntry) -> Effect {
     .with_artifacts(published(entry));
     effect.omissions = [entry.omissions(), budget::omissions_of(&entry.ledger)].concat();
     effect
+}
+
+/// The `verification.start` answer for an identity the startup resolution pass resolved to
+/// `Failed` (bn-1z09m): [`terminal`]'s lane, built from the resolution.
+///
+/// `ok` on the task-observing lane, `task` present, `result` absent, nothing run. The
+/// artifacts are the records the task committed before the crash, which the resolution
+/// claims. The task record itself was not durable, and the omission says so.
+fn resolved_terminal(resolved: &ResolvedTask) -> Result<Effect, Fault> {
+    let artifacts = resolved
+        .records
+        .iter()
+        .map(|record| {
+            Ok(ArtifactRef {
+                kind: ArtifactClass::Task.token().to_owned(),
+                handle: WireArtifactHandle::new(resolved.task.as_str()).map_err(|_| {
+                    Fault::new(
+                        ErrorCode::PublicationAborted,
+                        "the task identity is not a well-formed artifact handle",
+                    )
+                })?,
+                commitment: Optional::Present(Commitment::new(&record.identity.to_string())),
+                redacted: Optional::Absent,
+            })
+        })
+        .collect::<Result<Vec<_>, Fault>>()?;
+    let mut effect = Effect::new(
+        Payload::VerificationStart(VerificationStartResponse {
+            task: Optional::Present(resolved.task.clone()),
+            result: Optional::Absent,
+        }),
+        Nullable::Null,
+    )
+    .observing(resolved.task.clone())
+    .with_artifacts(artifacts);
+    effect.omissions = vec![unsupported("task.record")];
+    Ok(effect)
 }
 
 /// The `verification.start` answer that carries a cached result instead of a task.

@@ -43,14 +43,22 @@
 //!   child records that did land are complete, content-addressed artifacts in their own
 //!   right; they are not residue and they are not deleted, and a retry converges on them.
 //! - **no orphan task.** The task table is volatile, and docs/35 forbids the obvious
-//!   workaround outright: a restart "MUST NOT reconstruct task state by inference". So this
-//!   daemon does not resolve a `Running` task to `Failed`, because after the crash there is
-//!   no task record to resolve — and it says so, per fact, in [`RecoveryReport::volatile`],
-//!   rather than reporting an empty task table as though that were an achievement. What *is*
-//!   recovered is the published half: every campaign record a task committed before the
-//!   crash is in the store under the identity the task named it by
-//!   ([`budget::publication_record`](super::budget::publication_record)), and
-//!   [`RecoveryReport::surviving`] returns them.
+//!   workaround outright: a restart "MUST NOT reconstruct task state by inference". So no
+//!   live `TaskEntry` comes back. What *is* durable is the published half: every campaign
+//!   record a task committed before the crash is in the store under the identity the task
+//!   named it by ([`budget::publication_record`](super::budget::publication_record)), and
+//!   that record names its task, its sequence, its snapshot, and whether it closed or
+//!   parked. [`resolve_tasks`] is the startup pass over those records (bn-1z09m, plan §4.5
+//!   O2). It derives the task set from the store alone and resolves each task to exactly one
+//!   typed [`Resolution`]: `Settled` when the head record closed, and `Failed` with a
+//!   [`FailureReason`] otherwise. [`Builder::build`](super::Builder::build) runs it on every
+//!   restart and loads the result into the task table, so every surviving `task_*` record
+//!   has a claimant again.
+//!
+//!   The resume branch of O2 is **not** reachable, and the pass says so with
+//!   [`FailureReason::ContinuationNotDurable`] rather than with a missing arm. The record
+//!   carries the frontier and not the continuation's pins (epochs, bounds, intent, model
+//!   source), and a continuation without its pins is not a committed continuation.
 //!
 //! That last row is the honest scope of IMPL-02's durability criterion — "committed partial
 //! evidence survives daemon restart; uncommitted partials are absent, never half-visible".
@@ -62,9 +70,10 @@
 //! Because the dossier does not ask for one and the honest answer is better than a
 //! fabricated one. plan §4.5's restart contract is about the *store* (crash safety, the index
 //! verifier, GC roots) and about tasks resolving to a committed continuation or a typed
-//! failure; a daemon whose task table never reached a disk has no committed continuation to
-//! resume from, and inventing one from the store would be the "silently reconstructed state"
-//! the same paragraph prohibits. Persisting `DaemonState` is a real piece of work with its
+//! failure; a daemon whose continuation pins never reached a disk has no committed
+//! continuation to resume from, and inventing one from the store would be the "silently
+//! reconstructed state" the same paragraph prohibits. The resolution pass therefore reads
+//! only what the store already holds, and takes the typed-failure branch. Persisting `DaemonState` is a real piece of work with its
 //! own crate-boundary question (plan §20 gives `continuumd` no storage edge beyond
 //! `continuum-workspace`), and it is not this bone's. What this bone owes and delivers is the
 //! split above, stated and checked, and the machinery that makes a restart's answer typed.
@@ -92,6 +101,8 @@ use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle, Artifact
 use continuum_workspace::publication::{
     CapabilityDenied, CapabilityToken, ReferenceStore, StoreDefect,
 };
+
+use crate::protocol::scalar::{TaskHandle, WorkspaceHandle};
 
 // --- crash points ------------------------------------------------------------------------
 
@@ -277,6 +288,14 @@ pub enum Disposition {
     /// docs/35: a restart "MUST NOT reconstruct task state by inference […] A silently
     /// reconstructed state is indistinguishable from a fabricated one".
     Declared,
+    /// The live entries are gone and are not reconstructed. Its durable trace is read back
+    /// at startup, and each member it names is resolved to a typed outcome.
+    ///
+    /// The task table's disposition since bn-1z09m: [`resolve_tasks`] reads every committed
+    /// campaign record and resolves each task to [`Resolution::Settled`] or to
+    /// [`Resolution::Failed`] with a [`FailureReason`] (plan §4.5 O2). A resolved task is not
+    /// a live `TaskEntry`: its operation, epochs, budget and report were never durable.
+    Resolved,
 }
 
 impl Disposition {
@@ -286,6 +305,7 @@ impl Disposition {
         match self {
             Self::Reprovisioned => "reprovisioned",
             Self::Declared => "declared",
+            Self::Resolved => "resolved",
         }
     }
 }
@@ -373,6 +393,8 @@ impl VolatileFact {
             Self::WireCapabilityRegistry | Self::StagedContent | Self::ModelCatalog => {
                 Disposition::Reprovisioned
             }
+            // The one fact with a startup pass over its durable trace (plan §4.5 O2).
+            Self::TaskTable => Disposition::Resolved,
             _ => Disposition::Declared,
         }
     }
@@ -382,15 +404,23 @@ impl VolatileFact {
     ///
     /// [`None`] is the common and honest case: most of `DaemonState` is daemon-side
     /// bookkeeping with no published counterpart at all, and naming a class for it would
-    /// suggest a recovery path that does not exist. The two that do have one are the workspace
-    /// records — a *sealed* workspace's records are in the store, which is what sealing means
-    /// — and the task table, whose committed campaign records are published under
-    /// [`ArtifactClass::Task`].
+    /// suggest a recovery path that does not exist. The three that do have one are:
+    ///
+    /// - the workspace records — a *sealed* workspace's records are in the store, which is
+    ///   what sealing means;
+    /// - the task table, whose committed campaign records are published under
+    ///   [`ArtifactClass::Task`] and are what [`resolve_tasks`] reads;
+    /// - the continuation table, whose *frontier* is part of that same record
+    ///   ([`budget::publication_record`](super::budget::publication_record) writes it, and
+    ///   [`CampaignRecord::frontier`] reads its length back). The continuation's pins — its
+    ///   epochs, bounds, intent and model source — are not in the record, so the
+    ///   continuation as a whole stays [`Disposition::Declared`]: a frontier without its pins
+    ///   is not a committed continuation, and resuming from it would be inference.
     #[must_use]
     pub const fn survives_as(self) -> Option<ArtifactClass> {
         match self {
             Self::WorkspaceRecords => Some(ArtifactClass::WorkspaceSnapshot),
-            Self::TaskTable => Some(ArtifactClass::Task),
+            Self::TaskTable | Self::ContinuationTable => Some(ArtifactClass::Task),
             _ => None,
         }
     }
@@ -764,6 +794,434 @@ pub fn recover(
     })
 }
 
+// --- the startup task-resolution pass (plan §4.5 O2) -------------------------------------
+
+/// Why one `task_*` index entry could not be read as a campaign record.
+///
+/// Typed per cause (INV-008). A record that does not decode cannot be attributed to a task,
+/// so it is reported beside the resolved tasks and never silently dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RecordDefect {
+    /// The read path refused an identity the index names. Unreachable while the store keeps
+    /// its own rules; `recover` reports the same entry as a [`StoreDefect`].
+    Unreadable,
+    /// The bytes end inside a length-prefixed part, or a part is missing.
+    Truncated,
+    /// Bytes remain after the last part the record format declares.
+    TrailingBytes,
+    /// A numeric part does not have its declared width.
+    FieldWidth,
+    /// The task part is not a well-formed `task_*` handle.
+    TaskHandle,
+    /// The snapshot part is neither `-` nor a well-formed `ws_*` handle.
+    SnapshotHandle,
+    /// The closure part is neither `closed` nor `bounded`.
+    ClosureToken,
+    /// The frontier component count is not a whole number of states.
+    FrontierShape,
+}
+
+impl RecordDefect {
+    /// A stable token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Unreadable => "unreadable",
+            Self::Truncated => "truncated",
+            Self::TrailingBytes => "trailing-bytes",
+            Self::FieldWidth => "field-width",
+            Self::TaskHandle => "task-handle",
+            Self::SnapshotHandle => "snapshot-handle",
+            Self::ClosureToken => "closure-token",
+            Self::FrontierShape => "frontier-shape",
+        }
+    }
+}
+
+impl fmt::Display for RecordDefect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.token())
+    }
+}
+
+/// One published campaign record, decoded from the bytes the store holds.
+///
+/// The inverse of [`budget::publication_record`](super::budget::publication_record), field
+/// for field. Every field is read from the committed bytes. Nothing is supplied from the
+/// daemon's current configuration, so nothing here is inferred.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CampaignRecord {
+    /// The store identity the record is published under.
+    pub identity: ArtifactHandle,
+    /// The task that committed it.
+    pub task: TaskHandle,
+    /// Its position in that task's commit order, from zero.
+    pub sequence: u32,
+    /// The snapshot the run was over, or [`None`] when the record says `-`.
+    pub snapshot: Option<WorkspaceHandle>,
+    /// How many states the run explored.
+    pub states: u64,
+    /// Whether the exploration closed (`true`) or a bound tripped (`false`).
+    pub closed: bool,
+    /// How many unexpanded states the run parked with.
+    pub frontier: u64,
+}
+
+/// A cursor over one length-prefixed record.
+struct Parts<'a>(&'a [u8]);
+
+impl<'a> Parts<'a> {
+    fn next(&mut self) -> Result<&'a [u8], RecordDefect> {
+        let (width, rest) = self
+            .0
+            .split_first_chunk::<8>()
+            .ok_or(RecordDefect::Truncated)?;
+        let width =
+            usize::try_from(u64::from_be_bytes(*width)).map_err(|_| RecordDefect::Truncated)?;
+        if rest.len() < width {
+            return Err(RecordDefect::Truncated);
+        }
+        let (part, rest) = rest.split_at(width);
+        self.0 = rest;
+        Ok(part)
+    }
+
+    fn text(&mut self) -> Result<&'a str, RecordDefect> {
+        std::str::from_utf8(self.next()?).map_err(|_| RecordDefect::Truncated)
+    }
+
+    fn u64(&mut self) -> Result<u64, RecordDefect> {
+        let bytes: [u8; 8] = self
+            .next()?
+            .try_into()
+            .map_err(|_| RecordDefect::FieldWidth)?;
+        Ok(u64::from_be_bytes(bytes))
+    }
+
+    fn u32(&mut self) -> Result<u32, RecordDefect> {
+        let bytes: [u8; 4] = self
+            .next()?
+            .try_into()
+            .map_err(|_| RecordDefect::FieldWidth)?;
+        Ok(u32::from_be_bytes(bytes))
+    }
+}
+
+/// Decode the bytes a `task_*` index entry names into a [`CampaignRecord`].
+///
+/// Strict: every part must be present at its declared width, and no byte may remain. A
+/// record that does not decode is a [`RecordDefect`], never a best-effort partial.
+///
+/// # Errors
+///
+/// The [`RecordDefect`] that names the first part that did not decode.
+pub fn decode_campaign_record(
+    identity: &ArtifactHandle,
+    bytes: &[u8],
+) -> Result<CampaignRecord, RecordDefect> {
+    let mut parts = Parts(bytes);
+    let task = TaskHandle::new(parts.text()?).map_err(|_| RecordDefect::TaskHandle)?;
+    let sequence = parts.u32()?;
+    let snapshot = match parts.text()? {
+        "-" => None,
+        text => Some(WorkspaceHandle::new(text).map_err(|_| RecordDefect::SnapshotHandle)?),
+    };
+    let states = parts.u64()?;
+    let closed = match parts.text()? {
+        "closed" => true,
+        "bounded" => false,
+        _ => return Err(RecordDefect::ClosureToken),
+    };
+    let frontier = parts.u64()?;
+    let mut components: u64 = 0;
+    while !parts.0.is_empty() {
+        parts.u64()?;
+        components += 1;
+    }
+    // A state has at least one component, and every state in one model has the same arity,
+    // so the components are a whole multiple of the frontier length. An empty frontier has
+    // none.
+    let shaped = match frontier {
+        0 => components == 0,
+        n => components >= n && components % n == 0,
+    };
+    if !shaped {
+        return Err(if frontier == 0 {
+            RecordDefect::TrailingBytes
+        } else {
+            RecordDefect::FrontierShape
+        });
+    }
+    Ok(CampaignRecord {
+        identity: identity.clone(),
+        task,
+        sequence,
+        snapshot,
+        states,
+        closed,
+        frontier,
+    })
+}
+
+/// Why the pass resolved a task to `Failed`.
+///
+/// docs/35: a task the restart cannot resume "transition[s] to `Failed` with a typed reason
+/// (INV-008)". Each variant is one distinct cause. None is a catch-all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FailureReason {
+    /// The head record is `bounded`: the task parked with a frontier, and the frontier is
+    /// durable in the record. The continuation's *pins* are not. The epochs, the bounds, the
+    /// intent and the model source live only on the volatile `Continuation`. Resuming would
+    /// take them from the successor's configuration, which is reconstruction by inference
+    /// (docs/35). So the committed continuation this task needs does not exist.
+    ContinuationNotDurable,
+    /// Two different records claim the head sequence, so the task's last commit is
+    /// ambiguous. Neither is chosen.
+    AmbiguousHead,
+    /// The task's sequences are not contiguous from zero, so a committed record is missing
+    /// and the durable history is incomplete.
+    SequenceGap,
+}
+
+impl FailureReason {
+    /// A stable token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::ContinuationNotDurable => "continuation-not-durable",
+            Self::AmbiguousHead => "ambiguous-head",
+            Self::SequenceGap => "sequence-gap",
+        }
+    }
+}
+
+impl fmt::Display for FailureReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.token())
+    }
+}
+
+/// What the pass concluded about one task.
+///
+/// There is no `Resumed` arm. The resume branch of plan §4.5 needs a committed
+/// continuation, and this build commits the frontier without the pins (see
+/// [`FailureReason::ContinuationNotDurable`]). An arm no input can reach would be a claim
+/// the pass does not make.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Resolution {
+    /// The head record is `closed`: the task finished its exploration and reached a terminal
+    /// status before the crash. It was not left `Running` or `Suspended`, so O2 does not
+    /// apply. Its committed records are claimed. Its terminal status and its report are not
+    /// durable, and are not reconstructed.
+    Settled,
+    /// The task was non-terminal at its last durable commit, or its durable history is not
+    /// sound. It is `Failed`, for the typed reason given.
+    Failed(FailureReason),
+}
+
+impl Resolution {
+    /// A stable token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Settled => "settled",
+            Self::Failed(reason) => reason.token(),
+        }
+    }
+}
+
+/// One task the pass found in the store, and what it resolved the task to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedTask {
+    /// The task.
+    pub task: TaskHandle,
+    /// Every record the task committed, in `(sequence, identity)` order.
+    pub records: Vec<CampaignRecord>,
+    /// The outcome.
+    pub resolution: Resolution,
+}
+
+impl ResolvedTask {
+    /// The store identities this task claims: every record it committed.
+    #[must_use]
+    pub fn claims(&self) -> Vec<ArtifactHandle> {
+        self.records
+            .iter()
+            .map(|record| record.identity.clone())
+            .collect()
+    }
+}
+
+/// The output of the startup task-resolution pass.
+///
+/// Deterministic by construction, like [`RecoveryReport`]. The input is the index and the
+/// bytes it names, and every list is sorted, so [`render`](Self::render) is a function of
+/// the store alone.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TaskResolution {
+    tasks: Vec<ResolvedTask>,
+    unattributed: Vec<(ArtifactHandle, RecordDefect)>,
+}
+
+impl TaskResolution {
+    /// Every task the store holds a record for, in task order.
+    #[must_use]
+    pub fn tasks(&self) -> &[ResolvedTask] {
+        &self.tasks
+    }
+
+    /// `task_*` index entries that do not decode as a campaign record, with the typed cause.
+    #[must_use]
+    pub fn unattributed(&self) -> &[(ArtifactHandle, RecordDefect)] {
+        &self.unattributed
+    }
+
+    /// The canonical rendering: one fact per line, in a fixed section order.
+    #[must_use]
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str("task-resolution 1\n");
+        for resolved in &self.tasks {
+            out.push_str(&format!(
+                "task {} {}\n",
+                resolved.task.as_str(),
+                resolved.resolution.token()
+            ));
+            for record in &resolved.records {
+                out.push_str(&format!(
+                    "record {} {} {} states={} {} frontier={}\n",
+                    record.sequence,
+                    record.identity,
+                    record
+                        .snapshot
+                        .as_ref()
+                        .map_or("-", WorkspaceHandle::as_str),
+                    record.states,
+                    if record.closed { "closed" } else { "bounded" },
+                    record.frontier
+                ));
+            }
+        }
+        for (handle, defect) in &self.unattributed {
+            out.push_str(&format!("unattributed {handle} {defect}\n"));
+        }
+        out
+    }
+}
+
+/// Resolve every task the store holds a record for (plan §4.5 O2, docs/35).
+///
+/// The recoverable set is derived from **durable records only**: every `task_*` identity
+/// the index names, read through the ordinary read path and decoded. No volatile table is
+/// consulted, because after a crash there is none. Per task, in this order:
+///
+/// 1. sequences not contiguous from zero → `Failed(SequenceGap)`;
+/// 2. more than one record at the head sequence → `Failed(AmbiguousHead)`;
+/// 3. head record `closed` → [`Resolution::Settled`];
+/// 4. head record `bounded` → `Failed(ContinuationNotDurable)`.
+///
+/// The pass writes nothing, reads no clock and draws no entropy.
+///
+/// # Errors
+///
+/// [`CapabilityDenied`] when `operator` does not confer
+/// [`Action::Audit`](continuum_workspace::publication::Action::Audit), as for [`recover`].
+pub fn resolve_tasks(
+    store: &ReferenceStore,
+    operator: &CapabilityToken,
+) -> Result<TaskResolution, CapabilityDenied> {
+    let audit = store.audit_view(operator)?;
+    let mut identities: Vec<ArtifactHandle> = audit
+        .identities()
+        .into_iter()
+        .filter(|handle| handle.class() == ArtifactClass::Task)
+        .collect();
+    identities.sort();
+
+    let mut records = Vec::new();
+    let mut unattributed = Vec::new();
+    for identity in identities {
+        match store.read(&identity, operator) {
+            Err(CapabilityDenied) => unattributed.push((identity, RecordDefect::Unreadable)),
+            Ok(bytes) => match decode_campaign_record(&identity, &bytes) {
+                Ok(record) => records.push(record),
+                Err(defect) => unattributed.push((identity, defect)),
+            },
+        }
+    }
+    Ok(resolve_records(records, unattributed))
+}
+
+/// The pure half of [`resolve_tasks`]: group decoded records by task and resolve each.
+#[must_use]
+pub fn resolve_records(
+    records: Vec<CampaignRecord>,
+    mut unattributed: Vec<(ArtifactHandle, RecordDefect)>,
+) -> TaskResolution {
+    let mut by_task: BTreeMap<TaskHandle, Vec<CampaignRecord>> = BTreeMap::new();
+    for record in records {
+        by_task.entry(record.task.clone()).or_default().push(record);
+    }
+    let tasks = by_task
+        .into_iter()
+        .map(|(task, mut records)| {
+            records.sort_by(|a, b| (a.sequence, &a.identity).cmp(&(b.sequence, &b.identity)));
+            records.dedup_by(|a, b| a.identity == b.identity);
+            let resolution = resolve_one(&records);
+            ResolvedTask {
+                task,
+                records,
+                resolution,
+            }
+        })
+        .collect();
+    unattributed.sort();
+    unattributed.dedup();
+    TaskResolution {
+        tasks,
+        unattributed,
+    }
+}
+
+/// One task's resolution, from its records in `(sequence, identity)` order. See
+/// [`resolve_tasks`] for the rule order.
+fn resolve_one(records: &[CampaignRecord]) -> Resolution {
+    let sequences: BTreeSet<u32> = records.iter().map(|record| record.sequence).collect();
+    let Some(head) = sequences.last().copied() else {
+        // Unreachable: a group exists only because a record put it there.
+        return Resolution::Failed(FailureReason::SequenceGap);
+    };
+    let contiguous = u32::try_from(sequences.len()).is_ok_and(|count| count == head + 1);
+    if !contiguous {
+        return Resolution::Failed(FailureReason::SequenceGap);
+    }
+    let heads: Vec<&CampaignRecord> = records
+        .iter()
+        .filter(|record| record.sequence == head)
+        .collect();
+    match heads.as_slice() {
+        [only] if only.closed => Resolution::Settled,
+        [_] => Resolution::Failed(FailureReason::ContinuationNotDurable),
+        _ => Resolution::Failed(FailureReason::AmbiguousHead),
+    }
+}
+
+/// What the daemon did about tasks when it started.
+///
+/// A typed value rather than a flag: a cold start, a restart that ran the pass, and a
+/// restart whose connection capability could not audit the store are three different
+/// facts, and the third is not a success.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Startup {
+    /// A cold start: no durable substrate was adopted, so there was nothing to resolve.
+    Cold,
+    /// A restart over a durable substrate, and the pass ran.
+    Resolved(TaskResolution),
+    /// A restart over a durable substrate, and the connection capability could not audit
+    /// the store, so the pass did not run. No task was resolved.
+    Refused(CapabilityDenied),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -812,6 +1270,213 @@ mod tests {
                 "model-catalog"
             ],
             "IDL §7's out-of-band surface, and nothing else, is restored by the deployment"
+        );
+    }
+
+    // --- the startup task-resolution pass -------------------------------------------------
+
+    use super::super::budget::publication_record;
+    use super::super::task::Preimage;
+
+    fn task(name: &str) -> TaskHandle {
+        TaskHandle::new(name).expect("a well-formed task handle")
+    }
+
+    fn identity(name: &str) -> ArtifactHandle {
+        ArtifactHandle::new(ArtifactClass::Task, name).expect("a well-formed identity")
+    }
+
+    /// A record as `publication_record` writes it, with `frontier` states of `arity`
+    /// components each. Built by hand because the engine's `State` has no public constructor.
+    fn record_bytes(
+        handle: &str,
+        sequence: u32,
+        snapshot: &str,
+        closed: bool,
+        frontier: u64,
+        arity: u64,
+    ) -> Vec<u8> {
+        let mut preimage = Preimage::new();
+        preimage.text(handle);
+        preimage.push(&sequence.to_be_bytes());
+        preimage.text(snapshot);
+        preimage.push(&7_u64.to_be_bytes());
+        preimage.text(if closed { "closed" } else { "bounded" });
+        preimage.push(&frontier.to_be_bytes());
+        for component in 0..frontier * arity {
+            preimage.push(&(component as i64).to_be_bytes());
+        }
+        preimage.bytes().to_vec()
+    }
+
+    fn record(handle: &str, name: &str, sequence: u32, closed: bool) -> CampaignRecord {
+        decode_campaign_record(
+            &identity(name),
+            &record_bytes(handle, sequence, "ws_a", closed, u64::from(!closed), 2),
+        )
+        .expect("a well-formed record decodes")
+    }
+
+    #[test]
+    fn the_decoder_is_the_inverse_of_the_record_writer() {
+        let bytes = publication_record(&task("task_t"), 3, Some("ws_s"), 16, true, &[]);
+        let decoded = decode_campaign_record(&identity("r"), &bytes).expect("decodes");
+        assert_eq!(decoded.task, task("task_t"));
+        assert_eq!(decoded.sequence, 3);
+        assert_eq!(
+            decoded.snapshot.as_ref().map(WorkspaceHandle::as_str),
+            Some("ws_s")
+        );
+        assert_eq!(decoded.states, 16);
+        assert!(decoded.closed);
+        assert_eq!(decoded.frontier, 0);
+
+        let bytes = publication_record(&task("task_t"), 0, None, 4, false, &[]);
+        let decoded = decode_campaign_record(&identity("r"), &bytes).expect("decodes");
+        assert_eq!(decoded.snapshot, None);
+        assert!(!decoded.closed);
+
+        let bytes = record_bytes("task_t", 1, "ws_s", false, 3, 2);
+        let decoded = decode_campaign_record(&identity("r"), &bytes).expect("decodes");
+        assert_eq!(decoded.frontier, 3);
+    }
+
+    #[test]
+    fn a_record_that_does_not_decode_is_a_typed_defect_per_cause() {
+        let good = record_bytes("task_t", 0, "ws_s", false, 2, 2);
+        let cases: Vec<(Vec<u8>, RecordDefect)> = vec![
+            (good[..good.len() - 1].to_vec(), RecordDefect::Truncated),
+            (Vec::new(), RecordDefect::Truncated),
+            (
+                record_bytes("not-a-task", 0, "ws_s", true, 0, 0),
+                RecordDefect::TaskHandle,
+            ),
+            (
+                record_bytes("task_t", 0, "nope", true, 0, 0),
+                RecordDefect::SnapshotHandle,
+            ),
+            (
+                record_bytes("task_t", 0, "ws_s", false, 3, 0),
+                RecordDefect::FrontierShape,
+            ),
+            (
+                {
+                    let mut bytes = record_bytes("task_t", 0, "ws_s", true, 0, 0);
+                    bytes.extend_from_slice(&8_u64.to_be_bytes());
+                    bytes.extend_from_slice(&1_i64.to_be_bytes());
+                    bytes
+                },
+                RecordDefect::TrailingBytes,
+            ),
+            (
+                {
+                    let mut preimage = Preimage::new();
+                    preimage.text("task_t");
+                    preimage.push(&0_u64.to_be_bytes());
+                    preimage.bytes().to_vec()
+                },
+                RecordDefect::FieldWidth,
+            ),
+            (
+                {
+                    let mut preimage = Preimage::new();
+                    preimage.text("task_t");
+                    preimage.push(&0_u32.to_be_bytes());
+                    preimage.text("-");
+                    preimage.push(&0_u64.to_be_bytes());
+                    preimage.text("open");
+                    preimage.push(&0_u64.to_be_bytes());
+                    preimage.bytes().to_vec()
+                },
+                RecordDefect::ClosureToken,
+            ),
+        ];
+        for (bytes, expected) in cases {
+            assert_eq!(
+                decode_campaign_record(&identity("r"), &bytes),
+                Err(expected),
+                "expected `{expected}`"
+            );
+        }
+    }
+
+    #[test]
+    fn each_resolution_rule_fires_on_its_own_input_and_on_no_other() {
+        let resolution = resolve_records(
+            vec![
+                // Parked: one bounded record.
+                record("task_parked", "p0", 0, false),
+                // Settled: bounded, then resumed to closure.
+                record("task_settled", "s0", 0, false),
+                record("task_settled", "s1", 1, true),
+                // Gap: sequence 1 is missing.
+                record("task_gap", "g0", 0, false),
+                record("task_gap", "g2", 2, true),
+                // Ambiguous: two different records at the head sequence.
+                record("task_ambiguous", "a0", 0, false),
+                record("task_ambiguous", "a1", 0, true),
+            ],
+            vec![(identity("junk"), RecordDefect::Truncated)],
+        );
+        let outcomes: Vec<(&str, Resolution)> = resolution
+            .tasks()
+            .iter()
+            .map(|resolved| (resolved.task.as_str(), resolved.resolution))
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                (
+                    "task_ambiguous",
+                    Resolution::Failed(FailureReason::AmbiguousHead)
+                ),
+                ("task_gap", Resolution::Failed(FailureReason::SequenceGap)),
+                (
+                    "task_parked",
+                    Resolution::Failed(FailureReason::ContinuationNotDurable)
+                ),
+                ("task_settled", Resolution::Settled),
+            ]
+        );
+        assert_eq!(
+            resolution.unattributed(),
+            &[(identity("junk"), RecordDefect::Truncated)]
+        );
+        let settled = &resolution.tasks()[3];
+        assert_eq!(settled.claims(), vec![identity("s0"), identity("s1")]);
+    }
+
+    #[test]
+    fn the_resolution_is_independent_of_input_order() {
+        let forward = vec![
+            record("task_x", "x0", 0, false),
+            record("task_x", "x1", 1, false),
+            record("task_y", "y0", 0, true),
+        ];
+        let mut backward = forward.clone();
+        backward.reverse();
+        assert_eq!(
+            resolve_records(forward, Vec::new()).render(),
+            resolve_records(backward, Vec::new()).render()
+        );
+    }
+
+    #[test]
+    fn only_the_task_table_is_resolved_and_the_continuation_frontier_survives_in_the_record() {
+        let resolved: Vec<&str> = VolatileFact::ALL
+            .iter()
+            .filter(|fact| fact.disposition() == Disposition::Resolved)
+            .map(|fact| fact.token())
+            .collect();
+        assert_eq!(resolved, vec!["task-table"]);
+        assert_eq!(
+            VolatileFact::ContinuationTable.disposition(),
+            Disposition::Declared,
+            "a frontier without its pins is not a committed continuation"
+        );
+        assert_eq!(
+            VolatileFact::ContinuationTable.survives_as(),
+            Some(ArtifactClass::Task)
         );
     }
 }
