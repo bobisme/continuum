@@ -27,14 +27,14 @@
 //! | one operation — `verification.start` — carries the whole idempotence axis | **all 47 `@mutation` operations are enumerated** and each is classified; the 18 a typed dispatch can be handed are each driven twice ([`sweep_every_reachable_mutation_is_idempotent_under_one_key`]) |
 //! | the enumeration is implicit: whatever the fixture happens to call | the enumeration is an **independent parse of the IDL text** ([`idl_operations`]), cross-checked against `registry::OPERATIONS`, so an operation cannot be silently skipped ([`instrument_the_idl_and_the_registry_declare_the_same_forty_seven_mutations`]) |
 //! | idempotence is read off the *answer* — `wire_bytes(first) == wire_bytes(replay)` | idempotence is read off the **world**: a [`Fingerprint`] over the publication store's bytes, its authorization audit log, the evidence graph, the intent registry, and the answers of independently dispatched `@readonly` operations ([`Fingerprint::of`]) |
-//! | the replay carries the **same** `request_id` as the first call | the replay carries a **fresh** `request_id`, which is what a real retry does and what `ReplayKey`'s own documentation says it must be free to do — and that is where this file's finding comes from ([`finding_a_replay_echoes_the_first_attempts_request_id`]) |
+//! | the replay carries the **same** `request_id` as the first call | the replay carries a **fresh** `request_id`, which is what a real retry does and what `ReplayKey`'s own documentation says it must be free to do — and that is where this file's finding came from, now a regression guard ([`regression_a_replay_echoes_the_retrys_request_id`]) |
 //! | "a different request" is a different envelope `budget` (the bn-h1zqz regression) | "a different request" is a different envelope `output_policy`, applied **uniformly to all 18** operations, so the discrimination is a property of the ledger rather than of one operation's preimage |
 //! | the negative control is one campaign under two keys | the negative control is the **whole sweep** re-run under two fresh keys, per operation, reporting for each whether a genuine second execution is observably different from the recorded one ([`control_a_fresh_key_re_executes_and_the_sweep_says_where_that_is_observable`]) |
 //! | single actor | cross-actor and cross-operation scoping are probed in both directions ([`scoping_another_actors_key_behaves_as_an_unused_key`], [`scoping_one_key_may_not_group_two_operations`]) |
 //!
 //! # The verdict this file reaches
 //!
-//! **SATISFIED-AT-NARROWER-SCOPE, with one finding.**
+//! **SATISFIED-AT-NARROWER-SCOPE, with one finding, since repaired.**
 //!
 //! - **Satisfied** for the 18 `@mutation` operations this daemon's typed dispatch surface can
 //!   be handed. For each: the same key with a byte-equal canonical request returns the
@@ -47,17 +47,18 @@
 //!   `Arguments` variant names them, so a request for one cannot pass the dispatch's shape
 //!   check and never reaches the ledger at all. Their idempotency is **unprobed, not passed**
 //!   ([`scope_twenty_nine_mutations_are_unreachable_and_therefore_unprobed`]).
-//! - **Finding (`request_id` echo).** RFC 0026's envelope table declares `request_id`
-//!   "client-unique; **echoed in the result**". The ledger returns the recorded
-//!   `OperationOutcome` verbatim, so a retry under a fresh `request_id` is answered with an
-//!   envelope echoing the **first attempt's** `request_id` — and, for `@audit_recorded`
-//!   mutations, the first attempt's `audit` correlation, which `rule audit.correlation`
-//!   requires to be a function of *this* request's identity. The delivering evidence cannot
-//!   see this because it replays with an unchanged `request_id`. Recorded as executable
-//!   assertions in [`finding_a_replay_echoes_the_first_attempts_request_id`] and
-//!   [`finding_a_replay_returns_the_first_attempts_audit_correlation`]; both are written to
-//!   *pass* on today's daemon, describing what it does, so that a repair flips them and
-//!   nothing here silently rots.
+//! - **Finding (`request_id` echo), repaired by bn-1ybn3.** RFC 0026's envelope table
+//!   declares `request_id` "client-unique; **echoed in the result**". The ledger returned
+//!   the recorded `OperationOutcome` verbatim, so a retry under a fresh `request_id` was
+//!   answered with an envelope echoing the **first attempt's** `request_id` — and, for
+//!   `@audit_recorded` mutations, the first attempt's `audit` correlation, which
+//!   `rule audit.correlation` requires to be a function of *this* request's identity. The
+//!   delivering evidence cannot see this because it replays with an unchanged `request_id`.
+//!   A replay now returns the recorded outcome re-addressed to the retry ([`readdressed`]):
+//!   the retry's `request_id`, and this request's `audit` correlation, with every other
+//!   field unchanged. [`regression_a_replay_echoes_the_retrys_request_id`] and
+//!   [`regression_a_replay_carries_this_requests_audit_correlation`] guard the repair, and
+//!   every same-key replay in this file is compared against [`readdressed`].
 //!
 //! # Absences, stated rather than papered over (INV-007, INV-008)
 //!
@@ -101,7 +102,7 @@ use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::context::ContextFamily;
 use continuumd::daemon::evidence::EvidenceFamily;
 use continuumd::daemon::family::{Arguments, Payload};
-use continuumd::daemon::identity::Blake3Identity;
+use continuumd::daemon::identity::{AuditCorrelator, Blake3Identity, HashedCorrelation};
 use continuumd::daemon::intent::IntentFamily;
 use continuumd::daemon::observe::ObserveFamily;
 use continuumd::daemon::state::{IntentRecord, RegistryStatus};
@@ -1684,6 +1685,31 @@ fn control_the_fingerprint_detects_a_genuinely_new_artifact() {
 // G — the sweep: every reachable mutation, twice, under one key
 // =========================================================================================
 
+/// The answer a true replay of `recorded` owes `retry`.
+///
+/// `rule idempotency.replay` fixes the recorded *identity*: status, verdict, error,
+/// artifacts, task, and payload come back unchanged. Two envelope fields name the attempt
+/// instead, and a retry is a new attempt (bn-1ybn3):
+///
+/// - `request_id` is "echoed in the result" (RFC 0026, `RequestEnvelope` table), so it is
+///   the retry's;
+/// - `audit` "MUST be a function of the request identity alone — `request_id` and `actor`"
+///   (`rule audit.correlation`), so where the recorded outcome carries one it is the value
+///   the daemon's shipped correlator derives for the retry's identity.
+///
+/// Every other field is compared exactly, so this is the old field-for-field equality with
+/// the two per-attempt fields pinned to their required values rather than ignored.
+fn readdressed(recorded: &OperationOutcome, retry: &OperationRequest) -> OperationOutcome {
+    let mut expected = recorded.clone();
+    expected.envelope.request_id = retry.envelope.request_id.clone();
+    if recorded.envelope.audit.value().is_some() {
+        expected.envelope.audit = Optional::Present(
+            HashedCorrelation.correlate(&retry.envelope.request_id, &retry.envelope.actor),
+        );
+    }
+    expected
+}
+
 /// What one probe's same-key replay did.
 #[derive(Debug, Clone)]
 struct Replayed {
@@ -1693,7 +1719,8 @@ struct Replayed {
     first_status: ResultStatus,
     /// Whether the first call succeeded, i.e. whether the probe is non-vacuous.
     effective: bool,
-    /// Whether the replay's outcome equals the first call's, field for field.
+    /// Whether the replay's outcome is the first call's recorded outcome, re-addressed to
+    /// the retry and to nothing else ([`readdressed`]).
     outcome_equal: bool,
     /// Whether the world moved between the two calls.
     world_moved: bool,
@@ -1723,7 +1750,7 @@ fn replay_once(probe: &Probe) -> Replayed {
         operation: probe.operation,
         first_status: first.envelope.status,
         effective: first.envelope.status != ResultStatus::Error,
-        outcome_equal: first == replay,
+        outcome_equal: replay == readdressed(&first, &replay_request),
         world_moved: after_first != after_replay,
     }
 }
@@ -2228,13 +2255,13 @@ fn interleaving_a_replay_after_other_operations_still_neither_reruns_nor_corrupt
             "{}: the interleaving must actually move the world, or the probe is vacuous",
             probe.operation
         );
-        let replay = rig
-            .daemon
-            .dispatch(&request(&rig, probe, Body::A, "req_replay", &key));
+        let replay_request = request(&rig, probe, Body::A, "req_replay", &key);
+        let replay = rig.daemon.dispatch(&replay_request);
         let after = Fingerprint::of(&mut rig);
 
         assert_eq!(
-            first, replay,
+            readdressed(&first, &replay_request),
+            replay,
             "{}: the ledger returns the recorded outcome whatever happened in between",
             probe.operation
         );
@@ -2249,11 +2276,11 @@ fn interleaving_a_replay_after_other_operations_still_neither_reruns_nor_corrupt
 }
 
 // =========================================================================================
-// K — the finding: what the replay's own envelope says about which call it answers
+// K — the repaired finding: the replay's own envelope answers *this* call
 // =========================================================================================
 
 #[test]
-fn finding_a_replay_echoes_the_first_attempts_request_id() {
+fn regression_a_replay_echoes_the_retrys_request_id() {
     // RFC 0026's `RequestEnvelope` table:
     //
     // > `request_id` | `RequestId` (`^req_…`) | required | client-unique; **echoed in the
@@ -2262,15 +2289,11 @@ fn finding_a_replay_echoes_the_first_attempts_request_id() {
     // and the `ResultEnvelope` row for the same field reads, in full, "echo".
     //
     // `daemon::state::ReplayKey` deliberately excludes `request_id` — "a retry carries a
-    // fresh one by construction, so including it would make every genuine replay a conflict"
-    // — and step 7 of the dispatch then returns `previous.outcome.clone()`, envelope and
-    // all. So the two statements meet at a retry: the client sends `req_retry`, and the
-    // answer echoes `req_first`.
-    //
-    // This assertion describes what the daemon does today, so it passes; a repair flips it,
-    // which is the intent. The observable cost is correlation: a client with several
+    // fresh one by construction, so including it would make every genuine replay a conflict".
+    // Until bn-1ybn3, step 7 of the dispatch then returned the recorded outcome envelope and
+    // all, so a retry sent as `req_retry` was answered with `req_first`. A client with several
     // requests in flight matches answers to requests by this field, and an answer bearing an
-    // identifier it never sent cannot be matched at all.
+    // identifier it never sent cannot be matched at all. This guards the repair.
     let probe = named_probe("workspace.create");
     let mut rig = fixture();
     let key = "idem-echo";
@@ -2285,18 +2308,26 @@ fn finding_a_replay_echoes_the_first_attempts_request_id() {
 
     assert_eq!(
         replay.envelope.request_id,
-        RequestId::new("req_first").expect("a well-formed request id"),
-        "today: the replay echoes the first attempt's identity"
+        RequestId::new("req_retry").expect("a well-formed request id"),
+        "the replay echoes the identity the retry sent"
     );
     assert_ne!(
-        replay.envelope.request_id,
-        RequestId::new("req_retry").expect("a well-formed request id"),
-        "which is not the identity the retry sent — the echo rule is not kept on this lane"
+        replay.envelope.request_id, first.envelope.request_id,
+        "and not the first attempt's"
+    );
+    // The identity the rule protects is untouched by the re-addressing.
+    assert_eq!(
+        replay.envelope.artifacts, first.envelope.artifacts,
+        "`rule idempotency.replay`: the same artifact identity"
+    );
+    assert_eq!(
+        replay.payload, first.payload,
+        "and the recorded payload, unchanged"
     );
 }
 
 #[test]
-fn finding_a_replay_returns_the_first_attempts_audit_correlation() {
+fn regression_a_replay_carries_this_requests_audit_correlation() {
     // The same cause, on a field with its own rule:
     //
     // > The identity MUST be a function of the request identity alone — `request_id` and
@@ -2305,9 +2336,12 @@ fn finding_a_replay_returns_the_first_attempts_audit_correlation() {
     // >
     // > — `rule audit.correlation`
     //
-    // A replay returns the recorded envelope, whose `audit` is `f(req_first, actor)`. It is
-    // therefore not a function of *this* call's request identity, and a caller that cites it
-    // is citing the first attempt's record.
+    // Until bn-1ybn3 a replay returned the recorded envelope, whose `audit` is
+    // `f(req_first, actor)`, so a caller citing it cited the first attempt's record. The
+    // replay now carries `f(req_retry, actor)`, and that value names a record that exists:
+    // `@audit_recorded` obliges "every call written to the audit log" (RFC 0026, annotation
+    // table), and the replay's admission decision is recorded under this correlation before
+    // the ledger is consulted (RFC 0027 P5).
     let probe = named_probe("intent.accept");
     let mut rig = fixture();
     let key = "idem-audit";
@@ -2323,23 +2357,54 @@ fn finding_a_replay_returns_the_first_attempts_audit_correlation() {
         .cloned()
         .expect("`intent.accept` is `@audit_recorded`, so its result names a record");
 
-    let replay = rig
-        .daemon
-        .dispatch(&request(&rig, &probe, Body::A, "req_retry", key));
+    let retry = request(&rig, &probe, Body::A, "req_retry", key);
+    let replay = rig.daemon.dispatch(&retry);
     let replayed = replay
         .envelope
         .audit
         .value()
         .cloned()
-        .expect("the recorded outcome carries the recorded correlation");
-    assert_eq!(
+        .expect("a replay of an `@audit_recorded` call still names a record");
+    assert_ne!(
         replayed, recorded,
-        "today: the retry is answered with the first attempt's audit correlation"
+        "the retry is not answered with the first attempt's audit correlation"
+    );
+    assert_eq!(
+        replayed,
+        HashedCorrelation.correlate(&retry.envelope.request_id, &retry.envelope.actor),
+        "it carries the correlation of this request's identity"
+    );
+    assert_eq!(
+        replay,
+        readdressed(&first, &retry),
+        "and nothing else about the recorded outcome moved"
     );
 
-    // The control that makes the above a defect rather than a coincidence: the same actor
-    // sending a *different* `request_id` on a non-replayed call gets a different correlation,
-    // so the field really is per-attempt everywhere else.
+    // The record the new correlation names exists, and it is the replay's own.
+    let admissions = rig.daemon.state().admissions();
+    let cited: Vec<_> = admissions
+        .iter()
+        .filter(|record| record.audit == replayed.as_str())
+        .collect();
+    assert_eq!(
+        cited.len(),
+        1,
+        "exactly one audit record carries the replay's correlation"
+    );
+    assert_eq!(cited[0].operation, "intent.accept");
+    assert_eq!(cited[0].actor, probe.actor);
+    assert!(cited[0].admitted, "the replay was admitted");
+    assert_eq!(
+        admissions
+            .iter()
+            .filter(|record| record.audit == recorded.as_str())
+            .count(),
+        1,
+        "and the first attempt's record is still its own, not overwritten by the replay"
+    );
+
+    // The control that makes the correlation per-attempt everywhere else: the same actor
+    // sending a *different* `request_id` on a non-replayed call gets a different value.
     let mut fresh = fixture();
     let one = fresh
         .daemon
@@ -2388,11 +2453,11 @@ fn absence_the_retention_window_has_no_reachable_expiry() {
             index % 2 == 0,
         );
     }
-    let replay = rig
-        .daemon
-        .dispatch(&request(&rig, &probe, Body::A, "req_retry", key));
+    let retry = request(&rig, &probe, Body::A, "req_retry", key);
+    let replay = rig.daemon.dispatch(&retry);
     assert_eq!(
-        first, replay,
+        readdressed(&first, &retry),
+        replay,
         "the key survives every intervening call this file can make; the declared 24h window \
          itself has no reachable expiry and is not tested"
     );
@@ -2422,8 +2487,11 @@ fn absence_the_ledger_records_a_key_for_a_refused_mutation_too() {
         rig.daemon.state().replay("agent:reader", key).is_some(),
         "the refusal is filed under the key"
     );
-    let replay = rig
-        .daemon
-        .dispatch(&request(&rig, &probe, Body::A, "req_retry", key));
-    assert_eq!(first, replay, "and is what the retry is answered with");
+    let retry = request(&rig, &probe, Body::A, "req_retry", key);
+    let replay = rig.daemon.dispatch(&retry);
+    assert_eq!(
+        readdressed(&first, &retry),
+        replay,
+        "and is what the retry is answered with"
+    );
 }

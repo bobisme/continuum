@@ -535,7 +535,7 @@ impl Daemon {
         if let Some(key) = key.as_deref() {
             if let Some(previous) = state.replay(envelope.actor.as_str(), key) {
                 if previous.request == replay_key {
-                    return Ok(previous.outcome.clone());
+                    return Ok(replayed(&previous.outcome, envelope, &audit));
                 }
                 return Ok(raise(
                     services,
@@ -645,6 +645,49 @@ fn kill(injector: &dyn CrashInjector, point: CrashPoint) -> Result<(), Killed> {
         return Err(Killed { point });
     }
     Ok(())
+}
+
+/// The answer to a true replay: the recorded outcome, re-addressed to *this* call.
+///
+/// `rule idempotency.replay` fixes what a replay returns — "the same task or artifact
+/// identity" — so the payload, the status, the artifacts, the task, the verdict, and the
+/// error are the recorded ones, unchanged. Two envelope fields are not part of that
+/// identity. They name the *attempt*, and a retry is a new attempt:
+///
+/// - **`request_id`** — "client-unique; echoed in the result" (RFC 0026, `RequestEnvelope`
+///   table; the `ResultEnvelope` row reads "echo"). A retry carries a fresh one by
+///   construction ([`ReplayKey`] excludes it for that reason). A client matches answers to
+///   requests by this field, so it echoes the retry's value, not the first attempt's.
+/// - **`audit`** — "The identity MUST be a function of the request identity alone —
+///   `request_id` and `actor`" (`rule audit.correlation`). The first attempt's value is
+///   `f(first request_id, actor)`, so this call's `audit` is the one derived for *this*
+///   request identity. Presence is not re-decided: it is a function of the operation and
+///   the outcome's error code, and both are the recorded ones. A `CapabilityDenied` never
+///   reaches the ledger, because admission is step 5.
+///
+/// # The record the new correlation names
+///
+/// `@audit_recorded` obliges "every call written to the audit log" (RFC 0026, annotation
+/// table; plan §18.5), and the `audit` field "names the plan §18.5 audit record the call
+/// produced" (RFC 0026, `ResultEnvelope` notes). A replay is a call. Its record is the
+/// [`AdmissionRecord`] step 5 writes before the ledger is consulted, under this same
+/// correlation value (RFC 0027 P5: every admission decision is recorded). So the value this
+/// function puts in `audit` names a record that exists, and no second write is needed
+/// here. Writing one would also break exactly-once: the replay must not re-run the
+/// handler's own effects, which include any audit-bearing registry write such as
+/// `intent.accept`'s `acceptance.audit_record`. That record keeps the first attempt's
+/// correlation because it describes the first attempt's effect.
+fn replayed(
+    recorded: &OperationOutcome,
+    envelope: &RequestEnvelope,
+    audit: &crate::protocol::scalar::AuditCorrelationId,
+) -> OperationOutcome {
+    let mut outcome = recorded.clone();
+    outcome.envelope.request_id = envelope.request_id.clone();
+    if !outcome.envelope.audit.is_absent() {
+        outcome.envelope.audit = crate::protocol::spec::Optional::Present(audit.clone());
+    }
+    outcome
 }
 
 /// Everything that survives a daemon crash.

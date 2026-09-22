@@ -342,8 +342,11 @@ pub struct Replay {
     /// the typed request instead. The two agree by construction once a codec exists: equal
     /// canonical bytes decode to equal typed requests.
     pub request: ReplayKey,
-    /// The result the first execution produced, returned verbatim to a replay so that
-    /// "the same task or artifact identity" is returned by construction.
+    /// The result the first execution produced. A replay returns it with the payload and
+    /// every identity-bearing field unchanged, so "the same task or artifact identity" is
+    /// returned by construction. Only the per-attempt `request_id` echo and the `audit`
+    /// correlation derived from it are re-addressed to the retry (see `Daemon::dispatch`,
+    /// step 7).
     pub outcome: OperationOutcome,
 }
 
@@ -391,7 +394,8 @@ pub struct Replay {
 ///
 /// The direction of the repair is the rule's own: a *different* canonical request under a
 /// used key is refused, never silently served. A true replay — every field above equal — is
-/// unaffected and still returns the recorded outcome verbatim.
+/// unaffected and still returns the recorded outcome, re-addressed only in its per-attempt
+/// `request_id` and `audit` fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayKey {
     /// `RequestEnvelope.operation`.
