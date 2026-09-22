@@ -5,7 +5,8 @@ use super::prelude::*;
 use crate::protocol_struct;
 
 protocol_struct! {
-    /// What an operation is aimed at.
+    /// What an operation is aimed at. Under `kind = benchmark_task`, `id`
+    /// is a task name per `rule benchmark.task_identity`.
     struct Target {
         /// IDL `kind: TargetKind required`.
         kind: TargetKind required;
@@ -146,7 +147,9 @@ protocol_struct! {
         edge_kinds: list<EvidenceEdgeKind> optional;
         /// IDL `statuses: list<EvidenceStatus> optional`.
         statuses: list<EvidenceStatus> optional;
-        /// Claim identity or property identifier to scope the query to.
+        /// Claim identity to scope the query to: the `claim_id` of the nodes
+        /// it selects, compared byte for byte. Never a property identifier
+        /// (`rule evidence.claim_identity`).
         claim_id: String optional;
         /// Roots to traverse from; empty means the whole graph in scope.
         /// The traversal is `rule evidence.traversal`: an edge is walked in

@@ -484,7 +484,8 @@ protocol_enum! {
         module => Module,
         /// Wire token `program`.
         program => Program,
-        /// Wire token `benchmark_task`.
+        /// Wire token `benchmark_task`. `Target.id` carries a benchmark
+        /// task name (`rule benchmark.task_identity`).
         benchmark_task => BenchmarkTask,
         /// Wire token `all_claims`.
         all_claims => AllClaims,

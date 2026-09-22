@@ -142,7 +142,7 @@ const INVENTORY: &[Artifact] = &[
     // --- the authority ---------------------------------------------------------------
     Artifact {
         path: IDL,
-        role: "the normative wire contract: 75 operations, 47 structs, 34 enums, 45 rules",
+        role: "the normative wire contract: 75 operations, 47 structs, 34 enums, 50 rules",
         provenance: Provenance::Normative,
     },
     Artifact {
@@ -541,14 +541,14 @@ mod blindness {
 
     #[test]
     fn rule_bodies_are_dropped_except_the_one_rule_leg_one_reads_by_hand() {
-        // The parser skips `"""` blocks, so the 45 rules' normative bodies are compared
+        // The parser skips `"""` blocks, so the 50 rules' normative bodies are compared
         // against nothing. Leg one reaches back into the raw text for exactly one of
-        // them — `errors.common` — which is the measure of the hole: 44 rule bodies,
+        // them — `errors.common` — which is the measure of the hole: 49 rule bodies,
         // including `encoding.opaque_payloads` and `conformance.registry_agreement`
         // themselves, are unchecked prose as far as both checkers are concerned.
         let idl = read(IDL);
         let rules = idl.lines().filter(|line| line.starts_with("rule ")).count();
-        assert_eq!(rules, 45, "rules the IDL declares");
+        assert_eq!(rules, 50, "rules the IDL declares");
 
         let conformance = read(CHECKERS[0]);
         assert!(conformance.contains("dropping comments and `\"\"\"` blocks"));

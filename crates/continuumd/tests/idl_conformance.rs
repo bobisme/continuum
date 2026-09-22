@@ -1041,11 +1041,16 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // 44 -> 45. It fixes the spelling of plan §4.4's class vocabulary in fields that stay
     // `String`, because retyping them to an enum is `rule versioning.breaking_change`.
     // No operation, alias, enum, struct, or union moves, so `version` stays "3.6".
+    //
+    // IDL 1.14 (bn-ah1k8) adds five rules and nothing else: 45 -> 50. They declare the
+    // domains of six `String` leaves the G1-02 sweep pinned (`benchmark.task_identity`,
+    // `benchmark.graders`, `evidence.claim_identity`, `query.reuse_reasons`,
+    // `query.invalidation_edges`); the fields keep their type, so `version` stays "3.6".
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 45, "rules");
+    assert_eq!(document.rules.len(), 50, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()

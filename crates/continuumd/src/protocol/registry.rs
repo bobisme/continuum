@@ -19,11 +19,12 @@ use super::spec::{
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
 ///
-/// `"1.13"` as of bn-3ncfp, which adds `rule artifact_class.spelling` (the
-/// artifact-class token vocabulary, 44 -> 45 rules) and moves no declaration,
-/// so it leaves [`PROTOCOL_VERSION`] at `"3.6"`. `"1.12"` (bn-12plt) was a
-/// doc-comment-only revision on the same footing.
-pub const IDL_VERSION: &str = "1.13";
+/// `"1.14"` as of bn-ah1k8, which adds five rules that declare the domains of
+/// six `String` leaves (45 -> 50 rules) and moves no declaration, so it leaves
+/// [`PROTOCOL_VERSION`] at `"3.6"`. `"1.13"` (bn-3ncfp, `rule
+/// artifact_class.spelling`, 44 -> 45) and `"1.12"` (bn-12plt, doc comments
+/// only) were on the same footing.
+pub const IDL_VERSION: &str = "1.14";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///

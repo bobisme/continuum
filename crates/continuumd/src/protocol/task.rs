@@ -84,7 +84,8 @@ protocol_struct! {
         edge: EvidenceHandle optional;
         /// Status after the transition, for `status_transition` events.
         status: EvidenceStatus optional;
-        /// The claim whose status changed.
+        /// The claim whose status changed, as a claim identity
+        /// (`rule evidence.claim_identity`).
         claim_id: String optional;
     }
 }

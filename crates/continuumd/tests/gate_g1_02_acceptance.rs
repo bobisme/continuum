@@ -67,37 +67,41 @@
 //! | `Opaque`/`Bytes` leaves | 33 ([`INLINE_LEAVES`]) |
 //! | adjudicated `String` sites | 66 |
 //! | adjudicated `Opaque`/`Bytes` sites | 31 |
-//! | **findings** | **6 leaves over 5 sites** |
+//! | `String` sites whose domain a named IDL rule declares | 5 sites, 6 leaves ([`DECLARED_DOMAINS`]) |
+//! | **findings** | **0** — the 6 leaves over 5 sites pinned before bn-ah1k8 are paid by it |
 //!
 //! # Verdict
 //!
 //! **SATISFIED-AT-NARROWER-SCOPE.** Every daemon-held resource that any of the 75
 //! operations consumes or returns is named by an explicit typed handle or by a content
-//! commitment, with **five declaration sites (six leaves) excepted**, and with a stated
-//! boundary on inbound content. The scope statements are not softened:
+//! commitment, or by a string whose grammar, meaning, and refusal a named IDL rule declares,
+//! with a stated boundary on inbound content. The scope statements are not softened:
 //!
 //! | # | Scope statement | Test |
 //! |---|---|---|
 //! | 1 | 19 declared handle classes; every one is a prefix-checked newtype whose constructor is the parser, so a wrong-class handle is unconstructable rather than merely unlikely | [`a_handle_of_the_wrong_class_cannot_be_constructed_at_all`] |
 //! | 2 | Every `@mutation` operation returns at least one handle or commitment. The five operations whose response names none are all `@readonly` | [`the_response_direction_returns_handles_wherever_it_mints_or_moves_a_resource`] |
 //! | 3 | Every response-position inline blob travels in a call that also names a handle — content beside a name, never instead of one | [`inline_content_never_travels_without_a_handle_in_the_same_call`] |
-//! | 4 | **FINDING**: `benchmark.run` names its benchmark task (`schemas/benchmark-task.schema.json`) by `task_id: String` and its graders by `graders: list<String>`. No handle class exists for either, and `TargetKind` carries a `benchmark_task` member so `Target.id` can name one the same way | [`the_findings_are_exactly_these_and_no_others`] |
-//! | 5 | **FINDING**: `query.explain_invalidation` returns `edges: list<String>` beside two `list<ArtifactHandle>` siblings, while `evidence.query` returns its edges as `list<EvidenceHandle>` | same |
-//! | 6 | **FINDING (weak)**: `EvidenceQuery.claim_id` and `QueryExplainReuseResponse.reasons` declare no domain — the reader cannot tell whether the value names a resource | same |
+//! | 4 | **FINDING, paid (bn-ah1k8)**: `benchmark.run` named its benchmark task by `task_id: String` and its graders by `graders: list<String>`, with no handle class and no declared domain; `Target.id` under `benchmark_task` had the same gap. `rule benchmark.task_identity` now fixes the task name's grammar, meaning, and refusal, and states why a content handle is refused (it would be a function of the bundle's hidden half, an existence oracle). `rule benchmark.graders` closes the grader vocabulary to RFC 0034's seven grader-order stages | [`no_leaf_names_a_resource_without_a_handle_or_a_declared_domain`], [`every_declared_domain_is_a_rule_that_cites_its_site`] |
+//! | 5 | **FINDING, paid (bn-ah1k8)**: `query.explain_invalidation`'s `edges: list<String>` named nothing. `rule query.invalidation_edges` spells each edge `<handle>:<reason>` over a sibling `ArtifactHandle`, so the artifact is named by its handle, and states why an index record has no class of its own | same |
+//! | 6 | **FINDING (weak), paid (bn-ah1k8)**: `EvidenceQuery.claim_id` had two readings and `QueryExplainReuseResponse.reasons` had no doc. `rule evidence.claim_identity` fixes the first reading (a claim identity, never a property identifier); `rule query.reuse_reasons` keys `reasons` by sibling handles and closes its values | same |
 //! | 7 | 8 request-position leaves carry an inbound document by value (`Opaque`/`Bytes`); three of them name documents that have a `schemas/` artifact shape and no handle class (`whiteboard.compile.note`, `forge.create.sketch`, `intent.propose_revision.changes.changes`) | [`inbound_documents_travel_by_value_and_this_is_the_whole_list`] |
 //! | 8 | The live probes reach **30 of 75** operations: the other 45 have no `Arguments` variant in this build and are refused by the codec before a payload is read | [`the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which`] |
 //! | 9 | `ResultEnvelope.next_operations` — the typed discovery surface — is declared and **never populated** by this daemon | [`the_typed_discovery_surface_is_declared_and_unpopulated`] |
 //!
-//! Findings 4, 5 and 6 are **not** failures of the criterion as this file reads it: none of
-//! them is ambient state, an implicit "current" context, or prose that must be parsed to
-//! recover a name. They are places where a resource is named by an untyped string instead of
-//! a typed handle, which is the criterion's own subject, so they are reported as scope rather
-//! than buried.
+//! Findings 4, 5 and 6 were **not** failures of the criterion as this file reads it: none of
+//! them was ambient state, an implicit "current" context, or prose that must be parsed to
+//! recover a name. They were places where a resource was named by an untyped string instead
+//! of a typed handle. bn-ah1k8 pays them in the form `rule versioning.breaking_change` allows
+//! inside major 3: the fields keep type `String`, and a rule declares each domain. Retyping
+//! them is a major and stays owed (RFC 0026 F23). The pin below is now a regression guard: a
+//! new raw-string resource, or a declared-domain rule that is removed or stops citing its
+//! site, turns it red.
 //!
 //! # Negative controls
 //!
-//! Seven, each a real assertion rather than a comment. Six weaken the sweep and require it to
-//! report; one weakens the live comparison and requires it to disagree.
+//! Eight, each a real assertion rather than a comment. Seven weaken the sweep and require it
+//! to report; one weakens the live comparison and requires it to disagree.
 //!
 //! | Control | What it doctors | What must happen |
 //! |---|---|---|
@@ -107,6 +111,7 @@
 //! | [`the_sweep_flags_a_mutation_that_returns_no_handle`] | `workspace.seal`'s response loses its handle | detected on a `@mutation` |
 //! | [`a_removed_operation_breaks_the_registry_cross_check`] | deletes an operation from the IDL | both counting methods drop to 74 |
 //! | [`the_adjudication_table_is_not_a_wildcard`] | — | the tables answer `None` for real fields they do not name |
+//! | [`a_removed_domain_rule_is_reported`] | renames `rule benchmark.graders`, and separately removes `rule query.invalidation_edges`'s citation of its site | each declared-domain site loses its rule and is reported |
 //! | [`the_order_independence_comparison_detects_an_ambient_resolution`] | seals "the most recently created" snapshot instead of the one named | the two permutations **disagree** |
 //!
 //! # What the live probes observed
@@ -987,6 +992,13 @@ enum Naming {
     /// The encoding seam: an `Opaque` whose content is a declared struct of this same IDL,
     /// resolved by a `required` field of the same object (`rule encoding.opaque_payloads`).
     EncodedTypedBody,
+    /// A string whose domain a **named rule** of the IDL declares — its grammar, what it
+    /// names, and the refusal outside it — and which, by that rule's stated reason, has no
+    /// handle class of its own. Not a finding, but not trusted on this table's word either:
+    /// every such site is listed in [`DECLARED_DOMAINS`] with its rule, and
+    /// [`every_declared_domain_is_a_rule_that_cites_its_site`] reads the IDL to confirm the
+    /// rule exists and cites the site.
+    DeclaredDomain,
     /// **FINDING.** Names something the daemon itself holds or registers, and does not use a
     /// declared handle class to do it.
     ResourceWithoutAHandle,
@@ -1008,21 +1020,12 @@ impl Naming {
 /// table that decides the criterion: a resource named here rather than by a handle is exactly
 /// what "explicit handles across native API" forbids.
 const STRING_SITES: &[(&str, &str, Naming)] = &[
-    // --- benchmark: the one operation that names an artifact class by raw string ---------
-    // `graders` are daemon-side registrations — "the daemon MUST reject any grader not
-    // registered for the task" — and `task_id` is a `schemas/benchmark-task.schema.json`
-    // artifact. Neither has a declared handle class, and `TargetKind` carries a
-    // `benchmark_task` member so `Target.id` can name the same thing the same way.
-    (
-        "BenchmarkRunRequest",
-        "graders",
-        Naming::ResourceWithoutAHandle,
-    ),
-    (
-        "BenchmarkRunRequest",
-        "task_id",
-        Naming::ResourceWithoutAHandle,
-    ),
+    // --- benchmark: was a finding (a task and graders by raw string); paid by bn-ah1k8 ---
+    // `task_id` is the suite's task name under `rule benchmark.task_identity`, which also
+    // says why no content handle is minted: one over the bundle is a function of its
+    // hidden half. `graders` is `rule benchmark.graders`'s closed seven-stage vocabulary.
+    ("BenchmarkRunRequest", "graders", Naming::DeclaredDomain),
+    ("BenchmarkRunRequest", "task_id", Naming::DeclaredDomain),
     // --- context ------------------------------------------------------------------------
     ("ContextCompileRequest", "guarantees", Naming::Vocabulary),
     ("ContextCompileRequest", "question", Naming::NamesNoResource),
@@ -1047,9 +1050,10 @@ const STRING_SITES: &[(&str, &str, Naming)] = &[
     // --- evidence -----------------------------------------------------------------------
     ("EvidenceLinkRequest", "checker_profile", Naming::Vocabulary),
     ("EvidenceLinkResponse", "checker", Naming::Vocabulary),
-    // "Claim identity **or** property identifier": the declaration offers two readings and
-    // fixes neither, and the first of them is a resource. The weaker of the two findings.
-    ("EvidenceQuery", "claim_id", Naming::UndeclaredDomain),
+    // Was "claim identity **or** property identifier", two readings and neither fixed.
+    // `rule evidence.claim_identity` fixes the first: a node-grouping key, never resolved
+    // from a property identifier (bn-ah1k8).
+    ("EvidenceQuery", "claim_id", Naming::DeclaredDomain),
     ("EvidenceVerifyResponse", "checker", Naming::Vocabulary),
     (
         "EvidenceVerifyResponse",
@@ -1090,21 +1094,20 @@ const STRING_SITES: &[(&str, &str, Naming)] = &[
     ("ProofGoalRequest", "obligation", Naming::Coordinate),
     ("ProofSliceResponse", "axioms", Naming::Coordinate),
     ("ProofSliceResponse", "declarations", Naming::Coordinate),
-    // --- query: the response-direction finding -------------------------------------------
-    // "which results a change invalidated, and through which dependency edges". The two
-    // sibling fields are `list<ArtifactHandle>`; `evidence.query` returns its edges as
-    // `list<EvidenceHandle>`. A caller cannot name one of these edges in a later call.
+    // --- query: was the response-direction finding; paid by bn-ah1k8 ---------------------
+    // `rule query.invalidation_edges` spells an edge `<handle>:<reason>` over a sibling
+    // `ArtifactHandle`: the artifact is named by its handle, and the index record is a cache
+    // entry with no identity to publish. `rule query.reuse_reasons` keys `reasons` by the
+    // handles of `reused` and `recomputed` and closes the values.
     (
         "QueryExplainInvalidationResponse",
         "edges",
-        Naming::ResourceWithoutAHandle,
+        Naming::DeclaredDomain,
     ),
-    // No doc comment, and the grammar admits `map<ArtifactHandle, String>` — the key domain
-    // is a choice, and it is unstated.
     (
         "QueryExplainReuseResponse",
         "reasons",
-        Naming::UndeclaredDomain,
+        Naming::DeclaredDomain,
     ),
     ("Redacted", "original_class", Naming::Vocabulary),
     ("RefinementCheckRequest", "observer", Naming::Vocabulary),
@@ -1113,7 +1116,8 @@ const STRING_SITES: &[(&str, &str, Naming)] = &[
     ("SourceSpan", "file", Naming::Coordinate),
     // `Target` is `(kind, id)`: a kind-tagged coordinate inside the snapshot and intent the
     // envelope names. Seven of `TargetKind`'s eight members are intra-snapshot; the eighth,
-    // `benchmark_task`, reaches the same gap `BenchmarkRunRequest.task_id` does.
+    // `benchmark_task`, carries a task name under `rule benchmark.task_identity`, the rule
+    // that governs `BenchmarkRunRequest.task_id`.
     ("Target", "id", Naming::Coordinate),
     (
         "TaskRecord",
@@ -1254,6 +1258,55 @@ fn adjudication(table: &[(&str, &str, Naming)], declared_by: &str, field: &str) 
         .iter()
         .find(|(owner, name, _)| *owner == declared_by && *name == field)
         .map(|(_, _, naming)| *naming)
+}
+
+/// Every [`Naming::DeclaredDomain`] site, with the IDL rule that declares its domain.
+///
+/// Keyed like [`STRING_SITES`]. The rule body must cite the site as `` `Owner.field` ``, so
+/// the rule cannot drift away from the field it governs without this file seeing it.
+const DECLARED_DOMAINS: &[(&str, &str, &str)] = &[
+    ("BenchmarkRunRequest", "graders", "benchmark.graders"),
+    ("BenchmarkRunRequest", "task_id", "benchmark.task_identity"),
+    ("EvidenceQuery", "claim_id", "evidence.claim_identity"),
+    (
+        "QueryExplainInvalidationResponse",
+        "edges",
+        "query.invalidation_edges",
+    ),
+    (
+        "QueryExplainReuseResponse",
+        "reasons",
+        "query.reuse_reasons",
+    ),
+];
+
+/// The `"""` body of `rule <name>`, read from the raw IDL text.
+///
+/// [`reader`] elides rule bodies, so this reads the text directly: the declaration line
+/// `rule <name> {` at the start of a line, then the first `"""` block after it.
+fn rule_body(source: &str, name: &str) -> Option<String> {
+    let anchor = format!("\nrule {name} {{");
+    let start = source.find(&anchor)? + anchor.len();
+    let rest = &source[start..];
+    let open = rest.find("\"\"\"")? + 3;
+    let close = rest[open..].find("\"\"\"")? + open;
+    Some(rest[open..close].to_owned())
+}
+
+/// The declared-domain sites whose rule is missing or does not cite them, for a given IDL
+/// text. Empty is the clean state.
+fn undeclared_domains(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (owner, field, rule) in DECLARED_DOMAINS {
+        match rule_body(source, rule) {
+            None => out.push(format!("{owner}.{field}: `rule {rule}` is not declared")),
+            Some(body) if !body.contains(&format!("`{owner}.{field}`")) => {
+                out.push(format!("{owner}.{field}: `rule {rule}` does not cite it"));
+            }
+            Some(_) => {}
+        }
+    }
+    out
 }
 
 // --- the counts this file pins, so a protocol edit is visible here ------------------------
@@ -1462,9 +1515,15 @@ fn every_string_and_inline_site_is_adjudicated() {
     assert_eq!(INLINE_SITES.len(), inline_sites.len(), "no dead table rows");
 }
 
-/// The verdict, as an assertion. Six leaves over five sites, named individually.
+/// The verdict, as an assertion: no finding remains.
+///
+/// Until bn-ah1k8 this pinned six leaves over five sites — `benchmark.run`'s `task_id` and
+/// `graders`, `EvidenceQuery.claim_id` (reached by `evidence.query` and
+/// `evidence.subscribe`), and the `edges` and `reasons` of the two explain operations. bn-ah1k8
+/// paid all six by declaring each domain in a named rule ([`DECLARED_DOMAINS`]). The pin is
+/// now a regression guard: a new `String` site adjudicated as a finding turns it red.
 #[test]
-fn the_findings_are_exactly_these_and_no_others() {
+fn no_leaf_names_a_resource_without_a_handle_or_a_declared_domain() {
     let leaves = sweep(&document());
     let mut findings: Vec<(String, &'static str, String, Naming)> = Vec::new();
     for leaf in &leaves {
@@ -1485,48 +1544,83 @@ fn the_findings_are_exactly_these_and_no_others() {
         }
     }
     findings.sort();
-    let expected: Vec<(String, &str, String, Naming)> = vec![
-        (
-            "benchmark.run".to_owned(),
-            "request",
-            "graders".to_owned(),
-            Naming::ResourceWithoutAHandle,
-        ),
-        (
-            "benchmark.run".to_owned(),
-            "request",
-            "task_id".to_owned(),
-            Naming::ResourceWithoutAHandle,
-        ),
-        (
-            "evidence.query".to_owned(),
-            "request",
-            "query.claim_id".to_owned(),
-            Naming::UndeclaredDomain,
-        ),
-        (
-            "evidence.subscribe".to_owned(),
-            "request",
-            "scope.claim_id".to_owned(),
-            Naming::UndeclaredDomain,
-        ),
-        (
-            "query.explain_invalidation".to_owned(),
-            "response",
-            "edges".to_owned(),
-            Naming::ResourceWithoutAHandle,
-        ),
-        (
-            "query.explain_reuse".to_owned(),
-            "response",
-            "reasons".to_owned(),
-            Naming::UndeclaredDomain,
-        ),
-    ];
-    assert_eq!(findings, expected, "the finding set moved");
-    // 6 of 666. Stated so that "explicit handles" is a measured proportion rather than an
-    // impression.
-    assert_eq!(findings.len(), 6);
+    assert_eq!(findings, Vec::new(), "a finding re-entered the protocol");
+    // The six leaves that were findings are still there, still `String`, and each now sits
+    // on a declared-domain site: the payment moved their adjudication, not their type.
+    let declared: Vec<(String, String)> = leaves
+        .iter()
+        .filter(|leaf| {
+            leaf.class == Class::PlainString
+                && adjudication(STRING_SITES, &leaf.declared_by, &leaf.field)
+                    == Some(Naming::DeclaredDomain)
+        })
+        .map(|leaf| (leaf.operation.clone(), leaf.path.clone()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let expected: Vec<(String, String)> = [
+        ("benchmark.run", "graders"),
+        ("benchmark.run", "task_id"),
+        ("evidence.query", "query.claim_id"),
+        ("evidence.subscribe", "scope.claim_id"),
+        ("query.explain_invalidation", "edges"),
+        ("query.explain_reuse", "reasons"),
+    ]
+    .iter()
+    .map(|(operation, path)| ((*operation).to_owned(), (*path).to_owned()))
+    .collect();
+    assert_eq!(declared, expected, "the declared-domain leaves moved");
+}
+
+/// Each declared-domain site's rule exists in the IDL and cites the site, and the table and
+/// [`STRING_SITES`] agree on which sites are declared-domain sites.
+#[test]
+fn every_declared_domain_is_a_rule_that_cites_its_site() {
+    let source = std::fs::read_to_string(IDL_PATH).expect("the normative IDL is readable");
+    assert_eq!(undeclared_domains(&source), Vec::<String>::new());
+    let in_table: BTreeSet<(&str, &str)> = DECLARED_DOMAINS
+        .iter()
+        .map(|(owner, field, _)| (*owner, *field))
+        .collect();
+    let in_sites: BTreeSet<(&str, &str)> = STRING_SITES
+        .iter()
+        .filter(|(_, _, naming)| *naming == Naming::DeclaredDomain)
+        .map(|(owner, field, _)| (*owner, *field))
+        .collect();
+    assert_eq!(in_table, in_sites);
+    assert_eq!(in_table.len(), 5);
+    // A declared domain is not a finding, and the two finding classes stay available for
+    // the next site that earns one: the table has no rows in them, not no way to say them.
+    assert!(!Naming::DeclaredDomain.is_finding());
+    assert!(Naming::ResourceWithoutAHandle.is_finding());
+    assert!(Naming::UndeclaredDomain.is_finding());
+}
+
+/// Negative control for [`every_declared_domain_is_a_rule_that_cites_its_site`]: a rule that
+/// disappears, or stops citing its site, is reported.
+#[test]
+fn a_removed_domain_rule_is_reported() {
+    let source = std::fs::read_to_string(IDL_PATH).expect("the normative IDL is readable");
+    let renamed = mutate(
+        &source,
+        "\nrule benchmark.graders {",
+        "\nrule benchmark.gone {",
+    );
+    assert_eq!(
+        undeclared_domains(&renamed),
+        ["BenchmarkRunRequest.graders: `rule benchmark.graders` is not declared"]
+    );
+    let uncited = mutate(
+        &source,
+        "(`QueryExplainInvalidationResponse.edges`)",
+        "(the edges)",
+    );
+    assert_eq!(
+        undeclared_domains(&uncited),
+        [
+            "QueryExplainInvalidationResponse.edges: `rule query.invalidation_edges` does not cite it"
+        ]
+    );
 }
 
 /// The response direction: a resource the daemon mints or moves comes back as a handle.

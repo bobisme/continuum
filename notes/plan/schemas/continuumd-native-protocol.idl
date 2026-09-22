@@ -157,6 +157,41 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.14 — five declared string domains (bn-ah1k8); `version` stays
+  ///         "3.6". The G1-02 acceptance campaign (bn-3j01v) pinned six
+  ///         leaves over five sites where a resource, or a closed set,
+  ///         travelled as a bare `String` that no declaration governed:
+  ///         `benchmark.run`'s `task_id` and `graders`,
+  ///         `EvidenceQuery.claim_id`, and the `reasons` and `edges` of
+  ///         the two explain operations. Five rules now declare each
+  ///         domain — its grammar, what it names, and the refusal or the
+  ///         client treatment outside it: `benchmark.task_identity`,
+  ///         `benchmark.graders`, `evidence.claim_identity`,
+  ///         `query.reuse_reasons`, and `query.invalidation_edges`. The
+  ///         field doc comments cite them, and `EvidenceQuery.claim_id`
+  ///         loses its second reading ("or property identifier"), which
+  ///         the daemon never served.
+  ///
+  ///         **Why not handles or enums.** Each proper repair retypes a
+  ///         declared field, which `rule versioning.breaking_change`
+  ///         makes a major, on the 1.11 (F6) and 1.13 (F22) precedent.
+  ///         RFC 0026 F23 records the retypes as owed. Two of the rules
+  ///         also say why no handle class fits at all: a content handle
+  ///         over a benchmark bundle is a function of its hidden half,
+  ///         and a query-index edge is a cache record with no identity
+  ///         to publish.
+  ///
+  ///         **Why no minor.** None of `rule
+  ///         versioning.compatible_change`'s five changes occurs: no
+  ///         operation, field, enum member, or error code is added, and
+  ///         no server-side constraint is relaxed. The two request
+  ///         fields that gain a grammar, `task_id` and `graders`, belong
+  ///         to `benchmark.run`, which no conforming daemon serves yet
+  ///         (`rule errors.unsupported_surface`), so no request a client
+  ///         may send is refused where it was admitted before. The claim
+  ///         reading is the one the daemon already served, and the two
+  ///         explain operations are unserved. Five rules arrive (45 →
+  ///         50); every other count is unchanged.
   ///   1.13 — the artifact-class spelling rule (bn-3ncfp); `version`
   ///         stays "3.6". Plan §4.4's class vocabulary travels in three
   ///         places — `Redacted.original_class`, `ArtifactRef.kind`, and
@@ -678,7 +713,7 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.13";
+  idl_version = "1.14";
   /// The protocol version this document defines.
   ///
   /// 3.6 is the single minor bump for IDL 1.11, taken once at the end of
@@ -1471,6 +1506,8 @@ enum TargetKind {
   refinement,
   module,
   program,
+  /// `Target.id` carries a benchmark task name
+  /// (`rule benchmark.task_identity`).
   benchmark_task,
   all_claims,
 }
@@ -2426,7 +2463,8 @@ struct EvidenceEvent {
   edge: EvidenceHandle optional;
   /// Status after the transition, for `status_transition` events.
   status: EvidenceStatus optional;
-  /// The claim whose status changed.
+  /// The claim whose status changed, as a claim identity
+  /// (`rule evidence.claim_identity`).
   claim_id: String optional;
 }
 
@@ -2651,6 +2689,31 @@ rule evidence.traversal {
   """
 }
 
+rule evidence.claim_identity {
+  """
+  What `EvidenceQuery.claim_id` and `EvidenceEvent.claim_id` carry: a
+  claim identity, and only that. It is the value of the `claim_id`
+  member of `schemas/evidence-graph-node.schema.json`, the key each
+  node's status promotion is linearized against (plan §11.7, RFC 0038).
+
+  **One reading.** Before this rule, the query field's doc comment read
+  "claim identity or property identifier" and fixed neither reading.
+  The reading is the first. The daemon MUST NOT resolve a property
+  identifier, a `Target.id`, or any other name to a claim identity. As
+  a filter, the value selects exactly the nodes whose `claim_id` is
+  equal to it byte for byte. It is an identity-bearing string (`rule
+  encoding.canonical_form`) and is not normalized. A value that no node
+  in scope carries selects nothing: the result is empty, as for any
+  other clause that matches nothing, and is not an error. As `rule
+  evidence.traversal` states, the clause selects no edge.
+
+  **Why no handle class.** A claim identity is a key that groups nodes,
+  not an artifact: nothing is published under it, and it has no content
+  of its own to address. The nodes it groups are the resources, and
+  each is named by its `EvidenceHandle`.
+  """
+}
+
 @since("3.5")
 rule whiteboard.compilation {
   """
@@ -2870,7 +2933,8 @@ rule errors.defect_emission {
 // 9. Shared operation types
 // ---------------------------------------------------------------------
 
-/// What an operation is aimed at.
+/// What an operation is aimed at. Under `kind = benchmark_task`, `id`
+/// is a task name per `rule benchmark.task_identity`.
 struct Target {
   kind: TargetKind required;
   id: String required;
@@ -3063,7 +3127,9 @@ struct EvidenceQuery {
   node_kinds: list<EvidenceNodeKind> optional;
   edge_kinds: list<EvidenceEdgeKind> optional;
   statuses: list<EvidenceStatus> optional;
-  /// Claim identity or property identifier to scope the query to.
+  /// Claim identity to scope the query to: the `claim_id` of the nodes
+  /// it selects, compared byte for byte. Never a property identifier
+  /// (`rule evidence.claim_identity`).
   claim_id: String optional;
   /// Roots to traverse from; empty means the whole graph in scope.
   /// Which way a traversal walks an edge, and where an edge sits in the
@@ -4248,10 +4314,13 @@ operation forge.materialize {
 operation benchmark.run {
   authority execute;
   request {
-    /// Benchmark task (`schemas/benchmark-task.schema.json`).
+    /// Benchmark task, by the `task_id` member of its
+    /// `schemas/benchmark-task.schema.json` document
+    /// (`rule benchmark.task_identity`).
     task_id: String required;
-    /// Grader identities to apply; the daemon MUST reject any grader
-    /// not registered for the task.
+    /// Grader identities to apply, as RFC 0034 grader-order tokens in
+    /// that order; the daemon MUST reject any grader not registered for
+    /// the task (`rule benchmark.graders`).
     graders: list<String> required;
   };
   response {
@@ -4260,6 +4329,72 @@ operation benchmark.run {
   };
   verdict EvaluationVerdictValue;
   errors [UnsupportedSemanticFeature, BudgetExhausted, PolicyGateFailed];
+}
+
+rule benchmark.task_identity {
+  """
+  What `benchmark.run`'s `task_id` (`BenchmarkRunRequest.task_id`)
+  names, and why it is a name and not a handle. The same rule governs
+  `Target.id` when `Target.kind` is `benchmark_task`.
+
+  **Grammar.** A non-empty, NFC string, equal byte for byte to the
+  `task_id` member of a `schemas/benchmark-task.schema.json` document
+  the daemon has registered. It is an identity-bearing string (`rule
+  encoding.canonical_form`): a non-canonical spelling is refused, never
+  normalized. An empty string is `MalformedRequest`.
+
+  **Meaning.** It names one benchmark task: the suite's stable name
+  for the task, the same across its hidden variants and across schema
+  epochs of the task document. It does not name one variant, and it
+  does not name the bytes of the document.
+
+  **Why no handle class.** A plan §4.4 handle is a content identity,
+  and a content identity is derivable by anyone who holds the content.
+  A benchmark task has a public half and a hidden half — hidden
+  variants, mutations, and grader (RFC 0034 "Bundle", "Isolation").
+  A handle over the whole bundle is a function of the hidden half, so
+  an agent that holds a guess of a hidden variant could confirm it
+  against the handle; that is the existence oracle plan §4.5 forbids.
+  A handle over the public half alone names a document, not the task
+  that runs, because the run draws on the hidden half. The suite's
+  name is the one identity that names the task and reveals nothing
+  hidden. It is therefore declared here, not minted as a class.
+
+  **Refusal.** A string outside the grammar is `MalformedRequest`. A
+  well-formed name the daemon has not registered, or has not
+  registered for the caller's capability scope, is `CapabilityDenied`,
+  the same refusal as a handle nothing holds (RFC 0027 X2): the
+  refusal MUST NOT tell an unregistered task from an unauthorized one.
+  """
+}
+
+rule benchmark.graders {
+  """
+  What `benchmark.run`'s `graders` (`BenchmarkRunRequest.graders`)
+  holds. A grader is named by the stage of RFC 0034's grader order it
+  grades, never by an implementation identity: the hidden grader is
+  inaccessible to agents (RFC 0034 "Isolation"), so a name for its
+  implementation would be a name an agent cannot legitimately hold.
+
+  **Vocabulary.** Each member is one of exactly these seven tokens, in
+  RFC 0034's grader order: `intent_integrity`, `security`,
+  `semantic_correctness`, `evidence_validity`, `hidden_generalization`,
+  `cost`, `explanation`. The list is closed at this protocol version. A
+  new stage is added by revising this list together with RFC 0034, and
+  that raises the protocol minor.
+
+  **Grammar of the list.** The members are distinct and appear in the
+  order above, so one set of graders has one spelling. The list is not
+  empty: a run with no grader produces nothing a benchmark reports, and
+  a benchmark never self-scores. A list that breaks any of this, or
+  that holds any other string, is `MalformedRequest`.
+
+  **Registration.** Which stages apply to a task is part of its
+  bundle. A well-formed token that the task named by `task_id` does
+  not register is `CapabilityDenied`, the same refusal `rule
+  benchmark.task_identity` gives an unregistered task, so the refusal
+  reveals nothing about the hidden half of the bundle.
+  """
 }
 
 // --- task ------------------------------------------------------------
@@ -4540,6 +4675,10 @@ operation query.explain_reuse {
   response {
     reused: list<ArtifactHandle> required;
     recomputed: list<ArtifactHandle> required;
+    /// Why each input was reused or recomputed: one entry per member of
+    /// `reused` and `recomputed`, keyed by its handle's spelling, whose
+    /// value is a reuse-edge class or a recompute reason token
+    /// (`rule query.reuse_reasons`).
     reasons: map<String, String> required;
   };
   errors [UnsupportedSemanticFeature];
@@ -4556,9 +4695,80 @@ operation query.explain_invalidation {
   response {
     invalidated: list<ArtifactHandle> required;
     unknown: list<ArtifactHandle> required;
+    /// The dependency edges that caused the invalidation, each spelled
+    /// `<handle>:<reason>` over a member of `invalidated` or `unknown`
+    /// (`rule query.invalidation_edges`).
     edges: list<String> required;
   };
   errors [UnsupportedSemanticFeature];
+}
+
+rule query.reuse_reasons {
+  """
+  What `query.explain_reuse`'s `reasons`
+  (`QueryExplainReuseResponse.reasons`) holds. RFC 0030 F2 records that
+  the explain responses carry strings where RFC 0030's sets are closed;
+  this rule declares the domain, and the retype to enums stays owed at
+  the next major (`rule versioning.breaking_change`).
+
+  **Keys.** Each key is the handle spelling of one member of `reused`
+  or of `recomputed` in the same response. The map has exactly one
+  entry for each such member, and no other key: an input that the map
+  does not explain is a completeness failure (RFC 0030 "Wire
+  surface"), not an implicit reuse.
+
+  **Values.** For a member of `reused`, the value is the reuse-edge
+  class that licensed the reuse, spelled as RFC 0030's table spells it:
+  `Exact`, `Validated`, `Conservative`, or `Experimental`. For a member
+  of `recomputed`, the value is one recompute reason token:
+    - one of RFC 0030's nine dependency-reason wire tokens
+      (`reads-type` … `consumes-encoding-epoch-or-correspondence`),
+      when a change reached the input through that reason;
+    - `key-change`, when the input's query key changed, so no prior
+      result is addressable under it (RFC 0031 "none — a key change");
+    - `unknown`, when independence from the change is `Unknown`, which
+      is dependent (RFC 0030 "Independence and the invalidation cone");
+    - `not-memoized`, when no prior result exists under the key.
+
+  A daemon MUST NOT emit any other string in these positions. A client
+  that reads a value it does not recognize MUST treat that input as
+  RFC 0030 requires: as `Experimental`, with independence `Unknown`,
+  and never as reusable for promotion.
+  """
+}
+
+rule query.invalidation_edges {
+  """
+  What `query.explain_invalidation`'s `edges`
+  (`QueryExplainInvalidationResponse.edges`) holds, and why an edge is
+  a string over a handle and not a handle of its own.
+
+  **Grammar.** Each member is `<handle>:<reason>`: the handle spelling
+  of one member of `invalidated` or `unknown` in the same response, one
+  `:`, and one recompute reason token. The artifact-handle character
+  class does not contain `:`, so the split is unambiguous. For a member
+  of `invalidated` the reason is one of RFC 0030's nine
+  dependency-reason wire tokens or `key-change`; for a member of
+  `unknown` it is `unknown`. `not-memoized` never appears here, because
+  an invalidated result was memoized by definition.
+
+  **Completeness.** Every member of `invalidated` and of `unknown`
+  appears in at least one edge, and an artifact reached through several
+  reasons has one edge for each. The list is ordered by the handle
+  spelling and then by the reason token (`rule ordering.deterministic`).
+
+  **Why no handle class.** A dependency edge is a record of the query
+  index, and the index is a cache: discarding it MUST always be a valid
+  recovery (RFC 0030 "Versioning and revision"). A record that may be
+  discarded has no content identity to publish under plan §4.4, and an
+  evidence-graph `ev_*` edge is a different object that `evidence.query`
+  answers for. The resource an edge is about is the artifact, and the
+  edge names that artifact by its handle.
+
+  A daemon MUST NOT emit a member outside this grammar. A client that
+  reads a reason it does not recognize MUST treat the edge as RFC 0030
+  requires for an unrecognized token: independence `Unknown`.
+  """
 }
 
 /// Compare incremental results against a clean recompute — the

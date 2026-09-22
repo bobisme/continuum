@@ -11,10 +11,13 @@ use crate::protocol_struct;
 protocol_struct! {
     /// The `request` body of `benchmark.run`.
     struct BenchmarkRunRequest {
-        /// Benchmark task (`schemas/benchmark-task.schema.json`).
+        /// Benchmark task, by the `task_id` member of its
+        /// `schemas/benchmark-task.schema.json` document
+        /// (`rule benchmark.task_identity`).
         task_id: String required;
-        /// Grader identities to apply; the daemon MUST reject any grader
-        /// not registered for the task.
+        /// Grader identities to apply, as RFC 0034 grader-order tokens in
+        /// that order; the daemon MUST reject any grader not registered for
+        /// the task (`rule benchmark.graders`).
         graders: list<String> required;
     }
 }

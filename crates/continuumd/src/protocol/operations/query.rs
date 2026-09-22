@@ -23,7 +23,10 @@ protocol_struct! {
         reused: list<ArtifactHandle> required;
         /// IDL `recomputed: list<ArtifactHandle> required`.
         recomputed: list<ArtifactHandle> required;
-        /// IDL `reasons: map<String,String> required`.
+        /// IDL `reasons: map<String,String> required`. One entry per member
+        /// of `reused` and `recomputed`, keyed by its handle's spelling, whose
+        /// value is a reuse-edge class or a recompute reason token
+        /// (`rule query.reuse_reasons`).
         reasons: map<String,String> required;
     }
 }
@@ -43,7 +46,9 @@ protocol_struct! {
         invalidated: list<ArtifactHandle> required;
         /// IDL `unknown: list<ArtifactHandle> required`.
         unknown: list<ArtifactHandle> required;
-        /// IDL `edges: list<String> required`.
+        /// IDL `edges: list<String> required`. Each member is
+        /// `<handle>:<reason>` over a member of `invalidated` or `unknown`
+        /// (`rule query.invalidation_edges`).
         edges: list<String> required;
     }
 }
