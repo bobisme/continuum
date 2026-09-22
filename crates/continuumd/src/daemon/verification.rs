@@ -76,6 +76,7 @@ use continuum_engine_reference::checking::{
     self, DeadlockPolicy, Obligations, Scope, Verdict as EngineVerdict,
 };
 use continuum_engine_reference::model::{Model, State};
+use continuum_task::budget::dimension::CostDimension;
 use continuum_task::region::worker::WorkerStep;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{
@@ -86,6 +87,7 @@ use continuum_workspace::staleness::{LineageError, check_current};
 
 use super::Services;
 use super::budget::{self, Publications};
+use super::continuation::{self, Checkpointed, ContinuationRecord, ParkState};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 // `Scope` is `continuum_engine_reference::checking::Scope` in this module — the exploration's
 // completeness — so the region scope is imported under a name that says which of the two it
@@ -94,8 +96,8 @@ use super::recovery::{Resolution, ResolvedTask};
 use super::region::{self, Scope as RegionScope};
 use super::state::DaemonState;
 use super::task::{
-    Campaign, Continuation, PinnedEpochs, Preimage, TaskEntry, budget_preimage,
-    continuation_handle, epochs_preimage, published, task_handle, unsupported,
+    Campaign, Continuation, PinnedEpochs, Preimage, TaskEntry, budget_preimage, epochs_preimage,
+    published, task_handle, unsupported,
 };
 use crate::protocol::envelope::{
     ArtifactRef, AssuranceEnvelope, Budget, EnvelopeDimension, Omission, ProducedDimension,
@@ -104,7 +106,9 @@ use crate::protocol::envelope::{
 use crate::protocol::operations::verification::{
     VerificationStartRequest, VerificationStartResponse,
 };
-use crate::protocol::scalar::{ArtifactHandle as WireArtifactHandle, Commitment, TaskHandle};
+use crate::protocol::scalar::{
+    ArtifactHandle as WireArtifactHandle, Commitment, ContinuationHandle, TaskHandle,
+};
 use crate::protocol::shared::{Target, VerificationResult};
 use crate::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use crate::protocol::vocabulary::{
@@ -610,24 +614,10 @@ fn run_in(
         .evidence
         .stage(staged.clone());
 
-    // The durable write (bn-3dr), and it happens *here*: after the task-side stage, which no
-    // reader can observe, and before anything that makes the publication observable. So the
-    // two ledgers can only disagree in the direction docs/35 chose — the store may hold a
-    // record the task never committed (unreachable content, garbage-collectable), and the
-    // task can never claim a publication the store does not hold.
-    //
-    // An abort discards the staged publication and returns, which is the both-or-neither
-    // direction: no commitment on the task, no continuation minted, no `Suspended` status
-    // claiming committed evidence that is not there.
-    if let Err(fault) = publish_record(store, publisher, record, &staged) {
-        state.regions_mut().fail(scope, fault.code);
-        discard(handle, state);
-        return Err(fault);
-    }
-
-    // Park before the status moves, so a `Suspended` task never exists without the
-    // continuation `rule task.status_monotonic` says it has by definition.
-    let continuation = if campaign.is_closed() {
+    // Mint the continuation before anything durable happens, because its record is
+    // published first (bn-20142). Nothing here is observable yet: the continuation is parked
+    // in the table only after both durable writes succeed.
+    let parked = if campaign.is_closed() {
         None
     } else {
         let pinned = PinnedEpochs::of(services.epochs());
@@ -638,26 +628,31 @@ fn run_in(
             discard(handle, state);
             return Err(Fault::denied());
         };
-        let mut preimage = Preimage::new();
-        preimage.text(handle.as_str());
-        preimage.text(snapshot.as_str());
-        preimage.text(&campaign.states().to_string());
-        preimage.text(&campaign.frontier.len().to_string());
-        for state in &campaign.frontier {
-            for component in state.as_slice() {
-                preimage.push(&component.to_be_bytes());
-            }
-        }
-        epochs_preimage(&mut preimage, services.epochs());
-        let named = match continuation_handle(services.identifier(), &preimage) {
+        let states = campaign.states() as u64;
+        let frontier = continuation::vectors(&campaign.frontier);
+        // The pin preimage, whose part order the handle has always had: task, snapshot,
+        // state count, frontier, then the epochs. `continuation::pin_preimage` is the one
+        // spelling, shared with the startup pass that re-derives the handle.
+        let pins = continuation::pin_preimage(handle, &snapshot, states, &frontier, &pinned);
+        let named = match services
+            .identifier()
+            .identify(ArtifactClass::Continuation, &pins)
+            .map_err(|_| ())
+            .and_then(|stored| ContinuationHandle::new(&stored.to_string()).map_err(|_| ()))
+        {
             Ok(named) => named,
-            Err(fault) => {
+            Err(()) => {
+                let fault = Fault::new(
+                    ErrorCode::PublicationAborted,
+                    "no content identity could be derived for a task record",
+                )
+                .not_retryable();
                 state.regions_mut().fail(scope, fault.code);
                 discard(handle, state);
                 return Err(fault);
             }
         };
-        let parked = Continuation {
+        let continuation = Continuation {
             handle: named.clone(),
             task: handle.clone(),
             snapshot,
@@ -666,8 +661,71 @@ fn run_in(
             bounds,
             frontier: campaign.frontier.clone(),
         };
-        state.tasks_mut().park(parked);
-        Some(named)
+        // The record of the task *after* this run commits, projected before it does: the
+        // milestones `reach` will append, the spend `charge_states` will land, the
+        // checkpoint and the publication the commit block below writes. `continuation::
+        // settle` checks the projection against the task the commit leaves.
+        let record = {
+            let entry = state.tasks().get(handle).ok_or_else(Fault::denied)?;
+            let mut record = ContinuationRecord::of(
+                entry,
+                &continuation,
+                frontier,
+                states,
+                state.tasks().next_revision(&named),
+                ParkState::Suspended,
+            );
+            continuation::reach(&mut record, MILESTONE_BOUNDED, now.as_ref());
+            continuation::reach(&mut record, MILESTONE_CHECKED, now.as_ref());
+            let slot = CostDimension::States.index();
+            let recorded = record.spend[slot].unwrap_or_default();
+            record.spend[slot] = Some(recorded.max(states));
+            record.checkpoints.push(Checkpointed {
+                committed: entry.publications() + 1,
+                spend: record.spend,
+            });
+            record.publications.push(staged.clone());
+            record
+        };
+        Some((continuation, record))
+    };
+
+    // The durable writes (bn-3dr, bn-20142), and they happen *here*: after the task-side
+    // stage, which no reader can observe, and before anything that makes the publication
+    // observable. The continuation record goes first and the campaign record second, so
+    // the campaign record's index commit is the commit point of the park: a crash between
+    // the two leaves a continuation record no task claims, which the startup pass reports
+    // and does not use, and never a parked head without its continuation.
+    //
+    // So the two ledgers can only disagree in the direction docs/35 chose — the store may
+    // hold a record the task never committed, and the task can never claim a publication
+    // the store does not hold.
+    //
+    // An abort discards the staged publication and returns, which is the both-or-neither
+    // direction: no commitment on the task, no continuation parked, no `Suspended` status
+    // claiming committed evidence that is not there.
+    if let Some((_, record)) = &parked {
+        if let Err(fault) = continuation::publish(store, publisher, services.identifier(), record) {
+            state.regions_mut().fail(scope, fault.code);
+            discard(handle, state);
+            return Err(fault);
+        }
+    }
+    if let Err(fault) = publish_record(store, publisher, record, &staged) {
+        state.regions_mut().fail(scope, fault.code);
+        discard(handle, state);
+        return Err(fault);
+    }
+
+    // Park before the status moves, so a `Suspended` task never exists without the
+    // continuation `rule task.status_monotonic` says it has by definition.
+    let (continuation, durable) = match parked {
+        Some((continuation, record)) => {
+            let named = continuation.handle.clone();
+            state.tasks_mut().park(continuation);
+            (Some(named), Some(record))
+        }
+        None => (None, None),
     };
 
     let closed = campaign.is_closed();
@@ -732,6 +790,9 @@ fn run_in(
             },
             now.as_ref(),
         );
+    }
+    if let Some(record) = &durable {
+        continuation::settle(state.tasks_mut(), record);
     }
     // The campaign is on the task now, so a reader can observe it: the commit and the write
     // are one event reported in the order they happened.
@@ -972,6 +1033,9 @@ fn start(
             Resolution::Settled => {
                 state.tasks_mut().supersede(&handle);
             }
+            // Unreachable: a restored task is loaded into the live table, not the resolved
+            // set (bn-20142), and the live lookup below answers it.
+            Resolution::Restored(_) => {}
         }
     }
 
@@ -1227,6 +1291,18 @@ fn verification_result(
     entry: &TaskEntry,
 ) -> Result<(VerificationResult, SemanticVerdictValue), Fault> {
     let Some(campaign) = &entry.campaign else {
+        // A task restored from its continuation record (bn-20142) committed publications,
+        // and the engine's report of its last run was not durable. The honest answer is that
+        // this task is parked on its budget and its result is re-derived by resuming it: a
+        // `BudgetExhausted` resumable from the continuation, never the "initial states"
+        // reason below, which would be false.
+        if let (Some(continuation), true) = (&entry.continuation, entry.publications() > 0) {
+            return Err(Fault::exhausted_from(
+                "this task's check report did not survive a daemon restart; resume its \
+                 continuation to re-derive it",
+                continuation.clone(),
+            ));
+        }
         // SD-13: never a silent dead end. This task holds no continuation — initial states
         // are what exploration starts *from*, so there is no prefix of the walk to resume —
         // and the typed reason says exactly that rather than leaving a caller to infer it

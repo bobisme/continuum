@@ -45,7 +45,7 @@
 //! each in this repository, so no fixture here can drift from the corpus.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use continuum_engine_reference::diehard;
 use continuum_intent::canonical_json::Json;
@@ -56,12 +56,13 @@ use continuum_workspace::publication::{
     AbortReason, CapabilityToken, ContentIdentifier, IdentityUnavailable, PublicationPhase,
     ReferenceStore, StorageFaults, StoreDefect,
 };
+use continuumd::daemon::continuation::ParkState;
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
 use continuumd::daemon::recovery::{
-    self, CrashInjector, CrashPoint, Disposition, FailureReason, RecoveryReport, Resolution,
-    Verdict, VolatileFact,
+    self, CrashInjector, CrashPoint, Disposition, RecoveryReport, Resolution, Startup, Verdict,
+    VolatileFact,
 };
 use continuumd::daemon::state::{IntentRecord, RegistryStatus};
 use continuumd::daemon::task::TaskFamily;
@@ -157,29 +158,43 @@ impl StorageFaults for FailNth {
 /// the records of one seal, in one dispatch. A campaign record is published several
 /// publications into a longer sequence, so it is targeted by *when* instead: the test arms
 /// the fault immediately before the dispatch that publishes it, and the fault disarms itself
-/// on the way through. Nothing about the daemon's ordering is assumed by the fixture.
+/// on the way through. Nothing about the daemon's ordering is assumed by the fixture beyond
+/// what [`arm_at`](ArmedFault::arm_at) names: since bn-20142 a park publishes its
+/// continuation record and then its campaign record in one dispatch, so a test aiming at the
+/// campaign record arms the second check of the phase.
 #[derive(Debug, Clone)]
 struct ArmedFault {
     phase: PublicationPhase,
-    armed: Arc<AtomicBool>,
+    /// The matching checks left until the fault fires; zero is disarmed.
+    countdown: Arc<AtomicU64>,
 }
 
 impl ArmedFault {
     fn new(phase: PublicationPhase) -> Self {
         Self {
             phase,
-            armed: Arc::new(AtomicBool::new(false)),
+            countdown: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    fn arm(&self) {
-        self.armed.store(true, Ordering::SeqCst);
+    /// Fire at the `nth` check of the phase from now, counting from one.
+    fn arm_at(&self, nth: u64) {
+        self.countdown.store(nth, Ordering::SeqCst);
     }
 }
 
 impl StorageFaults for ArmedFault {
     fn check(&self, phase: PublicationPhase) -> Result<(), AbortReason> {
-        if phase == self.phase && self.armed.swap(false, Ordering::SeqCst) {
+        if phase != self.phase {
+            return Ok(());
+        }
+        let fired = self
+            .countdown
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok_and(|left| left == 1);
+        if fired {
             return Err(AbortReason::StorageExhausted);
         }
         Ok(())
@@ -991,11 +1006,11 @@ fn a_retry_after_the_restart_converges_on_the_records_that_landed() {
 /// half: the record those bytes are of is published into the store, so after the daemon is
 /// killed the identity still resolves, is receipted, and reads back.
 ///
-/// What does **not** survive is the live task record: the restarted daemon denies
-/// `task.status` on the handle. That is docs/35's own rule — a restart "MUST NOT reconstruct
-/// task state by inference". Since bn-1z09m, [`VolatileFact::TaskTable`] is `resolved`: the
-/// startup pass reads the surviving record and resolves the task to `Failed` with a typed
-/// reason, which is a resolution and not a reconstructed `TaskEntry`.
+/// Since bn-20142 the park also commits a continuation record (`cont_*`), and the task comes
+/// back. docs/35 forbids reconstruction *by inference*; this is not that. Every field of the
+/// restored task is read from the committed continuation record, so the restored
+/// `TaskRecord` is the pre-crash record byte for byte, and the startup pass says so with
+/// `Restored` rather than with the `Failed(ContinuationNotDurable)` bn-1z09m had to answer.
 #[test]
 fn a_parked_tasks_committed_publication_survives_the_crash() {
     let mut prepared = prepare(daemon());
@@ -1019,6 +1034,13 @@ fn a_parked_tasks_committed_publication_survives_the_crash() {
         1,
         "the parked run committed one publication"
     );
+    let before = prepared
+        .daemon
+        .state()
+        .tasks()
+        .get(&task)
+        .expect("the task is held")
+        .record();
 
     let durable = prepared.daemon.crash();
     let report = report(durable.store());
@@ -1042,25 +1064,43 @@ fn a_parked_tasks_committed_publication_survives_the_crash() {
         "with the receipt its publication issued"
     );
     assert_eq!(
+        report.surviving(ArtifactClass::Continuation).len(),
+        1,
+        "the park committed its continuation record beside the campaign record"
+    );
+    assert_eq!(
         VolatileFact::TaskTable.disposition(),
         Disposition::Resolved,
-        "the live record is not reconstructed; its durable trace is resolved at startup"
+        "the live record is not inferred; its durable trace is resolved at startup"
     );
     let restarted = restart(durable);
-    assert!(
-        restarted.state().tasks().get(&task).is_none(),
-        "no live entry comes back"
-    );
-    let resolved = restarted
-        .state()
+    let Startup::Resolved(resolution) = restarted.startup() else {
+        panic!("a restart over a durable substrate runs the pass");
+    };
+    let resolved = resolution
         .tasks()
-        .resolution(&task)
-        .expect("the startup pass resolves the parked task from its record");
+        .iter()
+        .find(|resolved| resolved.task == task)
+        .expect("the startup pass resolves the parked task from its records");
     assert_eq!(
         resolved.resolution,
-        Resolution::Failed(FailureReason::ContinuationNotDurable)
+        Resolution::Restored(ParkState::Suspended)
     );
-    assert_eq!(resolved.claims(), published);
+    assert!(
+        restarted.state().tasks().resolution(&task).is_none(),
+        "a restored task is live, not in the resolved set"
+    );
+    let entry = restarted
+        .state()
+        .tasks()
+        .get(&task)
+        .expect("the task comes back live from its continuation record");
+    assert_eq!(
+        entry.record(),
+        before,
+        "the restored record is the pre-crash record"
+    );
+    assert_eq!(committed(&restarted, &task), published);
 }
 
 /// **IMPL-02, second conjunct.** An uncommitted partial is absent after recovery, never
@@ -1086,7 +1126,9 @@ fn an_uncommitted_partial_is_absent_after_recovery() {
     let fault = ArmedFault::new(PublicationPhase::CommittingIndex);
     let mut prepared = prepare(daemon_with(fault.clone()));
     let snapshot = seal(&mut prepared, "req_create", "idem-create");
-    fault.arm();
+    // The park publishes its continuation record first and its campaign record second
+    // (bn-20142), so the campaign record's index commit is the second one.
+    fault.arm_at(2);
     let refused = start(&mut prepared, &snapshot, "req_start", "idem-start", 4);
     assert_eq!(refused.envelope.status, ResultStatus::Error);
     assert_eq!(refused.error_code(), Some(ErrorCode::PublicationAborted));
@@ -1128,14 +1170,27 @@ fn an_uncommitted_partial_is_absent_after_recovery() {
         report.quarantined().contains(&expected[0]),
         "what is left is residue, named as residue"
     );
+
+    // The continuation record published before the aborted commit point is indexed, and no
+    // task claims it: its publication list names a campaign record the store does not hold.
+    // The restart reports it and restores nothing from it.
+    let continuations = report.surviving(ArtifactClass::Continuation);
+    assert_eq!(continuations.len(), 1);
+    let restarted = restart(durable);
+    let Startup::Resolved(resolution) = restarted.startup() else {
+        panic!("a restart over a durable substrate runs the pass");
+    };
+    assert!(resolution.tasks().is_empty(), "no task committed anything");
+    assert_eq!(resolution.unclaimed(), continuations.as_slice());
+    assert!(restarted.state().tasks().handles().is_empty());
 }
 
 /// **No orphan task.** Every `task_*` identity that survives is index-resolved and receipted.
 ///
 /// "Orphan" at this grain has two readings and both are checked: no surviving task artifact
 /// is dangling (each resolves through the index and carries its receipts), and no task
-/// *record* is fabricated to go with one — the restarted daemon holds no live task. Since
-/// bn-1z09m its startup pass resolves each task from its surviving record instead, so each
+/// *record* is fabricated to go with one — every live task the restarted daemon holds was
+/// read back from a committed continuation record (bn-20142), never inferred. Each surviving
 /// artifact also has a claimant.
 #[test]
 fn every_surviving_task_artifact_is_reconciled_and_receipted() {
@@ -1180,24 +1235,44 @@ fn every_surviving_task_artifact_is_reconciled_and_receipted() {
     assert!(report.receiptless().is_empty());
     assert!(report.orphan_receipts().is_empty());
 
+    let continuations = report.surviving(ArtifactClass::Continuation);
+    assert_eq!(continuations.len(), 2, "one continuation record per park");
     let restarted = restart(durable);
-    assert!(
-        restarted.state().tasks().handles().is_empty(),
-        "no live task record is fabricated"
-    );
+    let Startup::Resolved(resolution) = restarted.startup() else {
+        panic!("a restart over a durable substrate runs the pass");
+    };
     let mut claimed: Vec<ArtifactHandle> = Vec::new();
     for task in [&first, &second] {
-        let resolved = restarted
-            .state()
+        let resolved = resolution
             .tasks()
-            .resolution(task)
-            .expect("each parked task is resolved from its record");
+            .iter()
+            .find(|resolved| &resolved.task == task)
+            .expect("each parked task is resolved from its records");
         assert_eq!(
             resolved.resolution,
-            Resolution::Failed(FailureReason::ContinuationNotDurable)
+            Resolution::Restored(ParkState::Suspended),
+            "each parked task is restored from its own continuation record"
         );
         claimed.extend(resolved.claims());
     }
+    let mut live = restarted.state().tasks().handles();
+    live.sort();
+    let mut parked = vec![&first, &second];
+    parked.sort();
+    assert_eq!(
+        live, parked,
+        "exactly the parked tasks are live, and nothing else"
+    );
+    let mut expected_continuations = continuations.clone();
+    expected_continuations.sort();
+    let mut claimed_continuations: Vec<ArtifactHandle> = claimed
+        .iter()
+        .filter(|handle| handle.class() == ArtifactClass::Continuation)
+        .cloned()
+        .collect();
+    claimed_continuations.sort();
+    assert_eq!(claimed_continuations, expected_continuations);
+    claimed.retain(|handle| handle.class() == ArtifactClass::Task);
     claimed.sort();
     let mut expected = surviving.clone();
     expected.sort();
@@ -1209,12 +1284,14 @@ fn every_surviving_task_artifact_is_reconciled_and_receipted() {
 
 // --- D. the volatile declaration is real --------------------------------------------------
 
-/// The restarted daemon holds none of what the report declares lost.
+/// The restarted daemon holds none of what the report declares lost, and holds exactly what
+/// it resolves.
 ///
-/// The declaration is checked behaviourally rather than by reading a list back: the task the
-/// pre-crash daemon parked is denied, the continuation it minted is denied, and the
-/// idempotency key that would have replayed does not — it runs afresh. Each of those is one
-/// [`VolatileFact`] observed through `Daemon::dispatch`.
+/// The declaration is checked behaviourally rather than by reading a list back. The task and
+/// continuation tables are `resolved` since bn-20142: the task the pre-crash daemon parked
+/// answers `task.status` with its pre-crash record, and the continuation it minted is
+/// resumed. The idempotency key that would have replayed does not — it runs afresh. Each of
+/// those is one [`VolatileFact`] observed through `Daemon::dispatch`.
 #[test]
 fn the_restarted_daemon_holds_none_of_what_the_report_declares_lost() {
     let mut prepared = prepare(daemon());
@@ -1231,16 +1308,28 @@ fn the_restarted_daemon_holds_none_of_what_the_report_declares_lost() {
         .clone()
         .expect("a parked task has one");
 
+    let before = prepared
+        .daemon
+        .state()
+        .tasks()
+        .get(&task)
+        .expect("the task is held")
+        .record();
+
     let durable = prepared.daemon.crash();
     let report = report(durable.store());
-    let mut restarted = restart(durable);
+    let restarted = restart(durable);
+    let mut prepared = prepare(restarted);
 
-    // TaskTable.
-    let status = restarted.dispatch(&OperationRequest {
+    // TaskTable: resolved, and the restored task answers with its pre-crash record.
+    let status = prepared.daemon.dispatch(&OperationRequest {
         envelope: envelope("task.status", "agent:runner", "cap_runner", "req_status"),
         arguments: Arguments::TaskStatus(TaskStatusRequest { task: task.clone() }),
     });
-    assert_eq!(status.error_code(), Some(ErrorCode::CapabilityDenied));
+    match &status.payload {
+        Payload::TaskStatus(record) => assert_eq!(record, &before),
+        other => panic!("expected a task.status payload, got {other:?}"),
+    }
 
     // ContinuationTable. `task.resume` is `@task_starting`, so the envelope carries a budget
     // — otherwise the refusal would be step 6's `MalformedRequest` and would say nothing
@@ -1250,21 +1339,42 @@ fn the_restarted_daemon_holds_none_of_what_the_report_declares_lost() {
         "idem-resume",
     );
     resume_envelope.budget = Optional::Present(budget(8));
-    let resumed = restarted.dispatch(&OperationRequest {
+    let resume = OperationRequest {
         envelope: resume_envelope,
         arguments: Arguments::TaskResume(TaskResumeRequest {
             continuation,
-            budget: Optional::Absent,
+            budget: Optional::Present(budget(64)),
         }),
-    });
-    assert_eq!(resumed.error_code(), Some(ErrorCode::CapabilityDenied));
+    };
+    // The resume guards read the snapshot record, which is a `Declared` fact: until the
+    // deployment re-seals, the pinned snapshot is not held and the answer is the denial.
+    let early = prepared.daemon.dispatch(&resume);
+    assert_eq!(early.error_code(), Some(ErrorCode::CapabilityDenied));
 
     // IdempotencyLedger, StagedContent, ModelCatalog, IntentRegistry: the same key that
     // recorded a reply before the crash records nothing now, and the request only reaches the
     // handler at all because the deployment re-provisioned the out-of-band surfaces.
-    let mut prepared = prepare(restarted);
     let again = seal(&mut prepared, "req_create", "idem-create");
     assert_eq!(again, snapshot, "content addressing is not process-scoped");
+
+    // ContinuationTable: resolved. With the workspace re-sealed, the restored continuation
+    // resumes, and the campaign closes. The denial above was a key the idempotency ledger
+    // did not bind, so the same request is served now.
+    let resumed = prepared.daemon.dispatch(&OperationRequest {
+        envelope: keyed(resume.envelope.clone(), "idem-resume-after-seal"),
+        arguments: resume.arguments.clone(),
+    });
+    assert_eq!(resumed.error_code(), None, "{:?}", resumed.envelope.error);
+    assert_eq!(
+        prepared
+            .daemon
+            .state()
+            .tasks()
+            .get(&task)
+            .expect("the restored task is held")
+            .status,
+        TaskStatus::Completed
+    );
 
     // And the declaration itself names all of them.
     let declared: Vec<&str> = report

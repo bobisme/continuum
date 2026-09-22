@@ -80,6 +80,7 @@ pub mod admission;
 pub mod budget;
 pub mod capability;
 pub mod context;
+pub mod continuation;
 pub mod errors;
 pub mod evidence;
 pub mod family;
@@ -1057,14 +1058,26 @@ impl Builder {
             }
             // The startup task-resolution pass (plan §4.5 O2), before any dispatch can run.
             // It reads the adopted store under the connection capability and writes only the
-            // task table's resolved set.
+            // task table: a `Restored` task as a live entry with its continuation (the resume
+            // branch, bn-20142), every other task into the resolved set.
             let startup = match identity::capability_to_store(&self.services.connection)
                 .map_err(|_| continuum_workspace::publication::CapabilityDenied)
                 .and_then(|operator| recovery::resolve_tasks(&durable.store, &operator))
             {
                 Ok(resolution) => {
                     for resolved in resolution.tasks() {
-                        self.state.tasks_mut().resolve(resolved.clone());
+                        let restored = match (&resolved.resolution, &resolved.continuation) {
+                            (recovery::Resolution::Restored(_), Some(record)) => {
+                                record.restore().ok()
+                            }
+                            _ => None,
+                        };
+                        match restored {
+                            Some(restored) => self.state.tasks_mut().restore(restored),
+                            // A `Restored` resolution always carries a record that restores:
+                            // the pass decoded it, and decoding runs the same replay.
+                            None => self.state.tasks_mut().resolve(resolved.clone()),
+                        }
                     }
                     recovery::Startup::Resolved(resolution)
                 }

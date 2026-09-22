@@ -299,6 +299,24 @@ pub fn update(ledger: &mut BudgetLedger, budget: &Budget) -> Vec<UpdateOutcome> 
         .collect()
 }
 
+/// Whether [`update`] with `budget` would land any dimension on the `Suspend` arm.
+///
+/// The projection a durable write needs *before* the ledger changes (bn-20142): the
+/// continuation record of a parked task is published first, and it carries the milestone
+/// the suspension records. It restates [`BudgetLedger::update`]'s arm order — an equal
+/// ceiling is `Unchanged` even below spend, and an unmetered dimension is `Unenforced` —
+/// and `task.update_budget` checks it against the outcomes the update then returns.
+#[must_use]
+pub fn would_suspend(ledger: &BudgetLedger, budget: &Budget) -> bool {
+    dimensions_of(budget).into_iter().any(|(dimension, limit)| {
+        let Some(after) = limit else { return false };
+        let Some(spent) = ledger.spend().measured(dimension) else {
+            return false;
+        };
+        ledger.budget().ceiling(dimension).limit() != Some(after) && after < spent
+    })
+}
+
 // ---------------------------------------------------------------------------
 // artifact identity
 // ---------------------------------------------------------------------------

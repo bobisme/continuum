@@ -19,7 +19,8 @@
 //!   ([`positive_a_duplicate_start_at_every_position_coalesces_to_one_task`]);
 //! - **restart boundaries** — a crash at every one of the nine dispatch boundaries at
 //!   every position of the lifecycle leaves a recoverable store with no half-publication,
-//!   and a restarted daemon re-runs the lifecycle to the byte-identical record
+//!   and a restarted daemon resumes (or, with nothing parked, re-runs) the lifecycle to the
+//!   byte-identical record
 //!   ([`positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_record`]).
 //!
 //! # How this composes with what already exists, rather than duplicating it
@@ -45,7 +46,7 @@
 //! - assertions are on outcomes of a written-down schedule, never on timing;
 //! - every sweep carries an anti-vacuity guard (space sizes asserted as literals; a sweep
 //!   whose members all produced one outcome fails);
-//! - bounded by construction: 20 + 140 + 140 + 27 + 40 runs, nothing built by doubling;
+//! - bounded by construction: 20 + 140 + 140 + 27 + 27 + 40 runs, nothing built by doubling;
 //! - `src/` is untouched; the daemon is driven through `dispatch`/`dispatch_or_die` only.
 //!
 //! # The harness
@@ -1095,11 +1096,13 @@ impl CrashInjector for KillAt {
 ///   pre-handler images render byte-identically and `AfterHandler` differs —
 ///   `g1_crash_recovery_evidence.rs`'s claim, extended from one prepared dispatch to
 ///   every position of a running lifecycle;
-/// - a daemon restarted over the survivor re-prepares its volatile facts and re-runs the
-///   whole lane to a final record **byte-identical** to a cold daemon's, with total
-///   regions, whenever the survivor holds no parked record. Where it does, the startup
-///   pass (bn-1z09m) resolved the task to `Failed`, which is final (RFC 0026 "Task
-///   lifecycle"): the restarted start observes it, runs nothing, and creates no live entry.
+/// - a daemon restarted over the survivor re-prepares its volatile facts and finishes the
+///   lane to a final record **byte-identical** to a cold daemon's, with total regions.
+///   Where the survivor holds no parked head, it re-runs the whole lane. Where it does, the
+///   startup pass restored the task live from its continuation record (plan §4.5 O2, the
+///   resume branch, bn-20142), and the lane resumes on the restored `cont_*` handle from the
+///   first beat the crash left undone. Before bn-20142 those 18 runs stopped at
+///   `Failed(ContinuationNotDurable)`, which RFC 0026 made final.
 #[test]
 fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_record() {
     // The cold baseline: the lane run to completion on a daemon that never crashed.
@@ -1113,7 +1116,7 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
     };
 
     let mut runs = 0_usize;
-    let mut resolved_failed = 0_usize;
+    let mut resumed = 0_usize;
     let mut reran = 0_usize;
     for position in 0..DPOR.beats.len() {
         let mut images: Vec<(CrashPoint, String)> = Vec::new();
@@ -1160,37 +1163,58 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
             assert_eq!(report.verdict(), Verdict::Clean);
             images.push((point, report.render()));
 
-            // The restart, over the survivor, re-running the whole lane.
+            // The restart, over the survivor.
             let mut restarted = fixture_over(restart(durable));
-            let failed = restarted
+            assert!(
+                restarted
+                    .daemon
+                    .state()
+                    .tasks()
+                    .resolved()
+                    .all(|resolved| !matches!(resolved.resolution, Resolution::Failed(_))),
+                "position {position}, {point}: a task resolved to `Failed` although every \
+                 parked head committed its continuation record"
+            );
+            let restored = restarted
                 .daemon
                 .state()
                 .tasks()
-                .resolved()
-                .find(|resolved| matches!(resolved.resolution, Resolution::Failed(_)))
-                .map(|resolved| resolved.task.clone());
+                .handles()
+                .first()
+                .map(|task| {
+                    let entry = restarted
+                        .daemon
+                        .state()
+                        .tasks()
+                        .get(task)
+                        .expect("a handle the table just listed");
+                    ((*task).clone(), entry.publications())
+                });
             let mut task = None;
-            if let Some(failed) = failed {
-                // The survivor held a parked record, so the startup pass resolved the task
-                // to `Failed` (plan §4.5 O2, bn-1z09m). That status is final (RFC 0026
-                // "Task lifecycle"): the lane's start answers the observing lane at `ok`,
-                // runs nothing, and creates no live entry, so the resume beats have no
-                // continuation to name and the lane stops there.
-                resolved_failed += 1;
-                play_beat_strict(&mut restarted, &DPOR, 0, &mut task, "");
-                assert_eq!(
-                    task.as_ref(),
-                    Some(&failed),
-                    "the start names the resolved task"
-                );
-                assert!(
-                    restarted.daemon.state().tasks().get(&failed).is_none(),
-                    "position {position}, {point}: a live entry appeared beside a resolution"
-                );
-                assert_total(&restarted, "after the restarted start");
-                continue;
-            }
-            for index in 0..DPOR.beats.len() {
+            let first_beat = match restored {
+                // The survivor held a parked head and its continuation record, so the
+                // startup pass restored the task live at its committed continuation (plan
+                // §4.5 O2, the resume branch, bn-20142). Each beat of this lane commits one
+                // publication, so the committed count is the index of the first beat the
+                // crash left undone. The lane resumes from there on the restored `cont_*`
+                // handle, with no re-run of what was committed.
+                Some((handle, publications)) => {
+                    resumed += 1;
+                    assert_eq!(
+                        restarted.daemon.state().tasks().handles().len(),
+                        1,
+                        "one lane, one restored task"
+                    );
+                    task = Some(handle);
+                    usize::try_from(publications).expect("a small count")
+                }
+                // Nothing parked survived: the lane re-runs from its start.
+                None => {
+                    reran += 1;
+                    0
+                }
+            };
+            for index in first_beat..DPOR.beats.len() {
                 play_beat_strict(&mut restarted, &DPOR, index, &mut task, "");
             }
             assert_total(&restarted, "after the restarted lane");
@@ -1199,7 +1223,6 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
                 cold,
                 "position {position}, {point}: the restarted lifecycle diverged from cold"
             );
-            reran += 1;
         }
 
         // The step function, per position (g1's claim, at every lifecycle position).
@@ -1232,8 +1255,102 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
     // Position 0 before the handler: nothing durable, the lane re-runs from scratch (8).
     // Position 2 at `AfterHandler`: the head record closed, so the task is `Settled`, the
     // start supersedes it, and the lane re-runs (1). Every other run has a parked head and
-    // resolves to `Failed` (18). Both arms are exercised, so neither is vacuous.
-    assert_eq!((reran, resolved_failed), (9, 18));
+    // its continuation record, so the task is restored and the lane resumes from the
+    // committed continuation (18) — the runs that stopped at `Failed(ContinuationNotDurable)`
+    // before bn-20142. Both arms are exercised, so neither is vacuous.
+    assert_eq!((reran, resumed), (9, 18));
+}
+
+/// **The same sweep over the proof lane, whose middle beat changes the budget and not the
+/// work** (bn-20142). `task.update_budget` on a parked task publishes the next revision of
+/// its continuation record, so a crash after it restores the raised ceiling and the
+/// `task.budget_updated` milestone, and a crash before it restores neither. For each of the
+/// lane's three beats and each of the nine boundaries — 27 runs — the restarted daemon
+/// finishes the lane to the cold record byte for byte. The first undone beat is read off the
+/// restored task: no publication means nothing parked, one publication and the original
+/// ceiling means the update is undone, and the raised ceiling means only the resume is.
+#[test]
+fn positive_a_crash_around_a_budget_update_resumes_the_proof_lane_to_the_same_record() {
+    let cold = {
+        let mut fixture = fixture();
+        let mut task = None;
+        for index in 0..PROOF.beats.len() {
+            play_beat_strict(&mut fixture, &PROOF, index, &mut task, "");
+        }
+        lane_render(&fixture, &task.expect("the cold lane completed"))
+    };
+
+    let mut first_beats: Vec<usize> = Vec::new();
+    for position in 0..PROOF.beats.len() {
+        for point in CrashPoint::ALL {
+            let mut fixture = fixture();
+            let mut task = None;
+            for index in 0..position {
+                play_beat_strict(&mut fixture, &PROOF, index, &mut task, "");
+            }
+            let request = beat_request(
+                &fixture,
+                &PROOF,
+                position,
+                PROOF.beats[position],
+                task.as_ref(),
+                "",
+            )
+            .expect("every beat of a strictly wound lane builds");
+            fixture
+                .daemon
+                .dispatch_or_die(&request, &KillAt(point))
+                .expect_err("the injector kills at this boundary");
+            let durable = fixture.daemon.crash();
+
+            let mut restarted = fixture_over(restart(durable));
+            let restored = restarted
+                .daemon
+                .state()
+                .tasks()
+                .handles()
+                .first()
+                .map(|task| {
+                    let entry = restarted
+                        .daemon
+                        .state()
+                        .tasks()
+                        .get(task)
+                        .expect("a handle the table just listed");
+                    ((*task).clone(), entry.budget().states.value().copied())
+                });
+            let mut task = None;
+            let first_beat = match restored {
+                Some((handle, Some(4))) => {
+                    task = Some(handle);
+                    1
+                }
+                Some((handle, Some(64))) => {
+                    task = Some(handle);
+                    2
+                }
+                Some((_, ceiling)) => panic!("an unexpected restored ceiling {ceiling:?}"),
+                None => 0,
+            };
+            first_beats.push(first_beat);
+            for index in first_beat..PROOF.beats.len() {
+                play_beat_strict(&mut restarted, &PROOF, index, &mut task, "");
+            }
+            assert_total(&restarted, "after the restarted proof lane");
+            assert_eq!(
+                lane_render(&restarted, &task.expect("the restarted lane completed")),
+                cold,
+                "position {position}, {point}: the restarted proof lane diverged from cold"
+            );
+        }
+    }
+    assert_eq!(first_beats.len(), 27, "three positions × nine boundaries");
+    // Position 0: nothing before the handler (8 × beat 0), the park after it (beat 1).
+    // Position 1: the park before the handler (8 × beat 1), the update after it (beat 2).
+    // Position 2: the update before the handler (8 × beat 2), and after it the closed head
+    // is `Settled` and the lane re-runs from its start (beat 0).
+    let count = |beat: usize| first_beats.iter().filter(|first| **first == beat).count();
+    assert_eq!((count(0), count(1), count(2)), (9, 9, 9));
 }
 
 // --- determinism -----------------------------------------------------------------------------

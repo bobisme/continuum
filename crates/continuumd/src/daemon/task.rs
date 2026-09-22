@@ -89,6 +89,7 @@ use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
 use continuum_workspace::staleness::{LineageError, check_current};
 
 use super::budget::{self, Publications};
+use super::continuation::{self, ParkState};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 use super::output;
 use super::region::{self, Scope, TaskRegions};
@@ -287,6 +288,11 @@ pub struct Continuation {
     /// The bounds that tripped.
     pub bounds: Bounds,
     /// The queue-ordered frontier: discovered states that were never expanded.
+    ///
+    /// Empty for a continuation restored at startup until `task.resume` reads its durable
+    /// frontier back through the model (bn-20142): a state is a value *of a model*, and the
+    /// model catalog is provisioned after startup. [`TaskTable::frontier_of`] answers the
+    /// frontier as vectors in both cases.
     pub frontier: Vec<State>,
 }
 
@@ -492,7 +498,15 @@ impl TaskEntry {
     /// `Some(0)` starting point.
     #[must_use]
     pub fn cost(&self) -> Cost {
-        budget::cost_of(&self.ledger, self.campaign.is_some())
+        // A run that committed a publication charged the meter, so the ledger holds a reading.
+        // For a live task the two conditions agree: `verification::advance` writes the
+        // campaign and commits the publication together. A task restored from its
+        // continuation record (bn-20142) has the committed publications and the recorded
+        // spend but not the engine's report, and its cost is the spend it recorded.
+        budget::cost_of(
+            &self.ledger,
+            self.campaign.is_some() || self.evidence.count() > 0,
+        )
     }
 
     /// The wire record for this task.
@@ -566,12 +580,20 @@ impl TaskEntry {
 pub struct TaskTable {
     tasks: BTreeMap<TaskHandle, TaskEntry>,
     continuations: BTreeMap<ContinuationHandle, Continuation>,
-    /// Tasks a startup resolution pass found in the store (plan §4.5 O2, bn-1z09m).
+    /// Tasks a startup resolution pass found in the store and resolved to `Settled` or
+    /// `Failed` (plan §4.5 O2, bn-1z09m).
     ///
-    /// Kept apart from `tasks` on purpose. A resolved task is not a `TaskEntry`: its
-    /// operation, epochs, budget and report were never durable, and a `TaskEntry` cannot be
-    /// built without them except by inference.
+    /// Kept apart from `tasks` on purpose. Such a task is not a `TaskEntry`: its terminal
+    /// record and report were never durable, and a `TaskEntry` cannot be built without them
+    /// except by inference. A task resolved to `Restored` is not here: its continuation
+    /// record holds what a `TaskEntry` needs, so it is in `tasks` (bn-20142).
     resolved: BTreeMap<TaskHandle, super::recovery::ResolvedTask>,
+    /// The frontiers of continuations restored at startup, as state vectors, until
+    /// `task.resume` reads them back through the model ([`Self::materialize`]).
+    pending: BTreeMap<ContinuationHandle, Vec<Vec<i64>>>,
+    /// The last durable revision of each continuation record this daemon published or
+    /// restored ([`continuation`](super::continuation)), and the state count its pins name.
+    revisions: BTreeMap<ContinuationHandle, (u32, u64)>,
 }
 
 impl TaskTable {
@@ -637,6 +659,80 @@ impl TaskTable {
     /// Every task the startup resolution pass resolved, in identity order.
     pub fn resolved(&self) -> impl Iterator<Item = &super::recovery::ResolvedTask> {
         self.resolved.values()
+    }
+
+    /// Load a task and its continuation read back from a continuation record (bn-20142).
+    ///
+    /// The one door by which a startup restoration enters the live table. The frontier is
+    /// held as vectors until [`Self::materialize`] reads it back through the model.
+    pub fn restore(&mut self, restored: super::continuation::Restored) {
+        let handle = restored.continuation.handle.clone();
+        self.revisions
+            .insert(handle.clone(), (restored.revision, restored.states));
+        self.pending.insert(handle, restored.frontier);
+        self.park(restored.continuation);
+        self.put(restored.entry);
+    }
+
+    /// The frontier of the continuation `handle` names, as state vectors, or [`None`] when
+    /// this table holds no such continuation.
+    #[must_use]
+    pub fn frontier_of(&self, handle: &ContinuationHandle) -> Option<Vec<Vec<i64>>> {
+        if let Some(pending) = self.pending.get(handle) {
+            return Some(pending.clone());
+        }
+        self.continuations
+            .get(handle)
+            .map(|continuation| super::continuation::vectors(&continuation.frontier))
+    }
+
+    /// Whether the continuation `handle` names still holds its frontier as vectors.
+    #[must_use]
+    pub fn is_pending(&self, handle: &ContinuationHandle) -> bool {
+        self.pending.contains_key(handle)
+    }
+
+    /// Read a restored continuation's frontier back through `model`.
+    ///
+    /// A no-op for a continuation whose frontier is already states. Returns whether the
+    /// continuation now holds its frontier as states. `false` means a vector is not a state
+    /// of `model`, and nothing changed.
+    pub fn materialize(
+        &mut self,
+        handle: &ContinuationHandle,
+        model: &continuum_engine_reference::model::Model,
+    ) -> bool {
+        let Some(vectors) = self.pending.get(handle) else {
+            return self.continuations.contains_key(handle);
+        };
+        let Some(states) = super::continuation::states_of(model, vectors) else {
+            return false;
+        };
+        let Some(continuation) = self.continuations.get_mut(handle) else {
+            return false;
+        };
+        continuation.frontier = states;
+        self.pending.remove(handle);
+        true
+    }
+
+    /// The revision the next continuation record for `handle` is published at.
+    #[must_use]
+    pub fn next_revision(&self, handle: &ContinuationHandle) -> u32 {
+        self.revisions
+            .get(handle)
+            .map_or(0, |(revision, _)| revision.saturating_add(1))
+    }
+
+    /// The state count the pins of `handle` name, once a record of it is durable.
+    #[must_use]
+    pub fn pinned_states(&self, handle: &ContinuationHandle) -> Option<u64> {
+        self.revisions.get(handle).map(|(_, states)| *states)
+    }
+
+    /// Record that the continuation record for `handle` at `revision` is durable.
+    pub fn record_revision(&mut self, handle: &ContinuationHandle, revision: u32, states: u64) {
+        self.revisions.insert(handle.clone(), (revision, states));
     }
 }
 
@@ -768,6 +864,7 @@ pub struct TaskFamily;
 pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("task.status", ErrorCode::CapabilityDenied),
     ("task.cancel", ErrorCode::CapabilityDenied),
+    ("task.cancel", ErrorCode::PublicationAborted),
     ("task.resume", ErrorCode::CapabilityDenied),
     ("task.resume", ErrorCode::StaleSnapshot),
     ("task.resume", ErrorCode::ContinuationEpochMismatch),
@@ -775,6 +872,7 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("task.resume", ErrorCode::PublicationAborted),
     ("task.subscribe", ErrorCode::CapabilityDenied),
     ("task.update_budget", ErrorCode::CapabilityDenied),
+    ("task.update_budget", ErrorCode::PublicationAborted),
 ];
 
 impl OperationFamily for TaskFamily {
@@ -789,17 +887,20 @@ impl OperationFamily for TaskFamily {
         // this function is pure in the arguments and is given no state, so resolving a task
         // handle to the snapshot behind it would be the store lookup X3 forbids before
         // admission. The handler re-reads that binding afterwards, where a lookup is allowed.
+        //
+        // `task.cancel` and `task.update_budget` also claim the continuation class: on a
+        // parked task each publishes the next revision of its continuation record
+        // (bn-20142).
         let task = ArtifactClass::Task.token();
         match arguments {
-            Arguments::TaskStatus(_)
-            | Arguments::TaskCancel(_)
-            | Arguments::TaskSubscribe(_)
-            | Arguments::TaskUpdateBudget(_) => ScopeClaim {
+            Arguments::TaskStatus(_) | Arguments::TaskSubscribe(_) => ScopeClaim {
                 snapshots: Vec::new(),
                 intents: Vec::new(),
                 classes: vec![task],
             },
-            Arguments::TaskResume(_) => ScopeClaim {
+            Arguments::TaskCancel(_)
+            | Arguments::TaskUpdateBudget(_)
+            | Arguments::TaskResume(_) => ScopeClaim {
                 snapshots: Vec::new(),
                 intents: Vec::new(),
                 classes: vec![task, ArtifactClass::Continuation.token()],
@@ -817,10 +918,12 @@ impl OperationFamily for TaskFamily {
     ) -> Result<Effect, Fault> {
         match call.arguments {
             Arguments::TaskStatus(request) => status(call, request, state, services),
-            Arguments::TaskCancel(request) => cancel(request, state, services),
+            Arguments::TaskCancel(request) => cancel(call, request, state, services, store),
             Arguments::TaskResume(request) => resume(call, request, state, services, store),
             Arguments::TaskSubscribe(request) => subscribe(request, state),
-            Arguments::TaskUpdateBudget(request) => update_budget(request, state, services),
+            Arguments::TaskUpdateBudget(request) => {
+                update_budget(call, request, state, services, store)
+            }
             // Unreachable: the dispatcher checked shape agreement against the registry
             // before routing. A typed refusal rather than an `unreachable!`, because a
             // daemon does not abort on its own invariant.
@@ -948,18 +1051,42 @@ fn subscribe(request: &TaskSubscribeRequest, state: &DaemonState) -> Result<Effe
 /// question whichever answer the status gives, and asking it in one place is what keeps the
 /// rows from drifting.
 fn cancel(
+    call: &Call<'_>,
     request: &TaskCancelRequest,
     state: &mut DaemonState,
     services: &Services,
+    store: &ReferenceStore,
 ) -> Result<Effect, Fault> {
     let now = services.now().cloned();
-    let residual = {
+    let (residual, terminal) = {
         let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
-        Residual {
-            publications: entry.publications(),
-            resumable: entry.continuation.is_some(),
-        }
+        (
+            Residual {
+                publications: entry.publications(),
+                resumable: entry.continuation.is_some(),
+            },
+            entry.is_terminal(),
+        )
     };
+    // The durable half (bn-20142). A parked task's cancel is published as the next revision
+    // of its continuation record *before* the status moves, so a restart restores the task
+    // `Cancelled` and never `Suspended` again ("a terminal status never changes"). An abort
+    // answers `PublicationAborted` and changes nothing.
+    let durable = if terminal {
+        None
+    } else {
+        continuation::current(state.tasks(), &request.task, ParkState::Cancelled).map(
+            |mut record| {
+                continuation::reach(&mut record, MILESTONE_CANCELLED, now.as_ref());
+                record
+            },
+        )
+    };
+    if let Some(record) = &durable {
+        let publisher = super::identity::capability_to_store(&call.envelope.capability)
+            .map_err(|_| Fault::denied())?;
+        continuation::publish(store, &publisher, services.identifier(), record)?;
+    }
     let task = request.task.clone();
     let (moved, settlement) = region::scoped(
         state,
@@ -974,6 +1101,9 @@ fn cancel(
             Ok(moved)
         },
     )?;
+    if let Some(record) = &durable {
+        continuation::settle(state.tasks_mut(), record);
+    }
 
     let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
     let outcome = if moved {
@@ -1099,11 +1229,40 @@ impl Residual {
 /// event emitted, the record byte-identical. They disagreed until bn-10093; the disagreement
 /// is what bn-3p32's A1 and bn-1kp6's attack 18 pinned, and both now guard the agreement.
 fn update_budget(
+    call: &Call<'_>,
     request: &TaskUpdateBudgetRequest,
     state: &mut DaemonState,
     services: &Services,
+    store: &ReferenceStore,
 ) -> Result<Effect, Fault> {
     let now = services.now().cloned();
+    // The durable half (bn-20142), before the ledger changes: the next revision of the
+    // parked task's continuation record, carrying the new ceilings and the milestones this
+    // update records. An abort answers `PublicationAborted` and changes nothing. A terminal
+    // task writes nothing, here as below.
+    let durable = {
+        let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+        if entry.is_terminal() {
+            None
+        } else {
+            let suspends = budget::would_suspend(&entry.ledger, &request.budget);
+            continuation::current(state.tasks(), &request.task, ParkState::Suspended).map(
+                |mut record| {
+                    record.ceilings = request.budget.clone();
+                    continuation::reach(&mut record, MILESTONE_BUDGET_UPDATED, now.as_ref());
+                    if suspends {
+                        continuation::reach(&mut record, MILESTONE_BUDGET_SUSPENDED, now.as_ref());
+                    }
+                    record
+                },
+            )
+        }
+    };
+    if let Some(record) = &durable {
+        let publisher = super::identity::capability_to_store(&call.envelope.capability)
+            .map_err(|_| Fault::denied())?;
+        continuation::publish(store, &publisher, services.identifier(), record)?;
+    }
     let entry = state
         .tasks_mut()
         .get_mut(&request.task)
@@ -1111,7 +1270,15 @@ fn update_budget(
     let outcome = if entry.is_terminal() {
         StructuralOutcome::Unchanged
     } else {
+        let projected = budget::would_suspend(&entry.ledger, &request.budget);
         let outcomes = budget::update(&mut entry.ledger, &request.budget);
+        debug_assert_eq!(
+            projected,
+            outcomes
+                .iter()
+                .any(|outcome| outcome.suspension().is_some()),
+            "`budget::would_suspend` restates the ledger's own arm order"
+        );
         entry.reach(MILESTONE_BUDGET_UPDATED, now.as_ref());
         if outcomes
             .iter()
@@ -1130,6 +1297,10 @@ fn update_budget(
         }
         StructuralOutcome::Updated
     };
+    if let Some(record) = &durable {
+        continuation::settle(state.tasks_mut(), record);
+    }
+    let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
     let payload = Payload::TaskUpdateBudget(TaskUpdateBudgetResponse {
         task: entry.handle.clone(),
         status: entry.status,
@@ -1357,9 +1528,17 @@ fn resume(
     // continuation this daemon has, and a *successful* resume was always distinguishable
     // from a denial. RFC 0027 X2 is about a caller out of scope for an artifact, and such a
     // caller never reaches a handler.
+    //
+    // A continuation restored at startup (bn-20142) holds its frontier as vectors, and they
+    // are read back into the model's states here, still before the first write: a vector
+    // that is not a state of the model the continuation names is the same condition — that
+    // model is not one this daemon can construct — and answers the same code.
     {
         let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
-        if state.models().get(&entry.model).is_none() {
+        let model = state.models().get(&entry.model).cloned();
+        let readable =
+            model.is_some_and(|model| state.tasks_mut().materialize(&request.continuation, &model));
+        if !readable {
             let fault = verification::no_model();
             return Err(if super::errors::admits(call.spec, fault.code) {
                 fault
@@ -1393,6 +1572,11 @@ fn resume(
     // one — the order the budget arm always had, and the reason the terminal test above it
     // is a reordering of two guards rather than of the run itself.
     let bounds = state.tasks().get(&task).ok_or_else(Fault::denied)?.bounds();
+    let frontier = state
+        .tasks()
+        .continuation(&request.continuation)
+        .map(|continuation| continuation.frontier.clone())
+        .unwrap_or_default();
 
     // The run's own refusals are the `verification` family's, and `task.resume` declares a
     // narrower `errors` clause than `verification.start` does, so any code outside this
@@ -1409,22 +1593,15 @@ fn resume(
     // "Continuations and resume admissibility") keeps it that way, `bounds`/`frontier` are
     // pinned provenance, not a resume instruction. It reaches `verification::advance` only so
     // `run` can check, rather than trust, that this run rediscovers it.
-    verification::advance(
-        &task,
-        bounds,
-        &continuation.frontier,
-        state,
-        services,
-        store,
-        &publisher,
-    )
-    .map_err(|fault| {
-        if super::errors::admits(call.spec, fault.code) {
-            fault
-        } else {
-            Fault::denied()
-        }
-    })?;
+    verification::advance(&task, bounds, &frontier, state, services, store, &publisher).map_err(
+        |fault| {
+            if super::errors::admits(call.spec, fault.code) {
+                fault
+            } else {
+                Fault::denied()
+            }
+        },
+    )?;
     let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
     let mut effect = reported(
         Payload::TaskResume(TaskResumeResponse {

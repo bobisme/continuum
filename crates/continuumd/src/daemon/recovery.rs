@@ -48,17 +48,17 @@
 //!   record a task committed before the crash is in the store under the identity the task
 //!   named it by ([`budget::publication_record`](super::budget::publication_record)), and
 //!   that record names its task, its sequence, its snapshot, and whether it closed or
-//!   parked. [`resolve_tasks`] is the startup pass over those records (bn-1z09m, plan §4.5
-//!   O2). It derives the task set from the store alone and resolves each task to exactly one
-//!   typed [`Resolution`]: `Settled` when the head record closed, and `Failed` with a
-//!   [`FailureReason`] otherwise. [`Builder::build`](super::Builder::build) runs it on every
-//!   restart and loads the result into the task table, so every surviving `task_*` record
-//!   has a claimant again.
-//!
-//!   The resume branch of O2 is **not** reachable, and the pass says so with
-//!   [`FailureReason::ContinuationNotDurable`] rather than with a missing arm. The record
-//!   carries the frontier and not the continuation's pins (epochs, bounds, intent, model
-//!   source), and a continuation without its pins is not a committed continuation.
+//!   parked. A task that parked also committed a continuation record under
+//!   `ArtifactClass::Continuation` ([`continuation`](super::continuation), bn-20142): the
+//!   continuation's pins and the task fields a resume reads. [`resolve_tasks`] is the
+//!   startup pass over both (bn-1z09m, plan §4.5 O2). It derives the task set from the store
+//!   alone and resolves each task to exactly one typed [`Resolution`]: `Settled` when the
+//!   head record closed, `Restored` when the head parked and a continuation record matches
+//!   it, and `Failed` with a [`FailureReason`] otherwise.
+//!   [`Builder::build`](super::Builder::build) runs it on every restart. A `Restored` task
+//!   comes back as a live entry holding its continuation, which is the resume branch of O2.
+//!   The others are loaded into the task table's resolved set, so every surviving `task_*`
+//!   record has a claimant again.
 //!
 //! That last row is the honest scope of IMPL-02's durability criterion — "committed partial
 //! evidence survives daemon restart; uncommitted partials are absent, never half-visible".
@@ -73,7 +73,9 @@
 //! failure; a daemon whose continuation pins never reached a disk has no committed
 //! continuation to resume from, and inventing one from the store would be the "silently
 //! reconstructed state" the same paragraph prohibits. The resolution pass therefore reads
-//! only what the store already holds, and takes the typed-failure branch. Persisting `DaemonState` is a real piece of work with its
+//! only what the store already holds: the campaign records and the continuation records,
+//! which are content-addressed artifacts of existing classes. Persisting the rest of
+//! `DaemonState` is a real piece of work with its
 //! own crate-boundary question (plan §20 gives `continuumd` no storage edge beyond
 //! `continuum-workspace`), and it is not this bone's. What this bone owes and delivers is the
 //! split above, stated and checked, and the machinery that makes a restart's answer typed.
@@ -104,6 +106,7 @@ use continuum_workspace::publication::{
 
 use crate::protocol::scalar::{TaskHandle, WorkspaceHandle};
 
+use super::continuation::{ContinuationRecord, ParkState};
 use super::identity::Blake3Identity;
 
 // --- crash points ------------------------------------------------------------------------
@@ -290,13 +293,16 @@ pub enum Disposition {
     /// docs/35: a restart "MUST NOT reconstruct task state by inference […] A silently
     /// reconstructed state is indistinguishable from a fabricated one".
     Declared,
-    /// The live entries are gone and are not reconstructed. Its durable trace is read back
-    /// at startup, and each member it names is resolved to a typed outcome.
+    /// The live entries are gone. Its durable trace is read back at startup, and each member
+    /// it names is resolved to a typed outcome.
     ///
-    /// The task table's disposition since bn-1z09m: [`resolve_tasks`] reads every committed
-    /// campaign record and resolves each task to [`Resolution::Settled`] or to
-    /// [`Resolution::Failed`] with a [`FailureReason`] (plan §4.5 O2). A resolved task is not
-    /// a live `TaskEntry`: its operation, epochs, budget and report were never durable.
+    /// The task table's disposition since bn-1z09m, and the continuation table's since
+    /// bn-20142: [`resolve_tasks`] reads every committed campaign record and every
+    /// continuation record, and resolves each task to [`Resolution::Settled`],
+    /// [`Resolution::Restored`] or [`Resolution::Failed`] with a [`FailureReason`] (plan §4.5
+    /// O2). A `Restored` task comes back as a live `TaskEntry` with its continuation, read
+    /// from the committed continuation record. A `Settled` or `Failed` task does not: its
+    /// terminal record and report were never durable.
     Resolved,
 }
 
@@ -395,8 +401,8 @@ impl VolatileFact {
             Self::WireCapabilityRegistry | Self::StagedContent | Self::ModelCatalog => {
                 Disposition::Reprovisioned
             }
-            // The one fact with a startup pass over its durable trace (plan §4.5 O2).
-            Self::TaskTable => Disposition::Resolved,
+            // The two facts with a startup pass over their durable trace (plan §4.5 O2).
+            Self::TaskTable | Self::ContinuationTable => Disposition::Resolved,
             _ => Disposition::Declared,
         }
     }
@@ -412,17 +418,17 @@ impl VolatileFact {
     ///   what sealing means;
     /// - the task table, whose committed campaign records are published under
     ///   [`ArtifactClass::Task`] and are what [`resolve_tasks`] reads;
-    /// - the continuation table, whose *frontier* is part of that same record
-    ///   ([`budget::publication_record`](super::budget::publication_record) writes it, and
-    ///   [`CampaignRecord::frontier`] reads its length back). The continuation's pins — its
-    ///   epochs, bounds, intent and model source — are not in the record, so the
-    ///   continuation as a whole stays [`Disposition::Declared`]: a frontier without its pins
-    ///   is not a committed continuation, and resuming from it would be inference.
+    /// - the continuation table, whose continuations are published under
+    ///   [`ArtifactClass::Continuation`] as
+    ///   [`ContinuationRecord`](super::continuation::ContinuationRecord)s with their pins
+    ///   (bn-20142). The frontier is also in the campaign record, and the pass matches the
+    ///   two.
     #[must_use]
     pub const fn survives_as(self) -> Option<ArtifactClass> {
         match self {
             Self::WorkspaceRecords => Some(ArtifactClass::WorkspaceSnapshot),
-            Self::TaskTable | Self::ContinuationTable => Some(ArtifactClass::Task),
+            Self::TaskTable => Some(ArtifactClass::Task),
+            Self::ContinuationTable => Some(ArtifactClass::Continuation),
             _ => None,
         }
     }
@@ -825,6 +831,20 @@ pub enum RecordDefect {
     ClosureToken,
     /// The frontier component count is not a whole number of states.
     FrontierShape,
+    /// A continuation record does not start with the format tag this build reads
+    /// ([`continuation::FORMAT`](super::continuation::FORMAT)).
+    Format,
+    /// A continuation record names a token or handle outside its vocabulary.
+    Vocabulary,
+    /// A continuation record decodes, but its bytes are not the canonical encoding of what
+    /// they decode to.
+    NonCanonical,
+    /// A continuation record's checkpoints, spend, ceilings and publications do not replay
+    /// into one ledger.
+    Ledger,
+    /// A continuation record's pin preimage does not derive the handle it claims, through
+    /// the declared identity seam.
+    HandleMismatch,
 }
 
 impl RecordDefect {
@@ -840,6 +860,11 @@ impl RecordDefect {
             Self::SnapshotHandle => "snapshot-handle",
             Self::ClosureToken => "closure-token",
             Self::FrontierShape => "frontier-shape",
+            Self::Format => "format",
+            Self::Vocabulary => "vocabulary",
+            Self::NonCanonical => "non-canonical",
+            Self::Ledger => "ledger",
+            Self::HandleMismatch => "handle-mismatch",
         }
     }
 }
@@ -874,10 +899,21 @@ pub struct CampaignRecord {
 }
 
 /// A cursor over one length-prefixed record.
-struct Parts<'a>(&'a [u8]);
+pub(super) struct Parts<'a>(&'a [u8]);
 
 impl<'a> Parts<'a> {
-    fn next(&mut self) -> Result<&'a [u8], RecordDefect> {
+    /// A cursor at the start of `bytes`.
+    pub(super) const fn new(bytes: &'a [u8]) -> Self {
+        Self(bytes)
+    }
+
+    /// Whether every byte has been read.
+    pub(super) const fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The next length-prefixed part.
+    pub(super) fn next(&mut self) -> Result<&'a [u8], RecordDefect> {
         let (width, rest) = self
             .0
             .split_first_chunk::<8>()
@@ -892,11 +928,13 @@ impl<'a> Parts<'a> {
         Ok(part)
     }
 
-    fn text(&mut self) -> Result<&'a str, RecordDefect> {
+    /// The next part, as UTF-8 text.
+    pub(super) fn text(&mut self) -> Result<&'a str, RecordDefect> {
         std::str::from_utf8(self.next()?).map_err(|_| RecordDefect::Truncated)
     }
 
-    fn u64(&mut self) -> Result<u64, RecordDefect> {
+    /// The next part, as a big-endian `u64`.
+    pub(super) fn u64(&mut self) -> Result<u64, RecordDefect> {
         let bytes: [u8; 8] = self
             .next()?
             .try_into()
@@ -904,7 +942,8 @@ impl<'a> Parts<'a> {
         Ok(u64::from_be_bytes(bytes))
     }
 
-    fn u32(&mut self) -> Result<u32, RecordDefect> {
+    /// The next part, as a big-endian `u32`.
+    pub(super) fn u32(&mut self) -> Result<u32, RecordDefect> {
         let bytes: [u8; 4] = self
             .next()?
             .try_into()
@@ -975,12 +1014,16 @@ pub fn decode_campaign_record(
 /// (INV-008)". Each variant is one distinct cause. None is a catch-all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FailureReason {
-    /// The head record is `bounded`: the task parked with a frontier, and the frontier is
-    /// durable in the record. The continuation's *pins* are not. The epochs, the bounds, the
-    /// intent and the model source live only on the volatile `Continuation`. Resuming would
-    /// take them from the successor's configuration, which is reconstruction by inference
-    /// (docs/35). So the committed continuation this task needs does not exist.
+    /// The head record is `bounded`: the task parked with a frontier, and no continuation
+    /// record in the store matches that head (bn-20142). Either none was published — a store
+    /// written before continuation records existed — or the one that was does not decode, or
+    /// its pins do not derive its handle (both reported in
+    /// [`TaskResolution::unattributed`]). Resuming would take the pins from the successor's
+    /// configuration, which is reconstruction by inference (docs/35).
     ContinuationNotDurable,
+    /// Two different continuation records match the head at the same highest revision, so
+    /// the committed continuation is ambiguous. Neither is chosen.
+    AmbiguousContinuation,
     /// Two different records claim the head sequence, so the task's last commit is
     /// ambiguous. Neither is chosen.
     AmbiguousHead,
@@ -995,6 +1038,7 @@ impl FailureReason {
     pub const fn token(self) -> &'static str {
         match self {
             Self::ContinuationNotDurable => "continuation-not-durable",
+            Self::AmbiguousContinuation => "ambiguous-continuation",
             Self::AmbiguousHead => "ambiguous-head",
             Self::SequenceGap => "sequence-gap",
         }
@@ -1008,11 +1052,6 @@ impl fmt::Display for FailureReason {
 }
 
 /// What the pass concluded about one task.
-///
-/// There is no `Resumed` arm. The resume branch of plan §4.5 needs a committed
-/// continuation, and this build commits the frontier without the pins (see
-/// [`FailureReason::ContinuationNotDurable`]). An arm no input can reach would be a claim
-/// the pass does not make.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Resolution {
     /// The head record is `closed`: the task finished its exploration and reached a terminal
@@ -1020,8 +1059,14 @@ pub enum Resolution {
     /// apply. Its committed records are claimed. Its terminal status and its report are not
     /// durable, and are not reconstructed.
     Settled,
-    /// The task was non-terminal at its last durable commit, or its durable history is not
-    /// sound. It is `Failed`, for the typed reason given.
+    /// The head record is `bounded` and a continuation record matches it (bn-20142): the
+    /// resume branch of O2. The task is restored as a live entry at the park state the
+    /// record's highest revision names, with its continuation, so `task.resume` on the
+    /// restored `cont_*` handle is admitted exactly when it was before the crash.
+    Restored(ParkState),
+    /// The task was non-terminal at its last durable commit and has no committed
+    /// continuation, or its durable history is not sound. It is `Failed`, for the typed
+    /// reason given.
     Failed(FailureReason),
 }
 
@@ -1031,6 +1076,8 @@ impl Resolution {
     pub const fn token(self) -> &'static str {
         match self {
             Self::Settled => "settled",
+            Self::Restored(ParkState::Suspended) => "restored-suspended",
+            Self::Restored(ParkState::Cancelled) => "restored-cancelled",
             Self::Failed(reason) => reason.token(),
         }
     }
@@ -1043,17 +1090,24 @@ pub struct ResolvedTask {
     pub task: TaskHandle,
     /// Every record the task committed, in `(sequence, identity)` order.
     pub records: Vec<CampaignRecord>,
+    /// Every continuation record of this task whose publication list is a prefix of the
+    /// task's committed records, by store identity, in identity order.
+    pub continuations: Vec<ArtifactHandle>,
+    /// The continuation record the task is restored from, for [`Resolution::Restored`].
+    pub continuation: Option<ContinuationRecord>,
     /// The outcome.
     pub resolution: Resolution,
 }
 
 impl ResolvedTask {
-    /// The store identities this task claims: every record it committed.
+    /// The store identities this task claims: every campaign record it committed, then every
+    /// continuation record it published.
     #[must_use]
     pub fn claims(&self) -> Vec<ArtifactHandle> {
         self.records
             .iter()
             .map(|record| record.identity.clone())
+            .chain(self.continuations.iter().cloned())
             .collect()
     }
 }
@@ -1067,6 +1121,7 @@ impl ResolvedTask {
 pub struct TaskResolution {
     tasks: Vec<ResolvedTask>,
     unattributed: Vec<(ArtifactHandle, RecordDefect)>,
+    unclaimed: Vec<ArtifactHandle>,
 }
 
 impl TaskResolution {
@@ -1076,10 +1131,21 @@ impl TaskResolution {
         &self.tasks
     }
 
-    /// `task_*` index entries that do not decode as a campaign record, with the typed cause.
+    /// `task_*` and `cont_*` index entries that do not decode, with the typed cause.
     #[must_use]
     pub fn unattributed(&self) -> &[(ArtifactHandle, RecordDefect)] {
         &self.unattributed
+    }
+
+    /// Continuation records that decode and that no task claims, in identity order.
+    ///
+    /// The residue of the park's write order: a continuation record is published before the
+    /// campaign record it names, so an abort or a crash between the two leaves one whose
+    /// publication list is not a prefix of any task's durable records. Reported, not used,
+    /// and not deleted.
+    #[must_use]
+    pub fn unclaimed(&self) -> &[ArtifactHandle] {
+        &self.unclaimed
     }
 
     /// The canonical rendering: one fact per line, in a fixed section order.
@@ -1107,9 +1173,23 @@ impl TaskResolution {
                     record.frontier
                 ));
             }
+            for handle in &resolved.continuations {
+                out.push_str(&format!("continuation-record {handle}\n"));
+            }
+            if let Some(record) = &resolved.continuation {
+                out.push_str(&format!(
+                    "restored {} revision={} {}\n",
+                    record.handle.as_str(),
+                    record.revision,
+                    record.state.token()
+                ));
+            }
         }
         for (handle, defect) in &self.unattributed {
             out.push_str(&format!("unattributed {handle} {defect}\n"));
+        }
+        for handle in &self.unclaimed {
+            out.push_str(&format!("unclaimed {handle}\n"));
         }
         out
     }
@@ -1117,14 +1197,22 @@ impl TaskResolution {
 
 /// Resolve every task the store holds a record for (plan §4.5 O2, docs/35).
 ///
-/// The recoverable set is derived from **durable records only**: every `task_*` identity
-/// the index names, read through the ordinary read path and decoded. No volatile table is
-/// consulted, because after a crash there is none. Per task, in this order:
+/// The recoverable set is derived from **durable records only**: every `task_*` and every
+/// `cont_*` identity the index names, read through the ordinary read path and decoded. A
+/// continuation record whose pins do not derive its handle through the declared seam
+/// ([`Blake3Identity`], as for [`recover`]) is [`RecordDefect::HandleMismatch`]. No volatile
+/// table is consulted, because after a crash there is none. Per task, in this order:
 ///
 /// 1. sequences not contiguous from zero → `Failed(SequenceGap)`;
 /// 2. more than one record at the head sequence → `Failed(AmbiguousHead)`;
 /// 3. head record `closed` → [`Resolution::Settled`];
-/// 4. head record `bounded` → `Failed(ContinuationNotDurable)`.
+/// 4. head record `bounded`, and continuation records match it — same task, same snapshot,
+///    same frontier length, and a publication list equal to the task's campaign records in
+///    sequence order — at one highest revision → [`Resolution::Restored`];
+/// 5. the same, at two different records of the highest revision →
+///    `Failed(AmbiguousContinuation)`;
+/// 6. head record `bounded` and no continuation record matches →
+///    `Failed(ContinuationNotDurable)`.
 ///
 /// The pass writes nothing, reads no clock and draws no entropy.
 ///
@@ -1140,75 +1228,147 @@ pub fn resolve_tasks(
     let mut identities: Vec<ArtifactHandle> = audit
         .identities()
         .into_iter()
-        .filter(|handle| handle.class() == ArtifactClass::Task)
+        .filter(|handle| {
+            matches!(
+                handle.class(),
+                ArtifactClass::Task | ArtifactClass::Continuation
+            )
+        })
         .collect();
     identities.sort();
 
     let mut records = Vec::new();
+    let mut continuations = Vec::new();
     let mut unattributed = Vec::new();
     for identity in identities {
-        match store.read(&identity, operator) {
-            Err(CapabilityDenied) => unattributed.push((identity, RecordDefect::Unreadable)),
-            Ok(bytes) => match decode_campaign_record(&identity, &bytes) {
-                Ok(record) => records.push(record),
+        let Ok(bytes) = store.read(&identity, operator) else {
+            unattributed.push((identity, RecordDefect::Unreadable));
+            continue;
+        };
+        if identity.class() == ArtifactClass::Continuation {
+            match ContinuationRecord::decode(&bytes) {
+                Ok(record) if record.derives_its_handle(&Blake3Identity) => {
+                    continuations.push((identity, record));
+                }
+                Ok(_) => unattributed.push((identity, RecordDefect::HandleMismatch)),
                 Err(defect) => unattributed.push((identity, defect)),
-            },
+            }
+            continue;
+        }
+        match decode_campaign_record(&identity, &bytes) {
+            Ok(record) => records.push(record),
+            Err(defect) => unattributed.push((identity, defect)),
         }
     }
-    Ok(resolve_records(records, unattributed))
+    Ok(resolve_records(records, continuations, unattributed))
 }
 
 /// The pure half of [`resolve_tasks`]: group decoded records by task and resolve each.
 #[must_use]
 pub fn resolve_records(
     records: Vec<CampaignRecord>,
+    mut continuations: Vec<(ArtifactHandle, ContinuationRecord)>,
     mut unattributed: Vec<(ArtifactHandle, RecordDefect)>,
 ) -> TaskResolution {
+    continuations.sort_by(|a, b| a.0.cmp(&b.0));
+    continuations.dedup_by(|a, b| a.0 == b.0);
     let mut by_task: BTreeMap<TaskHandle, Vec<CampaignRecord>> = BTreeMap::new();
     for record in records {
         by_task.entry(record.task.clone()).or_default().push(record);
     }
+    let mut claimed: BTreeSet<ArtifactHandle> = BTreeSet::new();
     let tasks = by_task
         .into_iter()
         .map(|(task, mut records)| {
             records.sort_by(|a, b| (a.sequence, &a.identity).cmp(&(b.sequence, &b.identity)));
             records.dedup_by(|a, b| a.identity == b.identity);
-            let resolution = resolve_one(&records);
+            let committed: Vec<String> = records
+                .iter()
+                .map(|record| record.identity.to_string())
+                .collect();
+            let own: Vec<&(ArtifactHandle, ContinuationRecord)> = continuations
+                .iter()
+                .filter(|(_, record)| {
+                    record.task == task
+                        && record.publications.len() <= committed.len()
+                        && record
+                            .publications
+                            .iter()
+                            .zip(&committed)
+                            .all(|(publication, identity)| publication.as_str() == identity)
+                })
+                .collect();
+            claimed.extend(own.iter().map(|(identity, _)| identity.clone()));
+            let (resolution, continuation) = resolve_one(&records, &own);
             ResolvedTask {
                 task,
                 records,
+                continuations: own.iter().map(|(identity, _)| identity.clone()).collect(),
+                continuation,
                 resolution,
             }
         })
+        .collect();
+    let unclaimed = continuations
+        .into_iter()
+        .map(|(identity, _)| identity)
+        .filter(|identity| !claimed.contains(identity))
         .collect();
     unattributed.sort();
     unattributed.dedup();
     TaskResolution {
         tasks,
         unattributed,
+        unclaimed,
     }
 }
 
-/// One task's resolution, from its records in `(sequence, identity)` order. See
-/// [`resolve_tasks`] for the rule order.
-fn resolve_one(records: &[CampaignRecord]) -> Resolution {
+/// One task's resolution, from its records in `(sequence, identity)` order and the
+/// continuation records it claims. See [`resolve_tasks`] for the rule order.
+fn resolve_one(
+    records: &[CampaignRecord],
+    continuations: &[&(ArtifactHandle, ContinuationRecord)],
+) -> (Resolution, Option<ContinuationRecord>) {
+    let failed = |reason| (Resolution::Failed(reason), None);
     let sequences: BTreeSet<u32> = records.iter().map(|record| record.sequence).collect();
     let Some(head) = sequences.last().copied() else {
         // Unreachable: a group exists only because a record put it there.
-        return Resolution::Failed(FailureReason::SequenceGap);
+        return failed(FailureReason::SequenceGap);
     };
     let contiguous = u32::try_from(sequences.len()).is_ok_and(|count| count == head + 1);
     if !contiguous {
-        return Resolution::Failed(FailureReason::SequenceGap);
+        return failed(FailureReason::SequenceGap);
     }
     let heads: Vec<&CampaignRecord> = records
         .iter()
         .filter(|record| record.sequence == head)
         .collect();
-    match heads.as_slice() {
-        [only] if only.closed => Resolution::Settled,
-        [_] => Resolution::Failed(FailureReason::ContinuationNotDurable),
-        _ => Resolution::Failed(FailureReason::AmbiguousHead),
+    let head = match heads.as_slice() {
+        [only] if only.closed => return (Resolution::Settled, None),
+        [only] => *only,
+        _ => return failed(FailureReason::AmbiguousHead),
+    };
+    // Exactly one record per sequence from here, so the claimed prefix of full length is the
+    // whole durable history.
+    let matching: Vec<&ContinuationRecord> = continuations
+        .iter()
+        .map(|(_, record)| record)
+        .filter(|record| {
+            record.publications.len() == records.len()
+                && Some(&record.snapshot) == head.snapshot.as_ref()
+                && record.frontier.len() as u64 == head.frontier
+        })
+        .collect();
+    let Some(highest) = matching.iter().map(|record| record.revision).max() else {
+        return failed(FailureReason::ContinuationNotDurable);
+    };
+    let top: Vec<&ContinuationRecord> = matching
+        .into_iter()
+        .filter(|record| record.revision == highest)
+        .collect();
+    match top.as_slice() {
+        [only] => (Resolution::Restored(only.state), Some((*only).clone())),
+        _ => failed(FailureReason::AmbiguousContinuation),
     }
 }
 
@@ -1422,6 +1582,7 @@ mod tests {
                 record("task_ambiguous", "a0", 0, false),
                 record("task_ambiguous", "a1", 0, true),
             ],
+            Vec::new(),
             vec![(identity("junk"), RecordDefect::Truncated)],
         );
         let outcomes: Vec<(&str, Resolution)> = resolution
@@ -1462,27 +1623,200 @@ mod tests {
         let mut backward = forward.clone();
         backward.reverse();
         assert_eq!(
-            resolve_records(forward, Vec::new()).render(),
-            resolve_records(backward, Vec::new()).render()
+            resolve_records(forward, Vec::new(), Vec::new()).render(),
+            resolve_records(backward, Vec::new(), Vec::new()).render()
         );
     }
 
     #[test]
-    fn only_the_task_table_is_resolved_and_the_continuation_frontier_survives_in_the_record() {
+    fn the_task_and_continuation_tables_are_the_resolved_facts() {
         let resolved: Vec<&str> = VolatileFact::ALL
             .iter()
             .filter(|fact| fact.disposition() == Disposition::Resolved)
             .map(|fact| fact.token())
             .collect();
-        assert_eq!(resolved, vec!["task-table"]);
-        assert_eq!(
-            VolatileFact::ContinuationTable.disposition(),
-            Disposition::Declared,
-            "a frontier without its pins is not a committed continuation"
-        );
+        assert_eq!(resolved, vec!["task-table", "continuation-table"]);
         assert_eq!(
             VolatileFact::ContinuationTable.survives_as(),
+            Some(ArtifactClass::Continuation),
+            "a continuation survives as its own record, pins included (bn-20142)"
+        );
+        assert_eq!(
+            VolatileFact::TaskTable.survives_as(),
             Some(ArtifactClass::Task)
         );
+    }
+
+    // --- the resume branch (bn-20142) -------------------------------------------------------
+
+    use super::super::continuation::{Checkpointed, pin_preimage};
+    use super::super::task::PinnedEpochs;
+    use crate::protocol::envelope::{Budget, EpochSet};
+    use crate::protocol::scalar::{Commitment, ContinuationHandle, OperationName, ProtocolVersion};
+    use crate::protocol::shared::Target;
+    use crate::protocol::spec::{Nullable, Optional};
+    use crate::protocol::vocabulary::{Portfolio, PriorityClass, TargetKind};
+    use continuum_engine_reference::bfs::Bounds;
+    use continuum_workspace::publication::ContentIdentifier;
+
+    /// A continuation record for `task` whose publication list is `publications`, at
+    /// `revision`, over the snapshot `ws_a` with one parked state — the shape `record`
+    /// above gives a bounded record.
+    fn continuation(
+        task_handle: &str,
+        publications: &[&str],
+        revision: u32,
+        state: ParkState,
+    ) -> (ArtifactHandle, ContinuationRecord) {
+        let task = task(task_handle);
+        let snapshot = WorkspaceHandle::new("ws_a").expect("a workspace handle");
+        let pinned = PinnedEpochs {
+            semantic: Nullable::Null,
+            intent: Nullable::Null,
+            evidence: Nullable::Null,
+            proof: Nullable::Null,
+            corpus: Nullable::Null,
+            engine: Nullable::Null,
+        };
+        let frontier = vec![vec![0, 1]];
+        let pins = pin_preimage(&task, &snapshot, 7, &frontier, &pinned);
+        let handle = Blake3Identity
+            .identify(ArtifactClass::Continuation, &pins)
+            .expect("blake3 names every input");
+        let unbounded = Budget {
+            wall_ms: Optional::Absent,
+            cpu_ms: Optional::Absent,
+            memory_bytes: Optional::Absent,
+            states: Optional::Absent,
+            solver_ms: Optional::Absent,
+            proof_ms: Optional::Absent,
+            tokens: Optional::Absent,
+            candidates: Optional::Absent,
+            bytes: Optional::Absent,
+        };
+        let mut spend = [None; 9];
+        spend[3] = Some(7);
+        let record = ContinuationRecord {
+            handle: ContinuationHandle::new(&handle.to_string()).expect("a cont handle"),
+            revision,
+            state,
+            task,
+            snapshot,
+            states: 7,
+            frontier,
+            pinned: pinned.clone(),
+            intent: Nullable::Null,
+            bounds: Bounds::CERTIFIABLE,
+            operation: OperationName::new("verification.start").expect("an operation"),
+            target: Target {
+                kind: TargetKind::AllClaims,
+                id: "M".to_owned(),
+            },
+            portfolio: Portfolio::Interactive,
+            priority_class: PriorityClass::Interactive,
+            epochs: EpochSet {
+                protocol: ProtocolVersion::new(3, 1),
+                semantic: Nullable::Null,
+                intent: Nullable::Null,
+                evidence: Nullable::Null,
+                proof: Nullable::Null,
+                corpus: Nullable::Null,
+                engine: Nullable::Null,
+            },
+            model: Commitment::new("elab_m"),
+            ceilings: unbounded,
+            spend,
+            checkpoints: publications
+                .iter()
+                .enumerate()
+                .map(|(index, _)| Checkpointed {
+                    committed: u32::try_from(index + 1).expect("small"),
+                    spend,
+                })
+                .collect(),
+            publications: publications
+                .iter()
+                .map(|name| Commitment::new(&identity(name).to_string()))
+                .collect(),
+            milestones: Vec::new(),
+            committed_evidence: Vec::new(),
+        };
+        let stored = Blake3Identity
+            .identify(ArtifactClass::Continuation, &record.encode())
+            .expect("blake3 names every input");
+        (stored, record)
+    }
+
+    #[test]
+    fn a_parked_head_with_a_matching_continuation_record_is_restored_at_its_highest_revision() {
+        let resolution = resolve_records(
+            vec![
+                record("task_parked", "p0", 0, false),
+                record("task_parked", "p1", 1, false),
+            ],
+            vec![
+                // The first park's record: a prefix, claimed as history.
+                continuation("task_parked", &["p0"], 0, ParkState::Suspended),
+                // The second park, then an update, then a cancel.
+                continuation("task_parked", &["p0", "p1"], 0, ParkState::Suspended),
+                continuation("task_parked", &["p0", "p1"], 1, ParkState::Suspended),
+                continuation("task_parked", &["p0", "p1"], 2, ParkState::Cancelled),
+                // Published before a campaign record that never landed: unclaimed.
+                continuation("task_parked", &["p0", "p1", "p2"], 0, ParkState::Suspended),
+            ],
+            Vec::new(),
+        );
+        let resolved = &resolution.tasks()[0];
+        assert_eq!(
+            resolved.resolution,
+            Resolution::Restored(ParkState::Cancelled)
+        );
+        let restored = resolved.continuation.as_ref().expect("a record");
+        assert_eq!(restored.revision, 2);
+        assert_eq!(resolved.continuations.len(), 4);
+        assert_eq!(resolution.unclaimed().len(), 1);
+        assert_eq!(
+            resolved.claims().len(),
+            6,
+            "two campaign records, four continuations"
+        );
+    }
+
+    #[test]
+    fn two_different_records_at_the_highest_revision_are_ambiguous() {
+        let (first, record_a) = continuation("task_x", &["x0"], 1, ParkState::Suspended);
+        let (_, mut record_b) = continuation("task_x", &["x0"], 1, ParkState::Suspended);
+        record_b.state = ParkState::Cancelled;
+        let second = Blake3Identity
+            .identify(ArtifactClass::Continuation, &record_b.encode())
+            .expect("blake3 names every input");
+        assert_ne!(first, second);
+        let resolution = resolve_records(
+            vec![record("task_x", "x0", 0, false)],
+            vec![(first, record_a), (second, record_b)],
+            Vec::new(),
+        );
+        assert_eq!(
+            resolution.tasks()[0].resolution,
+            Resolution::Failed(FailureReason::AmbiguousContinuation)
+        );
+    }
+
+    #[test]
+    fn a_continuation_record_for_an_earlier_head_does_not_restore_a_later_one() {
+        let resolution = resolve_records(
+            vec![
+                record("task_y", "y0", 0, false),
+                record("task_y", "y1", 1, false),
+            ],
+            vec![continuation("task_y", &["y0"], 3, ParkState::Suspended)],
+            Vec::new(),
+        );
+        assert_eq!(
+            resolution.tasks()[0].resolution,
+            Resolution::Failed(FailureReason::ContinuationNotDurable),
+            "a continuation of the first park is not the committed continuation of the second"
+        );
+        assert_eq!(resolution.tasks()[0].continuations.len(), 1);
     }
 }

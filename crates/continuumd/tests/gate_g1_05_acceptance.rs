@@ -41,7 +41,7 @@
 //! |---|---|
 //! | asserts `TaskRegions::is_total()` — one boolean summarising six conjuncts | enumerates the **whole obligation space**: all four [`ObligationKind`]s × every region **and** worker ordinal the tree ever allocated, probed one at a time through [`Ledger::holds`] ([`census`]) |
 //! | asserts `ledger().is_balanced()` at one point in one test | predicts the ledger's `opened`/`discharged` **deltas dispatch by dispatch** from *wire-observable facts only*, and compares ([`ledger_shadow`], [`obligations_match_a_wire_derived_prediction_dispatch_by_dispatch`]) |
-//! | never touches the publication store | fingerprints the **published namespace** — every store identity, its bytes, its receipts, the abort log, storage attribution, and `fsck` — and requires bit-for-bit equality across a cancel ([`PublishedNamespace`]) |
+//! | never touches the publication store | fingerprints the **published namespace** — every store identity, its bytes, its receipts, the abort log, storage attribution, and `fsck` — and requires bit-for-bit equality across a cancel, except the one continuation record a parked task's cancel names and the test decodes ([`PublishedNamespace`]) |
 //! | reads `TaskEntry::publications()`, a count on the cancelled task | reads the store the daemon actually published into, through the store's own capability-checked audit view, plus each task's *named* publication list |
 //! | shows a denied cancel opens no scope (unknown task) | shows a cancel is a **capability**, not ambient: a `Read`-level actor is refused, nothing is torn down, and nothing is published (ADR-0003) |
 //! | never re-drives work after a cancel | runs a second campaign *after* a cancel and requires it to be byte-identical to the same campaign in a daemon that never cancelled anything ([`the_world_after_a_cancel_is_the_world_a_cancel_never_touched`]) |
@@ -98,20 +98,22 @@
 //!
 //! # Findings this file states rather than papers over (INV-007, INV-008)
 //!
-//! 1. **`task.cancel` cannot reach the publication store at all, and that is why its
-//!    store-side half is trivially safe.** `TaskFamily::handle` receives `store` and routes
-//!    `Arguments::TaskCancel(request) => cancel(request, state, services)` — the handler has
-//!    no store parameter, so "a cancel publishes nothing durable" is a property of the
-//!    function's signature and not of the handler's care. Stated because it *bounds this
-//!    file's own store-side evidence for the cancel*: the store rows of
-//!    [`PublishedNamespace`] are guaranteed constant across a cancel by the type. They are
-//!    still load-bearing everywhere else — for the publish path
-//!    ([`negative_control_the_fingerprint_moves_when_an_uncancelled_run_publishes`]), for the
-//!    injured store, and for
-//!    [`the_world_after_a_cancel_is_the_world_a_cancel_never_touched`] — and the rows a cancel
-//!    *can* move, because `cancel` holds `&mut DaemonState`, are the task-side publication
-//!    list, the evidence graph, and the intent registry. All three are in the fingerprint,
-//!    and the second injected defect above moved the first of them.
+//! 1. **`task.cancel` reaches the publication store for one artifact, and only one
+//!    (bn-20142).** Until bn-20142 the handler had no store parameter, so "a cancel publishes
+//!    nothing durable" was a property of its signature. A parked task's cancel now publishes
+//!    the next revision of the task's continuation record, in state `cancelled`, so a
+//!    restart restores the task `Cancelled` and never `Suspended` again (`rule
+//!    task.status_monotonic` across a restart). That record is not partial finality: it
+//!    names the continuation the task already held and exactly the publications it already
+//!    committed, and it adds no campaign record. So the store rows of [`PublishedNamespace`]
+//!    are no longer constant by the type, and
+//!    [`cancellation_publishes_only_its_continuation_record_and_no_partial_finality`] reads
+//!    them: the one added identity is named and decoded, and everything else — every other
+//!    identity with its bytes, every receipt, the abort log, attribution, `fsck` — is
+//!    bit-for-bit unchanged. The rows a cancel can move in memory, because `cancel` holds
+//!    `&mut DaemonState`, are the task-side publication list, the evidence graph, and the
+//!    intent registry. All three are in the fingerprint, and the second injected defect
+//!    above moved the first of them.
 //! 2. **The delivering suite is blind to one direction of the criterion.** Injected defect 3
 //!    is a daemon in which every task claims a publication the store never received, and
 //!    `dx14_cancellation_matrix.rs` is green on it. That is not a defect in the daemon —
@@ -151,6 +153,7 @@ use continuum_workspace::publication::{
     AbortReason, CapabilityToken, PublicationPhase, StorageFaults,
 };
 use continuum_workspace::snapshot::WorkspacePath;
+use continuumd::daemon::continuation::{ContinuationRecord, ParkState};
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
@@ -509,6 +512,18 @@ struct PublishedNamespace {
 impl PublishedNamespace {
     /// Read the whole published namespace out of a daemon.
     fn of(daemon: &Daemon) -> Self {
+        Self::excluding(daemon, &BTreeSet::new())
+    }
+
+    /// Read the published namespace out of a daemon as if the identities in `excluded` had
+    /// never been published: their rows are skipped, and the count and the per-class
+    /// attribution are reduced by exactly them.
+    ///
+    /// The instrument for a cancel of a parked task since bn-20142, which publishes one
+    /// artifact — the cancelled revision of the task's continuation record — and must move
+    /// nothing else. Excluding a named, checked identity is not a blind spot: the caller
+    /// asserts what the excluded identity *is* before it excludes it.
+    fn excluding(daemon: &Daemon, excluded: &BTreeSet<String>) -> Self {
         let token = root_token();
         let view = daemon
             .store()
@@ -517,11 +532,30 @@ impl PublishedNamespace {
 
         let mut artifacts = BTreeMap::new();
         let mut out = String::new();
-        out.push_str(&format!("published_count {}\n", view.published_count()));
 
         let mut identities = view.identities();
         identities.sort();
+        let mut excluded_bytes: BTreeMap<ArtifactClass, u64> = BTreeMap::new();
+        let mut excluded_count = 0_usize;
         for handle in &identities {
+            if excluded.contains(&handle.to_string()) {
+                let content = daemon
+                    .store()
+                    .read(handle, &token)
+                    .expect("`cap_root` confers read on a published artifact");
+                *excluded_bytes.entry(handle.class()).or_insert(0) +=
+                    u64::try_from(content.len()).expect("small");
+                excluded_count += 1;
+            }
+        }
+        out.push_str(&format!(
+            "published_count {}\n",
+            view.published_count() - excluded_count
+        ));
+        for handle in identities
+            .iter()
+            .filter(|handle| !excluded.contains(&handle.to_string()))
+        {
             let content = daemon
                 .store()
                 .read(handle, &token)
@@ -548,7 +582,10 @@ impl PublishedNamespace {
             out.push_str(&format!("abort {} {}\n", abort.phase(), abort.reason()));
         }
         for (class, bytes) in view.storage_attribution() {
-            out.push_str(&format!("attribution {} {bytes}\n", class.token()));
+            let bytes = bytes - excluded_bytes.get(&class).copied().unwrap_or(0);
+            if bytes > 0 {
+                out.push_str(&format!("attribution {} {bytes}\n", class.token()));
+            }
         }
         let defects = view.fsck(&Blake3Identity);
         out.push_str(&format!("fsck {}\n", defects.len()));
@@ -1245,22 +1282,25 @@ fn wind_up(fixture: &mut Fixture, profile: &Profile) -> TaskHandle {
 }
 
 // =========================================================================================
-// 1. no partial finality — the published namespace is bit-for-bit unchanged by a cancel
+// 1. no partial finality — a cancel adds its continuation record and moves nothing else
 // =========================================================================================
 
 /// **The criterion's second half, read off the store rather than off the cancelled task.**
 ///
 /// For every residual profile: fingerprint the published namespace, cancel, fingerprint
-/// again, and require the two to be byte-identical. The fingerprint is
-/// [`PublishedNamespace`] — every store identity *with its bytes*, every receipt, the abort
-/// log, storage attribution, `fsck`, and each task's named publication list.
+/// again. The cancel of a parked task adds exactly one identity — its continuation record's
+/// `cancelled` revision (bn-20142) — which is decoded and checked against the task. With that
+/// one identity excluded, the two fingerprints are byte-identical; every other cancel adds
+/// nothing at all. The fingerprint is [`PublishedNamespace`] — every store identity *with its
+/// bytes*, every receipt, the abort log, storage attribution, `fsck`, and each task's named
+/// publication list. A second cancel moves nothing.
 ///
 /// This is the check the delivering evidence does not make. `dx14_cancellation_matrix.rs`
 /// asserts `entry.publications()` is the same integer before and after the cancel; that is a
 /// count the cancelled task keeps about itself, and it is equally true of a daemon whose
 /// cancel deleted a store record, rewrote one, or issued a second receipt for one.
 #[test]
-fn cancellation_leaves_the_published_namespace_bit_for_bit_unchanged() {
+fn cancellation_publishes_only_its_continuation_record_and_no_partial_finality() {
     for profile in PROFILES {
         let mut fixture = fixture();
         let task = wind_up(&mut fixture, profile);
@@ -1287,13 +1327,56 @@ fn cancellation_leaves_the_published_namespace_bit_for_bit_unchanged() {
             profile.token
         );
 
+        // What the cancel added, named before anything is excluded (bn-20142). A cancel
+        // that moves a parked task to `Cancelled` publishes exactly one artifact: the next
+        // revision of that task's continuation record, in state `cancelled`, naming the
+        // same continuation and exactly the publications the task already committed — no
+        // campaign record, so no partial finality. Every other cancel publishes nothing.
         let after = PublishedNamespace::of(&fixture.daemon);
+        let added: BTreeSet<String> = after
+            .artifacts
+            .keys()
+            .filter(|handle| !before.artifacts.contains_key(*handle))
+            .cloned()
+            .collect();
+        let records_the_cancel =
+            profile.resumable && profile.outcome == StructuralOutcome::Cancelled;
         assert_eq!(
-            after.rendered.as_bytes(),
-            before.rendered.as_bytes(),
-            "{}: the cancel moved the published namespace\n{}",
+            added.len(),
+            usize::from(records_the_cancel),
+            "{}: the cancel published {} artifacts",
             profile.token,
-            before.diff(&after)
+            added.len()
+        );
+        for handle in &added {
+            assert!(
+                handle.starts_with(ArtifactClass::Continuation.prefix()),
+                "{}: the cancel published a `{handle}`, which is not a continuation record",
+                profile.token
+            );
+            let record = ContinuationRecord::decode(&after.artifacts[handle])
+                .expect("the added artifact is a continuation record");
+            let held = entry(&fixture, &task);
+            assert_eq!(record.state, ParkState::Cancelled, "{}", profile.token);
+            assert_eq!(Some(&record.handle), held.continuation.as_ref());
+            assert_eq!(
+                record.publications,
+                held.evidence
+                    .committed()
+                    .iter()
+                    .map(|publication| publication.commitment().clone())
+                    .collect::<Vec<_>>(),
+                "{}: the cancel record names exactly the committed publications",
+                profile.token
+            );
+        }
+        let rest = PublishedNamespace::excluding(&fixture.daemon, &added);
+        assert_eq!(
+            rest.rendered.as_bytes(),
+            before.rendered.as_bytes(),
+            "{}: the cancel moved the published namespace beyond its continuation record\n{}",
+            profile.token,
+            before.diff(&rest)
         );
 
         // And a second cancel, which is where a non-idempotent teardown would republish.
@@ -1302,19 +1385,21 @@ fn cancellation_leaves_the_published_namespace_bit_for_bit_unchanged() {
         let twice = PublishedNamespace::of(&fixture.daemon);
         assert_eq!(
             twice.rendered.as_bytes(),
-            before.rendered.as_bytes(),
+            after.rendered.as_bytes(),
             "{}: cancelling twice moved the published namespace\n{}",
             profile.token,
-            before.diff(&twice)
+            after.diff(&twice)
         );
     }
 }
 
 /// **Negative control for the fingerprint.** The same instrument, on a world where a
-/// publication really does happen, must move — and must move by exactly one artifact.
+/// publication really does happen, must move — and must move by exactly the artifacts a
+/// parked run publishes: one campaign record and one continuation record.
 ///
-/// Without this, [`cancellation_leaves_the_published_namespace_bit_for_bit_unchanged`] would
-/// be satisfied by a fingerprint that reads nothing.
+/// Without this,
+/// [`cancellation_publishes_only_its_continuation_record_and_no_partial_finality`] would be
+/// satisfied by a fingerprint that reads nothing.
 #[test]
 fn negative_control_the_fingerprint_moves_when_an_uncancelled_run_publishes() {
     let mut fixture = fixture();
@@ -1344,11 +1429,21 @@ fn negative_control_the_fingerprint_moves_when_an_uncancelled_run_publishes() {
         .keys()
         .filter(|handle| !before.artifacts.contains_key(*handle))
         .collect();
+    // A resumed run that parks again publishes its campaign record and, since bn-20142,
+    // its new continuation record.
+    let campaign_records = added
+        .iter()
+        .filter(|handle| handle.starts_with(ArtifactClass::Task.prefix()))
+        .count();
+    let continuation_records = added
+        .iter()
+        .filter(|handle| handle.starts_with(ArtifactClass::Continuation.prefix()))
+        .count();
     assert_eq!(
-        added.len(),
-        1,
-        "a resumed run publishes exactly one campaign record; this one published {}",
-        added.len()
+        (campaign_records, continuation_records, added.len()),
+        (1, 1, 2),
+        "a resumed run that parks publishes one campaign record and one continuation \
+         record; this one published {added:?}"
     );
     assert!(
         before

@@ -138,9 +138,9 @@
 //! - **No transport, no CLI, no concurrency.** Every request goes through
 //!   [`Daemon::dispatch`] in process, one at a time. "The agent crashed" is modelled by
 //!   destroying the client value, not by killing a process.
-//! - **No daemon restart.** G1-04's `scope_a_continuation_does_not_survive_a_restart` measures
-//!   the volatile boundary; this file's interruption is on the other side of the connection
-//!   and says nothing about it.
+//! - **No daemon restart.** G1-04's `regression_a_continuation_survives_a_restart_with_its_pins`
+//!   measures the restart boundary (bn-20142); this file's interruption is on the other side
+//!   of the connection and says nothing about it.
 //! - **No evidence graph and no Context Pack.** `verification.*` in this build commits no `ev_`
 //!   node — the `task.committed_evidence` omission on every task result says so — so
 //!   `evidence.get` and `context.expand` have nothing to walk here and are not driven.

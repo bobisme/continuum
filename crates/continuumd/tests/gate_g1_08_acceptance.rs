@@ -19,7 +19,7 @@
 //! | | plan §4.5 says | this build has |
 //! |---|---|---|
 //! | **O1** | "Publication commits content before index; a crash leaves unreachable content eligible for GC, never a stale index entry." | **built.** The two-phase protocol, the in-flight root pin, `StoreAudit::fsck`, `recovery::recover`, and a real restart seam (`Daemon::crash` → `Builder::over`). |
-//! | **O2** | "On restart, `Running` tasks resume from their last committed continuation or transition to `Failed` with a typed reason — never to a silently reconstructed state." | **built, failure branch only (bn-1z09m).** `recovery::resolve_tasks` runs at every restart and resolves each task the store holds a campaign record for to `Settled` or to `Failed` with a typed `FailureReason`. The resume branch is unreachable: the record carries the frontier but not the continuation's pins, so no committed continuation exists. |
+//! | **O2** | "On restart, `Running` tasks resume from their last committed continuation or transition to `Failed` with a typed reason — never to a silently reconstructed state." | **built, both branches (bn-1z09m, bn-20142).** A park commits a continuation record (`cont_`) with the continuation's pins and the task fields a resume reads. `recovery::resolve_tasks` runs at every restart and resolves each task the store holds a campaign record for to `Settled`, to `Restored` — a live task and continuation read back from the matching continuation record — or to `Failed` with a typed `FailureReason`. |
 //! | **O3** | "An index verifier (fsck) ships with the daemon." | **built.** `StoreAudit::fsck`. |
 //!
 //! So the two nouns of G1-08 land on opposite sides of that table, and the honest verdict is
@@ -32,8 +32,9 @@
 //!   [`the_independent_census_and_the_stores_own_fsck_agree`]).
 //! - **"no orphan tasks"** is O2. Before bn-1z09m the successor's task table was *empty*,
 //!   so the property held only of an empty set. Now the startup pass derives the task set
-//!   from the durable `task_*` records and resolves each member to a typed outcome
-//!   ([`derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store`]), and a
+//!   from the durable `task_*` and `cont_*` records and resolves each member to a typed
+//!   outcome, restoring a parked task live
+//!   ([`derived_scope_the_startup_pass_restores_the_parked_task_from_the_store`]), and a
 //!   daemon killed at `AfterHandler` has its record reconnected to a claimant
 //!   ([`a_daemon_dropped_mid_dispatch_has_its_complete_artifact_reconnected_by_the_restart`]).
 //!   The loss pin over the remaining `Declared` facts stays
@@ -52,40 +53,48 @@
 //! ## The debt spec — what O2 would require
 //!
 //! Actionable, in the shape `bn-3dr` left it and this file measures. Status after bn-1z09m
-//! is given per item.
+//! and bn-20142 is given per item.
 //!
 //! 1. **A durable task record.** `TaskEntry` — at minimum `handle`, `operation`, `status`,
 //!    `snapshot`, `intent`, `epochs`, the ledger's checkpoints, and `Publications::committed`
-//!    — written before the operation that changes it answers. Today `VolatileFact::TaskTable`
-//!    is `Declared` and `survives_as() == Some(ArtifactClass::Task)` names only the published
-//!    *evidence*, never the record. **Still open.** The pass works from the campaign record,
-//!    which names the task, its sequence, its snapshot and whether it closed. The rest of
-//!    `TaskEntry` is still volatile, so no live entry comes back.
-//! 2. **A durable continuation.** `VolatileFact::ContinuationTable` has
-//!    `survives_as() == None`: nothing of a parked continuation reaches the store at all, so
-//!    "resume from the last committed continuation" has no referent across a restart.
-//!    **Corrected, still open.** The frontier *does* reach the store: it is part of the
-//!    campaign record, so `survives_as()` is now `Some(ArtifactClass::Task)`. The pins
-//!    (epochs, bounds, intent, model source) do not, so the continuation stays `Declared`
-//!    and the resume branch stays unreachable. Closing it needs a durable continuation
-//!    artifact, which is a new artifact shape and out of bn-1z09m's scope.
+//!    — written before the operation that changes it answers. **Closed for a parked task
+//!    (bn-20142).** The continuation record carries every one of those fields plus the
+//!    target, portfolio, priority, model source, ceilings, spend and milestones, and it is
+//!    written before the park, `task.update_budget` or `task.cancel` answers. The restored
+//!    `TaskRecord` is the pre-crash one byte for byte, and `task.status` answers it
+//!    ([`a_restored_task_answers_task_status_with_its_pre_crash_record`]). **Still open for a
+//!    task that closed:** a closing run publishes no continuation record, so a `Settled` task
+//!    has no durable terminal record and `task.status` on it answers `CapabilityDenied` until
+//!    a re-issued start re-runs it. What is missing is exactly a terminal record — status,
+//!    report and final ledger — for the `Completed` arm. Not durable either, by declaration:
+//!    `TaskEntry::events` (hints, `rule subscription.hints_only`) and the engine's
+//!    `CheckReport`, which the next resume re-derives.
+//! 2. **A durable continuation.** **Closed (bn-20142).** `VolatileFact::ContinuationTable` is
+//!    `Resolved` and `survives_as() == Some(ArtifactClass::Continuation)`. The record is an
+//!    artifact of the existing `cont_` class, content-addressed, with the pin preimage the
+//!    `cont_*` handle is the identity of; the pass re-derives the handle through the
+//!    declared seam. The crash matrices resume a restored continuation to the byte-identical
+//!    cold record at every boundary (`tests/task_lifecycle_schedule_matrix.rs`), and the
+//!    decision table admits it exactly as it admitted the live one
+//!    ([`a_restored_continuation_is_admitted_exactly_when_the_live_one_was`]).
 //! 3. **A startup resolution pass.** For every durable record in a non-terminal state:
-//!    resume it under its pinned epochs, or write `Failed` with a typed `ErrorCode`. Before
-//!    bn-1z09m neither branch existed, and `recovery::recover` took `&ReferenceStore` and no
-//!    task input at all, which was this file's mechanical evidence that the pass was unbuilt.
-//!    **Built (bn-1z09m), failure branch.** `recovery::resolve_tasks` runs in
-//!    `Builder::build` on every restart. A `bounded` head resolves to
-//!    `Failed(ContinuationNotDurable)`, a `closed` head to `Settled`, and an unsound history
-//!    to `Failed(SequenceGap)` or `Failed(AmbiguousHead)`.
+//!    resume it under its pinned epochs, or write `Failed` with a typed `ErrorCode`. **Built,
+//!    both branches.** `recovery::resolve_tasks` runs in `Builder::build` on every restart. A
+//!    `bounded` head with a matching continuation record resolves to `Restored` at the record's
+//!    highest revision; one with none to `Failed(ContinuationNotDurable)`
+//!    ([`a_parked_head_without_a_continuation_record_still_resolves_to_failed`]); two records
+//!    at one highest revision to `Failed(AmbiguousContinuation)`; a `closed` head to
+//!    `Settled`; an unsound history to `Failed(SequenceGap)` or `Failed(AmbiguousHead)`.
 //! 4. **An orphan reaper with something to reap.** The census in this file *is* the reaper's
 //!    detector, and [`negative_control_a_planted_orphan_task_is_detected`] shows it fires. It
 //!    had nothing to run against after a restart because there were no tasks. **Now has a
-//!    subject**: the successor's resolved tasks claim every surviving record, and the census
-//!    runs over those claims.
+//!    subject**: the successor's live and resolved tasks claim every surviving record, and the
+//!    census runs over those claims. A continuation record no task claims — one published
+//!    before a campaign record that then aborted — is reported by the pass as unclaimed.
 //! 5. **A crate-boundary decision.** Plan §20 gives `continuumd` no storage edge beyond
 //!    `continuum-workspace`, so 1–3 need either a task artifact class in that store or a new
-//!    edge. This is a dossier decision, not an implementation detail. **Unchanged.** The
-//!    pass needed no new edge, because it only reads the existing `task` class.
+//!    edge. This is a dossier decision, not an implementation detail. **Unchanged, and not
+//!    needed.** The pass reads the existing `task` and `cont` classes of the one store edge.
 //!
 //! ## Absences stated (INV-007)
 //!
@@ -133,14 +142,15 @@
 //!   and the store's own `fsck` agree on the clean case and on the residue case. The narrowing
 //!   is the crash grain (a dropped value, not a dropped process, and no `fsync` below it) and
 //!   the single-threaded dispatch.
-//! - **"no orphan tasks" — SATISFIED at a narrowed scope (bn-1z09m).** Every `task_*` record
-//!   in the store has a claimant after a restart, and every task with a non-terminal head is
-//!   `Failed` with a typed reason. The detector fires
+//! - **"no orphan tasks" — SATISFIED at a narrowed scope (bn-1z09m, bn-20142).** Every
+//!   `task_*` record in the store has a claimant after a restart, and every task with a
+//!   non-terminal head is restored from its committed continuation or is `Failed` with a
+//!   typed reason. The detector fires
 //!   ([`negative_control_a_planted_orphan_task_is_detected`]), and the pass is two-sided
-//!   ([`negative_control_a_restart_that_cannot_audit_resolves_nothing_and_says_so`]). The
-//!   narrowing: the resume branch of O2 is unreachable (debt item 2), a resolved task is not
-//!   visible through `task.status` (no durable `TaskRecord` fields to answer with), and the
-//!   crash grain is as stated for the first conjunct.
+//!   ([`negative_control_a_restart_that_cannot_audit_resolves_nothing_and_says_so`]). Since
+//!   bn-20142 a parked task comes back live from its continuation record and resumes. The
+//!   narrowing: a `Settled` task is not visible through `task.status` (debt item 1: no
+//!   durable terminal record), and the crash grain is as stated for the first conjunct.
 //!
 //! # Four findings this re-derivation produced that the delivering evidence does not carry
 //!
@@ -165,12 +175,13 @@
 //!    complete, resolvable, receipted `task_*` record that no surviving task claimed. It was
 //!    neither a stale entry nor residue nor an orphan task — it was O2's absence seen from the
 //!    other side. Since bn-1z09m the startup pass reconnects it: the successor resolves the
-//!    task that published it, under the handle a healthy twin names.
+//!    task that published it, under the handle a healthy twin names. Since bn-20142 it
+//!    restores that task live, under the continuation handle the twin minted.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use continuum_engine_reference::diehard;
 use continuum_intent::canonical_json::Json;
@@ -185,6 +196,7 @@ use continuum_workspace::publication::{
 };
 use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::budget::Publications;
+use continuumd::daemon::continuation::ParkState;
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
@@ -201,7 +213,9 @@ use continuumd::protocol::handshake::{
     CapabilityDescriptor, CapabilityProfile, ClientHello, Negotiated, VersionRange, negotiate,
 };
 use continuumd::protocol::operations::intent::IntentAcceptRequest;
-use continuumd::protocol::operations::task::{TaskCancelRequest, TaskStatusRequest};
+use continuumd::protocol::operations::task::{
+    TaskCancelRequest, TaskResumeRequest, TaskStatusRequest, TaskUpdateBudgetRequest,
+};
 use continuumd::protocol::operations::verification::VerificationStartRequest;
 use continuumd::protocol::operations::workspace::WorkspaceCreateRequest;
 use continuumd::protocol::registry::ENCODINGS;
@@ -561,28 +575,47 @@ impl CrashInjector for KillAt {
 }
 
 /// Storage that refuses one check of one phase, and only while the test has armed it.
+///
+/// Armed by ordinal from the arming: since bn-20142 a park publishes its continuation record
+/// and then its campaign record, so a test aiming at the campaign record's index commit arms
+/// the second check of that phase ([`CAMPAIGN_RECORD`]).
 #[derive(Debug, Clone)]
 struct ArmedAbort {
     phase: PublicationPhase,
-    armed: Arc<AtomicBool>,
+    /// The matching checks left until the fault fires; zero is disarmed.
+    countdown: Arc<AtomicU64>,
 }
+
+/// The ordinal of a park's campaign record among its publications: the continuation record
+/// is first, the campaign record second.
+const CAMPAIGN_RECORD: u64 = 2;
 
 impl ArmedAbort {
     fn new(phase: PublicationPhase) -> Self {
         Self {
             phase,
-            armed: Arc::new(AtomicBool::new(false)),
+            countdown: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    fn arm(&self) {
-        self.armed.store(true, Ordering::SeqCst);
+    /// Fire at the `nth` check of the phase from now, counting from one.
+    fn arm_at(&self, nth: u64) {
+        self.countdown.store(nth, Ordering::SeqCst);
     }
 }
 
 impl StorageFaults for ArmedAbort {
     fn check(&self, phase: PublicationPhase) -> Result<(), AbortReason> {
-        if phase == self.phase && self.armed.swap(false, Ordering::SeqCst) {
+        if phase != self.phase {
+            return Ok(());
+        }
+        let fired = self
+            .countdown
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok_and(|left| left == 1);
+        if fired {
             return Err(AbortReason::StorageExhausted);
         }
         Ok(())
@@ -1049,27 +1082,68 @@ fn driven(mut prepared: Prepared) -> (Prepared, Witnesses) {
     (prepared, witnesses)
 }
 
+/// A store written before continuation records existed: a parked campaign record and no
+/// continuation record (bn-20142).
+///
+/// The production daemon cannot write this any more — a park publishes its continuation
+/// record before its campaign record, so a parked head always has one — so the store is
+/// planted: a healthy twin runs [`driven`], and its campaign record's bytes are published
+/// into a fresh daemon's store under the operator capability, beside the same sealed
+/// snapshot. The witnesses are the twin's, and they name the planted task.
+fn legacy(mut prepared: Prepared) -> (Prepared, Witnesses) {
+    let (twin, witnesses) = driven(prepare(daemon()));
+    let claims = claims_of(&twin.daemon);
+    assert_eq!(claims.len(), 1, "the twin committed one campaign record");
+    let bytes = twin
+        .daemon
+        .store()
+        .read(&claims[0].1, &operator())
+        .expect("`cap_root` reads the twin's record");
+    let snapshot = seal(&mut prepared, "req_create", "idem-create");
+    assert_eq!(
+        snapshot, witnesses.snapshot,
+        "the same inputs seal the same snapshot"
+    );
+    let receipt = prepared
+        .daemon
+        .store()
+        .stage(ArtifactClass::Task, bytes, &operator())
+        .expect("`cap_root` publishes")
+        .commit_content()
+        .expect("nothing is injured")
+        .commit_index()
+        .expect("nothing is injured");
+    assert_eq!(
+        receipt.handle(),
+        &claims[0].1,
+        "the planted record is the twin's"
+    );
+    (prepared, witnesses)
+}
+
 // =============================================================================================
 // A. derived scope
 // =============================================================================================
 
-/// **The startup pass resolves the parked task from the store, and nothing else comes back.**
+/// **The startup pass restores the parked task from the store, and nothing else comes back.**
 ///
-/// Regression guard for bn-1z09m (plan §4.5 O2). Before it, `recovery::recover` took a store
-/// and a capability and no task input, the task table was `Declared` lost, and the successor's
-/// task table was empty, so "no orphan tasks" held only of an empty set. This test pinned
-/// that. It now guards the fix:
+/// Regression guard for bn-1z09m and bn-20142 (plan §4.5 O2). Before bn-1z09m the task table
+/// was `Declared` lost and the successor's task table was empty, so "no orphan tasks" held
+/// only of an empty set. bn-1z09m resolved the parked task to
+/// `Failed(ContinuationNotDurable)`; bn-20142 made the continuation durable. This test now
+/// guards the resume branch:
 ///
 /// - the store-shaped fsck entry point is unchanged, and beside it `resolve_tasks` also takes
 ///   only a store and a capability. The task set is derived from durable records, never
 ///   from a volatile table;
-/// - nine facts stay `Declared`. The task table is `Resolved`, and the continuation table
-///   stays `Declared` while `survives_as()` now names the class its frontier lives in;
-/// - the successor holds **no live entry** for the parked task, and holds its resolution:
-///   `Failed(ContinuationNotDurable)`, claiming the record the task committed;
-/// - `Daemon::startup` is exactly what `resolve_tasks` derives from the store alone.
+/// - eight facts stay `Declared`. The task table and the continuation table are `Resolved`,
+///   and `survives_as()` names the class each is read back from;
+/// - the successor holds the parked task **live**, restored from its continuation record,
+///   with the pre-crash `TaskRecord` byte for byte, and claims exactly what it committed;
+/// - `Daemon::startup` is exactly what `resolve_tasks` derives from the store alone, and it
+///   says `Restored(Suspended)`.
 #[test]
-fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
+fn derived_scope_the_startup_pass_restores_the_parked_task_from_the_store() {
     let (prepared, witnesses) = driven(prepare(daemon()));
     let committed = claims_of(&prepared.daemon);
     assert_eq!(
@@ -1077,6 +1151,13 @@ fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
         1,
         "the parked campaign committed one record"
     );
+    let before = prepared
+        .daemon
+        .state()
+        .tasks()
+        .get(&witnesses.task)
+        .expect("held")
+        .record();
     let durable = prepared.daemon.crash();
 
     // The fsck entry point, unchanged: a store and a capability.
@@ -1103,10 +1184,9 @@ fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
             "evidence-event-log",
             "idempotency-ledger",
             "admission-log",
-            "continuation-table",
             "region-tree",
         ],
-        "nine of thirteen facts are lost and named as lost"
+        "eight of thirteen facts are lost and named as lost"
     );
     let resolved: Vec<&str> = VolatileFact::ALL
         .iter()
@@ -1115,8 +1195,8 @@ fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
         .collect();
     assert_eq!(
         resolved,
-        vec!["task-table"],
-        "the task table alone is resolved at startup"
+        vec!["task-table", "continuation-table"],
+        "the task and continuation tables are resolved at startup"
     );
     assert_eq!(
         VolatileFact::ALL.len() - declared.len() - resolved.len(),
@@ -1125,8 +1205,8 @@ fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
     );
     assert_eq!(
         VolatileFact::ContinuationTable.survives_as(),
-        Some(ArtifactClass::Task),
-        "the frontier is in the campaign record; the pins are not, so it stays declared"
+        Some(ArtifactClass::Continuation),
+        "the continuation survives as its own record, pins included"
     );
     assert_eq!(
         VolatileFact::TaskTable.survives_as(),
@@ -1135,19 +1215,39 @@ fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
     );
 
     let restarted = successor(durable);
-    assert!(
-        restarted.state().tasks().handles().is_empty(),
-        "no live entry comes back: a resolution is not a reconstructed `TaskEntry`"
+    assert_eq!(
+        restarted.state().tasks().handles(),
+        vec![&witnesses.task],
+        "exactly the parked task comes back live"
     );
-    let resolution = restarted
-        .state()
+    assert!(
+        restarted
+            .state()
+            .tasks()
+            .resolution(&witnesses.task)
+            .is_none(),
+        "a restored task is live, not in the resolved set"
+    );
+    assert_eq!(
+        restarted
+            .state()
+            .tasks()
+            .get(&witnesses.task)
+            .expect("live")
+            .record(),
+        before,
+        "every field of the restored record is read back from the continuation record"
+    );
+    let Some(resolution) = derived
         .tasks()
-        .resolution(&witnesses.task)
-        .expect("the task that was `Suspended` when the daemon died is resolved");
+        .iter()
+        .find(|resolved| resolved.task == witnesses.task)
+    else {
+        panic!("the pass resolves the task that was `Suspended` when the daemon died");
+    };
     assert_eq!(
         resolution.resolution,
-        Resolution::Failed(FailureReason::ContinuationNotDurable),
-        "a parked task has a durable frontier and no durable pins, so it cannot resume"
+        Resolution::Restored(ParkState::Suspended)
     );
     assert_eq!(
         claims_of(&restarted),
@@ -1161,6 +1261,30 @@ fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
     );
 }
 
+/// **The failure branch stays: a parked head with no continuation record is `Failed`.**
+///
+/// The store is [`legacy`] — the campaign record and no continuation record, as a store
+/// written before bn-20142 is. The pass resolves the task to
+/// `Failed(ContinuationNotDurable)` and no live entry comes back: without the pins, resuming
+/// would take them from the successor's configuration, which is inference.
+#[test]
+fn a_parked_head_without_a_continuation_record_still_resolves_to_failed() {
+    let (prepared, witnesses) = legacy(prepare(daemon()));
+    let restarted = successor(prepared.daemon.crash());
+    assert!(
+        restarted.state().tasks().get(&witnesses.task).is_none(),
+        "no live entry comes back"
+    );
+    assert_eq!(
+        restarted
+            .state()
+            .tasks()
+            .resolution(&witnesses.task)
+            .map(|resolved| resolved.resolution),
+        Some(Resolution::Failed(FailureReason::ContinuationNotDurable))
+    );
+}
+
 /// **The loss declaration, pinned per fact, with the vacuous entries named.**
 ///
 /// For each of the thirteen `VolatileFact`s this drive can witness: the pre-crash daemon holds
@@ -1169,11 +1293,12 @@ fn derived_scope_the_startup_pass_resolves_the_parked_task_from_the_store() {
 /// had would pass for the wrong reason — so the "held before" half is asserted first and the
 /// facts with no witness are listed rather than counted.
 ///
-/// This was the executable form of the debt, and bn-1z09m flipped its `task-table` row: the
-/// task table is now `Resolved`, so it leaves the declared set, and the test asserts the
-/// split exactly — the *live* witness is gone, and the startup resolution of that witness is
-/// present. The `continuation-table` row stays: the day a durable continuation lands, it
-/// fails, and that failure is the signal that O2's resume branch became reachable.
+/// This was the executable form of the debt. bn-1z09m flipped its `task-table` row, and
+/// bn-20142 flipped its `continuation-table` row — the signal this pin was kept for: O2's
+/// resume branch is reachable. Both tables are `Resolved`, so they leave the declared set,
+/// and the test asserts the split exactly: every declared witness is gone, and the two
+/// resolved witnesses — the live task and its continuation — are back, read from the
+/// continuation record.
 #[test]
 fn derived_scope_every_declared_fact_that_had_a_witness_is_gone_after_the_restart() {
     let (prepared, witnesses) = driven(prepare(daemon()));
@@ -1211,8 +1336,8 @@ fn derived_scope_every_declared_fact_that_had_a_witness_is_gone_after_the_restar
         .collect();
     assert_eq!(
         declared.len(),
-        7,
-        "seven of the nine declared facts are witnessed here (the two named above are not)"
+        6,
+        "six of the eight declared facts are witnessed here (the two named above are not)"
     );
     for fact in &declared {
         assert_eq!(
@@ -1222,21 +1347,14 @@ fn derived_scope_every_declared_fact_that_had_a_witness_is_gone_after_the_restar
         );
     }
 
-    // The resolved fact, split exactly: the live entry is gone, and its resolution is here.
-    assert_eq!(
-        holds(&restarted, VolatileFact::TaskTable, &witnesses),
-        Some(false),
-        "no live task entry survives the crash"
-    );
-    assert_eq!(
-        restarted
-            .state()
-            .tasks()
-            .resolution(&witnesses.task)
-            .map(|resolved| resolved.resolution),
-        Some(Resolution::Failed(FailureReason::ContinuationNotDurable)),
-        "the startup pass resolved the witness task from its durable record"
-    );
+    // The resolved facts: the task and its continuation are back, from the durable records.
+    for fact in [VolatileFact::TaskTable, VolatileFact::ContinuationTable] {
+        assert_eq!(
+            holds(&restarted, fact, &witnesses),
+            Some(true),
+            "`{fact}` is resolved at startup from the continuation record"
+        );
+    }
 
     // `Reprovisioned` is a claim about the *deployment*, not about the restart, and the three
     // arrive by two different doors — so the bare successor is measured before anything is
@@ -1267,7 +1385,7 @@ fn derived_scope_every_declared_fact_that_had_a_witness_is_gone_after_the_restar
             "`{fact}` is the out-of-band surface a deployment restores, and it did not restore"
         );
     }
-    // Five of the seven declared facts stay gone through the re-provisioning, and the split is
+    // Four of the six declared facts stay gone through the re-provisioning, and the split is
     // asserted exactly rather than asserted uniformly. The other two — the intent registry and
     // the admission log — come back, and the reason is worth naming because it is *not*
     // recovery: `prepare` is the deployment's own startup work, it re-registers the contract
@@ -1283,18 +1401,10 @@ fn derived_scope_every_declared_fact_that_had_a_witness_is_gone_after_the_restar
             "`{fact}` disagreed with the deployment-rewrites-its-own-startup split"
         );
     }
-    assert!(
-        restored.daemon.state().tasks().handles().is_empty(),
-        "and no amount of re-provisioning resurrects a live task: resume stays unreachable"
-    );
-    assert!(
-        restored
-            .daemon
-            .state()
-            .tasks()
-            .resolution(&witnesses.task)
-            .is_some(),
-        "while the startup resolution survives the deployment's own startup work"
+    assert_eq!(
+        restored.daemon.state().tasks().handles(),
+        vec![&witnesses.task],
+        "the deployment's own startup work adds no task and loses the restored one"
     );
 }
 
@@ -1374,10 +1484,10 @@ fn the_independent_census_of_a_crashed_store_finds_no_stale_entry_and_no_orphan_
 /// - before the restart it has **no claimant** — O2's absence seen from the other side.
 ///
 /// This test pinned that absence until bn-1z09m. It now guards the fix: the successor's
-/// startup pass reads the record, resolves the task that published it — under exactly the
-/// handle a healthy twin names — to `Failed(ContinuationNotDurable)`, and that resolved task
-/// claims the record. The identity is predicted from the twin so the census is not told the
-/// answer.
+/// startup pass reads the record and the continuation record the same handler published,
+/// and restores the task that published them — under exactly the handle a healthy twin
+/// names — live and `Suspended` (bn-20142). The restored task claims the record. The
+/// identity is predicted from the twin so the census is not told the answer.
 #[test]
 fn a_daemon_dropped_mid_dispatch_has_its_complete_artifact_reconnected_by_the_restart() {
     let (healthy, twin) = driven(prepare(daemon()));
@@ -1435,10 +1545,6 @@ fn a_daemon_dropped_mid_dispatch_has_its_complete_artifact_reconnected_by_the_re
 
     // The restart reconnects it.
     let restarted = successor(durable);
-    assert!(
-        restarted.state().tasks().handles().is_empty(),
-        "no live entry is reconstructed for the task that died mid-dispatch"
-    );
     assert_eq!(
         claims_of(&restarted),
         predicted,
@@ -1448,10 +1554,19 @@ fn a_daemon_dropped_mid_dispatch_has_its_complete_artifact_reconnected_by_the_re
         restarted
             .state()
             .tasks()
-            .resolution(&twin.task)
-            .map(|resolved| resolved.resolution),
-        Some(Resolution::Failed(FailureReason::ContinuationNotDurable)),
-        "the task is resolved to `Failed` with a typed reason, never to a guessed state"
+            .get(&twin.task)
+            .map(|entry| entry.status),
+        Some(TaskStatus::Suspended),
+        "the task is restored from its committed continuation record, never guessed"
+    );
+    assert_eq!(
+        restarted
+            .state()
+            .tasks()
+            .get(&twin.task)
+            .and_then(|entry| entry.continuation.clone()),
+        twin.continuation,
+        "under the continuation handle the healthy twin minted"
     );
     let reconnected = census(restarted.store(), &claims_of(&restarted));
     assert!(
@@ -1491,14 +1606,23 @@ fn status_of(daemon: &mut Daemon, task: &TaskHandle, request: &str) -> Option<Ta
 /// Regression guard for the lead's bn-1z09m review. RFC 0026 "Task lifecycle": "a terminal
 /// status never changes", and a terminal, non-`Completed` identity is answered on the
 /// observing lane at `ok`, running nothing (F20, paid at 3.4). A task the startup pass
-/// resolved to `Failed` is such an identity. So the identical `verification.start` after the
+/// resolved to `Failed` is such an identity. Since bn-20142 only a [`legacy`] store holds
+/// one: a store this build writes restores the task instead
+/// ([`a_restart_then_the_same_start_answers_the_restored_task_on_its_suspended_lane`]). So the identical `verification.start` after the
 /// restart answers that lane and creates **no** live entry beside the resolution: the table,
 /// `task.status` and `claims_of` all read the one resolved state.
 #[test]
 fn a_restart_then_the_same_start_leaves_one_state_for_a_failed_resolution() {
-    let (prepared, witnesses) = driven(prepare(daemon()));
-    let committed = claims_of(&prepared.daemon);
+    // A `Failed` resolution needs a parked head with no continuation record, which only a
+    // store written before bn-20142 holds.
+    let (prepared, witnesses) = legacy(prepare(daemon()));
     let mut again = prepare(successor(prepared.daemon.crash()));
+    let committed = claims_of(&again.daemon);
+    assert_eq!(
+        committed.len(),
+        1,
+        "the resolution claims the planted record"
+    );
     let snapshot = seal(&mut again, "req_create", "idem-create");
     assert_eq!(
         snapshot, witnesses.snapshot,
@@ -1619,6 +1743,252 @@ fn a_restart_then_the_same_start_supersedes_a_settled_resolution() {
     );
 }
 
+// =============================================================================================
+// A'. the resume branch of O2 (bn-20142)
+// =============================================================================================
+
+/// `task.resume` on `continuation`, under `states`, as `agent:runner`.
+fn resume_request(continuation: &ContinuationHandle, states: u64, tag: &str) -> OperationRequest {
+    let mut request = keyed(
+        envelope(
+            "task.resume",
+            "agent:runner",
+            "cap_runner",
+            &format!("req_{tag}"),
+        ),
+        &format!("idem-{tag}"),
+    );
+    request.budget = Optional::Present(budget(states));
+    OperationRequest {
+        envelope: request,
+        arguments: Arguments::TaskResume(TaskResumeRequest {
+            continuation: continuation.clone(),
+            budget: Optional::Present(budget(states)),
+        }),
+    }
+}
+
+/// **`task.status` answers a restored task from durable data** (bn-20142, the bone's third
+/// item). The successor answers the pre-crash `TaskRecord` byte for byte — operation,
+/// epochs, budget, cost, priority, milestones, continuation — none of it taken from the
+/// successor's configuration, all of it read from the continuation record.
+///
+/// What still answers `CapabilityDenied` is a task resolved to `Settled` or `Failed`: a
+/// closing run publishes no continuation record, so its terminal `TaskRecord` fields are not
+/// durable ([`a_restart_then_the_same_start_supersedes_a_settled_resolution`] reads that arm).
+#[test]
+fn a_restored_task_answers_task_status_with_its_pre_crash_record() {
+    let (prepared, witnesses) = driven(prepare(daemon()));
+    let before = prepared
+        .daemon
+        .state()
+        .tasks()
+        .get(&witnesses.task)
+        .expect("held")
+        .record();
+    let mut restarted = successor(prepared.daemon.crash());
+    let answer = restarted.dispatch(&OperationRequest {
+        envelope: envelope("task.status", "agent:runner", "cap_runner", "req_status"),
+        arguments: Arguments::TaskStatus(TaskStatusRequest {
+            task: witnesses.task.clone(),
+        }),
+    });
+    match &answer.payload {
+        Payload::TaskStatus(record) => assert_eq!(record, &before),
+        other => panic!("expected a task.status payload, got {other:?}: {answer:?}"),
+    }
+}
+
+/// **The restored continuation is admitted exactly when the live one was.**
+///
+/// The resume decision table (RFC 0026) applied to a restored continuation, row by row
+/// where a restart can move the input:
+///
+/// - the deployment has not re-sealed the snapshot: `CapabilityDenied`, the "pinned snapshot
+///   is not held" row;
+/// - the successor serves a different intent epoch: `ContinuationEpochMismatch` (P1);
+/// - the successor serves a different engine identity: `ContinuationEpochMismatch` (P2);
+/// - all inputs as before the crash: admitted.
+///
+/// The model row is not driven here: the deployment's own startup work (`prepare`)
+/// registers the model with the content it stages, so a restart cannot move that input
+/// without also moving the snapshot.
+#[test]
+fn a_restored_continuation_is_admitted_exactly_when_the_live_one_was() {
+    let run = |configure: &dyn Fn(Builder) -> Builder, reseal: bool| {
+        let (prepared, witnesses) = driven(prepare(daemon()));
+        let continuation = witnesses.continuation.clone().expect("parked");
+        let mut restarted = configure(builder()).over(prepared.daemon.crash()).build();
+        if reseal {
+            let mut again = prepare(restarted);
+            seal(&mut again, "req_create", "idem-create");
+            restarted = again.daemon;
+        }
+        restarted
+            .dispatch(&resume_request(&continuation, 64, "resume"))
+            .error_code()
+    };
+    let same = |builder: Builder| builder;
+    // The intent epoch, not the semantic one: the snapshot's own components pin the
+    // semantic epoch, so a successor serving another one cannot re-seal the snapshot at all,
+    // and the resume would stop at the snapshot row.
+    let advanced_intent = |builder: Builder| {
+        let mut epochs = epochs();
+        epochs.intent = Nullable::Value(epoch("intent-2"));
+        builder.epochs(epochs)
+    };
+    let other_engine = |builder: Builder| {
+        let mut epochs = epochs();
+        epochs.engine = Nullable::Value(epoch("engine-reference-2"));
+        builder.epochs(epochs)
+    };
+
+    assert_eq!(
+        run(&same, false),
+        Some(ErrorCode::CapabilityDenied),
+        "the pinned snapshot is not held until the deployment re-seals it"
+    );
+    assert_eq!(
+        run(&advanced_intent, true),
+        Some(ErrorCode::ContinuationEpochMismatch),
+        "P1: an intent-epoch advance refuses the restored continuation"
+    );
+    assert_eq!(
+        run(&other_engine, true),
+        Some(ErrorCode::ContinuationEpochMismatch),
+        "P2: another engine identity refuses the restored continuation"
+    );
+    assert_eq!(run(&same, true), None, "all inputs as before: admitted");
+}
+
+/// **A restart then the same start answers the restored task on its suspended lane.**
+///
+/// The re-issued `verification.start` names a live, parked identity, so it answers
+/// `task_suspended` with the restored continuation — the answer the pre-crash daemon gave —
+/// runs nothing, and creates no second state.
+#[test]
+fn a_restart_then_the_same_start_answers_the_restored_task_on_its_suspended_lane() {
+    let (prepared, witnesses) = driven(prepare(daemon()));
+    let committed = claims_of(&prepared.daemon);
+    let mut again = prepare(successor(prepared.daemon.crash()));
+    let snapshot = seal(&mut again, "req_create", "idem-create");
+    let opened = again.daemon.state().regions().opened();
+    let answer = start(&mut again, &snapshot, "req_start", "idem-start", 4);
+    assert_eq!(
+        answer.envelope.status,
+        ResultStatus::TaskSuspended,
+        "{:?}",
+        answer.envelope.error
+    );
+    assert_eq!(answer.envelope.task.value(), Some(&witnesses.task));
+    assert_eq!(
+        answer.envelope.continuation.value(),
+        witnesses.continuation.as_ref()
+    );
+    assert_eq!(
+        again.daemon.state().regions().opened(),
+        opened,
+        "nothing ran"
+    );
+    assert_eq!(
+        claims_of(&again.daemon),
+        committed,
+        "one claimant, one record"
+    );
+}
+
+/// **A cancel before the crash is a cancel after it** (`rule task.status_monotonic` across a
+/// restart). The cancel of a parked task publishes the `cancelled` revision of its
+/// continuation record, so the successor restores the task `Cancelled` — never `Suspended`
+/// again — with its pre-crash record, and a resume answers the terminal status and writes
+/// nothing. A budget update before the crash is likewise durable.
+#[test]
+fn a_cancel_and_a_budget_update_before_the_crash_survive_it() {
+    let (mut prepared, witnesses) = driven(prepare(daemon()));
+    let updated = prepared.daemon.dispatch(&OperationRequest {
+        envelope: keyed(
+            envelope(
+                "task.update_budget",
+                "agent:runner",
+                "cap_runner",
+                "req_update",
+            ),
+            "idem-update",
+        ),
+        arguments: Arguments::TaskUpdateBudget(TaskUpdateBudgetRequest {
+            task: witnesses.task.clone(),
+            budget: budget(12),
+        }),
+    });
+    assert_eq!(updated.error_code(), None, "{:?}", updated.envelope.error);
+    let cancelled = prepared.daemon.dispatch(&OperationRequest {
+        envelope: keyed(
+            envelope("task.cancel", "agent:runner", "cap_runner", "req_cancel"),
+            "idem-cancel",
+        ),
+        arguments: Arguments::TaskCancel(TaskCancelRequest {
+            task: witnesses.task.clone(),
+        }),
+    });
+    assert_eq!(
+        cancelled.error_code(),
+        None,
+        "{:?}",
+        cancelled.envelope.error
+    );
+    let before = prepared
+        .daemon
+        .state()
+        .tasks()
+        .get(&witnesses.task)
+        .expect("held")
+        .record();
+    assert_eq!(before.status, TaskStatus::Cancelled);
+    assert_eq!(before.budget.states.value(), Some(&12));
+
+    let restarted = successor(prepared.daemon.crash());
+    let Startup::Resolved(resolution) = restarted.startup() else {
+        panic!("`cap_root` audits");
+    };
+    assert_eq!(
+        resolution
+            .tasks()
+            .iter()
+            .find(|resolved| resolved.task == witnesses.task)
+            .map(|resolved| resolved.resolution),
+        Some(Resolution::Restored(ParkState::Cancelled))
+    );
+    assert_eq!(
+        restarted
+            .state()
+            .tasks()
+            .get(&witnesses.task)
+            .expect("restored")
+            .record(),
+        before,
+        "the cancelled record, ceiling and milestones included, is the pre-crash one"
+    );
+
+    let mut again = prepare(restarted);
+    seal(&mut again, "req_create", "idem-create");
+    let continuation = witnesses.continuation.clone().expect("parked");
+    let answer = again
+        .daemon
+        .dispatch(&resume_request(&continuation, 64, "resume"));
+    assert_eq!(answer.error_code(), None, "{:?}", answer.envelope.error);
+    assert_eq!(
+        again
+            .daemon
+            .state()
+            .tasks()
+            .get(&witnesses.task)
+            .expect("held")
+            .record(),
+        before,
+        "a resume of a cancelled task answers the terminal status and writes nothing"
+    );
+}
+
 /// **Negative control — a restart that cannot audit the store resolves nothing, and says so.**
 ///
 /// The pass is two-sided. Over the same kind of crashed store, a successor whose connection
@@ -1648,6 +2018,11 @@ fn negative_control_a_restart_that_cannot_audit_resolves_nothing_and_says_so() {
         "and resolves nothing"
     );
 
+    assert!(
+        refused.state().tasks().get(&witnesses.task).is_none(),
+        "and restores nothing"
+    );
+
     let (mirror, mirror_witnesses) = driven(prepare(daemon()));
     let restarted = successor(mirror.daemon.crash());
     assert!(matches!(restarted.startup(), Startup::Resolved(_)));
@@ -1655,8 +2030,9 @@ fn negative_control_a_restart_that_cannot_audit_resolves_nothing_and_says_so() {
         restarted
             .state()
             .tasks()
-            .resolution(&mirror_witnesses.task)
-            .is_some()
+            .get(&mirror_witnesses.task)
+            .is_some(),
+        "the mirror restores the task"
     );
     assert!(
         matches!(daemon().startup(), Startup::Cold),
@@ -1681,8 +2057,10 @@ fn two_independently_restarted_daemons_resolve_identically() {
     }
     assert_eq!(renders[0], renders[1]);
     assert!(
-        renders[0].contains("continuation-not-durable") && renders[0].contains("record 0 task_"),
-        "anti-vacuity: the rendering names a resolved task and its record:\n{}",
+        renders[0].contains("restored-suspended")
+            && renders[0].contains("record 0 task_")
+            && renders[0].contains("restored cont_"),
+        "anti-vacuity: the rendering names a restored task, its record and its continuation:\n{}",
         renders[0]
     );
 }
@@ -1778,7 +2156,7 @@ fn the_independent_census_and_the_stores_own_fsck_agree() {
     let fault = ArmedAbort::new(PublicationPhase::CommittingIndex);
     let mut injured = prepare(daemon_with(fault.clone()));
     let snapshot = seal(&mut injured, "req_create", "idem-create");
-    fault.arm();
+    fault.arm_at(CAMPAIGN_RECORD);
     let refused = start(&mut injured, &snapshot, "req_start", "idem-start", 4);
     assert_eq!(
         refused.envelope.status,
@@ -1940,7 +2318,7 @@ fn after_a_refused_and_aborted_operation_mix_the_within_lifetime_census_is_exact
     assert_eq!(phantom.envelope.status, ResultStatus::Error);
 
     // aborted: the campaign record's index commit is refused
-    fault.arm();
+    fault.arm_at(CAMPAIGN_RECORD);
     let aborted = start(&mut prepared, &snapshot, "req_abort", "idem-abort", 4);
     assert_eq!(aborted.envelope.status, ResultStatus::Error);
     assert_eq!(
@@ -2181,7 +2559,7 @@ fn negative_control_residue_is_detected_by_arithmetic_alone() {
     let before = census(injured.daemon.store(), &[]);
     assert_eq!(before.residue_total(), 0, "the seal itself left nothing");
 
-    fault.arm();
+    fault.arm_at(CAMPAIGN_RECORD);
     let refused = start(&mut injured, &snapshot, "req_start", "idem-start", 4);
     assert_eq!(refused.envelope.status, ResultStatus::Error);
 
@@ -2194,9 +2572,19 @@ fn negative_control_residue_is_detected_by_arithmetic_alone() {
         after.residue_bytes().keys().copied().collect::<Vec<_>>(),
         vec![ArtifactClass::Task]
     );
-    assert_eq!(
-        after.entries, before.entries,
-        "and the index did not grow: residue is content without an entry"
+    let grown: Vec<&ArtifactHandle> = after
+        .entries
+        .iter()
+        .filter(|handle| !before.entries.contains(handle))
+        .collect();
+    assert!(
+        grown
+            .iter()
+            .all(|handle| handle.class() == ArtifactClass::Continuation)
+            && grown.len() == 1,
+        "the index grew by the continuation record published before the aborted commit \
+         point, and by nothing of the residue's class: residue is content without an entry \
+         ({grown:?})"
     );
     assert!(
         after.findings.is_empty(),

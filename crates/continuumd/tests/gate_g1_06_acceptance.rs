@@ -89,9 +89,9 @@
 //! | registered operations | 75 ([`OPERATION_COUNT`]) |
 //! | `@mutation` operations | 47 |
 //! | served by this build | 18 |
-//! | that can make an artifact visible | **6** ([`SEAMS`]) |
-//! | distinct `(file, call)` store-write sites in `continuumd/src` | 5, over 4 modules |
-//! | seams driven end to end | 5 |
+//! | that can make an artifact visible | **8** ([`SEAMS`]; 6 before bn-20142) |
+//! | distinct `(file, call)` store-write sites in `continuumd/src` | 6, over 5 modules |
+//! | seams driven end to end | 5 in the matrix, plus the continuation-record site's 3 operations × 3 phases in its own test |
 //! | independent read paths in the instrument | 6 |
 //! | seam × phase abort cells | 15 |
 //! | phase × abort-reason cells | 18 |
@@ -120,6 +120,12 @@
 //!
 //! # Absences (INV-007)
 //!
+//! 0. **The continuation-record site (bn-20142) is outside the 5 × 3 matrix.** Its three
+//!    operations — a park inside `verification.start`, `task.update_budget` and
+//!    `task.cancel` — are driven at every phase by
+//!    [`the_continuation_record_seam_is_all_or_nothing_for_each_operation_that_reaches_it`],
+//!    which asserts the same byte-identical published namespace after an abort, plus an
+//!    unchanged task record. The matrix counts above are unchanged by it.
 //! 1. **`workspace.create_by_reference` is adjudicated but not driven.** It reaches the store
 //!    only by delegating into `workspace.create`'s own code path, which §3–§6 drive directly;
 //!    provisioning a held `SnapshotComponents` commitment is an out-of-band setup this file
@@ -177,12 +183,13 @@ use continuumd::protocol::handshake::{
 use continuumd::protocol::operations::evidence::EvidenceLinkRequest;
 use continuumd::protocol::operations::intent::IntentAcceptRequest;
 use continuumd::protocol::operations::observe::ObserveIngestRequest;
+use continuumd::protocol::operations::task::{TaskCancelRequest, TaskUpdateBudgetRequest};
 use continuumd::protocol::operations::verification::VerificationStartRequest;
 use continuumd::protocol::operations::workspace::{WorkspaceCreateRequest, WorkspaceSealRequest};
 use continuumd::protocol::registry::{ENCODINGS, OPERATION_COUNT, OPERATIONS};
 use continuumd::protocol::scalar::{
     ActorId, CapabilityHandle, Commitment, EpochIdentity, EvidenceHandle, IntentHandle, Opaque,
-    OperationName, ProtocolVersion, RequestId, Timestamp, WorkspaceHandle,
+    OperationName, ProtocolVersion, RequestId, TaskHandle, Timestamp, WorkspaceHandle,
 };
 use continuumd::protocol::shared::{SnapshotComponents, SnapshotEpochs, Target};
 use continuumd::protocol::spec::{Nullable, Optional};
@@ -290,6 +297,32 @@ const SEAMS: &[Seam] = &[
         shape: Shape::Composite,
         driven: false,
     },
+    // The continuation record (bn-20142): one site, reached by a park inside
+    // `verification.start` (and `task.resume`, through the same `verification::advance`), and
+    // by `task.update_budget` and `task.cancel` on a parked task. Not in the 5 × 3 matrix:
+    // [`the_continuation_record_seam_is_all_or_nothing_for_each_operation_that_reaches_it`]
+    // drives all three operations at every phase.
+    Seam {
+        operation: "verification.start",
+        file: "daemon/continuation.rs",
+        call: "store.stage(",
+        shape: Shape::Single,
+        driven: false,
+    },
+    Seam {
+        operation: "task.update_budget",
+        file: "daemon/continuation.rs",
+        call: "store.stage(",
+        shape: Shape::Single,
+        driven: false,
+    },
+    Seam {
+        operation: "task.cancel",
+        file: "daemon/continuation.rs",
+        call: "store.stage(",
+        shape: Shape::Single,
+        driven: false,
+    },
 ];
 
 /// The `@mutation` operations this build serves that reach no store write at all.
@@ -305,9 +338,7 @@ const SERVED_NON_PUBLISHERS: &[&str] = &[
     "intent.accept",
     "intent.reject",
     "intent.lock",
-    "task.cancel",
     "task.resume",
-    "task.update_budget",
     "evidence.verify",
     "context.compile",
     "context.expand",
@@ -379,9 +410,10 @@ fn the_publication_seam_census_is_closed_over_the_daemon_source() {
     }
     assert_eq!(
         found.len(),
-        5,
-        "five distinct (file, call) sites reach the store's write surface; `SEAMS` has six \
-         rows because `workspace.create` and `workspace.create_by_reference` share one"
+        6,
+        "six distinct (file, call) sites reach the store's write surface; `SEAMS` has nine \
+         rows because `workspace.create` and `workspace.create_by_reference` share one, and \
+         three operations share the continuation record's"
     );
     assert_eq!(
         SEAMS
@@ -389,7 +421,7 @@ fn the_publication_seam_census_is_closed_over_the_daemon_source() {
             .filter(|seam| seam.shape == Shape::Composite)
             .count(),
         3,
-        "three of the six seams publish a composite"
+        "three of the nine seams publish a composite"
     );
 }
 
@@ -451,8 +483,10 @@ fn the_mutation_surface_is_partitioned_by_the_census() {
     );
     assert_eq!(
         publishers.len(),
-        6,
-        "six of those eighteen can make an artifact visible"
+        8,
+        "eight of those eighteen can make an artifact visible — six before bn-20142, plus \
+         `task.update_budget` and `task.cancel`, which publish a parked task's continuation \
+         record"
     );
     assert!(
         unserved.contains("repair.promote"),
@@ -460,8 +494,8 @@ fn the_mutation_surface_is_partitioned_by_the_census() {
     );
     assert_eq!(
         OPERATION_COUNT - publishers.len(),
-        69,
-        "sixty-nine of the seventy-five registered operations publish nothing here"
+        67,
+        "sixty-seven of the seventy-five registered operations publish nothing here"
     );
 }
 
@@ -888,12 +922,13 @@ fn the_driven_seams_are_exactly_the_census_rows_marked_driven() {
     assert_eq!(
         driven.len(),
         5,
-        "five of the six census rows are driven end to end"
+        "five operations are driven through the matrix"
     );
     assert_eq!(
         SEAMS.iter().filter(|seam| !seam.driven).count(),
-        1,
-        "and the one that is not is stated as an absence in this file's module doc"
+        4,
+        "`workspace.create_by_reference`, stated as an absence in this file's module doc, and \
+         the three continuation-record rows, driven by their own test"
     );
 }
 
@@ -2080,12 +2115,13 @@ fn control_the_census_scanner_reads_control_flow_and_not_prose() {
     assert_eq!(
         files,
         BTreeSet::from([
+            "daemon/continuation.rs",
             "daemon/evidence.rs",
             "daemon/observe.rs",
             "daemon/verification.rs",
             "daemon/workspace.rs",
         ]),
-        "exactly four daemon modules reach the store's write surface"
+        "exactly five daemon modules reach the store's write surface"
     );
     // `daemon/output.rs` names `PublicationAborted` and INV-017 in prose and publishes
     // nothing. If the scanner counted comments it would appear above.
@@ -2108,6 +2144,196 @@ fn control_the_census_scanner_reads_control_flow_and_not_prose() {
             .any(|(file, _, call)| file == "daemon/observe.rs" && call == "store.publish("),
         "and the scanner finds it anyway"
     );
+}
+
+// =========================================================================================
+// The continuation-record seam (bn-20142)
+// =========================================================================================
+
+/// **The continuation record's seam is all-or-nothing, for each operation that reaches it.**
+///
+/// bn-20142 added one publication site, `daemon/continuation.rs`, reached by three
+/// operations: a park inside `verification.start`, where the continuation record is the
+/// first of two publications, and `task.update_budget` and `task.cancel` on a parked task,
+/// where it is the only one and precedes the in-memory change. For each operation and each
+/// phase — nine cells — the first check of the phase refuses, and then:
+///
+/// - the answer is `PublicationAborted`;
+/// - the published namespace renders byte-identical to the moment before the request;
+/// - the task's wire record is unchanged: an aborted update records no ceiling and no
+///   milestone, an aborted cancel leaves the task `Suspended`, and an aborted park leaves
+///   the task with no committed publication and no continuation.
+///
+/// The control: each healthy operation adds exactly one continuation record, and the park
+/// adds one campaign record beside it.
+#[test]
+fn the_continuation_record_seam_is_all_or_nothing_for_each_operation_that_reaches_it() {
+    const OPERATIONS: [&str; 3] = ["verification.start", "task.update_budget", "task.cancel"];
+
+    fn park(rig: &mut Rig, tag: &str) -> OperationOutcome {
+        let snapshot = rig.sealed_workspace();
+        let mut request = keyed(
+            envelope(
+                "verification.start",
+                "agent:runner",
+                "cap_runner",
+                &format!("req_park_{tag}"),
+            ),
+            &format!("idem-park-{tag}"),
+        );
+        request.budget = Optional::Present(budget(4));
+        request.snapshot = Nullable::Value(snapshot);
+        rig.daemon.dispatch(&OperationRequest {
+            envelope: request,
+            arguments: Arguments::VerificationStart(VerificationStartRequest {
+                target: target(TargetKind::AllClaims, "DieHard"),
+                portfolio: Portfolio::Interactive,
+                context_policy: Optional::Absent,
+                priority_class: Optional::Absent,
+            }),
+        })
+    }
+
+    fn mutate(rig: &mut Rig, operation: &str, task: &TaskHandle, tag: &str) -> OperationOutcome {
+        let request = format!("req_{tag}");
+        let key = format!("idem-{tag}");
+        let arguments = match operation {
+            "task.update_budget" => Arguments::TaskUpdateBudget(TaskUpdateBudgetRequest {
+                task: task.clone(),
+                budget: budget(64),
+            }),
+            "task.cancel" => Arguments::TaskCancel(TaskCancelRequest { task: task.clone() }),
+            other => panic!("no mutation is defined for `{other}`"),
+        };
+        rig.daemon.dispatch(&OperationRequest {
+            envelope: keyed(
+                envelope(operation, "agent:runner", "cap_runner", &request),
+                &key,
+            ),
+            arguments,
+        })
+    }
+
+    fn task_of(outcome: &OperationOutcome) -> TaskHandle {
+        match &outcome.payload {
+            Payload::VerificationStart(response) => response
+                .task
+                .value()
+                .cloned()
+                .expect("a parked start names its task"),
+            other => panic!("expected a verification.start payload, got {other:?}"),
+        }
+    }
+
+    fn classes(before: &Namespace, after: &Namespace) -> (usize, usize) {
+        let added: Vec<ArtifactHandle> = after
+            .visible()
+            .difference(&before.visible())
+            .cloned()
+            .collect();
+        (
+            added
+                .iter()
+                .filter(|handle| handle.class() == ArtifactClass::Task)
+                .count(),
+            added
+                .iter()
+                .filter(|handle| handle.class() == ArtifactClass::Continuation)
+                .count(),
+        )
+    }
+
+    let mut cells = 0_usize;
+    for operation in OPERATIONS {
+        // The control: a healthy run of the operation.
+        let mut rig = Rig::new();
+        rig.sealed_workspace();
+        let task = if operation == "verification.start" {
+            None
+        } else {
+            let parked = park(&mut rig, "healthy");
+            assert_eq!(parked.envelope.status, ResultStatus::TaskSuspended);
+            Some(task_of(&parked))
+        };
+        let before = rig.namespace(&[]);
+        let outcome = match &task {
+            None => park(&mut rig, "control"),
+            Some(task) => mutate(&mut rig, operation, task, "control"),
+        };
+        assert!(
+            outcome.error_code().is_none(),
+            "`{operation}` succeeds on a healthy daemon: {:?}",
+            outcome.envelope.error
+        );
+        let after = rig.namespace(&[]);
+        assert_eq!(
+            classes(&before, &after),
+            (usize::from(task.is_none()), 1),
+            "`{operation}` publishes one continuation record, and a park one campaign record"
+        );
+
+        for phase in PHASES {
+            let mut rig = Rig::new();
+            rig.sealed_workspace();
+            let task = if operation == "verification.start" {
+                None
+            } else {
+                Some(task_of(&park(&mut rig, "setup")))
+            };
+            let record = task.as_ref().map(|task| {
+                rig.daemon
+                    .state()
+                    .tasks()
+                    .get(task)
+                    .expect("the parked task is held")
+                    .record()
+            });
+            let before = rig.namespace(&[]);
+
+            rig.arm(Plan::Nth {
+                phase,
+                nth: 1,
+                reason: AbortReason::StorageExhausted,
+            });
+            let outcome = match &task {
+                None => park(&mut rig, "injured"),
+                Some(task) => mutate(&mut rig, operation, task, "injured"),
+            };
+            assert_eq!(
+                outcome.error_code(),
+                Some(ErrorCode::PublicationAborted),
+                "`{operation}` at {phase} must refuse with the code INV-017 owns"
+            );
+            let after = rig.namespace(&[]);
+            assert_eq!(
+                after.render(),
+                before.render(),
+                "`{operation}` aborted at {phase} and left a trace a reader can see"
+            );
+            assert!(after.hard_defects().is_empty());
+            match (&task, &record) {
+                (Some(task), Some(record)) => assert_eq!(
+                    &rig.daemon
+                        .state()
+                        .tasks()
+                        .get(task)
+                        .expect("the parked task is held")
+                        .record(),
+                    record,
+                    "`{operation}` aborted at {phase} and changed the task"
+                ),
+                _ => {
+                    for handle in rig.daemon.state().tasks().handles() {
+                        let entry = rig.daemon.state().tasks().get(handle).expect("listed");
+                        assert!(entry.evidence.committed().is_empty());
+                        assert!(entry.continuation.is_none());
+                    }
+                }
+            }
+            cells += 1;
+        }
+    }
+    assert_eq!(cells, 9, "three operations by three phases");
 }
 
 // =========================================================================================

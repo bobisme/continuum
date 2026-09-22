@@ -38,11 +38,16 @@
 //! assertion rather than prose. Parts 1 and 3 still narrow it; part 2 was repaired by
 //! bn-3oocz and is now a regression guard:
 //!
-//! 1. **Within one daemon process lifetime.** [`PHASE_A_EXIT_PACKAGE.md`] §6.4 declares ten
-//!    of thirteen `VolatileFact`s lost on restart, task and continuation tables among them.
-//!    [`scope_a_continuation_does_not_survive_a_restart`] confirms the declared boundary
-//!    exactly — it is neither wider nor narrower than declared — and this file relitigates
-//!    nothing else about it.
+//! 1. **Within one daemon process lifetime — no longer for a continuation (bn-20142).**
+//!    [`PHASE_A_EXIT_PACKAGE.md`] §6.4 declared ten of thirteen `VolatileFact`s lost on
+//!    restart, task and continuation tables among them. bn-20142 moved both to `resolved`:
+//!    a park commits a continuation record, and a restart restores the task and its
+//!    continuation from it with every pin intact.
+//!    [`regression_a_continuation_survives_a_restart_with_its_pins`] is the guard, and the
+//!    resume decision table is then applied to the restored continuation exactly as to the
+//!    live one (`tests/task_lifecycle_schedule_matrix.rs` resumes it to the cold record).
+//!    The other declared-lost facts are unchanged, and this file relitigates nothing else
+//!    about them.
 //! 2. **"Validated before any reuse" is true of all thirteen refusal classes — as of
 //!    bn-3oocz.** This file first found it false of one: the "the model the continuation
 //!    names is no longer one this daemon can construct" row of the exit package's own §6.1
@@ -2402,19 +2407,33 @@ fn negative_control_a_store_only_fingerprint_misses_the_same_trace() {
 // scope, stated as assertions
 // =========================================================================================
 
-/// The declared boundary, confirmed: a continuation does not survive a restart.
+/// A continuation survives a restart with its pins (bn-20142). This was the declared
+/// boundary `scope_a_continuation_does_not_survive_a_restart` confirmed; it is now a guard.
 ///
-/// [`PHASE_A_EXIT_PACKAGE.md`] §6.4 declares the task and continuation tables lost on
-/// restart. This file's brief is not to relitigate that decision, but a scope statement that
-/// is never executed is prose. So: crash the daemon, rebuild over the durable substrate, and
-/// check the continuation is gone. Neither wider nor narrower than declared.
-///
-/// [`PHASE_A_EXIT_PACKAGE.md`]: ../../../notes/plan/notes/PHASE_A_EXIT_PACKAGE.md
+/// Crash the daemon, rebuild over the durable substrate, and check that the continuation
+/// and its task come back from the committed continuation record: the same handle, the same
+/// snapshot, intent, compatibility epochs, engine identity and bounds — every input the
+/// resume decision table reads. The frontier is read back through the model by the first
+/// resume, so it is held as vectors until then.
 #[test]
-fn scope_a_continuation_does_not_survive_a_restart() {
+fn regression_a_continuation_survives_a_restart_with_its_pins() {
     let deployment = parked();
     let continuation = deployment.continuation.clone();
     let task = deployment.task.clone();
+    let before = deployment
+        .daemon
+        .state()
+        .tasks()
+        .continuation(&continuation)
+        .expect("held")
+        .clone();
+    let record = deployment
+        .daemon
+        .state()
+        .tasks()
+        .get(&task)
+        .expect("held")
+        .record();
     let substrate = deployment.daemon.crash();
     let restarted = Daemon::builder(Blake3Identity, negotiated_at(version()), cap("cap_root"))
         .epochs(epochs())
@@ -2433,17 +2452,41 @@ fn scope_a_continuation_does_not_survive_a_restart() {
         .family(TaskFamily)
         .build();
 
+    let after = restarted
+        .state()
+        .tasks()
+        .continuation(&continuation)
+        .expect("the continuation table is resolved from the continuation record");
+    assert_eq!(after.handle, before.handle);
+    assert_eq!(after.task, before.task);
+    assert_eq!(after.snapshot, before.snapshot);
+    assert_eq!(after.intent, before.intent);
+    assert_eq!(after.pinned, before.pinned);
+    assert_eq!(after.bounds, before.bounds);
     assert!(
+        restarted.state().tasks().is_pending(&continuation),
+        "the frontier waits for the model"
+    );
+    assert_eq!(
+        restarted.state().tasks().frontier_of(&continuation),
+        Some(
+            before
+                .frontier
+                .iter()
+                .map(|state| state.as_slice().to_vec())
+                .collect()
+        ),
+        "and it is the parked frontier, component for component"
+    );
+    assert_eq!(
         restarted
             .state()
             .tasks()
-            .continuation(&continuation)
-            .is_none(),
-        "the continuation table is a declared-lost VolatileFact",
-    );
-    assert!(
-        restarted.state().tasks().get(&task).is_none(),
-        "and so is the task table",
+            .get(&task)
+            .expect("and so is the task table")
+            .record(),
+        record,
+        "the restored task record is the pre-crash one"
     );
 }
 
