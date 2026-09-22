@@ -777,7 +777,8 @@ fn a_crash_between_the_two_commits_leaves_residue_and_no_stale_index_entry() {
     assert_eq!(
         created.error_code(),
         Some(ErrorCode::PublicationAborted),
-        "nothing was published and nothing was truncated"
+        "the composite root was not published and no record was truncated; the record \
+         before the fault stays published (RFC 0026, correction 48)"
     );
 
     let durable = prepared.daemon.crash();

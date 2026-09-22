@@ -134,7 +134,7 @@
 //! - **What a `@mutation` does under a ceiling its answer cannot meet.** Refusing after the
 //!   handler ran would trade a rendering bound for a lost mutation — the work committed and
 //!   the caller told it failed — which is the shape INV-017 and `PublicationAborted`'s
-//!   "nothing published, nothing truncated" exist to prevent. `task.status` is `@readonly`, so
+//!   per-artifact "not published, not truncated" exist to prevent. `task.status` is `@readonly`, so
 //!   this bone does not have to answer it, and it does not.
 //!
 //! [`Negotiated::encoding`]: crate::protocol::handshake::Negotiated::encoding

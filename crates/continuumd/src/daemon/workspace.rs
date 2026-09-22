@@ -787,6 +787,11 @@ fn lineage_fault(error: &LineageError) -> Fault {
     }
 }
 
+/// A seal publishes a composite one record at a time, children first and the root last, so
+/// an abort at record *k* can leave the records before *k* published, each complete and
+/// receipted. The detail says what is true at operation grain: the workspace root is not
+/// published, and no record is partial (RFC 0026 "Atomicity of publication", correction 48;
+/// INV-017 per artifact, RFC 0038).
 fn seal_fault(error: &SealError) -> Fault {
     match error {
         SealError::Refused {
@@ -795,7 +800,8 @@ fn seal_fault(error: &SealError) -> Fault {
         } => Fault::denied(),
         SealError::Refused { .. } | SealError::IdentityDisagreement { .. } => Fault::new(
             ErrorCode::PublicationAborted,
-            "the publication aborted; nothing was published and nothing was truncated",
+            "the composite publication aborted; the workspace root was not published and \
+             nothing was truncated, and records published before the abort remain published",
         ),
     }
 }

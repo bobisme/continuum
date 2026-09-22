@@ -18,7 +18,10 @@ use super::spec::{
 };
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
-pub const IDL_VERSION: &str = "1.11";
+///
+/// `"1.12"` as of bn-12plt, a doc-comment-only revision (`PublicationAborted`
+/// is atomic per artifact) that leaves [`PROTOCOL_VERSION`] at `"3.6"`.
+pub const IDL_VERSION: &str = "1.12";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///

@@ -112,8 +112,8 @@
 //!
 //! | # | Scope statement | Test |
 //! |---|---|---|
-//! | 1 | **"Nothing is published" is exact; "nothing is written" is false, by design.** An abort at `CommittingIndex` leaves GC-eligible unreachable content in the substrate — bytes no reader can reach. Aborts at `Staging` and `CommittingContent` leave nothing at all. The residue is a *step function of the phase*, is always `UnreachableContent`, and is never `MissingReferent` or `IdentityMismatch`. | [`residue_is_a_step_function_of_the_phase_and_is_never_reachable`] |
-//! | 2 | **INV-017 is per artifact, not per operation.** A composite seal that fails at record *k* leaves records 0..*k* published, visible, and receipted — each a complete artifact — while RFC 0026's wire promise for the same failure reads "Nothing is published". The two are consistent only under the per-artifact reading (RFC 0038: "publication is per-artifact atomic"), and this file pins the difference instead of choosing a reading silently. | [`scope_a_composite_publication_is_atomic_per_record_and_not_per_operation`] |
+//! | 1 | **For one artifact, "nothing is published" is exact; "nothing is written" is false, by design.** An abort at `CommittingIndex` leaves GC-eligible unreachable content in the substrate — bytes no reader can reach. Aborts at `Staging` and `CommittingContent` leave nothing at all. The residue is a *step function of the phase*, is always `UnreachableContent`, and is never `MissingReferent` or `IdentityMismatch`. | [`residue_is_a_step_function_of_the_phase_and_is_never_reachable`] |
+//! | 2 | **INV-017 is per artifact, not per operation, and RFC 0026 now says so.** A composite seal that fails at record *k* leaves the records before *k* published, visible, and receipted — each a complete artifact — and never its root. This file first pinned that against RFC 0026's old wire text ("Nothing is published"); bn-12plt corrected RFC 0026 to the per-artifact contract (correction 48), and the test now asserts that contract clause by clause, retry included. | [`a_partial_composite_publication_meets_rfc_0026s_per_artifact_contract`] |
 //! | 3 | **The composite's own guarantee is ordering, not a transaction.** The root is published last, so a partial seal is unreachable under the name a caller would fetch it by. That rests on `WorkspaceDescriptor::records` yielding children before parents, one crate away, so the sweep measures it rather than assuming it. | [`the_visible_set_is_a_monotone_prefix_of_the_complete_publication`] |
 //! | 4 | **"References" has two halves at the daemon grain and only one is durable.** The store index survives a restart; the daemon-side evidence-graph record naming a published artifact does not. A restarted daemon serves a *visible* artifact whose daemon-side reference record is gone. | [`scope_the_daemon_side_reference_record_of_a_published_artifact_is_volatile`] |
 //! | 5 | **There is no concurrency at this grain to probe.** `Daemon::dispatch` takes `&mut self` and every publication completes inside one dispatch, so no two publications can interleave *within* a publication here. Interleaving is probed at the coarsest grain the surface admits — whole dispatches — and the store's own concurrency remains DX-13's. | [`interleaved_publications_at_the_dispatch_grain_never_observe_each_others_intermediates`] |
@@ -987,8 +987,10 @@ fn a_publication_aborted_at_its_first_phase_leaves_the_published_namespace_byte_
     assert_eq!(cells, 15, "five seams by three phases");
 }
 
-/// **Scope statement 1.** "Nothing is published" is exact. "Nothing is written" is false, by
-/// design, and the difference is a step function of the phase.
+/// **Scope statement 1.** For the artifact whose publication aborted, "nothing is published"
+/// is exact. "Nothing is written" is false, by design, and the difference is a step function
+/// of the phase. Every drive here aborts at the first check of its kind, so the aborted
+/// artifact is the operation's first record; scope statement 2 covers a later one.
 ///
 /// docs/35 chooses the asymmetry in its own words: a publication interrupted after its
 /// content commit leaves "unreachable content, which is garbage-collectable, and never a
@@ -1364,76 +1366,171 @@ fn the_visible_set_is_a_monotone_prefix_of_the_complete_publication() {
     );
 }
 
-/// **Scope statement 2.** A composite publication is atomic per record, not per operation.
+/// **Scope statement 2.** A composite publication is atomic per record, not per operation —
+/// and that is now RFC 0026's own contract, which this test holds the daemon to.
 ///
-/// This is the sharpest thing this file has to say about G1-06, and it is a *narrowing*, not
-/// a failure. INV-017's own sentence quantifies over artifacts, and RFC 0038 restates it as
-/// "publication is per-artifact atomic". RFC 0026's wire text for the same failure reads
-/// stronger — "Nothing is published and nothing is truncated" — and at the operation grain
-/// that sentence is not what a composite delivers: a `workspace.create(seal: true)` that
-/// aborts at record *k* answers `PublicationAborted` while records 0..*k* are published,
-/// visible, receipted, and complete.
+/// INV-017's own sentence quantifies over artifacts, and RFC 0038 restates it as "publication
+/// is per-artifact atomic". RFC 0026's wire text for `PublicationAborted` used to read "Nothing
+/// is published and nothing is truncated", which a composite does not deliver at operation
+/// grain: a `workspace.create(seal: true)` that aborts at record *k* answers
+/// `PublicationAborted` while the records before *k* are published. This file pinned that
+/// discrepancy; the lead adjudicated it under plan §25 (bn-12plt) by correcting RFC 0026 to the
+/// per-artifact contract (correction 48), not by making the composite a transaction.
 ///
-/// The two readings reconcile by ordering, not by a transaction: the root is last, so the
-/// artifact the caller named is absent. That is a weaker property than "nothing is published",
-/// and it rests on `WorkspaceDescriptor::records` yielding children before parents — one crate
-/// away from this assertion, which is why it is measured here and not assumed.
+/// The corrected "Atomicity of publication" names five things a client MAY assume about a
+/// partial composite. Each is an assertion here:
+///
+/// 1. records before *k* MAY be published, and each is complete, receipted, and indexed;
+/// 2. the root is never published — the `ws_` identity is absent and its read is refused;
+/// 3. record *k* and every later record are not published;
+/// 4. the residue is a step function of the phase — one GC-eligible unindexed record at
+///    `CommittingIndex`, none at `Staging` or `CommittingContent`;
+/// 5. a retry converges on the complete publication. The same-key half of the retry rule is
+///    an as-is pin here: this daemon replays the recorded abort (see the assertion).
+///
+/// The root-last ordering rests on `WorkspaceDescriptor::records` yielding children before
+/// parents, one crate away, which is why it is measured here and not assumed.
 #[test]
-fn scope_a_composite_publication_is_atomic_per_record_and_not_per_operation() {
+fn a_partial_composite_publication_meets_rfc_0026s_per_artifact_contract() {
     let mut healthy = Rig::new();
     let root = healthy.seal_workspace("req_create", "idem-create");
     let root_handle =
         identity::workspace_to_store(&root).expect("a `ws_` handle crosses to the store");
     let complete = healthy.namespace(&[]);
 
-    // Fail the second record's index commit: the first record is already complete.
-    let mut rig = Rig::new();
-    rig.arm(Plan::Nth {
-        phase: PublicationPhase::CommittingIndex,
-        nth: 2,
-        reason: AbortReason::StorageExhausted,
-    });
-    let outcome = rig.drive("workspace.create");
-    assert_eq!(
-        outcome.error_code(),
-        Some(ErrorCode::PublicationAborted),
-        "the wire answer says nothing was published"
-    );
+    for phase in PHASES {
+        // Fail the second record at `phase`: the first record is already complete.
+        let mut rig = Rig::new();
+        let before = rig.namespace(&[]);
+        rig.arm(Plan::Nth {
+            phase,
+            nth: 2,
+            reason: AbortReason::StorageExhausted,
+        });
+        let (request, key) = ("req_partial", "idem-partial");
+        let outcome = rig.daemon.dispatch(&rig.create_request(request, key, true));
+        assert_eq!(
+            outcome.error_code(),
+            Some(ErrorCode::PublicationAborted),
+            "{phase}: a composite that stops part-way answers `PublicationAborted`"
+        );
 
-    let after = rig.namespace(std::slice::from_ref(&root_handle));
-    let visible = after.visible();
+        let after = rig.namespace(std::slice::from_ref(&root_handle));
+        let visible = after.visible();
 
-    // The per-operation reading, falsified.
-    assert_eq!(
-        visible.len(),
-        1,
-        "one record of the composite is published and visible, against a wire answer whose \
-         normative text says nothing was published"
-    );
-    // The per-artifact reading, upheld: that record is a complete artifact by every conjunct.
-    assert!(after.observation.tears().is_empty());
-    let landed = visible.iter().next().expect("one visible record").clone();
-    assert_eq!(
-        after.receipts.get(&landed).copied(),
-        Some(1),
-        "the record that landed carries its own receipt"
-    );
-    assert!(
-        complete.observation.indexed.contains(&landed),
-        "and it is one of the records a complete publication produces, not debris"
-    );
-    // And the ordering guarantee that makes the composite safe.
-    assert!(
-        !visible.contains(&root_handle),
-        "the composite's root is published last, so the artifact the caller named is absent"
-    );
-    assert!(
-        rig.daemon
-            .store()
-            .read(&root_handle, &Rig::operator())
-            .is_err(),
-        "and a read of it is refused rather than half-served"
-    );
+        // (1) Earlier records MAY be published, and each is a complete artifact.
+        assert_eq!(
+            visible.len(),
+            1,
+            "{phase}: exactly the one record before the abort is published — RFC 0026 \
+             correction 48, not \"nothing is published\""
+        );
+        assert!(
+            after.observation.tears().is_empty(),
+            "{phase}: no record is partial"
+        );
+        let landed = visible.iter().next().expect("one visible record").clone();
+        assert_eq!(
+            after.receipts.get(&landed).copied(),
+            Some(1),
+            "{phase}: the record that landed carries its own receipt"
+        );
+        assert!(
+            complete.observation.indexed.contains(&landed),
+            "{phase}: and it is one of the records a complete publication produces, not debris"
+        );
+
+        // (2) The root is never published.
+        assert!(
+            !visible.contains(&root_handle),
+            "{phase}: the composite's root is published last, so the artifact the caller \
+             named is absent"
+        );
+        assert!(
+            rig.daemon
+                .store()
+                .read(&root_handle, &Rig::operator())
+                .is_err(),
+            "{phase}: and a read of it is refused rather than half-served"
+        );
+
+        // (3) Record k and every later record are not published.
+        assert_eq!(
+            after.published_count,
+            before.published_count + 1,
+            "{phase}: nothing after the first record reached the index"
+        );
+
+        // (4) The residue is a step function of the phase.
+        let fresh: Vec<ArtifactHandle> = after
+            .residue()
+            .into_iter()
+            .filter(|handle| !before.residue().contains(handle))
+            .collect();
+        match phase {
+            PublicationPhase::Staging | PublicationPhase::CommittingContent => assert!(
+                fresh.is_empty(),
+                "{phase}: record k wrote nothing to the substrate, so there is no residue"
+            ),
+            PublicationPhase::CommittingIndex => {
+                assert_eq!(
+                    fresh.len(),
+                    1,
+                    "{phase}: exactly one GC-eligible unindexed record — record k's content"
+                );
+                let residue = &fresh[0];
+                assert!(!after.observation.indexed.contains(residue));
+                assert!(rig.daemon.store().read(residue, &Rig::operator()).is_err());
+                assert_eq!(after.receipts.get(residue).copied().unwrap_or(0), 0);
+            }
+        }
+        assert!(
+            after.hard_defects().is_empty(),
+            "{phase}: residue is the only defect a partial composite may leave: {:?}",
+            after.hard_defects()
+        );
+
+        // (5) A retry converges on the complete publication.
+        //
+        // AS-IS PIN, not the contract. RFC 0026 says a retry under the *same* idempotency key
+        // is a fresh publication, and its taxonomy marks `PublicationAborted` retryable. This
+        // daemon records the abort in its replay ledger (`Daemon::dispatch`, step 7) and
+        // raises it through `Fault::new`, so the same key replays the abort with
+        // `retryable: false`. That predates bn-12plt and is reported to the lead rather than
+        // fixed here; when it is fixed, this block flips to assert the same-key retry succeeds.
+        rig.faults.disarm();
+        let replayed = rig.daemon.dispatch(&rig.create_request(request, key, true));
+        assert_eq!(
+            replayed.error_code(),
+            Some(ErrorCode::PublicationAborted),
+            "{phase}: as-is, the same key replays the recorded abort"
+        );
+        assert_eq!(
+            replayed.envelope.error.value().map(|error| error.retryable),
+            Some(false),
+            "{phase}: as-is, the replayed abort says it is not retryable"
+        );
+        let retried = rig
+            .daemon
+            .dispatch(&rig.create_request("req_retry", "idem-retry", true));
+        assert_eq!(
+            retried.envelope.status,
+            ResultStatus::Ok,
+            "{phase}: a fresh publication of the same composite completes: {:?}",
+            retried.envelope.error
+        );
+        let converged = rig.namespace(std::slice::from_ref(&root_handle));
+        assert!(
+            converged.visible().contains(&root_handle),
+            "{phase}: the retry publishes the root"
+        );
+        assert_eq!(
+            converged.observation.indexed, complete.observation.indexed,
+            "{phase}: the retry converges on the complete publication's identities, and the \
+             record that landed first is not duplicated"
+        );
+        assert!(converged.observation.tears().is_empty());
+    }
 }
 
 // =========================================================================================

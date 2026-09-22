@@ -559,7 +559,13 @@ protocol_enum! {
         /// best-effort decoding (docs/09 T13).
         EpochUnsupported => EpochUnsupported,
         /// An atomic publication aborted (e.g. disk exhaustion, plan §4.5).
-        /// Nothing was published and nothing was truncated (INV-017).
+        /// Atomicity is per artifact (INV-017, RFC 0038): the artifact whose
+        /// publication aborted is not published, and nothing is truncated. A
+        /// composite publication (`workspace.create` or
+        /// `workspace.create_by_reference` with `seal`, `workspace.seal`) MAY
+        /// leave earlier records published, each complete and receipted, and
+        /// never leaves its root published (RFC 0026 "Atomicity of
+        /// publication", correction 48).
         PublicationAborted => PublicationAborted,
         /// No protocol version is common to client and daemon, or the client's
         /// major falls outside the N / N−1 window.

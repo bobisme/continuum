@@ -855,17 +855,19 @@ impl fmt::Display for AbortReason {
     }
 }
 
-/// RFC 0026's `PublicationAborted`: nothing was published and nothing was truncated.
+/// RFC 0026's `PublicationAborted`, at the grain of one artifact: nothing was published
+/// and nothing was truncated.
 ///
-/// > A publication that cannot complete atomically MUST fail with `PublicationAborted`
-/// > (INV-017). Nothing is published and nothing is truncated; the client MAY retry with
-/// > the same idempotency key, and the retry is a fresh publication, not a resumption of
-/// > a partial one.
+/// > A publication that cannot complete atomically MUST fail with `PublicationAborted`.
+/// > The artifact whose publication aborted is not published and not truncated: it has no
+/// > index entry and no receipt, and no reader can fetch it.
 /// >
-/// > — `notes/plan/rfcs/0026-continuumd-native-protocol.md`
+/// > — `notes/plan/rfcs/0026-continuumd-native-protocol.md`, "Atomicity of publication"
 ///
-/// "Nothing is published" is exact: no index entry, no receipt, nothing a reader can
-/// observe. An abort after the content commit may leave *unreachable* content, which is
+/// This type is one artifact's abort, so "nothing is published" is exact here: no index
+/// entry, no receipt, nothing a reader can observe. A composite of several publications
+/// ([`crate::seal`]) is ordered, not transactional, and RFC 0026 states what an abort at
+/// record *k* may leave published. An abort after the content commit may leave *unreachable* content, which is
 /// GC residue rather than a partial artifact — docs/35 chooses that asymmetry
 /// deliberately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

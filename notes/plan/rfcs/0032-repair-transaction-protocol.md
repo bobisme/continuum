@@ -294,7 +294,7 @@ Multiple transactions MAY share a base snapshot, and multiple agents MAY append 
 **Rollback.** Promotion has no partial state to unwind, by construction:
 
 - a failure at any step before publication leaves the transaction `ready`, publishes nothing, and returns the typed code for the step that failed — `PolicyGateFailed` for a verdict that is no longer `allow`, `InsufficientEvidence` for an unresolvable reference, `CertificateRejected` for a certificate that fails checking, `StatusConflict` for a lost lineage race;
-- a publication failure — disk exhaustion or any other abort — returns `PublicationAborted`: nothing is published and nothing is truncated, and the transaction remains `ready` (plan §4.5, INV-017);
+- a publication failure — disk exhaustion or any other abort — returns `PublicationAborted`: nothing is published and nothing is truncated, and the transaction remains `ready` (plan §4.5, INV-017). This is stronger than the per-artifact floor of [RFC 0026](0026-continuumd-native-protocol.md) "Atomicity of publication" (RFC 0026 correction 48), under which an ordered composite MAY leave earlier records published: promotion is one semantically atomic step, so it MUST NOT leave any of its artifacts published when it aborts;
 - rejecting a transaction is the rollback of an applied patch. `reject` is terminal, the candidate snapshot is never merged into the base lineage, and it becomes GC-eligible under the retention policy. No artifact is edited and no identity is reused;
 - a promoted repair is not rolled back by deletion. The base lineage is advanced again by a subsequent transaction and the superseding relationship is recorded by a `SUPERSEDES` edge (plan §4.6). Published receipts remain verifiable under their pinned epochs indefinitely.
 

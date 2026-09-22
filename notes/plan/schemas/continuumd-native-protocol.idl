@@ -157,6 +157,17 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.12 — the `PublicationAborted` doc-comment correction
+  ///         (bn-12plt), doc comments only; `version` stays "3.6".
+  ///         The code's comment read "Nothing was published", which the
+  ///         G1-06 acceptance campaign (bn-2vbqm) showed false at
+  ///         operation grain: a composite seal that aborts at record k
+  ///         answers this code while its earlier records are published
+  ///         and receipted. INV-017 holds per artifact (RFC 0038), and
+  ///         RFC 0026 correction 48 corrects the RFC to that contract.
+  ///         No declaration moves — no field, presence marker, enum
+  ///         member, annotation, rule, or error code — so no protocol
+  ///         minor is taken, on the precedent of 1.10.
   ///   1.11 — the port-by-reference verb (bn-3of5h) and the single
   ///         protocol-minor bump 3.5 → 3.6 that covers it.
   ///         `workspace.create_by_reference` is the **75th** operation
@@ -625,7 +636,7 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.11";
+  idl_version = "1.12";
   /// The protocol version this document defines.
   ///
   /// 3.6 is the single minor bump for IDL 1.11, taken once at the end of
@@ -1673,7 +1684,13 @@ enum ErrorCode {
   /// best-effort decoding (docs/09 T13).
   EpochUnsupported,
   /// An atomic publication aborted (e.g. disk exhaustion, plan §4.5).
-  /// Nothing was published and nothing was truncated (INV-017).
+  /// Atomicity is per artifact (INV-017, RFC 0038): the artifact whose
+  /// publication aborted is not published, and nothing is truncated. A
+  /// composite publication (`workspace.create` or
+  /// `workspace.create_by_reference` with `seal`, `workspace.seal`) MAY
+  /// leave earlier records published, each complete and receipted, and
+  /// never leaves its root published (RFC 0026 "Atomicity of
+  /// publication", correction 48).
   PublicationAborted,
   /// No protocol version is common to client and daemon, or the client's
   /// major falls outside the N / N−1 window.
