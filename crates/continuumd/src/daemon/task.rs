@@ -1142,7 +1142,15 @@ fn update_budget(
 /// | a pinned epoch names a kind the daemon pins no identity for | `EpochUnsupported` |
 /// | a pinned epoch disagrees with the daemon's current epoch of that kind (P1) | `ContinuationEpochMismatch` |
 /// | the pinned engine identity disagrees with the daemon's (P2) | `ContinuationEpochMismatch` |
-/// | the model the continuation names is no longer one this daemon can construct | `UnsupportedSemanticFeature` (3.2; see the comment at the call) |
+/// | the model the continuation names is no longer one this daemon can construct | `UnsupportedSemanticFeature` (3.2; see the comment at the guard) |
+///
+/// **Every row is a guard in this function, and every guard runs before the first write**
+/// (bn-3oocz). The last row used to be raised inside `verification::run_in`, after the
+/// request budget reached the ledger and after `verification::advance` opened a region and
+/// stamped `TaskEntry::region`/`worker`. The refusal was typed and correct, but it was not
+/// zero-trace, so G1-04's "validates … inputs before any reuse" held for twelve classes and
+/// not for this one. `gate_g1_04_acceptance.rs` measures it with a total structural
+/// fingerprint of the effect surface.
 ///
 /// **The third row is bn-10wdo's disposition of a doc/code disagreement the table itself
 /// used to carry**, and the row above is the aligned reading, not a behaviour change: the
@@ -1285,6 +1293,35 @@ fn resume(
         }
     }
 
+    // Model availability: the last row of the decision table, and the last guard before the
+    // first write. It is below the terminal answer on purpose: a terminal task is not run,
+    // so the model it names is not an input to that answer, and the terminal answer stays
+    // what it always was for a task whose model left the catalog.
+    //
+    // The code is `verification.start`'s code for the same condition, so the two operations
+    // agree about one fact. Until protocol 3.2 `task.resume`'s `errors` clause did not admit
+    // `UnsupportedSemanticFeature`, and "the model this continuation named is no longer one
+    // this daemon can construct" collapsed to the one denial — the workaround bn-18z
+    // recorded as wire defect (7). `rule errors.common` admits it for every operation as of
+    // 3.2, so the honest answer reaches the wire. The collapse stays for any code outside
+    // the union, and the check is registry data, so it tracks the IDL by construction.
+    //
+    // It is not a new existence oracle. Reaching this line already required holding a
+    // continuation this daemon has, and a *successful* resume was always distinguishable
+    // from a denial. RFC 0027 X2 is about a caller out of scope for an artifact, and such a
+    // caller never reaches a handler.
+    {
+        let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
+        if state.models().get(&entry.model).is_none() {
+            let fault = verification::no_model();
+            return Err(if super::errors::admits(call.spec, fault.code) {
+                fault
+            } else {
+                Fault::denied()
+            });
+        }
+    }
+
     if let Optional::Present(budget) = &request.budget {
         if let Some(entry) = state.tasks_mut().get_mut(&task) {
             // `task.resume` carries an optional budget and RFC 0026 gives it the same
@@ -1311,23 +1348,14 @@ fn resume(
     let bounds = state.tasks().get(&task).ok_or_else(Fault::denied)?.bounds();
 
     // The run's own refusals are the `verification` family's, and `task.resume` declares a
-    // narrower `errors` clause than `verification.start` does. Until protocol 3.2 that
-    // included `UnsupportedSemanticFeature`, so "the model this continuation named is no
-    // longer one this daemon can construct" had no admissible code and collapsed to the one
-    // denial — the workaround bn-18z recorded as wire defect (7).
+    // narrower `errors` clause than `verification.start` does, so any code outside this
+    // operation's union collapses to the one denial. The check is registry data rather than
+    // a list maintained here, so it tracks the IDL by construction.
     //
-    // `rule errors.common` admits that code for every operation as of 3.2, so the honest
-    // answer now reaches the wire: the same code `verification.start` returns for the same
-    // condition, which is what makes the two operations agree about one fact. It is not a
-    // new existence oracle. Reaching this line already required holding a continuation this
-    // daemon has — an unheld one was denied at the top of this function — and a *successful*
-    // resume was always distinguishable from a denial, so nothing here tells a caller
-    // anything a success did not already tell it. RFC 0027 X2 is about a caller out of scope
-    // for an artifact, and such a caller never reaches a handler.
-    //
-    // The collapse itself stays, for every code still outside the union: a family may not
-    // put an undeclared code on the wire, and the check is registry data rather than a list
-    // maintained here, so it tracks the IDL by construction.
+    // Model availability is not one of the run's refusals any more: the guard above decides
+    // it before the budget write. `run_in` still looks the model up, because it needs the
+    // value, and its `no_model` arm is now unreachable from this operation — see the comment
+    // there for why no race can reach it.
     //
     // `continuation.frontier` is passed through unread by anything that decides whether this
     // resume is *admissible* — bn-10wdo's cont_* semantics disposition (RFC 0026,

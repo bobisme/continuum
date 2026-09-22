@@ -29,26 +29,29 @@
 //! | three epoch axes (semantic, corpus, engine) | **twelve** — five compatibility epochs × {disagreement, unheld} and engine identity × {disagreement, unheld}, each its own `#[test]` |
 //! | deployment leaves `evidence` and `corpus` `Null`, so neither can refuse ([`PHASE_A_EXIT_PACKAGE.md`] §9.2: "clause 4's guarantee covers five epochs, not six") | deployment pins **all five compatibility epochs plus engine**, so each is probed and the "five, not six" reading is shown to be a property of that deployment, not of the predicate |
 //! | asserts `payload == None` and `status == Suspended` | asserts a **total structural fingerprint** of the daemon's whole effect surface is byte-identical ([`Trace`]) |
-//! | no control that the no-trace check can fail | drives a refusal that **does** leave a trace and shows the weak predicate calls it clean while the strict one catches it ([`negative_control_the_weak_no_trace_predicate_misses_what_the_strict_one_catches`]) |
+//! | no control that the no-trace check can fail | drives a refusal that **does** leave a trace — a publication abort after admission — and shows the weak predicate calls it clean while the strict one catches it ([`negative_control_the_weak_no_trace_predicate_misses_what_the_strict_one_catches`]) |
 //! | asserts refusals | asserts refusals **and** that the predicate is not over-broad ([`control_a_protocol_minor_difference_is_not_a_resume_refusal`], [`control_an_unrelated_lineage_and_an_unrelated_task_do_not_refuse_a_resume`]) |
 //!
 //! # The verdict this file reaches
 //!
-//! **SATISFIED-AT-NARROWER-SCOPE.** The narrowing has three parts, each an executable
-//! assertion rather than prose:
+//! **SATISFIED-AT-NARROWER-SCOPE.** The narrowing had three parts, each an executable
+//! assertion rather than prose. Parts 1 and 3 still narrow it; part 2 was repaired by
+//! bn-3oocz and is now a regression guard:
 //!
 //! 1. **Within one daemon process lifetime.** [`PHASE_A_EXIT_PACKAGE.md`] §6.4 declares ten
 //!    of thirteen `VolatileFact`s lost on restart, task and continuation tables among them.
 //!    [`scope_a_continuation_does_not_survive_a_restart`] confirms the declared boundary
 //!    exactly — it is neither wider nor narrower than declared — and this file relitigates
 //!    nothing else about it.
-//! 2. **"Validated before any reuse" is true of twelve refusal classes and false of one.**
-//!    [`class_model_availability_is_refused_but_not_before_any_reuse`] is the finding: the
-//!    "the model the continuation names is no longer one this daemon can construct" row of
-//!    the exit package's own §6.1 decision table is *not* a validation step. It is raised
-//!    inside the run, after `task.resume` has already written the request's budget onto the
-//!    ledger and after `verification::advance` has opened a region and stamped
-//!    `TaskEntry::region`/`worker`. The refusal is typed and correct; it is not zero-trace.
+//! 2. **"Validated before any reuse" is true of all thirteen refusal classes — as of
+//!    bn-3oocz.** This file first found it false of one: the "the model the continuation
+//!    names is no longer one this daemon can construct" row of the exit package's own §6.1
+//!    decision table was raised inside the run, after `task.resume` wrote the request's
+//!    budget onto the ledger and after `verification::advance` opened a region and stamped
+//!    `TaskEntry::region`/`worker`. `daemon::task::resume` now checks the catalog before its
+//!    first write, and [`class_model_availability_is_refused_before_any_reuse`] guards the
+//!    repair with the same total fingerprint as the other twelve. This item no longer
+//!    narrows the verdict; it is kept so the history of the finding stays readable.
 //! 3. **The continuation's pinned `in_*` intent is not revalidated at resume.**
 //!    [`scope_the_pinned_intent_is_not_revalidated_at_resume`] shows a resume succeeding
 //!    after the governing contract left the registry. RFC 0026's resume decision table does
@@ -68,7 +71,10 @@
 //! - **F2 — an unheld *engine* identity answers `ContinuationEpochMismatch`, not
 //!   `EpochUnsupported`.** The five compatibility epochs answer `EpochUnsupported` when the
 //!   daemon pins nothing for the kind; engine identity does not, because P2 is equality and
-//!   engine is not an epoch. Recorded at [`class_p2_engine_identity_unheld`].
+//!   engine is not an epoch. bn-3oocz read RFC 0026's resume decision table against it and
+//!   kept it: the table's `EpochUnsupported` row is about "a pinned *epoch*", the P2 row maps
+//!   any engine-identity disagreement to `ContinuationEpochMismatch`, and RFC 0026 forbids
+//!   grouping `engine` under "epochs". Guarded at [`class_p2_engine_identity_unheld`].
 //! - **F3 — a refused resume is not observationally silent, and must not be.** It appends an
 //!   admission record, and — when the request carried an idempotency key — a replay record,
 //!   so an identical retry returns the recorded refusal without re-evaluating the predicate.
@@ -116,8 +122,8 @@
 //!     [`class_capability_authority_is_below_the_operation`];
 //! 12. protocol version outside the connection —
 //!     [`class_protocol_version_outside_the_connection`];
-//! 13. model availability — [`class_model_availability_is_refused_but_not_before_any_reuse`],
-//!     the one class that is refused but not before any reuse.
+//! 13. model availability — [`class_model_availability_is_refused_before_any_reuse`], the
+//!     one class that was refused but not before any reuse until bn-3oocz.
 //!
 //! [`class_idempotency_key_reused_for_a_different_request`] is deliberately outside that
 //! list. It is request hygiene rather than an input the continuation depends on, and it is
@@ -133,8 +139,10 @@
 //! - **No epoch *advance* operation.** No daemon here migrates from one epoch to another;
 //!   two deployments exist at two pinnings, which is the observable consequence and not the
 //!   migration. `EpochAdvanceNotice` ordering is out of scope.
-//! - **`QuotaExhausted`, `PublicationAborted`, `BudgetExhausted` and `MalformedRequest`**
-//!   are inside `task.resume`'s admissible error union and are driven by nothing here.
+//! - **`QuotaExhausted`, `BudgetExhausted` and `MalformedRequest`** are inside
+//!   `task.resume`'s admissible error union and are driven by nothing here.
+//!   `PublicationAborted` is driven only by the negative controls, through an injected store
+//!   fault; INV-017's own evidence is `dx13`/`g1_crash_recovery_evidence`.
 //!   [`the_probe_table_accounts_for_every_code_task_resume_may_answer_with`] asserts that
 //!   accounting mechanically against the registry rather than describing it.
 //! - **`Continuation::bounds` and `frontier`** are pinned provenance that no admissibility
@@ -154,12 +162,15 @@
 //! [`PHASE_A_EXIT_PACKAGE.md`]: ../../../notes/plan/notes/PHASE_A_EXIT_PACKAGE.md
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use continuum_engine_reference::diehard;
 use continuum_intent::canonical_json::Json;
 use continuum_intent::contract::IntentContract;
 use continuum_value::epoch::ProtocolWindow;
 use continuum_workspace::lineage::ForkName;
+use continuum_workspace::publication::{AbortReason, PublicationPhase, StorageFaults};
 use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
@@ -309,9 +320,18 @@ fn negotiated_at(wanted: ProtocolVersion) -> Negotiated {
 }
 
 /// A daemon serving `epochs` over a connection negotiated at `protocol`.
-fn daemon_serving(epochs: &EpochSet, protocol: ProtocolVersion) -> Daemon {
+fn daemon_serving(
+    epochs: &EpochSet,
+    protocol: ProtocolVersion,
+    faults: Option<StoreSwitch>,
+) -> Daemon {
     let root = Some(cap("cap_root"));
-    Daemon::builder(Blake3Identity, negotiated_at(protocol), cap("cap_root"))
+    let builder = Daemon::builder(Blake3Identity, negotiated_at(protocol), cap("cap_root"));
+    let builder = match faults {
+        Some(switch) => builder.store_faults(switch),
+        None => builder,
+    };
+    builder
         .epochs(epochs.clone())
         .now(now())
         .capability(
@@ -369,6 +389,32 @@ fn daemon_serving(epochs: &EpochSet, protocol: ProtocolVersion) -> Daemon {
         .family(TaskFamily)
         .family(VerificationFamily)
         .build()
+}
+
+/// A storage seam that starts inert and refuses every publication phase once armed.
+///
+/// `Builder::store_faults` is a build-time option, so a fault installed at construction would
+/// fire on the parking run too. Arming after the campaign parked makes the *resume's*
+/// publication the first one refused. The negative controls use it, and only them: it is the
+/// one reachable refusal of a resume whose inputs are all valid, so it runs and leaves a
+/// trace by design.
+#[derive(Debug, Clone, Default)]
+struct StoreSwitch(Arc<AtomicBool>);
+
+impl StoreSwitch {
+    fn arm(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+impl StorageFaults for StoreSwitch {
+    fn check(&self, _phase: PublicationPhase) -> Result<(), AbortReason> {
+        if self.0.load(Ordering::SeqCst) {
+            Err(AbortReason::StorageExhausted)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 fn envelope_at(
@@ -513,7 +559,23 @@ fn parked() -> Deployment {
 /// and the model catalog — which is the same door `daemon_task_operations.rs` uses and the
 /// one `DaemonState::state_mut`'s own documentation names.
 fn deployment(epochs: &EpochSet, protocol: ProtocolVersion) -> Deployment {
-    let mut daemon = daemon_serving(epochs, protocol);
+    deployment_over(epochs, protocol, None)
+}
+
+/// [`parked`], over a store whose publications fail once the returned switch is armed.
+fn parked_over_a_failing_store() -> (Deployment, StoreSwitch) {
+    let switch = StoreSwitch::default();
+    let deployment = deployment_over(&epochs(), version(), Some(switch.clone()));
+    (deployment, switch)
+}
+
+/// [`deployment`], with an optional storage seam.
+fn deployment_over(
+    epochs: &EpochSet,
+    protocol: ProtocolVersion,
+    faults: Option<StoreSwitch>,
+) -> Deployment {
+    let mut daemon = daemon_serving(epochs, protocol, faults);
     let contract = die_hard_contract();
     let intent = intent_handle(&contract);
     daemon.state_mut().put_intent(
@@ -1090,8 +1152,8 @@ fn weak_no_trace(outcome: &OperationOutcome, before: TaskStatus, after: TaskStat
 
 /// Assert a refusal is typed `expected` and moved nothing.
 ///
-/// Every class probe ends here, so "before any reuse" is asserted the same way eleven times
-/// and cannot drift between them.
+/// Every class probe ends here, so "before any reuse" is asserted the same way for every
+/// class and cannot drift between them.
 fn refused_without_trace(
     deployment: &mut Deployment,
     plan: &Resume<'_>,
@@ -1398,15 +1460,22 @@ fn class_p2_engine_identity_disagreement() {
 }
 
 /// **F2.** A deployment pinning *no* engine identity answers `ContinuationEpochMismatch`,
-/// where the same shape on any compatibility epoch answers `EpochUnsupported`.
+/// where the same shape on any compatibility epoch answers `EpochUnsupported`. **A
+/// regression guard: RFC 0026 requires this code** (bn-3oocz read the table and kept it).
 ///
-/// This is not a defect. RFC 0026 is explicit that engine identity "is engine identity, not
-/// an epoch", that P2 "is equality on `EpochIdentity`, never an ordering", and that a
-/// continuation whose engine is null is malformed. `EpochUnsupported`'s own definition — "an
-/// artifact or continuation declares a schema or semantic epoch unknown to this daemon" — is
-/// about epochs. The asymmetry is recorded because a reader of the decision table would
-/// otherwise expect the epoch answer, and because INV-008 makes which code arrives a fact,
-/// not a detail.
+/// RFC 0026, "Resume decision table": "a pinned epoch names an identity the daemon no longer
+/// holds at all → `EpochUnsupported`" and "the pinned engine identity disagrees with the
+/// daemon's engine identity (P2 fails) → `ContinuationEpochMismatch`". The first row is about
+/// epochs, and the RFC's "Epochs" section says "`engine` is engine identity, not an epoch"
+/// and that prose "that groups `engine` under the word \"epochs\" is corrected by this
+/// rule". P2 "is equality on `EpochIdentity`, never an ordering", so a pinned engine against
+/// a daemon with none is a P2 disagreement, and "a disagreement in either yields
+/// `ContinuationEpochMismatch`" ("The two-predicate obligation"). The error taxonomy agrees:
+/// `EpochUnsupported` is "an artifact, page token, or continuation declares an *epoch* this
+/// daemon does not implement". Changing this answer to `EpochUnsupported` would need an RFC
+/// revision first. The asymmetry is kept visible because a reader of the decision table
+/// would otherwise expect the epoch answer, and because INV-008 makes which code arrives a
+/// fact, not a detail.
 #[test]
 fn class_p2_engine_identity_unheld() {
     advanced(&Axis {
@@ -1675,29 +1744,29 @@ fn class_idempotency_key_reused_for_a_different_request() {
     );
 }
 
-/// **The finding.** The model the continuation's task names is refused — and the refusal is
-/// *not* before any reuse.
+/// Model availability: the model the continuation's task names is no longer one this daemon
+/// can construct. **A regression guard for bn-3oocz.**
 ///
 /// [`PHASE_A_EXIT_PACKAGE.md`] §6.1 lists "the model the continuation names is no longer one
 /// this daemon can construct → `UnsupportedSemanticFeature`" as the last row of the decision
-/// table "in the order the function checks it". It is not a row of the same kind as the
-/// others. The five rows above it are guards in `daemon::task::resume`; this one is raised by
-/// `daemon::verification::run_in`, which runs *after* `resume` has written the request's
-/// budget onto the task ledger and after `verification::advance` has opened a region and
-/// stamped `TaskEntry::region` and `worker`. So:
+/// table. Before bn-3oocz it was not a guard of the same kind as the others: it was raised by
+/// `daemon::verification::run_in`, *after* `task.resume` wrote the request's budget onto the
+/// task ledger and after `verification::advance` opened a region and stamped
+/// `TaskEntry::region` and `worker`. The code was right and the task did not advance, so the
+/// delivering suites' two-observable predicate held — but the effect surface moved.
 ///
-/// - the code is right, and INV-008-typed;
-/// - the task does not advance, so the delivering suites' predicate holds;
-/// - the effect surface **moves**, so "validates … before any reuse" does not cover this row.
+/// `daemon::task::resume` now checks the catalog before its first write, like the other
+/// twelve classes, so this probe goes through [`refused_without_trace`] and the total
+/// fingerprint must be byte-identical. The two extra assertions below name the rows the old
+/// trace moved, so a regression reports which write came back.
 ///
-/// This test asserts all three, which is why it does not go through
-/// [`refused_without_trace`]. The graft — retargeting `TaskEntry::model` at a commitment the
-/// catalog has no entry for — is the only reachable spelling of "the daemon can no longer
-/// construct this model", because `ModelCatalog` exposes registration and no removal.
+/// The graft — retargeting `TaskEntry::model` at a commitment the catalog has no entry for —
+/// is the only reachable spelling of "the daemon can no longer construct this model",
+/// because `ModelCatalog` exposes registration and no removal.
 ///
 /// [`PHASE_A_EXIT_PACKAGE.md`]: ../../../notes/plan/notes/PHASE_A_EXIT_PACKAGE.md
 #[test]
-fn class_model_availability_is_refused_but_not_before_any_reuse() {
+fn class_model_availability_is_refused_before_any_reuse() {
     let mut deployment = parked();
     let absent = model_source(
         &Blake3Identity,
@@ -1718,39 +1787,26 @@ fn class_model_availability_is_refused_but_not_before_any_reuse() {
         .model = absent;
 
     let before = deployment.trace();
-    let status_before = deployment.table_status();
     let continuation = deployment.continuation.clone();
     let plan = probe(&continuation, "req_resume");
-    let outcome = deployment.resume(&Resume {
-        continuation: &continuation,
-        ..plan
-    });
+    refused_without_trace(
+        &mut deployment,
+        &Resume {
+            continuation: &continuation,
+            ..plan
+        },
+        ErrorCode::UnsupportedSemanticFeature,
+        "a model this daemon can no longer construct",
+    );
     let after = deployment.trace();
-    let status_after = deployment.table_status();
-
-    assert_eq!(code(&outcome), ErrorCode::UnsupportedSemanticFeature);
-    assert_eq!(outcome.payload, Payload::None);
     assert_eq!(
-        status_before, status_after,
-        "the task does not advance, which is what the delivering predicate checks",
-    );
-    assert!(
-        !strict_no_trace(&before, &after),
-        "the finding is that this refusal is not zero-trace; if that changed, this test must \
-         be rewritten rather than relaxed",
+        after.regions_opened, before.regions_opened,
+        "the refusal must not open a region before it decides",
     );
     assert_eq!(
-        after.regions_opened,
-        before.regions_opened + 1,
-        "the refusal opened a region before it decided",
-    );
-    assert_ne!(
         after.tasks, before.tasks,
-        "the refusal wrote the task record — the budget ledger, the region and the worker",
-    );
-    assert_eq!(
-        after.store, before.store,
-        "nothing was published, which is the half of INV-017 this row still keeps",
+        "the refusal must not write the task record — the budget ledger, the region or the \
+         worker",
     );
 }
 
@@ -2266,30 +2322,18 @@ fn negative_control_the_fingerprint_moves_on_a_successful_resume() {
     );
 }
 
-/// The mutant: the weak predicate calls a trace-leaving refusal clean, and the strict one
-/// does not.
+/// A resume whose every input is valid, refused by the run itself: the durable publication
+/// of the campaign record aborts (INV-017), so the answer is `PublicationAborted`.
 ///
-/// This is the assertion that decides whether replacing the delivering suites' two-observable
-/// check with a full fingerprint was worth doing. The situation is not synthesised — it is
-/// [`class_model_availability_is_refused_but_not_before_any_reuse`], the one refusal in this
-/// file's whole enumeration that leaves a trace — and the two predicates are the same two
-/// functions every other test in this file uses.
-#[test]
-fn negative_control_the_weak_no_trace_predicate_misses_what_the_strict_one_catches() {
-    let mut deployment = parked();
-    let absent = model_source(
-        &Blake3Identity,
-        [("Nothing.ctm", b"not registered".as_slice())],
-    )
-    .expect("blake3 names the module set");
-    let task = deployment.task.clone();
-    deployment
-        .daemon
-        .state_mut()
-        .tasks_mut()
-        .get_mut(&task)
-        .expect("held")
-        .model = absent;
+/// This is the one refusal in reach of this file that *legitimately* leaves a trace. The
+/// predicate admitted the resume, so the budget reached the ledger and a region opened and
+/// failed; only then did the store refuse. It is not one of the thirteen input classes, and
+/// "before any reuse" does not cover it, because the reuse was admitted. The negative
+/// controls below use it for exactly that reason: it is a real daemon path, not a hand-made
+/// mutant, and it leaves a trace the weak predicate cannot see.
+fn resume_into_a_failing_store() -> (OperationOutcome, Trace, Trace, TaskStatus, TaskStatus) {
+    let (mut deployment, switch) = parked_over_a_failing_store();
+    switch.arm();
 
     let before = deployment.trace();
     let status_before = deployment.table_status();
@@ -2301,6 +2345,27 @@ fn negative_control_the_weak_no_trace_predicate_misses_what_the_strict_one_catch
     });
     let after = deployment.trace();
     let status_after = deployment.table_status();
+
+    assert_eq!(code(&outcome), ErrorCode::PublicationAborted);
+    assert_eq!(
+        after.regions_opened,
+        before.regions_opened + 1,
+        "the admitted resume opened a region before the store refused",
+    );
+    (outcome, before, after, status_before, status_after)
+}
+
+/// The mutant: the weak predicate calls a trace-leaving refusal clean, and the strict one
+/// does not.
+///
+/// This is the assertion that decides whether replacing the delivering suites' two-observable
+/// check with a full fingerprint was worth doing. Until bn-3oocz the situation was
+/// [`class_model_availability_is_refused_before_any_reuse`] itself; that refusal is
+/// zero-trace now, so the control drives [`resume_into_a_failing_store`] instead. The two
+/// predicates are the same two functions every other test in this file uses.
+#[test]
+fn negative_control_the_weak_no_trace_predicate_misses_what_the_strict_one_catches() {
+    let (outcome, before, after, status_before, status_after) = resume_into_a_failing_store();
 
     assert!(
         weak_no_trace(&outcome, status_before, status_after),
@@ -2321,30 +2386,7 @@ fn negative_control_the_weak_no_trace_predicate_misses_what_the_strict_one_catch
 /// most sufficient.
 #[test]
 fn negative_control_a_store_only_fingerprint_misses_the_same_trace() {
-    let mut deployment = parked();
-    let absent = model_source(
-        &Blake3Identity,
-        [("Nothing.ctm", b"not registered".as_slice())],
-    )
-    .expect("blake3 names the module set");
-    let task = deployment.task.clone();
-    deployment
-        .daemon
-        .state_mut()
-        .tasks_mut()
-        .get_mut(&task)
-        .expect("held")
-        .model = absent;
-
-    let before = deployment.trace();
-    let continuation = deployment.continuation.clone();
-    let plan = probe(&continuation, "req_resume");
-    let outcome = deployment.resume(&Resume {
-        continuation: &continuation,
-        ..plan
-    });
-    assert_eq!(code(&outcome), ErrorCode::UnsupportedSemanticFeature);
-    let after = deployment.trace();
+    let (_, before, after, _, _) = resume_into_a_failing_store();
 
     assert_eq!(
         before.store, after.store,
@@ -2571,7 +2613,12 @@ const PROBED: &[(ErrorCode, &str)] = &[
     (ErrorCode::EpochUnsupported, "class_unheld_* (five epochs)"),
     (
         ErrorCode::UnsupportedSemanticFeature,
-        "class_model_availability_is_refused_but_not_before_any_reuse",
+        "class_model_availability_is_refused_before_any_reuse",
+    ),
+    (
+        ErrorCode::PublicationAborted,
+        "negative_control_* through resume_into_a_failing_store — a run refusal after \
+         admission, not an input class",
     ),
     (
         ErrorCode::ProtocolVersionUnsupported,
@@ -2593,12 +2640,6 @@ const UNPROBED: &[(ErrorCode, &str)] = &[
     (
         ErrorCode::QuotaExhausted,
         "this daemon enforces no quota, so no request can reach the code",
-    ),
-    (
-        ErrorCode::PublicationAborted,
-        "reachable only through an injected store fault (`Builder::store_faults`), which is \
-         INV-017's question and not this criterion's; `dx13`/`g1_crash_recovery_evidence` \
-         own it",
     ),
     (
         ErrorCode::BudgetExhausted,

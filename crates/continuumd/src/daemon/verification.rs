@@ -371,7 +371,7 @@ fn run(
 /// | What happened | Worker step | Why there |
 /// |---|---|---|
 /// | the run started | `Begin` | `TaskStatus::Running`, which is representable and never reported |
-/// | the model is not one this daemon holds | `Fail(UnsupportedSemanticFeature)` | nothing was published, and nothing is left behind for a resume |
+/// | the model is not one this daemon holds | `Fail(UnsupportedSemanticFeature)` | unreachable: both callers refuse it before their first write (see [`run_in`]); kept typed rather than a panic |
 /// | the state budget cannot hold the initial states | `Fail(BudgetExhausted)` | RFC 0026's failure with no continuation and a `non_resumable_reason` beside it |
 /// | a campaign came back | `Reserve` | staged: the result exists and no reader can see it yet |
 /// | it was written onto the task | `Commit` | `verification.result` can read it now, and INV-009 makes it monotone |
@@ -531,6 +531,15 @@ fn run_in(
     // The model is data — named variables, named actions, an explicit initial-state
     // enumeration — so cloning it out of the catalog costs a copy of that data and buys the
     // disjoint borrow the task table needs. Nothing about the run depends on the copy.
+    //
+    // The `else` arm is unreachable from both callers, and it guards no race. Both
+    // `verification::start` and `task::resume` refuse an uncatalogued model *before* their
+    // first write (bn-3oocz: that is what keeps the resume refusal zero-trace). Between that
+    // guard and this line the handler holds `&mut DaemonState` for the whole dispatch, and
+    // `ModelCatalog` has no removal operation, so nothing can deregister the model in
+    // between. The arm stays because the lookup returns an `Option` and the run needs the
+    // value; it answers the same typed code rather than panicking if a future caller skips
+    // the guard.
     let Some(model) = state.models().get(source).cloned() else {
         let fault = no_model();
         state.regions_mut().fail(scope, fault.code);
@@ -1307,7 +1316,7 @@ fn start_handle(
     task_handle(services.identifier(), &preimage)
 }
 
-fn no_model() -> Fault {
+pub(super) fn no_model() -> Fault {
     Fault::new(
         ErrorCode::UnsupportedSemanticFeature,
         "this daemon compiles no CML source; it verifies the models a deployment registered, \
