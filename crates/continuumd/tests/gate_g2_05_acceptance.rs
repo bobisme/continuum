@@ -50,15 +50,17 @@
 //!   [`the_expansion_ceiling_is_exact_at_a_boundary_this_file_derives_independently`] probes it
 //!   at, one under, and one over — on both boundaries the RFC names.
 //!
-//! **The gap this re-derivation found, stated before any pass.** The byte ceiling is enforced on
-//! `context.expand` only. `context.compile` reads no ceiling at all: its request declares none
-//! (IDL `operation context.compile`), the daemon's handler never consults `envelope.budget.bytes`
-//! or `envelope.output_policy.max_bytes`, and `continuumd::daemon::output`'s own scope statement
-//! is explicit — "**The other 72 operations.** […] Every other operation still ignores
-//! `max_bytes`." The IDL nevertheless declares `BudgetExhausted` among `context.compile`'s
-//! errors, and `daemon::context::FAULTS` does not list it: a declared branch no code takes.
-//! [`the_compile_surface_enforces_no_caller_stated_byte_ceiling`] pins that as a **typed
-//! absence** (INV-007), not as a pass and not as a violation of the structural bound.
+//! **The gap this re-derivation found, and its repair.** The byte ceiling was first enforced on
+//! `context.expand` only: `context.compile` read no ceiling, its handler never consulted
+//! `envelope.budget.bytes` or `envelope.output_policy.max_bytes`, and the IDL's declared
+//! `BudgetExhausted` was a branch no code took. bn-2ga1c paid it. The compile now refuses a
+//! root over any stated ceiling with `BudgetExhausted` and publishes nothing — RFC 0028's
+//! "A guaranteed core is never truncated" branch, since a root's selection is its
+//! `CausallyClosed` core — and records `OutputPolicy.max_nodes` at `content_budget.nodes`.
+//! [`the_compile_budget_bytes_ceiling_is_exact_at_the_whole_root`],
+//! [`the_compile_max_bytes_ceiling_is_exact_at_the_whole_payload`] and
+//! [`the_compile_node_ceiling_is_recorded_and_exact_at_the_selection`] are the regression
+//! guards, each at the limit and one over it.
 //!
 //! # Conjunct 3 is not probed here, and the reason is not an opinion
 //!
@@ -75,7 +77,7 @@
 //! |---|---|---|
 //! | (1) bounded — structural | **SUPPORTED** | [`the_root_pack_holds_the_closure_of_the_question_and_nothing_else`] |
 //! | (1) bounded — byte ceiling on `context.expand` | **SUPPORTED** | [`the_expansion_ceiling_is_exact_at_a_boundary_this_file_derives_independently`] |
-//! | (1) bounded — byte ceiling on `context.compile` | **UNSUPPORTED (unenforced surface)** | [`the_compile_surface_enforces_no_caller_stated_byte_ceiling`] |
+//! | (1) bounded — byte and node ceilings on `context.compile` | **SUPPORTED** (bn-2ga1c; refusal branch, no root packer) | [`the_compile_budget_bytes_ceiling_is_exact_at_the_whole_root`], [`the_compile_max_bytes_ceiling_is_exact_at_the_whole_payload`], [`the_compile_node_ceiling_is_recorded_and_exact_at_the_selection`] |
 //! | (2) omission manifests | **SUPPORTED** | [`the_manifest_enumerates_exactly_what_the_question_left_out`] |
 //! | (2) expansion handles | **SUPPORTED** | [`every_omitted_candidate_comes_back_through_the_handle_the_manifest_named`] |
 //! | negative controls | all fire | [`the_cross_checks_fail_on_artifacts_this_file_doctors`], [`a_handle_that_should_not_resolve_does_not`] |
@@ -894,65 +896,243 @@ fn the_expansion_ceiling_is_exact_at_a_boundary_this_file_derives_independently(
     assert_eq!(above_wire.len() as u64, minimal);
 }
 
-#[test]
-fn the_compile_surface_enforces_no_caller_stated_byte_ceiling() {
-    // A **typed absence** (INV-007), pinned so it cannot be read as a pass and cannot decay
-    // unnoticed. `context.expand` enforces a byte ceiling; `context.compile` reads none.
-    let (mut daemon, root) = daemon();
-    let stated = 512;
-    let outcome = compile(
-        &mut daemon,
-        &root,
-        "req_ceiling_ignored",
-        Optional::Present(ByteCount::new(stated)),
+/// A compile under `budget.bytes`, `output_policy.max_bytes`, or `output_policy.max_nodes`.
+fn compile_under(
+    daemon: &mut Daemon,
+    root: &ArtifactHandle,
+    request_id: &str,
+    budget_bytes: Option<u64>,
+    max_bytes: Option<u64>,
+    max_nodes: Option<u64>,
+) -> OperationOutcome {
+    let policy = if max_bytes.is_none() && max_nodes.is_none() {
+        Optional::Absent
+    } else {
         Optional::Present(OutputPolicy {
-            max_bytes: Optional::Present(ByteCount::new(stated)),
+            max_bytes: max_bytes.map_or(Optional::Absent, |b| Optional::Present(ByteCount::new(b))),
             max_tokens: Optional::Absent,
-            max_nodes: Optional::Present(1),
+            max_nodes: max_nodes.map_or(Optional::Absent, Optional::Present),
             audience: Optional::Absent,
-        }),
+        })
+    };
+    compile(
+        daemon,
+        root,
+        request_id,
+        budget_bytes.map_or(Optional::Absent, |b| Optional::Present(ByteCount::new(b))),
+        policy,
+    )
+}
+
+/// The refusal every over-ceiling compile earns: `BudgetExhausted`, with nothing on the wire.
+fn assert_exhausted(outcome: &OperationOutcome, what: &str) {
+    assert_eq!(outcome.envelope.status, ResultStatus::Error, "{what}");
+    let error = outcome
+        .envelope
+        .error
+        .value()
+        .expect("a refusal carries an error object");
+    assert_eq!(error.code, ErrorCode::BudgetExhausted, "{what}");
+    assert!(
+        !error.non_resumable_reason.is_absent(),
+        "the refusal carries a typed non_resumable_reason (SD-13): {what}"
     );
+    assert!(
+        matches!(outcome.payload, Payload::None),
+        "nothing is published over a ceiling: {what}"
+    );
+}
+
+/// The whole answer this compile gives when nothing bounds it: its wire bytes, its handle, and
+/// the size of the result payload in the negotiated encoding (canonical JSON, see [`hello`]),
+/// measured by this file's own call into the codec rather than read back off the daemon.
+fn unbounded_compile(daemon: &mut Daemon, root: &ArtifactHandle) -> (Vec<u8>, ContextHandle, u64) {
+    let outcome = compile_under(daemon, root, "req_unbounded", None, None, None);
+    assert_eq!(outcome.envelope.status, ResultStatus::Ok);
+    let payload = match &outcome.payload {
+        Payload::ContextCompile(response) => {
+            continuumd::codec::write_in::<continuumd::codec::json::Json, _>(response)
+                .expect("the response encodes")
+                .len() as u64
+        }
+        other => panic!("expected a compile payload, got {other:?}"),
+    };
+    let (wire, context, _) = answered(&outcome);
+    (wire, context, payload)
+}
+
+#[test]
+fn the_compile_budget_bytes_ceiling_is_exact_at_the_whole_root() {
+    // RFC 0028, "Budgets and packing": "A guaranteed core is never truncated" — a root's
+    // selection is its CausallyClosed core, so over the ceiling the compile takes the
+    // `BudgetExhausted` branch its IDL `errors` clause declares. Regression guard for bn-2ga1c:
+    // a compile under `budget.bytes = 512` once answered Ok with a 23 KiB pack.
+    let (mut served, root) = daemon();
+    let (whole, context, _) = unbounded_compile(&mut served, &root);
+    let n = whole.len() as u64;
+
+    // At the limit: admitted, byte-identical to the unbounded answer.
+    let at = compile_under(&mut served, &root, "req_budget_at", Some(n), None, None);
     assert_eq!(
-        outcome.envelope.status,
+        at.envelope.status,
         ResultStatus::Ok,
-        "the compile is admitted under a ceiling far below its answer"
+        "{:?}",
+        at.envelope.error
     );
-    let (wire, _, document) = answered(&outcome);
-    assert!(
-        wire.len() as u64 > stated,
-        "the answer ({} B) did not exceed the stated ceiling, so this pin no longer probes \
-         anything",
-        wire.len()
-    );
-    // Neither the enforced-ceiling branch nor an omission naming a budget: the ceiling was not
-    // read at all, rather than read and honoured.
-    assert!(
-        outcome.envelope.error.is_absent(),
-        "no BudgetExhausted branch is taken"
-    );
-    assert!(
-        !outcome
-            .envelope
-            .omissions
-            .iter()
-            .any(|omission| omission.subject.starts_with("budget.")),
-        "nothing in the answer says a byte ceiling shaped it"
-    );
-    // `content_budget.nodes` is `OutputPolicy.max_nodes`'s ceiling in the schema, and the root
-    // writer emits one key only — so the node ceiling is unrepresented as well as unenforced.
-    let content_budget = document.as_object().expect("object")["content_budget"]
-        .as_object()
-        .expect("an object");
-    assert!(
-        !content_budget.contains_key("nodes"),
-        "a `nodes` key would mean the graph-node ceiling had become representable; this pin \
-         must then be re-adjudicated"
+    let (at_wire, _, _) = answered(&at);
+    within_ceiling(&at_wire, n).expect("a ceiling of n admits n");
+    assert_eq!(
+        at_wire, whole,
+        "budget is not key material; the answer is the same pack"
     );
 
-    // The declaration the daemon does not implement, read from the normative IDL itself: the
-    // operation's `errors` clause offers `BudgetExhausted` while its `request` carries no term a
-    // ceiling could be stated in and `daemon::context::FAULTS` lists no such fault. A declared
-    // branch no code takes is the precise shape of this absence.
+    // One byte over the limit (the answer is limit + 1): refused, typed.
+    let (mut fresh, fresh_root) = daemon();
+    let over = compile_under(
+        &mut fresh,
+        &fresh_root,
+        "req_budget_over",
+        Some(n - 1),
+        None,
+        None,
+    );
+    assert_exhausted(&over, "the whole root is one byte over budget.bytes");
+    // And nothing was registered: the `ctx_*` the unbounded compile names is not navigable in
+    // a daemon whose only compile was refused. A refused `@mutation` commits nothing.
+    let probe = expand(
+        &mut fresh,
+        &context,
+        "req_budget_over_probe",
+        &root_id(),
+        ExpansionRelation::CausalSuccessors,
+        Optional::Present(ByteCount::new(1 << 20)),
+    );
+    assert_eq!(
+        probe.envelope.error.value().map(|error| error.code),
+        Some(ErrorCode::CapabilityDenied),
+        "the refused compile published no pack"
+    );
+
+    // The bn-2ga1c probe itself.
+    let tiny = compile_under(
+        &mut fresh,
+        &fresh_root,
+        "req_budget_512",
+        Some(512),
+        None,
+        None,
+    );
+    assert_exhausted(&tiny, "budget.bytes = 512 against a root of tens of KiB");
+}
+
+#[test]
+fn the_compile_max_bytes_ceiling_is_exact_at_the_whole_payload() {
+    // IDL `OutputPolicy.max_bytes`: "Enforced byte ceiling on the result payload" — measured
+    // on the payload in the negotiated encoding, as `task.status` is (`daemon::output`).
+    let (mut daemon, root) = daemon();
+    let (whole, _, payload) = unbounded_compile(&mut daemon, &root);
+    assert!(
+        payload > whole.len() as u64,
+        "the payload carries the pack and more"
+    );
+
+    let at = compile_under(&mut daemon, &root, "req_max_at", None, Some(payload), None);
+    assert_eq!(
+        at.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        at.envelope.error
+    );
+    let (at_wire, _, _) = answered(&at);
+    assert_eq!(at_wire, whole, "at the limit, the whole answer");
+    assert!(
+        at.envelope
+            .omissions
+            .iter()
+            .all(|o| o.reason != continuumd::protocol::vocabulary::OmissionReason::Budget),
+        "an answer that fits records no budget omission"
+    );
+
+    let over = compile_under(
+        &mut daemon,
+        &root,
+        "req_max_over",
+        None,
+        Some(payload - 1),
+        None,
+    );
+    assert_exhausted(
+        &over,
+        "the payload is one byte over output_policy.max_bytes",
+    );
+
+    let tiny = compile_under(
+        &mut daemon,
+        &root,
+        "req_max_512",
+        Some(512),
+        Some(512),
+        None,
+    );
+    assert_exhausted(&tiny, "the bn-2ga1c probe: both ceilings at 512");
+}
+
+#[test]
+fn the_compile_node_ceiling_is_recorded_and_exact_at_the_selection() {
+    // RFC 0028: "`content_budget.nodes` is the graph-node ceiling of `OutputPolicy.max_nodes`";
+    // IDL: "Ceiling on returned graph nodes". The returned graph nodes are `selected[]`, which
+    // this file's own walk says is the whole chain.
+    let (mut daemon, root) = daemon();
+    let (whole, _, _) = unbounded_compile(&mut daemon, &root);
+    let unbounded = Json::parse(&whole).expect("canonical JSON");
+    assert!(
+        !unbounded.as_object().expect("object")["content_budget"]
+            .as_object()
+            .expect("object")
+            .contains_key("nodes"),
+        "no ceiling stated, none recorded"
+    );
+    let limit = u64::from(DEPTH);
+    assert_eq!(selected_ids(&unbounded).len() as u64, limit);
+
+    let at = compile_under(&mut daemon, &root, "req_nodes_at", None, None, Some(limit));
+    assert_eq!(
+        at.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        at.envelope.error
+    );
+    let (at_wire, _, at_document) = answered(&at);
+    size_is_measured(&at_document, &at_wire).expect("still a measured pack");
+    assert_eq!(
+        at_document.as_object().expect("object")["content_budget"]
+            .as_object()
+            .expect("object")
+            .get("nodes"),
+        Some(&Json::Integer(i64::from(DEPTH))),
+        "the stated ceiling is recorded at content_budget.nodes"
+    );
+    assert_eq!(selected_ids(&at_document).len() as u64, limit);
+
+    let over = compile_under(
+        &mut daemon,
+        &root,
+        "req_nodes_over",
+        None,
+        None,
+        Some(limit - 1),
+    );
+    assert_exhausted(
+        &over,
+        "the selection is one node over output_policy.max_nodes",
+    );
+}
+
+#[test]
+fn the_compile_budget_exhausted_branch_is_declared_and_reachable() {
+    // The declaration and the implementation agree: the IDL offers `BudgetExhausted` for
+    // context.compile, and `daemon::context::FAULTS` lists it. Before bn-2ga1c the second half
+    // was false.
     let idl = read_dossier("notes/plan/schemas/continuumd-native-protocol.idl");
     let declaration = idl
         .split("operation context.compile {")
@@ -963,28 +1143,13 @@ fn the_compile_surface_enforces_no_caller_stated_byte_ceiling() {
         .expect("the operation block closes");
     assert!(
         declaration.contains("BudgetExhausted"),
-        "the IDL no longer declares BudgetExhausted for context.compile; re-adjudicate this pin"
+        "the IDL declares BudgetExhausted for context.compile"
     );
-    let request_block = declaration
-        .split("request {")
-        .nth(1)
-        .expect("the operation declares a request")
-        .split("\n  };")
-        .next()
-        .expect("the request block closes");
-    for term in [
-        "budget",
-        "Budget",
-        "max_bytes",
-        "OutputPolicy",
-        "ContextPolicy",
-    ] {
-        assert!(
-            !request_block.contains(term),
-            "context.compile's request gained a `{term}` term; the absence this pin records is \
-             paid and the pin must be rewritten"
-        );
-    }
+    assert!(
+        continuumd::daemon::context::FAULTS
+            .contains(&("context.compile", ErrorCode::BudgetExhausted)),
+        "FAULTS lists the branch the handler now takes"
+    );
 }
 
 // --- conjunct 2: omission manifests and expansion handles ------------------------------------

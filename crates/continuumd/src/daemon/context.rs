@@ -135,13 +135,53 @@
 //! | the registered source names no root, or the compile has nothing to slice | `InsufficientEvidence` | [`compile`] |
 //! | the pipeline refuses the registered input (a redacted root, an unanchored residual, …) | `UnsupportedSemanticFeature` | [`compile_fault`] |
 //! | the assembled root would not reconcile, or violates its profile | `UnsupportedSemanticFeature` | [`pack_fault`] — nothing is published |
+//! | the root selects more items than `output_policy.max_nodes` | `BudgetExhausted` | [`pack_fault`], from `PackError::OverNodeCeiling` — nothing is published |
+//! | the root document is larger than `budget.bytes` | `BudgetExhausted` | [`compile`] — nothing is published |
+//! | the result payload, in the negotiated encoding, is larger than `output_policy.max_bytes` | `BudgetExhausted` | [`compile`] — nothing is published |
 //! | otherwise | **success**, with the pack, the verdict, and the manifest as envelope omissions | [`compile`] |
 //!
-//! `BudgetExhausted` is declared for `context.compile` and is **not** raised here: byte packing
-//! is stage 10 and is applied to expansions, where RFC 0028's two branches live. A compile in
-//! this deployment publishes the whole root or nothing, and a root too large for a caller's
-//! ceiling is a shortfall the *expansion* protocol answers. Naming a branch that no code takes
-//! would be worse than the absence.
+//! # Over a ceiling: a typed refusal, and the rule that picks it
+//!
+//! Until bn-2ga1c this handler read no ceiling at all: a compile under `budget.bytes = 512`
+//! answered `Ok` with a 23 KiB pack, while the IDL offered `BudgetExhausted` in the operation's
+//! `errors` clause and no code took it. The ceilings are now read with the same helpers the
+//! other two readers use — [`output::Ceiling::of_budget`] (`context.expand`'s `budget.bytes`),
+//! [`output::Ceiling::of`] and [`output::measure`] (`task.status`'s `output_policy.max_bytes`),
+//! [`output::max_nodes`] — and a ceiling admits an answer of exactly its own size (`<=`).
+//!
+//! RFC 0028 gives an over-budget pack two admissible answers and forbids a third:
+//!
+//! > **A guaranteed core is never truncated.** If the items required by a claimed guarantee
+//! > alone exceed the budget, the compiler MUST either drop the guarantee — recording the drop
+//! > as an omission with reason `budget` — or fail with `BudgetExhausted` carrying a
+//! > continuation. It MUST NOT publish a pack that claims a guarantee whose supporting items
+//! > were trimmed.
+//! >
+//! > — RFC 0028, "Budgets and packing"
+//!
+//! > The answer is a smaller pack with a larger manifest, or `BudgetExhausted` with a
+//! > continuation.
+//! >
+//! > — RFC 0028, "Rejected alternatives"
+//!
+//! A root's selection here is stage 2's backward slice with stage 9 disabled, and stage 2 is
+//! what licenses `CausallyClosed`: every selected item is core. So the budget rule is the one
+//! that governs, and this handler takes its `BudgetExhausted` branch — the IDL's declared code,
+//! carried with the typed `non_resumable_reason` (SD-13) exactly as `context.expand`'s
+//! below-the-floor refusal is. It never takes the forbidden third branch: nothing is truncated,
+//! nothing is dumped, and a refusal registers no pack (the ceilings are decided before
+//! [`DaemonState::put_context_pack`](super::state::DaemonState::put_context_pack) runs), so this
+//! `@mutation` commits nothing it then reports as failed.
+//!
+//! The other admissible branch — drop the guarantee and publish a smaller root with a larger
+//! manifest — needs a root packer. [`continuum_context::budget::BudgetPacker`] packs expansion
+//! children only, which claim no guarantee; a root packer must also decide which guarantee to
+//! drop and record it. That is a packer bone, not a wire bone. When it lands it narrows the
+//! refusal to "below the smallest conforming root", as `context.expand`'s already is, and no
+//! wire shape changes.
+//!
+//! `content_budget.nodes` records the stated `max_nodes` (the schema: "Graph-node ceiling of
+//! the IDL's OutputPolicy.max_nodes"), and a returned graph node is a `selected[]` item.
 //!
 //! # What is declined here, and why
 //!
@@ -190,6 +230,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::Services;
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::output;
 use super::state::DaemonState;
 use crate::protocol::envelope::{EvaluationVerdictValue, Omission, RequestEnvelope, Verdict};
 use crate::protocol::operations::context::{
@@ -198,7 +239,7 @@ use crate::protocol::operations::context::{
 use crate::protocol::scalar::{ArtifactHandle, ContextHandle, Opaque, WorkspaceHandle};
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::vocabulary::{
-    AssuranceClass, ErrorCode, EvaluationVerdict, ExpansionRelation, InconclusiveReason,
+    AssuranceClass, Encoding, ErrorCode, EvaluationVerdict, ExpansionRelation, InconclusiveReason,
     OmissionReason,
 };
 
@@ -216,12 +257,30 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("context.compile", ErrorCode::MalformedRequest),
     ("context.compile", ErrorCode::StaleSnapshot),
     ("context.compile", ErrorCode::UnsupportedSemanticFeature),
+    ("context.compile", ErrorCode::BudgetExhausted),
     ("context.expand", ErrorCode::CapabilityDenied),
     ("context.expand", ErrorCode::MalformedRequest),
     ("context.expand", ErrorCode::StaleSnapshot),
     ("context.expand", ErrorCode::UnsupportedSemanticFeature),
     ("context.expand", ErrorCode::BudgetExhausted),
 ];
+
+/// The refusal detail for a root pack larger than the envelope's `budget.bytes`.
+///
+/// Also the typed `non_resumable_reason` (SD-13), as on `context.expand`'s refusal.
+pub const COMPILE_OVER_BUDGET_BYTES: &str = "the compiled root pack is larger than the byte \
+     budget this call ran under; a root's selection is its guaranteed core, which is never \
+     truncated, and this deployment packs no smaller root";
+
+/// The refusal detail for a compile answer larger than `output_policy.max_bytes`.
+pub const COMPILE_OVER_MAX_BYTES: &str = "the compile's result payload, in the negotiated \
+     encoding, is larger than output_policy.max_bytes; a root's selection is its guaranteed \
+     core, which is never truncated, and this deployment packs no smaller root";
+
+/// The refusal detail for a root that selects more items than `output_policy.max_nodes`.
+pub const COMPILE_OVER_MAX_NODES: &str = "the compiled root pack selects more items than \
+     output_policy.max_nodes; a root's selection is its guaranteed core, which is never \
+     truncated, and this deployment packs no smaller root";
 
 /// A published Context Pack this daemon can navigate, and the groups its manifest names.
 ///
@@ -627,12 +686,17 @@ impl OperationFamily for ContextFamily {
         &self,
         call: &Call<'_>,
         state: &mut DaemonState,
-        _services: &Services,
+        services: &Services,
         _store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
             Arguments::ContextExpand(request) => expand(call.envelope, request, state),
-            Arguments::ContextCompile(request) => compile(call.envelope, request, state),
+            Arguments::ContextCompile(request) => compile(
+                call.envelope,
+                request,
+                state,
+                services.negotiated().encoding(),
+            ),
             // Unreachable: the dispatcher checked shape agreement before routing.
             _ => Err(Fault::new(
                 ErrorCode::MalformedRequest,
@@ -653,6 +717,7 @@ fn compile(
     envelope: &RequestEnvelope,
     request: &ContextCompileRequest,
     state: &mut DaemonState,
+    encoding: Encoding,
 ) -> Result<Effect, Fault> {
     // Uniform in the root, so it answers the same whether or not this daemon holds one: the
     // absent producer is `continuum-cir`, which is a property of the deployment and not of the
@@ -763,17 +828,39 @@ fn compile(
         guarantees: compilation.guarantees(),
         redactions: &source.redactions,
         profile: source.profile,
+        nodes: output::max_nodes(envelope),
     };
     let document = assembly.to_json::<Blake3Hasher>().map_err(pack_fault)?;
     let published = assembly.published_manifest().map_err(pack_fault)?;
 
-    // --- registration: the compiled pack is navigable the moment it is answered with -------
+    // --- the ceilings: decided on the finished answer, before anything is registered ------
+    //
+    // The byte ceiling of `budget.bytes` is read against the pack document — the quantity
+    // `content_budget.bytes` measures and `context.expand` admits against — and
+    // `output_policy.max_bytes` against the result payload in the negotiated encoding, as
+    // `daemon::output` does for `task.status`. `max_nodes` was refused by the writer above
+    // (`PackError::OverNodeCeiling`, mapped in `pack_fault`). Every over-ceiling outcome is
+    // `BudgetExhausted` with nothing published — see "Over a ceiling" in this module's
+    // documentation for the RFC 0028 rule that picks this branch.
+    if !output::Ceiling::of_budget(envelope).admits(document.to_canonical_bytes().len() as u64) {
+        return Err(Fault::exhausted(COMPILE_OVER_BUDGET_BYTES));
+    }
     let context = ContextHandle::new(&identity.to_string()).map_err(|_| {
         Fault::new(
             ErrorCode::UnsupportedSemanticFeature,
             "the derived pack identity is not a well-formed context handle",
         )
     })?;
+    let response = ContextCompileResponse {
+        context: context.clone(),
+        pack: Opaque::from_bytes(document.to_canonical_bytes()),
+    };
+    let ceiling = output::Ceiling::of(envelope);
+    if ceiling.stated().is_some() && !ceiling.admits(output::measure(&response, encoding)?) {
+        return Err(Fault::exhausted(COMPILE_OVER_MAX_BYTES));
+    }
+
+    // --- registration: the compiled pack is navigable the moment it is answered with -------
     let record = ContextPackRecord::new(
         document.clone(),
         source.snapshot.clone(),
@@ -789,10 +876,7 @@ fn compile(
     state.put_context_pack(context.clone(), record);
 
     Ok(Effect::new(
-        Payload::ContextCompile(ContextCompileResponse {
-            context,
-            pack: Opaque::from_bytes(document.to_canonical_bytes()),
-        }),
+        Payload::ContextCompile(response),
         // > `context.compile` is `@mutation @task_starting` with `authority read` and verdict
         // > `EvaluationVerdictValue`; that verdict MUST equal the pack's `verdict`, and its
         // > `assurance_class` MUST equal the pack's `assurance.class`.
@@ -1020,6 +1104,7 @@ fn pack_fault(error: PackError) -> Fault {
             ErrorCode::UnsupportedSemanticFeature,
             "rule C2: a pack claiming `ReplayPreserving` MUST carry a non-null `replay`",
         ),
+        PackError::OverNodeCeiling { .. } => Fault::exhausted(COMPILE_OVER_MAX_NODES),
         _ => Fault::new(
             ErrorCode::UnsupportedSemanticFeature,
             "the registered projection does not assemble into a conforming root pack",
@@ -1253,12 +1338,7 @@ fn project(
 /// own recorded value comes from here: what a child records is its own measurement
 /// (`ChildPack::to_json`), and this number only decides what it is admitted against.
 fn ceiling(record: &ContextPackRecord, envelope: &RequestEnvelope) -> Result<u64, PackError> {
-    let stated = envelope
-        .budget
-        .value()
-        .and_then(|budget| budget.bytes.value().copied())
-        .map(crate::protocol::scalar::ByteCount::bytes);
-    match stated {
+    match output::Ceiling::of_budget(envelope).stated() {
         Some(bytes) => Ok(bytes),
         None => pack::budget_bytes_of(record.document()),
     }

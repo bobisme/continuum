@@ -124,10 +124,13 @@
 //! # What this module deliberately does not decide
 //!
 //! - **The other 72 operations.** `task.status` is the operation whose record the ledger
-//!   measured and whose declaration leaves something a ceiling can legally take. Every other
-//!   operation still ignores `max_bytes`. The mechanism here is per-response-shape by
-//!   construction — the elidable set is a property of the *declaration*, and there is no
-//!   shape-agnostic answer to "what may a ceiling take from this struct".
+//!   measured and whose declaration leaves something a ceiling can legally take. The one
+//!   other reader is `context.compile` (bn-2ga1c), which uses [`Ceiling`], [`measure`] and
+//!   [`max_nodes`] and answers an over-ceiling compile with the `BudgetExhausted` its own
+//!   `errors` clause declares — see `daemon::context`. Every other operation still ignores
+//!   `max_bytes`. The mechanism here is per-response-shape by construction — the elidable
+//!   set is a property of the *declaration*, and there is no shape-agnostic answer to "what
+//!   may a ceiling take from this struct".
 //! - **What a `@mutation` does under a ceiling its answer cannot meet.** Refusing after the
 //!   handler ran would trade a rendering bound for a lost mutation — the work committed and
 //!   the caller told it failed — which is the shape INV-017 and `PublicationAborted`'s
@@ -194,6 +197,25 @@ impl Ceiling {
         )
     }
 
+    /// The ceiling this request's `budget.bytes` stated.
+    ///
+    /// A second reading of the envelope beside [`Ceiling::of`], and a different field:
+    /// `Budget.bytes` is the task's byte budget (a `@task_starting` operation carries a
+    /// `budget`, RFC 0026), `OutputPolicy.max_bytes` is the ceiling on the result payload
+    /// (IDL `struct OutputPolicy`). An absent `budget`, or a `budget` with no `bytes`, states
+    /// no ceiling — never a ceiling of zero. The `context` family reads this one against the
+    /// pack document it publishes, the way `content_budget.bytes` measures it.
+    #[must_use]
+    pub fn of_budget(envelope: &RequestEnvelope) -> Self {
+        Self(
+            envelope
+                .budget
+                .value()
+                .and_then(|budget| budget.bytes.value().copied())
+                .map(crate::protocol::scalar::ByteCount::bytes),
+        )
+    }
+
     /// The stated ceiling in bytes, when there is one.
     #[must_use]
     pub const fn stated(self) -> Option<u64> {
@@ -211,6 +233,21 @@ impl Ceiling {
             Some(ceiling) => bytes <= ceiling,
         }
     }
+}
+
+/// The graph-node ceiling this request stated — IDL `OutputPolicy.max_nodes`, "Ceiling on
+/// returned graph nodes" — or [`None`].
+///
+/// A count of nodes, not of bytes, so it is not a [`Ceiling`]: nothing here measures it. The
+/// operation that returns graph nodes decides what one is and enforces it; `context.compile`
+/// counts `selected[]` items and records the ceiling at `content_budget.nodes` (RFC 0028,
+/// "Budgets and packing").
+#[must_use]
+pub fn max_nodes(envelope: &RequestEnvelope) -> Option<u64> {
+    envelope
+        .output_policy
+        .value()
+        .and_then(|policy| policy.max_nodes.value().copied())
 }
 
 /// A record fitted to a ceiling, and the manifest of what the fitting took.

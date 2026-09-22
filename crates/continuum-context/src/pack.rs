@@ -804,6 +804,17 @@ pub struct RootPack<'a> {
     pub redactions: &'a [RedactionStub],
     /// Which profile's content constraints this compile is held to.
     pub profile: PackProfile,
+    /// The graph-node ceiling the compile ran under — the IDL's `OutputPolicy.max_nodes` —
+    /// or [`None`] when the caller stated none.
+    ///
+    /// Written at `content_budget.nodes`, which the schema documents as exactly that ceiling
+    /// ("Graph-node ceiling of the IDL's OutputPolicy.max_nodes"; RFC 0028, "Budgets and
+    /// packing"). Unlike `content_budget.bytes` it is a *ceiling*, not a measurement — the
+    /// schema's own asymmetry, which RFC 0028 correction 17 names. Absent rather than a
+    /// placeholder when no ceiling was stated. This writer records the value and does not
+    /// enforce it: [`RootPack::to_json`] refuses a selection larger than the ceiling it would
+    /// record, so a document never states a ceiling its own `selected[]` breaks.
+    pub nodes: Option<u64>,
 }
 
 impl RootPack<'_> {
@@ -882,8 +893,9 @@ impl RootPack<'_> {
     /// [`PackError::EmptyEpoch`] for an absent `semantic_epoch`;
     /// [`PackError::ReplayPreservingWithoutReplay`] for rule C2's artifact half;
     /// [`PackError::ProfileViolation`] when the profile's content constraints are not met;
-    /// [`PackError::Manifest`] from [`RootPack::published_manifest`]; and
-    /// [`PackError::UnmeasurableSize`] if the measurement does not settle.
+    /// [`PackError::Manifest`] from [`RootPack::published_manifest`];
+    /// [`PackError::OverNodeCeiling`] when the selection is larger than [`RootPack::nodes`];
+    /// and [`PackError::UnmeasurableSize`] if the measurement does not settle.
     pub fn to_json<H: ContentHasher>(&self) -> Result<Json, PackError> {
         self.check()?;
         let manifest = self.published_manifest()?;
@@ -901,6 +913,14 @@ impl RootPack<'_> {
 
     /// Every refusal that is about the *inputs* rather than about the writing.
     fn check(&self) -> Result<(), PackError> {
+        if let Some(ceiling) = self.nodes {
+            if self.selected.len() as u64 > ceiling {
+                return Err(PackError::OverNodeCeiling {
+                    selected: self.selected.len() as u64,
+                    ceiling,
+                });
+            }
+        }
         if !self.snapshot.starts_with("ws_") {
             return Err(PackError::UnclassedHandle { key: "snapshot" });
         }
@@ -1021,15 +1041,21 @@ impl RootPack<'_> {
             ])
             .expect("two distinct string literals"),
         );
-        // One key, for `ChildPack::document_with`'s reasons: no tokenizer exists in this
-        // workspace, and `nodes` is a ceiling nothing here is given.
+        // `bytes` always; `nodes` exactly when the compile was given a node ceiling; never
+        // `tokens`, for `ChildPack::document_with`'s reasons — no tokenizer exists here.
+        let mut budget = vec![(
+            "bytes".to_owned(),
+            Json::Integer(i64::try_from(bytes).unwrap_or(i64::MAX)),
+        )];
+        if let Some(nodes) = self.nodes {
+            budget.push((
+                "nodes".to_owned(),
+                Json::Integer(i64::try_from(nodes).unwrap_or(i64::MAX)),
+            ));
+        }
         fields.insert(
             "content_budget".to_owned(),
-            Json::object([(
-                "bytes".to_owned(),
-                Json::Integer(i64::try_from(bytes).unwrap_or(i64::MAX)),
-            )])
-            .expect("one key"),
+            Json::object(budget).expect("two distinct string literals"),
         );
 
         // The identity preimage: this document, `content_hash` absent, every other key present
@@ -1119,6 +1145,14 @@ pub enum PackError {
         /// The clause it failed, verbatim from RFC 0028's "Pack profiles".
         clause: &'static str,
     },
+    /// The root selects more items than the graph-node ceiling it would record
+    /// ([`RootPack::nodes`]).
+    OverNodeCeiling {
+        /// How many items the selection holds.
+        selected: u64,
+        /// The stated `OutputPolicy.max_nodes`.
+        ceiling: u64,
+    },
 }
 
 impl fmt::Display for PackError {
@@ -1181,6 +1215,11 @@ impl fmt::Display for PackError {
             Self::ProfileViolation { profile, clause } => {
                 write!(f, "the {profile} profile requires that {clause}")
             }
+            Self::OverNodeCeiling { selected, ceiling } => write!(
+                f,
+                "the selection holds {selected} items against a graph-node ceiling of \
+                 {ceiling}; a pack never records a ceiling its own selection breaks"
+            ),
         }
     }
 }
@@ -1360,8 +1399,59 @@ mod tests {
                 guarantees: &self.guarantees,
                 redactions: &self.redactions,
                 profile: PackProfile::Failure,
+                nodes: None,
             }
         }
+    }
+
+    /// `content_budget.nodes` records the `OutputPolicy.max_nodes` ceiling the compile ran
+    /// under — present exactly when one was stated — and a root never records a ceiling its
+    /// own selection breaks. The fixture selects one item, so one is the exact boundary.
+    #[test]
+    fn a_root_records_its_node_ceiling_and_refuses_to_break_it() {
+        let fixture = RootFixture::new();
+        let nodes_of = |document: &Json| {
+            document.as_object().expect("object")["content_budget"]
+                .as_object()
+                .expect("object")
+                .get("nodes")
+                .cloned()
+        };
+
+        let unbounded = fixture
+            .pack()
+            .to_json::<Blake3Hasher>()
+            .expect("conforming");
+        assert_eq!(
+            nodes_of(&unbounded),
+            None,
+            "no ceiling stated, none recorded"
+        );
+
+        let at = RootPack {
+            nodes: Some(1),
+            ..fixture.pack()
+        }
+        .to_json::<Blake3Hasher>()
+        .expect("a ceiling of n admits n items");
+        assert_eq!(nodes_of(&at), Some(Json::Integer(1)));
+        assert_eq!(
+            budget_bytes_of(&at).expect("measured"),
+            at.to_canonical_bytes().len() as u64,
+            "the recorded ceiling is inside the measured document"
+        );
+
+        assert_eq!(
+            RootPack {
+                nodes: Some(0),
+                ..fixture.pack()
+            }
+            .to_json::<Blake3Hasher>(),
+            Err(PackError::OverNodeCeiling {
+                selected: 1,
+                ceiling: 0
+            })
+        );
     }
 
     #[test]
