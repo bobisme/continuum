@@ -725,24 +725,24 @@ fn leg1_the_lossless_floor_is_conditional_on_charging_the_handshake() {
     );
 }
 
-/// **Two transcription slips in the ledger's §9.1, found and priced.**
+/// **The ledger's §9.1 landing table agrees with the §2.1 table it descends from.**
 ///
 /// An audit that reproduces every number and reports no discrepancy has probably not
-/// reproduced them. Two cells of the ledger's landing table do not agree with the table it
-/// descends from, and both are stated here with what they cost: nothing.
+/// reproduced them — which is exactly what caught this document's prior state: two cells of
+/// the landing table did not agree with the table they descend from. §2.1 puts
+/// `workspace.create` at 35,304 B over 24 calls, which is 1,471 B per call, and its totals row
+/// reads 260,630 B; §9.1's "before" cells used to read 1,470/−474 and 260,616/−11,386 — off by
+/// one byte per call and by the resulting 14 B over the matrix. Both are now the exact figures,
+/// 1,471/−475 and 260,630/−11,400, and this test is the regression guard: it fails again if
+/// either before/delta pair drifts from §2.1's own arithmetic, and it fails if the stale
+/// figures reappear anywhere in the document.
 ///
-/// - §2.1 puts `workspace.create` at 35,304 B over 24 calls, which is 1,471 B per call.
-///   §9.1's "before" cell reads 1,470 and its delta reads −474; the exact figures are 1,471
-///   and −475, and §9.1's own per-solved-task delta already reads −475.
-/// - §2.1's totals row reads 260,630 B; §9.1's "native, B over the matrix" before-cell reads
-///   260,616 with a delta of −11,386. The landed after-figure, 249,230, is exactly
-///   260,630 − 11,400 — the true delta of the create row — so the after-figure is the one that
-///   is right and the before/delta pair carries the slip.
-///
-/// Every headline figure survives both: 10,859, 10,384, −475 per solved task, −163% and −152%
-/// are unchanged, because integer division by 24 absorbs a discrepancy of 14 B.
+/// The landed after-figure, 249,230, was never in question — it is exactly 260,630 − 11,400,
+/// the true delta of the create row — and every headline figure is unchanged by the
+/// correction: 10,859, 10,384, −475 per solved task, −163% and −152%, because integer division
+/// by 24 absorbs a discrepancy this small either way.
 #[test]
-fn leg1_the_ledger_landing_table_carries_two_slips_and_no_headline_moves() {
+fn leg1_the_ledger_landing_table_agrees_with_the_table_it_descends_from() {
     let decomposition = section(LEDGER, "## 2. The measured decomposition");
     let landing = section(LEDGER, "## 9. C4b landed");
 
@@ -757,35 +757,52 @@ fn leg1_the_ledger_landing_table_carries_two_slips_and_no_headline_moves() {
         "workspace.create, B per call (request + result)",
         4,
     );
-    assert_eq!(count(&landing_row[1]), 1_470, "§9.1 states 1,470");
-    assert_eq!(count(&landing_row[3]), 474, "and a delta of 474");
-    assert_ne!(
+    assert_eq!(
         count(&landing_row[1]),
         bytes / calls,
-        "which is one byte per call under §2.1's own row"
+        "§9.1's before-cell equals §2.1's own row exactly"
     );
+    assert_eq!(count(&landing_row[1]), 1_471, "§9.1 states 1,471");
+    assert_eq!(count(&landing_row[3]), 475, "and a delta of 475");
 
     let over_the_matrix = row(landing, "native, B over the matrix", 4);
     let before = count(&over_the_matrix[1]);
     let after = count(&over_the_matrix[2]);
     let delta = count(&over_the_matrix[3]);
-    assert_eq!((before, after, delta), (260_616, 249_230, 11_386));
+    assert_eq!((before, after, delta), (260_630, 249_230, 11_400));
     assert_eq!(before - delta, after, "§9.1 is internally consistent");
 
     let summed = derive(LEDGER).native_total;
     assert_eq!(summed, 260_630);
-    assert_ne!(summed, before, "but disagrees with §2.1's own sum by 14 B");
+    assert_eq!(
+        summed, before,
+        "§9.1's before-cell now agrees with §2.1's own sum exactly"
+    );
     assert_eq!(
         summed - (bytes - count(&landing_row[2]) * calls),
         after,
-        "and §2.1's sum, with the create row replaced by its landed value, lands on 249,230 \
-         exactly — so the after-figure is the sound one"
+        "and §2.1's sum, with the create row replaced by its landed value, still lands on \
+         249,230 exactly"
     );
 
-    // The headline quotients, on both readings of the before-figure.
+    // The headline quotients, unmoved by the correction.
     assert_eq!(summed / 24, 10_859);
     assert_eq!(before / 24, 10_859);
     assert_eq!(after / 24, 10_384);
+
+    // The stale transcription is gone from the document, not merely superseded.
+    assert!(
+        !LEDGER.contains("260,616"),
+        "the stale before-cell must not reappear"
+    );
+    assert!(
+        !LEDGER.contains("11,386"),
+        "the stale delta must not reappear"
+    );
+    assert!(
+        !landing.contains("1,470 | 996"),
+        "the stale per-call before-cell must not reappear"
+    );
 }
 
 // ================================================================================================

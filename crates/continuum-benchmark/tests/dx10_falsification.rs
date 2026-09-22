@@ -447,7 +447,7 @@ fn arm_totals(runs: &[ArmRun]) -> ArmTotals {
 /// only `epochs` is both required and *constant across a connection*, so it is the only
 /// conformance cost a redesign could amortize without changing a guarantee: with `epochs`
 /// pinned at the handshake and `SnapshotComponents` resolved by reference, the typed arm
-/// spends 9,355 bytes per solved task against the baseline's 4,118 — a -138% margin. Even
+/// spends 9,355 bytes per solved task against the baseline's 4,118 — a -127% margin. Even
 /// reducing the whole envelope to its floor — every list empty, every optional absent, the
 /// six epochs gone — leaves 7,193 against 4,118, a -74% margin. **The byte loss is not an
 /// envelope-overhead artefact. It survives a maximal redesign of the encoding.**

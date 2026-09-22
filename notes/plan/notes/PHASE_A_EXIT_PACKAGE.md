@@ -909,7 +909,7 @@ INV-007 and INV-008 both require to stay separate: **not measured**,
 
 | # | What | Where |
 |---|---|---|
-| F1 | **The ACI ablation's interface-bytes margin: −152% against a +30% floor.** Not an encoding artefact — reducing the whole result envelope to its floor and resolving `SnapshotComponents` by reference still leaves −86%, and the addendum proves no lossless protocol clears it. | §4; `G0_SPIKE_MATRIX.md` DX-10; RFC 0027 correction 31 |
+| F1 | **The ACI ablation's interface-bytes margin: −152% against a +30% floor.** Not an encoding artefact — reducing the whole result envelope to its floor and resolving `SnapshotComponents` by reference still leaves −74% at protocol 3.6, and the addendum proves no lossless protocol clears it. | §4; `G0_SPIKE_MATRIX.md` DX-10; RFC 0027 correction 31 |
 | F2 | **G0-DX-10's pass condition is not met and the row closes as `failed`.** Success is a measured tie, not a pass. The clause is carried by its second disjunct. | §4.1 |
 | F3 | **Three G0 freeze-blocking items were falsified before they were repaired:** DX-03 (three daemon defects), DX-13 (GC-vs-publication race), DX-14 (`task.resume` writing a terminal task's budget). Each fix landed with the campaign's own reproduction as its regression guard. | §7.1 |
 

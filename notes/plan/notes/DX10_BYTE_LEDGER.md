@@ -1134,8 +1134,8 @@ remembering it.
 | | before | after | delta |
 |---|---:|---:|---:|
 | native, B per solved task | 10,859 | **10,384** | **−475** |
-| native, B over the matrix | 260,616 | 249,230 | −11,386 |
-| `workspace.create`, B per call (request + result) | 1,470 | 996 | −474 |
+| native, B over the matrix | 260,630 | 249,230 | −11,400 |
+| `workspace.create`, B per call (request + result) | 1,471 | 996 | −475 |
 | **shell, B per solved task** | **4,118** | **4,118** | **0** |
 | byte margin against the +30% floor | −163% | **−152%** | +11 pts |
 
