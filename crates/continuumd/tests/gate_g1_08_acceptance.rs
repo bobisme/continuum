@@ -19,7 +19,7 @@
 //! | | plan §4.5 says | this build has |
 //! |---|---|---|
 //! | **O1** | "Publication commits content before index; a crash leaves unreachable content eligible for GC, never a stale index entry." | **built.** The two-phase protocol, the in-flight root pin, `StoreAudit::fsck`, `recovery::recover`, and a real restart seam (`Daemon::crash` → `Builder::over`). |
-//! | **O2** | "On restart, `Running` tasks resume from their last committed continuation or transition to `Failed` with a typed reason — never to a silently reconstructed state." | **built, both branches (bn-1z09m, bn-20142).** A park commits a continuation record (`cont_`) with the continuation's pins and the task fields a resume reads. `recovery::resolve_tasks` runs at every restart and resolves each task the store holds a campaign record for to `Settled`, to `Restored` — a live task and continuation read back from the matching continuation record — or to `Failed` with a typed `FailureReason`. |
+//! | **O2** | "On restart, `Running` tasks resume from their last committed continuation or transition to `Failed` with a typed reason — never to a silently reconstructed state." | **built, both branches (bn-1z09m, bn-20142), and terminal tasks too (bn-2g3ei).** A park commits a continuation record (`cont_`) with the continuation's pins and the task fields a resume reads, and a run that closes or fails commits a terminal task record (`task_`). `recovery::resolve_tasks` runs at every restart and resolves each task the store holds a record for to `Terminal` — a live `Completed` or `Failed` task read back from its terminal record — to `Restored` — a live task and continuation read back from the matching continuation record — to `Settled` (a closed head with no terminal record, which only a store written before bn-2g3ei holds), or to `Failed` with a typed `FailureReason`. |
 //! | **O3** | "An index verifier (fsck) ships with the daemon." | **built.** `StoreAudit::fsck`. |
 //!
 //! So the two nouns of G1-08 land on opposite sides of that table, and the honest verdict is
@@ -52,8 +52,8 @@
 //!
 //! ## The debt spec — what O2 would require
 //!
-//! Actionable, in the shape `bn-3dr` left it and this file measures. Status after bn-1z09m
-//! and bn-20142 is given per item.
+//! Actionable, in the shape `bn-3dr` left it and this file measures. Status after bn-1z09m,
+//! bn-20142 and bn-2g3ei is given per item.
 //!
 //! 1. **A durable task record.** `TaskEntry` — at minimum `handle`, `operation`, `status`,
 //!    `snapshot`, `intent`, `epochs`, the ledger's checkpoints, and `Publications::committed`
@@ -62,13 +62,23 @@
 //!    target, portfolio, priority, model source, ceilings, spend and milestones, and it is
 //!    written before the park, `task.update_budget` or `task.cancel` answers. The restored
 //!    `TaskRecord` is the pre-crash one byte for byte, and `task.status` answers it
-//!    ([`a_restored_task_answers_task_status_with_its_pre_crash_record`]). **Still open for a
-//!    task that closed:** a closing run publishes no continuation record, so a `Settled` task
-//!    has no durable terminal record and `task.status` on it answers `CapabilityDenied` until
-//!    a re-issued start re-runs it. What is missing is exactly a terminal record — status,
-//!    report and final ledger — for the `Completed` arm. Not durable either, by declaration:
-//!    `TaskEntry::events` (hints, `rule subscription.hints_only`) and the engine's
-//!    `CheckReport`, which the next resume re-derives.
+//!    ([`a_restored_task_answers_task_status_with_its_pre_crash_record`]). **Closed for a
+//!    terminal task (bn-2g3ei).** A run that closes or fails publishes a terminal task record
+//!    (`daemon::terminal`) — the same task fields, plus the status, `failed_reason`,
+//!    `non_resumable_reason` and `continuation` — before the status moves. For a closing run
+//!    it is published before the campaign record, whose index commit stays the commit point
+//!    ([`a_terminal_record_whose_campaign_record_aborted_is_unclaimed`]). The successor
+//!    restores the task live and terminal, and `task.status` answers the pre-crash outcome
+//!    byte for byte, for `Completed`
+//!    ([`a_completed_task_answers_task_status_after_a_restart_byte_for_byte`]) and for a
+//!    first run that `Failed` and committed nothing else
+//!    ([`a_failed_task_answers_task_status_after_a_restart_byte_for_byte`]). Not durable, by
+//!    declaration: `TaskEntry::events` (hints, `rule subscription.hints_only`) and the
+//!    engine's `CheckReport`. A resume re-derives the report of a parked task, and
+//!    `verification.result` re-derives the report of a restored `Completed` task from its
+//!    durable model source, target and bounds, checked against its durable state count.
+//!    Still not durable: a `task.resume` whose budget write lands and whose run then fails
+//!    (`daemon::continuation`'s module doc).
 //! 2. **A durable continuation.** **Closed (bn-20142).** `VolatileFact::ContinuationTable` is
 //!    `Resolved` and `survives_as() == Some(ArtifactClass::Continuation)`. The record is an
 //!    artifact of the existing `cont_` class, content-addressed, with the pin preimage the
@@ -83,18 +93,24 @@
 //!    `bounded` head with a matching continuation record resolves to `Restored` at the record's
 //!    highest revision; one with none to `Failed(ContinuationNotDurable)`
 //!    ([`a_parked_head_without_a_continuation_record_still_resolves_to_failed`]); two records
-//!    at one highest revision to `Failed(AmbiguousContinuation)`; a `closed` head to
-//!    `Settled`; an unsound history to `Failed(SequenceGap)` or `Failed(AmbiguousHead)`.
+//!    at one highest revision to `Failed(AmbiguousContinuation)`; a history a terminal record
+//!    matches to `Terminal` (bn-2g3ei), two to `Failed(AmbiguousTerminal)`; a `closed` head
+//!    with no terminal record to `Settled`, which a re-issued start supersedes and re-runs
+//!    ([`a_restart_then_the_same_start_supersedes_a_legacy_settled_resolution`]); an unsound
+//!    history to `Failed(SequenceGap)` or `Failed(AmbiguousHead)`.
 //! 4. **An orphan reaper with something to reap.** The census in this file *is* the reaper's
 //!    detector, and [`negative_control_a_planted_orphan_task_is_detected`] shows it fires. It
 //!    had nothing to run against after a restart because there were no tasks. **Now has a
 //!    subject**: the successor's live and resolved tasks claim every surviving record, and the
-//!    census runs over those claims. A continuation record no task claims — one published
-//!    before a campaign record that then aborted — is reported by the pass as unclaimed.
+//!    census runs over those claims. A continuation or terminal record no task claims — one
+//!    published before a campaign record that then aborted — is reported by the pass as
+//!    unclaimed.
 //! 5. **A crate-boundary decision.** Plan §20 gives `continuumd` no storage edge beyond
 //!    `continuum-workspace`, so 1–3 need either a task artifact class in that store or a new
 //!    edge. This is a dossier decision, not an implementation detail. **Unchanged, and not
 //!    needed.** The pass reads the existing `task` and `cont` classes of the one store edge.
+//!    The terminal record is a second internal format under `task`, told apart from the
+//!    campaign record by its format tag.
 //!
 //! ## Absences stated (INV-007)
 //!
@@ -148,9 +164,13 @@
 //!   typed reason. The detector fires
 //!   ([`negative_control_a_planted_orphan_task_is_detected`]), and the pass is two-sided
 //!   ([`negative_control_a_restart_that_cannot_audit_resolves_nothing_and_says_so`]). Since
-//!   bn-20142 a parked task comes back live from its continuation record and resumes. The
-//!   narrowing: a `Settled` task is not visible through `task.status` (debt item 1: no
-//!   durable terminal record), and the crash grain is as stated for the first conjunct.
+//!   bn-20142 a parked task comes back live from its continuation record and resumes. Since
+//!   bn-2g3ei a `Completed` or `Failed` task comes back live and terminal from its terminal
+//!   record, and `task.status` answers it byte for byte. The narrowing: the crash grain is
+//!   as stated for the first conjunct; a store written before bn-2g3ei can still hold a
+//!   `Settled` task, which is not visible through `task.status` until a re-issued start
+//!   re-runs it; and a `task.resume` budget write whose run then fails is not durable
+//!   (debt item 1).
 //!
 //! # Four findings this re-derivation produced that the delivering evidence does not carry
 //!
@@ -205,6 +225,7 @@ use continuumd::daemon::recovery::{
 };
 use continuumd::daemon::state::{IntentRecord, RegistryStatus};
 use continuumd::daemon::task::TaskFamily;
+use continuumd::daemon::terminal::{TerminalRecord, TerminalState};
 use continuumd::daemon::verification::{VerificationFamily, model_source};
 use continuumd::daemon::workspace::WorkspaceFamily;
 use continuumd::daemon::{Builder, Daemon, DurableSubstrate, OperationRequest};
@@ -216,7 +237,9 @@ use continuumd::protocol::operations::intent::IntentAcceptRequest;
 use continuumd::protocol::operations::task::{
     TaskCancelRequest, TaskResumeRequest, TaskStatusRequest, TaskUpdateBudgetRequest,
 };
-use continuumd::protocol::operations::verification::VerificationStartRequest;
+use continuumd::protocol::operations::verification::{
+    VerificationResultRequest, VerificationStartRequest,
+};
 use continuumd::protocol::operations::workspace::WorkspaceCreateRequest;
 use continuumd::protocol::registry::ENCODINGS;
 use continuumd::protocol::scalar::{
@@ -495,6 +518,16 @@ fn claims_of(daemon: &Daemon) -> Vec<Claim> {
                 continue;
             };
             claims.push((task.as_str().to_owned(), handle));
+        }
+        // A `Completed` or `Failed` task also claims its terminal record (bn-2g3ei): the
+        // record of the entry as it is now, named by the declared seam. A live terminal
+        // task always published it, because the status moves only after the record's index
+        // commit.
+        if let Some(record) = TerminalRecord::current(entry) {
+            let identity =
+                ContentIdentifier::identify(&Blake3Identity, ArtifactClass::Task, &record.encode())
+                    .expect("blake3 names every input");
+            claims.push((task.as_str().to_owned(), identity));
         }
     }
     // A task the startup resolution pass resolved claims every record it committed. This is
@@ -1669,35 +1702,69 @@ fn a_restart_then_the_same_start_leaves_one_state_for_a_failed_resolution() {
     );
 }
 
-/// **A re-issued start after a restart leaves one state per handle: `Settled` is superseded.**
+/// A store written before terminal records existed: a closed campaign record and no
+/// terminal record (bn-2g3ei).
 ///
-/// The other arm. A `Settled` task reached `Completed` before the crash and its report was
-/// not durable, so the cached-result lane has nothing to return. Re-running a completed
-/// identity "could only produce the same answer" (`verification::start`), so the start
-/// removes the resolution explicitly and runs. Afterwards the live entry is the only state:
-/// `Completed`, claiming the same record the resolution claimed, with no duplicate claim.
+/// The production daemon cannot write this any more — a closing run publishes its terminal
+/// record before its campaign record — so the store is planted, as [`legacy`] plants a
+/// parked one: a healthy twin closes the campaign under a 64-state ceiling, and its campaign
+/// record's bytes (not its terminal record's) are published into a fresh daemon's store.
+fn legacy_closed(mut prepared: Prepared) -> (Prepared, TaskHandle, Vec<ArtifactHandle>) {
+    let mut twin = prepare(daemon());
+    let snapshot = seal(&mut twin, "req_create", "idem-create");
+    let task = started_task(&start(&mut twin, &snapshot, "req_start", "idem-start", 64));
+    let campaign: Vec<ArtifactHandle> = twin
+        .daemon
+        .state()
+        .tasks()
+        .get(&task)
+        .expect("held")
+        .evidence
+        .committed()
+        .iter()
+        .map(|publication| {
+            let text = publication.commitment().as_str();
+            let identity = text
+                .strip_prefix(ArtifactClass::Task.prefix())
+                .expect("a task_ commitment");
+            ArtifactHandle::new(ArtifactClass::Task, identity).expect("an identity")
+        })
+        .collect();
+    assert_eq!(campaign.len(), 1, "the twin committed one campaign record");
+    let bytes = twin
+        .daemon
+        .store()
+        .read(&campaign[0], &operator())
+        .expect("`cap_root` reads the twin's record");
+    assert!(!TerminalRecord::is_terminal_record(&bytes));
+    let sealed = seal(&mut prepared, "req_create", "idem-create");
+    assert_eq!(sealed, snapshot, "the same inputs seal the same snapshot");
+    prepared
+        .daemon
+        .store()
+        .stage(ArtifactClass::Task, bytes, &operator())
+        .expect("`cap_root` publishes")
+        .commit_content()
+        .expect("nothing is injured")
+        .commit_index()
+        .expect("nothing is injured");
+    (prepared, task, campaign)
+}
+
+/// **A `Settled` resolution survives only in a store written before terminal records, and a
+/// re-issued start supersedes it.**
+///
+/// A `Settled` task reached `Completed` before the crash, and nothing about it is durable but
+/// its campaign record, so no status, milestone or ledger of it was ever answered after the
+/// restart. Re-running a completed identity "could only produce the same answer"
+/// (`verification::start`), so the start removes the resolution explicitly and runs.
+/// Afterwards the live entry is the only state: `Completed`, claiming the same campaign
+/// record the resolution claimed plus the terminal record the re-run published. A store
+/// this build writes never resolves to `Settled`
+/// ([`a_completed_task_answers_task_status_after_a_restart_byte_for_byte`]).
 #[test]
-fn a_restart_then_the_same_start_supersedes_a_settled_resolution() {
-    let mut prepared = prepare(daemon());
-    let snapshot = seal(&mut prepared, "req_create", "idem-create");
-    let task = started_task(&start(
-        &mut prepared,
-        &snapshot,
-        "req_start",
-        "idem-start",
-        64,
-    ));
-    assert_eq!(
-        prepared
-            .daemon
-            .state()
-            .tasks()
-            .get(&task)
-            .map(|entry| entry.status),
-        Some(TaskStatus::Completed),
-        "a 64-state ceiling closes the Die Hard campaign"
-    );
-    let committed = claims_of(&prepared.daemon);
+fn a_restart_then_the_same_start_supersedes_a_legacy_settled_resolution() {
+    let (prepared, task, campaign) = legacy_closed(prepare(daemon()));
 
     let restarted = successor(prepared.daemon.crash());
     assert_eq!(
@@ -1709,6 +1776,11 @@ fn a_restart_then_the_same_start_supersedes_a_settled_resolution() {
         Some(Resolution::Settled)
     );
     let mut again = prepare(restarted);
+    assert_eq!(
+        status_of(&mut again.daemon, &task, "req_status_before"),
+        None,
+        "a `Settled` task has no durable record for `task.status` to answer"
+    );
     let snapshot = seal(&mut again, "req_create", "idem-create");
     let answer = start(&mut again, &snapshot, "req_start", "idem-start", 64);
     assert_eq!(
@@ -1732,14 +1804,284 @@ fn a_restart_then_the_same_start_supersedes_a_settled_resolution() {
         tasks.get(&task).map(|entry| entry.status),
         Some(TaskStatus::Completed)
     );
+    let claims = claims_of(&again.daemon);
+    let claimed: Vec<&ArtifactHandle> = claims.iter().map(|(_, handle)| handle).collect();
     assert_eq!(
-        claims_of(&again.daemon),
-        committed,
-        "the re-run republished the same record, and it is claimed once"
+        claims.len(),
+        2,
+        "one campaign record and one terminal record"
+    );
+    assert!(
+        claimed.contains(&&campaign[0]),
+        "the re-run republished the same campaign record, and it is claimed once"
+    );
+    assert!(
+        claimed
+            .iter()
+            .all(|handle| resolves(again.daemon.store(), handle)),
+        "the re-run published the terminal record the legacy store lacked"
     );
     assert_eq!(
         status_of(&mut again.daemon, &task, "req_status"),
         Some(TaskStatus::Completed)
+    );
+}
+
+/// `task.status` on `task`, as `agent:runner`, under `request`.
+fn status_request(task: &TaskHandle, request: &str) -> OperationRequest {
+    OperationRequest {
+        envelope: envelope("task.status", "agent:runner", "cap_runner", request),
+        arguments: Arguments::TaskStatus(TaskStatusRequest { task: task.clone() }),
+    }
+}
+
+/// `verification.result` on `task`, as `agent:runner`, under `request`.
+fn result_request(task: &TaskHandle, request: &str) -> OperationRequest {
+    OperationRequest {
+        envelope: envelope("verification.result", "agent:runner", "cap_runner", request),
+        arguments: Arguments::VerificationResult(VerificationResultRequest { task: task.clone() }),
+    }
+}
+
+/// **A crash after completion, then a restart: `task.status` answers byte for byte what it
+/// answered before the crash** (bn-2g3ei).
+///
+/// Regression guard for the debt bn-20142 left: a closing run published no durable terminal
+/// record, the startup pass resolved the task to `Settled`, and `task.status` on its handle
+/// answered `CapabilityDenied`. A closing run now publishes its terminal record before its
+/// campaign record, the startup pass resolves the task to `Terminal(Completed)` and restores
+/// it live, and:
+///
+/// - `task.status` answers the whole pre-crash outcome — envelope and payload — byte for
+///   byte, with nothing taken from the successor's configuration;
+/// - `verification.result` answers the pre-crash result: the report is not durable, and the
+///   successor re-derives it from the durable model source, target and bounds, checked
+///   against the durable state count;
+/// - the same `verification.start` answers the pre-crash cached-result lane, runs no task
+///   (no region opens) and creates no second state (RFC 0026 "Task lifecycle": a terminal
+///   status never changes, and the milestones `task.status` answered are not re-timed);
+/// - every `task_*` record in the store has a claimant, and the store is unchanged.
+#[test]
+fn a_completed_task_answers_task_status_after_a_restart_byte_for_byte() {
+    let mut prepared = prepare(daemon());
+    let snapshot = seal(&mut prepared, "req_create", "idem-create");
+    let task = started_task(&start(
+        &mut prepared,
+        &snapshot,
+        "req_start",
+        "idem-start",
+        64,
+    ));
+    let before = prepared
+        .daemon
+        .dispatch(&status_request(&task, "req_status"));
+    assert_eq!(before.envelope.status, ResultStatus::Ok);
+    match &before.payload {
+        Payload::TaskStatus(record) => assert_eq!(record.status, TaskStatus::Completed),
+        other => panic!("expected a task.status payload, got {other:?}"),
+    }
+    let result_before = prepared
+        .daemon
+        .dispatch(&result_request(&task, "req_result"));
+    assert_eq!(result_before.envelope.status, ResultStatus::Ok);
+    let start_before = start(&mut prepared, &snapshot, "req_again", "idem-again", 64);
+    assert_eq!(
+        start_before.envelope.status,
+        ResultStatus::Ok,
+        "a completed identity answers the cached-result lane"
+    );
+    let committed = claims_of(&prepared.daemon);
+    assert_eq!(
+        committed.len(),
+        2,
+        "one campaign record and one terminal record"
+    );
+
+    // The task half of the census: the re-seal below is the deployment's own step and adds
+    // workspace receipts, so the claim "nothing about the task was published" is read off
+    // the `task_` lines.
+    let task_half = |render: String| -> String {
+        render
+            .lines()
+            .filter(|line| line.contains("task"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let durable = prepared.daemon.crash();
+    let image = task_half(census(durable.store(), &committed).render());
+    let restarted = successor(durable);
+    let resolved = match restarted.startup() {
+        Startup::Resolved(resolution) => resolution.clone(),
+        other => panic!("expected a resolved startup, got {other:?}"),
+    };
+    assert_eq!(resolved.tasks().len(), 1);
+    assert_eq!(
+        resolved.tasks()[0].resolution,
+        Resolution::Terminal(TerminalState::Completed)
+    );
+    assert!(resolved.unclaimed().is_empty() && resolved.unattributed().is_empty());
+    assert!(
+        restarted.state().tasks().resolution(&task).is_none(),
+        "a terminal task is live, not in the resolved set"
+    );
+
+    let mut again = prepare(restarted);
+    let after = again.daemon.dispatch(&status_request(&task, "req_status"));
+    assert_eq!(
+        format!("{after:?}"),
+        format!("{before:?}"),
+        "`task.status` after the restart is the pre-crash answer, byte for byte"
+    );
+    let result_after = again.daemon.dispatch(&result_request(&task, "req_result"));
+    assert_eq!(
+        format!("{result_after:?}"),
+        format!("{result_before:?}"),
+        "`verification.result` re-derives the pre-crash result"
+    );
+    let sealed = seal(&mut again, "req_create", "idem-create");
+    assert_eq!(sealed, snapshot);
+    let opened = again.daemon.state().regions().opened();
+    let start_after = start(&mut again, &snapshot, "req_again", "idem-again", 64);
+    assert_eq!(
+        format!("{start_after:?}"),
+        format!("{start_before:?}"),
+        "the re-issued start answers the pre-crash cached-result lane"
+    );
+    assert_eq!(
+        again.daemon.state().regions().opened(),
+        opened,
+        "no task ran"
+    );
+    assert_eq!(
+        claims_of(&again.daemon),
+        committed,
+        "one claimant, the same two records"
+    );
+    assert_eq!(
+        task_half(census(again.daemon.store(), &committed).render()),
+        image,
+        "the successor published nothing about the task"
+    );
+}
+
+/// **A first run that failed is `Failed` after a restart, with its pre-crash record**
+/// (bn-2g3ei).
+///
+/// A state budget of zero cannot hold the model's initial states, so the run fails with
+/// `BudgetExhausted` and a `non_resumable_reason`, and commits no campaign record. Before
+/// bn-2g3ei nothing about the task was durable, so a restart did not know it. The terminal
+/// record is now its whole durable history: the startup pass resolves it to
+/// `Terminal(Failed)`, `task.status` answers the pre-crash outcome byte for byte, and a
+/// re-issued start answers the pre-crash observing lane and runs nothing.
+#[test]
+fn a_failed_task_answers_task_status_after_a_restart_byte_for_byte() {
+    let mut prepared = prepare(daemon());
+    let snapshot = seal(&mut prepared, "req_create", "idem-create");
+    let task = started_task(&start(
+        &mut prepared,
+        &snapshot,
+        "req_start",
+        "idem-start",
+        0,
+    ));
+    let before = prepared
+        .daemon
+        .dispatch(&status_request(&task, "req_status"));
+    match &before.payload {
+        Payload::TaskStatus(record) => {
+            assert_eq!(record.status, TaskStatus::Failed);
+            assert_eq!(
+                record.failed_reason.value(),
+                Some(&ErrorCode::BudgetExhausted)
+            );
+        }
+        other => panic!("expected a task.status payload, got {other:?}"),
+    }
+    let start_before = start(&mut prepared, &snapshot, "req_again", "idem-again", 0);
+    assert_eq!(start_before.envelope.status, ResultStatus::Ok);
+    let committed = claims_of(&prepared.daemon);
+    assert_eq!(committed.len(), 1, "the terminal record, and nothing else");
+
+    let mut again = prepare(successor(prepared.daemon.crash()));
+    assert_eq!(
+        again
+            .daemon
+            .state()
+            .tasks()
+            .get(&task)
+            .map(|entry| entry.status),
+        Some(TaskStatus::Failed)
+    );
+    let after = again.daemon.dispatch(&status_request(&task, "req_status"));
+    assert_eq!(format!("{after:?}"), format!("{before:?}"));
+    let sealed = seal(&mut again, "req_create", "idem-create");
+    assert_eq!(sealed, snapshot);
+    let opened = again.daemon.state().regions().opened();
+    let start_after = start(&mut again, &snapshot, "req_again", "idem-again", 0);
+    assert_eq!(format!("{start_after:?}"), format!("{start_before:?}"));
+    assert_eq!(
+        again.daemon.state().regions().opened(),
+        opened,
+        "no task ran"
+    );
+    assert_eq!(claims_of(&again.daemon), committed);
+}
+
+/// **A completion whose campaign record aborted is not a completion after a restart.**
+///
+/// The commit point of a closing run is the campaign record's index commit, and the terminal
+/// record is published before it. An abort of that one index commit leaves the terminal
+/// record in the store, naming a campaign record the store does not hold. The startup pass
+/// reports it as unclaimed and does not use it: the resume of a parked task that aborted at
+/// its closing campaign record is restored `Suspended` from its continuation record, as if
+/// the resume had not run.
+#[test]
+fn a_terminal_record_whose_campaign_record_aborted_is_unclaimed() {
+    let faults = ArmedAbort::new(PublicationPhase::CommittingIndex);
+    let (mut prepared, witnesses) = driven(prepare(daemon_with(faults.clone())));
+    let continuation = witnesses
+        .continuation
+        .clone()
+        .expect("the parked task holds a continuation");
+    let before = prepared
+        .daemon
+        .state()
+        .tasks()
+        .get(&witnesses.task)
+        .expect("held")
+        .record();
+    // The closing resume publishes its terminal record, then its campaign record, whose
+    // index commit aborts: the same ordinal a park's campaign record has.
+    faults.arm_at(CAMPAIGN_RECORD);
+    let answer = prepared
+        .daemon
+        .dispatch(&resume_request(&continuation, 64, "resume"));
+    assert_eq!(answer.error_code(), Some(ErrorCode::PublicationAborted));
+
+    let restarted = successor(prepared.daemon.crash());
+    let resolved = match restarted.startup() {
+        Startup::Resolved(resolution) => resolution.clone(),
+        other => panic!("expected a resolved startup, got {other:?}"),
+    };
+    assert_eq!(
+        resolved.unclaimed().len(),
+        1,
+        "the terminal record names a campaign record the store does not hold"
+    );
+    assert_eq!(
+        resolved.tasks()[0].resolution,
+        Resolution::Restored(ParkState::Suspended)
+    );
+    let entry = restarted
+        .state()
+        .tasks()
+        .get(&witnesses.task)
+        .expect("restored");
+    assert_eq!(entry.status, TaskStatus::Suspended);
+    assert_eq!(
+        entry.record().status,
+        before.status,
+        "the aborted resume changed nothing durable about the task's status"
     );
 }
 
@@ -1773,9 +2115,13 @@ fn resume_request(continuation: &ContinuationHandle, states: u64, tag: &str) -> 
 /// epochs, budget, cost, priority, milestones, continuation — none of it taken from the
 /// successor's configuration, all of it read from the continuation record.
 ///
-/// What still answers `CapabilityDenied` is a task resolved to `Settled` or `Failed`: a
-/// closing run publishes no continuation record, so its terminal `TaskRecord` fields are not
-/// durable ([`a_restart_then_the_same_start_supersedes_a_settled_resolution`] reads that arm).
+/// A terminal task answers from its terminal record since bn-2g3ei
+/// ([`a_completed_task_answers_task_status_after_a_restart_byte_for_byte`]). What still
+/// answers `CapabilityDenied` is a task resolved to `Settled` — only a store written before
+/// bn-2g3ei holds one
+/// ([`a_restart_then_the_same_start_supersedes_a_legacy_settled_resolution`] reads that arm)
+/// — or to `Failed`: a parked head with no continuation record, which only a store written
+/// before bn-20142 holds, or an unsound history.
 #[test]
 fn a_restored_task_answers_task_status_with_its_pre_crash_record() {
     let (prepared, witnesses) = driven(prepare(daemon()));

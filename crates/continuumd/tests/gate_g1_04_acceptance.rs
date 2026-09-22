@@ -2043,8 +2043,9 @@ fn control_untouched_inputs_resume_and_the_effect_happens_exactly_once() {
     assert_eq!(deployment.status("req_status"), TaskStatus::Completed);
     assert_eq!(
         after_first.store.len(),
-        before.store.len() + 1,
-        "the resumed run published exactly one further campaign record",
+        before.store.len() + 2,
+        "the resumed run published exactly one further campaign record and, because it \
+         closed, the task's one terminal record (bn-2g3ei)",
     );
     assert_eq!(
         after_first.regions_opened,

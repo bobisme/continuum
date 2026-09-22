@@ -69,6 +69,7 @@
 //! [`budget::bounds_of`](super::budget::bounds_of), where it is a projection of the ledger's
 //! `states` ceiling instead of a second read of the same wire field.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use continuum_engine_reference::bfs::{self, Bounds, ExplorationError, Partial};
@@ -89,6 +90,7 @@ use super::Services;
 use super::budget::{self, Publications};
 use super::continuation::{self, Checkpointed, ContinuationRecord, ParkState};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::terminal::{self, TerminalRecord, TerminalState};
 // `Scope` is `continuum_engine_reference::checking::Scope` in this module — the exploration's
 // completeness — so the region scope is imported under a name that says which of the two it
 // is rather than shadowing the engine's vocabulary.
@@ -111,6 +113,7 @@ use crate::protocol::scalar::{
 };
 use crate::protocol::shared::{Target, VerificationResult};
 use crate::protocol::spec::{Nullable, Optional, ProtocolEnum};
+use crate::protocol::task::Milestone;
 use crate::protocol::vocabulary::{
     AssuranceClass, ErrorCode, Fragment, InconclusiveReason, Portfolio, PriorityClass,
     SemanticVerdict, TargetKind, TaskStatus,
@@ -515,6 +518,23 @@ fn publish_record(
     Ok(())
 }
 
+/// Publish a terminal record (bn-2g3ei) through [`publish_record`], under the identity the
+/// daemon's own seam names its bytes by.
+///
+/// # Errors
+///
+/// As [`publish_record`], and [`ErrorCode::PublicationAborted`] when no identity can be
+/// derived for the bytes. Nothing is published on an error path.
+fn publish_terminal(
+    store: &ReferenceStore,
+    publisher: &CapabilityToken,
+    services: &Services,
+    record: &TerminalRecord,
+) -> Result<(), Fault> {
+    let named = record.commitment(services.identifier())?;
+    publish_record(store, publisher, record.encode(), &named)
+}
+
 /// One run, inside the scope that owns it. See [`advance`] for the step table.
 ///
 /// `prior_frontier` is the parked continuation's frontier on a resume, and empty on a fresh
@@ -563,6 +583,21 @@ fn run_in(
     let campaign = match outcome {
         Ok(campaign) => campaign,
         Err(fault) => {
+            // The durable half (bn-2g3ei): the terminal record of the task *after* it fails,
+            // projected and published before the status moves. The run committed no campaign
+            // record, so this record's index commit is the commit point. An abort answers
+            // `PublicationAborted` and the task does not become `Failed`.
+            let projected = {
+                let entry = state.tasks().get(handle).ok_or_else(Fault::denied)?;
+                let mut record = TerminalRecord::of(entry, TerminalState::Failed);
+                record.failed_reason = Some(fault.code);
+                record.non_resumable_reason = Some(fault.detail.to_owned());
+                record
+            };
+            if let Err(aborted) = publish_terminal(store, publisher, services, &projected) {
+                state.regions_mut().fail(scope, aborted.code);
+                return Err(aborted);
+            }
             state.regions_mut().fail(scope, fault.code);
             let entry = state
                 .tasks_mut()
@@ -571,6 +606,7 @@ fn run_in(
             entry.failed_reason = Some(fault.code);
             entry.non_resumable_reason = Some(fault.detail.to_owned());
             entry.advance(TaskStatus::Failed, now.as_ref());
+            terminal::settle(state.tasks().get(handle), &projected);
             return Ok(());
         }
     };
@@ -690,6 +726,38 @@ fn run_in(
         Some((continuation, record))
     };
 
+    // The terminal record of the task *after* this run closes it (bn-2g3ei), projected as
+    // the continuation record is: the milestones `reach` will append, the spend
+    // `charge_states` will land, the checkpoint and the publication the commit block below
+    // writes. A closed run parks nothing, so the task's record carries no continuation.
+    let closing = if campaign.is_closed() {
+        let entry = state.tasks().get(handle).ok_or_else(Fault::denied)?;
+        let mut record = TerminalRecord::of(entry, TerminalState::Completed);
+        let mut reached = |name: &str| {
+            if let Some(at) = now.as_ref() {
+                record.milestones.push(Milestone {
+                    name: name.to_owned(),
+                    at: at.clone(),
+                });
+            }
+        };
+        reached(MILESTONE_CLOSED);
+        reached(MILESTONE_CHECKED);
+        let slot = CostDimension::States.index();
+        let states = campaign.states() as u64;
+        let recorded = record.spend[slot].unwrap_or_default();
+        record.spend[slot] = Some(recorded.max(states));
+        record.checkpoints.push(Checkpointed {
+            committed: entry.publications() + 1,
+            spend: record.spend,
+        });
+        record.publications.push(staged.clone());
+        record.continuation = None;
+        Some(record)
+    } else {
+        None
+    };
+
     // The durable writes (bn-3dr, bn-20142), and they happen *here*: after the task-side
     // stage, which no reader can observe, and before anything that makes the publication
     // observable. The continuation record goes first and the campaign record second, so
@@ -706,6 +774,16 @@ fn run_in(
     // claiming committed evidence that is not there.
     if let Some((_, record)) = &parked {
         if let Err(fault) = continuation::publish(store, publisher, services.identifier(), record) {
+            state.regions_mut().fail(scope, fault.code);
+            discard(handle, state);
+            return Err(fault);
+        }
+    }
+    // A closing run's terminal record goes first for the same reason (bn-2g3ei): a crash
+    // between the two leaves a terminal record no task claims, never a `closed` head without
+    // its terminal record.
+    if let Some(record) = &closing {
+        if let Err(fault) = publish_terminal(store, publisher, services, record) {
             state.regions_mut().fail(scope, fault.code);
             discard(handle, state);
             return Err(fault);
@@ -793,6 +871,9 @@ fn run_in(
     }
     if let Some(record) = &durable {
         continuation::settle(state.tasks_mut(), record);
+    }
+    if let Some(record) = &closing {
+        terminal::settle(state.tasks().get(handle), record);
     }
     // The campaign is on the task now, so a reader can observe it: the commit and the write
     // are one event reported in the order they happened.
@@ -1022,20 +1103,32 @@ fn start(
     //   changes", and a terminal non-`Completed` identity is answered on the observing lane
     //   at `ok`, running nothing (F20, paid at 3.4). So a re-issued start is that answer, and
     //   no live entry is created beside the resolution.
-    // - `Settled` is a task that reached `Completed` before the crash, whose report was not
-    //   durable. The cached-result lane has no result to hand back, and re-running a
-    //   completed identity "could only produce the same answer" (the `Completed` arm below).
-    //   So the resolution is superseded explicitly and the campaign runs again under the same
-    //   identity. It republishes the same records and reaches `Completed` again.
+    // - `Settled` is a task that reached `Completed` before the crash in a store written
+    //   before terminal records existed (bn-2g3ei), so nothing about it is durable but its
+    //   campaign records: no status, milestone or ledger was ever answered after the
+    //   restart, and a re-run contradicts nothing a client read. The cached-result lane has
+    //   no result to hand back, and re-running a completed identity "could only produce the
+    //   same answer" (the `Completed` arm below). So the resolution is superseded explicitly
+    //   and the campaign runs again under the same identity. It republishes the same
+    //   campaign records, publishes the terminal record the old store lacked, and reaches
+    //   `Completed` again.
+    //
+    // A task whose terminal record is durable is not here: the startup pass restored it as a
+    // live terminal entry (bn-2g3ei), and the live lookup below answers it without a re-run.
+    // RFC 0026 "Task lifecycle" is why a re-run is not available for it: "reported
+    // milestones and `committed_evidence` only grow, and a terminal status never changes",
+    // and a re-run under a fresh entry would re-time the milestones `task.status` already
+    // answered. The `Completed` arm answers from the restored entry, re-deriving only the
+    // report ([`rederived`]).
     if let Some(resolved) = state.tasks().resolution(&handle) {
         match resolved.resolution {
             Resolution::Failed(_) => return resolved_terminal(resolved),
             Resolution::Settled => {
                 state.tasks_mut().supersede(&handle);
             }
-            // Unreachable: a restored task is loaded into the live table, not the resolved
-            // set (bn-20142), and the live lookup below answers it.
-            Resolution::Restored(_) => {}
+            // Unreachable: a restored or terminal task is loaded into the live table, not the
+            // resolved set (bn-20142, bn-2g3ei), and the live lookup below answers it.
+            Resolution::Restored(_) | Resolution::Terminal(_) => {}
         }
     }
 
@@ -1053,7 +1146,7 @@ fn start(
             // `ok` with `result` present. The envelope still names the task the result
             // is about, which is the second clause of the `task` presence rule.
             if entry.status == TaskStatus::Completed {
-                let (payload, verdict, omissions) = cached(entry)?;
+                let (payload, verdict, omissions) = cached(entry, state.models())?;
                 let mut effect = Effect::new(payload, verdict.0)
                     .observing(entry.handle.clone())
                     .with_artifacts(published(entry));
@@ -1228,8 +1321,9 @@ type Cached = (
     Vec<Omission>,
 );
 
-fn cached(entry: &TaskEntry) -> Result<Cached, Fault> {
-    let (result, _) = verification_result(entry)?;
+fn cached(entry: &TaskEntry, models: &ModelCatalog) -> Result<Cached, Fault> {
+    let campaign = campaign_of(entry, models)?;
+    let (result, _) = verification_result(entry, campaign.as_deref())?;
     Ok((
         Payload::VerificationStart(VerificationStartResponse {
             task: Optional::Absent,
@@ -1263,7 +1357,8 @@ fn cached(entry: &TaskEntry) -> Result<Cached, Fault> {
 /// states, which is the one outcome with no result to report and no continuation to resume.
 fn result(handle: &TaskHandle, state: &DaemonState, awaiting: bool) -> Result<Effect, Fault> {
     let entry = state.tasks().get(handle).ok_or_else(Fault::denied)?;
-    let (result, verdict) = verification_result(entry)?;
+    let campaign = campaign_of(entry, state.models())?;
+    let (result, verdict) = verification_result(entry, campaign.as_deref())?;
     let payload = if awaiting {
         Payload::VerificationAwait(result)
     } else {
@@ -1271,7 +1366,7 @@ fn result(handle: &TaskHandle, state: &DaemonState, awaiting: bool) -> Result<Ef
     };
     let mut effect = Effect::new(payload, Nullable::Value(Verdict::Semantic(verdict)))
         .observing(entry.handle.clone());
-    effect.assurance = Optional::Present(assurance(entry));
+    effect.assurance = Optional::Present(assurance(campaign.as_deref()));
     effect.omissions = [entry.omissions(), coverage()].concat();
     // `verification.await` is `@task_starting` and `verification.result` is not, so only
     // the first may report a parked task on the `task_suspended` lane. The asymmetry is
@@ -1286,11 +1381,72 @@ fn result(handle: &TaskHandle, state: &DaemonState, awaiting: bool) -> Result<Ef
     Ok(effect)
 }
 
+/// The engine report of a `Completed` task restored from its terminal record (bn-2g3ei),
+/// re-derived from durable inputs.
+///
+/// The report is not in the terminal record: it is the engine's own value, and the terminal
+/// record carries what `task.status` projects. What the record does carry is every input
+/// the closing run was a function of — the model source by content identity, the target,
+/// and the ceilings the bounds are read from — and the reference engine is deterministic.
+/// So the same run over the same model under the same bounds is the same report, and this
+/// function computes it. It is a pure computation, not a run of the task: no region is
+/// opened, nothing is published, and the task's status, milestones, ledger and publications
+/// do not change. That is what separates it from the supersede-and-rerun a `Settled`
+/// resolution takes (`start` below), which RFC 0026's monotonic `task.status` excludes for
+/// a task whose record is durable: a re-run re-times its milestones.
+///
+/// The result is checked against the durable record rather than trusted: the exploration
+/// must close, and over exactly the state count the ledger recorded.
+///
+/// # Errors
+///
+/// [`ErrorCode::UnsupportedSemanticFeature`] when the model the task names is not in the
+/// catalog — `verification.start`'s code for the same condition, and the model catalog is
+/// reprovisioned after a restart — or when the re-derived run does not reproduce the
+/// durable record. The second is unreachable while the engine is deterministic.
+fn rederived(entry: &TaskEntry, models: &ModelCatalog) -> Result<Campaign, Fault> {
+    let model = models.get(&entry.model).ok_or_else(no_model)?;
+    let campaign = run(model, &entry.target, entry.bounds(), &[])?.map_err(|_| unreproduced())?;
+    let recorded = entry.ledger.spend().measured(CostDimension::States);
+    if !campaign.is_closed() || recorded != Some(campaign.states() as u64) {
+        return Err(unreproduced());
+    }
+    Ok(campaign)
+}
+
+fn unreproduced() -> Fault {
+    Fault::new(
+        ErrorCode::UnsupportedSemanticFeature,
+        "the completed task's check report could not be re-derived from its durable record",
+    )
+}
+
+/// The campaign a result is read from: the task's own, or — for a `Completed` task restored
+/// from its terminal record (bn-2g3ei) — the one [`rederived`] computes. [`None`] when the
+/// task holds none and none can be derived.
+///
+/// # Errors
+///
+/// As [`rederived`].
+fn campaign_of<'a>(
+    entry: &'a TaskEntry,
+    models: &ModelCatalog,
+) -> Result<Option<Cow<'a, Campaign>>, Fault> {
+    Ok(match &entry.campaign {
+        Some(campaign) => Some(Cow::Borrowed(campaign)),
+        None if entry.status == TaskStatus::Completed => {
+            Some(Cow::Owned(rederived(entry, models)?))
+        }
+        None => None,
+    })
+}
+
 /// The typed result of one task, and the verdict it carries.
 fn verification_result(
     entry: &TaskEntry,
+    campaign: Option<&Campaign>,
 ) -> Result<(VerificationResult, SemanticVerdictValue), Fault> {
-    let Some(campaign) = &entry.campaign else {
+    let Some(campaign) = campaign else {
         // A task restored from its continuation record (bn-20142) committed publications,
         // and the engine's report of its last run was not durable. The honest answer is that
         // this task is parked on its budget and its result is re-derived by resuming it: a
@@ -1395,14 +1551,11 @@ fn coverage() -> Vec<Omission> {
 /// machine token — docs/03 §3's own scope names, and the IDL's own
 /// `sequential-consistency-only` example — and none of them interpolates anything
 /// (`rule envelope.no_prose`).
-fn assurance(entry: &TaskEntry) -> AssuranceEnvelope {
-    let scope = entry
-        .campaign
-        .as_ref()
-        .map_or("no-exploration", |campaign| match campaign.report.scope() {
-            Scope::Complete { .. } => "exhaustive-finite",
-            Scope::Bounded { .. } => "bounded-states",
-        });
+fn assurance(campaign: Option<&Campaign>) -> AssuranceEnvelope {
+    let scope = campaign.map_or("no-exploration", |campaign| match campaign.report.scope() {
+        Scope::Complete { .. } => "exhaustive-finite",
+        Scope::Bounded { .. } => "bounded-states",
+    });
     AssuranceEnvelope {
         bounds: produced(scope),
         faults: unsupported_dimension("no-fault-model"),
@@ -1412,17 +1565,11 @@ fn assurance(entry: &TaskEntry) -> AssuranceEnvelope {
         memory_model: unsupported_dimension("sequential-consistency-only"),
         observer: unsupported_dimension("no-observer-model"),
         proof_status: unsupported_dimension("no-certificate-emitted"),
-        unknowns: produced(
-            if entry
-                .campaign
-                .as_ref()
-                .is_some_and(super::task::Campaign::is_closed)
-            {
-                "none"
-            } else {
-                "bounded-frontier"
-            },
-        ),
+        unknowns: produced(if campaign.is_some_and(Campaign::is_closed) {
+            "none"
+        } else {
+            "bounded-frontier"
+        }),
     }
 }
 

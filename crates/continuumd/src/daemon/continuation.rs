@@ -57,6 +57,9 @@
 //! - **At `task.update_budget` and `task.cancel`** on a parked task: the next revision is
 //!   published before the in-memory change. An abort answers `PublicationAborted` (admitted
 //!   for both `@mutation` operations) and changes nothing.
+//! - **Never at a close or a failure.** A run that closes or fails publishes the task's
+//!   terminal record instead ([`terminal`](super::terminal), bn-2g3ei), in the same order
+//!   relative to its campaign record.
 //!
 //! In each case the record is built from a *projection* of the task after the change, and
 //! the handler checks (`debug_assert`) that the projection equals the record of the task it
@@ -274,15 +277,15 @@ fn pinned_identities(pinned: &PinnedEpochs) -> [&Nullable<EpochIdentity>; 6] {
     ]
 }
 
-fn text_or_dash(preimage: &mut Preimage, text: Option<&str>) {
+pub(super) fn text_or_dash(preimage: &mut Preimage, text: Option<&str>) {
     preimage.text(text.unwrap_or("-"));
 }
 
-fn spend_of(ledger: &BudgetLedger) -> [Option<u64>; 9] {
+pub(super) fn spend_of(ledger: &BudgetLedger) -> [Option<u64>; 9] {
     CostDimension::ALL.map(|dimension| ledger.spend().measured(dimension))
 }
 
-fn spend_preimage(preimage: &mut Preimage, spend: &[Option<u64>; 9]) {
+pub(super) fn spend_preimage(preimage: &mut Preimage, spend: &[Option<u64>; 9]) {
     for value in spend {
         match value {
             Some(value) => preimage.push(&value.to_be_bytes()),
@@ -291,7 +294,7 @@ fn spend_preimage(preimage: &mut Preimage, spend: &[Option<u64>; 9]) {
     }
 }
 
-fn count(preimage: &mut Preimage, length: usize) {
+pub(super) fn count(preimage: &mut Preimage, length: usize) {
     preimage.push(&u32::try_from(length).unwrap_or(u32::MAX).to_be_bytes());
 }
 
@@ -329,16 +332,7 @@ impl ContinuationRecord {
             model: entry.model.clone(),
             ceilings: entry.budget(),
             spend: spend_of(&entry.ledger),
-            checkpoints: entry
-                .ledger
-                .checkpoints()
-                .iter()
-                .map(|checkpoint| Checkpointed {
-                    committed: checkpoint.committed(),
-                    spend: CostDimension::ALL
-                        .map(|dimension| checkpoint.spend().measured(dimension)),
-                })
-                .collect(),
+            checkpoints: checkpoints_of(&entry.ledger),
             publications: entry
                 .evidence
                 .committed()
@@ -527,48 +521,14 @@ impl ContinuationRecord {
             .is_ok_and(|derived| derived.to_string() == self.handle.as_str())
     }
 
-    /// Replay the ledger this record describes.
-    ///
-    /// `BudgetLedger` has no constructor from parts, by design (one task, one accounting).
-    /// So the ledger is rebuilt through its own operations, in the order the live task made
-    /// them: charges up to each checkpoint's spend and the checkpoint, charges up to the
-    /// final spend, then the ceilings in force. The replay runs unbounded, so no charge can
-    /// exhaust, and the ceilings are recorded last through `budget::update`, which records a
-    /// ceiling on every arm. The result is checked against the record, part by part.
+    /// Replay the ledger this record describes. See [`replay`].
     fn ledger(&self) -> Result<BudgetLedger, RecordDefect> {
-        let mut ledger = budget::ledger_of(&unbounded());
-        for checkpoint in &self.checkpoints {
-            charge_to(&mut ledger, &checkpoint.spend)?;
-            ledger
-                .checkpoint(checkpoint.committed)
-                .map_err(|_| RecordDefect::Ledger)?;
-        }
-        charge_to(&mut ledger, &self.spend)?;
-        let _ = budget::update(&mut ledger, &self.ceilings);
-        let replayed_checkpoints: Vec<(u32, [Option<u64>; 9])> = ledger
-            .checkpoints()
-            .iter()
-            .map(|checkpoint| {
-                (
-                    checkpoint.committed(),
-                    CostDimension::ALL.map(|dimension| checkpoint.spend().measured(dimension)),
-                )
-            })
-            .collect();
-        let recorded: Vec<(u32, [Option<u64>; 9])> = self
-            .checkpoints
-            .iter()
-            .map(|checkpoint| (checkpoint.committed, checkpoint.spend))
-            .collect();
-        if spend_of(&ledger) != self.spend
-            || replayed_checkpoints != recorded
-            || budget::wire_budget(&ledger) != self.ceilings
-            || ledger.exhaustion().is_some()
-            || self.checkpoints.len() != self.publications.len()
-        {
-            return Err(RecordDefect::Ledger);
-        }
-        Ok(ledger)
+        replay(
+            &self.checkpoints,
+            &self.spend,
+            &self.ceilings,
+            self.publications.len(),
+        )
     }
 
     /// The live task and continuation this record restores.
@@ -584,13 +544,7 @@ impl ContinuationRecord {
     /// [`Self::decode`] returned, which runs the same replay.
     pub fn restore(&self) -> Result<Restored, RecordDefect> {
         let ledger = self.ledger()?;
-        let mut evidence = Publications::new();
-        for (publication, checkpoint) in self.publications.iter().zip(ledger.checkpoints()) {
-            evidence.stage(publication.clone());
-            if evidence.commit(*checkpoint).is_none() {
-                return Err(RecordDefect::Ledger);
-            }
-        }
+        let evidence = publications_of(&self.publications, &ledger)?;
         let entry = TaskEntry {
             handle: self.task.clone(),
             operation: self.operation.clone(),
@@ -631,6 +585,79 @@ impl ContinuationRecord {
             states: self.states,
         })
     }
+}
+
+/// Replay the ledger a durable record describes.
+///
+/// `BudgetLedger` has no constructor from parts, by design (one task, one accounting).
+/// So the ledger is rebuilt through its own operations, in the order the live task made
+/// them: charges up to each checkpoint's spend and the checkpoint, charges up to the
+/// final spend, then the ceilings in force. The replay runs unbounded, so no charge can
+/// exhaust, and the ceilings are recorded last through `budget::update`, which records a
+/// ceiling on every arm. The result is checked against the record, part by part, and
+/// every checkpoint must bind exactly one of the `publications` committed publications.
+///
+/// Shared by the continuation record and the terminal task record
+/// ([`terminal`](super::terminal)), so the two restore one ledger one way.
+///
+/// # Errors
+///
+/// [`RecordDefect::Ledger`] when the parts do not replay into one ledger.
+pub(super) fn replay(
+    checkpoints: &[Checkpointed],
+    spend: &[Option<u64>; 9],
+    ceilings: &Budget,
+    publications: usize,
+) -> Result<BudgetLedger, RecordDefect> {
+    let mut ledger = budget::ledger_of(&unbounded());
+    for checkpoint in checkpoints {
+        charge_to(&mut ledger, &checkpoint.spend)?;
+        ledger
+            .checkpoint(checkpoint.committed)
+            .map_err(|_| RecordDefect::Ledger)?;
+    }
+    charge_to(&mut ledger, spend)?;
+    let _ = budget::update(&mut ledger, ceilings);
+    if spend_of(&ledger) != *spend
+        || checkpoints_of(&ledger) != checkpoints
+        || budget::wire_budget(&ledger) != *ceilings
+        || ledger.exhaustion().is_some()
+        || checkpoints.len() != publications
+    {
+        return Err(RecordDefect::Ledger);
+    }
+    Ok(ledger)
+}
+
+/// A ledger's checkpoints, in the record's spelling.
+pub(super) fn checkpoints_of(ledger: &BudgetLedger) -> Vec<Checkpointed> {
+    ledger
+        .checkpoints()
+        .iter()
+        .map(|checkpoint| Checkpointed {
+            committed: checkpoint.committed(),
+            spend: CostDimension::ALL.map(|dimension| checkpoint.spend().measured(dimension)),
+        })
+        .collect()
+}
+
+/// The committed publications a record names, each bound to its replayed checkpoint.
+///
+/// # Errors
+///
+/// [`RecordDefect::Ledger`] when a publication cannot be committed at its checkpoint.
+pub(super) fn publications_of(
+    publications: &[Commitment],
+    ledger: &BudgetLedger,
+) -> Result<Publications, RecordDefect> {
+    let mut evidence = Publications::new();
+    for (publication, checkpoint) in publications.iter().zip(ledger.checkpoints()) {
+        evidence.stage(publication.clone());
+        if evidence.commit(*checkpoint).is_none() {
+            return Err(RecordDefect::Ledger);
+        }
+    }
+    Ok(evidence)
 }
 
 /// The record of `task` as `tasks` holds it now, at `revision`, with the pinned state
@@ -726,7 +753,7 @@ pub struct Restored {
     pub states: u64,
 }
 
-fn unbounded() -> Budget {
+pub(super) fn unbounded() -> Budget {
     Budget {
         wall_ms: Optional::Absent,
         cpu_ms: Optional::Absent,
@@ -741,7 +768,10 @@ fn unbounded() -> Budget {
 }
 
 /// Charge `ledger` up to `target`, dimension by dimension.
-fn charge_to(ledger: &mut BudgetLedger, target: &[Option<u64>; 9]) -> Result<(), RecordDefect> {
+pub(super) fn charge_to(
+    ledger: &mut BudgetLedger,
+    target: &[Option<u64>; 9],
+) -> Result<(), RecordDefect> {
     for (dimension, target) in CostDimension::ALL.into_iter().zip(target) {
         let current = ledger.spend().measured(dimension);
         match (current, target) {
@@ -833,7 +863,7 @@ fn decode_pins(bytes: &[u8]) -> Result<Pins, RecordDefect> {
     ))
 }
 
-fn epoch(text: &str) -> Result<Nullable<EpochIdentity>, RecordDefect> {
+pub(super) fn epoch(text: &str) -> Result<Nullable<EpochIdentity>, RecordDefect> {
     match text {
         "-" => Ok(Nullable::Null),
         text => Ok(Nullable::Value(
@@ -842,7 +872,7 @@ fn epoch(text: &str) -> Result<Nullable<EpochIdentity>, RecordDefect> {
     }
 }
 
-fn decode_epochs(parts: &mut Parts<'_>) -> Result<PinnedEpochs, RecordDefect> {
+pub(super) fn decode_epochs(parts: &mut Parts<'_>) -> Result<PinnedEpochs, RecordDefect> {
     Ok(PinnedEpochs {
         semantic: epoch(parts.text()?)?,
         intent: epoch(parts.text()?)?,
@@ -864,7 +894,7 @@ fn optional_u64(parts: &mut Parts<'_>) -> Result<Option<u64>, RecordDefect> {
     Ok(Some(u64::from_be_bytes(bytes)))
 }
 
-fn decode_spend(parts: &mut Parts<'_>) -> Result<[Option<u64>; 9], RecordDefect> {
+pub(super) fn decode_spend(parts: &mut Parts<'_>) -> Result<[Option<u64>; 9], RecordDefect> {
     let mut spend = [None; 9];
     for slot in &mut spend {
         *slot = optional_u64(parts)?;
@@ -872,7 +902,7 @@ fn decode_spend(parts: &mut Parts<'_>) -> Result<[Option<u64>; 9], RecordDefect>
     Ok(spend)
 }
 
-fn decode_budget(parts: &mut Parts<'_>) -> Result<Budget, RecordDefect> {
+pub(super) fn decode_budget(parts: &mut Parts<'_>) -> Result<Budget, RecordDefect> {
     let [
         wall_ms,
         cpu_ms,

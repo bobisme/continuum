@@ -143,6 +143,7 @@ use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
 use continuumd::daemon::state::{IntentRecord, RegistryStatus};
 use continuumd::daemon::task::{Preimage, TaskFamily, budget_preimage, epochs_preimage};
+use continuumd::daemon::terminal::TerminalRecord;
 use continuumd::daemon::verification::{VerificationFamily, model_source};
 use continuumd::daemon::workspace::WorkspaceFamily;
 use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest, identity};
@@ -1362,16 +1363,32 @@ fn task_artifacts_are_the_independent_digest_of_their_stored_record() {
     ok(&start, "verification.start");
 
     let published = rig.published();
-    let records: Vec<_> = published
+    // A campaign that closes also publishes its terminal task record under the same class
+    // (bn-2g3ei). It is told apart by its format tag, and it is content-addressed the same
+    // way, so it is held to the same digest check.
+    let (terminals, records): (Vec<_>, Vec<_>) = published
         .iter()
         .filter(|(handle, _)| handle.class() == ArtifactClass::Task)
-        .collect();
+        .partition(|(_, content)| TerminalRecord::is_terminal_record(content));
     assert_eq!(
         records.len(),
         1,
-        "one campaign publishes one `task_*` record; found {}",
+        "one campaign publishes one `task_*` campaign record; found {}",
         records.len()
     );
+    assert_eq!(
+        terminals.len(),
+        1,
+        "a campaign that closes publishes one terminal record; found {}",
+        terminals.len()
+    );
+    for (handle, content) in &terminals {
+        assert_eq!(
+            handle.identity(),
+            independent_identity(content),
+            "the terminal record at {handle} is not the independent digest of its bytes"
+        );
+    }
     let (handle, content) = records[0];
     assert_eq!(
         handle.identity(),
@@ -2272,7 +2289,9 @@ fn scope_the_two_content_addressing_shapes_are_not_one_shape() {
     let record = rig
         .published()
         .into_iter()
-        .find(|(handle, _)| handle.class() == ArtifactClass::Task)
+        .find(|(handle, content)| {
+            handle.class() == ArtifactClass::Task && !TerminalRecord::is_terminal_record(content)
+        })
         .expect("the campaign published its record");
     assert_eq!(
         commitment,

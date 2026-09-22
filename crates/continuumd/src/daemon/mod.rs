@@ -95,6 +95,7 @@ pub mod region;
 pub mod result;
 pub mod state;
 pub mod task;
+pub mod terminal;
 pub mod verification;
 pub mod whiteboard;
 pub mod workspace;
@@ -1059,7 +1060,8 @@ impl Builder {
             // The startup task-resolution pass (plan §4.5 O2), before any dispatch can run.
             // It reads the adopted store under the connection capability and writes only the
             // task table: a `Restored` task as a live entry with its continuation (the resume
-            // branch, bn-20142), every other task into the resolved set.
+            // branch, bn-20142), a `Terminal` task as a live terminal entry (bn-2g3ei), every
+            // other task into the resolved set.
             let startup = match identity::capability_to_store(&self.services.connection)
                 .map_err(|_| continuum_workspace::publication::CapabilityDenied)
                 .and_then(|operator| recovery::resolve_tasks(&durable.store, &operator))
@@ -1072,11 +1074,18 @@ impl Builder {
                             }
                             _ => None,
                         };
-                        match restored {
-                            Some(restored) => self.state.tasks_mut().restore(restored),
-                            // A `Restored` resolution always carries a record that restores:
-                            // the pass decoded it, and decoding runs the same replay.
-                            None => self.state.tasks_mut().resolve(resolved.clone()),
+                        let terminal = match (&resolved.resolution, &resolved.terminal) {
+                            (recovery::Resolution::Terminal(_), Some(record)) => {
+                                record.restore().ok()
+                            }
+                            _ => None,
+                        };
+                        // A `Restored` or `Terminal` resolution always carries a record that
+                        // restores: the pass decoded it, and decoding runs the same replay.
+                        match (restored, terminal) {
+                            (Some(restored), _) => self.state.tasks_mut().restore(restored),
+                            (None, Some(entry)) => self.state.tasks_mut().put(entry),
+                            (None, None) => self.state.tasks_mut().resolve(resolved.clone()),
                         }
                     }
                     recovery::Startup::Resolved(resolution)

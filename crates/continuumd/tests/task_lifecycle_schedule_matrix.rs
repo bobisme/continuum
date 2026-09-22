@@ -19,8 +19,8 @@
 //!   ([`positive_a_duplicate_start_at_every_position_coalesces_to_one_task`]);
 //! - **restart boundaries** — a crash at every one of the nine dispatch boundaries at
 //!   every position of the lifecycle leaves a recoverable store with no half-publication,
-//!   and a restarted daemon resumes (or, with nothing parked, re-runs) the lifecycle to the
-//!   byte-identical record
+//!   and a restarted daemon resumes (or, with nothing parked, re-runs, or, with the task
+//!   already `Completed`, restores) the lifecycle to the byte-identical record
 //!   ([`positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_record`]).
 //!
 //! # How this composes with what already exists, rather than duplicating it
@@ -95,7 +95,7 @@ use continuumd::protocol::scalar::{
 use continuumd::protocol::shared::{SnapshotComponents, SnapshotEpochs, Target};
 use continuumd::protocol::spec::{Nullable, Optional};
 use continuumd::protocol::vocabulary::{
-    AuthorityLevel, Encoding, Portfolio, ResultStatus, TargetKind,
+    AuthorityLevel, Encoding, Portfolio, ResultStatus, TargetKind, TaskStatus,
 };
 
 /// The TV-009 port's model, verbatim — the bytes that go into the snapshot.
@@ -1102,7 +1102,10 @@ impl CrashInjector for KillAt {
 ///   startup pass restored the task live from its continuation record (plan §4.5 O2, the
 ///   resume branch, bn-20142), and the lane resumes on the restored `cont_*` handle from the
 ///   first beat the crash left undone. Before bn-20142 those 18 runs stopped at
-///   `Failed(ContinuationNotDurable)`, which RFC 0026 made final.
+///   `Failed(ContinuationNotDurable)`, which RFC 0026 made final. Where the survivor holds
+///   the closing run's terminal record (bn-2g3ei), the startup pass restored the task live
+///   and `Completed`, nothing is played, and the restored record is the cold one byte for
+///   byte. Before bn-2g3ei that run resolved to `Settled` and re-ran the whole lane.
 #[test]
 fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_record() {
     // The cold baseline: the lane run to completion on a daemon that never crashed.
@@ -1118,6 +1121,7 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
     let mut runs = 0_usize;
     let mut resumed = 0_usize;
     let mut reran = 0_usize;
+    let mut terminal = 0_usize;
     for position in 0..DPOR.beats.len() {
         let mut images: Vec<(CrashPoint, String)> = Vec::new();
         for point in CrashPoint::ALL {
@@ -1188,17 +1192,26 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
                         .tasks()
                         .get(task)
                         .expect("a handle the table just listed");
-                    ((*task).clone(), entry.publications())
+                    ((*task).clone(), entry.publications(), entry.status)
                 });
             let mut task = None;
             let first_beat = match restored {
+                // The survivor held the closing run's terminal record, so the startup pass
+                // restored the task live and `Completed` (bn-2g3ei). Nothing is left to play:
+                // the restored record itself is compared with the cold one below, which is
+                // `task.status` answering byte for byte what it answered before the crash.
+                Some((handle, _, TaskStatus::Completed)) => {
+                    terminal += 1;
+                    task = Some(handle);
+                    DPOR.beats.len()
+                }
                 // The survivor held a parked head and its continuation record, so the
                 // startup pass restored the task live at its committed continuation (plan
                 // §4.5 O2, the resume branch, bn-20142). Each beat of this lane commits one
                 // publication, so the committed count is the index of the first beat the
                 // crash left undone. The lane resumes from there on the restored `cont_*`
                 // handle, with no re-run of what was committed.
-                Some((handle, publications)) => {
+                Some((handle, publications, _)) => {
                     resumed += 1;
                     assert_eq!(
                         restarted.daemon.state().tasks().handles().len(),
@@ -1253,12 +1266,14 @@ fn positive_a_crash_at_every_boundary_of_every_position_restarts_to_the_same_rec
     }
     assert_eq!(runs, 27, "three positions × nine boundaries");
     // Position 0 before the handler: nothing durable, the lane re-runs from scratch (8).
-    // Position 2 at `AfterHandler`: the head record closed, so the task is `Settled`, the
-    // start supersedes it, and the lane re-runs (1). Every other run has a parked head and
-    // its continuation record, so the task is restored and the lane resumes from the
-    // committed continuation (18) — the runs that stopped at `Failed(ContinuationNotDurable)`
-    // before bn-20142. Both arms are exercised, so neither is vacuous.
-    assert_eq!((reran, resumed), (9, 18));
+    // Position 2 at `AfterHandler`: the closing run committed its terminal record, so the
+    // task is restored `Completed` and nothing re-runs (1). Before bn-2g3ei this run
+    // resolved to `Settled`, the start superseded it, and the lane re-ran from scratch.
+    // Every other run has a parked head and its continuation record, so the task is
+    // restored and the lane resumes from the committed continuation (18) — the runs that
+    // stopped at `Failed(ContinuationNotDurable)` before bn-20142. All three arms are
+    // exercised, so none is vacuous.
+    assert_eq!((reran, resumed, terminal), (8, 18, 1));
 }
 
 /// **The same sweep over the proof lane, whose middle beat changes the budget and not the
@@ -1317,19 +1332,29 @@ fn positive_a_crash_around_a_budget_update_resumes_the_proof_lane_to_the_same_re
                         .tasks()
                         .get(task)
                         .expect("a handle the table just listed");
-                    ((*task).clone(), entry.budget().states.value().copied())
+                    (
+                        (*task).clone(),
+                        entry.budget().states.value().copied(),
+                        entry.status,
+                    )
                 });
             let mut task = None;
             let first_beat = match restored {
-                Some((handle, Some(4))) => {
+                // The closing resume committed its terminal record (bn-2g3ei): the task is
+                // restored `Completed` and nothing is left to play.
+                Some((handle, _, TaskStatus::Completed)) => {
+                    task = Some(handle);
+                    PROOF.beats.len()
+                }
+                Some((handle, Some(4), _)) => {
                     task = Some(handle);
                     1
                 }
-                Some((handle, Some(64))) => {
+                Some((handle, Some(64), _)) => {
                     task = Some(handle);
                     2
                 }
-                Some((_, ceiling)) => panic!("an unexpected restored ceiling {ceiling:?}"),
+                Some((_, ceiling, _)) => panic!("an unexpected restored ceiling {ceiling:?}"),
                 None => 0,
             };
             first_beats.push(first_beat);
@@ -1347,10 +1372,11 @@ fn positive_a_crash_around_a_budget_update_resumes_the_proof_lane_to_the_same_re
     assert_eq!(first_beats.len(), 27, "three positions × nine boundaries");
     // Position 0: nothing before the handler (8 × beat 0), the park after it (beat 1).
     // Position 1: the park before the handler (8 × beat 1), the update after it (beat 2).
-    // Position 2: the update before the handler (8 × beat 2), and after it the closed head
-    // is `Settled` and the lane re-runs from its start (beat 0).
+    // Position 2: the update before the handler (8 × beat 2), and after it the task is
+    // restored `Completed` from its terminal record and nothing re-runs (beat 3). Before
+    // bn-2g3ei the closed head was `Settled` and the lane re-ran from its start (beat 0).
     let count = |beat: usize| first_beats.iter().filter(|first| **first == beat).count();
-    assert_eq!((count(0), count(1), count(2)), (9, 9, 9));
+    assert_eq!((count(0), count(1), count(2), count(3)), (8, 9, 9, 1));
 }
 
 // --- determinism -----------------------------------------------------------------------------

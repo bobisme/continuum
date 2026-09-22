@@ -89,9 +89,9 @@
 //! | registered operations | 75 ([`OPERATION_COUNT`]) |
 //! | `@mutation` operations | 47 |
 //! | served by this build | 18 |
-//! | that can make an artifact visible | **8** ([`SEAMS`]; 6 before bn-20142) |
+//! | that can make an artifact visible | **9** ([`SEAMS`]; 6 before bn-20142, 8 before bn-2g3ei corrected `task.resume`) |
 //! | distinct `(file, call)` store-write sites in `continuumd/src` | 6, over 5 modules |
-//! | seams driven end to end | 5 in the matrix, plus the continuation-record site's 3 operations × 3 phases in its own test |
+//! | seams driven end to end | 5 in the matrix, plus 3 of the continuation-record site's 4 operations × 3 phases in its own test (`task.resume` reaches it through `verification.start`'s path) |
 //! | independent read paths in the instrument | 6 |
 //! | seam × phase abort cells | 15 |
 //! | phase × abort-reason cells | 18 |
@@ -131,7 +131,12 @@
 //!    provisioning a held `SnapshotComponents` commitment is an out-of-band setup this file
 //!    does not perform. [`SEAMS`] carries the row with `driven: false` and
 //!    [`the_driven_seams_are_exactly_the_census_rows_marked_driven`] counts it, so the gap is
-//!    a measurement rather than an oversight.
+//!    a measurement rather than an oversight. **`task.resume` is adjudicated but not driven
+//!    either** (bn-2g3ei). It reaches `verification.start`'s two sites through
+//!    `verification::advance`, the one writer of a task's outcome, so its publications are
+//!    the same code under the same three phases. This file does not inject faults into a
+//!    resume. G1-04's resume controls and `tests/task_lifecycle_schedule_matrix.rs` drive
+//!    its publications without faults.
 //! 2. **`repair.promote` — RFC 0032's "one semantically atomic step (INV-017)" — cannot be
 //!    formed at this layer.** It is registered and declares `PublicationAborted`, and the
 //!    `Arguments` enum carries no variant for it, so no request naming it can reach a
@@ -323,6 +328,27 @@ const SEAMS: &[Seam] = &[
         shape: Shape::Single,
         driven: false,
     },
+    // `task.resume` runs the parked campaign again through `verification::advance`, the one
+    // writer of a task's outcome, so it reaches both of `verification.start`'s sites: the
+    // campaign record (and, since bn-2g3ei, the terminal record of a run that closes or
+    // fails) in `verification.rs`, and the continuation record of a run that parks again in
+    // `continuation.rs`. Until bn-2g3ei this census listed it as a served non-publisher,
+    // which was false since bn-3dr. Not driven here: its sites are `verification.start`'s,
+    // and G1-04's resume controls drive its publications end to end.
+    Seam {
+        operation: "task.resume",
+        file: "daemon/verification.rs",
+        call: "store.stage(",
+        shape: Shape::Single,
+        driven: false,
+    },
+    Seam {
+        operation: "task.resume",
+        file: "daemon/continuation.rs",
+        call: "store.stage(",
+        shape: Shape::Single,
+        driven: false,
+    },
 ];
 
 /// The `@mutation` operations this build serves that reach no store write at all.
@@ -338,7 +364,6 @@ const SERVED_NON_PUBLISHERS: &[&str] = &[
     "intent.accept",
     "intent.reject",
     "intent.lock",
-    "task.resume",
     "evidence.verify",
     "context.compile",
     "context.expand",
@@ -411,9 +436,10 @@ fn the_publication_seam_census_is_closed_over_the_daemon_source() {
     assert_eq!(
         found.len(),
         6,
-        "six distinct (file, call) sites reach the store's write surface; `SEAMS` has nine \
-         rows because `workspace.create` and `workspace.create_by_reference` share one, and \
-         three operations share the continuation record's"
+        "six distinct (file, call) sites reach the store's write surface; `SEAMS` has eleven \
+         rows because `workspace.create` and `workspace.create_by_reference` share one, \
+         `verification.start` and `task.resume` share the campaign record's, and four \
+         operations share the continuation record's"
     );
     assert_eq!(
         SEAMS
@@ -421,7 +447,7 @@ fn the_publication_seam_census_is_closed_over_the_daemon_source() {
             .filter(|seam| seam.shape == Shape::Composite)
             .count(),
         3,
-        "three of the nine seams publish a composite"
+        "three of the eleven seams publish a composite"
     );
 }
 
@@ -483,10 +509,11 @@ fn the_mutation_surface_is_partitioned_by_the_census() {
     );
     assert_eq!(
         publishers.len(),
-        8,
-        "eight of those eighteen can make an artifact visible — six before bn-20142, plus \
+        9,
+        "nine of those eighteen can make an artifact visible — six before bn-20142, plus \
          `task.update_budget` and `task.cancel`, which publish a parked task's continuation \
-         record"
+         record, plus `task.resume`, which publishes through `verification::advance` and was \
+         misfiled as a non-publisher until bn-2g3ei"
     );
     assert!(
         unserved.contains("repair.promote"),
@@ -494,8 +521,8 @@ fn the_mutation_surface_is_partitioned_by_the_census() {
     );
     assert_eq!(
         OPERATION_COUNT - publishers.len(),
-        67,
-        "sixty-seven of the seventy-five registered operations publish nothing here"
+        66,
+        "sixty-six of the seventy-five registered operations publish nothing here"
     );
 }
 
@@ -926,9 +953,10 @@ fn the_driven_seams_are_exactly_the_census_rows_marked_driven() {
     );
     assert_eq!(
         SEAMS.iter().filter(|seam| !seam.driven).count(),
-        4,
-        "`workspace.create_by_reference`, stated as an absence in this file's module doc, and \
-         the three continuation-record rows, driven by their own test"
+        6,
+        "`workspace.create_by_reference`, stated as an absence in this file's module doc, the \
+         three continuation-record rows, driven by their own test, and the two `task.resume` \
+         rows, stated as an absence in the module doc"
     );
 }
 
@@ -1729,8 +1757,13 @@ fn the_read_paths_reconcile_after_a_mixed_campaign() {
     for seam in DRIVEN {
         mixed.prepare(seam);
     }
+    // Every fourth index commit. It was every third until bn-2g3ei, when a closing
+    // `verification.start` began to publish two records (its terminal record, then its
+    // campaign record). Under the third-commit cadence every aborted content was then
+    // published again by a later seam, so no residue was left and the residue assertion
+    // below failed. The cadence is a fixture choice. The assertions are unchanged.
     mixed.arm(Plan::EveryNthIndexCommit {
-        nth: 3,
+        nth: 4,
         reason: AbortReason::StorageExhausted,
     });
     let mut failures = 0_usize;

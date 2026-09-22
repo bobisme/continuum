@@ -50,15 +50,19 @@
 //!   that record names its task, its sequence, its snapshot, and whether it closed or
 //!   parked. A task that parked also committed a continuation record under
 //!   `ArtifactClass::Continuation` ([`continuation`](super::continuation), bn-20142): the
-//!   continuation's pins and the task fields a resume reads. [`resolve_tasks`] is the
-//!   startup pass over both (bn-1z09m, plan §4.5 O2). It derives the task set from the store
-//!   alone and resolves each task to exactly one typed [`Resolution`]: `Settled` when the
-//!   head record closed, `Restored` when the head parked and a continuation record matches
-//!   it, and `Failed` with a [`FailureReason`] otherwise.
-//!   [`Builder::build`](super::Builder::build) runs it on every restart. A `Restored` task
-//!   comes back as a live entry holding its continuation, which is the resume branch of O2.
-//!   The others are loaded into the task table's resolved set, so every surviving `task_*`
-//!   record has a claimant again.
+//!   continuation's pins and the task fields a resume reads. A task that closed or failed
+//!   also committed a terminal record under `ArtifactClass::Task`
+//!   ([`terminal`](super::terminal), bn-2g3ei): its terminal `TaskRecord` inputs.
+//!   [`resolve_tasks`] is the startup pass over all three (bn-1z09m, plan §4.5 O2). It
+//!   derives the task set from the store alone and resolves each task to exactly one typed
+//!   [`Resolution`]: `Terminal` when a terminal record matches its history, `Restored` when
+//!   the head parked and a continuation record matches it, `Settled` when the head closed
+//!   and no terminal record matches (a store written before bn-2g3ei), and `Failed` with a
+//!   [`FailureReason`] otherwise. [`Builder::build`](super::Builder::build) runs it on every
+//!   restart. A `Restored` task comes back as a live entry holding its continuation, which
+//!   is the resume branch of O2, and a `Terminal` task as a live terminal entry. The others
+//!   are loaded into the task table's resolved set, so every surviving `task_*` record has a
+//!   claimant again.
 //!
 //! That last row is the honest scope of IMPL-02's durability criterion — "committed partial
 //! evidence survives daemon restart; uncommitted partials are absent, never half-visible".
@@ -108,6 +112,7 @@ use crate::protocol::scalar::{TaskHandle, WorkspaceHandle};
 
 use super::continuation::{ContinuationRecord, ParkState};
 use super::identity::Blake3Identity;
+use super::terminal::{TerminalRecord, TerminalState};
 
 // --- crash points ------------------------------------------------------------------------
 
@@ -297,12 +302,13 @@ pub enum Disposition {
     /// it names is resolved to a typed outcome.
     ///
     /// The task table's disposition since bn-1z09m, and the continuation table's since
-    /// bn-20142: [`resolve_tasks`] reads every committed campaign record and every
-    /// continuation record, and resolves each task to [`Resolution::Settled`],
-    /// [`Resolution::Restored`] or [`Resolution::Failed`] with a [`FailureReason`] (plan §4.5
-    /// O2). A `Restored` task comes back as a live `TaskEntry` with its continuation, read
-    /// from the committed continuation record. A `Settled` or `Failed` task does not: its
-    /// terminal record and report were never durable.
+    /// bn-20142: [`resolve_tasks`] reads every committed campaign record, continuation record
+    /// and terminal record, and resolves each task to [`Resolution::Terminal`],
+    /// [`Resolution::Restored`], [`Resolution::Settled`] or [`Resolution::Failed`] with a
+    /// [`FailureReason`] (plan §4.5 O2). A `Restored` task comes back as a live `TaskEntry`
+    /// with its continuation, read from the committed continuation record, and a `Terminal`
+    /// task as a live terminal `TaskEntry`, read from its terminal record (bn-2g3ei). A
+    /// `Settled` or `Failed` task does not: no record of it holds what a `TaskEntry` needs.
     Resolved,
 }
 
@@ -416,8 +422,8 @@ impl VolatileFact {
     ///
     /// - the workspace records — a *sealed* workspace's records are in the store, which is
     ///   what sealing means;
-    /// - the task table, whose committed campaign records are published under
-    ///   [`ArtifactClass::Task`] and are what [`resolve_tasks`] reads;
+    /// - the task table, whose committed campaign records and terminal records are published
+    ///   under [`ArtifactClass::Task`] and are what [`resolve_tasks`] reads;
     /// - the continuation table, whose continuations are published under
     ///   [`ArtifactClass::Continuation`] as
     ///   [`ContinuationRecord`](super::continuation::ContinuationRecord)s with their pins
@@ -1024,6 +1030,10 @@ pub enum FailureReason {
     /// Two different continuation records match the head at the same highest revision, so
     /// the committed continuation is ambiguous. Neither is chosen.
     AmbiguousContinuation,
+    /// Two different terminal records match the task's durable history, so its terminal
+    /// state is ambiguous (bn-2g3ei). Neither is chosen. A terminal status is written once,
+    /// so no store this build writes holds two.
+    AmbiguousTerminal,
     /// Two different records claim the head sequence, so the task's last commit is
     /// ambiguous. Neither is chosen.
     AmbiguousHead,
@@ -1039,6 +1049,7 @@ impl FailureReason {
         match self {
             Self::ContinuationNotDurable => "continuation-not-durable",
             Self::AmbiguousContinuation => "ambiguous-continuation",
+            Self::AmbiguousTerminal => "ambiguous-terminal",
             Self::AmbiguousHead => "ambiguous-head",
             Self::SequenceGap => "sequence-gap",
         }
@@ -1054,10 +1065,16 @@ impl fmt::Display for FailureReason {
 /// What the pass concluded about one task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Resolution {
-    /// The head record is `closed`: the task finished its exploration and reached a terminal
-    /// status before the crash. It was not left `Running` or `Suspended`, so O2 does not
-    /// apply. Its committed records are claimed. Its terminal status and its report are not
-    /// durable, and are not reconstructed.
+    /// A terminal record matches the task's durable history (bn-2g3ei): the task reached
+    /// `Completed` or `Failed` before the crash and committed that status. It is restored as
+    /// a live, terminal entry read back from the record, so `task.status` answers what it
+    /// answered before the crash. O2 does not apply: the task was not left `Running`.
+    Terminal(TerminalState),
+    /// The head record is `closed` and no terminal record matches it: the task finished its
+    /// exploration before the crash in a store written before terminal records existed
+    /// (bn-2g3ei). A store this build writes has none, because the terminal record is
+    /// published before the closing campaign record. Its committed records are claimed. Its
+    /// terminal status and its report are not durable, and are not reconstructed.
     Settled,
     /// The head record is `bounded` and a continuation record matches it (bn-20142): the
     /// resume branch of O2. The task is restored as a live entry at the park state the
@@ -1075,6 +1092,8 @@ impl Resolution {
     #[must_use]
     pub const fn token(self) -> &'static str {
         match self {
+            Self::Terminal(TerminalState::Completed) => "terminal-completed",
+            Self::Terminal(TerminalState::Failed) => "terminal-failed",
             Self::Settled => "settled",
             Self::Restored(ParkState::Suspended) => "restored-suspended",
             Self::Restored(ParkState::Cancelled) => "restored-cancelled",
@@ -1095,19 +1114,25 @@ pub struct ResolvedTask {
     pub continuations: Vec<ArtifactHandle>,
     /// The continuation record the task is restored from, for [`Resolution::Restored`].
     pub continuation: Option<ContinuationRecord>,
+    /// Every terminal record of this task whose publication list is exactly the task's
+    /// committed records, by store identity, in identity order (bn-2g3ei).
+    pub terminals: Vec<ArtifactHandle>,
+    /// The terminal record the task is restored from, for [`Resolution::Terminal`].
+    pub terminal: Option<TerminalRecord>,
     /// The outcome.
     pub resolution: Resolution,
 }
 
 impl ResolvedTask {
     /// The store identities this task claims: every campaign record it committed, then every
-    /// continuation record it published.
+    /// continuation record it published, then its terminal record.
     #[must_use]
     pub fn claims(&self) -> Vec<ArtifactHandle> {
         self.records
             .iter()
             .map(|record| record.identity.clone())
             .chain(self.continuations.iter().cloned())
+            .chain(self.terminals.iter().cloned())
             .collect()
     }
 }
@@ -1131,18 +1156,20 @@ impl TaskResolution {
         &self.tasks
     }
 
-    /// `task_*` and `cont_*` index entries that do not decode, with the typed cause.
+    /// `task_*` and `cont_*` index entries that do not decode — campaign, continuation and
+    /// terminal records alike — with the typed cause.
     #[must_use]
     pub fn unattributed(&self) -> &[(ArtifactHandle, RecordDefect)] {
         &self.unattributed
     }
 
-    /// Continuation records that decode and that no task claims, in identity order.
+    /// Continuation and terminal records that decode and that no task claims, in identity
+    /// order.
     ///
-    /// The residue of the park's write order: a continuation record is published before the
-    /// campaign record it names, so an abort or a crash between the two leaves one whose
-    /// publication list is not a prefix of any task's durable records. Reported, not used,
-    /// and not deleted.
+    /// The residue of the write order: a continuation record (at a park) and a terminal
+    /// record (at a completion) are published before the campaign record they name, so an
+    /// abort or a crash between the two leaves one whose publication list does not match any
+    /// task's durable records. Reported, not used, and not deleted.
     #[must_use]
     pub fn unclaimed(&self) -> &[ArtifactHandle] {
         &self.unclaimed
@@ -1184,6 +1211,12 @@ impl TaskResolution {
                     record.state.token()
                 ));
             }
+            for handle in &resolved.terminals {
+                out.push_str(&format!("terminal-record {handle}\n"));
+            }
+            if let Some(record) = &resolved.terminal {
+                out.push_str(&format!("restored-terminal {}\n", record.state.token()));
+            }
         }
         for (handle, defect) in &self.unattributed {
             out.push_str(&format!("unattributed {handle} {defect}\n"));
@@ -1200,18 +1233,25 @@ impl TaskResolution {
 /// The recoverable set is derived from **durable records only**: every `task_*` and every
 /// `cont_*` identity the index names, read through the ordinary read path and decoded. A
 /// continuation record whose pins do not derive its handle through the declared seam
-/// ([`Blake3Identity`], as for [`recover`]) is [`RecordDefect::HandleMismatch`]. No volatile
-/// table is consulted, because after a crash there is none. Per task, in this order:
+/// ([`Blake3Identity`], as for [`recover`]) is [`RecordDefect::HandleMismatch`]. A `task_*`
+/// entry is a terminal record when it carries [`terminal::FORMAT`](super::terminal::FORMAT)
+/// and a campaign record otherwise. No volatile table is consulted, because after a crash
+/// there is none. The task set is every task a campaign record names, plus every task a
+/// terminal record with an empty publication list names (a first run that failed commits
+/// no campaign record). Per task, in this order:
 ///
 /// 1. sequences not contiguous from zero → `Failed(SequenceGap)`;
 /// 2. more than one record at the head sequence → `Failed(AmbiguousHead)`;
-/// 3. head record `closed` → [`Resolution::Settled`];
-/// 4. head record `bounded`, and continuation records match it — same task, same snapshot,
+/// 3. a terminal record matches — same task, a publication list equal to the task's
+///    campaign records in sequence order, and a `closed` head when it says `Completed` —
+///    → [`Resolution::Terminal`]; two different ones → `Failed(AmbiguousTerminal)`;
+/// 4. head record `closed` → [`Resolution::Settled`];
+/// 5. head record `bounded`, and continuation records match it — same task, same snapshot,
 ///    same frontier length, and a publication list equal to the task's campaign records in
 ///    sequence order — at one highest revision → [`Resolution::Restored`];
-/// 5. the same, at two different records of the highest revision →
+/// 6. the same, at two different records of the highest revision →
 ///    `Failed(AmbiguousContinuation)`;
-/// 6. head record `bounded` and no continuation record matches →
+/// 7. head record `bounded` and no continuation record matches →
 ///    `Failed(ContinuationNotDurable)`.
 ///
 /// The pass writes nothing, reads no clock and draws no entropy.
@@ -1239,6 +1279,7 @@ pub fn resolve_tasks(
 
     let mut records = Vec::new();
     let mut continuations = Vec::new();
+    let mut terminals = Vec::new();
     let mut unattributed = Vec::new();
     for identity in identities {
         let Ok(bytes) = store.read(&identity, operator) else {
@@ -1255,12 +1296,24 @@ pub fn resolve_tasks(
             }
             continue;
         }
+        if TerminalRecord::is_terminal_record(&bytes) {
+            match TerminalRecord::decode(&bytes) {
+                Ok(record) => terminals.push((identity, record)),
+                Err(defect) => unattributed.push((identity, defect)),
+            }
+            continue;
+        }
         match decode_campaign_record(&identity, &bytes) {
             Ok(record) => records.push(record),
             Err(defect) => unattributed.push((identity, defect)),
         }
     }
-    Ok(resolve_records(records, continuations, unattributed))
+    Ok(resolve_records(
+        records,
+        continuations,
+        terminals,
+        unattributed,
+    ))
 }
 
 /// The pure half of [`resolve_tasks`]: group decoded records by task and resolve each.
@@ -1268,13 +1321,23 @@ pub fn resolve_tasks(
 pub fn resolve_records(
     records: Vec<CampaignRecord>,
     mut continuations: Vec<(ArtifactHandle, ContinuationRecord)>,
+    mut terminals: Vec<(ArtifactHandle, TerminalRecord)>,
     mut unattributed: Vec<(ArtifactHandle, RecordDefect)>,
 ) -> TaskResolution {
     continuations.sort_by(|a, b| a.0.cmp(&b.0));
     continuations.dedup_by(|a, b| a.0 == b.0);
+    terminals.sort_by(|a, b| a.0.cmp(&b.0));
+    terminals.dedup_by(|a, b| a.0 == b.0);
     let mut by_task: BTreeMap<TaskHandle, Vec<CampaignRecord>> = BTreeMap::new();
     for record in records {
         by_task.entry(record.task.clone()).or_default().push(record);
+    }
+    // A first run that failed commits no campaign record, so its terminal record is the
+    // task's whole durable history.
+    for (_, record) in &terminals {
+        if record.publications.is_empty() {
+            by_task.entry(record.task.clone()).or_default();
+        }
     }
     let mut claimed: BTreeSet<ArtifactHandle> = BTreeSet::new();
     let tasks = by_task
@@ -1299,21 +1362,43 @@ pub fn resolve_records(
                 })
                 .collect();
             claimed.extend(own.iter().map(|(identity, _)| identity.clone()));
-            let (resolution, continuation) = resolve_one(&records, &own);
+            let closed = records.last().is_some_and(|head| head.closed);
+            let finals: Vec<&(ArtifactHandle, TerminalRecord)> = terminals
+                .iter()
+                .filter(|(_, record)| {
+                    record.task == task
+                        && record.publications.len() == committed.len()
+                        && record
+                            .publications
+                            .iter()
+                            .zip(&committed)
+                            .all(|(publication, identity)| publication.as_str() == identity)
+                        && (record.state == TerminalState::Failed || closed)
+                })
+                .collect();
+            claimed.extend(finals.iter().map(|(identity, _)| identity.clone()));
+            let (resolution, continuation, terminal) = resolve_one(&records, &own, &finals);
             ResolvedTask {
                 task,
                 records,
                 continuations: own.iter().map(|(identity, _)| identity.clone()).collect(),
                 continuation,
+                terminals: finals
+                    .iter()
+                    .map(|(identity, _)| identity.clone())
+                    .collect(),
+                terminal,
                 resolution,
             }
         })
         .collect();
-    let unclaimed = continuations
+    let mut unclaimed: Vec<ArtifactHandle> = continuations
         .into_iter()
         .map(|(identity, _)| identity)
+        .chain(terminals.into_iter().map(|(identity, _)| identity))
         .filter(|identity| !claimed.contains(identity))
         .collect();
+    unclaimed.sort();
     unattributed.sort();
     unattributed.dedup();
     TaskResolution {
@@ -1323,17 +1408,44 @@ pub fn resolve_records(
     }
 }
 
-/// One task's resolution, from its records in `(sequence, identity)` order and the
-/// continuation records it claims. See [`resolve_tasks`] for the rule order.
+/// The terminal resolution of a task whose matching terminal records are `terminals`, or
+/// [`None`] when none matches.
+fn terminal_of(
+    terminals: &[&(ArtifactHandle, TerminalRecord)],
+) -> Option<(
+    Resolution,
+    Option<ContinuationRecord>,
+    Option<TerminalRecord>,
+)> {
+    match terminals {
+        [] => None,
+        [(_, only)] => Some((Resolution::Terminal(only.state), None, Some(only.clone()))),
+        _ => Some((
+            Resolution::Failed(FailureReason::AmbiguousTerminal),
+            None,
+            None,
+        )),
+    }
+}
+
+/// One task's resolution, from its records in `(sequence, identity)` order, the
+/// continuation records it claims and the terminal records that match it. See
+/// [`resolve_tasks`] for the rule order.
 fn resolve_one(
     records: &[CampaignRecord],
     continuations: &[&(ArtifactHandle, ContinuationRecord)],
-) -> (Resolution, Option<ContinuationRecord>) {
-    let failed = |reason| (Resolution::Failed(reason), None);
+    terminals: &[&(ArtifactHandle, TerminalRecord)],
+) -> (
+    Resolution,
+    Option<ContinuationRecord>,
+    Option<TerminalRecord>,
+) {
+    let failed = |reason| (Resolution::Failed(reason), None, None);
     let sequences: BTreeSet<u32> = records.iter().map(|record| record.sequence).collect();
     let Some(head) = sequences.last().copied() else {
-        // Unreachable: a group exists only because a record put it there.
-        return failed(FailureReason::SequenceGap);
+        // A task with no campaign record is in the set only because a terminal record with
+        // an empty publication list put it there, and that record matches.
+        return terminal_of(terminals).unwrap_or_else(|| failed(FailureReason::SequenceGap));
     };
     let contiguous = u32::try_from(sequences.len()).is_ok_and(|count| count == head + 1);
     if !contiguous {
@@ -1344,10 +1456,15 @@ fn resolve_one(
         .filter(|record| record.sequence == head)
         .collect();
     let head = match heads.as_slice() {
-        [only] if only.closed => return (Resolution::Settled, None),
         [only] => *only,
         _ => return failed(FailureReason::AmbiguousHead),
     };
+    if let Some(resolution) = terminal_of(terminals) {
+        return resolution;
+    }
+    if head.closed {
+        return (Resolution::Settled, None, None);
+    }
     // Exactly one record per sequence from here, so the claimed prefix of full length is the
     // whole durable history.
     let matching: Vec<&ContinuationRecord> = continuations
@@ -1367,7 +1484,11 @@ fn resolve_one(
         .filter(|record| record.revision == highest)
         .collect();
     match top.as_slice() {
-        [only] => (Resolution::Restored(only.state), Some((*only).clone())),
+        [only] => (
+            Resolution::Restored(only.state),
+            Some((*only).clone()),
+            None,
+        ),
         _ => failed(FailureReason::AmbiguousContinuation),
     }
 }
@@ -1583,6 +1704,7 @@ mod tests {
                 record("task_ambiguous", "a1", 0, true),
             ],
             Vec::new(),
+            Vec::new(),
             vec![(identity("junk"), RecordDefect::Truncated)],
         );
         let outcomes: Vec<(&str, Resolution)> = resolution
@@ -1623,8 +1745,8 @@ mod tests {
         let mut backward = forward.clone();
         backward.reverse();
         assert_eq!(
-            resolve_records(forward, Vec::new(), Vec::new()).render(),
-            resolve_records(backward, Vec::new(), Vec::new()).render()
+            resolve_records(forward, Vec::new(), Vec::new(), Vec::new()).render(),
+            resolve_records(backward, Vec::new(), Vec::new(), Vec::new()).render()
         );
     }
 
@@ -1765,6 +1887,7 @@ mod tests {
                 continuation("task_parked", &["p0", "p1", "p2"], 0, ParkState::Suspended),
             ],
             Vec::new(),
+            Vec::new(),
         );
         let resolved = &resolution.tasks()[0];
         assert_eq!(
@@ -1795,6 +1918,7 @@ mod tests {
             vec![record("task_x", "x0", 0, false)],
             vec![(first, record_a), (second, record_b)],
             Vec::new(),
+            Vec::new(),
         );
         assert_eq!(
             resolution.tasks()[0].resolution,
@@ -1811,6 +1935,7 @@ mod tests {
             ],
             vec![continuation("task_y", &["y0"], 3, ParkState::Suspended)],
             Vec::new(),
+            Vec::new(),
         );
         assert_eq!(
             resolution.tasks()[0].resolution,
@@ -1818,5 +1943,155 @@ mod tests {
             "a continuation of the first park is not the committed continuation of the second"
         );
         assert_eq!(resolution.tasks()[0].continuations.len(), 1);
+    }
+
+    // --- the terminal branch (bn-2g3ei) -----------------------------------------------------
+
+    use crate::protocol::vocabulary::ErrorCode;
+
+    /// A terminal record for `task` whose publication list is `publications`, in `state`.
+    fn terminal(
+        task_handle: &str,
+        publications: &[&str],
+        state: TerminalState,
+    ) -> (ArtifactHandle, TerminalRecord) {
+        let (_, parked) = continuation(task_handle, publications, 0, ParkState::Suspended);
+        let record = TerminalRecord {
+            task: parked.task,
+            state,
+            operation: parked.operation,
+            snapshot: Nullable::Value(parked.snapshot),
+            intent: parked.intent,
+            target: parked.target,
+            portfolio: parked.portfolio,
+            priority_class: parked.priority_class,
+            epochs: parked.epochs,
+            model: parked.model,
+            ceilings: parked.ceilings,
+            spend: parked.spend,
+            checkpoints: parked.checkpoints,
+            publications: parked.publications,
+            milestones: Vec::new(),
+            committed_evidence: Vec::new(),
+            failed_reason: (state == TerminalState::Failed).then_some(ErrorCode::BudgetExhausted),
+            non_resumable_reason: None,
+            continuation: None,
+        };
+        let stored = Blake3Identity
+            .identify(ArtifactClass::Task, &record.encode())
+            .expect("blake3 names every input");
+        (stored, record)
+    }
+
+    #[test]
+    fn a_terminal_record_that_matches_the_history_resolves_the_task_terminal() {
+        let (identity_c, _) = terminal("task_closed", &["c0", "c1"], TerminalState::Completed);
+        let resolution = resolve_records(
+            vec![
+                record("task_closed", "c0", 0, false),
+                record("task_closed", "c1", 1, true),
+            ],
+            vec![continuation(
+                "task_closed",
+                &["c0"],
+                0,
+                ParkState::Suspended,
+            )],
+            vec![
+                terminal("task_closed", &["c0", "c1"], TerminalState::Completed),
+                // A first run that failed: no campaign record, and the terminal record is
+                // the whole history.
+                terminal("task_failed", &[], TerminalState::Failed),
+            ],
+            Vec::new(),
+        );
+        let outcomes: Vec<(&str, Resolution)> = resolution
+            .tasks()
+            .iter()
+            .map(|resolved| (resolved.task.as_str(), resolved.resolution))
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                (
+                    "task_closed",
+                    Resolution::Terminal(TerminalState::Completed)
+                ),
+                ("task_failed", Resolution::Terminal(TerminalState::Failed)),
+            ]
+        );
+        let closed = &resolution.tasks()[0];
+        assert_eq!(closed.terminals, vec![identity_c.clone()]);
+        assert_eq!(
+            closed.claims().len(),
+            4,
+            "two campaign records, one continuation record, one terminal record"
+        );
+        assert!(closed.claims().contains(&identity_c));
+        assert!(resolution.unclaimed().is_empty());
+        assert!(resolution.render().contains("restored-terminal completed"));
+    }
+
+    #[test]
+    fn a_terminal_record_that_does_not_match_the_history_is_unclaimed_and_unused() {
+        let (dangling, _) = terminal("task_x", &["x0", "x1"], TerminalState::Completed);
+        let (bounded, _) = terminal("task_y", &["y0"], TerminalState::Completed);
+        let resolution = resolve_records(
+            vec![
+                record("task_x", "x0", 0, false),
+                record("task_y", "y0", 0, false),
+            ],
+            vec![continuation("task_x", &["x0"], 0, ParkState::Suspended)],
+            vec![
+                // Published before a campaign record that never landed.
+                terminal("task_x", &["x0", "x1"], TerminalState::Completed),
+                // Claims `Completed` over a head that did not close.
+                terminal("task_y", &["y0"], TerminalState::Completed),
+                // Names a task no record names, with a history it does not have.
+                terminal("task_z", &["z0"], TerminalState::Failed),
+            ],
+            Vec::new(),
+        );
+        let outcomes: Vec<(&str, Resolution)> = resolution
+            .tasks()
+            .iter()
+            .map(|resolved| (resolved.task.as_str(), resolved.resolution))
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                ("task_x", Resolution::Restored(ParkState::Suspended)),
+                (
+                    "task_y",
+                    Resolution::Failed(FailureReason::ContinuationNotDurable)
+                ),
+            ],
+            "no task is resolved from a terminal record that does not match it"
+        );
+        assert_eq!(resolution.unclaimed().len(), 3);
+        assert!(resolution.unclaimed().contains(&dangling));
+        assert!(resolution.unclaimed().contains(&bounded));
+    }
+
+    #[test]
+    fn two_different_terminal_records_for_one_history_are_ambiguous() {
+        let (first, record_a) = terminal("task_x", &["x0"], TerminalState::Completed);
+        let mut record_b = record_a.clone();
+        record_b.non_resumable_reason = Some("a second, different record".to_owned());
+        let second = Blake3Identity
+            .identify(ArtifactClass::Task, &record_b.encode())
+            .expect("blake3 names every input");
+        assert_ne!(first, second);
+        let resolution = resolve_records(
+            vec![record("task_x", "x0", 0, true)],
+            Vec::new(),
+            vec![(first, record_a), (second, record_b)],
+            Vec::new(),
+        );
+        assert_eq!(
+            resolution.tasks()[0].resolution,
+            Resolution::Failed(FailureReason::AmbiguousTerminal)
+        );
+        assert!(resolution.tasks()[0].terminal.is_none());
     }
 }

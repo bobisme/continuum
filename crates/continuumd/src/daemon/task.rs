@@ -583,10 +583,11 @@ pub struct TaskTable {
     /// Tasks a startup resolution pass found in the store and resolved to `Settled` or
     /// `Failed` (plan §4.5 O2, bn-1z09m).
     ///
-    /// Kept apart from `tasks` on purpose. Such a task is not a `TaskEntry`: its terminal
-    /// record and report were never durable, and a `TaskEntry` cannot be built without them
-    /// except by inference. A task resolved to `Restored` is not here: its continuation
-    /// record holds what a `TaskEntry` needs, so it is in `tasks` (bn-20142).
+    /// Kept apart from `tasks` on purpose. Such a task is not a `TaskEntry`: no durable
+    /// record of it holds what a `TaskEntry` needs, and one cannot be built without that
+    /// except by inference. A task resolved to `Restored` or `Terminal` is not here: its
+    /// continuation record (bn-20142) or terminal record (bn-2g3ei) holds what a `TaskEntry`
+    /// needs, so it is in `tasks`.
     resolved: BTreeMap<TaskHandle, super::recovery::ResolvedTask>,
     /// The frontiers of continuations restored at startup, as state vectors, until
     /// `task.resume` reads them back through the model ([`Self::materialize`]).
@@ -650,7 +651,8 @@ impl TaskTable {
 
     /// Remove the startup resolution of `handle`, because a live entry now answers for it.
     ///
-    /// The one way a resolution leaves the table, and only for a `Settled` task that a fresh
+    /// The one way a resolution leaves the table, and only for a `Settled` task — a store
+    /// written before terminal records existed (bn-2g3ei) — that a fresh
     /// `verification.start` re-runs (see `verification::start`). Returns what was removed.
     pub fn supersede(&mut self, handle: &TaskHandle) -> Option<super::recovery::ResolvedTask> {
         self.resolved.remove(handle)
