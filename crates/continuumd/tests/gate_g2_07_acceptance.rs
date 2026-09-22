@@ -81,21 +81,29 @@
 //! [`the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_five_cases`]
 //! derives that accounting mechanically rather than asserting it.
 //!
-//! **F3 — the delivering suite's headline claim is oracle-dependent on the daemon's own
-//! transcription.** `no_case_in_the_corpus_triggers_a_privileged_operation` filters the
-//! admission ledger with `registry::operation(name).has(Annotation::Privileged)` — the same
-//! table the admission predicate consults. Drop `Annotation::Privileged` from `intent.lock`
-//! in `protocol/registry.rs` and the daemon *admits* the corpus's three `intent.lock` cases
-//! for an unprivileged capability, while that test still passes: the operation simply leaves
-//! its filter. Measured, not argued — under that mutant nineteen of the delivering suite's
-//! twenty tests are green and the one that fails is an arity check
-//! (`operations.len() == 3`), not a claim about admission. Seven tests in this file fail on
-//! it, because the set they compare against is read from the normative IDL rather than from
-//! the transcription. That is the whole reason a re-derivation is worth more than a re-run,
-//! and it is what [`the_privileged_set_re_derived_from_the_idl_is_exactly_the_delivering_oracles_set`]
+//! **F3 — repaired (bn-2a7q9).** The delivering suite's headline claim used to be
+//! oracle-dependent on the daemon's own transcription: `no_case_in_the_corpus_triggers_a_privileged_operation`
+//! filtered the admission ledger with `registry::operation(name).has(Annotation::Privileged)` —
+//! the same table the admission predicate consults. Dropping `Annotation::Privileged` from
+//! `intent.lock` in `protocol/registry.rs` made the daemon *admit* the corpus's three
+//! `intent.lock` cases for an unprivileged capability while that test still passed: the
+//! operation simply left its filter, and nineteen of the delivering suite's twenty tests stayed
+//! green, the one failure an arity check (`operations.len() == 3`), not a claim about
+//! admission. bn-2a7q9 closed this: `g2_injection_corpus_evidence.rs` now reads
+//! `notes/plan/schemas/continuumd-native-protocol.idl` directly, through its own `idl_scan`
+//! module written to this file's approach — column-zero anchored, independent of
+//! `protocol::registry` — and not shared with it, since no helper module is shared across this
+//! directory's test binaries. Measured, not argued — under that same mutant, two of the
+//! delivering suite's twenty tests now fail: the headline test itself, and
+//! `enforcement::the_privilege_bit_is_the_only_difference_between_admitted_and_denied`. Seven
+//! tests in this file still fail on it too, because the set they compare against is read from
+//! the normative IDL by an independent path from the delivering suite's own fix — sharing no
+//! helper, fixture, principal or oracle with it. That independence is still the whole reason a
+//! re-derivation is worth more than a re-run, and it is what
+//! [`the_privileged_set_re_derived_from_the_idl_is_exactly_the_delivering_oracles_set`]
 //! and [`the_admission_matrix_is_predicted_from_the_idl_alone`] exist for. `idl_conformance.rs`
-//! independently guards the same transcription by a third route; the point here is that
-//! G2-07's own evidence did not.
+//! independently guards the same transcription by a third route; the point this file made is
+//! that G2-07's own evidence did not, until bn-2a7q9.
 //!
 //! **F4 — nine of the 34 landed cases cannot carry their payload into a well-formed body.**
 //! `evidence.verify`, `task.resume` and `task.cancel` declare no string or opaque field: their
@@ -141,7 +149,7 @@
 //! | the T1 ladder comparison never fires | `daemon/admission.rs` | 4 tests |
 //! | admission grants on a payload marker | `daemon/admission.rs` | 9 tests, including both payload differentials |
 //! | the actor-to-capability comparison never fires | `daemon/admission.rs` | 1 test (F7) |
-//! | a privileged marker dropped in transcription | `protocol/registry.rs` | 7 tests (F3) |
+//! | a privileged marker dropped in transcription | `protocol/registry.rs` | 7 tests (F3, repaired bn-2a7q9: also 2 delivering-suite tests) |
 //!
 //! # Verdicts this file supports
 //!
@@ -154,7 +162,7 @@
 //! | admission carries no payload term | **SUPPORTED** | [`the_admission_ledger_does_not_move_with_the_payload`] |
 //! | no status a privileged reader can see on the wire moves | **SUPPORTED** | [`the_corpus_moves_no_status_a_privileged_reader_can_see_on_the_wire`] |
 //! | coverage of the declared privileged surface | **PARTIAL — 3 of 5** (F1) | [`the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_declares`] |
-//! | the privileged set is checked against the normative file, not the transcription | **SUPPORTED here, absent from the delivering suite** (F3) | [`the_privileged_set_re_derived_from_the_idl_is_exactly_the_delivering_oracles_set`] |
+//! | the privileged set is checked against the normative file, not the transcription | **SUPPORTED here, and now also in the delivering suite** (F3, repaired bn-2a7q9) | [`the_privileged_set_re_derived_from_the_idl_is_exactly_the_delivering_oracles_set`] |
 //! | the corpus is exactly §24.5's taxonomy, with no cell empty | **SUPPORTED** | [`the_corpus_is_exactly_the_taxonomy_the_ratified_promotion_gate_enumerates`] |
 //! | every agent-readable artifact class carries a case | **SUPPORTED** | [`the_corpus_declares_a_payload_in_every_agent_readable_artifact_class`] |
 //! | no *fresh* vector triggers a privileged operation | **SUPPORTED — 19 vectors, 13 of them privileged, all refused at the gate** | [`no_fresh_vector_admits_a_privileged_operation`] |

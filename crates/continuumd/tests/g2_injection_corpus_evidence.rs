@@ -661,9 +661,98 @@ fn error_code(result: &ResultEnvelope) -> Option<ErrorCode> {
     result.error.value().map(|error| error.code)
 }
 
-/// Whether the registry declares this operation `@privileged`.
+// =====================================================================================
+// The privileged set, read from the IDL rather than from the registry
+// =====================================================================================
+
+/// A minimal line-oriented scanner over the normative IDL, local to this file.
+///
+/// `no_case_in_the_corpus_triggers_a_privileged_operation` and
+/// `the_corpus_drives_at_every_privileged_operation_this_daemon_serves` used to filter the
+/// admission ledger and the operation set with `registry::operation(name)
+/// .has(Annotation::Privileged)` — the daemon's own transcription of the IDL, and the exact
+/// table `daemon::admission` reads to decide T3. Drop `Annotation::Privileged` from
+/// `intent.lock` in `protocol/registry.rs` and the daemon starts admitting `intent.lock` for
+/// an unprivileged capability *and* this file's oracle stops calling it privileged in the same
+/// stroke, so the headline test kept passing on a real admission-control regression
+/// (`gate_g2_07_acceptance.rs` F3). This scanner reads
+/// `notes/plan/schemas/continuumd-native-protocol.idl` directly — a source the registry
+/// transcribes but the admission predicate never consults — so a marker dropped from the
+/// transcription alone is now a fact this file can see. Its approach (column-zero anchoring,
+/// so `@privileged` in running doc prose is never misread as a marker) follows
+/// `gate_g2_07_acceptance.rs`'s `idl_scan`; it is not shared with that file because no helper
+/// module is shared across this directory's test binaries.
+mod idl_scan {
+    use std::collections::BTreeSet;
+
+    /// The names of every operation the IDL marks `@privileged`.
+    ///
+    /// # Panics
+    ///
+    /// On an `operation` declaration whose opening line has no closing `{`.
+    #[must_use]
+    pub fn privileged_operations(source: &str) -> BTreeSet<String> {
+        let lines: Vec<&str> = source.lines().collect();
+        let mut found = BTreeSet::new();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(rest) = line.strip_prefix("operation ") else {
+                continue;
+            };
+            let Some(name) = rest.strip_suffix(" {") else {
+                panic!(
+                    "line {}: `operation` without an opening brace: {line:?}",
+                    index + 1
+                );
+            };
+            if annotations_above(&lines, index).contains("privileged") {
+                found.insert(name.to_owned());
+            }
+        }
+        found
+    }
+
+    /// The contiguous run of column-zero annotation lines immediately above `index`.
+    fn annotations_above(lines: &[&str], index: usize) -> BTreeSet<String> {
+        let mut annotations = BTreeSet::new();
+        let mut cursor = index;
+        while cursor > 0 && lines[cursor - 1].starts_with('@') {
+            cursor -= 1;
+            for token in lines[cursor].split_whitespace() {
+                let token = token
+                    .strip_prefix('@')
+                    .unwrap_or_else(|| panic!("line {}: not an annotation: {token:?}", cursor + 1));
+                let name = token.split('(').next().unwrap_or(token);
+                annotations.insert(name.to_owned());
+            }
+        }
+        annotations
+    }
+}
+
+/// The normative wire authority — the same file `gate_g2_07_acceptance.rs` reads. Not
+/// `protocol::registry`: that is the daemon's own transcription of this file, and reading the
+/// transcription to check the transcription is exactly the gap `is_privileged` closes.
+const IDL_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../notes/plan/schemas/continuumd-native-protocol.idl"
+);
+
+fn idl_source() -> String {
+    std::fs::read_to_string(IDL_PATH).expect("the normative IDL is in the tree")
+}
+
+/// The set of operations the IDL marks `@privileged`, read fresh from disk. Not cached: this
+/// file's whole point is that the answer comes from the file on disk, not from a table that
+/// could go stale independently of it.
+fn idl_privileged_operations() -> BTreeSet<String> {
+    idl_scan::privileged_operations(&idl_source())
+}
+
+/// Whether the IDL — independent of the registry the admission predicate itself consults —
+/// marks this operation `@privileged`. See the `idl_scan` module above for why this is not
+/// `registry::operation(operation).is_some_and(|spec| spec.has(Annotation::Privileged))`.
 fn is_privileged(operation: &str) -> bool {
-    registry::operation(operation).is_some_and(|spec| spec.has(Annotation::Privileged))
+    idl_privileged_operations().contains(operation)
 }
 
 /// Whether an operation has a family in this daemon — decided by asking the codec rather than
@@ -852,19 +941,19 @@ fn every_attempt_that_reached_admission_is_audited() {
 
 mod enforcement {
     use super::{
-        AGENT, Annotation, ArtifactClass, BENIGN, CASES, Case, ErrorCode, ProhibitedOutcome,
-        REVISER, Readability, ResultStatus, STEWARD, Vector, answer, error_code, fixture, frame,
-        is_landed, is_privileged, readability, registry, request_id, run,
+        AGENT, ArtifactClass, BENIGN, CASES, Case, ErrorCode, ProhibitedOutcome, REVISER,
+        Readability, ResultStatus, STEWARD, Vector, answer, error_code, fixture, frame,
+        idl_privileged_operations, is_landed, is_privileged, readability, request_id, run,
     };
     use std::collections::BTreeSet;
 
-    /// The `@privileged` operations this daemon actually serves, taken off the registry
-    /// rather than listed: a fourth landing later joins this comparison without an edit.
-    fn landed_privileged_operations() -> Vec<&'static str> {
-        registry::OPERATIONS
-            .iter()
-            .filter(|spec| spec.has(Annotation::Privileged))
-            .map(|spec| spec.name)
+    /// The `@privileged` operations this daemon actually serves, taken off the IDL-derived set
+    /// (see `super::is_privileged`) rather than the registry: a fourth landing later joins this
+    /// comparison without an edit, and a marker the registry's transcription drops does not
+    /// silently shrink it.
+    fn landed_privileged_operations() -> Vec<String> {
+        idl_privileged_operations()
+            .into_iter()
             .filter(|name| is_landed(name))
             .collect()
     }
@@ -1434,18 +1523,44 @@ fn every_corpus_operation_is_one_this_protocol_declares() {
 #[test]
 fn the_corpus_drives_at_every_privileged_operation_this_daemon_serves() {
     // A corpus that never named a landed `@privileged` operation could not falsify the G2
-    // bullet however green it was.
-    let served: BTreeSet<&str> = registry::OPERATIONS
-        .iter()
-        .filter(|spec| spec.has(Annotation::Privileged))
-        .map(|spec| spec.name)
-        .filter(|name| is_landed(name))
-        .collect();
-    assert!(!served.is_empty());
-    let attempted: BTreeSet<&str> = CASES.iter().map(|case| case.operation).collect();
-    for operation in served {
+    // bullet however green it was. The privileged set is the IDL-derived one (see
+    // `is_privileged`), not the registry's, for the same reason the headline test reads it:
+    // the registry is the table the admission predicate itself consults, so a marker it drops
+    // cannot be the oracle that catches the drop.
+    let privileged = idl_privileged_operations();
+    assert!(!privileged.is_empty());
+
+    // Two of the IDL's five `@privileged` operations have no family in this daemon
+    // (`repair.promote`, `repair.reject`; tracked `bn-1n7hy`, see `gate_g2_07_acceptance.rs`
+    // F1). They are named here, not dropped by an `is_landed` filter applied to the whole set:
+    // a filter that silently narrowed the privileged set itself is exactly how this guard
+    // used to report full coverage of three operations while never admitting it was checking
+    // three out of five.
+    const UNLANDED_PRIVILEGED: [&str; 2] = ["repair.promote", "repair.reject"];
+    for operation in UNLANDED_PRIVILEGED {
         assert!(
-            attempted.contains(operation),
+            privileged.contains(operation),
+            "{operation} is no longer declared `@privileged` in the IDL — update this list"
+        );
+        assert!(
+            !is_landed(operation),
+            "{operation} has landed — drop it from UNLANDED_PRIVILEGED and require corpus \
+             coverage for it below"
+        );
+    }
+
+    let attempted: BTreeSet<&str> = CASES.iter().map(|case| case.operation).collect();
+    for operation in &privileged {
+        if UNLANDED_PRIVILEGED.contains(&operation.as_str()) {
+            continue;
+        }
+        assert!(
+            is_landed(operation),
+            "{operation} is `@privileged` and not in UNLANDED_PRIVILEGED, but this daemon does \
+             not serve it — add it to UNLANDED_PRIVILEGED or give it corpus coverage"
+        );
+        assert!(
+            attempted.contains(operation.as_str()),
             "no corpus case drives at the privileged operation {operation}"
         );
     }
