@@ -375,6 +375,7 @@ impl Publication {
                     ErrorCode::PublicationAborted,
                     "the task identity is not a well-formed artifact handle",
                 )
+                .not_retryable()
             })?,
             commitment: Optional::Present(self.commitment.clone()),
             redacted: Optional::Absent,
@@ -609,6 +610,7 @@ pub fn commitment_of(
                 ErrorCode::PublicationAborted,
                 "no content identity could be derived for a committed publication",
             )
+            .not_retryable()
         })?;
     Ok(Commitment::new(&handle.to_string()))
 }

@@ -282,6 +282,7 @@ fn evidence_identity(
                 ErrorCode::PublicationAborted,
                 "no well-formed content identity could be derived for the evidence node",
             )
+            .not_retryable()
         })
 }
 
@@ -293,6 +294,7 @@ fn artifact(handle: &EvidenceHandle) -> Result<ArtifactRef, Fault> {
                 ErrorCode::PublicationAborted,
                 "the derived evidence identity is not a well-formed artifact handle",
             )
+            .not_retryable()
         })?,
         commitment: Optional::Present(handle_commitment(handle)),
         redacted: Optional::Absent,

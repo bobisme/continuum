@@ -500,6 +500,8 @@ fn identity_unavailable() -> Fault {
         ErrorCode::PublicationAborted,
         "no well-formed content identity could be derived for the proposed evidence artifact",
     )
+    // Deterministic: the identity is a function of the request, so a retry fails the same way.
+    .not_retryable()
 }
 
 /// The note's `tool`, or the empty string when it named none.

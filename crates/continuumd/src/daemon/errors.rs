@@ -70,3 +70,78 @@ pub fn admits_with_snapshot(spec: &OperationSpec, code: ErrorCode, snapshot: boo
     }
     snapshot && SNAPSHOT.contains(&code)
 }
+
+/// Whether an identical retry of a failure carrying `code` can succeed.
+///
+/// > The last column is guidance for reading the taxonomy; the authoritative per-occurrence
+/// > value is the **required** `Error.retryable` field, which a daemon MUST set on every
+/// > error it returns.
+/// >
+/// > — RFC 0026, "Error taxonomy"
+///
+/// The IDL declares `Error.retryable` ("Whether an identical retry can succeed without any
+/// change by the caller") but carries no per-code retry data: `ErrorCode`'s members are bare
+/// names. The per-code value is therefore derived here, once, from RFC 0026's taxonomy
+/// table, column "Identical retry can succeed?". Three codes answer **yes**:
+///
+/// - `StatusConflict` — "re-read and retry";
+/// - `QuotaExhausted` — "later, or with fewer concurrent tasks";
+/// - `PublicationAborted` — "same idempotency key" ("Atomicity of publication": "The client
+///   MAY retry with the same idempotency key, and the retry is a fresh publication").
+///
+/// Every other code answers **no**. `rule handshake.rejection` fixes `retryable` false for
+/// the two handshake codes independently, and the table agrees. The match is exhaustive, so
+/// a code added to the `@open` enum does not compile until its row is decided here.
+///
+/// The value also decides what the idempotency ledger keeps (`Daemon::dispatch` step 7): a
+/// retryable failure does not bind its key, because a replay of it would make the identical
+/// retry the table says can succeed unable to.
+#[must_use]
+pub const fn retryable(code: ErrorCode) -> bool {
+    match code {
+        ErrorCode::StatusConflict | ErrorCode::QuotaExhausted | ErrorCode::PublicationAborted => {
+            true
+        }
+        ErrorCode::StaleSnapshot
+        | ErrorCode::UnsupportedSemanticFeature
+        | ErrorCode::IntentMutationDenied
+        | ErrorCode::InsufficientEvidence
+        | ErrorCode::BudgetExhausted
+        | ErrorCode::ContinuationEpochMismatch
+        | ErrorCode::AmbiguousCorrespondence
+        | ErrorCode::UntrustedDomainBoundary
+        | ErrorCode::CertificateRejected
+        | ErrorCode::ReplayDiverged
+        | ErrorCode::CapabilityDenied
+        | ErrorCode::PolicyGateFailed
+        | ErrorCode::AcceptanceChainInvalid
+        | ErrorCode::EpochUnsupported
+        | ErrorCode::ProtocolVersionUnsupported
+        | ErrorCode::IdempotencyKeyReused
+        | ErrorCode::MalformedRequest => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::spec::ProtocolEnum;
+
+    /// RFC 0026's taxonomy table has exactly three "yes" rows.
+    #[test]
+    fn exactly_the_three_taxonomy_yes_rows_are_retryable() {
+        let yes: Vec<ErrorCode> = ErrorCode::ALL
+            .iter()
+            .copied()
+            .filter(|code| retryable(*code))
+            .collect();
+        assert_eq!(
+            yes,
+            [
+                ErrorCode::StatusConflict,
+                ErrorCode::QuotaExhausted,
+                ErrorCode::PublicationAborted,
+            ]
+        );
+    }
+}

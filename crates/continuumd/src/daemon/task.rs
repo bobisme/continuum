@@ -710,6 +710,8 @@ fn identity_fault() -> Fault {
         ErrorCode::PublicationAborted,
         "no content identity could be derived for a task record",
     )
+    // Deterministic: the identity is a function of the record, so a retry fails the same way.
+    .not_retryable()
 }
 
 /// The nine budget dimensions, written into a preimage.

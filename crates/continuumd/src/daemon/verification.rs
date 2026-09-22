@@ -504,7 +504,9 @@ fn publish_record(
             PublishRefusal::Aborted(_) => aborted(),
         })?;
     if receipt.handle().to_string() != named.as_str() {
-        return Err(aborted());
+        // The two identity seams disagree on the same bytes, so a retry derives the same
+        // disagreement: deterministic, whatever the taxonomy default says.
+        return Err(aborted().not_retryable());
     }
     Ok(())
 }

@@ -154,7 +154,8 @@ use continuum_intent::contract::IntentContract;
 use continuum_value::epoch::ProtocolWindow;
 use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
 use continuum_workspace::publication::{
-    AbortReason, CapabilityToken, ContentIdentifier, PublicationPhase, StorageFaults, StoreDefect,
+    AbortReason, CapabilityToken, ContentIdentifier, IdentityUnavailable, PublicationPhase,
+    StorageFaults, StoreDefect,
 };
 use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::evidence::EvidenceFamily;
@@ -1385,8 +1386,10 @@ fn the_visible_set_is_a_monotone_prefix_of_the_complete_publication() {
 /// 3. record *k* and every later record are not published;
 /// 4. the residue is a step function of the phase — one GC-eligible unindexed record at
 ///    `CommittingIndex`, none at `Staging` or `CommittingContent`;
-/// 5. a retry converges on the complete publication. The same-key half of the retry rule is
-///    an as-is pin here: this daemon replays the recorded abort (see the assertion).
+/// 5. a retry converges on the complete publication — under the *same* idempotency key, which
+///    the taxonomy names as the route (`PublicationAborted` is retryable, "same idempotency
+///    key"). bn-1gj9z made the daemon honour it: the abort says `retryable: true` and does not
+///    bind its key, so the same-key retry is a fresh publication and not a replayed abort.
 ///
 /// The root-last ordering rests on `WorkspaceDescriptor::records` yielding children before
 /// parents, one crate away, which is why it is measured here and not assumed.
@@ -1413,6 +1416,11 @@ fn a_partial_composite_publication_meets_rfc_0026s_per_artifact_contract() {
             outcome.error_code(),
             Some(ErrorCode::PublicationAborted),
             "{phase}: a composite that stops part-way answers `PublicationAborted`"
+        );
+        assert_eq!(
+            outcome.envelope.error.value().map(|error| error.retryable),
+            Some(true),
+            "{phase}: RFC 0026's taxonomy marks `PublicationAborted` retryable under the same key"
         );
 
         let after = rig.namespace(std::slice::from_ref(&root_handle));
@@ -1492,31 +1500,19 @@ fn a_partial_composite_publication_meets_rfc_0026s_per_artifact_contract() {
 
         // (5) A retry converges on the complete publication.
         //
-        // AS-IS PIN, not the contract. RFC 0026 says a retry under the *same* idempotency key
-        // is a fresh publication, and its taxonomy marks `PublicationAborted` retryable. This
-        // daemon records the abort in its replay ledger (`Daemon::dispatch`, step 7) and
-        // raises it through `Fault::new`, so the same key replays the abort with
-        // `retryable: false`. That predates bn-12plt and is reported to the lead rather than
-        // fixed here; when it is fixed, this block flips to assert the same-key retry succeeds.
+        // Regression guard for bn-1gj9z. The retry uses the *same* idempotency key and the
+        // byte-identical request, with a fresh `request_id`. RFC 0026: "The client MAY retry
+        // with the same idempotency key, and the retry is a fresh publication". Before the
+        // fix, `Daemon::dispatch` step 7 recorded the abort in the replay ledger and
+        // `Fault::new` fixed `retryable: false`, so this call replayed the abort.
         rig.faults.disarm();
-        let replayed = rig.daemon.dispatch(&rig.create_request(request, key, true));
-        assert_eq!(
-            replayed.error_code(),
-            Some(ErrorCode::PublicationAborted),
-            "{phase}: as-is, the same key replays the recorded abort"
-        );
-        assert_eq!(
-            replayed.envelope.error.value().map(|error| error.retryable),
-            Some(false),
-            "{phase}: as-is, the replayed abort says it is not retryable"
-        );
         let retried = rig
             .daemon
-            .dispatch(&rig.create_request("req_retry", "idem-retry", true));
+            .dispatch(&rig.create_request("req_retry", key, true));
         assert_eq!(
             retried.envelope.status,
             ResultStatus::Ok,
-            "{phase}: a fresh publication of the same composite completes: {:?}",
+            "{phase}: the same-key retry is a fresh publication, not a replayed abort: {:?}",
             retried.envelope.error
         );
         let converged = rig.namespace(std::slice::from_ref(&root_handle));
@@ -1529,8 +1525,110 @@ fn a_partial_composite_publication_meets_rfc_0026s_per_artifact_contract() {
             "{phase}: the retry converges on the complete publication's identities, and the \
              record that landed first is not duplicated"
         );
+
+        // The success binds the key: a further same-key call replays it, publishing nothing.
+        let replayed = rig
+            .daemon
+            .dispatch(&rig.create_request("req_replay", key, true));
+        assert_eq!(
+            replayed.envelope.status,
+            ResultStatus::Ok,
+            "{phase}: the replay answers the recorded success"
+        );
+        assert_eq!(
+            replayed.envelope.artifacts, retried.envelope.artifacts,
+            "{phase}: `rule idempotency.replay` — the same artifact identity"
+        );
+        let after_replay = rig.namespace(std::slice::from_ref(&root_handle));
+        assert_eq!(
+            after_replay.published_count, converged.published_count,
+            "{phase}: the replay publishes nothing"
+        );
+
+        // A fresh key converges on the same identities too.
+        let fresh = rig
+            .daemon
+            .dispatch(&rig.create_request("req_fresh", "idem-fresh", true));
+        assert_eq!(
+            fresh.envelope.status,
+            ResultStatus::Ok,
+            "{phase}: a fresh-key publication of the same composite completes: {:?}",
+            fresh.envelope.error
+        );
+        let converged = rig.namespace(std::slice::from_ref(&root_handle));
+        assert_eq!(
+            converged.observation.indexed, complete.observation.indexed,
+            "{phase}: and duplicates nothing"
+        );
         assert!(converged.observation.tears().is_empty());
     }
+}
+
+/// A seam that cannot name a workspace snapshot, and names every other class as BLAKE3 does.
+///
+/// The failure is a function of the request alone, so every identical retry meets it again.
+#[derive(Debug, Clone, Copy, Default)]
+struct NoSnapshotIdentity;
+
+impl ContentIdentifier for NoSnapshotIdentity {
+    fn identify(
+        &self,
+        class: ArtifactClass,
+        content: &[u8],
+    ) -> Result<ArtifactHandle, IdentityUnavailable> {
+        if class == ArtifactClass::WorkspaceSnapshot {
+            return Err(IdentityUnavailable);
+        }
+        Blake3Identity.identify(class, content)
+    }
+}
+
+/// **A deterministic `PublicationAborted` binds its key.** bn-1gj9z's per-occurrence half.
+///
+/// RFC 0026 makes the per-occurrence `Error.retryable` authoritative over the taxonomy's
+/// per-code guidance. A composite whose snapshot identity cannot be derived fails the same way
+/// on every identical retry, so the daemon says `retryable: false`, and the idempotency ledger
+/// reads that occurrence value: the key is bound. A different request under the same key is
+/// therefore `IdempotencyKeyReused` (`rule idempotency.replay`), which it could not be if the
+/// abort had left the key unbound.
+#[test]
+fn a_deterministic_publication_abort_binds_its_key_and_is_not_retryable() {
+    let mut rig = Rig::with_identifier(NoSnapshotIdentity);
+    let key = "idem-deterministic";
+
+    let first = rig
+        .daemon
+        .dispatch(&rig.create_request("req_first", key, true));
+    assert_eq!(first.error_code(), Some(ErrorCode::PublicationAborted));
+    assert_eq!(
+        first.envelope.error.value().map(|error| error.retryable),
+        Some(false),
+        "an abort that every identical retry meets again says it is not retryable"
+    );
+
+    let (actor, _) = rig.publisher();
+    assert!(
+        rig.daemon.state().replay(actor, key).is_some(),
+        "the non-retryable abort is recorded under its key"
+    );
+
+    let replayed = rig
+        .daemon
+        .dispatch(&rig.create_request("req_again", key, true));
+    assert_eq!(
+        replayed.envelope.error, first.envelope.error,
+        "the identical same-key retry replays the recorded abort"
+    );
+    assert_eq!(replayed.envelope.request_id.as_str(), "req_again");
+
+    let reused = rig
+        .daemon
+        .dispatch(&rig.create_request("req_other", key, false));
+    assert_eq!(
+        reused.error_code(),
+        Some(ErrorCode::IdempotencyKeyReused),
+        "the key is bound, so a different request under it is refused"
+    );
 }
 
 // =========================================================================================
@@ -2071,6 +2169,18 @@ impl Rig {
         Self::assemble(builder().over(durable), Injector::default())
     }
 
+    /// A rig whose content-identity seam is `identifier`, with no store faults armed.
+    fn with_identifier<I>(identifier: I) -> Self
+    where
+        I: ContentIdentifier + Clone + 'static,
+    {
+        let faults = Injector::default();
+        Self::assemble(
+            builder_with(identifier).store_faults(faults.clone()),
+            faults,
+        )
+    }
+
     fn assemble(builder: Builder, faults: Injector) -> Self {
         let mut daemon = builder.build();
 
@@ -2598,9 +2708,17 @@ fn epochs() -> EpochSet {
 
 /// The builder every rig goes through, so two rigs differ in exactly one thing: the seam.
 fn builder() -> Builder {
+    builder_with(Blake3Identity)
+}
+
+/// [`builder`] over a chosen content-identity seam.
+fn builder_with<I>(identifier: I) -> Builder
+where
+    I: ContentIdentifier + Clone + 'static,
+{
     let root = Some(cap("cap_root"));
     let privileged = ["intent.accept", "intent.reject", "intent.lock"];
-    Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
+    Daemon::builder(identifier, negotiated(), cap("cap_root"))
         .epochs(epochs())
         .now(now())
         .capability(

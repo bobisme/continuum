@@ -1889,12 +1889,24 @@ fn identity_rejected() -> Fault {
 ///
 /// The sentence covers both halves — a lost guard and a would-be regression — so both map
 /// here, and the `detail` does not distinguish them because the recovery is identical.
+///
+/// `retryable` is per occurrence (RFC 0026: "the authoritative per-occurrence value is the
+/// **required** `Error.retryable` field"), and the lattice never regresses, so the claim's
+/// status only rises. An *identical* retry — the same `expected` — can therefore succeed
+/// only when the claim still sits strictly below `expected` and can rise to it. A claim
+/// already above or beside `expected`, and a would-be regression ("Re-reading will not
+/// help; the write is wrong"), fail the same way on every identical retry. The value is a
+/// function of `expected` and `actual` alone, and a node the graph does not hold reports
+/// `actual` as the lattice's bottom, so it discloses no more than the code already does
+/// (RFC 0027 X2).
 fn status_fault(rejected: PromotionRejected) -> Fault {
+    let fault = Fault::new(
+        ErrorCode::StatusConflict,
+        "the promotion lost its compare-and-set against the claim's current status",
+    );
     match rejected {
-        PromotionRejected::Conflict(_) | PromotionRejected::Regression(_) => Fault::new(
-            ErrorCode::StatusConflict,
-            "the promotion lost its compare-and-set against the claim's current status",
-        ),
+        PromotionRejected::Conflict(conflict) if conflict.actual < conflict.expected => fault,
+        PromotionRejected::Conflict(_) | PromotionRejected::Regression(_) => fault.not_retryable(),
     }
 }
 

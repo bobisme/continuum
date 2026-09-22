@@ -392,6 +392,7 @@ fn create(
             ErrorCode::PublicationAborted,
             "no content identity could be derived for the snapshot",
         )
+        .not_retryable()
     })?;
     if let Optional::Present(overlays) = &request.overlay {
         let overlay = build_overlay(overlays)?;
@@ -420,6 +421,7 @@ fn create(
                 ErrorCode::PublicationAborted,
                 "no content identity could be derived for a workspace component",
             )
+            .not_retryable()
         })?;
 
     let handle = wire_handle(&descriptor)?;
@@ -520,7 +522,8 @@ fn create_by_reference(
         return Err(Fault::new(
             ErrorCode::PublicationAborted,
             "the create lane produced a body this operation does not declare",
-        ));
+        )
+        .not_retryable());
     };
     Ok(Effect::new(
         Payload::WorkspaceCreateByReference(WorkspaceCreateByReferenceResponse {
@@ -578,6 +581,7 @@ fn fork(
                 ErrorCode::PublicationAborted,
                 "no content identity could be derived for a workspace component",
             )
+            .not_retryable()
         })?;
     let handle = wire_handle(&descriptor)?;
 
@@ -908,17 +912,23 @@ pub(super) fn reseal_current_head(state: &DaemonState, lineage: &ForkName) -> Ve
 /// receipted. The detail says what is true at operation grain: the workspace root is not
 /// published, and no record is partial (RFC 0026 "Atomicity of publication", correction 48;
 /// INV-017 per artifact, RFC 0038).
+/// The `detail` of every aborted composite publication, retryable or not.
+const SEAL_ABORTED: &str = "the composite publication aborted; the workspace root was not \
+                            published and nothing was truncated, and records published before \
+                            the abort remain published";
+
 fn seal_fault(error: &SealError) -> Fault {
     match error {
         SealError::Refused {
             refusal: PublishRefusal::CapabilityDenied(_),
             ..
         } => Fault::denied(),
-        SealError::Refused { .. } | SealError::IdentityDisagreement { .. } => Fault::new(
-            ErrorCode::PublicationAborted,
-            "the composite publication aborted; the workspace root was not published and \
-             nothing was truncated, and records published before the abort remain published",
-        ),
+        SealError::Refused { .. } => Fault::new(ErrorCode::PublicationAborted, SEAL_ABORTED),
+        // The two identity seams disagree on the same bytes, so a retry derives the same
+        // disagreement: deterministic, whatever the taxonomy default says.
+        SealError::IdentityDisagreement { .. } => {
+            Fault::new(ErrorCode::PublicationAborted, SEAL_ABORTED).not_retryable()
+        }
     }
 }
 
@@ -928,6 +938,7 @@ fn wire_handle(descriptor: &WorkspaceDescriptor) -> Result<WorkspaceHandle, Faul
             ErrorCode::PublicationAborted,
             "the derived workspace identity is not a well-formed handle",
         )
+        .not_retryable()
     })
 }
 
@@ -937,6 +948,7 @@ fn lineage_name(handle: &WorkspaceHandle) -> Result<ForkName, Fault> {
             ErrorCode::PublicationAborted,
             "the derived workspace identity is not a printable lineage label",
         )
+        .not_retryable()
     })
 }
 
@@ -948,6 +960,7 @@ fn artifact(handle: &WorkspaceHandle) -> Result<ArtifactRef, Fault> {
                 ErrorCode::PublicationAborted,
                 "the derived workspace identity is not a well-formed artifact handle",
             )
+            .not_retryable()
         })?,
         commitment: Optional::Absent,
         redacted: Optional::Absent,

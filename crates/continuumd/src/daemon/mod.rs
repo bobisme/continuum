@@ -633,7 +633,30 @@ impl Daemon {
         // (see [`CrashPoint`]).
         kill(injector, CrashPoint::AfterHandler)?;
 
-        if let Some(key) = key {
+        // The ledger keeps every outcome except a retryable failure.
+        //
+        // `rule idempotency.replay`: "A mutation replayed with the same `idempotency_key` and
+        // a byte-identical canonical request MUST return the same task or artifact identity."
+        // A success binds its key, because it is the identity a replay returns. A
+        // non-retryable failure binds its key too: RFC 0026's taxonomy says an identical
+        // retry cannot succeed, so the replay answers what a re-run would, without re-running
+        // the handler's effects.
+        //
+        // A retryable failure ([`errors::retryable`]) does not bind its key. The taxonomy
+        // says an identical retry *can* succeed, and for `PublicationAborted` it names the
+        // route — "same idempotency key" — and "Atomicity of publication" says "the retry is
+        // a fresh publication, not a resumption of a partial one" and that "a retry under the
+        // same idempotency key derives the same records; a record that is already published
+        // converges on its existing identity, and it is not duplicated". A recorded abort
+        // would answer that retry with the abort, forever within the retention window. The
+        // failed attempt named no identity, so leaving the key unbound breaks no replay the
+        // daemon still remembers (`ServerLimits.idempotency_retention_ms`).
+        let binds = outcome
+            .envelope
+            .error
+            .value()
+            .is_none_or(|error| !error.retryable);
+        if let Some(key) = key.filter(|_| binds) {
             state.record_replay(
                 envelope.actor.as_str(),
                 &key,

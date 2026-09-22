@@ -701,14 +701,15 @@ pub struct Fault {
 }
 
 impl Fault {
-    /// A non-retryable failure. Every fault this bone's families raise is non-retryable:
-    /// each names something the caller must change.
+    /// A failure whose `retryable` is its code's row in RFC 0026's error taxonomy
+    /// ([`errors::retryable`]): true for `StatusConflict`, `QuotaExhausted`, and
+    /// `PublicationAborted`, false for every other code.
     #[must_use]
     pub const fn new(code: ErrorCode, detail: &'static str) -> Self {
         Self {
             code,
             detail,
-            retryable: false,
+            retryable: errors::retryable(code),
             resumption: Resumption::NotApplicable,
             data: ErrorData::None,
             recovery: Vec::new(),
@@ -721,6 +722,20 @@ impl Fault {
     #[must_use]
     pub fn with_recovery(mut self, recovery: Vec<RecoveryOffer>) -> Self {
         self.recovery = recovery;
+        self
+    }
+
+    /// The same fault, marked as one an identical retry cannot clear.
+    ///
+    /// RFC 0026 makes the per-occurrence value the authority: "the authoritative
+    /// per-occurrence value is the **required** `Error.retryable` field". [`Self::new`]
+    /// takes the code's taxonomy row as the default. A site whose failure is deterministic —
+    /// the same request against the same state fails the same way — overrides it here. The
+    /// idempotency ledger reads this occurrence value, so such a failure binds its key
+    /// (`Daemon::dispatch` step 7).
+    #[must_use]
+    pub const fn not_retryable(mut self) -> Self {
+        self.retryable = false;
         self
     }
 
@@ -751,7 +766,7 @@ impl Fault {
         Self {
             code: ErrorCode::BudgetExhausted,
             detail,
-            retryable: false,
+            retryable: errors::retryable(ErrorCode::BudgetExhausted),
             resumption: Resumption::NonResumable(detail),
             data: ErrorData::None,
             recovery: Vec::new(),
@@ -764,7 +779,7 @@ impl Fault {
         Self {
             code: ErrorCode::BudgetExhausted,
             detail,
-            retryable: false,
+            retryable: errors::retryable(ErrorCode::BudgetExhausted),
             resumption: Resumption::From(continuation),
             data: ErrorData::None,
             recovery: Vec::new(),
