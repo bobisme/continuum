@@ -87,6 +87,7 @@ use continuum_workspace::snapshot::Snapshot;
 use continuum_workspace::staleness::{LineageError, check_current};
 
 use super::Services;
+use super::admission::Derived;
 use super::budget::{self, Publications};
 use super::continuation::{self, Checkpointed, ContinuationRecord, ParkState};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
@@ -98,8 +99,8 @@ use super::recovery::{Resolution, ResolvedTask};
 use super::region::{self, Scope as RegionScope};
 use super::state::DaemonState;
 use super::task::{
-    Campaign, Continuation, PinnedEpochs, Preimage, TaskEntry, budget_preimage, epochs_preimage,
-    published, task_handle, unsupported,
+    Campaign, Continuation, PinnedEpochs, Preimage, RefusedRun, TaskEntry, budget_preimage,
+    epochs_preimage, published, task_handle, unsupported,
 };
 use crate::protocol::envelope::{
     ArtifactRef, AssuranceEnvelope, Budget, EnvelopeDimension, Omission, ProducedDimension,
@@ -426,6 +427,7 @@ pub fn advance(
     services: &Services,
     store: &ReferenceStore,
     publisher: &CapabilityToken,
+    authorize: &mut dyn FnMut(&ContinuationHandle, u64) -> bool,
 ) -> Result<(), Fault> {
     let (source, target, snapshot, intent) = {
         let entry = state.tasks().get(handle).ok_or_else(Fault::denied)?;
@@ -465,6 +467,7 @@ pub fn advance(
             services,
             store,
             publisher,
+            authorize,
         )
     })?;
     Ok(())
@@ -543,6 +546,29 @@ fn publish_terminal(
 ///
 /// `prior_frontier` is the parked continuation's frontier on a resume, and empty on a fresh
 /// `verification.start` — see [`run`]'s doc for what it guards.
+/// The denial for a run whose minted continuation is outside the caller's grant
+/// (`rule capability.instance_scope`, the minted-handle clause; cr-3hcpn4).
+///
+/// The run has happened once, and its results are discarded: the staged publication is
+/// dropped, nothing is published, and no continuation or record exists. The region records
+/// the failure. Nothing about the task itself is written — a task identity is shared by
+/// every caller that names it, so a refusal must not change it for anyone else. The work
+/// is charged to the refused caller instead: the operation that called [`advance`] learns
+/// the explored state count through its `authorize` callback and records the refused run
+/// against the presenting capability ([`TaskTable::refuse_run`]), which refuses the same
+/// run again before any exploration.
+///
+/// The fault is the one `CapabilityDenied` (X1), flagged for the denial counter.
+///
+/// [`TaskTable::refuse_run`]: super::task::TaskTable::refuse_run
+fn refuse_minted(scope: RegionScope, handle: &TaskHandle, state: &mut DaemonState) -> Fault {
+    discard(handle, state);
+    state.regions_mut().fail(scope, ErrorCode::CapabilityDenied);
+    let mut denied = Fault::denied();
+    denied.derived_denial = true;
+    denied
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_in(
     scope: RegionScope,
@@ -558,6 +584,7 @@ fn run_in(
     services: &Services,
     store: &ReferenceStore,
     publisher: &CapabilityToken,
+    authorize: &mut dyn FnMut(&ContinuationHandle, u64) -> bool,
 ) -> Result<(), Fault> {
     // The model is data — named variables, named actions, an explicit initial-state
     // enumeration — so cloning it out of the catalog costs a copy of that data and buys the
@@ -692,6 +719,12 @@ fn run_in(
                 return Err(fault);
             }
         };
+        // The continuation is minted here, by the run, so no request named it. It is decided
+        // against the caller's grant now, after the one run and before anything durable
+        // (`rule capability.instance_scope`, the minted-handle clause; cr-3hcpn4).
+        if !authorize(&named, campaign.states() as u64) {
+            return Err(refuse_minted(scope, handle, state));
+        }
         let continuation = Continuation {
             handle: named.clone(),
             task: handle.clone(),
@@ -958,11 +991,19 @@ impl OperationFamily for VerificationFamily {
                     ArtifactClass::ElaboratedModel.token(),
                     ArtifactClass::Task.token(),
                 ],
+                instances: Vec::new(),
             },
-            Arguments::VerificationResult(_) | Arguments::VerificationAwait(_) => ScopeClaim {
+            Arguments::VerificationResult(request) => ScopeClaim {
                 snapshots: Vec::new(),
                 intents: Vec::new(),
                 classes: vec![ArtifactClass::Task.token()],
+                instances: vec![request.task.as_str().to_owned()],
+            },
+            Arguments::VerificationAwait(request) => ScopeClaim {
+                snapshots: Vec::new(),
+                intents: Vec::new(),
+                classes: vec![ArtifactClass::Task.token()],
+                instances: vec![request.task.as_str().to_owned()],
             },
             _ => ScopeClaim::default(),
         }
@@ -977,8 +1018,8 @@ impl OperationFamily for VerificationFamily {
     ) -> Result<Effect, Fault> {
         match call.arguments {
             Arguments::VerificationStart(request) => start(call, request, state, services, store),
-            Arguments::VerificationResult(request) => result(&request.task, state, false),
-            Arguments::VerificationAwait(request) => result(&request.task, state, true),
+            Arguments::VerificationResult(request) => result(call, &request.task, state, false),
+            Arguments::VerificationAwait(request) => result(call, &request.task, state, true),
             // Unreachable: the dispatcher checked shape agreement against the registry
             // before routing.
             _ => Err(Fault::new(
@@ -1050,6 +1091,10 @@ fn start(
     // sealed where sealing is required**" — a campaign is required over a sealed snapshot,
     // because a result pinned to a mutable tree pins nothing.
     let record = state.workspace(snapshot).ok_or_else(Fault::denied)?;
+    // The snapshot's intent is not named by the request; the task records it and
+    // `task.status` reports it. It is decided by the grant before anything else is read
+    // about it (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4).
+    call.derived(Derived::Intent(&record.intent))?;
     if !record.sealed() {
         return Err(Fault::new(
             ErrorCode::StaleSnapshot,
@@ -1108,6 +1153,11 @@ fn start(
         priority_class,
         &budget,
     )?;
+    // The task identity is a function of the request, so it is decided here, before any
+    // lookup: an existing task under it is reported, and a new one is created under it. A
+    // grant that instance-scopes `task` and does not list this identity is refused either
+    // way, so the answer does not say whether the identity already exists (X2; cr-3hcpn4).
+    call.derived(Derived::Instance(handle.as_str()))?;
 
     // A task the startup resolution pass resolved (plan §4.5 O2, bn-1z09m). One handle has
     // exactly one state, so this is decided before the live table is consulted:
@@ -1160,6 +1210,7 @@ fn start(
     // the old lane as no violation and raised F20 for exactly this branch). A terminal
     // identity is now one of two `ok` answers:
     if let Some(entry) = state.tasks().get(&handle) {
+        super::task::task_scope(call, entry)?;
         if entry.is_terminal() {
             // A completed task under this identity is the same campaign, and re-running
             // it could only produce the same answer more slowly: the cached-result lane,
@@ -1212,9 +1263,47 @@ fn start(
         evidence: Publications::new(),
     };
     let bounds = entry.bounds();
+    // The same run, refused before for this capability on the continuation it would mint,
+    // is refused again before any exploration (cr-3hcpn4).
+    let refused_key = RefusedRun {
+        capability: call.envelope.capability.clone(),
+        task: handle.clone(),
+        from: None,
+        bounds,
+    };
+    if state.tasks().refused(&refused_key) {
+        let mut denied = Fault::denied();
+        denied.derived_denial = true;
+        return Err(denied);
+    }
     state.tasks_mut().put(entry);
     // A fresh task has no parked continuation, so there is no prior frontier to rediscover.
-    advance(&handle, bounds, &[], state, services, store, &publisher)?;
+    let mut explored = None;
+    let mut authorize = |minted: &ContinuationHandle, states: u64| {
+        explored = Some(states);
+        super::admission::admits_derived(call.grant, Derived::Instance(minted.as_str()))
+    };
+    let ran = advance(
+        &handle,
+        bounds,
+        &[],
+        state,
+        services,
+        store,
+        &publisher,
+        &mut authorize,
+    );
+    if let Err(fault) = ran {
+        // A run refused on its minted continuation leaves no task: the entry this call
+        // created is removed, and the work is charged to the presenting capability.
+        if fault.derived_denial {
+            state.tasks_mut().remove(&handle);
+            state
+                .tasks_mut()
+                .refuse_run(refused_key, explored.unwrap_or_default());
+        }
+        return Err(fault);
+    }
 
     let entry = state.tasks().get(&handle).ok_or_else(Fault::denied)?;
     Ok(started(entry))
@@ -1378,8 +1467,14 @@ fn cached(entry: &TaskEntry, models: &ModelCatalog) -> Result<Cached, Fault> {
 /// [`ErrorCode::CapabilityDenied`] for a task this daemon does not hold — X2 again — and
 /// [`ErrorCode::BudgetExhausted`] for a task whose budget could not hold the model's initial
 /// states, which is the one outcome with no result to report and no continuation to resume.
-fn result(handle: &TaskHandle, state: &DaemonState, awaiting: bool) -> Result<Effect, Fault> {
+fn result(
+    call: &Call<'_>,
+    handle: &TaskHandle,
+    state: &DaemonState,
+    awaiting: bool,
+) -> Result<Effect, Fault> {
     let entry = state.tasks().get(handle).ok_or_else(Fault::denied)?;
+    super::task::task_scope(call, entry)?;
     let campaign = campaign_of(entry, state.models())?;
     let (result, verdict) = verification_result(entry, campaign.as_deref())?;
     let payload = if awaiting {

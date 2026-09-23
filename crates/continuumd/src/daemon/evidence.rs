@@ -136,15 +136,18 @@ use continuum_value::assurance::ValidationBasis;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{Published, ReferenceStore};
 
+use super::admission::{Derived, InstanceScope};
 use super::family::{
     Arguments, Call, Effect, ErrorData, Fault, OperationFamily, Payload, ScopeClaim,
 };
+use super::provisioning::class_of;
 use super::state::{DaemonState, EvidenceEdge, EvidenceNode, StatusWrite};
 use super::{Services, identity};
 use crate::protocol::envelope::{
     AssuranceEnvelope, CertificateRejection, EnvelopeDimension, Omission, ProducedDimension,
     Redacted, SemanticVerdictValue, UnsupportedDimension, Verdict,
 };
+use crate::protocol::handshake::CapabilityDescriptor;
 use crate::protocol::operations::evidence::{
     EvidenceGetRequest, EvidenceGetResponse, EvidenceLinkRequest, EvidenceLinkResponse,
     EvidenceQueryRequest, EvidenceQueryResponse, EvidenceSubscribeRequest,
@@ -327,21 +330,32 @@ impl OperationFamily for EvidenceFamily {
     }
 
     fn scope(&self, arguments: &Arguments) -> ScopeClaim {
-        let claim = |classes: Vec<&'static str>| ScopeClaim {
+        let claim = |instances: Vec<String>| ScopeClaim {
             snapshots: Vec::new(),
             intents: Vec::new(),
-            classes,
+            classes: vec![ArtifactClass::Evidence.token()],
+            instances,
         };
-        let evidence = ArtifactClass::Evidence.token();
+        let named = |handle: &EvidenceHandle| vec![handle.as_str().to_owned()];
+        let roots = |query: &EvidenceQuery| {
+            query
+                .roots
+                .value()
+                .into_iter()
+                .flatten()
+                .map(|root| root.as_str().to_owned())
+                .collect()
+        };
         match arguments {
-            Arguments::EvidenceGet(_)
-            | Arguments::EvidenceVerify(_)
-            | Arguments::EvidenceLink(_) => claim(vec![evidence]),
-            // A query names no instance it is authorized *against* — its `roots` are where
-            // a traversal starts, not artifacts it is entitled to — so the class is the
-            // whole scope claim, and every node it would return is filtered against the
-            // descriptor again in `visible`.
-            Arguments::EvidenceQuery(_) | Arguments::EvidenceSubscribe(_) => claim(vec![evidence]),
+            Arguments::EvidenceGet(request) => claim(named(&request.evidence)),
+            Arguments::EvidenceVerify(request) => claim(named(&request.evidence)),
+            Arguments::EvidenceLink(request) => claim(named(&request.subject)),
+            // A query's `roots` are named instances, so an instance-scoped capability is
+            // refused a root outside its scope here. What the traversal then *reaches* is
+            // not named by the request, and is bounded after admission by [`scoped`]
+            // (`rule capability.instance_scope`, C1).
+            Arguments::EvidenceQuery(request) => claim(roots(&request.query)),
+            Arguments::EvidenceSubscribe(request) => claim(roots(&request.scope)),
             _ => ScopeClaim::default(),
         }
     }
@@ -354,10 +368,10 @@ impl OperationFamily for EvidenceFamily {
         store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
-            Arguments::EvidenceGet(request) => get(request, state),
-            Arguments::EvidenceQuery(request) => query(request, state),
+            Arguments::EvidenceGet(request) => get(call, request, state),
+            Arguments::EvidenceQuery(request) => query(request, state, call.grant),
             Arguments::EvidenceVerify(request) => self.verify(request, state, services),
-            Arguments::EvidenceSubscribe(request) => subscribe(request, state),
+            Arguments::EvidenceSubscribe(request) => subscribe(request, state, call.grant),
             Arguments::EvidenceLink(request) => link(call, request, state, services, store),
             // Unreachable: the dispatcher checked shape agreement against the registry
             // before routing. A typed refusal rather than an `unreachable!`, because a
@@ -372,11 +386,37 @@ impl OperationFamily for EvidenceFamily {
 
 // --- evidence.get -----------------------------------------------------------------------
 
-fn get(request: &EvidenceGetRequest, state: &DaemonState) -> Result<Effect, Fault> {
+/// Every handle a record names beyond its own — an edge's `from` and `to`, and each
+/// provenance input that is spelled as a handle — decided against the grant before the
+/// record is reported (`rule capability.instance_scope`, the derived-handle clause;
+/// cr-3hcpn4). An input that carries no class prefix — a note identifier, a content
+/// identity — names no artifact instance and is not a handle.
+fn record_scope<'handle>(
+    call: &Call<'_>,
+    handles: impl IntoIterator<Item = &'handle str>,
+    inputs: &[String],
+) -> Result<(), Fault> {
+    for named in handles {
+        call.derived(Derived::Instance(named))?;
+    }
+    for input in inputs {
+        if class_of(input).is_some() {
+            call.derived(Derived::Instance(input))?;
+        }
+    }
+    Ok(())
+}
+
+fn get(
+    call: &Call<'_>,
+    request: &EvidenceGetRequest,
+    state: &DaemonState,
+) -> Result<Effect, Fault> {
     // One handle class names both halves of the graph (`^ev_[A-Za-z0-9_-]+$` is the pattern
     // of `node_id` *and* `edge_id`), so this operation resolves either. The edge arm is
     // reachable as of protocol 3.3, when `evidence.link` gave the graph its first edges.
     if let Some(edge) = state.evidence_edge(&request.evidence) {
+        record_scope(call, [edge.from.as_str(), edge.to.as_str()], &edge.inputs)?;
         return Ok(Effect::new(
             Payload::EvidenceGet(EvidenceGetResponse {
                 node: Nullable::Null,
@@ -397,6 +437,7 @@ fn get(request: &EvidenceGetRequest, state: &DaemonState) -> Result<Effect, Faul
     let node = state
         .evidence(&request.evidence)
         .ok_or_else(Fault::denied)?;
+    record_scope(call, [], &node.inputs)?;
 
     // `inline` is "include bounded inline content", and this daemon has no bounded-content
     // channel in the response body — `node` and `edge` are the node record itself — so a
@@ -560,12 +601,34 @@ fn redacted_json(redaction: &Redacted) -> Json {
 
 // --- evidence.query ---------------------------------------------------------------------
 
-fn query(request: &EvidenceQueryRequest, state: &DaemonState) -> Result<Effect, Fault> {
-    let (nodes, edges) = selected(&request.query, state);
+fn query(
+    request: &EvidenceQueryRequest,
+    state: &DaemonState,
+    grant: &CapabilityDescriptor,
+) -> Result<Effect, Fault> {
+    let scope = InstanceScope::of(grant);
+    let (nodes, edges) = scoped(selected(&request.query, state, &scope), &scope);
     Ok(Effect::new(
         Payload::EvidenceQuery(EvidenceQueryResponse { nodes, edges }),
         Nullable::Null,
     ))
+}
+
+/// A selection bounded by the caller's instance scope (`rule capability.instance_scope`, C1).
+///
+/// A query or a subscription *selects* artifacts it did not name, so admission cannot have
+/// decided them. An `ev_` outside an instance-scoped capability's list is left out, with no
+/// per-instance trace: a trace would say that the instance exists (X2). A capability that
+/// does not instance-scope `ev` gets the selection unchanged, which is the 3.6 answer.
+fn scoped(
+    (nodes, edges): (Vec<EvidenceHandle>, Vec<EvidenceHandle>),
+    scope: &InstanceScope<'_>,
+) -> (Vec<EvidenceHandle>, Vec<EvidenceHandle>) {
+    let keep = |handle: &EvidenceHandle| scope.admits(handle.as_str());
+    (
+        nodes.into_iter().filter(keep).collect(),
+        edges.into_iter().filter(keep).collect(),
+    )
 }
 
 /// Every node and edge one [`EvidenceQuery`] selects, in the graph's own order.
@@ -579,8 +642,9 @@ fn query(request: &EvidenceQueryRequest, state: &DaemonState) -> Result<Effect, 
 fn selected(
     query: &EvidenceQuery,
     state: &DaemonState,
+    scope: &InstanceScope<'_>,
 ) -> (Vec<EvidenceHandle>, Vec<EvidenceHandle>) {
-    let reach = Reach::of(query, state);
+    let reach = Reach::of(query, state, scope);
     let nodes = state
         .evidence_nodes()
         .filter(|(handle, node)| matches(query, &reach, handle, node))
@@ -633,7 +697,13 @@ enum Reach {
 
 impl Reach {
     /// Walk the graph from `query`'s roots, breadth-first, recording each artifact's depth.
-    fn of(query: &EvidenceQuery, state: &DaemonState) -> Self {
+    ///
+    /// The walk passes only through artifacts `scope` admits: an edge is walked only when it
+    /// and both its endpoints are in scope, and a root edge seeds its endpoints only when it
+    /// is. So which in-scope artifacts a traversal reaches never depends on one outside the
+    /// scope, and the answer says nothing about the out-of-scope part of the graph
+    /// (`rule capability.instance_scope`, C1, X2; cr-3hcpn4).
+    fn of(query: &EvidenceQuery, state: &DaemonState, scope: &InstanceScope<'_>) -> Self {
         let roots = match &query.roots {
             Optional::Present(roots) if !roots.is_empty() => roots,
             _ => return Self::Whole,
@@ -646,7 +716,11 @@ impl Reach {
         // Adjacency is built once, from the edge set, and is symmetric by construction:
         // clause 1 is a property of this map rather than a branch in the loop below.
         let mut incident: BTreeMap<&EvidenceHandle, Vec<&EvidenceHandle>> = BTreeMap::new();
-        for (_, edge) in state.evidence_edges() {
+        let admitted = |handle: &EvidenceHandle| scope.admits(handle.as_str());
+        for (handle, edge) in state.evidence_edges() {
+            if !(admitted(handle) && admitted(&edge.from) && admitted(&edge.to)) {
+                continue;
+            }
             incident.entry(&edge.from).or_default().push(&edge.to);
             incident.entry(&edge.to).or_default().push(&edge.from);
         }
@@ -658,7 +732,10 @@ impl Reach {
             // naming a node, or a handle the graph does not hold, seeds only itself — an
             // unheld handle then reaches nothing, which is a refusal to invent a
             // neighborhood around an artifact that does not exist.
-            if let Some(edge) = state.evidence_edge(root) {
+            if let Some(edge) = state
+                .evidence_edge(root)
+                .filter(|edge| admitted(&edge.from) && admitted(&edge.to))
+            {
                 for endpoint in [&edge.from, &edge.to] {
                     if depth.insert(endpoint.clone(), 0).is_none() {
                         frontier.push(endpoint.clone());
@@ -840,17 +917,37 @@ fn matches(
 /// daemon that remembered which client had read how far would be holding exactly the session
 /// state RFC 0026 says it holds none of. Dropping a connection loses the cursor and no
 /// artifact.
-fn subscribe(request: &EvidenceSubscribeRequest, state: &DaemonState) -> Result<Effect, Fault> {
+fn subscribe(
+    request: &EvidenceSubscribeRequest,
+    state: &DaemonState,
+    grant: &CapabilityDescriptor,
+) -> Result<Effect, Fault> {
     // One list on the wire: `frontier: list<EvidenceHandle>`, and the handle class names
     // both halves of the graph. Nodes before edges, each in the graph's own order, so two
     // calls over one scope answer identically.
-    let (mut frontier, edges) = selected(&request.scope, state);
+    let instance_scope = InstanceScope::of(grant);
+    let (mut frontier, edges) = scoped(
+        selected(&request.scope, state, &instance_scope),
+        &instance_scope,
+    );
     frontier.extend(edges);
     Ok(Effect::new(
         Payload::EvidenceSubscribe(EvidenceSubscribeResponse { frontier }),
         // `evidence.subscribe` declares no `verdict` clause, so its result carries none.
         Nullable::Null,
     ))
+}
+
+/// Whether `grant` admits the artifact `event` names: its edge for an edge delta, its node
+/// otherwise. The instance half of [`in_scope`], exposed so delivery can count what the
+/// instance scope withheld (cr-3hcpn4).
+#[must_use]
+pub fn admits_event(event: &EvidenceEvent, grant: &InstanceScope<'_>) -> bool {
+    let named = match event.kind {
+        EvidenceEventKind::EdgePublished => event.edge.value(),
+        _ => event.node.value(),
+    };
+    named.is_none_or(|handle| grant.admits(handle.as_str()))
 }
 
 /// Whether one committed delta is in a subscription's declared scope
@@ -889,9 +986,21 @@ fn subscribe(request: &EvidenceSubscribeRequest, state: &DaemonState) -> Result<
 /// committed after a delta can bring a later delta inside a scope, and does not retroactively
 /// deliver an earlier one. A subscription is a cursor, and re-reading is what recovers the
 /// difference.
+///
+/// `grant` is the subscribing capability's instance scope as it stands at delivery, indexed
+/// once per pass by the caller, so a delta outside it is not delivered, by the same predicate that bounds the frontier
+/// ([`scoped`]; `rule capability.instance_scope`).
 #[must_use]
-pub fn in_scope(scope: &EvidenceQuery, event: &EvidenceEvent, state: &DaemonState) -> bool {
-    let reach = Reach::of(scope, state);
+pub fn in_scope(
+    scope: &EvidenceQuery,
+    event: &EvidenceEvent,
+    state: &DaemonState,
+    grant: &InstanceScope<'_>,
+) -> bool {
+    if !admits_event(event, grant) {
+        return false;
+    }
+    let reach = Reach::of(scope, state, grant);
     match event.kind {
         EvidenceEventKind::NodePublished
         | EvidenceEventKind::StatusTransition
@@ -1539,6 +1648,11 @@ fn link(
     //    with, so a check recorded twice converges rather than forking the graph.
     let receipt_handle = node_identity(services, &request.receipt, &request.checker_profile)
         .map_err(|_| identity_unavailable())?;
+    // The receipt node is not named by the request, and it may already be held: this call
+    // then reads its kind and appends to it. It is decided by the grant first, held or not,
+    // so the answer does not say which (X2; `rule capability.instance_scope`, the
+    // derived-handle clause; cr-3hcpn4).
+    call.derived(Derived::Instance(receipt_handle.as_str()))?;
     if let Some(held) = state.evidence(&receipt_handle) {
         // The identity is a function of (content, profile) and nothing else, so it can
         // already name a node of another kind. RFC 0038 D1 says what a check edge may point
@@ -1564,6 +1678,7 @@ fn link(
     }
     let edge_handle = edge_identity(services, &relation, &request.subject, &receipt_handle)
         .map_err(|_| identity_unavailable())?;
+    call.derived(Derived::Instance(edge_handle.as_str()))?;
 
     // 6a. Sign the receipt's canonical bytes before anything is published (plan §18.6,
     //     ADR-0054, bn-1hape). A deployment with a signing identity that is no longer active

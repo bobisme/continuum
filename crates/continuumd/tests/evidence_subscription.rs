@@ -121,6 +121,7 @@ fn grant(
         expires_at: Nullable::Null,
         delegation_depth: 3,
         profile,
+        instances: Optional::Absent,
     }
 }
 
@@ -149,10 +150,12 @@ fn negotiated(encoding: Encoding) -> Negotiated {
 }
 
 /// The daemon behind every connection here: the two families that write the graph, and the
-/// four capabilities the writes need.
-fn daemon(encoding: Encoding) -> Daemon {
+/// four capabilities the writes need, serving a connection that settled on `connection`.
+/// `extra` capabilities are provisioned at build time under `cap_root`, so the publication
+/// store knows them and they can publish.
+fn daemon_with(encoding: Encoding, connection: &str, extra: Vec<CapabilityDescriptor>) -> Daemon {
     let root = Some(cap("cap_root"));
-    Daemon::builder(Blake3Identity, negotiated(encoding), cap("cap_root"))
+    let mut builder = Daemon::builder(Blake3Identity, negotiated(encoding), cap(connection))
         .capability(
             {
                 let mut descriptor = grant(
@@ -194,12 +197,15 @@ fn daemon(encoding: Encoding) -> Daemon {
                 AuthorityLevel::Execute,
                 Optional::Present(traced(&[DataGrant::ProductionTrace])),
             ),
-            root,
+            root.clone(),
         )
         .family(EvidenceFamily::new())
         .family(ObserveFamily)
-        .now(now())
-        .build()
+        .now(now());
+    for descriptor in extra {
+        builder = builder.capability(descriptor, root.clone());
+    }
+    builder.build()
 }
 
 /// One connection, plus the two staged traces its ingests reference.
@@ -211,7 +217,17 @@ struct World {
 }
 
 fn world(encoding: Encoding) -> World {
-    let mut daemon = daemon(encoding);
+    world_on(encoding, "cap_root")
+}
+
+/// [`world`], on a connection whose capability is `connection`.
+fn world_on(encoding: Encoding, connection: &str) -> World {
+    world_with(encoding, connection, Vec::new())
+}
+
+/// [`world_on`], with `extra` capabilities provisioned at build time.
+fn world_with(encoding: Encoding, connection: &str, extra: Vec<CapabilityDescriptor>) -> World {
+    let mut daemon = daemon_with(encoding, connection, extra);
     let mut stage = |path: &str, content: &str| {
         daemon
             .state_mut()
@@ -1236,4 +1252,776 @@ fn a_second_drain_yields_nothing() {
     );
     assert!(world.server.deliver().expect("delivery encodes").is_empty());
     assert!(world.server.deliver().expect("delivery encodes").is_empty());
+}
+
+// =========================================================================================
+// negative: a subscription does not outlive its standing (cr-3hcpn4)
+// =========================================================================================
+
+mod standing {
+    //! A subscription outlives the request that opened it, so delivery re-decides T4 for the
+    //! subscribing capability before every pass: registered, bound to its actor, unexpired
+    //! at the daemon's latest time reading, and descended from the connection's capability
+    //! through hops that all still exist and still narrow. Each test opens a subscription
+    //! under a two-hop delegate (`cap_root` -> `cap_reader` -> `cap_sub`), shows one delta
+    //! delivered as the control, changes the chain *between a commit and its delivery*, and
+    //! shows the next delta is not delivered and the subscription is closed with its typed
+    //! reason.
+
+    use continuumd::daemon::OperationRequest;
+    use continuumd::transport::SubscriptionClosed;
+
+    use super::{
+        Arguments, AuthorityLevel, Encoding, EvidenceSubscribeRequest, Json, Nullable,
+        ObserveIngestRequest, Optional, PROFILE, ResultStatus, Timestamp, World, cap, empty_scope,
+        envelope, exchange, grant, result, send, started, world,
+    };
+
+    /// Register `cap_sub` under `cap_reader`, subscribe with it, and deliver one delta.
+    fn subscribed(expires_at: Option<&str>) -> World {
+        let mut world = world(Encoding::CanonicalJson);
+        let mut sub = grant(
+            "cap_sub",
+            "agent:sub",
+            AuthorityLevel::Read,
+            Optional::Absent,
+        );
+        sub.delegation_depth = 2;
+        if let Some(at) = expires_at {
+            sub.expires_at = Nullable::Value(Timestamp::new(at).expect("a timestamp"));
+        }
+        world
+            .server
+            .daemon_mut()
+            .state_mut()
+            .register_capability(sub, Some(cap("cap_reader")))
+            .expect("a well-formed delegate");
+        send::<Json>(
+            &mut world,
+            &envelope("evidence.subscribe", "agent:sub", "cap_sub", "req_sub"),
+            &Arguments::EvidenceSubscribe(EvidenceSubscribeRequest {
+                scope: empty_scope(),
+            }),
+        );
+        let opened = exchange::<Json>(&mut world, "evidence.subscribe");
+        assert_eq!(result(&opened).status, ResultStatus::Ok);
+
+        // The control: a delta committed now is delivered.
+        let trace = world.trace.clone();
+        commit(&mut world, &trace, "req_commit_control", "idem-control");
+        assert_eq!(
+            world.server.deliver().expect("delivery encodes").len(),
+            1,
+            "the delegate's subscription delivers while its chain stands"
+        );
+        world
+    }
+
+    /// Commit an ingest without delivering, so the chain can change in between.
+    fn commit(
+        world: &mut World,
+        trace: &continuumd::protocol::scalar::Commitment,
+        request: &str,
+        key: &str,
+    ) {
+        let outcome = world.server.daemon_mut().dispatch(&OperationRequest {
+            envelope: started(
+                envelope("observe.ingest", "agent:observer", "cap_observer", request),
+                key,
+            ),
+            arguments: Arguments::ObserveIngest(ObserveIngestRequest {
+                trace: trace.clone(),
+                instrumentation_profile: PROFILE.to_owned(),
+            }),
+        });
+        assert_eq!(outcome.error_code(), None, "the ingest commits");
+    }
+
+    fn assert_closed(world: &mut World) {
+        let other = world.other.clone();
+        commit(world, &other, "req_commit_after", "idem-after");
+        assert!(
+            world.server.deliver().expect("delivery encodes").is_empty(),
+            "a subscription whose standing is gone delivers nothing"
+        );
+        assert_eq!(world.server.subscriptions(), 0, "and it is closed");
+        assert_eq!(
+            world.server.closed_subscriptions(),
+            [SubscriptionClosed::StandingLost],
+            "with its typed reason"
+        );
+        assert_eq!(world.server.suppressed_deliveries().standing_lost, 1);
+    }
+
+    /// Revoking the parent revokes the delegate (D8), for delivery as for requests.
+    #[test]
+    fn revoking_the_parent_stops_delivery_to_the_delegate() {
+        let mut world = subscribed(None);
+        world
+            .server
+            .daemon_mut()
+            .state_mut()
+            .revoke_capability(&cap("cap_reader"));
+        assert!(
+            world
+                .server
+                .daemon()
+                .state()
+                .grant(&cap("cap_sub"))
+                .is_some(),
+            "the leaf itself is still registered: only the chain is broken"
+        );
+        assert_closed(&mut world);
+    }
+
+    /// An expiry passed between commit and delivery, judged at the deployment's new
+    /// reading (INV-005: the daemon reads no clock of its own).
+    #[test]
+    fn an_expiry_passed_before_delivery_stops_it() {
+        let mut world = subscribed(Some("2026-08-02T00:00:00.000Z"));
+        world
+            .server
+            .daemon_mut()
+            .set_now(Timestamp::new("2026-08-03T00:00:00.000Z").expect("a timestamp"));
+        assert_closed(&mut world);
+    }
+
+    /// A parent re-provisioned narrower than its delegate no longer admits it.
+    #[test]
+    fn a_parent_narrowed_below_the_delegate_stops_delivery() {
+        let mut world = subscribed(None);
+        let mut narrowed = grant(
+            "cap_reader",
+            "agent:reader",
+            AuthorityLevel::Read,
+            Optional::Absent,
+        );
+        narrowed.artifact_classes = vec!["ws".to_owned()];
+        world
+            .server
+            .daemon_mut()
+            .state_mut()
+            .register_capability(narrowed, Some(cap("cap_root")))
+            .expect("a well-formed parent");
+        assert_closed(&mut world);
+    }
+
+    /// The same token re-registered narrower is decided at the next delivery by the whole
+    /// admission of `evidence.subscribe`, not only its standing (cr-3hcpn4): a grant that
+    /// lost the `ev` class, or whose profile now denies the operation, is closed before a
+    /// frame. The control re-registers it unchanged and keeps delivering.
+    #[test]
+    fn a_grant_re_registered_narrower_closes_its_subscription() {
+        enum Narrowing {
+            Unchanged,
+            ClassRemoved,
+            OperationDenied,
+        }
+        for narrowing in [
+            Narrowing::Unchanged,
+            Narrowing::ClassRemoved,
+            Narrowing::OperationDenied,
+        ] {
+            let mut world = subscribed(None);
+            let mut replaced = grant(
+                "cap_sub",
+                "agent:sub",
+                AuthorityLevel::Read,
+                Optional::Absent,
+            );
+            replaced.delegation_depth = 2;
+            match narrowing {
+                Narrowing::Unchanged => {}
+                Narrowing::ClassRemoved => replaced.artifact_classes = vec!["ws".to_owned()],
+                Narrowing::OperationDenied => {
+                    replaced.profile =
+                        Optional::Present(continuumd::protocol::handshake::CapabilityProfile {
+                            privileged_operations: Vec::new(),
+                            denied_operations: vec![
+                                continuumd::protocol::scalar::OperationName::new(
+                                    "evidence.subscribe",
+                                )
+                                .expect("an operation"),
+                            ],
+                            data_grants: Vec::new(),
+                            cross_principal_sharing: false,
+                        });
+                }
+            }
+            let unchanged = matches!(narrowing, Narrowing::Unchanged);
+            world
+                .server
+                .daemon_mut()
+                .state_mut()
+                .register_capability(replaced, Some(cap("cap_reader")))
+                .expect("a well-formed delegate");
+            let other = world.other.clone();
+            commit(&mut world, &other, "req_commit_after", "idem-after");
+            let frames = world.server.deliver().expect("delivery encodes");
+            assert_eq!(
+                frames.len(),
+                usize::from(unchanged),
+                "a frame only for the control"
+            );
+            assert_eq!(world.server.subscriptions(), usize::from(unchanged));
+            assert_eq!(
+                world.server.suppressed_deliveries().standing_lost,
+                u64::from(!unchanged)
+            );
+        }
+    }
+
+    /// A delegated grant used as the connection's own capability is held to its stored
+    /// chain too (D8, R1; cr-3hcpn4). `cap_observer` is a child of `cap_root` and is the
+    /// connection capability here. After its parent is revoked, re-provisioned narrower,
+    /// or it expires, a request on the connection is denied, a delta is not delivered and
+    /// the subscription is closed, and a new handshake presenting it is refused.
+    #[test]
+    fn a_delegated_connection_capability_does_not_outlive_its_parent() {
+        use continuumd::daemon::capability::ConnectionPolicy;
+        use continuumd::protocol::handshake::{ClientHello, ServerLimits, VersionRange};
+        use continuumd::protocol::scalar::{ByteCount, DurationMs};
+
+        enum Change {
+            RevokeParent,
+            NarrowParent,
+            Expire,
+        }
+        for change in [Change::RevokeParent, Change::NarrowParent, Change::Expire] {
+            let mut world = super::world_on(Encoding::CanonicalJson, "cap_observer");
+            if matches!(change, Change::Expire) {
+                let mut expiring = grant(
+                    "cap_observer",
+                    "agent:observer",
+                    AuthorityLevel::Execute,
+                    Optional::Present(super::traced(&[super::DataGrant::ProductionTrace])),
+                );
+                expiring.expires_at =
+                    Nullable::Value(Timestamp::new("2026-08-02T00:00:00.000Z").expect("a time"));
+                world
+                    .server
+                    .daemon_mut()
+                    .state_mut()
+                    .register_capability(expiring, Some(cap("cap_root")))
+                    .expect("a well-formed delegate");
+            }
+            send::<Json>(
+                &mut world,
+                &envelope(
+                    "evidence.subscribe",
+                    "agent:observer",
+                    "cap_observer",
+                    "req_sub",
+                ),
+                &Arguments::EvidenceSubscribe(EvidenceSubscribeRequest {
+                    scope: empty_scope(),
+                }),
+            );
+            let opened = exchange::<Json>(&mut world, "evidence.subscribe");
+            assert_eq!(
+                result(&opened).status,
+                ResultStatus::Ok,
+                "the delegate's own connection"
+            );
+            let trace = world.trace.clone();
+            commit(&mut world, &trace, "req_commit_control", "idem-control");
+            assert_eq!(world.server.deliver().expect("delivery encodes").len(), 1);
+
+            match change {
+                Change::RevokeParent => world
+                    .server
+                    .daemon_mut()
+                    .state_mut()
+                    .revoke_capability(&cap("cap_root")),
+                Change::NarrowParent => {
+                    let mut narrowed = grant(
+                        "cap_root",
+                        "service:continuumd",
+                        AuthorityLevel::Promote,
+                        Optional::Present(super::traced(&[super::DataGrant::ProductionTrace])),
+                    );
+                    narrowed.delegation_depth = 4;
+                    narrowed.artifact_classes = vec!["ws".to_owned()];
+                    world
+                        .server
+                        .daemon_mut()
+                        .state_mut()
+                        .register_capability(narrowed, None)
+                        .expect("a well-formed root");
+                }
+                Change::Expire => world
+                    .server
+                    .daemon_mut()
+                    .set_now(Timestamp::new("2026-08-03T00:00:00.000Z").expect("a time")),
+            }
+
+            // The next request on the connection is denied.
+            let other = world.other.clone();
+            let denied = world.server.daemon_mut().dispatch(&OperationRequest {
+                envelope: started(
+                    envelope(
+                        "observe.ingest",
+                        "agent:observer",
+                        "cap_observer",
+                        "req_after",
+                    ),
+                    "idem-after",
+                ),
+                arguments: Arguments::ObserveIngest(ObserveIngestRequest {
+                    trace: other,
+                    instrumentation_profile: PROFILE.to_owned(),
+                }),
+            });
+            assert_eq!(
+                denied.error_code(),
+                Some(super::ErrorCode::CapabilityDenied)
+            );
+
+            // A delta committed by the root's own authority is not delivered.
+            if matches!(change, Change::Expire) {
+                // The root still stands; commit under a root-connection daemon is not
+                // reachable from this connection, so the log is unchanged and the pass
+                // below decides only the subscription's standing.
+            }
+            assert!(world.server.deliver().expect("delivery encodes").is_empty());
+            assert_eq!(world.server.subscriptions(), 0);
+            assert_eq!(
+                world.server.closed_subscriptions(),
+                [SubscriptionClosed::StandingLost]
+            );
+
+            // A new handshake presenting the delegate is refused.
+            let policy = ConnectionPolicy::new(
+                vec![super::version()],
+                continuum_value::epoch::ProtocolWindow::new(3),
+                continuumd::protocol::registry::ENCODINGS.to_vec(),
+                ServerLimits {
+                    idempotency_retention_ms: DurationMs::new(86_400_000),
+                    max_page_size: 100,
+                    max_result_bytes: ByteCount::new(1_048_576),
+                    max_concurrent_tasks: 4,
+                },
+                "continuumd-evidence-subscription".to_owned(),
+            );
+            let hello = ClientHello {
+                protocol_versions: VersionRange {
+                    low: super::version(),
+                    high: super::version(),
+                },
+                encodings: vec![Encoding::CanonicalJson],
+                client: "continuumd-evidence-subscription".to_owned(),
+                actor: super::who("agent:observer"),
+                capability: cap("cap_observer"),
+                features: Optional::Absent,
+            };
+            assert!(
+                world.server.daemon().welcome(&policy, &hello).is_err(),
+                "a delegate whose chain is gone is not welcomed"
+            );
+        }
+    }
+}
+
+// =========================================================================================
+// the derived-handle sweep: evidence and observe (cr-3hcpn4)
+// =========================================================================================
+
+mod derived {
+    //! Every handle an evidence or observe operation reaches without the request naming it is
+    //! decided against the grant before it is used. Each test runs one table: two grants that
+    //! differ only in whether the derived handle is in scope. The out-of-scope grant is refused
+    //! `CapabilityDenied` and leaves no trace — nothing appended, nothing published — and the
+    //! in-scope grant is served. The handles are content identities, so they are learned once
+    //! on a scratch world and are the same on the world under test.
+
+    use continuumd::daemon::OperationRequest;
+    use continuumd::daemon::family::Payload;
+    use continuumd::protocol::operations::evidence::{
+        EvidenceGetRequest, EvidenceLinkRequest, EvidenceQueryRequest, EvidenceSubscribeRequest,
+    };
+
+    use super::{
+        Arguments, AuthorityLevel, CapabilityDescriptor, DataGrant, Encoding, ErrorCode,
+        EvidenceHandle, EvidenceQuery, Json, ObserveIngestRequest, Optional, PROFILE, World, cap,
+        empty_scope, envelope, grant, ingest, ingested, link, started, traced, world, world_with,
+    };
+
+    /// A grant under `cap_root`, instance-scoped to `listed`.
+    fn scoped(
+        capability: &str,
+        actor: &str,
+        level: AuthorityLevel,
+        listed: &[&str],
+    ) -> CapabilityDescriptor {
+        let mut descriptor = grant(
+            capability,
+            actor,
+            level,
+            Optional::Present(traced(&[DataGrant::ProductionTrace])),
+        );
+        descriptor.delegation_depth = 2;
+        descriptor.instances = Optional::Present(
+            listed
+                .iter()
+                .map(|text| {
+                    continuumd::protocol::scalar::ArtifactHandle::new(text).expect("a handle")
+                })
+                .collect(),
+        );
+        descriptor
+    }
+
+    /// The node an ingest of the first trace lands on, and the receipt node and edge a link
+    /// of the second trace to it lands on.
+    struct Learned {
+        node: EvidenceHandle,
+        receipt: EvidenceHandle,
+        edge: EvidenceHandle,
+    }
+
+    fn linked(world: &mut World) -> Learned {
+        let trace = world.trace.clone();
+        let other = world.other.clone();
+        let node = ingested(&ingest::<Json>(world, &trace, "req_ingest", "idem-ingest"));
+        let frames = link::<Json>(world, &node, &other, "req_link", "idem-link");
+        let (edge, receipt) = frames
+            .iter()
+            .find_map(|frame| match frame {
+                super::ServerFrame::Result(_, payload) => match payload.as_ref() {
+                    Payload::EvidenceLink(body) => Some((body.edge.clone(), body.receipt.clone())),
+                    _ => None,
+                },
+                super::ServerFrame::Event(_) => None,
+            })
+            .expect("the link answers its edge and receipt");
+        Learned {
+            node,
+            receipt,
+            edge,
+        }
+    }
+
+    fn learned() -> Learned {
+        linked(&mut world(Encoding::CanonicalJson))
+    }
+
+    fn register(world: &mut World, descriptor: CapabilityDescriptor) {
+        world
+            .server
+            .daemon_mut()
+            .state_mut()
+            .register_capability(descriptor, Some(cap("cap_root")))
+            .expect("a well-formed delegate");
+    }
+
+    fn get(
+        world: &mut World,
+        capability: &str,
+        actor: &str,
+        evidence: &EvidenceHandle,
+    ) -> continuumd::daemon::OperationOutcome {
+        world.server.daemon_mut().dispatch(&OperationRequest {
+            envelope: envelope("evidence.get", actor, capability, "req_get"),
+            arguments: Arguments::EvidenceGet(EvidenceGetRequest {
+                evidence: evidence.clone(),
+                inline: Optional::Absent,
+            }),
+        })
+    }
+
+    /// `evidence.get` reports an edge's endpoints and a record's handle-spelled provenance
+    /// inputs only when the grant admits them.
+    #[test]
+    fn evidence_get_reports_endpoints_and_provenance_only_in_scope() {
+        let mut world = world(Encoding::CanonicalJson);
+        let handles = linked(&mut world);
+
+        // A node whose provenance names a `task_`, beside the real ones.
+        let mut synthetic = world
+            .server
+            .daemon()
+            .state()
+            .evidence(&handles.node)
+            .expect("the ingested node")
+            .clone();
+        synthetic.inputs = vec!["task_elsewhere".to_owned()];
+        let synthetic_handle = EvidenceHandle::new("ev_synthetic").expect("a handle");
+        world
+            .server
+            .daemon_mut()
+            .state_mut()
+            .append_evidence(synthetic_handle.clone(), synthetic);
+
+        let edge = handles.edge.as_str();
+        let node = handles.node.as_str();
+        let receipt = handles.receipt.as_str();
+        // (capability, the handle read, what the grant lists, served?)
+        let table: [(&str, &EvidenceHandle, Vec<&str>, bool); 4] = [
+            ("cap_edgeout", &handles.edge, vec![edge, node], false),
+            ("cap_edgein", &handles.edge, vec![edge, node, receipt], true),
+            ("cap_provout", &synthetic_handle, vec!["task_mine"], false),
+            (
+                "cap_provin",
+                &synthetic_handle,
+                vec!["task_elsewhere"],
+                true,
+            ),
+        ];
+        for (capability, read, listed, served) in table {
+            register(
+                &mut world,
+                scoped(capability, "agent:reader", AuthorityLevel::Read, &listed),
+            );
+            let outcome = get(&mut world, capability, "agent:reader", read);
+            if served {
+                assert_eq!(outcome.error_code(), None, "{capability}");
+                assert!(matches!(outcome.payload, Payload::EvidenceGet(_)));
+            } else {
+                assert_eq!(
+                    outcome.error_code(),
+                    Some(ErrorCode::CapabilityDenied),
+                    "{capability}"
+                );
+                assert_eq!(outcome.payload, Payload::None, "{capability}: no record");
+            }
+        }
+    }
+
+    /// `evidence.link` decides the receipt node and the edge it would append before any
+    /// lookup, and `observe.ingest` decides the node it would append.
+    #[test]
+    fn link_and_ingest_append_only_derived_nodes_and_edges_in_scope() {
+        let handles = learned();
+        let (node, receipt, edge) = (
+            handles.node.as_str(),
+            handles.receipt.as_str(),
+            handles.edge.as_str(),
+        );
+        let mut world = world_with(
+            Encoding::CanonicalJson,
+            "cap_root",
+            vec![
+                scoped(
+                    "cap_ingestout",
+                    "agent:observer",
+                    AuthorityLevel::Execute,
+                    &["ev_elsewhere"],
+                ),
+                scoped(
+                    "cap_ingestin",
+                    "agent:observer",
+                    AuthorityLevel::Execute,
+                    &[node],
+                ),
+                scoped(
+                    "cap_linkout",
+                    "service:kernel-core",
+                    AuthorityLevel::Execute,
+                    &[node],
+                ),
+                scoped(
+                    "cap_linknoreceipt",
+                    "service:kernel-core",
+                    AuthorityLevel::Execute,
+                    &[node, edge],
+                ),
+                scoped(
+                    "cap_linknoedge",
+                    "service:kernel-core",
+                    AuthorityLevel::Execute,
+                    &[node, receipt],
+                ),
+                scoped(
+                    "cap_linkin",
+                    "service:kernel-core",
+                    AuthorityLevel::Execute,
+                    &[node, receipt, edge],
+                ),
+            ],
+        );
+        let ingest_as = |world: &mut World, capability: &str, key: &str| {
+            let trace = world.trace.clone();
+            world.server.daemon_mut().dispatch(&OperationRequest {
+                envelope: started(
+                    envelope("observe.ingest", "agent:observer", capability, key),
+                    key,
+                ),
+                arguments: Arguments::ObserveIngest(ObserveIngestRequest {
+                    trace,
+                    instrumentation_profile: PROFILE.to_owned(),
+                }),
+            })
+        };
+        let link_as = |world: &mut World, capability: &str, key: &str| {
+            let receipt_trace = world.other.clone();
+            let mut sent = envelope("evidence.link", "service:kernel-core", capability, key);
+            sent.idempotency_key = Optional::Present(key.to_owned());
+            world.server.daemon_mut().dispatch(&OperationRequest {
+                envelope: sent,
+                arguments: Arguments::EvidenceLink(EvidenceLinkRequest {
+                    subject: handles.node.clone(),
+                    receipt: receipt_trace,
+                    checker_profile: "kernel-core/1".to_owned(),
+                }),
+            })
+        };
+        let trace_of = |world: &World| {
+            (
+                world.server.daemon().store_audit().len(),
+                world.server.daemon().state().evidence_events().len(),
+            )
+        };
+
+        // observe.ingest: the node it would append.
+        let before = trace_of(&world);
+        let refused = ingest_as(&mut world, "cap_ingestout", "req_ingest_out");
+        assert_eq!(refused.error_code(), Some(ErrorCode::CapabilityDenied));
+        assert!(
+            world
+                .server
+                .daemon()
+                .state()
+                .evidence(&handles.node)
+                .is_none()
+        );
+        assert_eq!(
+            trace_of(&world),
+            before,
+            "nothing published, nothing appended"
+        );
+        let served = ingest_as(&mut world, "cap_ingestin", "req_ingest_in");
+        assert_eq!(served.error_code(), None);
+        assert!(
+            world
+                .server
+                .daemon()
+                .state()
+                .evidence(&handles.node)
+                .is_some()
+        );
+
+        // evidence.link: the receipt node and the edge it would append, each left out alone.
+        for capability in ["cap_linkout", "cap_linknoreceipt", "cap_linknoedge"] {
+            let before = trace_of(&world);
+            let refused = link_as(&mut world, capability, &format!("req_{capability}"));
+            assert_eq!(
+                refused.error_code(),
+                Some(ErrorCode::CapabilityDenied),
+                "{capability}"
+            );
+            let state = world.server.daemon().state();
+            assert!(state.evidence(&handles.receipt).is_none(), "{capability}");
+            assert!(state.evidence_edge(&handles.edge).is_none(), "{capability}");
+            assert_eq!(
+                trace_of(&world),
+                before,
+                "{capability}: nothing published, nothing appended"
+            );
+        }
+        let served = link_as(&mut world, "cap_linkin", "req_link_in");
+        assert_eq!(served.error_code(), None);
+        assert!(
+            world
+                .server
+                .daemon()
+                .state()
+                .evidence_edge(&handles.edge)
+                .is_some()
+        );
+    }
+
+    /// `evidence.query` and `evidence.subscribe` walk only edges in scope with both
+    /// endpoints, so a node reachable only through an out-of-scope edge is not reached.
+    #[test]
+    fn a_traversal_reaches_nothing_through_an_out_of_scope_edge() {
+        let mut world = world(Encoding::CanonicalJson);
+        let handles = linked(&mut world);
+        let (node, receipt, edge) = (
+            handles.node.as_str(),
+            handles.receipt.as_str(),
+            handles.edge.as_str(),
+        );
+        let scope = EvidenceQuery {
+            roots: Optional::Present(vec![handles.node.clone()]),
+            max_depth: Optional::Present(1),
+            ..empty_scope()
+        };
+        // (capability, what the grant lists, is the receipt reached?)
+        let table = [
+            ("cap_walkout", vec![node, receipt], false),
+            ("cap_walkin", vec![node, receipt, edge], true),
+        ];
+        for (capability, listed, reached) in table {
+            register(
+                &mut world,
+                scoped(capability, "agent:reader", AuthorityLevel::Read, &listed),
+            );
+            let queried = world.server.daemon_mut().dispatch(&OperationRequest {
+                envelope: envelope("evidence.query", "agent:reader", capability, "req_query"),
+                arguments: Arguments::EvidenceQuery(EvidenceQueryRequest {
+                    query: scope.clone(),
+                }),
+            });
+            let (nodes, edges) = match queried.payload {
+                Payload::EvidenceQuery(body) => (body.nodes, body.edges),
+                other => panic!("expected an evidence.query payload, got {other:?}"),
+            };
+            assert!(nodes.contains(&handles.node), "{capability}: the root");
+            assert_eq!(nodes.contains(&handles.receipt), reached, "{capability}");
+            assert_eq!(edges.contains(&handles.edge), reached, "{capability}");
+
+            let subscribed = world.server.daemon_mut().dispatch(&OperationRequest {
+                envelope: envelope("evidence.subscribe", "agent:reader", capability, "req_sub"),
+                arguments: Arguments::EvidenceSubscribe(EvidenceSubscribeRequest {
+                    scope: scope.clone(),
+                }),
+            });
+            let frontier = match subscribed.payload {
+                Payload::EvidenceSubscribe(body) => body.frontier,
+                other => panic!("expected an evidence.subscribe payload, got {other:?}"),
+            };
+            assert_eq!(frontier.contains(&handles.receipt), reached, "{capability}");
+        }
+    }
+
+    /// A delta outside an open subscription's instance scope is withheld and counted, with
+    /// nothing on the wire.
+    #[test]
+    fn a_withheld_delta_is_counted_and_not_sent() {
+        let handles = learned();
+        let mut world = world(Encoding::CanonicalJson);
+        register(
+            &mut world,
+            scoped(
+                "cap_narrow",
+                "agent:reader",
+                AuthorityLevel::Read,
+                &["ev_elsewhere"],
+            ),
+        );
+        super::send::<Json>(
+            &mut world,
+            &envelope(
+                "evidence.subscribe",
+                "agent:reader",
+                "cap_narrow",
+                "req_sub",
+            ),
+            &Arguments::EvidenceSubscribe(EvidenceSubscribeRequest {
+                scope: empty_scope(),
+            }),
+        );
+        let opened = super::exchange::<Json>(&mut world, "evidence.subscribe");
+        assert_eq!(super::result(&opened).status, super::ResultStatus::Ok);
+        let trace = world.trace.clone();
+        let appended = ingest::<Json>(&mut world, &trace, "req_ingest", "idem-ingest");
+        assert_eq!(ingested(&appended), handles.node);
+        assert!(
+            super::deltas(&appended).is_empty(),
+            "the node is outside the scope"
+        );
+        let counted = world.server.suppressed_deliveries();
+        assert_eq!(counted.out_of_scope, 1);
+        assert_eq!(counted.standing_lost, 0);
+    }
 }

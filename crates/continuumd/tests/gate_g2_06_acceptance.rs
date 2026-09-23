@@ -852,15 +852,26 @@ fn leg2_the_decision_trail_agrees_across_the_matrix_the_plan_and_the_package() {
 /// freezes at, and the freeze itself is a gate that has not closed.**
 ///
 /// Two halves. The version half is mechanical: the redesign's operation is declared `@since
-/// 3.6`, the registry serves 3.6, and 3.6 is the version the ratified decision freezes Phase A
-/// at — so the redesign is inside the frozen surface rather than after it. The act half is
+/// 3.6`, the registry serves 3.6 or a later compatible minor (3.7 since Phase B, bn-28kv4), and
+/// 3.6 is the version the ratified decision freezes Phase A at — so the redesign is inside the frozen surface rather than after it. The act half is
 /// documentary and is stated in the bone comment: `bn-1grk`, the Phase A exit gate that closes
 /// the freeze, is `goal:manual` and still `open`, and this bone is one of its dependencies.
 #[test]
 fn leg2_the_redesign_landed_at_the_version_the_freeze_freezes_at() {
-    assert_eq!(PROTOCOL_VERSION, "3.6", "the registry serves 3.6");
+    // Phase A froze the protocol at 3.6. Phase B lifted the freeze (user ruling 2026-09-23)
+    // and took 3.7 for bn-28kv4's capability field, so the registry now serves a later minor
+    // of the same major. The redesign is still inside the frozen surface: its operation is
+    // `@since("3.6")` below, and every later minor is a compatible change over 3.6.
+    let (major, minor) = PROTOCOL_VERSION
+        .split_once('.')
+        .expect("a `major.minor` protocol version");
+    assert_eq!(major, "3", "the registry serves major 3");
     assert!(
-        IDL.contains("  version = \"3.6\";"),
+        minor.parse::<u32>().expect("a decimal minor") >= 6,
+        "the registry serves 3.6 or a later compatible minor, not {PROTOCOL_VERSION}"
+    );
+    assert!(
+        IDL.contains(&format!("  version = \"{PROTOCOL_VERSION}\";")),
         "and the IDL declares the same version"
     );
 
@@ -1509,6 +1520,7 @@ fn grant(
         expires_at: Nullable::Null,
         delegation_depth: depth,
         profile,
+        instances: Optional::Absent,
     }
 }
 

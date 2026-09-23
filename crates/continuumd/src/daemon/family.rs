@@ -352,8 +352,15 @@ pub struct ScopeClaim {
     pub snapshots: Vec<WorkspaceHandle>,
     /// Intent instances the arguments name.
     pub intents: Vec<IntentHandle>,
-    /// Artifact classes the request touches, as plan §4.4 prefixes without the underscore.
+    /// Artifact classes the request touches, as plan §4.4 class tokens
+    /// (`rule artifact_class.spelling`).
     pub classes: Vec<&'static str>,
+    /// Every other instance the arguments name, as handle spellings: the `ev_`, `task_`,
+    /// `cont_`, `ctx_`, and other handles T2 decides against `CapabilityDescriptor.instances`
+    /// (`rule capability.instance_scope`). Each handle's class is its prefix. A handle a
+    /// request *returns* or *derives* is not named here, and neither is one a handler would
+    /// resolve from state: this list is pure in the arguments.
+    pub instances: Vec<String>,
 }
 
 /// Everything the dispatcher established before the family ran.
@@ -374,6 +381,30 @@ pub struct Call<'a> {
     /// alone (`rule audit.correlation`). A family that writes an audit record cites this
     /// value rather than minting one.
     pub audit: &'a AuditCorrelationId,
+}
+
+impl Call<'_> {
+    /// Refuse, with the one `CapabilityDenied`, a handle this call reached from one it
+    /// named when the grant does not admit it ([`admits_derived`]).
+    ///
+    /// Called by a handler after the lookup that found the derived handle and before it
+    /// reads, writes, or reports anything about it, so an out-of-scope derived instance
+    /// leaves no trace: nothing published, nothing answered (cr-3hcpn4).
+    ///
+    /// # Errors
+    ///
+    /// [`Fault::denied`] when the derived handle is out of scope.
+    ///
+    /// [`admits_derived`]: super::admission::admits_derived
+    pub fn derived(&self, derived: super::admission::Derived<'_>) -> Result<(), Fault> {
+        if super::admission::admits_derived(self.grant, derived) {
+            Ok(())
+        } else {
+            let mut denied = Fault::denied();
+            denied.derived_denial = true;
+            Err(denied)
+        }
+    }
 }
 
 /// Where a family's result lands on the result envelope's `status` lane, and which
@@ -698,6 +729,11 @@ pub struct Fault {
     pub data: ErrorData,
     /// The typed `Error.recovery` offers, before the dispatcher's N2 filter.
     pub recovery: Vec<RecoveryOffer>,
+    /// Whether this is the denial [`Call::derived`] raised for a derived handle outside the
+    /// grant. Never on the wire: the envelope is the one `CapabilityDenied` (X1). The
+    /// dispatcher reads it only to categorize the admission audit record
+    /// ([`Denial::DerivedHandle`](super::state::Denial::DerivedHandle)).
+    pub derived_denial: bool,
 }
 
 impl Fault {
@@ -713,6 +749,7 @@ impl Fault {
             resumption: Resumption::NotApplicable,
             data: ErrorData::None,
             recovery: Vec::new(),
+            derived_denial: false,
         }
     }
 
@@ -770,6 +807,7 @@ impl Fault {
             resumption: Resumption::NonResumable(detail),
             data: ErrorData::None,
             recovery: Vec::new(),
+            derived_denial: false,
         }
     }
 
@@ -783,6 +821,7 @@ impl Fault {
             resumption: Resumption::From(continuation),
             data: ErrorData::None,
             recovery: Vec::new(),
+            derived_denial: false,
         }
     }
 

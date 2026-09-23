@@ -229,8 +229,10 @@ use continuum_workspace::publication::ReferenceStore;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::Services;
+use super::admission::Derived;
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 use super::output;
+use super::provisioning::class_of;
 use super::state::DaemonState;
 use crate::protocol::envelope::{EvaluationVerdictValue, Omission, RequestEnvelope, Verdict};
 use crate::protocol::operations::context::{
@@ -653,6 +655,21 @@ impl core::fmt::Display for ContextPackError {
 
 impl core::error::Error for ContextPackError {}
 
+/// A compile projection offered under a root that is not an `ev_` handle
+/// ([`DaemonState::put_compile_source`](super::state::DaemonState::put_compile_source)).
+///
+/// It names no handle, so the refusal text carries nothing a caller supplied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotAnEvidenceRoot;
+
+impl core::fmt::Display for NotAnEvidenceRoot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("a compile projection is registered only under an `ev_` evidence root")
+    }
+}
+
+impl core::error::Error for NotAnEvidenceRoot {}
+
 impl OperationFamily for ContextFamily {
     fn namespace(&self) -> &'static str {
         "context"
@@ -665,18 +682,25 @@ impl OperationFamily for ContextFamily {
         // it compiles from; the snapshot behind a pack is checked after admission, in
         // `expand`, where reading state is allowed.
         match arguments {
-            Arguments::ContextExpand(_) => ScopeClaim {
+            Arguments::ContextExpand(request) => ScopeClaim {
                 snapshots: Vec::new(),
                 intents: Vec::new(),
                 classes: vec![ArtifactClass::ContextPack.token()],
+                instances: vec![request.context.as_str().to_owned()],
             },
-            Arguments::ContextCompile(_) => ScopeClaim {
+            // `evidence_root` is class-agnostic on the wire (`ArtifactHandle`), so its class
+            // is read off its own prefix and claimed as that class, never assumed to be `ev`.
+            // A `task_` root is decided by the `task` class, and a root of no class is
+            // claimed as no class, which admission refuses (cr-3hcpn4). The handler then
+            // refuses every root that is not an `ev_` ([`compile`]).
+            Arguments::ContextCompile(request) => ScopeClaim {
                 snapshots: Vec::new(),
                 intents: Vec::new(),
-                classes: vec![
-                    ArtifactClass::ContextPack.token(),
-                    ArtifactClass::Evidence.token(),
-                ],
+                classes: core::iter::once(ArtifactClass::ContextPack)
+                    .chain(class_of(request.evidence_root.as_str()))
+                    .map(ArtifactClass::token)
+                    .collect(),
+                instances: vec![request.evidence_root.as_str().to_owned()],
             },
             _ => ScopeClaim::default(),
         }
@@ -690,13 +714,10 @@ impl OperationFamily for ContextFamily {
         _store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
-            Arguments::ContextExpand(request) => expand(call.envelope, request, state),
-            Arguments::ContextCompile(request) => compile(
-                call.envelope,
-                request,
-                state,
-                services.negotiated().encoding(),
-            ),
+            Arguments::ContextExpand(request) => expand(call, request, state),
+            Arguments::ContextCompile(request) => {
+                compile(call, request, state, services.negotiated().encoding())
+            }
             // Unreachable: the dispatcher checked shape agreement before routing.
             _ => Err(Fault::new(
                 ErrorCode::MalformedRequest,
@@ -704,6 +725,74 @@ impl OperationFamily for ContextFamily {
             )),
         }
     }
+}
+
+/// Every handle a pack document names, decided against the grant before the pack is
+/// registered, expanded, or reported (`rule capability.instance_scope`, the derived-handle
+/// clause; cr-3hcpn4): `snapshot`, `intent`, each `evidence` member, `replay`, `parent`,
+/// `context_id`, `debugger_branch`, and each `selected[].artifact`. A child inherits most of
+/// them from its parent (`pack::INHERITED_KEYS`) and selects its own items, so an expansion
+/// is decided on the child it would return as well as on the parent it reads.
+///
+/// One out-of-scope handle denies the whole call. A pack is never returned with an item
+/// silently withheld: the manifest (INV-007) has no omission reason for "outside the
+/// caller's scope" (RFC 0026 F24), and a withheld item with no record would be a partial
+/// answer that hides an omission.
+fn pack_scope(call: &Call<'_>, document: &Json) -> Result<(), Fault> {
+    let Json::Object(fields) = document else {
+        return Err(Fault::denied());
+    };
+    let named = |value: Option<&Json>| -> Result<(), Fault> {
+        if let Some(Json::String(handle)) = value {
+            call.derived(Derived::Instance(handle))?;
+        }
+        Ok(())
+    };
+    for key in [
+        "snapshot",
+        "intent",
+        "replay",
+        "parent",
+        "context_id",
+        "debugger_branch",
+    ] {
+        named(fields.get(key))?;
+    }
+    if let Some(Json::Array(items)) = fields.get("evidence") {
+        for item in items {
+            named(Some(item))?;
+        }
+    }
+    if let Some(Json::Array(items)) = fields.get("selected") {
+        for item in items {
+            if let Json::Object(selected) = item {
+                named(selected.get("artifact"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every handle a registered projection can put into a pack — its snapshot, intent,
+/// evidence, replay, and the artifact of every item a root or any expansion can select —
+/// decided against the grant before anything is compiled (cr-3hcpn4). Deciding the whole
+/// projection up front means an expansion of the compiled pack cannot reach an item the
+/// compile would not have admitted.
+fn source_scope(call: &Call<'_>, source: &ContextCompileSource) -> Result<(), Fault> {
+    call.derived(Derived::Snapshot(source.snapshot()))?;
+    call.derived(Derived::Instance(&source.intent.to_string()))?;
+    for evidence in &source.evidence {
+        call.derived(Derived::Instance(&evidence.to_string()))?;
+    }
+    if let Some(replay) = &source.replay {
+        call.derived(Derived::Instance(&replay.crashpack().to_string()))?;
+    }
+    for item in source.items.values() {
+        if let Some(artifact) = item.artifact() {
+            call.derived(Derived::Instance(&artifact.to_string()))?;
+        }
+    }
+    Ok(())
 }
 
 /// `context.compile` — run the landed pipeline over a registered projection, assemble the root
@@ -714,11 +803,23 @@ impl OperationFamily for ContextFamily {
 /// never costs a compile, and everything that is about the *answer* is decided before anything
 /// is registered, so a pack that would not reconcile is never navigable.
 fn compile(
-    envelope: &RequestEnvelope,
+    call: &Call<'_>,
     request: &ContextCompileRequest,
     state: &mut DaemonState,
     encoding: Encoding,
 ) -> Result<Effect, Fault> {
+    let envelope = call.envelope;
+    // An evidence root is an `ev_`. Any other class — a `task_`, a `ctx_`, a spelling of
+    // no class — is refused before any lookup, by its spelling alone, so the answer says
+    // nothing about what this daemon holds (X2) and no other class's registration can be
+    // reached through this operation (cr-3hcpn4).
+    if class_of(request.evidence_root.as_str()) != Some(ArtifactClass::Evidence) {
+        return Err(Fault::new(
+            ErrorCode::MalformedRequest,
+            "`evidence_root` is not an `ev_` handle; a Context Pack compiles from an evidence \
+             root",
+        ));
+    }
     // Uniform in the root, so it answers the same whether or not this daemon holds one: the
     // absent producer is `continuum-cir`, which is a property of the deployment and not of the
     // caller's scope, and a distinguishable answer here would be the existence oracle RFC 0027
@@ -733,6 +834,9 @@ fn compile(
             )
         })?
         .clone();
+    // The projection names handles the request did not, and the pack embeds them. Every one
+    // is decided by the grant before the pack is built ([`source_scope`]).
+    source_scope(call, &source)?;
 
     stale_snapshot_check(envelope, source.snapshot())?;
 
@@ -755,18 +859,36 @@ fn compile(
         ));
     }
 
-    let compilation = source
-        .compile
-        .run(&source.roots, &source.residual)
-        .map_err(compile_fault)?;
-
-    // --- the answer header ---------------------------------------------------------------
+    // The pack identity is a function of the target, the snapshot, the semantic epoch, and
+    // the evidence, all known before any stage runs, and registration is convergent, so it
+    // may name a pack this daemon holds. It is decided by the grant here, before the compile
+    // does any work, held or not (X2; cr-3hcpn4).
     let target = Target::new(source.intent.clone(), question).map_err(|_| {
         Fault::new(
             ErrorCode::UnsupportedSemanticFeature,
             "the registered projection names an intent that is not an `in_*` contract",
         )
     })?;
+    let identity = RootIdentity::derive::<Blake3Hasher>(
+        &target,
+        source.snapshot.as_str(),
+        &source.semantic_epoch,
+        &source.evidence,
+    );
+    let context = ContextHandle::new(&identity.to_string()).map_err(|_| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the derived pack identity is not a well-formed context handle",
+        )
+    })?;
+    call.derived(Derived::Instance(context.as_str()))?;
+
+    let compilation = source
+        .compile
+        .run(&source.roots, &source.residual)
+        .map_err(compile_fault)?;
+
+    // --- the answer header ---------------------------------------------------------------
     let verdict = match source.verdict {
         Some(verdict) => verdict,
         None => PackVerdict::Inconclusive(compilation.inconclusive_reason().ok_or_else(|| {
@@ -806,12 +928,6 @@ fn compile(
         .filter(|guarantee| !compilation.guarantees().members().contains(guarantee))
         .collect();
 
-    let identity = RootIdentity::derive::<Blake3Hasher>(
-        &target,
-        source.snapshot.as_str(),
-        &source.semantic_epoch,
-        &source.evidence,
-    );
     let assembly = RootPack {
         identity: &identity,
         snapshot: source.snapshot.as_str(),
@@ -845,12 +961,7 @@ fn compile(
     if !output::Ceiling::of_budget(envelope).admits(document.to_canonical_bytes().len() as u64) {
         return Err(Fault::exhausted(COMPILE_OVER_BUDGET_BYTES));
     }
-    let context = ContextHandle::new(&identity.to_string()).map_err(|_| {
-        Fault::new(
-            ErrorCode::UnsupportedSemanticFeature,
-            "the derived pack identity is not a well-formed context handle",
-        )
-    })?;
+    pack_scope(call, &document)?;
     let response = ContextCompileResponse {
         context: context.clone(),
         pack: Opaque::from_bytes(document.to_canonical_bytes()),
@@ -1115,10 +1226,11 @@ fn pack_fault(error: PackError) -> Fault {
 /// `context.expand` — follow one expansion handle and answer with the child pack and the
 /// manifest that is still outstanding.
 fn expand(
-    envelope: &RequestEnvelope,
+    call: &Call<'_>,
     request: &ContextExpandRequest,
     state: &mut DaemonState,
 ) -> Result<Effect, Fault> {
+    let envelope = call.envelope;
     // Content this daemon does not hold is a denial, never a not-found (RFC 0027 X2): a
     // distinguishable "no such pack" would answer whether a `ctx_*` outside this caller's
     // scope exists, which is the existence oracle that rule closes.
@@ -1126,6 +1238,7 @@ fn expand(
         .context_pack(&request.context)
         .ok_or_else(Fault::denied)?
         .clone();
+    pack_scope(call, record.document())?;
 
     // The one snapshot test an expansion runs — see [`stale_snapshot_check`] for the two
     // `task.resume` runs that this deliberately does not.
@@ -1157,6 +1270,20 @@ fn expand(
         )
     })?;
     let query = ExpansionQuery::new(crosswalk(request.relation), anchor);
+
+    // The child's identity is a function of the parent, the query, and the depth, all known
+    // now, so it is decided by the grant before the walk or the packer does any work
+    // (cr-3hcpn4).
+    let parent_id = pack::identity_of(record.document()).map_err(malformed_pack)?;
+    let identity = ExpansionHandle::derive::<Blake3Hasher>(&parent_id, &query, depth)
+        .map_err(|_| malformed_pack(PackError::NotAPackHandle))?;
+    let context = ContextHandle::new(&identity.to_string()).map_err(|_| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the derived pack identity is not a well-formed context handle",
+        )
+    })?;
+    call.derived(Derived::Instance(context.as_str()))?;
 
     let Some(payload) = record.payloads.get(&query) else {
         // Two different refusals, and the difference is which half of the request is
@@ -1201,9 +1328,6 @@ fn expand(
         )
     })?;
 
-    let parent_id = pack::identity_of(record.document()).map_err(malformed_pack)?;
-    let identity = ExpansionHandle::derive::<Blake3Hasher>(&parent_id, &query, depth)
-        .map_err(|_| malformed_pack(PackError::NotAPackHandle))?;
     let question = continuum_context::expansion::ExpansionQuestion::of(&query, depth);
     let ceiling = ceiling(&record, envelope).map_err(malformed_pack)?;
 
@@ -1225,12 +1349,7 @@ fn expand(
     .pack::<Blake3Hasher>()
     .map_err(budget_fault)?;
 
-    let context = ContextHandle::new(&identity.to_string()).map_err(|_| {
-        Fault::new(
-            ErrorCode::UnsupportedSemanticFeature,
-            "the derived pack identity is not a well-formed context handle",
-        )
-    })?;
+    pack_scope(call, packed.document())?;
     // The manifest the *published* child carries, which is the pre-packing one plus whatever
     // the ceiling cost: "the wire projection of the same facts", record for record.
     let omissions = project(packed.manifest(), &parent_id);

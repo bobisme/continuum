@@ -70,6 +70,7 @@ fn grant(handle: &str, actor: &str, level: AuthorityLevel, depth: u32) -> Capabi
             data_grants: vec![DataGrant::ProductionTrace],
             cross_principal_sharing: false,
         }),
+        instances: Optional::Absent,
     }
 }
 

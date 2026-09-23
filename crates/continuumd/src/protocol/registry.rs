@@ -19,12 +19,13 @@ use super::spec::{
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
 ///
-/// `"1.14"` as of bn-ah1k8, which adds five rules that declare the domains of
-/// six `String` leaves (45 -> 50 rules) and moves no declaration, so it leaves
-/// [`PROTOCOL_VERSION`] at `"3.6"`. `"1.13"` (bn-3ncfp, `rule
+/// `"1.15"` as of bn-28kv4, which adds `CapabilityDescriptor.instances` and
+/// `rule capability.instance_scope` (50 -> 51 rules) and raises
+/// [`PROTOCOL_VERSION`] to `"3.7"`. `"1.14"` (bn-ah1k8, five rules that declare
+/// the domains of six `String` leaves, 45 -> 50), `"1.13"` (bn-3ncfp, `rule
 /// artifact_class.spelling`, 44 -> 45) and `"1.12"` (bn-12plt, doc comments
-/// only) were on the same footing.
-pub const IDL_VERSION: &str = "1.14";
+/// only) moved no declaration, so they left the protocol at `"3.6"`.
+pub const IDL_VERSION: &str = "1.15";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
@@ -133,7 +134,16 @@ pub const IDL_VERSION: &str = "1.14";
 /// (`snapshot.by_reference`). No flag rides the bump and none is raised; RFC
 /// 0026's flags preamble records the sweep, including why F6, touched at 1.10,
 /// is not payable here either.
-pub const PROTOCOL_VERSION: &str = "3.6";
+///
+/// The 3.6 -> 3.7 bump covers IDL 1.15 (bn-28kv4) and adds a **field**, not an
+/// operation: `CapabilityDescriptor.instances: list<ArtifactHandle> optional`,
+/// which pays RFC 0027 F2. "Adding an `optional` field" is the second change
+/// `rule versioning.compatible_change` names, so the bump is a minor and
+/// [`MAJORS_SERVED`] is untouched. Absent is the 3.6 class scope, and
+/// `CapabilityDescriptor::as_reported_at` keeps the field off a connection
+/// negotiated below 3.7. Counts: 75 operations, 47 named structs, rules
+/// 50 -> 51 (`capability.instance_scope`).
+pub const PROTOCOL_VERSION: &str = "3.7";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).

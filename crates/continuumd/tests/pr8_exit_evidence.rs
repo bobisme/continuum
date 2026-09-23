@@ -273,6 +273,7 @@ fn grant(handle: &str, actor: &str, level: AuthorityLevel, depth: u32) -> Capabi
         expires_at: continuumd::protocol::spec::Nullable::Null,
         delegation_depth: depth,
         profile: Optional::Absent,
+        instances: Optional::Absent,
     }
 }
 

@@ -478,8 +478,21 @@ impl AuditCorrelationId {
 ///
 /// Used where an operation accepts more than one class — `debug.open`'s `subject`,
 /// `program.replay`'s `recording`, `query.explain_reuse`'s `derivation`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ArtifactHandle(String);
+
+impl fmt::Debug for ArtifactHandle {
+    /// The spelling, except for a `cap_` one, which is a capability token: a class-agnostic
+    /// field admits that spelling by grammar, so a client can put its bearer secret here,
+    /// and a derived `Debug` would print it (RFC 0026, RFC 0027 S5; cr-3hcpn4).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.starts_with("cap_") {
+            f.write_str("ArtifactHandle(cap_<redacted>)")
+        } else {
+            f.debug_tuple("ArtifactHandle").field(&self.0).finish()
+        }
+    }
+}
 
 impl ArtifactHandle {
     /// The pattern this alias declares.

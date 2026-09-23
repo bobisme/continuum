@@ -383,6 +383,49 @@ impl Daemon {
         &self.services
     }
 
+    /// Supply a new time reading.
+    ///
+    /// Time is an explicit effect (INV-005, ADR-0003): the deployment reads its clock and
+    /// hands the reading in, and the daemon never reads one itself. Admission judges expiry
+    /// against the latest reading, and so does subscription delivery, which re-decides a
+    /// subscriber's standing before every pass.
+    pub fn set_now(&mut self, now: Timestamp) {
+        self.services.now = Some(now);
+    }
+
+    /// Decide T1–T4 again for a request this daemon already admitted, against the current
+    /// registry and time reading, and return the grant it stands under now.
+    ///
+    /// Everything `dispatch` decides at step 5 — level, snapshot, intent, and class scope,
+    /// the instance scope of what the request names, the profile's denial and privilege
+    /// tests, and the capability's standing through its whole chain — with the family's own
+    /// scope claim. Nothing is recorded: this is not a request. A subscription outlives the
+    /// request that opened it, so delivery calls this before every pass, and a re-registered
+    /// or narrowed grant is decided exactly as a new request would be (cr-3hcpn4).
+    #[must_use]
+    pub fn readmit(
+        &self,
+        envelope: &RequestEnvelope,
+        arguments: &Arguments,
+    ) -> Option<CapabilityDescriptor> {
+        let spec = registry::operation(envelope.operation.as_str())?;
+        let family = self
+            .families
+            .iter()
+            .find(|family| Some(family.namespace()) == namespace(spec.name))?;
+        let claim = family.scope(arguments);
+        admission::admit(
+            spec,
+            envelope,
+            &claim,
+            &self.state,
+            &self.services.connection,
+            self.services.now.as_ref(),
+        )
+        .ok()
+        .cloned()
+    }
+
     /// Everything the daemon knows.
     #[must_use]
     pub const fn state(&self) -> &DaemonState {
@@ -600,6 +643,7 @@ impl Daemon {
             capability: envelope.capability.clone(),
             admitted: admitted.is_ok(),
             audit: audit.as_str().to_owned(),
+            denial: admitted.is_err().then_some(state::Denial::Admission),
         });
         let Ok(grant) = admitted else {
             return Ok(OperationOutcome {
@@ -626,7 +670,33 @@ impl Daemon {
         if let Some(key) = key.as_deref() {
             if let Some(previous) = state.replay(envelope.actor.as_str(), key) {
                 if previous.request == replay_key {
-                    return Ok(replayed(&previous.outcome, envelope, &audit));
+                    // The ledger is keyed by actor and request, not by capability, so the
+                    // presenting capability may not be the one the outcome was recorded
+                    // under: a sibling token, a re-provisioned grant, a narrowed parent.
+                    // Admission above already decided its standing (cr-3hcpn4).
+                    //
+                    // Recovery is capability-relative (RFC 0027 N2): a replayed offer is
+                    // decided under the presenting capability, as a fresh one is, and an
+                    // offer it would be denied is dropped. What remains is returned only
+                    // when the presenting grant covers the recording one, or admits every
+                    // handle the remaining outcome names; otherwise it is the one denial,
+                    // and nothing of the outcome is returned.
+                    let mut outcome = replayed(&previous.outcome, envelope, &audit);
+                    outcome.recovery =
+                        admissible_offers(outcome.recovery, envelope, families, state, services);
+                    if !admission::covers(&grant, &previous.grant)
+                        && !replay_admitted(&outcome, &grant)
+                    {
+                        state.record_denial(audit.as_str(), state::Denial::ReplayAuthority);
+                        return Ok(raise(
+                            services,
+                            envelope,
+                            Fault::denied(),
+                            &audit,
+                            audit_required,
+                        ));
+                    }
+                    return Ok(outcome);
                 }
                 return Ok(raise(
                     services,
@@ -690,13 +760,18 @@ impl Daemon {
                     recovery: Vec::new(),
                 }
             }
-            Err(fault) => raise(
-                services,
-                envelope,
-                offer_under_n2(fault, envelope, families, state, services),
-                &audit,
-                audit_required,
-            ),
+            Err(fault) => {
+                if fault.derived_denial {
+                    state.record_derived_denial(audit.as_str());
+                }
+                raise(
+                    services,
+                    envelope,
+                    offer_under_n2(fault, envelope, families, state, services),
+                    &audit,
+                    audit_required,
+                )
+            }
         };
 
         // The last boundary: the handler ran — store writes and all — and the replay record
@@ -734,6 +809,7 @@ impl Daemon {
                 &key,
                 Replay {
                     request: replay_key,
+                    grant: grant.clone(),
                     outcome: outcome.clone(),
                 },
             );
@@ -798,6 +874,66 @@ fn kill(injector: &dyn CrashInjector, point: CrashPoint) -> Result<(), Killed> {
 /// handler's own effects, which include any audit-bearing registry write such as
 /// `intent.accept`'s `acceptance.audit_record`. That record keeps the first attempt's
 /// correlation because it describes the first attempt's effect.
+/// Whether `grant` admits every handle a recorded outcome names, for a replay whose
+/// presenting grant does not cover the recording one ([`admission::covers`]): its
+/// envelope (the task, the continuation, the artifact references, the error), its payload,
+/// its typed error data, and its recovery offers.
+///
+/// Each part is read in its canonical wire form, so this is exactly what a replay would
+/// send, and every string in it that spells a handle of an artifact class is decided by
+/// [`admission::admits_derived`]. An outcome that cannot be encoded is not replayed: the
+/// check fails closed.
+fn replay_admitted(outcome: &OperationOutcome, grant: &CapabilityDescriptor) -> bool {
+    use crate::codec::json::Json as Wire;
+    use continuum_intent::canonical_json::Json;
+
+    fn admitted(value: &Json, grant: &CapabilityDescriptor) -> bool {
+        let named = |text: &str| {
+            provisioning::class_of(text).is_none()
+                || admission::admits_derived(grant, admission::Derived::Instance(text))
+        };
+        match value {
+            Json::String(text) => named(text),
+            Json::Array(items) => items.iter().all(|item| admitted(item, grant)),
+            // Two fields carry strings a class prefix can spell and that name no instance:
+            // `commitment` (`ArtifactRef.commitment`, a content hash; the artifact is decided
+            // by the `handle` beside it) and `status` (a vocabulary token such as
+            // `task_suspended`). Every other string is decided. A string that only looks like
+            // a handle is decided too, which can refuse a replay the grant would admit and
+            // never the converse: the check fails closed.
+            Json::Object(fields) => fields.iter().all(|(key, item)| {
+                named(key) && (key == "commitment" || key == "status" || admitted(item, grant))
+            }),
+            _ => true,
+        }
+    }
+
+    let mut documents: Vec<Vec<u8>> = Vec::new();
+    let Ok(envelope) = crate::codec::write_in::<Wire, _>(&outcome.envelope) else {
+        return false;
+    };
+    documents.push(envelope);
+    match crate::codec::operations::encode_payload(&outcome.payload) {
+        Ok(Some(payload)) => documents.push(payload.as_bytes().to_vec()),
+        Ok(None) => {}
+        Err(_) => return false,
+    }
+    match crate::codec::operations::encode_error_data_in::<Wire>(&outcome.data) {
+        Ok(Some(data)) => documents.push(data.as_bytes().to_vec()),
+        Ok(None) => {}
+        Err(_) => return false,
+    }
+    for offer in &outcome.recovery {
+        match crate::transport::encode_arguments(&offer.arguments) {
+            Ok(arguments) => documents.push(arguments.as_bytes().to_vec()),
+            Err(_) => return false,
+        }
+    }
+    documents
+        .iter()
+        .all(|bytes| Json::parse(bytes).is_ok_and(|document| admitted(&document, grant)))
+}
+
 fn replayed(
     recorded: &OperationOutcome,
     envelope: &RequestEnvelope,
@@ -897,7 +1033,20 @@ fn offer_under_n2(
     state: &DaemonState,
     services: &Services,
 ) -> Fault {
-    fault.recovery.retain(|offer| {
+    fault.recovery = admissible_offers(fault.recovery, envelope, families, state, services);
+    fault
+}
+
+/// The offers of `offers` the capability `envelope` presents would be admitted for
+/// ([`offer_under_n2`]); shared by a fresh failure and a replayed one.
+fn admissible_offers(
+    mut offers: Vec<family::RecoveryOffer>,
+    envelope: &RequestEnvelope,
+    families: &[Box<dyn OperationFamily>],
+    state: &DaemonState,
+    services: &Services,
+) -> Vec<family::RecoveryOffer> {
+    offers.retain(|offer| {
         let Some(spec) = registry::operation(offer.arguments.operation()) else {
             return false;
         };
@@ -920,7 +1069,7 @@ fn offer_under_n2(
         )
         .is_ok()
     });
-    fault
+    offers
 }
 
 /// The refusal an operation registered ahead of its subsystem gets.
@@ -1121,12 +1270,15 @@ impl Builder {
     ///
     /// [`ProvisioningRefusal::ArtifactClass`] when a descriptor's `artifact_classes` names a
     /// string that is not a class token (`rule artifact_class.spelling`) — the plan §4.4
-    /// prefix spelling `ws_` included. Every descriptor is checked before any is
+    /// prefix spelling `ws_` included, and [`ProvisioningRefusal::Instance`] when its
+    /// `instances` names a handle that cannot be an instance scope
+    /// (`rule capability.instance_scope`). Every descriptor is checked before any is
     /// registered, so a refused build registers nothing.
     pub fn try_build(mut self) -> Result<Daemon, ProvisioningRefusal> {
         let mut scopes = Vec::with_capacity(self.capabilities.len());
         for (descriptor, _) in &self.capabilities {
             scopes.push(provisioning::scoped_classes(descriptor)?);
+            provisioning::scoped_instances(descriptor)?;
         }
 
         // A restart adopts the surviving store and provisions the wire registry only; a cold

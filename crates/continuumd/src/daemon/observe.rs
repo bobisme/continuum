@@ -108,15 +108,18 @@ impl OperationFamily for ObserveFamily {
     }
 
     fn scope(&self, arguments: &Arguments) -> ScopeClaim {
-        let claim = || ScopeClaim {
+        let claim = |instances: Vec<String>| ScopeClaim {
             snapshots: Vec::new(),
             intents: Vec::new(),
             classes: vec![ArtifactClass::Evidence.token()],
+            instances,
         };
         match arguments {
-            Arguments::ObserveIngest(_)
-            | Arguments::ObserveClassify(_)
-            | Arguments::ObserveResult(_) => claim(),
+            Arguments::ObserveIngest(_) => claim(Vec::new()),
+            Arguments::ObserveClassify(request) => {
+                claim(vec![request.evidence.as_str().to_owned()])
+            }
+            Arguments::ObserveResult(request) => claim(vec![request.evidence.as_str().to_owned()]),
             _ => ScopeClaim::default(),
         }
     }
@@ -178,6 +181,11 @@ fn ingest(
     // The evidence identity: the trace and the profile together, canonically framed so no
     // pair of inputs can produce another pair's preimage by concatenation.
     let handle = evidence_identity(request, services)?;
+    // The identity is a function of the request, and the append is convergent: it may land
+    // on a node this daemon already holds. It is decided by the grant first, held or not, so
+    // the answer does not say which (X2; `rule capability.instance_scope`, the derived-handle
+    // clause; cr-3hcpn4).
+    call.derived(super::admission::Derived::Instance(handle.as_str()))?;
 
     // The trace is published under the caller's own capability, so the store decides and
     // audits the write against the identity the wire presented — "authorization separate

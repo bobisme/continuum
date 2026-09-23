@@ -1288,6 +1288,7 @@ fn grant() -> CapabilityDescriptor {
             data_grants: Vec::new(),
             cross_principal_sharing: true,
         }),
+        instances: Optional::Absent,
     }
 }
 
@@ -1314,7 +1315,10 @@ fn daemon_holding(source: ContextCompileSource, root: &WireArtifactHandle) -> Da
         .capability(grant(), None)
         .family(ContextFamily)
         .build();
-    daemon.state_mut().put_compile_source(root, source);
+    daemon
+        .state_mut()
+        .put_compile_source(root, source)
+        .expect("an `ev_` root");
     daemon
 }
 

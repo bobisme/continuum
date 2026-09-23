@@ -166,6 +166,7 @@ use continuum_workspace::staleness::{
     GuardedAdvanceError, GuardedSealError, LineageError, advance_current, seal_current,
 };
 
+use super::admission::Derived;
 use super::family::{
     Arguments, Call, Effect, Fault, OperationFamily, Payload, RATIONALE_RESEAL_LINEAGE_HEAD,
     RecoveryOffer, ScopeClaim,
@@ -276,6 +277,7 @@ impl OperationFamily for WorkspaceFamily {
                 snapshots: Vec::new(),
                 intents: vec![request.components.intent.clone()],
                 classes: vec![workspace, ArtifactClass::IntentContract.token()],
+                instances: Vec::new(),
             },
             Arguments::WorkspaceCreateByReference(request) => ScopeClaim {
                 // The intent is read from the *request*, which is why the operation
@@ -284,21 +286,25 @@ impl OperationFamily for WorkspaceFamily {
                 snapshots: Vec::new(),
                 intents: vec![request.intent.clone()],
                 classes: vec![workspace, ArtifactClass::IntentContract.token()],
+                instances: Vec::new(),
             },
             Arguments::WorkspaceFork(request) => ScopeClaim {
                 snapshots: vec![request.base.clone()],
                 intents: Vec::new(),
                 classes: vec![workspace],
+                instances: Vec::new(),
             },
             Arguments::WorkspaceDiff(request) => ScopeClaim {
                 snapshots: vec![request.before.clone(), request.after.clone()],
                 intents: Vec::new(),
                 classes: vec![workspace, ArtifactClass::Diff.token()],
+                instances: Vec::new(),
             },
             Arguments::WorkspaceSeal(request) => ScopeClaim {
                 snapshots: vec![request.snapshot.clone()],
                 intents: Vec::new(),
                 classes: vec![workspace],
+                instances: Vec::new(),
             },
             _ => ScopeClaim::default(),
         }
@@ -316,8 +322,8 @@ impl OperationFamily for WorkspaceFamily {
             Arguments::WorkspaceCreateByReference(request) => {
                 create_by_reference(call, request, state, services, store)
             }
-            Arguments::WorkspaceFork(request) => fork(request, state, services),
-            Arguments::WorkspaceDiff(request) => diff(request, state),
+            Arguments::WorkspaceFork(request) => fork(call, request, state, services),
+            Arguments::WorkspaceDiff(request) => diff(call, request, state),
             Arguments::WorkspaceSeal(request) => seal(call, request, state, store),
             // Unreachable: the dispatcher checked shape agreement against the registry
             // before routing. A typed refusal rather than an `unreachable!`, because a
@@ -425,6 +431,24 @@ fn create(
         })?;
 
     let handle = wire_handle(&descriptor)?;
+    // The snapshot handle is a function of the components, so a create may land on a
+    // snapshot this daemon already holds and seal it (convergence, below). It is decided by
+    // the grant's `snapshots` list first, whether or not it is held, so the answer does not
+    // say which (X2), and a snapshot-scoped grant writes no snapshot it does not list
+    // (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4).
+    call.derived(Derived::Snapshot(&handle))?;
+    // A create converges on a snapshot this daemon already holds under the same content,
+    // and the snapshot identity does not include the intent. A held record governed by
+    // another intent is not this caller's to seal or to learn the state of: the create is
+    // refused before anything is published (cr-3hcpn4). The residue is stated: the refusal
+    // says that identical content is held under another intent, which the caller could
+    // only learn by holding that content.
+    if let Some(held) = state.workspace(&handle) {
+        if held.intent != request.components.intent {
+            return Err(Fault::denied());
+        }
+        call.derived(Derived::Intent(&held.intent))?;
+    }
     let lineage = lineage_name(&handle)?;
     let requested_seal = matches!(request.seal, Optional::Present(true));
     let seal = if requested_seal {
@@ -539,6 +563,7 @@ fn create_by_reference(
 }
 
 fn fork(
+    call: &Call<'_>,
     request: &WorkspaceForkRequest,
     state: &mut DaemonState,
     services: &Services,
@@ -554,6 +579,9 @@ fn fork(
         ));
     }
     let base = state.workspace(&request.base).ok_or_else(Fault::denied)?;
+    // The base's intent is not named by the request; the fork records it and reports it.
+    // It is decided by the grant before it is read (cr-3hcpn4).
+    call.derived(Derived::Intent(&base.intent))?;
     let expected_head = base.descriptor.source().identity().clone();
     let intent = base.intent.clone();
     let lineage_name = base.lineage.clone();
@@ -586,6 +614,8 @@ fn fork(
             .not_retryable()
         })?;
     let handle = wire_handle(&descriptor)?;
+    // The new snapshot, decided as a create decides its own, before anything is written.
+    call.derived(Derived::Snapshot(&handle))?;
 
     state.put_lineage(advanced);
     state.put_workspace(
@@ -639,9 +669,16 @@ fn fork(
 /// before it are not a degraded answer. They are the input contract the shipped lane will
 /// have, and they are what makes this operation's staleness behaviour observable today
 /// (`tests/gate_g2_04_acceptance.rs`, which found it consulted neither carrier).
-fn diff(request: &WorkspaceDiffRequest, state: &DaemonState) -> Result<Effect, Fault> {
+fn diff(
+    call: &Call<'_>,
+    request: &WorkspaceDiffRequest,
+    state: &DaemonState,
+) -> Result<Effect, Fault> {
     for snapshot in [&request.before, &request.after] {
         let record = state.workspace(snapshot).ok_or_else(Fault::denied)?;
+        // The snapshot's intent, decided before its lineage is read for a recovery offer
+        // (cr-3hcpn4).
+        call.derived(Derived::Intent(&record.intent))?;
         if !record.sealed() {
             return Err(Fault::new(
                 ErrorCode::StaleSnapshot,
@@ -666,6 +703,9 @@ fn seal(
     let record = state
         .workspace(&request.snapshot)
         .ok_or_else(Fault::denied)?;
+    // The snapshot's intent is not named by the request, and sealing writes this record and
+    // its lineage's recovery offers name the head. It is decided first (cr-3hcpn4).
+    call.derived(Derived::Intent(&record.intent))?;
     let descriptor = record.descriptor.clone();
     let lineage = state
         .lineage(&record.lineage)

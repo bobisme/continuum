@@ -131,6 +131,7 @@ fn grant(handle: &str, actor: &str, level: AuthorityLevel, depth: u32) -> Capabi
         // worth stating here rather than discovering it as a mystery.
         delegation_depth: depth,
         profile: Optional::Absent,
+        instances: Optional::Absent,
     }
 }
 

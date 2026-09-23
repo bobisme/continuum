@@ -84,11 +84,12 @@ use std::collections::VecDeque;
 use crate::codec::cbor::Cbor;
 use crate::codec::json::Json;
 use crate::codec::{self, CodecError, Document, read_in, to_bytes, write_in};
+use crate::daemon::admission;
 use crate::daemon::family::{Arguments, Payload};
 use crate::daemon::{Daemon, OperationRequest};
 use crate::protocol::envelope::{RequestEnvelope, ResultEnvelope};
 use crate::protocol::handshake::{
-    ClientHello, Negotiated, NegotiationError, ServerReject, ServerWelcome,
+    CapabilityDescriptor, ClientHello, Negotiated, NegotiationError, ServerReject, ServerWelcome,
 };
 use crate::protocol::shared::EvidenceQuery;
 use crate::protocol::spec::{Nullable, Optional};
@@ -479,6 +480,41 @@ pub fn decode_server_frame_in<D: Document>(
 struct Subscription {
     scope: EvidenceQuery,
     delivered: usize,
+    /// The request that opened the subscription, envelope and arguments. Delivery re-runs
+    /// the whole admission of that request before every pass ([`Daemon::readmit`]): the
+    /// level, the class, snapshot, intent, and instance scope, the profile, and the
+    /// capability's standing through its whole chain, against the registry and the time
+    /// reading as they are now. A subscription that would no longer be admitted is closed,
+    /// so a revoked or narrowed grant — a parent, or the same token re-registered — stops
+    /// delivery before the next frame (`rule capability.instance_scope`; RFC 0027 D8, E1,
+    /// R1; cr-3hcpn4).
+    opened: RequestEnvelope,
+    arguments: Arguments,
+}
+
+/// Suppressed deliveries on one connection, counted by category
+/// ([`Server::suppressed_deliveries`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SuppressedDeliveries {
+    /// Subscriptions closed because their capability no longer stood (T4).
+    pub standing_lost: u64,
+    /// Deltas withheld from an open subscription because the artifact they name is outside
+    /// that subscription's instance scope (`rule capability.instance_scope`, C1).
+    pub out_of_scope: u64,
+}
+
+/// Why a subscription stopped delivering.
+///
+/// One member, on purpose: expiry, revocation of the capability or of any ancestor, an
+/// actor mismatch, and a parent that no longer narrows are the one denial RFC 0027 X1
+/// makes indistinguishable, and a subscription that outlives its request is decided by the
+/// same predicate. Nothing about it reaches the wire: an event frame has no field for it
+/// (`rule subscription.delivery`), and the client learns it at its next request, which is
+/// answered `CapabilityDenied` (R1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionClosed {
+    /// The subscribing capability no longer stands on this connection (T4).
+    StandingLost,
 }
 
 /// A daemon behind a byte boundary.
@@ -493,6 +529,8 @@ pub struct Server {
     daemon: Daemon,
     negotiated: Negotiated,
     subscriptions: Vec<Subscription>,
+    closed: Vec<SubscriptionClosed>,
+    withheld: u64,
 }
 
 impl Server {
@@ -503,6 +541,27 @@ impl Server {
             daemon,
             negotiated,
             subscriptions: Vec::new(),
+            closed: Vec::new(),
+            withheld: 0,
+        }
+    }
+
+    /// The subscriptions delivery closed on this connection, oldest first, each with the
+    /// typed reason it stopped (`SubscriptionClosed`). A closed subscription is not
+    /// reopened: a client whose standing is restored subscribes again and is answered a new
+    /// frontier.
+    #[must_use]
+    pub fn closed_subscriptions(&self) -> &[SubscriptionClosed] {
+        &self.closed
+    }
+
+    /// Deliveries this connection suppressed, by category, with no handle, actor, or token
+    /// in them, for a monitor (cr-3hcpn4).
+    #[must_use]
+    pub fn suppressed_deliveries(&self) -> SuppressedDeliveries {
+        SuppressedDeliveries {
+            standing_lost: u64::try_from(self.closed.len()).unwrap_or(u64::MAX),
+            out_of_scope: self.withheld,
         }
     }
 
@@ -648,22 +707,57 @@ impl Server {
         if self.subscriptions.is_empty() {
             return Ok(Vec::new());
         }
+        // The whole admission of each subscription's request, decided again once per pass
+        // before any event is considered ([`Daemon::readmit`]). The time reading is the
+        // deployment's, handed in (INV-005); none cannot judge an expiring capability, which
+        // fails closed.
+        let grants: Vec<Option<CapabilityDescriptor>> = self
+            .subscriptions
+            .iter()
+            .map(|subscription| {
+                self.daemon
+                    .readmit(&subscription.opened, &subscription.arguments)
+            })
+            .collect();
+        let lost = grants.iter().filter(|grant| grant.is_none()).count();
+        self.closed
+            .extend(core::iter::repeat_n(SubscriptionClosed::StandingLost, lost));
+        let mut kept = grants.iter().map(Option::is_some);
+        self.subscriptions.retain(|_| kept.next().unwrap_or(false));
+        let grants: Vec<CapabilityDescriptor> = grants.into_iter().flatten().collect();
+        if self.subscriptions.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let state = self.daemon.state();
+        let granted: Vec<(&Subscription, admission::InstanceScope<'_>)> = self
+            .subscriptions
+            .iter()
+            .zip(&grants)
+            .map(|(subscription, grant)| (subscription, admission::InstanceScope::of(grant)))
+            .collect();
         let log = state.evidence_events();
         let committed = log.len();
         let mut frames = Vec::new();
+        let mut withheld = 0_u64;
         for (index, event) in log.iter().enumerate() {
-            let owed = self.subscriptions.iter().any(|subscription| {
+            let owed = granted.iter().any(|(subscription, scope)| {
                 subscription.delivered <= index
-                    && crate::daemon::evidence::in_scope(&subscription.scope, event, state)
+                    && crate::daemon::evidence::in_scope(&subscription.scope, event, state, scope)
             });
             if owed {
                 frames.push(write_in::<D, _>(event)?);
+            } else if granted.iter().any(|(subscription, scope)| {
+                subscription.delivered <= index
+                    && !crate::daemon::evidence::admits_event(event, scope)
+            }) {
+                withheld += 1;
             }
         }
         for subscription in &mut self.subscriptions {
             subscription.delivered = committed;
         }
+        self.withheld = self.withheld.saturating_add(withheld);
         Ok(frames)
     }
 
@@ -707,6 +801,7 @@ impl Server {
             Arguments::EvidenceSubscribe(request) => Some(request.scope.clone()),
             _ => None,
         };
+        let opened = (envelope.clone(), arguments.clone());
         let outcome = self.daemon.dispatch(&OperationRequest {
             envelope,
             arguments,
@@ -723,6 +818,8 @@ impl Server {
             self.subscriptions.push(Subscription {
                 scope,
                 delivered: self.daemon.state().evidence_events().len(),
+                opened: opened.0,
+                arguments: opened.1,
             });
         }
         // Where the typed payload becomes the envelope's `payload`. On `status = error`

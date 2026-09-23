@@ -2028,6 +2028,7 @@ fn grant(handle: &str, actor: &str) -> CapabilityDescriptor {
         expires_at: Nullable::Null,
         delegation_depth: 3,
         profile: Optional::Absent,
+        instances: Optional::Absent,
     }
 }
 

@@ -88,7 +88,7 @@
 //! There is no wire `delegate`, so a delegated capability arrives through
 //! [`DaemonState::register_capability`] like every other one, and D1–D9 are enforced where
 //! they are *decidable*: [`admission`](super::admission) walks the delegation chain on
-//! every request and requires each hop to narrow on level, depth, expiry, all three scope
+//! every request and requires each hop to narrow on level, depth, expiry, all four scope
 //! lists, and the profile. A child that exceeds its parent is therefore refused **before**
 //! any family runs — the `evidence` family never sees it — which is what
 //! `tests/daemon_evidence.rs` asserts through `dispatch` rather than by calling the
@@ -104,8 +104,8 @@ use super::state::DaemonState;
 use super::{Daemon, result};
 use crate::protocol::envelope::EpochSet;
 use crate::protocol::handshake::{
-    CapabilityDescriptor, ClientHello, EpochAdvanceNotice, Negotiated, NegotiationError,
-    ServerLimits, ServerReject, ServerWelcome, negotiate,
+    ClientHello, EpochAdvanceNotice, Negotiated, NegotiationError, ServerLimits, ServerReject,
+    ServerWelcome, negotiate,
 };
 use crate::protocol::scalar::{ProtocolVersion, Timestamp};
 use crate::protocol::vocabulary::{Encoding, ErrorCode};
@@ -231,13 +231,21 @@ pub fn welcome(
     //    unexpired — four tests, one answer. An unregistered token and a revoked one take
     //    the same path here for the same reason they do in `admission`: they are
     //    indistinguishable by construction rather than by care.
-    let grant = state
-        .grant(&hello.capability)
-        .filter(|grant| grant.descriptor.actor == hello.actor)
-        .filter(|grant| unexpired(&grant.descriptor, now))
-        .ok_or_else(|| Refusal {
-            frame: capability_reject(hello, &majors),
-        })?;
+    //    And its stored delegation chain stands: every ancestor still registered, every
+    //    hop still narrowing. A delegated grant may open a connection of its own, and it
+    //    must not be welcomed after its parent is revoked or narrowed (D8, R1; cr-3hcpn4).
+    //    This is `admission::standing` with the presented capability as the connection's,
+    //    so the handshake and every later request decide T4 by one predicate.
+    let descriptor = super::admission::standing(
+        state,
+        &hello.capability,
+        &hello.actor,
+        &hello.capability,
+        now,
+    )
+    .map_err(|_| Refusal {
+        frame: capability_reject(hello, &majors),
+    })?;
 
     Ok((
         negotiated,
@@ -248,7 +256,8 @@ pub fn welcome(
             server: policy.server.clone(),
             // The authority the presented capability *actually* confers. Cloned from the
             // daemon's own registry; no field of `hello` reaches it.
-            grant: grant.descriptor.clone(),
+            // (3.7) Without `instances` below the version that defines it.
+            grant: descriptor.as_reported_at(negotiated.protocol_version()),
             limits: policy.limits.clone(),
             features: offered_features(policy, hello),
             epochs: epochs.clone(),
@@ -299,18 +308,6 @@ fn offered_features(policy: &ConnectionPolicy, hello: &ClientHello) -> Vec<Strin
         .filter(|feature| offered.is_some_and(|list| list.contains(feature)))
         .cloned()
         .collect()
-}
-
-/// Whether a descriptor is unexpired against the reading the deployment supplied.
-///
-/// A daemon with no clock effect cannot judge an expiring capability and refuses it: "a
-/// daemon that cannot decide admission fails closed" (RFC 0027). A non-expiring descriptor
-/// needs no reading, which is E2's "`expires_at: null` means non-expiring".
-fn unexpired(descriptor: &CapabilityDescriptor, now: Option<&Timestamp>) -> bool {
-    match descriptor.expires_at.value() {
-        Some(expiry) => now.is_some_and(|reading| reading < expiry),
-        None => true,
-    }
 }
 
 /// The refusal frame a capability failure gets.

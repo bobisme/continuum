@@ -551,6 +551,7 @@ fn grant() -> CapabilityDescriptor {
             data_grants: Vec::new(),
             cross_principal_sharing: true,
         }),
+        instances: Optional::Absent,
     }
 }
 
@@ -698,7 +699,10 @@ struct LiveCompile {
 fn live_compile() -> LiveCompile {
     let (source, root) = exit_projection();
     let mut daemon = daemon();
-    daemon.state_mut().put_compile_source(&root, source);
+    daemon
+        .state_mut()
+        .put_compile_source(&root, source)
+        .expect("an `ev_` root");
     let outcome = daemon.dispatch(&compile_request(&root));
     let Payload::ContextCompile(response) = &outcome.payload else {
         panic!(

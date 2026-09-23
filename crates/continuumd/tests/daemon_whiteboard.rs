@@ -128,6 +128,7 @@ fn grant(
         expires_at: Nullable::Null,
         delegation_depth: 3,
         profile: Optional::Present(profile(grants)),
+        instances: Optional::Absent,
     }
 }
 
@@ -1399,4 +1400,97 @@ fn the_request_body_round_trips_through_the_codec() {
         }
         other => panic!("expected a whiteboard.compile request, got {other:?}"),
     }
+}
+
+/// `whiteboard.compile` resolves a reference, and draws support, only through a node the
+/// grant admits, and it appends only nodes and edges the grant admits
+/// (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4).
+///
+/// Three grants for the note's own author that differ only in which `ev_` they list. One
+/// leaves out the proposals the note would append; one leaves out the node the cited
+/// artifact resolves through. Both are refused with one identical `CapabilityDenied` and
+/// append nothing. The third lists all of them and is served. The identities are content
+/// identities, learned on a scratch fixture.
+#[test]
+fn negative_a_note_resolves_and_appends_only_through_nodes_in_scope() {
+    let note_for = |fixture: &Fixture| {
+        let held = fixture.artifact.as_str().to_owned();
+        let mut note = Note::new(&entry("c-goal", "prop_a", "goal", &[]));
+        note.decisions = vec![entry("c-dec", "prop_dec", "we conclude", &[&held])];
+        note
+    };
+    let mut scratch = fixture();
+    let note = note_for(&scratch);
+    let (nodes, edges, _) = compiled(&compile(&mut scratch, "req_learn", "idem-learn", &note));
+    let seeded = scratch.seeded.as_str().to_owned();
+    let proposals: Vec<String> = nodes
+        .iter()
+        .chain(&edges)
+        .map(|handle| handle.as_str().to_owned())
+        .collect();
+
+    let mut fixture = fixture();
+    assert_eq!(fixture.seeded.as_str(), seeded, "content identities");
+    let note = note_for(&fixture);
+    let listing = |extra: &[String], with_seeded: bool| {
+        let mut listed: Vec<String> = extra.to_vec();
+        if with_seeded {
+            listed.push(seeded.clone());
+        }
+        listed
+    };
+    // (capability, what the grant lists, served?)
+    let table = [
+        ("cap_wbproposals", listing(&[], true), false),
+        ("cap_wbreference", listing(&proposals, false), false),
+        ("cap_wbin", listing(&proposals, true), true),
+    ];
+    let mut denials = Vec::new();
+    for (capability, listed, served) in table {
+        let mut scoped = grant(capability, "agent:author", AuthorityLevel::Propose, &[]);
+        scoped.delegation_depth = 2;
+        scoped.instances = Optional::Present(
+            listed
+                .iter()
+                .map(|text| {
+                    continuumd::protocol::scalar::ArtifactHandle::new(text).expect("a handle")
+                })
+                .collect(),
+        );
+        fixture
+            .daemon
+            .state_mut()
+            .register_capability(scoped, Some(cap("cap_root")))
+            .expect("a well-formed delegate");
+        let before = graph_size(&fixture);
+        let outcome = compile_as(
+            &mut fixture,
+            "agent:author",
+            capability,
+            &format!("req_{capability}"),
+            &format!("idem-{capability}"),
+            &note,
+        );
+        if served {
+            let (served_nodes, served_edges, _) = compiled(&outcome);
+            assert_eq!(served_nodes, nodes, "{capability}");
+            assert_eq!(served_edges, edges, "{capability}");
+        } else {
+            assert_eq!(
+                outcome.error_code(),
+                Some(ErrorCode::CapabilityDenied),
+                "{capability}"
+            );
+            assert_eq!(
+                graph_size(&fixture),
+                before,
+                "{capability}: nothing appended"
+            );
+            denials.push(outcome.envelope.error.clone());
+        }
+    }
+    assert_eq!(
+        denials[0], denials[1],
+        "an unresolvable reference and an unlisted proposal are the one denial (X1, X2)"
+    );
 }

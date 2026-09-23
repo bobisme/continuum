@@ -240,6 +240,7 @@ fn grant(handle: &str, actor: &str, level: AuthorityLevel, depth: u32) -> Capabi
         expires_at: Nullable::Null,
         delegation_depth: depth,
         profile: Optional::Present(traced()),
+        instances: Optional::Absent,
     }
 }
 

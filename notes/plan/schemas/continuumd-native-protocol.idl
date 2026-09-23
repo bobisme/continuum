@@ -157,6 +157,27 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.15 — the general instance scope (bn-28kv4); `version` "3.7".
+  ///         `CapabilityDescriptor` gains `instances: list<ArtifactHandle>
+  ///         optional @since("3.7")`, and `rule capability.instance_scope`
+  ///         arrives with it. Before this revision T2's instance scope
+  ///         reached two of the nineteen handle classes, snapshots and
+  ///         intents (RFC 0027 F2), which the G1-07 acceptance census
+  ///         measured off this struct's own field list. A flat list of
+  ///         `ArtifactHandle` is a per-class list, because each member
+  ///         carries its class as its prefix, so the list-valued map F2
+  ///         was deferred on is not needed. Eighteen classes now have an
+  ///         instance scope; `cap` has none by design.
+  ///
+  ///         **Why a minor.** An `optional` field is the second of
+  ///         `rule versioning.compatible_change`'s five changes, and that
+  ///         rule says each MUST raise the minor. Absent is the 3.6 class
+  ///         scope, and a daemon does not emit the field on a connection
+  ///         negotiated below 3.7, so a 3.0–3.6 client sees no change.
+  ///         One rule arrives (`capability.instance_scope`, 50 → 51); no
+  ///         operation, struct, enum, alias, or union moves. RFC 0026 F24
+  ///         is raised: `OmissionReason` is closed and has no member for
+  ///         an answer the caller's own scope bounded.
   ///   1.14 — five declared string domains (bn-ah1k8); `version` stays
   ///         "3.6". The G1-02 acceptance campaign (bn-3j01v) pinned six
   ///         leaves over five sites where a resource, or a closed set,
@@ -713,8 +734,18 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.14";
+  idl_version = "1.15";
   /// The protocol version this document defines.
+  ///
+  /// 3.7 is the single minor bump for IDL 1.15 (bn-28kv4), and it is the
+  /// first since 3.2 that adds a field rather than an operation:
+  /// `CapabilityDescriptor.instances`, `optional`, the second compatible
+  /// change `rule versioning.compatible_change` names. No operation is
+  /// added, no existing field moves, no enum gains a member, and no
+  /// error code is minted, so the major window `[3, 2]` is untouched. A
+  /// capability without `instances` is admitted exactly as at 3.6. The
+  /// field reaches a client only in `ServerWelcome.grant`, and only on a
+  /// connection negotiated at 3.7 or later.
   ///
   /// 3.6 is the single minor bump for IDL 1.11, taken once at the end of
   /// that revision, and it is the third minor that adds an operation.
@@ -861,7 +892,7 @@ protocol continuum.native {
   /// and the F13 discipline is now mechanically enforced rather than
   /// remembered: the dossier validator parses all three sources and
   /// fails closed on any disagreement, preferring none.
-  version = "3.6";
+  version = "3.7";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -2203,6 +2234,13 @@ struct CapabilityDescriptor {
   /// no privileged operation granted, no additional data grant held, no
   /// cross-principal sharing. See `rule capability.profile_narrowing`.
   profile: CapabilityProfile optional @since("3.1");
+  /// Artifact instances in scope, for every class that has no instance
+  /// list of its own. The class of each member is its handle prefix. A
+  /// class none of whose instances is listed keeps its class scope; a
+  /// class with at least one listed instance is scoped to exactly the
+  /// listed instances. Absent is today's class scope, unchanged. See
+  /// `rule capability.instance_scope` (RFC 0027 T2, F2).
+  instances: list<ArtifactHandle> optional @since("3.7");
 }
 
 /// A grant a capability carries beyond its level and scope, for the
@@ -2387,6 +2425,152 @@ rule artifact_class.spelling {
   is added by revising this list, and that raises the protocol minor.
   The fields stay `String` within major 3, because narrowing a declared
   field's type is `rule versioning.breaking_change` (RFC 0026 F22).
+  """
+}
+
+rule capability.instance_scope {
+  """
+  `CapabilityDescriptor.instances` extends T2's instance scope past
+  snapshots and intents. Each member is an `ArtifactHandle`, and its
+  class is the plan §4.4 class whose prefix the handle carries. For
+  each class, the scope is decided by that class alone: a class none
+  of whose instances is listed keeps the scope `artifact_classes`
+  gives it, and a class with at least one listed instance admits a
+  request only when every instance of that class the request names is
+  listed. An absent or empty list is the class scope of protocol 3.6,
+  unchanged.
+
+  A request "names" exactly the handles its envelope and its arguments
+  carry. An instance scope does not extend to an artifact derived from
+  a listed instance: a `task_` instance admits no `cont_`, no `ctx_`,
+  and no `ev_` that the task produced, because deciding derivation
+  needs a store lookup that admission may not make (RFC 0027 X3). A
+  derived artifact is in scope only through its own class: listed by
+  instance, or reached by a class scope. An answer that selects
+  artifacts the request did not name — `evidence.query` and the
+  frontier and deltas of `evidence.subscribe` — MUST NOT name an
+  instance of an instance-scoped class outside the scope (C1). Such
+  an instance is left out without a per-instance trace, because a
+  trace would reveal that it exists (X2). The bound is not hidden: it
+  is the caller's own scope, which `ServerWelcome.grant` reports.
+  `OmissionReason` is closed and has no member for it, so no
+  `omissions` entry is emitted (RFC 0026 F24). An operation that writes
+  an existing artifact the request did not name is bounded the same
+  way: `task.cancel` and `task.update_budget` on a parked task publish
+  the next revision of that task's `cont_`, and MUST be refused with
+  `CapabilityDenied`, before anything is published, when `cont` is
+  instance-scoped and that continuation is not listed.
+
+  The same holds for every handle an operation derives from one the
+  request names and then reads, writes, or reports: a continuation's
+  task, snapshot, and intent (`task.resume`); a task's snapshot,
+  intent, and continuation (`task.status`, `task.subscribe`,
+  `task.cancel`, `task.update_budget`, `verification.result`,
+  `verification.await`); a snapshot's intent (`workspace.fork`,
+  `verification.start`); an intent's `supersedes` and
+  `superseded_by` (`intent.get`, `intent.accept`, `intent.lock`); an
+  edge's endpoints and a record's handle-spelled provenance inputs
+  (`evidence.get`); and a pack's snapshot, intent, and evidence
+  (`context.compile`, `context.expand`). Each is decided against the
+  grant exactly as a named handle of its class would be, after the
+  lookup and before anything is read, written, published, or
+  reported, and an out-of-scope one is refused `CapabilityDenied`
+  with no trace. No handle is exempt because the operation minted it.
+  Every handle an operation creates, converges on, or reports — a
+  created or forked snapshot, a locked successor intent, an ingested
+  or linked evidence node or edge, a compiled or expanded pack, a
+  started task, the continuation a start or a resume parks under, the
+  lineage head a recovery offer names — is decided the same way
+  before it is written, published, or returned, whether or not it is
+  already held, so the answer does not say which (X2). A handle whose
+  identity the run itself determines, such as a parked continuation,
+  is decided after the one run and before its first write. On a
+  refusal the run's results are discarded — nothing is published, no
+  continuation or record exists, a task the call created is removed,
+  and a task the call resumed is left exactly as it was, because a
+  task identity is shared by every caller that names it. The
+  exploration is charged to the presenting capability, and the same
+  run for the same capability is refused again before any
+  exploration. A Context Pack is decided on every handle it embeds —
+  `snapshot`, `intent`, each `evidence` member, `replay`, `parent`,
+  `context_id`, `debugger_branch`, and each `selected[].artifact` —
+  and a compile on every handle its registered projection can put
+  into any pack, and on the pack identity, before any stage runs; one
+  handle outside the scope refuses the whole call, because the
+  manifest has no omission reason for it and a pack must not hide an
+  omission. A derived `ws_` or `in_` needs its class held, as a named
+  one does. A create that converges on a held snapshot governed by
+  another intent is refused, and `workspace.seal` and
+  `workspace.diff` decide the intent a snapshot record carries before
+  they read it. A recovery offer is kept only when the presenting
+  capability would be admitted for it, which decides the head it
+  names; a replayed offer is decided again under the capability that
+  presents the replay. A replay under `rule idempotency.replay`
+  returns a recorded outcome only when the presenting capability's
+  grant covers the grant it was recorded under — a presenting profile
+  that denies an operation does not cover a recording grant that
+  denied none — or admits every handle the outcome names: payload,
+  envelope, error data, and the offers that remain; otherwise it is
+  `CapabilityDenied`, and nothing of the outcome is returned. A traversal (`evidence.query`, `evidence.subscribe`) walks
+  only through edges that are in scope with both endpoints, so what it
+  reaches never depends on an artifact outside the scope, and
+  `whiteboard.compile` resolves a reference only through a node in
+  scope.
+
+  Every handle a request names is decided by its own class. A handle
+  a field carries as a class-agnostic `ArtifactHandle` is claimed as
+  the class its prefix names, never as the class the field is about:
+  `context.compile`'s `evidence_root` is claimed as a `task` when it
+  is a `task_`, and a root that is not an `ev_` is then refused
+  `MalformedRequest` by its spelling, before any lookup. A named
+  handle whose prefix names no class MUST be refused
+  `CapabilityDenied`, under any scope and with no `instances` at all,
+  because no class scope can have decided it.
+
+  A capability stands only while its whole stored delegation chain
+  does: every ancestor up to a root still registered, and every hop
+  still narrowing. That is decided at the handshake, at every request,
+  and before every delivery, and it holds when the capability is
+  itself the connection's, so a delegated grant that opened its own
+  connection does not outlive its parent. A subscription outlives the
+  request that opened it, so before every delivery the whole
+  admission of that `evidence.subscribe` is decided again against the
+  registry and time reading as they are then: level, class, snapshot,
+  intent, and instance scope, the profile's denial, and the
+  capability's standing through that chain. A delegate with no profile
+  denies nothing, so it narrows only a parent that denies nothing: a
+  parent's deny list binds every descendant. A revoked ancestor
+  revokes it (D8), and so does an ancestor re-provisioned narrower.
+  When the standing is gone, no further delta is delivered and the
+  subscription is closed; nothing reaches the wire, and the client's
+  next request is answered `CapabilityDenied` (R1).
+
+  A member MUST be refused where the capability is provisioned, never
+  registered and never served as an empty scope, when its prefix names
+  no class; when its class is `ws` or `in`, whose instances belong in
+  `snapshots` and `intents` (one scope, one place); when its class is
+  `cap`, because a capability is the authority a request presents and
+  not an artifact it names; and when `artifact_classes` is non-empty
+  and does not hold its class, because that instance could never be
+  admitted.
+
+  A delegated capability's instance scope MUST be a narrowing of its
+  parent's, class by class: for each class the parent instance-scopes,
+  the child MUST instance-scope it too, to a subset. For `snapshots`,
+  `intents`, and `artifact_classes` alike, an empty list is the widest
+  scope, so an empty child list narrows only an empty parent list. A
+  refusal's text MUST NOT carry a capability token, the provisioned
+  capability's or one pasted into a scope list (RFC 0027 S5). A denial for an
+  instance outside the scope is `CapabilityDenied`, identical to every
+  other admission failure (X1), whether or not the instance exists
+  (X2). Authorization stays independent of possession: an instance
+  scope is a property of the capability, never of what the caller was
+  told (`rule authorization.independent_of_handles`).
+
+  A daemon MUST NOT emit `instances` on a connection negotiated below
+  3.7. Such a connection is still served under the instance scope; its
+  `ServerWelcome.grant` omits the field, which reports a wider grant
+  than admission enforces and never a narrower one.
   """
 }
 

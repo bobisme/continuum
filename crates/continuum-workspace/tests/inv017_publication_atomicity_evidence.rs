@@ -1300,6 +1300,26 @@ const BARE_HANDLE_FIELDS: &[(&str, &str, &str, &str)] = &[
         "tasks",
         "key: a task identity, not a store artifact",
     ),
+    // A refused run's key (cr-3hcpn4): what was refused, for whom. A refused run
+    // published nothing, so none of these claims a publication.
+    (
+        TASK_RS,
+        "RefusedRun",
+        "capability",
+        "key: the capability a refused run is charged to, not content",
+    ),
+    (
+        TASK_RS,
+        "RefusedRun",
+        "task",
+        "key: the task a refused run was for; a refused run publishes nothing",
+    ),
+    (
+        TASK_RS,
+        "RefusedRun",
+        "from",
+        "key: the continuation a refused resume started from, not a claim",
+    ),
     (
         TASK_RS,
         "TaskTable",

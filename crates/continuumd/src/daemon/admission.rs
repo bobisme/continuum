@@ -3,7 +3,8 @@
 //! ```text
 //! T1 (level)      registry_minimum(operation)  ≤  descriptor.level
 //! T2 (scope)      every snapshot, intent, and artifact class the request names
-//!                 lies inside the descriptor's scope
+//!                 lies inside the descriptor's scope, and so does every other
+//!                 instance it names, class by class (3.7, `instances`)
 //! T3 (privilege)  the operation is not @privileged, or the profile explicitly
 //!                 grants it — and no profile denies it
 //! T4 (validity)   the capability is registered, unexpired, unrevoked, its actor
@@ -38,13 +39,18 @@
 //! this level'" (RFC 0027, "Landed vocabulary"), so the comparison goes through
 //! [`store_level`] and there is exactly one ladder in the workspace.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use continuum_workspace::artifact_path::ArtifactClass;
 
 use super::family::ScopeClaim;
+use super::provisioning::class_of;
 use super::state::{DaemonState, store_level};
 use crate::protocol::envelope::RequestEnvelope;
 use crate::protocol::handshake::{CapabilityDescriptor, CapabilityProfile};
-use crate::protocol::scalar::{CapabilityHandle, Timestamp};
+use crate::protocol::scalar::{
+    ActorId, ArtifactHandle, CapabilityHandle, IntentHandle, Timestamp, WorkspaceHandle,
+};
 use crate::protocol::spec::{Annotation, OperationSpec, Optional};
 use crate::protocol::vocabulary::DataGrant;
 
@@ -102,40 +108,22 @@ pub fn admit<'state>(
     connection: &CapabilityHandle,
     now: Option<&Timestamp>,
 ) -> Result<&'state CapabilityDescriptor, Denied> {
-    // T4, first half: registered and unrevoked. An unregistered token and a revoked one
-    // take the same path, which is what makes them indistinguishable.
-    let grant = state.grant(&envelope.capability).ok_or(Denied)?;
-    let descriptor = &grant.descriptor;
-
-    // T4: the actor binds to the capability. "A mismatch is `CapabilityDenied`, never
-    // `MalformedRequest`: an attempt to act as another principal is an authorization
-    // failure and MUST NOT be distinguishable from any other one."
-    if descriptor.actor != envelope.actor {
-        return Err(Denied);
-    }
-
-    // T4: unexpired. Time is not ambient (INV-005, ADR-0003), so a deployment that supplies
-    // no reading cannot judge an expiring capability and the predicate fails closed — "a
-    // daemon that cannot decide admission fails closed" (RFC 0027).
-    if let Some(expiry) = descriptor.expires_at.value() {
-        match now {
-            Some(reading) if reading < expiry => {}
-            _ => return Err(Denied),
-        }
-    }
-
-    // T4: the presented capability is the connection's, or a descendant that narrows.
-    if &descriptor.capability != connection {
-        admissible_on_connection(state, &descriptor.capability, connection)?;
-    }
+    let descriptor = standing(
+        state,
+        &envelope.capability,
+        &envelope.actor,
+        connection,
+        now,
+    )?;
 
     // T1: the ladder, read off the registry.
     if store_level(descriptor.level) < store_level(spec.authority) {
         return Err(Denied);
     }
 
-    // T2: instance scope for snapshots and intents, class scope for everything else. An
-    // empty list means unrestricted *within the level*.
+    // T2: instance scope for snapshots and intents, class scope for everything else, and
+    // (3.7) instance scope for any other class `instances` lists. An empty list means
+    // unrestricted *within the level*.
     let named_snapshots = envelope
         .snapshot
         .value()
@@ -168,6 +156,27 @@ pub fn admit<'state>(
         }
     }
 
+    // T2, 3.7: every other instance the request names, decided per class. A class none of
+    // whose instances is listed keeps the class scope tested above; a class with a listed
+    // instance admits only listed instances (`rule capability.instance_scope`). The test is
+    // on the handle's spelling alone, so it neither reads the store nor depends on who was
+    // told about the handle (X3, G1-07).
+    //
+    // Each named instance is bound to its own class first: its prefix must name a class,
+    // and that class must be one the claim declares, so the class half above has decided
+    // it. A handle of no class, or of a class the family did not claim, is refused rather
+    // than decided by the wrong class (class confusion, cr-3hcpn4).
+    let claimed_class =
+        |named: &str| class_of(named).is_some_and(|class| claim.classes.contains(&class.token()));
+    let scope = InstanceScope::of(descriptor);
+    if !claim
+        .instances
+        .iter()
+        .all(|named| claimed_class(named) && scope.admits(named))
+    {
+        return Err(Denied);
+    }
+
     // T3: privilege, plus the per-operation restriction a total order cannot express.
     let profile = descriptor.profile.value();
     if denies_operation(profile, spec.name) {
@@ -184,6 +193,216 @@ pub fn admit<'state>(
     }
 
     Ok(descriptor)
+}
+
+/// T4 alone: whether `presented` still stands for `actor` on the connection that settled on
+/// `connection`, at the time reading `now`.
+///
+/// Registered and unrevoked, bound to `actor`, unexpired, and either the connection's own
+/// capability or a descendant whose every hop still exists and still narrows. A revoked
+/// parent revokes its children (D8) because the walk needs every hop, and a parent
+/// re-provisioned narrower than its child refuses the child because the walk re-checks
+/// each hop. [`admit`] decides this first for every request, and subscription delivery
+/// decides it again before every pass, because a subscription outlives the request that
+/// opened it (RFC 0027 R1, `rule capability.instance_scope`).
+///
+/// # Errors
+///
+/// [`Denied`], carrying nothing: every T4 failure is the one denial (X1).
+pub fn standing<'state>(
+    state: &'state DaemonState,
+    presented: &CapabilityHandle,
+    actor: &ActorId,
+    connection: &CapabilityHandle,
+    now: Option<&Timestamp>,
+) -> Result<&'state CapabilityDescriptor, Denied> {
+    // Registered and unrevoked. An unregistered token and a revoked one take the same
+    // path, which is what makes them indistinguishable.
+    let grant = state.grant(presented).ok_or(Denied)?;
+    let descriptor = &grant.descriptor;
+
+    // The actor binds to the capability. "A mismatch is `CapabilityDenied`, never
+    // `MalformedRequest`: an attempt to act as another principal is an authorization
+    // failure and MUST NOT be distinguishable from any other one."
+    if descriptor.actor != *actor {
+        return Err(Denied);
+    }
+
+    // Unexpired. Time is not ambient (INV-005, ADR-0003), so a deployment that supplies no
+    // reading cannot judge an expiring capability and the predicate fails closed — "a
+    // daemon that cannot decide admission fails closed" (RFC 0027). Each hop's expiry is
+    // no later than its parent's (D5, [`narrows`]), so the leaf's reading covers the chain.
+    if let Some(expiry) = descriptor.expires_at.value() {
+        match now {
+            Some(reading) if reading < expiry => {}
+            _ => return Err(Denied),
+        }
+    }
+
+    // The presented capability is the connection's, or a descendant of it, and its whole
+    // stored chain stands up to a root — also when it *is* the connection's capability,
+    // because a delegated grant can open a connection of its own and must not outlive its
+    // parent there either (D8, R1; cr-3hcpn4).
+    chain_stands(state, &descriptor.capability, connection)?;
+    Ok(descriptor)
+}
+
+/// A handle a handler reached from one the request named, by a lookup admission may not
+/// make (X3): a continuation's task and snapshot, a task's snapshot and continuation, a
+/// pack's snapshot, and so on.
+#[derive(Debug, Clone, Copy)]
+pub enum Derived<'handle> {
+    /// A `ws_*` snapshot, decided by the `snapshots` list as T2 decides a named one.
+    Snapshot(&'handle WorkspaceHandle),
+    /// An `in_*` intent, decided by the `intents` list as T2 decides a named one.
+    Intent(&'handle IntentHandle),
+    /// Any other instance, decided by `artifact_classes` and `instances` as T2 decides a
+    /// named one. A spelling of no class is never admitted.
+    Instance(&'handle str),
+}
+
+/// Whether `descriptor` admits a derived handle by the same T2 it applies to a named one
+/// (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4).
+///
+/// Admission decides what a request names. A handler that resolves a named handle into an
+/// instance of another class — and then reads it, writes it, or reports anything about
+/// it — decides that instance here, *before* the read, the write, or the answer, and
+/// refuses with the one `CapabilityDenied` when it is out of scope. Scope is the capability's
+/// property, never derived from what the caller named (`rule
+/// authorization.independent_of_handles`).
+#[must_use]
+pub fn admits_derived(descriptor: &CapabilityDescriptor, derived: Derived<'_>) -> bool {
+    match derived {
+        // A snapshot or intent a handler derived is decided as a named one of its class
+        // would be: its list, and the class held (cr-3hcpn4). The same handle then gets the
+        // same answer whether it arrives typed or spelled as a generic handle.
+        Derived::Snapshot(snapshot) => {
+            class_held(descriptor, ArtifactClass::WorkspaceSnapshot)
+                && (descriptor.snapshots.is_empty() || descriptor.snapshots.contains(snapshot))
+        }
+        Derived::Intent(intent) => {
+            class_held(descriptor, ArtifactClass::IntentContract)
+                && (descriptor.intents.is_empty() || descriptor.intents.contains(intent))
+        }
+        Derived::Instance(named) => {
+            let Some(class) = class_of(named) else {
+                return false;
+            };
+            let class_held = class_held(descriptor, class);
+            // A `ws_` or `in_` spelled as a generic handle is decided by its own list, as
+            // the two typed arms above decide it; every other class by `instances`.
+            let listed = match class {
+                ArtifactClass::WorkspaceSnapshot => {
+                    descriptor.snapshots.is_empty()
+                        || descriptor
+                            .snapshots
+                            .iter()
+                            .any(|held| held.as_str() == named)
+                }
+                ArtifactClass::IntentContract => {
+                    descriptor.intents.is_empty()
+                        || descriptor.intents.iter().any(|held| held.as_str() == named)
+                }
+                _ => InstanceScope::of(descriptor).admits(named),
+            };
+            class_held && listed
+        }
+    }
+}
+
+/// Whether `descriptor`'s `artifact_classes` holds `class`; an empty list holds every class.
+fn class_held(descriptor: &CapabilityDescriptor, class: ArtifactClass) -> bool {
+    descriptor.artifact_classes.is_empty()
+        || descriptor
+            .artifact_classes
+            .iter()
+            .any(|held| held == class.token())
+}
+
+/// Whether `wide` admits everything `narrow` admits, on every field T1–T3 decide: the level,
+/// the snapshot, intent, and class scopes, the instance scope class by class, and the
+/// profile. Standing (T4) is not compared; it is decided for the presenting capability on
+/// its own.
+///
+/// Used by a replay: an outcome recorded under `narrow` names only what `narrow` admitted,
+/// so a presenting grant that covers it admits all of it by monotonicity (cr-3hcpn4).
+#[must_use]
+pub fn covers(wide: &CapabilityDescriptor, narrow: &CapabilityDescriptor) -> bool {
+    store_level(narrow.level) <= store_level(wide.level)
+        && scope_narrows(&narrow.snapshots, &wide.snapshots)
+        && scope_narrows(&narrow.intents, &wide.intents)
+        && scope_narrows(&narrow.artifact_classes, &wide.artifact_classes)
+        && instances_narrow(narrow.instances.value(), wide.instances.value())
+        && profile_narrows(narrow.profile.value(), wide.profile.value())
+}
+
+/// Whether `descriptor`'s instance scope admits the handle spelled `named`.
+///
+/// > For each class, the scope is decided by that class alone: a class none of whose
+/// > instances is listed keeps the scope `artifact_classes` gives it, and a class with at
+/// > least one listed instance admits a request only when every instance of that class the
+/// > request names is listed.
+/// >
+/// > — `rule capability.instance_scope`
+///
+/// This is only the instance half of T2. The class half is decided from
+/// `ScopeClaim::classes`, so a handle of a class the capability does not hold is refused
+/// there and is answered `true` here. A handle of no class is answered `false`: nothing can
+/// have decided its class, so it fails closed. Exposed because an answer that *selects* artifacts
+/// the request did not name — `evidence.query`, `evidence.subscribe` — is bounded by the
+/// same predicate after admission (C1), and a second spelling of it could drift.
+#[must_use]
+pub fn admits_instance(descriptor: &CapabilityDescriptor, named: &str) -> bool {
+    InstanceScope::of(descriptor).admits(named)
+}
+
+/// A descriptor's `instances`, indexed by class once, so that deciding many handles
+/// against it costs one logarithmic lookup each rather than a scan of the list per handle.
+///
+/// Admission decides every instance a request names against one index, and a selection
+/// (`evidence.query`, the `evidence.subscribe` frontier) filters every handle it selects
+/// against one index. [`admits_instance`] is the one-handle spelling of the same test.
+pub struct InstanceScope<'grant> {
+    /// `None` when `instances` is absent: every class keeps its class scope.
+    listed: Option<BTreeMap<ArtifactClass, BTreeSet<&'grant str>>>,
+}
+
+impl<'grant> InstanceScope<'grant> {
+    /// Index `descriptor`'s instance scope by class.
+    #[must_use]
+    pub fn of(descriptor: &'grant CapabilityDescriptor) -> Self {
+        Self {
+            listed: descriptor.instances.value().map(|listed| by_class(listed)),
+        }
+    }
+
+    /// Whether this scope admits the handle spelled `named`
+    /// (`rule capability.instance_scope`).
+    ///
+    /// A spelling of no class is never admitted, whatever the scope lists: no class scope
+    /// can have decided it, so the answer fails closed.
+    #[must_use]
+    pub fn admits(&self, named: &str) -> bool {
+        let Some(class) = class_of(named) else {
+            return false;
+        };
+        let Some(listed) = &self.listed else {
+            return true;
+        };
+        listed.get(&class).is_none_or(|held| held.contains(named))
+    }
+}
+
+/// `listed`, grouped by the class each member's prefix names. A member of no class is left
+/// out: provisioning refuses one, so none reaches a registered descriptor.
+fn by_class(listed: &[ArtifactHandle]) -> BTreeMap<ArtifactClass, BTreeSet<&str>> {
+    let mut index: BTreeMap<ArtifactClass, BTreeSet<&str>> = BTreeMap::new();
+    for held in listed {
+        if let Some(class) = class_of(held.as_str()) {
+            index.entry(class).or_default().insert(held.as_str());
+        }
+    }
+    index
 }
 
 /// The class prefix a snapshot or intent handle belongs to, as `ScopeClaim` spells it.
@@ -220,9 +439,15 @@ fn denies_operation(profile: Option<&CapabilityProfile>, operation: &str) -> boo
     })
 }
 
-/// Walk the delegation chain from `presented` to `connection`, requiring every hop to
-/// narrow.
-fn admissible_on_connection(
+/// Walk the stored delegation chain from `presented` to its root, requiring every parent
+/// to exist and every hop to narrow, and requiring `connection` to be `presented` itself or
+/// one of its ancestors.
+///
+/// The walk goes to the root rather than stopping at the connection's capability, because
+/// a connection may itself be held under a delegated grant: revoking, narrowing, or letting
+/// expire any ancestor of it must end that connection's authority as well (D8, R1). A grant
+/// with no parent is a root and stands on its own registration.
+fn chain_stands(
     state: &DaemonState,
     presented: &CapabilityHandle,
     connection: &CapabilityHandle,
@@ -230,17 +455,18 @@ fn admissible_on_connection(
     // A delegation chain is finite and acyclic by construction — `register_capability`
     // records a parent that already exists — but the bound is stated rather than assumed,
     // because a daemon does not loop on a value a deployment chose.
+    let mut on_connection = presented == connection;
     let mut child = presented.clone();
     for _ in 0..MAX_DELEGATION_HOPS {
         let grant = state.grant(&child).ok_or(Denied)?;
-        let parent_handle = grant.parent.clone().ok_or(Denied)?;
+        let Some(parent_handle) = grant.parent.clone() else {
+            return if on_connection { Ok(()) } else { Err(Denied) };
+        };
         let parent = state.grant(&parent_handle).ok_or(Denied)?;
         if !narrows(&grant.descriptor, &parent.descriptor) {
             return Err(Denied);
         }
-        if parent_handle == *connection {
-            return Ok(());
-        }
+        on_connection |= parent_handle == *connection;
         child = parent_handle;
     }
     Err(Denied)
@@ -279,17 +505,41 @@ fn narrows(child: &CapabilityDescriptor, parent: &CapabilityDescriptor) -> bool 
     if !scope_narrows(&child.snapshots, &parent.snapshots)
         || !scope_narrows(&child.intents, &parent.intents)
         || !scope_narrows(&child.artifact_classes, &parent.artifact_classes)
+        || !instances_narrow(child.instances.value(), parent.instances.value())
     {
         return false;
     }
     profile_narrows(child.profile.value(), parent.profile.value())
 }
 
+/// `rule capability.instance_scope`'s delegation clause: class by class, a child
+/// instance-scopes every class its parent instance-scopes, to a subset.
+///
+/// A class the parent leaves at class scope is unconstrained here, because any child list
+/// for it is a narrowing, and the class half of D4 is `artifact_classes`'s own test.
+fn instances_narrow(
+    child: Option<&Vec<ArtifactHandle>>,
+    parent: Option<&Vec<ArtifactHandle>>,
+) -> bool {
+    let Some(parent) = parent else {
+        return true;
+    };
+    let parent = by_class(parent);
+    let child = by_class(child.map_or(&[], Vec::as_slice));
+    // The parent scopes each of its classes to instances, so the child must too, and every
+    // child instance of the class must be one the parent lists.
+    parent
+        .iter()
+        .all(|(class, theirs)| child.get(class).is_some_and(|mine| mine.is_subset(theirs)))
+}
+
 /// `rule capability.profile_narrowing`'s four field rules.
 fn profile_narrows(child: Option<&CapabilityProfile>, parent: Option<&CapabilityProfile>) -> bool {
     let Some(child) = child else {
-        // No profile is the fail-closed reading: it grants nothing, so it narrows anything.
-        return true;
+        // No profile grants nothing, and it also denies nothing. So it narrows a parent only
+        // when that parent denies nothing either: a parent's deny list binds every
+        // descendant, and a child without a profile is not a way out of it (cr-3hcpn4).
+        return parent.is_none_or(|parent| parent.denied_operations.is_empty());
     };
     let Some(parent) = parent else {
         // "A child of a parent with no profile MUST have no profile grants either."
@@ -310,8 +560,13 @@ fn profile_narrows(child: Option<&CapabilityProfile>, parent: Option<&Capability
 
 /// Whether `narrow` is a narrowing of the *scope* list `wide`, where an empty list means
 /// "unrestricted within the level" — the reading the IDL fixes for every scope list.
+///
+/// An empty list is the *widest* scope ("unrestricted within the level"), so an empty
+/// child list narrows only an empty parent list. Before cr-3hcpn4 an empty child list was
+/// read as the empty set and passed under any parent, which let a delegate with no scope
+/// list escape a scoped parent (D4).
 fn scope_narrows<T: PartialEq>(narrow: &[T], wide: &[T]) -> bool {
-    wide.is_empty() || contains_all(wide, narrow)
+    wide.is_empty() || (!narrow.is_empty() && contains_all(wide, narrow))
 }
 
 /// Whether every member of `narrow` appears in `wide`.

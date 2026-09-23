@@ -319,6 +319,10 @@ fn actor() -> ActorId {
     ActorId::new("agent:reader").expect("a well-formed actor identity")
 }
 
+fn capability_root() -> CapabilityHandle {
+    capability()
+}
+
 fn capability() -> CapabilityHandle {
     CapabilityHandle::new("cap_reader").expect("a well-formed capability handle")
 }
@@ -365,6 +369,7 @@ fn grant() -> CapabilityDescriptor {
             data_grants: Vec::new(),
             cross_principal_sharing: true,
         }),
+        instances: Optional::Absent,
     }
 }
 
@@ -389,7 +394,10 @@ fn daemon() -> (Daemon, ArtifactHandle) {
         .family(ContextFamily)
         .build();
     let (source, root) = projection();
-    daemon.state_mut().put_compile_source(&root, source);
+    daemon
+        .state_mut()
+        .put_compile_source(&root, source)
+        .expect("an `ev_` root");
     (daemon, root)
 }
 
@@ -613,6 +621,400 @@ fn within_ceiling(wire: &[u8], ceiling: u64) -> Result<(), Discrepancy> {
 }
 
 // --- conjunct 1: bounded ---------------------------------------------------------------------
+
+/// `context.compile` and `context.expand` use the handles a projection or a pack names
+/// beyond the request — its snapshot and intent, and the pack's own identity — only when the
+/// grant admits them (`rule capability.instance_scope`, the derived-handle clause;
+/// cr-3hcpn4).
+///
+/// Each row is a grant that differs from its in-scope control only in one derived handle.
+/// The out-of-scope grant is refused `CapabilityDenied` with no payload and registers no
+/// pack; the in-scope grant is served.
+#[test]
+fn context_compile_and_expand_use_derived_handles_only_in_scope() {
+    use continuumd::protocol::scalar::IntentHandle;
+
+    // The pack identity and its intent, learned on a scratch daemon: content identities.
+    let (mut scratch, root) = daemon();
+    let learned = compile(
+        &mut scratch,
+        &root,
+        "req_learn",
+        Optional::Absent,
+        Optional::Absent,
+    );
+    let (_, context, document) = answered(&learned);
+    let intent = document.as_object().expect("object")["intent"]
+        .as_str()
+        .expect("the pack names its intent")
+        .to_owned();
+    let child = expand(
+        &mut scratch,
+        &context,
+        "req_learn_child",
+        &root_id(),
+        ExpansionRelation::CausalSuccessors,
+        Optional::Present(ByteCount::new(1 << 20)),
+    );
+    let (_, child, _) = answered(&child);
+
+    let (mut daemon, root) = daemon();
+    let as_grant = |mut envelope: RequestEnvelope, capability: &str| {
+        envelope.capability = CapabilityHandle::new(capability).expect("a capability");
+        envelope
+    };
+    let register = |daemon: &mut Daemon,
+                    capability: &str,
+                    snapshots: &[&str],
+                    intents: &[&str],
+                    instances: &[&str]| {
+        let mut scoped = grant();
+        scoped.capability = CapabilityHandle::new(capability).expect("a capability");
+        scoped.delegation_depth = 2;
+        scoped.snapshots = snapshots
+            .iter()
+            .map(|text| WorkspaceHandle::new(text).expect("a snapshot"))
+            .collect();
+        scoped.intents = intents
+            .iter()
+            .map(|text| IntentHandle::new(text).expect("an intent"))
+            .collect();
+        if !instances.is_empty() {
+            scoped.instances = Optional::Present(
+                instances
+                    .iter()
+                    .map(|text| ArtifactHandle::new(text).expect("a handle"))
+                    .collect(),
+            );
+        }
+        daemon
+            .state_mut()
+            .register_capability(scoped, Some(capability_root()))
+            .expect("a well-formed delegate");
+    };
+    // (capability, snapshots, intents, instances, served?)
+    type Row<'a> = (&'a str, Vec<&'a str>, Vec<&'a str>, Vec<&'a str>, bool);
+    let table: [Row<'_>; 4] = [
+        ("cap_snapout", vec!["ws_elsewhere"], vec![], vec![], false),
+        ("cap_intentout", vec![], vec!["in_elsewhere"], vec![], false),
+        ("cap_packout", vec![], vec![], vec!["ctx_elsewhere"], false),
+        (
+            "cap_allin",
+            vec![SNAPSHOT],
+            vec![intent.as_str()],
+            vec![context.as_str(), child.as_str()],
+            true,
+        ),
+    ];
+    for (capability, snapshots, intents, instances, _) in &table {
+        register(&mut daemon, capability, snapshots, intents, instances);
+    }
+
+    // compile: every out-of-scope row is refused and registers nothing; then the control.
+    for (capability, _, _, _, served) in &table {
+        let outcome = daemon.dispatch(&OperationRequest {
+            envelope: as_grant(
+                envelope(
+                    "context.compile",
+                    &format!("req_compile_{capability}"),
+                    Optional::Absent,
+                    Optional::Absent,
+                ),
+                capability,
+            ),
+            arguments: Arguments::ContextCompile(ContextCompileRequest {
+                evidence_root: root.clone(),
+                question: QUESTION.to_owned(),
+                audience: Optional::Absent,
+                guarantees: Optional::Absent,
+            }),
+        });
+        if *served {
+            assert_eq!(outcome.error_code(), None, "{capability}");
+            assert!(daemon.state().context_pack(&context).is_some());
+        } else {
+            assert_eq!(
+                outcome.error_code(),
+                Some(ErrorCode::CapabilityDenied),
+                "{capability}"
+            );
+            assert_eq!(outcome.payload, Payload::None, "{capability}: no pack");
+            assert!(
+                daemon.state().context_pack(&context).is_none(),
+                "{capability}: nothing registered"
+            );
+        }
+    }
+
+    // expand: the parent pack's snapshot and intent, decided the same way.
+    for (capability, _, _, _, served) in table.iter().filter(|row| row.2.len() + row.1.len() > 0) {
+        let outcome = daemon.dispatch(&OperationRequest {
+            envelope: as_grant(
+                envelope(
+                    "context.expand",
+                    &format!("req_expand_{capability}"),
+                    Optional::Present(ByteCount::new(1 << 20)),
+                    Optional::Absent,
+                ),
+                capability,
+            ),
+            arguments: Arguments::ContextExpand(ContextExpandRequest {
+                context: context.clone(),
+                anchor: root_id(),
+                relation: ExpansionRelation::CausalSuccessors,
+                depth: Optional::Absent,
+            }),
+        });
+        if *served {
+            assert_eq!(outcome.error_code(), None, "{capability}");
+        } else {
+            assert_eq!(
+                outcome.error_code(),
+                Some(ErrorCode::CapabilityDenied),
+                "{capability}"
+            );
+            assert_eq!(outcome.payload, Payload::None, "{capability}: no child");
+        }
+    }
+}
+
+/// Every handle a pack embeds is decided before the pack is built, so a projection whose
+/// selectable item or replay reference is outside the grant compiles nothing
+/// (cr-3hcpn4). The whole call is refused: the manifest has no omission reason for
+/// "outside the caller's scope" (RFC 0026 F24), so a pack with the item silently withheld
+/// would hide an omission.
+#[test]
+fn a_pack_whose_item_or_replay_is_outside_the_grant_is_not_compiled() {
+    use continuum_context::model::ModelActionRef;
+
+    // A one-node projection whose only item names an elaborated model.
+    let model = StoreHandle::new(ArtifactClass::ElaboratedModel, &digest("g2-05-model"))
+        .expect("a model handle");
+    let evidence = StoreHandle::new(ArtifactClass::Evidence, &digest("g2-05-model-evidence"))
+        .expect("an evidence handle");
+    // A two-node projection: the root item names one model, and its causal successor —
+    // reachable only by expansion — names another.
+    let only = "model_node";
+    let next = "model_next";
+    let successor_model =
+        StoreHandle::new(ArtifactClass::ElaboratedModel, &digest("g2-05-model-next"))
+            .expect("a model handle");
+    let order = CausalOrder::new(
+        [
+            (id(only), SelectionKind::Model),
+            (id(next), SelectionKind::Model),
+        ],
+        [(id(next), id(only))],
+    )
+    .expect("a two-node chain is a DAG");
+    let header = CompileHeader {
+        snapshot: WorkspaceHandle::new(SNAPSHOT).expect("a workspace handle"),
+        semantic_epoch: SEMANTIC_EPOCH.to_owned(),
+        intent: StoreHandle::new(ArtifactClass::IntentContract, &digest("g2-05-intent"))
+            .expect("an intent handle"),
+        evidence: vec![evidence.clone()],
+        // The failure profile requires a replay reference.
+        replay: Some(
+            ReplayRef::new(
+                StoreHandle::new(ArtifactClass::Crashpack, &digest("g2-05-crashpack"))
+                    .expect("a crash handle"),
+            )
+            .expect("a crash_* handle"),
+        ),
+        verdict: Some(PackVerdict::Refuted),
+        assurance: Assurance::new(
+            AssuranceLevel::Bounded,
+            AssuranceEnvelope::all_unsupported(
+                &UnsupportedReason::new("outside-this-acceptance-probe").expect("a plain token"),
+            ),
+        ),
+        profile: PackProfile::Failure,
+        redactions: Vec::new(),
+    };
+    let item = ModelActionRef::with_model(id("act"), model.clone())
+        .expect("a model_* handle")
+        .into_selected_item(id(only));
+    let successor = ModelActionRef::with_model(id("act_next"), successor_model.clone())
+        .expect("a model_* handle")
+        .into_selected_item(id(next));
+    let source = ContextCompileSource::new(
+        CausalCompile::new(order, RedactionPolicy::permitting_everything()),
+        [id(only)],
+        ExpansionQuery::new(PackRelation::CausalSuccessors, id(only)),
+        [item, successor],
+        header,
+    )
+    .expect("every candidate has a body");
+    let model_root = ArtifactHandle::new(&evidence.to_string()).expect("an ev_ root");
+
+    let (mut daemon, standard_root) = daemon();
+    daemon
+        .state_mut()
+        .put_compile_source(&model_root, source)
+        .expect("an ev_ root");
+    let crash = StoreHandle::new(ArtifactClass::Crashpack, &digest("g2-05-crashpack"))
+        .expect("a crash handle")
+        .to_string();
+    let model = model.to_string();
+    let successor_model = successor_model.to_string();
+    let mut model_pack = None;
+    // (capability, what the grant lists, the root compiled, served?)
+    let table = [
+        ("cap_itemout", vec!["model_elsewhere"], &model_root, false),
+        // Only the item an expansion would reach is left out: the compile is still refused,
+        // because the whole projection is decided before any work.
+        ("cap_successorout", vec![model.as_str()], &model_root, false),
+        (
+            "cap_itemin",
+            vec![model.as_str(), successor_model.as_str()],
+            &model_root,
+            true,
+        ),
+        (
+            "cap_replayout",
+            vec!["crash_elsewhere"],
+            &standard_root,
+            false,
+        ),
+        ("cap_replayin", vec![crash.as_str()], &standard_root, true),
+    ];
+    for (capability, listed, root, served) in table {
+        let mut scoped = grant();
+        scoped.capability = CapabilityHandle::new(capability).expect("a capability");
+        scoped.delegation_depth = 2;
+        scoped.instances = Optional::Present(
+            listed
+                .iter()
+                .map(|text| ArtifactHandle::new(text).expect("a handle"))
+                .collect(),
+        );
+        daemon
+            .state_mut()
+            .register_capability(scoped, Some(capability_root()))
+            .expect("a well-formed delegate");
+        let mut sent = envelope(
+            "context.compile",
+            &format!("req_{capability}"),
+            Optional::Absent,
+            Optional::Absent,
+        );
+        sent.capability = CapabilityHandle::new(capability).expect("a capability");
+        let outcome = daemon.dispatch(&OperationRequest {
+            envelope: sent,
+            arguments: Arguments::ContextCompile(ContextCompileRequest {
+                evidence_root: root.clone(),
+                question: QUESTION.to_owned(),
+                audience: Optional::Absent,
+                guarantees: Optional::Absent,
+            }),
+        });
+        if served {
+            assert_eq!(
+                outcome.error_code(),
+                None,
+                "{capability}: {:?}",
+                outcome.envelope.error
+            );
+            if capability == "cap_itemin" {
+                model_pack = Some(answered(&outcome).1);
+            }
+        } else {
+            assert_eq!(
+                outcome.error_code(),
+                Some(ErrorCode::CapabilityDenied),
+                "{capability}"
+            );
+            assert_eq!(outcome.payload, Payload::None, "{capability}: no pack");
+        }
+    }
+
+    // context.expand is decided on the child it would return: a grant that admits the root
+    // item but not its successor reads the root pack and is refused the expansion.
+    let context = model_pack.expect("the served compile of the model projection");
+    for (capability, listed, served) in [
+        ("cap_expandout", vec![model.as_str()], false),
+        (
+            "cap_expandin",
+            vec![model.as_str(), successor_model.as_str()],
+            true,
+        ),
+    ] {
+        let mut scoped = grant();
+        scoped.capability = CapabilityHandle::new(capability).expect("a capability");
+        scoped.delegation_depth = 2;
+        scoped.instances = Optional::Present(
+            listed
+                .iter()
+                .map(|text| ArtifactHandle::new(text).expect("a handle"))
+                .collect(),
+        );
+        daemon
+            .state_mut()
+            .register_capability(scoped, Some(capability_root()))
+            .expect("a well-formed delegate");
+        let mut sent = envelope(
+            "context.expand",
+            &format!("req_{capability}"),
+            Optional::Present(ByteCount::new(1 << 20)),
+            Optional::Absent,
+        );
+        sent.capability = CapabilityHandle::new(capability).expect("a capability");
+        let outcome = daemon.dispatch(&OperationRequest {
+            envelope: sent,
+            arguments: Arguments::ContextExpand(ContextExpandRequest {
+                context: context.clone(),
+                anchor: only.to_owned(),
+                relation: ExpansionRelation::CausalSuccessors,
+                depth: Optional::Absent,
+            }),
+        });
+        if served {
+            assert_eq!(
+                outcome.error_code(),
+                None,
+                "{capability}: {:?}",
+                outcome.envelope.error
+            );
+        } else {
+            assert_eq!(
+                outcome.error_code(),
+                Some(ErrorCode::CapabilityDenied),
+                "{capability}"
+            );
+            assert_eq!(outcome.payload, Payload::None, "{capability}: no child");
+        }
+    }
+}
+
+/// A compile projection registers only under an `ev_` root (cr-3hcpn4).
+///
+/// `context.compile` reads the table by a class-agnostic `ArtifactHandle`. A projection
+/// registered under a `task_`, a `ctx_`, or a spelling of no class would be reachable under
+/// that name, so the table refuses it, registers nothing, and still takes the `ev_` root.
+#[test]
+fn a_compile_projection_registers_only_under_an_evidence_root() {
+    use continuumd::daemon::context::NotAnEvidenceRoot;
+    use continuumd::daemon::state::DaemonState;
+
+    let (source, root) = projection();
+    let mut state = DaemonState::new();
+    for wrong in ["task_elsewhere", "ctx_elsewhere", "zz_nothing"] {
+        let wrong = ArtifactHandle::new(wrong).expect("an artifact handle");
+        assert_eq!(
+            state.put_compile_source(&wrong, source.clone()),
+            Err(NotAnEvidenceRoot)
+        );
+        assert!(
+            state.compile_source(&wrong).is_none(),
+            "nothing is registered"
+        );
+    }
+    assert!(root.as_str().starts_with("ev_"));
+    state
+        .put_compile_source(&root, source)
+        .expect("an `ev_` root registers");
+    assert!(state.compile_source(&root).is_some());
+}
 
 #[test]
 fn the_root_pack_holds_the_closure_of_the_question_and_nothing_else() {

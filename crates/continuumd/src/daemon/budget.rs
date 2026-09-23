@@ -190,7 +190,21 @@ pub fn wire_budget(ledger: &BudgetLedger) -> Budget {
 /// it.
 #[must_use]
 pub fn bounds_of(ledger: &BudgetLedger) -> Bounds {
-    match ledger.budget().ceiling(CostDimension::States).limit() {
+    bounds_after(ledger, None)
+}
+
+/// The bounds [`bounds_of`] would read after [`update`] with `budget` — computed without the
+/// write, so a caller can decide what the next run would do before it changes anything.
+///
+/// [`update`] sets every dimension's ceiling to the budget's, an absent one to unbounded, so
+/// the state ceiling after it is exactly `budget.states`; with no budget it is the ledger's.
+#[must_use]
+pub fn bounds_after(ledger: &BudgetLedger, budget: Option<&Budget>) -> Bounds {
+    let ceiling = match budget {
+        Some(budget) => budget.states.value().copied(),
+        None => ledger.budget().ceiling(CostDimension::States).limit(),
+    };
+    match ceiling {
         Some(limit) => {
             let committed = ledger.spend().measured(CostDimension::States).unwrap_or(0);
             Bounds::CERTIFIABLE

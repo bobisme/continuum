@@ -199,8 +199,10 @@ fn the_protocol_bump_is_byte_neutral() {
     // The measurement above is attributable to the argument and to nothing else, and this
     // is why: the version appears on the wire only as a `ProtocolVersion`, and "3.2" and
     // "3.6" are the same length. A bump that changed the frame size would have put an
-    // unattributed byte into every row of the table.
-    assert_eq!(PROTOCOL_VERSION, "3.6");
+    // unattributed byte into every row of the table. The registry has since moved to 3.7
+    // (bn-28kv4, a capability field this instrument never reads); the instrument stays
+    // at the version it measured.
+    assert_eq!(PROTOCOL_VERSION, "3.7");
     assert_eq!(
         continuum_benchmark::rig::VERSION,
         (3, 6),

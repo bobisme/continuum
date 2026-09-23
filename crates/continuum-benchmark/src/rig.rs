@@ -362,6 +362,7 @@ fn grant(principal: Principal, level: AuthorityLevel, depth: u32) -> CapabilityD
         expires_at: Nullable::Null,
         delegation_depth: depth,
         profile: Optional::Absent,
+        instances: Optional::Absent,
     }
 }
 

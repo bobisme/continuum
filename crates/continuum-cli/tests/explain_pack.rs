@@ -125,6 +125,7 @@ fn root_grant() -> CapabilityDescriptor {
             data_grants: Vec::new(),
             cross_principal_sharing: true,
         }),
+        instances: Optional::Absent,
     }
 }
 

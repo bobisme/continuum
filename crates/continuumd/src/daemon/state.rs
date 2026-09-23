@@ -41,7 +41,7 @@ use continuum_workspace::publication::Published;
 use continuum_workspace::snapshot::WorkspacePath;
 
 use super::family::Arguments;
-use super::provisioning::{ProvisioningRefusal, scoped_classes};
+use super::provisioning::{ProvisioningRefusal, scoped_instances};
 use super::{OperationOutcome, ServiceError};
 use crate::protocol::envelope::{Budget, OutputPolicy, Page, Redacted, RequestEnvelope};
 use crate::protocol::handshake::CapabilityDescriptor;
@@ -95,6 +95,38 @@ pub struct AdmissionRecord {
     /// The audit-correlation identity the result cites, so the record and the result name
     /// each other.
     pub audit: String,
+    /// Why the request was denied, when it was: at admission, or after admission on a
+    /// handle the handler derived (cr-3hcpn4). [`None`] for a request that was not denied
+    /// on authority. On the wire both are the one `CapabilityDenied` (X1); the category
+    /// exists only in this daemon-side record, for [`DaemonState::denial_counts`].
+    pub denial: Option<Denial>,
+}
+
+/// The category of an authority denial, for the admission audit record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Denial {
+    /// T1–T4 refused the request (`admission::admit`).
+    Admission,
+    /// Admission accepted the request, and the handler refused a handle it derived from
+    /// one the request named, or one it was about to mint (`rule capability.instance_scope`,
+    /// the derived-handle and minted-handle clauses).
+    DerivedHandle,
+    /// Admission accepted a replay of a recorded mutation, and a handle the recorded outcome
+    /// names is outside the presenting capability's grant.
+    ReplayAuthority,
+}
+
+/// Authority denials counted by category, with no handle, actor, or token in them
+/// ([`DaemonState::denial_counts`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DenialCounts {
+    /// Requests T1–T4 refused.
+    pub admission: u64,
+    /// Admitted requests refused on a derived or minted handle.
+    pub derived_handle: u64,
+    /// Replays refused because the recorded outcome names a handle the presenting grant does
+    /// not admit.
+    pub replay_authority: u64,
 }
 
 /// Registry status of an Intent Contract
@@ -366,6 +398,10 @@ pub struct Replay {
     /// the typed request instead. The two agree by construction once a codec exists: equal
     /// canonical bytes decode to equal typed requests.
     pub request: ReplayKey,
+    /// The grant the recording capability conferred when the outcome was produced. A replay
+    /// under a grant that covers it is authorized by construction: everything the outcome
+    /// names was admitted under this one (cr-3hcpn4).
+    pub grant: crate::protocol::handshake::CapabilityDescriptor,
     /// The result the first execution produced. A replay returns it with the payload and
     /// every identity-bearing field unchanged, so "the same task or artifact identity" is
     /// returned by construction. Only the per-attempt `request_id` echo and the `audit`
@@ -498,13 +534,16 @@ impl DaemonState {
     /// [`ProvisioningRefusal::ArtifactClass`] when `artifact_classes` names a string that is
     /// not a class token (`rule artifact_class.spelling`). The descriptor is then not
     /// registered: a scope that matches nothing is refused here, where the deployment can
-    /// see it, and never served as an empty scope.
+    /// see it, and never served as an empty scope. [`ProvisioningRefusal::Instance`] when
+    /// `instances` names a handle that cannot be an instance scope
+    /// (`rule capability.instance_scope`), on the same footing.
     pub fn register_capability(
         &mut self,
         descriptor: CapabilityDescriptor,
         parent: Option<CapabilityHandle>,
     ) -> Result<(), ProvisioningRefusal> {
-        scoped_classes(&descriptor)?;
+        // The instance check runs the class check first, so one call refuses both.
+        scoped_instances(&descriptor)?;
         self.capabilities.insert(
             descriptor.capability.clone(),
             CapabilityGrant { descriptor, parent },
@@ -542,6 +581,42 @@ impl DaemonState {
     #[must_use]
     pub fn admissions(&self) -> &[AdmissionRecord] {
         &self.admissions
+    }
+
+    /// Mark the admission record `audit` names as denied on a derived handle.
+    ///
+    /// The record was written at admission, admitted; this is the one later fact about it.
+    pub fn record_derived_denial(&mut self, audit: &str) {
+        self.record_denial(audit, Denial::DerivedHandle);
+    }
+
+    /// Mark the admission record `audit` names as denied after admission, in `category`.
+    pub fn record_denial(&mut self, audit: &str, category: Denial) {
+        if let Some(record) = self
+            .admissions
+            .iter_mut()
+            .rev()
+            .find(|record| record.audit == audit)
+        {
+            record.denial = Some(category);
+        }
+    }
+
+    /// Authority denials so far, by category, read off the admission audit log (RFC 0027
+    /// P5). A count carries no handle, actor, or capability token, so it can be exported to
+    /// a monitor as it is (cr-3hcpn4).
+    #[must_use]
+    pub fn denial_counts(&self) -> DenialCounts {
+        let mut counts = DenialCounts::default();
+        for record in &self.admissions {
+            match record.denial {
+                Some(Denial::Admission) => counts.admission += 1,
+                Some(Denial::DerivedHandle) => counts.derived_handle += 1,
+                Some(Denial::ReplayAuthority) => counts.replay_authority += 1,
+                None => {}
+            }
+        }
+        counts
     }
 
     // --- staged content ------------------------------------------------------------
@@ -747,13 +822,27 @@ impl DaemonState {
     /// from an evidence graph; a deployment registers the one it holds and the landed pipeline
     /// does the rest. See [`context::ContextCompileSource`](super::context::ContextCompileSource)
     /// for what is registered and what is emphatically not.
+    ///
+    /// # Errors
+    ///
+    /// [`NotAnEvidenceRoot`](super::context::NotAnEvidenceRoot) when `root` is not an
+    /// `ev_` handle. `context.compile` reads this table by a class-agnostic
+    /// `ArtifactHandle`, so a projection registered under another class's handle would be
+    /// reachable under that class's name without that class's authority (cr-3hcpn4). It is
+    /// refused here, where the deployment can see it, and nothing is registered.
     pub fn put_compile_source(
         &mut self,
         root: &ArtifactHandle,
         source: super::context::ContextCompileSource,
-    ) {
+    ) -> Result<(), super::context::NotAnEvidenceRoot> {
+        if super::provisioning::class_of(root.as_str())
+            != Some(continuum_workspace::artifact_path::ArtifactClass::Evidence)
+        {
+            return Err(super::context::NotAnEvidenceRoot);
+        }
         self.compile_sources
             .insert(root.as_str().to_owned(), source);
+        Ok(())
     }
 
     /// The compile projection `root` names, or [`None`].

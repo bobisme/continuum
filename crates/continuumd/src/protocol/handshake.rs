@@ -168,6 +168,11 @@ protocol_struct! {
         /// no privileged operation granted, no additional data grant held, no
         /// cross-principal sharing. See `rule capability.profile_narrowing`.
         profile: CapabilityProfile optional;
+        /// Artifact instances in scope for every class with no instance list
+        /// of its own; each member's class is its handle prefix. A class with
+        /// no listed instance keeps its class scope. Absent is the 3.6 class
+        /// scope, unchanged. See `rule capability.instance_scope`.
+        instances: list<ArtifactHandle> optional;
     }
 }
 
@@ -320,6 +325,27 @@ impl NegotiationError {
 /// one. The gate is the client's own offer instead: a client whose range reaches this
 /// version has told the daemon it can parse the frame.
 const REJECT_FRAME_SINCE: ProtocolVersion = ProtocolVersion::new(3, 1);
+
+/// The first protocol version that defines `CapabilityDescriptor.instances`
+/// (`@since("3.7")`, `rule capability.instance_scope`).
+pub const INSTANCE_SCOPE_SINCE: ProtocolVersion = ProtocolVersion::new(3, 7);
+
+impl CapabilityDescriptor {
+    /// This descriptor as a connection negotiated at `version` may be told it.
+    ///
+    /// `rule versioning.compatible_change` forbids emitting a field the negotiated version
+    /// does not define, so below [`INSTANCE_SCOPE_SINCE`] the `instances` field is dropped.
+    /// Admission still enforces it on every request: the report is then wider than the
+    /// grant, never narrower, and a client acting on it meets `CapabilityDenied`.
+    #[must_use]
+    pub fn as_reported_at(&self, version: ProtocolVersion) -> Self {
+        let mut reported = self.clone();
+        if version < INSTANCE_SCOPE_SINCE {
+            reported.instances = super::spec::Optional::Absent;
+        }
+        reported
+    }
+}
 
 impl ServerReject {
     /// The typed refusal for `error`, or [`None`] where the connection must be closed

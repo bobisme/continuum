@@ -99,6 +99,7 @@ use continuum_evidence::whiteboard::{
 use continuum_intent::canonical_json::Json;
 use continuum_workspace::artifact_path::ArtifactClass;
 
+use super::admission::InstanceScope;
 use super::evidence::edge_identity;
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 use super::state::{DaemonState, EvidenceEdge, EvidenceNode, StatusWrite};
@@ -153,6 +154,7 @@ impl OperationFamily for WhiteboardFamily {
                 snapshots: Vec::new(),
                 intents: Vec::new(),
                 classes: vec![ArtifactClass::Evidence.token()],
+                instances: Vec::new(),
             },
             _ => ScopeClaim::default(),
         }
@@ -204,8 +206,16 @@ fn compile(
     //    before anything is built. A reference the graph holds no node about is a denial
     //    and never a distinguishable not-found (RFC 0027 X2): a note is otherwise an
     //    existence oracle over the whole graph, one handle per line.
+    //
+    //    A reference resolves only through a node the caller's grant admits: the note names
+    //    content, and the nodes about that content are derived handles, decided by the
+    //    grant (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4). A
+    //    node outside the scope neither resolves a reference nor supports a decision, so the
+    //    answer says nothing about it (X2). The index is built once for the whole note.
+    let scope = InstanceScope::of(call.grant);
     let held: Vec<Commitment> = state
         .evidence_nodes()
+        .filter(|(handle, _)| scope.admits(handle.as_str()))
         .map(|(_, node)| node.artifact.clone())
         .collect();
     let resolves =
@@ -262,6 +272,7 @@ fn compile(
         for reference in entry.references() {
             let supporting: Vec<EvidenceHandle> = state
                 .evidence_nodes()
+                .filter(|(handle, _)| scope.admits(handle.as_str()))
                 .filter(|(_, node)| node.artifact.as_str() == reference.as_str())
                 .map(|(handle, _)| handle.clone())
                 .collect();
@@ -311,6 +322,19 @@ fn compile(
                 .collect(),
         })
         .collect();
+
+    // 6a. Every node and edge this call would append has an identity that is a function of
+    //     the note, and an append is convergent, so it may land on one the graph holds. Each
+    //     is decided by the grant before anything is appended, held or not (X2; cr-3hcpn4).
+    for handle in nodes
+        .iter()
+        .map(|(handle, _)| handle)
+        .chain(edges.iter().map(|(handle, _)| handle))
+    {
+        if !scope.admits(handle.as_str()) {
+            return Err(Fault::denied());
+        }
+    }
 
     // 7. Nothing was appended until here, so every refusal above left the graph exactly as
     //    it found it (W8).

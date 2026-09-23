@@ -1004,6 +1004,7 @@ fn grant(
         // set is a subset of its parent's" holds by construction rather than by luck.
         delegation_depth: if handle == "cap_root" { 4 } else { 3 },
         profile,
+        instances: Optional::Absent,
     }
 }
 
@@ -3284,16 +3285,24 @@ fn the_artifact_class_spelling_is_a_typed_refusal_at_provisioning() {
         refused,
         ProvisioningRefusal::ArtifactClass {
             capability: cap("cap_prefixed"),
+            actor: who("agent:prefixed"),
             refusal: ArtifactClassRefusal::PrefixSpelling {
                 given: "ws_".to_owned(),
                 meant: ArtifactClass::WorkspaceSnapshot,
             },
         }
     );
+    // The rendering names the spelling, the class it meant, and the capability's actor, and
+    // never the capability token: a `cap_` token is a bearer secret and a refusal's text
+    // reaches logs and panic messages (RFC 0027 S5; cr-3hcpn4).
     let message = refused.to_string();
     assert!(
-        message.contains("cap_prefixed") && message.contains("`ws_`") && message.contains("`ws`"),
-        "the refusal's rendering carries what its fields carry: {message}"
+        message.contains("agent:prefixed") && message.contains("`ws_`") && message.contains("`ws`"),
+        "the refusal's rendering names the actor, the spelling, and the token: {message}"
+    );
+    assert!(
+        !message.contains("cap_prefixed"),
+        "the refusal's rendering never carries the capability token: {message}"
     );
 
     // A spelling that is neither a token nor a prefix is the other refusal, not the same one.

@@ -1046,11 +1046,15 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // domains of six `String` leaves the G1-02 sweep pinned (`benchmark.task_identity`,
     // `benchmark.graders`, `evidence.claim_identity`, `query.reuse_reasons`,
     // `query.invalidation_edges`); the fields keep their type, so `version` stays "3.6".
+    //
+    // Protocol 3.7 (IDL 1.15, bn-28kv4) adds one `optional` field,
+    // `CapabilityDescriptor.instances`, and one rule, `capability.instance_scope`:
+    // 50 -> 51. A field is not one of these five counts, so only the rule count moves.
     assert_eq!(document.aliases.len(), 9, "aliases");
     assert_eq!(document.enums.len(), 34, "enums");
     assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 50, "rules");
+    assert_eq!(document.rules.len(), 51, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()

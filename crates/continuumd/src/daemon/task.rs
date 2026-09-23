@@ -88,6 +88,7 @@ use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
 use continuum_workspace::publication::{ContentIdentifier, Published, ReferenceStore};
 use continuum_workspace::staleness::{LineageError, check_current};
 
+use super::admission::Derived;
 use super::budget::{self, Publications};
 use super::continuation::{self, ParkState};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
@@ -264,6 +265,29 @@ impl PinnedEpochs {
             &self.corpus,
         ]
     }
+}
+
+/// A run refused on the continuation it would mint (`rule capability.instance_scope`, the
+/// minted-handle clause; cr-3hcpn4): the capability that presented it, the task, the
+/// continuation it started from (none for a `verification.start`), and the bounds it ran
+/// under.
+///
+/// The run is deterministic, so the same run for the same capability would mint the same
+/// handle and be refused again. [`TaskTable::refuse_run`] keeps the key and the states the
+/// refused run explored — the work charged to that capability — and a repeat is refused
+/// before any exploration, so a fresh idempotency key buys nothing. The key is per
+/// capability, not per task: a task identity is shared by every caller that names it, and
+/// one caller's refusal must not change what another is served.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RefusedRun {
+    /// The capability the refused request presented.
+    pub capability: crate::protocol::scalar::CapabilityHandle,
+    /// The task the run was for.
+    pub task: TaskHandle,
+    /// The continuation the run started from.
+    pub from: Option<ContinuationHandle>,
+    /// The bounds it ran under.
+    pub bounds: Bounds,
 }
 
 /// A `cont_*` continuation: what it pins, and the search state it resumes from.
@@ -597,6 +621,9 @@ pub struct TaskTable {
     /// the revision's store handle tied to its receipt (bn-283p6). A revision is recorded
     /// as durable only with the receipt-tied name of the record that makes it so.
     revisions: BTreeMap<ContinuationHandle, DurableRevision>,
+    /// Runs refused on the continuation they would mint, and the states each explored:
+    /// the refused work, charged to the capability that presented it ([`RefusedRun`]).
+    refused: BTreeMap<RefusedRun, u64>,
 }
 
 impl TaskTable {
@@ -609,6 +636,35 @@ impl TaskTable {
     /// Insert or replace a task.
     pub fn put(&mut self, entry: TaskEntry) {
         self.tasks.insert(entry.handle.clone(), entry);
+    }
+
+    /// Remove a task this dispatch created and must not leave behind — a start refused on
+    /// the continuation its run would mint (cr-3hcpn4).
+    pub fn remove(&mut self, handle: &TaskHandle) -> Option<TaskEntry> {
+        self.tasks.remove(handle)
+    }
+
+    /// Record a run refused on the continuation it would mint, with the states it explored.
+    pub fn refuse_run(&mut self, run: RefusedRun, explored: u64) {
+        self.refused.insert(run, explored);
+    }
+
+    /// Whether `run` was refused before, so a repeat is refused without exploring.
+    #[must_use]
+    pub fn refused(&self, run: &RefusedRun) -> bool {
+        self.refused.contains_key(run)
+    }
+
+    /// The states explored by refused runs, summed per capability: the refused work each
+    /// capability was charged with. No handle but the capability's is in it, and it never
+    /// reaches the wire.
+    #[must_use]
+    pub fn refused_work(&self) -> BTreeMap<crate::protocol::scalar::CapabilityHandle, u64> {
+        let mut charged = BTreeMap::new();
+        for (run, explored) in &self.refused {
+            *charged.entry(run.capability.clone()).or_insert(0) += explored;
+        }
+        charged
     }
 
     /// The task `handle` names, or [`None`].
@@ -926,29 +982,42 @@ impl OperationFamily for TaskFamily {
     }
 
     fn scope(&self, arguments: &Arguments) -> ScopeClaim {
-        // A `task_*` handle is neither a snapshot nor an intent, and RFC 0027 T2 scopes
-        // instances by those two plus artifact classes. So a task operation claims the task
-        // class, and the snapshot the task runs over is deliberately *not* claimed here:
-        // this function is pure in the arguments and is given no state, so resolving a task
-        // handle to the snapshot behind it would be the store lookup X3 forbids before
-        // admission. The handler re-reads that binding afterwards, where a lookup is allowed.
+        // A task operation claims the task class and the one `task_*` or `cont_*` instance
+        // it names, which `CapabilityDescriptor.instances` decides (3.7,
+        // `rule capability.instance_scope`). The snapshot the task runs over is deliberately
+        // *not* claimed here: this function is pure in the arguments and is given no state,
+        // so resolving a task handle to the snapshot behind it would be the store lookup X3
+        // forbids before admission. The handler re-reads that binding afterwards, where a
+        // lookup is allowed. For the same reason `task.resume` claims only the continuation
+        // it names and not the task that continuation belongs to: a `task_` instance scope
+        // does not cover the task's `cont_` (the rule's derived-artifact clause).
         //
         // `task.cancel` and `task.update_budget` also claim the continuation class: on a
         // parked task each publishes the next revision of its continuation record
         // (bn-20142).
         let task = ArtifactClass::Task.token();
+        let claim = |handle: &str| ScopeClaim {
+            snapshots: Vec::new(),
+            intents: Vec::new(),
+            classes: vec![task],
+            instances: vec![handle.to_owned()],
+        };
         match arguments {
-            Arguments::TaskStatus(_) | Arguments::TaskSubscribe(_) => ScopeClaim {
-                snapshots: Vec::new(),
-                intents: Vec::new(),
-                classes: vec![task],
-            },
-            Arguments::TaskCancel(_)
-            | Arguments::TaskUpdateBudget(_)
-            | Arguments::TaskResume(_) => ScopeClaim {
-                snapshots: Vec::new(),
-                intents: Vec::new(),
+            Arguments::TaskStatus(request) => claim(request.task.as_str()),
+            Arguments::TaskSubscribe(request) => claim(request.task.as_str()),
+            // The continuation these two write is not named, so its instance is decided in
+            // the handler, after the lookup admission may not make ([`continuation_in_scope`]).
+            Arguments::TaskCancel(request) => ScopeClaim {
                 classes: vec![task, ArtifactClass::Continuation.token()],
+                ..claim(request.task.as_str())
+            },
+            Arguments::TaskUpdateBudget(request) => ScopeClaim {
+                classes: vec![task, ArtifactClass::Continuation.token()],
+                ..claim(request.task.as_str())
+            },
+            Arguments::TaskResume(request) => ScopeClaim {
+                classes: vec![task, ArtifactClass::Continuation.token()],
+                ..claim(request.continuation.as_str())
             },
             _ => ScopeClaim::default(),
         }
@@ -965,7 +1034,7 @@ impl OperationFamily for TaskFamily {
             Arguments::TaskStatus(request) => status(call, request, state, services),
             Arguments::TaskCancel(request) => cancel(call, request, state, services, store),
             Arguments::TaskResume(request) => resume(call, request, state, services, store),
-            Arguments::TaskSubscribe(request) => subscribe(request, state),
+            Arguments::TaskSubscribe(request) => subscribe(call, request, state),
             Arguments::TaskUpdateBudget(request) => {
                 update_budget(call, request, state, services, store)
             }
@@ -1012,6 +1081,7 @@ fn status(
     services: &Services,
 ) -> Result<Effect, Fault> {
     let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+    task_scope(call, entry)?;
     let fitted = output::fit_task_record(
         entry.record(),
         output::Ceiling::of(call.envelope),
@@ -1045,8 +1115,13 @@ fn status(
 /// `task.subscribe` returns only common codes, which is what its empty clause permits, and
 /// the `unsupported_surface` path is not taken. The contradiction itself is gone as of
 /// protocol 3.2 (bn-i4aem item 1).
-fn subscribe(request: &TaskSubscribeRequest, state: &DaemonState) -> Result<Effect, Fault> {
+fn subscribe(
+    call: &Call<'_>,
+    request: &TaskSubscribeRequest,
+    state: &DaemonState,
+) -> Result<Effect, Fault> {
     let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+    task_scope(call, entry)?;
     Ok(reported(
         Payload::TaskSubscribe(TaskSubscribeResponse {
             record: entry.record(),
@@ -1054,6 +1129,43 @@ fn subscribe(request: &TaskSubscribeRequest, state: &DaemonState) -> Result<Effe
         Nullable::Null,
         entry,
     ))
+}
+
+/// Every handle a task names beyond itself — its snapshot, its intent, and the continuation
+/// it holds — decided against the grant before anything is read about it, written to it, or
+/// reported (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4).
+///
+/// Admission saw only the task handle, because finding what the task names is a table
+/// lookup X3 keeps out of admission. Every operation that resolves a `task_` calls this
+/// first: `task.status` and `task.subscribe` report all three in the record,
+/// `task.cancel` and `task.update_budget` report the continuation and, on a parked task,
+/// publish its next revision (bn-20142), and `verification.result` and
+/// `verification.await` report the continuation. The refusal is the same
+/// `CapabilityDenied` as every other denial (X1, X2), for a terminal task as for a live one.
+/// A grant that scopes none of those classes and lists no snapshot or intent passes
+/// unchanged, which is the 3.6 behaviour.
+pub(super) fn task_scope(call: &Call<'_>, entry: &TaskEntry) -> Result<(), Fault> {
+    if let Nullable::Value(snapshot) = &entry.snapshot {
+        call.derived(Derived::Snapshot(snapshot))?;
+    }
+    if let Nullable::Value(intent) = &entry.intent {
+        call.derived(Derived::Intent(intent))?;
+    }
+    if let Some(continuation) = &entry.continuation {
+        call.derived(Derived::Instance(continuation.as_str()))?;
+    }
+    Ok(())
+}
+
+/// Every handle a continuation names beyond itself, decided against the grant
+/// ([`Call::derived`]).
+fn continuation_scope(call: &Call<'_>, continuation: &Continuation) -> Result<(), Fault> {
+    call.derived(Derived::Instance(continuation.task.as_str()))?;
+    call.derived(Derived::Snapshot(&continuation.snapshot))?;
+    if let Nullable::Value(intent) = &continuation.intent {
+        call.derived(Derived::Intent(intent))?;
+    }
+    Ok(())
 }
 
 /// `task.cancel` — request, drain, finalize, driven through the region that owns the work.
@@ -1105,6 +1217,7 @@ fn cancel(
     let now = services.now().cloned();
     let (residual, terminal) = {
         let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+        task_scope(call, entry)?;
         (
             Residual {
                 publications: entry.publications(),
@@ -1292,6 +1405,7 @@ fn update_budget(
     // task writes nothing, here as below.
     let durable = {
         let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
+        task_scope(call, entry)?;
         if entry.is_terminal() {
             None
         } else {
@@ -1476,6 +1590,12 @@ fn resume(
         .continuation(&request.continuation)
         .ok_or_else(Fault::denied)?
         .clone();
+    // The continuation names a task, a snapshot, and perhaps an intent the request did not.
+    // Each is decided by the grant before anything is read about it, written to it, or
+    // reported: a grant listing `cont_B` and not `task_B` cannot resume, observe, or
+    // re-budget `task_B`, terminal or live (cr-3hcpn4). The refusal precedes the staleness
+    // checks too, whose recovery offers would otherwise name the task's lineage head.
+    continuation_scope(call, &continuation)?;
 
     if let Nullable::Value(named) = &call.envelope.snapshot {
         if named != &continuation.snapshot {
@@ -1603,6 +1723,31 @@ fn resume(
         }
     }
 
+    // The same run, refused before for this capability on the continuation it would mint,
+    // is refused again before the budget write or any exploration. The run is decided by
+    // the continuation it starts from and the bounds the budget write would leave
+    // (cr-3hcpn4).
+    let refused_key = {
+        let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
+        RefusedRun {
+            capability: call.envelope.capability.clone(),
+            task: task.clone(),
+            from: Some(request.continuation.clone()),
+            bounds: budget::bounds_after(&entry.ledger, request.budget.value()),
+        }
+    };
+    if state.tasks().refused(&refused_key) {
+        let mut denied = Fault::denied();
+        denied.derived_denial = true;
+        return Err(denied);
+    }
+    // What the budget write below changes, so a refused run can put it back: the ceilings
+    // and the milestone and event logs `reach` appends to.
+    let (prior_budget, prior_milestones, prior_events) = {
+        let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
+        (entry.budget(), entry.milestones.len(), entry.events.len())
+    };
+
     if let Optional::Present(budget) = &request.budget {
         if let Some(entry) = state.tasks_mut().get_mut(&task) {
             // `task.resume` carries an optional budget and RFC 0026 gives it the same
@@ -1648,15 +1793,42 @@ fn resume(
     // "Continuations and resume admissibility") keeps it that way, `bounds`/`frontier` are
     // pinned provenance, not a resume instruction. It reaches `verification::advance` only so
     // `run` can check, rather than trust, that this run rediscovers it.
-    verification::advance(&task, bounds, &frontier, state, services, store, &publisher).map_err(
-        |fault| {
-            if super::errors::admits(call.spec, fault.code) {
-                fault
-            } else {
-                Fault::denied()
+    let mut explored = None;
+    let mut authorize = |minted: &ContinuationHandle, states: u64| {
+        explored = Some(states);
+        super::admission::admits_derived(call.grant, Derived::Instance(minted.as_str()))
+    };
+    let ran = verification::advance(
+        &task,
+        bounds,
+        &frontier,
+        state,
+        services,
+        store,
+        &publisher,
+        &mut authorize,
+    );
+    if let Err(fault) = &ran {
+        // A run refused on its minted continuation leaves the shared task as it was: the
+        // budget write is put back, and the work is charged to the presenting capability.
+        if fault.derived_denial {
+            if let Some(entry) = state.tasks_mut().get_mut(&task) {
+                let _ = budget::update(&mut entry.ledger, &prior_budget);
+                entry.milestones.truncate(prior_milestones);
+                entry.events.truncate(prior_events);
             }
-        },
-    )?;
+            state
+                .tasks_mut()
+                .refuse_run(refused_key, explored.unwrap_or_default());
+        }
+    }
+    ran.map_err(|fault| {
+        if super::errors::admits(call.spec, fault.code) {
+            fault
+        } else {
+            Fault::denied()
+        }
+    })?;
     let entry = state.tasks().get(&task).ok_or_else(Fault::denied)?;
     let mut effect = reported(
         Payload::TaskResume(TaskResumeResponse {

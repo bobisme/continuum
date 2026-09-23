@@ -74,6 +74,7 @@ use continuum_intent::contract::{ContractParts, IntentContract, IntentId};
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::ReferenceStore;
 
+use super::admission::Derived;
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 use super::state::{Acceptance, DaemonState, IntentRecord, RegistryStatus};
 use super::{Services, identity};
@@ -136,6 +137,7 @@ impl OperationFamily for IntentFamily {
             snapshots: Vec::new(),
             intents,
             classes,
+            instances: Vec::new(),
         };
         match arguments {
             Arguments::IntentGet(request) => claim(vec![request.intent.clone()], vec![intent]),
@@ -146,10 +148,19 @@ impl OperationFamily for IntentFamily {
             Arguments::IntentProposeRevision(request) => {
                 claim(vec![request.base.clone()], vec![intent])
             }
-            Arguments::IntentAccept(request) => claim(
-                vec![request.proposal.clone()],
-                vec![intent, ArtifactClass::SignedIntentBundle.token()],
-            ),
+            Arguments::IntentAccept(request) => ScopeClaim {
+                // The optional bundle is an `inb_` instance the request names.
+                instances: request
+                    .bundle
+                    .value()
+                    .map(|bundle| bundle.as_str().to_owned())
+                    .into_iter()
+                    .collect(),
+                ..claim(
+                    vec![request.proposal.clone()],
+                    vec![intent, ArtifactClass::SignedIntentBundle.token()],
+                )
+            },
             Arguments::IntentReject(request) => claim(vec![request.proposal.clone()], vec![intent]),
             Arguments::IntentLock(request) => claim(vec![request.intent.clone()], vec![intent]),
             _ => ScopeClaim::default(),
@@ -164,12 +175,12 @@ impl OperationFamily for IntentFamily {
         _store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
-            Arguments::IntentGet(request) => get(request, state),
+            Arguments::IntentGet(request) => get(call, request, state),
             Arguments::IntentDiff(_) => Err(unclassifiable()),
             Arguments::IntentProposeRevision(request) => propose_revision(request, state),
             Arguments::IntentAccept(request) => accept(call, request, state),
             Arguments::IntentReject(request) => reject(request, state),
-            Arguments::IntentLock(request) => lock(request, state, services),
+            Arguments::IntentLock(request) => lock(call, request, state, services),
             // Unreachable: the dispatcher checked shape agreement before routing.
             _ => Err(Fault::new(
                 ErrorCode::MalformedRequest,
@@ -179,8 +190,23 @@ impl OperationFamily for IntentFamily {
     }
 }
 
-fn get(request: &IntentGetRequest, state: &DaemonState) -> Result<Effect, Fault> {
+/// The intents a registry record names beyond its own — `supersedes` and `superseded_by` —
+/// decided against the grant before the record is reported or changed
+/// (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4). An
+/// intent-scoped grant is not told the identity of a revision it does not list.
+fn lineage_scope(call: &Call<'_>, record: &IntentRecord) -> Result<(), Fault> {
+    for intent in [&record.supersedes, &record.superseded_by]
+        .into_iter()
+        .flatten()
+    {
+        call.derived(Derived::Intent(intent))?;
+    }
+    Ok(())
+}
+
+fn get(call: &Call<'_>, request: &IntentGetRequest, state: &DaemonState) -> Result<Effect, Fault> {
     let record = state.intent(&request.intent).ok_or_else(Fault::denied)?;
+    lineage_scope(call, record)?;
     Ok(Effect::new(
         Payload::IntentGet(IntentGetResponse {
             intent: request.intent.clone(),
@@ -246,6 +272,7 @@ fn accept(
     let acceptance = decode_acceptance(&request.acceptance, call.audit.as_str())?;
 
     let record = state.intent(&request.proposal).ok_or_else(Fault::denied)?;
+    lineage_scope(call, record)?;
     if record.status != RegistryStatus::Proposed {
         return Err(Fault::new(
             ErrorCode::IntentMutationDenied,
@@ -289,11 +316,13 @@ fn reject(request: &IntentRejectRequest, state: &mut DaemonState) -> Result<Effe
 }
 
 fn lock(
+    call: &Call<'_>,
     request: &IntentLockRequest,
     state: &mut DaemonState,
     services: &Services,
 ) -> Result<Effect, Fault> {
     let record = state.intent(&request.intent).ok_or_else(Fault::denied)?;
+    lineage_scope(call, record)?;
     let contract = record.contract.clone();
     let acceptance = record.acceptance.clone();
     let current = contract.policy().clone();
@@ -338,6 +367,10 @@ fn lock(
     // ID3: a governance edit moves the identity, so the response names a successor.
     let successor = respell(&contract, table);
     let handle = mint(&successor, services)?;
+    // The successor's identity is a function of the edited contract, so it may be one this
+    // daemon already holds, and `put_intent` below writes it. It is decided by the grant's
+    // `intents` list first, held or not (X2; cr-3hcpn4).
+    call.derived(Derived::Intent(&handle))?;
     let successor = respell_id(&successor, &handle)?;
     let policy = wire_policy(successor.policy());
     let predecessor = request.intent.clone();
