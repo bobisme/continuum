@@ -93,12 +93,18 @@ covenant:
 # identity, reject digest mismatch, and preserve redaction commitments
 # bound to live enforcement; hash chain/Merkle root over events and
 # optional signing/attestation recorded as typed absences, each with its
-# own mechanical absence-check). Each checker runs its self-test first —
+# own mechanical absence-check), and the docs/09 T09 five-control binding
+# (agent weakens property: semantic property diff, review gates, and the
+# immutable baseline property digest bound to live enforcement, the last
+# with a merge-base revision rule over tools/governance/t09-property-
+# baseline.json; mutation score a typed gap; claim ledger/certificate
+# partial, with the claims registry's missing write protection a checked
+# absence). Each checker runs its self-test first —
 # every violating fixture must be caught — so none of these can pass
 # vacuously. Evidence lands in tools/governance/evidence/.
 #
 # `check_revision_delta.py` is the two-revision half of GOV-1-08/09: the other
-# six checkers read one revision, and "this change was semantic" / "this change
+# seven checkers read one revision, and "this change was semantic" / "this change
 # was breaking" are not one-revision properties. It runs *last* and guards
 # itself on a resolvable base rather than being guarded here, because a shell
 # guard would have to duplicate the base-resolution logic and could then
@@ -130,6 +136,8 @@ governance:
     python3 tools/governance/check_r16_evidence.py
     python3 tools/governance/check_t04_evidence.py --self-test
     python3 tools/governance/check_t04_evidence.py
+    python3 tools/governance/check_t09_evidence.py --self-test
+    python3 tools/governance/check_t09_evidence.py
     python3 tools/governance/check_revision_delta.py --self-test
     python3 tools/governance/check_revision_delta.py
     python3 tools/governance/check_obligations.py --self-test

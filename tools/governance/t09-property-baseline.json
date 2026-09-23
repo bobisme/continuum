@@ -1,0 +1,47 @@
+{
+  "schema": "continuum.governance.t09-property-baseline/1",
+  "authority": "notes/plan/docs/09_THREAT_MODEL.md T09 (Agent weakens property): immutable baseline property digest in CI",
+  "hasher": "blake3-256",
+  "digests": {
+    "intent_identity": "BLAKE3 over IntentIdentity canonical bytes: the RFC 0037 ID1/ID2 preimage, every protected field group plus the policy table, no ID2 metadata",
+    "claims": "BLAKE3 over the canonical bytes of the claims group's identity preimage: the property set alone",
+    "policy": "BLAKE3 over the canonical bytes of the policy table's identity preimage: the change-policy verbs alone"
+  },
+  "enforced_by": [
+    "crates/continuum-intent/tests/t09_property_baseline.rs (the digests, computed by the real decoder; every committed Intent Contract is pinned exactly once)",
+    "tools/governance/check_t09_evidence.py baseline-revision-delta (a moved, added, or retired pin carries a fresh named revision against the merge base)"
+  ],
+  "entries": [
+    {
+      "path": "crates/continuum-intent/tests/fixtures/die-hard-contract.json",
+      "intent_identity": "7c579d67c260f5b9f3739359cb76941aed0fa533568b317d5a173844c1267b42",
+      "claims": "b649eca04285751a738a7b6c35c1e5bee94fbb3f02ef92ad3f88b21c9d7ce257",
+      "policy": "57fce8b90a42cf61a877d871fae7b80e58c155fa9e81b50b306d9805fe2a80a4",
+      "revision": {
+        "bone": "bn-20co",
+        "reason": "initial T09 pin of the committed Intent Contract corpus"
+      }
+    },
+    {
+      "path": "crates/continuum-intent/tests/fixtures/replicated-register-contract.json",
+      "intent_identity": "02c2da65b627deb7cc28e57fdd1be81f7a5e4a84e489a333a78013da221392c8",
+      "claims": "6517606865a351b9557a5145704129c4662ac688056a7b6e3abb4ece3b21fbd6",
+      "policy": "4111db5514f5df8108a79bf870de66efe6dcaee35fb3a63cd44ebfe48e1fee21",
+      "revision": {
+        "bone": "bn-20co",
+        "reason": "initial T09 pin of the committed Intent Contract corpus"
+      }
+    },
+    {
+      "path": "notes/plan/schemas/examples/intent-contract.example.json",
+      "intent_identity": "ebc25055a3205ebb5396511d636c32235bbe96418dc795a91939a6856f459286",
+      "claims": "92f81e2cf1dce30ec59fa5647214f20e43117e5a0f8e358729d0a1b344cba40b",
+      "policy": "62ee33d6c8b71797881ea81d0ace0f687a8e3001afa52c1d433c6d3390d2d6dc",
+      "revision": {
+        "bone": "bn-20co",
+        "reason": "initial T09 pin of the committed Intent Contract corpus"
+      }
+    }
+  ],
+  "retired": []
+}

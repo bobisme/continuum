@@ -159,7 +159,7 @@ Controls:
 - multiple solver diversity;
 - preserve raw proof and command.
 
-### T09 — Agent weakens property
+### T09 — Agent weakens property (delivered: bn-20co — three of five controls bound to live, re-run enforcement in `tools/governance/check_t09_evidence.py` / `evidence/t09.json`: semantic property diff via PR-12's `properties` classifier, which classifies an agent-authored complementary-disjunct weakening of a real corpus claim `weakened` and blocks it under `locked`, with disguise and blind-classifier mutants caught; review gates via the six INV-001 verbs forbidding `allow` on every acceptance path, privileged accept/reject/lock, and GOV §4 review records; and the immutable baseline property digest, new here: `tools/governance/t09-property-baseline.json` pins identity, claims, and policy BLAKE3 digests of every committed Intent Contract, computed by the real decoder in `crates/continuum-intent/tests/t09_property_baseline.rs`, and a merge-base rule demands a fresh named revision for every moved, new, or retired pin — plus agent cannot modify claim ledger or certificate bound at the daemon and certificate grain, with the repository claims registry's missing in-tree write protection recorded as a checked absence; and mutation score a typed gap, since no producer computes a per-property mutation score and Forge's plan §14.5 mutation challenges are not landed, each absence with its own mechanical absence-check)
 
 Controls:
 

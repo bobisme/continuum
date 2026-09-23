@@ -1,0 +1,464 @@
+{
+  "artifact": "continuum.governance.evidence/t09",
+  "authority": "notes/plan/docs/09_THREAT_MODEL.md T09 (Agent weakens property)",
+  "boundary": "Three of five controls are bound to re-run enforcement. 'mutation score' is a typed gap with a mechanical absence-scan. 'agent cannot modify claim ledger or certificate' is partial: bound at the daemon and certificate grain, with the repository claims registry's missing write protection recorded as a checked absence. The baseline pin makes a property change visible and named; it does not authenticate the approver, which is the review gate's job outside the tree.",
+  "controls": {
+    "(failure monotonicity)": {
+      "citations": [
+        {
+          "artifact": "crates/continuum-semantic-diff/tests/pr12_impl02_property_ast_edit_evidence.rs (two boundary tests)",
+          "enforces": "an unrelatable edit and an exhausted step budget are `unknown` and block",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-semantic-diff/tests/pr12_exit_evidence.rs live_beyond_g0_\u2026_fails_closed_to_review",
+          "enforces": "an abstraction merge beyond G0 fails closed to review",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-intent/tests/inv001_protected_intent_evidence.rs positive_fail_closed_unknown_forbids_allow_\u2026",
+          "enforces": "`unknown` forbids `allow` under every verb",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    },
+    "agent cannot modify claim ledger or certificate": {
+      "absence_checks": [
+        {
+          "artifact": "tools/governance/check_t09_evidence.py claim-registry-write-protection-gap",
+          "checks": "no CODEOWNERS file exists and the T09 baseline does not pin docs/18: the repository claims registry has no in-tree write protection",
+          "status": "pass"
+        }
+      ],
+      "citations": [
+        {
+          "artifact": "crates/continuumd/tests/inv015_agent_least_authority_evidence.rs (five tests)",
+          "enforces": "no request admits a caller-supplied status; the Promotion witness is unreachable outside the verification service; receipt appending is service-only and never self-certified; privilege is never default",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuumd/tests/inv009_monotonic_task_evidence.rs (two tests)",
+          "enforces": "the append-only evidence containers admit no removal verb, with mutants",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs (two mutants)",
+          "enforces": "a forged receipt constructor and a Published name forged without a receipt are both caught",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-certificate/tests/inv004_no_self_certification.rs (two tests)",
+          "enforces": "the certificate checker has one entry point over wire-form bytes and collapses no outcome into a bool",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/check_crate_boundaries.py",
+          "enforces": "no self-certification crate edges (INV-004)",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_claim_governance.py",
+          "enforces": "the docs/18 claims registry and its PLAN_REQUIREMENTS mirror agree row for row, so a one-sided edit fails",
+          "status": "pass"
+        }
+      ],
+      "reason": "Bound at the daemon and certificate grain. The repository claims registry (docs/18 and its PLAN_REQUIREMENTS mirror) is writable by any committer: the mirror check fails a one-sided edit and review gates a two-sided one, but nothing in the tree refuses an agent commit that edits both.",
+      "status": "pass",
+      "type": "partial"
+    },
+    "immutable baseline property digest in CI": {
+      "citations": [
+        {
+          "artifact": "crates/continuum-intent/tests/t09_property_baseline.rs (seven tests)",
+          "enforces": "every committed Intent Contract is pinned exactly once by identity, claims, and policy digests the real decoder computes; the complementary-disjunct weakening moves the claims pin; unlocking `properties` moves the policy pin; metadata does not",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/t09-property-baseline.json",
+          "enforces": "every pin carries three hex digests and a named revision",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_t09_evidence.py baseline-revision-delta",
+          "enforces": "against the merge base, a moved, new, or retired pin carries a fresh named revision; its seven fixtures are re-run here, and its live verdict fails the run (stdout, exit code)",
+          "status": "pass"
+        },
+        {
+          "artifact": "Justfile",
+          "enforces": "`just check` runs `test` and this checker; CI runs `just check`",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    },
+    "mutation score": {
+      "absence_checks": [
+        {
+          "artifact": "tools/governance/check_t09_evidence.py mutation-score-gap",
+          "checks": "no crates/*/src identifier names a mutation score or kill rate; no cargo-mutants configuration exists",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-intent/tests/inv012_nonvacuity_evidence.rs boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed",
+          "checks": "plan \u00a714.5's property-mutation challenge is still Forge's and still not landed",
+          "status": "pass"
+        }
+      ],
+      "reason": "No producer computes a per-property mutation score. The mutants that exist are anti-vacuity mutants of the classifiers, the kernel mutation-class matrix (certificates, KCOV-08), and docs/19 \u00a74's semantic-engine mutants; none seeds program mutants and reports the fraction a property kills. Forge's plan \u00a714.5 mutation challenges are not landed.",
+      "status": "pass",
+      "type": "gap"
+    },
+    "review gates": {
+      "citations": [
+        {
+          "artifact": "crates/continuum-intent/tests/inv001_protected_intent_evidence.rs (four tests)",
+          "enforces": "each of the six INV-001 verbs forbids `allow` on every acceptance path; none reads as a repair; accept/reject/lock are privileged and proposing is not; a blind classifier is detected",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-semantic-diff/tests/pr12_impl02_property_ast_edit_evidence.rs positive_gutting_\u2026_classifies_weakened_and_blocks",
+          "enforces": "under a `review` verb the same weakening closes to `review` with named reviewers, never `allow`",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_obligations.py",
+          "enforces": "a semantic-core change ships a GOV \u00a74 review record (reference, metamorphic, differential tests; schemas; migration; security review)",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    },
+    "semantic property diff": {
+      "citations": [
+        {
+          "artifact": "notes/plan/docs/09_THREAT_MODEL.md",
+          "enforces": "T09's control list is exactly the five this binding covers",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-semantic-diff/tests/pr12_impl02_property_ast_edit_evidence.rs (five tests)",
+          "enforces": "an agent-authored complementary-disjunct weakening of a real claim is an affirmed `weakened` and blocks under `locked`; double-negation, vacuous-conjunct, and rename disguises fail; a content-blind classifier mutant is caught",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-semantic-diff/tests/pr12_exit_evidence.rs (two tests)",
+          "enforces": "weakening a property is a privileged change at production grain; a blind property classifier flips the exit and is rejected",
+          "status": "pass"
+        }
+      ],
+      "status": "pass",
+      "type": "pass"
+    }
+  },
+  "determinism": "No timestamp, commit id, or absolute path is recorded, and the merge-base delta verdict goes to stdout only: the file is a function of the tree and the delegates' outputs. Each Rust group records only its `test result:` line, without wall-clock time.",
+  "produced_by": "tools/governance/check_t09_evidence.py",
+  "py_delegates": [
+    "tools/check_crate_boundaries.py",
+    "tools/governance/check_claim_governance.py",
+    "tools/governance/check_obligations.py"
+  ],
+  "reproduce": "python3 tools/governance/check_t09_evidence.py --evidence tools/governance/evidence/t09.json",
+  "rust_delegates": {
+    "baseline_digest": {
+      "args": [
+        "--test",
+        "t09_property_baseline"
+      ],
+      "package": "continuum-intent",
+      "tests": [
+        "the_baseline_pins_exactly_the_committed_intent_contracts",
+        "every_pinned_contract_still_matches_its_baseline_digests",
+        "the_baseline_names_the_production_hasher",
+        "hostile_an_agent_authored_property_weakening_moves_the_claims_pin",
+        "hostile_unlocking_the_properties_verb_moves_the_policy_pin",
+        "boundary_metadata_and_display_source_do_not_move_any_pin",
+        "negative_a_flipped_digest_and_a_dropped_entry_are_both_detected"
+      ]
+    },
+    "certificate_wire_only": {
+      "args": [
+        "--test",
+        "inv004_no_self_certification"
+      ],
+      "package": "continuum-certificate",
+      "tests": [
+        "checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+        "no_public_item_collapses_the_four_outcomes_into_a_bool"
+      ]
+    },
+    "fail_closed_classifier": {
+      "args": [
+        "--test",
+        "pr12_impl02_property_ast_edit_evidence"
+      ],
+      "package": "continuum-semantic-diff",
+      "tests": [
+        "boundary_an_edit_the_oracle_cannot_relate_classifies_unknown_and_blocks",
+        "boundary_the_step_budget_fails_closed_on_a_derivation_too_large_for_it"
+      ]
+    },
+    "fail_closed_exit": {
+      "args": [
+        "--test",
+        "pr12_exit_evidence"
+      ],
+      "package": "continuum-semantic-diff",
+      "tests": [
+        "live_beyond_g0_an_abstraction_merge_fails_closed_to_review"
+      ]
+    },
+    "fail_closed_policy": {
+      "args": [
+        "--test",
+        "inv001_protected_intent_evidence"
+      ],
+      "package": "continuum-intent",
+      "tests": [
+        "policy_decision::positive_fail_closed_unknown_forbids_allow_and_correction_13_excludes_assurance_incomparable"
+      ]
+    },
+    "ledger_append_only": {
+      "args": [
+        "--test",
+        "inv009_monotonic_task_evidence"
+      ],
+      "package": "continuumd",
+      "tests": [
+        "positive_no_monotone_container_has_a_removal_verb",
+        "negative_the_sweeps_are_not_vacuous"
+      ]
+    },
+    "ledger_authority": {
+      "args": [
+        "--test",
+        "inv015_agent_least_authority_evidence"
+      ],
+      "package": "continuumd",
+      "tests": [
+        "privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status",
+        "status_authority::positive_the_promotion_witness_cannot_be_built_outside_the_verification_service",
+        "receipt_authority::positive_receipt_appending_is_gated_to_service_actors_and_never_self_certified",
+        "privileged_perimeter::positive_the_privileged_set_is_exactly_the_five_governance_operations",
+        "no_widening::positive_privilege_is_never_acquired_by_default"
+      ]
+    },
+    "mutation_challenge_tripwire": {
+      "args": [
+        "--test",
+        "inv012_nonvacuity_evidence"
+      ],
+      "package": "continuum-intent",
+      "tests": [
+        "boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed"
+      ]
+    },
+    "receipt_unforgeable": {
+      "args": [
+        "--test",
+        "inv017_publication_atomicity_evidence"
+      ],
+      "package": "continuum-workspace",
+      "tests": [
+        "mutant_a_forged_receipt_constructor_is_caught",
+        "mutant_a_published_name_forged_without_a_receipt_is_caught"
+      ]
+    },
+    "review_gates_intent": {
+      "args": [
+        "--test",
+        "inv001_protected_intent_evidence"
+      ],
+      "package": "continuum-intent",
+      "tests": [
+        "policy_decision::positive_each_of_the_six_verbs_forbids_allow_under_the_fixtures_own_policy",
+        "policy_decision::positive_no_acceptance_path_reads_any_of_the_six_as_a_repair",
+        "policy_decision::negative_a_blind_classifier_reading_an_attack_as_unchanged_is_detected",
+        "daemon_boundary::boundary_accept_reject_lock_are_privileged_and_proposing_is_not"
+      ]
+    },
+    "semantic_diff_exit": {
+      "args": [
+        "--test",
+        "pr12_exit_evidence"
+      ],
+      "package": "continuum-semantic-diff",
+      "tests": [
+        "live_weakening_a_property_is_a_privileged_change",
+        "mutant_a_blind_property_classifier_flips_the_exit_and_is_rejected"
+      ]
+    },
+    "semantic_diff_weakening": {
+      "args": [
+        "--test",
+        "pr12_impl02_property_ast_edit_evidence"
+      ],
+      "package": "continuum-semantic-diff",
+      "tests": [
+        "positive_gutting_the_real_fixtures_agreement_claim_with_a_complementary_disjunct_classifies_weakened_and_blocks",
+        "negative_a_double_negation_dressing_dissolves_and_the_weakening_underneath_classifies_weakened",
+        "negative_a_vacuous_conjunct_game_never_classifies_unchanged",
+        "negative_renaming_a_real_corpus_claim_while_weakening_it_is_removed_plus_added_never_unchanged",
+        "negative_mutant_blind_to_expression_content_would_wrongly_pass_the_weakening_as_unchanged"
+      ]
+    }
+  },
+  "self_test": {
+    "direct": {
+      "checks_caught": [
+        "baseline-revision-delta",
+        "baseline-shape",
+        "binding-fails-closed",
+        "claim-registry-write-protection-gap",
+        "justfile-runs-t09",
+        "mutation-score-gap",
+        "t09-control-list"
+      ],
+      "failures": [],
+      "status": "pass"
+    },
+    "py_delegates": {
+      "delegates": {
+        "check_claim_governance": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_crate_boundaries": {
+          "exit_code": 0,
+          "status": "pass"
+        },
+        "check_obligations": {
+          "exit_code": 0,
+          "status": "pass"
+        }
+      },
+      "failures": [],
+      "status": "pass"
+    },
+    "rust_delegates_rerun": {
+      "baseline_digest": {
+        "package": "continuum-intent",
+        "result": "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+        "status": "pass",
+        "tests": [
+          "the_baseline_pins_exactly_the_committed_intent_contracts",
+          "every_pinned_contract_still_matches_its_baseline_digests",
+          "the_baseline_names_the_production_hasher",
+          "hostile_an_agent_authored_property_weakening_moves_the_claims_pin",
+          "hostile_unlocking_the_properties_verb_moves_the_policy_pin",
+          "boundary_metadata_and_display_source_do_not_move_any_pin",
+          "negative_a_flipped_digest_and_a_dropped_entry_are_both_detected"
+        ]
+      },
+      "certificate_wire_only": {
+        "package": "continuum-certificate",
+        "result": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out",
+        "status": "pass",
+        "tests": [
+          "checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+          "no_public_item_collapses_the_four_outcomes_into_a_bool"
+        ]
+      },
+      "fail_closed_classifier": {
+        "package": "continuum-semantic-diff",
+        "result": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out",
+        "status": "pass",
+        "tests": [
+          "boundary_an_edit_the_oracle_cannot_relate_classifies_unknown_and_blocks",
+          "boundary_the_step_budget_fails_closed_on_a_derivation_too_large_for_it"
+        ]
+      },
+      "fail_closed_exit": {
+        "package": "continuum-semantic-diff",
+        "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out",
+        "status": "pass",
+        "tests": [
+          "live_beyond_g0_an_abstraction_merge_fails_closed_to_review"
+        ]
+      },
+      "fail_closed_policy": {
+        "package": "continuum-intent",
+        "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out",
+        "status": "pass",
+        "tests": [
+          "policy_decision::positive_fail_closed_unknown_forbids_allow_and_correction_13_excludes_assurance_incomparable"
+        ]
+      },
+      "ledger_append_only": {
+        "package": "continuumd",
+        "result": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out",
+        "status": "pass",
+        "tests": [
+          "positive_no_monotone_container_has_a_removal_verb",
+          "negative_the_sweeps_are_not_vacuous"
+        ]
+      },
+      "ledger_authority": {
+        "package": "continuumd",
+        "result": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out",
+        "status": "pass",
+        "tests": [
+          "privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status",
+          "status_authority::positive_the_promotion_witness_cannot_be_built_outside_the_verification_service",
+          "receipt_authority::positive_receipt_appending_is_gated_to_service_actors_and_never_self_certified",
+          "privileged_perimeter::positive_the_privileged_set_is_exactly_the_five_governance_operations",
+          "no_widening::positive_privilege_is_never_acquired_by_default"
+        ]
+      },
+      "mutation_challenge_tripwire": {
+        "package": "continuum-intent",
+        "result": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out",
+        "status": "pass",
+        "tests": [
+          "boundary_mutation_challenges_are_forges_own_responsibility_and_not_yet_landed"
+        ]
+      },
+      "receipt_unforgeable": {
+        "package": "continuum-workspace",
+        "result": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out",
+        "status": "pass",
+        "tests": [
+          "mutant_a_forged_receipt_constructor_is_caught",
+          "mutant_a_published_name_forged_without_a_receipt_is_caught"
+        ]
+      },
+      "review_gates_intent": {
+        "package": "continuum-intent",
+        "result": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out",
+        "status": "pass",
+        "tests": [
+          "policy_decision::positive_each_of_the_six_verbs_forbids_allow_under_the_fixtures_own_policy",
+          "policy_decision::positive_no_acceptance_path_reads_any_of_the_six_as_a_repair",
+          "policy_decision::negative_a_blind_classifier_reading_an_attack_as_unchanged_is_detected",
+          "daemon_boundary::boundary_accept_reject_lock_are_privileged_and_proposing_is_not"
+        ]
+      },
+      "semantic_diff_exit": {
+        "package": "continuum-semantic-diff",
+        "result": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out",
+        "status": "pass",
+        "tests": [
+          "live_weakening_a_property_is_a_privileged_change",
+          "mutant_a_blind_property_classifier_flips_the_exit_and_is_rejected"
+        ]
+      },
+      "semantic_diff_weakening": {
+        "package": "continuum-semantic-diff",
+        "result": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out",
+        "status": "pass",
+        "tests": [
+          "positive_gutting_the_real_fixtures_agreement_claim_with_a_complementary_disjunct_classifies_weakened_and_blocks",
+          "negative_a_double_negation_dressing_dissolves_and_the_weakening_underneath_classifies_weakened",
+          "negative_a_vacuous_conjunct_game_never_classifies_unchanged",
+          "negative_renaming_a_real_corpus_claim_while_weakening_it_is_removed_plus_added_never_unchanged",
+          "negative_mutant_blind_to_expression_content_would_wrongly_pass_the_weakening_as_unchanged"
+        ]
+      }
+    },
+    "status": "pass"
+  },
+  "status": "pass"
+}
