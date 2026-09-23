@@ -1,0 +1,129 @@
+continuum-semantic-diff kill09-indicator v1
+# KILL-09 (plan.md §24): intent diff cannot reliably expose gaming in supported fragments
+# crates/continuum-semantic-diff/tests/kill09_intent_diff_indicator.rs (bn-3kql)
+# bar: plan §5.3 / RFC 0031 completeness guarantee and G3 — every gaming move in a supported fragment is privileged; zero misses
+# This artifact measures. It does not decide (notes/plan/notes/KILL09_CHECKPOINT.md).
+## 1 leading indicator: exposure over the C020 hidden-mutant corpus
+# generator tests/support/c020_mutant_generator.rs; primary seed 0xc0205eed00000001 x 4; held-out 16 seeds x 2
+# exposed = every target field carries a record outside its benign set AND the locked policy does not allow, at bounded and at observed
+# columns: slice | weakening | rejected-at-decode | reached | exposed | affirmed | fail-closed | unexposed | silent | refused | 95% upper bound on miss rate (ppm, zero-failure)
+primary | 339 | 4 | 335 | 335 | 291 | 44 | 0 | 0 | 0 | 8943
+held-out | 2990 | 34 | 2956 | 2956 | 2521 | 435 | 0 | 0 | 0 | 1014
+combined | 3329 | 38 | 3291 | 3291 | 2812 | 479 | 0 | 0 | 0 | 911
+dim:Properties | 1206 | 17 | 1189 | 1189 | 894 | 295 | 0 | 0 | 0 | 2520
+dim:Assumptions | 941 | 0 | 941 | 941 | 926 | 15 | 0 | 0 | 0 | 3184
+dim:Bounds | 236 | 21 | 215 | 215 | 118 | 97 | 0 | 0 | 0 | 13934
+dim:Observers | 224 | 0 | 224 | 224 | 152 | 72 | 0 | 0 | 0 | 13374
+dim:Faults | 181 | 0 | 181 | 181 | 181 | 0 | 0 | 0 | 0 | 16552
+dim:Fairness | 214 | 2 | 212 | 212 | 212 | 0 | 0 | 0 | 0 | 14131
+dim:Assurance | 435 | 0 | 435 | 435 | 435 | 0 | 0 | 0 | 0 | 6887
+controls (meaning-preserving) allowed: 396 of 396
+own committed policy: 36 exposed weakening mutants allowed by an owner verb
+exposure-miss rate 0/3291; silent-pass rate 0/3291; fail-closed share 479/3291
+## 2 semantic differential falsifier
+# seed 0x4b09d1ff00000001; 3000 authored pairs (random Finite formula, one agent-style edit); ground truth = direct evaluation over 528 lasso traces x 9 domain interpretations
+pairs 3000 | normalize-rejected 0 | decode-rejected 0 | normal-form meaning changes 0 | unsound classifications 0 | silent passes 0
+classifier relations: strengthened 317, unchanged 1036, unknown 1111, weakened 536
+ground truth: equivalent 1439, incomparable 424, strict-strengthening 439, strict-weakening 698
+strict weakenings affirmed `weakened`: 419 of 698 (the rest fail closed)
+assumption side (same pairs on JugCapacities): relations strengthened 317, unchanged 1036, unknown 1111, weakened 536; unsound 0; silent passes (narrowed and allowed) 0; strict strengthenings affirmed `strengthened` 226 of 439
+# per edit: edit | pairs | pairs that admit a new behavior
+replace-subtree | 186 | 114
+or-widen | 180 | 91
+and-narrow | 196 | 31
+double-negation | 185 | 0
+tautology-disjunct | 206 | 130
+implication-guard | 199 | 96
+always-wrap | 178 | 25
+eventually-wrap | 173 | 83
+vacuous-forall | 151 | 86
+leads-to-guard | 188 | 116
+dual-swap | 189 | 121
+drop-operand | 187 | 122
+binder-rename | 202 | 107
+implies-respell | 189 | 0
+iff-true-respell | 181 | 0
+duplicate-conjunct | 210 | 0
+## 3 named adversarial assay
+# columns: id | family | base | verdict | records (locked run, bounded) | locked | own | attack
+K09-E01 | encoding | die-hard | exposed | properties[NotSolved]:weakened | block | block | tautology by bi-implication: always(big != 4 or (p iff p))
+K09-E02 | encoding | die-hard | exposed | properties[NotSolved]:weakened | block | block | complementary disjunct behind a double negation: always(big != 4 or not not (big == 4))
+K09-E03 | encoding | die-hard | exposed | properties[SolutionReachesFourGallons]:weakened | block | block | vacuous response: eventually(big == 4) becomes leads_to(false, big == 4)
+K09-E04 | encoding | die-hard | exposed | properties[NotSolved]:unknown | block | block | empty-domain vacuity: always(forall x in Empty. big != 4)
+K09-E05 | encoding | die-hard | exposed | properties[NotSolved]:unknown | block | block | temporal dual swap: always(big != 4) becomes eventually(big != 4)
+K09-E06 | encoding | die-hard | exposed | properties[NotSolved]:unknown | block | block | recurrence in place of invariance: always(eventually(big != 4))
+K09-E07 | encoding | die-hard | exposed | properties[TypeOK]:weakened | block | block | guarded invariant: TypeOK becomes always(big == 4 implies TypeOK-body)
+K09-E08 | encoding | die-hard | exposed | properties[NotSolved]:incomparable | block | block | kind flip with the expression fixed: NotSolved safety becomes liveness
+K09-E09 | encoding | die-hard | exposed | properties[NotSolved]:weakened | block | block | source lie: the AST is weakened and the display source is left saying big != 4
+K09-E10 | encoding | die-hard | exposed | properties[NotSo1ved]:added,properties[NotSolved]:removed | block | block | homoglyph rename plus weakening: NotSolved becomes NotSo1ved with a weaker body
+K09-E11 | encoding | die-hard | rejected-at-decode | - | - | - | shadow unit: a second NotSolved entry with a weaker body after the original
+K09-E12 | encoding | die-hard | rejected-at-decode | - | - | - | non-normal AST declared cpnf-1: gt(4, big) in place of lt(big, 4) inside a weakening
+K09-E13 | encoding | replicated-register | exposed | properties[Agreement]:unknown | block | block | binder-reference swap: Agreement's v1 == v2 disjunct becomes v1 == v1 (always true)
+K09-E14 | encoding | replicated-register | exposed | properties[Agreement]:unknown | block | block | quantifier domain swap: Agreement's value binder ranges over Epochs
+K09-E15 | encoding | die-hard | exposed | properties[NotSolved]:unknown | block | block | literal type confusion: big != "4" (a text literal is never equal to an integer)
+K09-E16 | encoding | die-hard | control-allowed | - | allow | allow | control: De Morgan and implication respelling of NotSolved (meaning-preserving)
+K09-X01 | compensation | die-hard | exposed | properties[NotSolved]:unknown,properties[TypeOK]:strengthened | block | block | weaken NotSolved and strengthen TypeOK in the same revision
+K09-X02 | compensation | die-hard | exposed | assumptions[TypeOKAssumed]:added,properties[TypeOK]:removed | block | block | move a guarantee into an assumption: drop TypeOK, assume its body
+K09-X03 | compensation | die-hard | exposed | bounds:contracted,properties[NotSolved]:unknown | block | block | weaken NotSolved and shrink bounds.values in the same revision
+K09-X04 | compensation | die-hard | exposed | bounds:incomparable | block | review | bound trade: values 6 to 4 paid for by nodes 1 to 2
+K09-X05 | compensation | replicated-register | exposed | observers[client_lite]:added,properties[RuntimeToAbstract]:incomparable | block | block | re-point RuntimeToAbstract at a new, coarser observer; the old one is untouched
+K09-X06 | compensation | replicated-register | exposed | observers[client]:coarsened | block | review | coarsen the observer a claim is stated over; the claim text is untouched
+K09-X07 | compensation | die-hard | exposed | completion_policy:unknown | block | block | completion policy: stutter-forever becomes finite-trace-only (liveness can go vacuous)
+K09-X08 | compensation | die-hard | exposed | nondeterminism[Next]:unknown | block | review | nondeterminism: the Next choice becomes angelic (the checker picks the good branch)
+K09-X09 | compensation | replicated-register | exposed | trust_boundaries:unknown | block | review | trust boundary: mark the storage effect opaque
+K09-X10 | compensation | replicated-register | exposed | abstraction_maps[runtime to abstract register]:unknown | block | review | abstraction map rebound to a different map identity
+K09-X11 | compensation | die-hard | exposed | optimization[big != 4]:unknown | block | review | hard optimization constraint that excludes the failing state
+K09-X12 | compensation | die-hard | exposed | non_vacuity[a reachable state with big == 4 witnesses the NotSolved refutation]:unknown | block | review | non-vacuity witness removed, so NotSolved may hold vacuously
+K09-X13 | compensation | replicated-register | exposed | faults[crash]:removed,faults[process/crash-only-v0]:added | block | block | fault moved: crash class removed, a crash-only profile added
+K09-X14 | compensation | replicated-register | exposed | assurance:downgraded,assurance[sampled]:added | block | block | assurance trade: minimum lowered, an evidence class added
+K09-X15 | compensation | replicated-register | exposed | fairness[strong:Recover]:strengthened | block | review | fairness strengthened in place: weak Recover becomes strong
+K09-X16 | compensation | die-hard | exposed | scope[components]:unknown | block | review | scope narrowed: the DieHard component removed from scope
+K09-X17 | compensation | die-hard | exposed | security_policy[revise-intent]:unknown | block | review | security policy: the revise-intent capability requirement dropped
+K09-F01 | fragment | die-hard | exposed | properties[NotSolved]:unsupported | block | block | weaken NotSolved and relabel it Temporal (outside the declared scope)
+K09-F02 | fragment | die-hard | exposed | properties[NotSolved]:unknown | block | block | weaken NotSolved and drop its fragment declaration (absent reads as the contract's)
+K09-F03 | fragment | die-hard | exposed | properties[NotSolved]:unknown,scope[fragments]:unknown | block | block | declare Temporal in scope, move NotSolved there, and weaken it
+K09-F04 | fragment | die-hard | exposed | assumptions[JugCapacities]:unsupported,properties[NotSolved]:unsupported,properties[SolutionReachesFourGallons]:unsupported,properties[TypeOK]:unsupported,scope[fragments]:unknown | block | block | swap the declared scope Finite to Symbolic, relabel every unit, weaken one
+K09-F05 | fragment | die-hard | exposed | assumptions[JugCapacities]:unsupported | block | block | strengthen the JugCapacities assumption and relabel it Symbolic
+K09-F06 | fragment | die-hard | control-allowed | - | allow | allow | control: a claim relabelled nothing, its fragment restated as Finite
+## 3b policy-table edits (verdict against the before-table, agent path)
+# columns: id | decision | records | reviewers named | attack
+K09-P01 | block | properties[RuntimeToAbstract]:weakened | - | self-unlock rider: properties unlocked and RuntimeToAbstract weakened in one revision
+K09-P02 | allow | - | - | policy-only loosening: properties locked to unlocked, nothing else
+K09-P03 | allow | properties[RuntimeToAbstract]:weakened | - | two-step, step 2: RuntimeToAbstract weakened against the P02 table
+K09-P04 | review | assumptions[NetworkNoForgery]:strengthened | verification-lead | reviewer injection: agent-self named the assumptions reviewer while strengthening an assumption
+K09-P05 | block | bounds:contracted | - | verb swap rider: bounds no-decrease to review (agent-self reviewer) with values 2 to 1
+## 4 policy verb matrix (agent path)
+cells 323 (W6-admissible field x verb x dangerous relation); allow cells 31
+allow abstraction_maps:unlocked:merged | owner-declared (unlocked)
+allow abstraction_maps:unlocked:split | owner-declared (unlocked)
+allow abstraction_maps:unlocked:added | owner-declared (unlocked)
+allow abstraction_maps:unlocked:removed | owner-declared (unlocked)
+allow assumptions:unlocked:strengthened | owner-declared (unlocked)
+allow assumptions:unlocked:added | owner-declared (unlocked)
+allow assurance:unlocked:downgraded | owner-declared (unlocked)
+allow assurance:unlocked:added | owner-declared (unlocked)
+allow assurance:unlocked:removed | owner-declared (unlocked)
+allow bounds:unlocked:contracted | owner-declared (unlocked)
+allow fairness:unlocked:strengthened | owner-declared (unlocked)
+allow fairness:unlocked:weakened | owner-declared (unlocked)
+allow fairness:unlocked:added | owner-declared (unlocked)
+allow fairness:unlocked:removed | owner-declared (unlocked)
+allow faults:unlocked:removed | owner-declared (unlocked)
+allow non_vacuity:unlocked:removed | owner-declared (unlocked)
+allow nondeterminism:unlocked:added | owner-declared (unlocked)
+allow nondeterminism:unlocked:removed | owner-declared (unlocked)
+allow observers:unlocked:coarsened | owner-declared (unlocked)
+allow observers:unlocked:removed | owner-declared (unlocked)
+allow optimization:unlocked:added | owner-declared (unlocked)
+allow optimization:unlocked:removed | owner-declared (unlocked)
+allow optimization:no-removal:added | latent (no classifier for this field today; the assembler emits only unknown, P2 gives review)
+allow properties:unlocked:weakened | owner-declared (unlocked)
+allow properties:unlocked:removed | owner-declared (unlocked)
+allow scope:unlocked:added | owner-declared (unlocked)
+allow scope:unlocked:removed | owner-declared (unlocked)
+allow security_policy:unlocked:weakened | owner-declared (unlocked)
+allow security_policy:unlocked:removed | owner-declared (unlocked)
+allow security_policy:no-removal:weakened | latent (no classifier for this field today; the assembler emits only unknown, P2 gives review)
+allow trust_boundaries:unlocked:expanded | owner-declared (unlocked)
+## trend columns
+3291 | 0 | 0 | 2812 | 479 | 36 | 396/396 | 3000 | 0/0 | 37/37 | 31

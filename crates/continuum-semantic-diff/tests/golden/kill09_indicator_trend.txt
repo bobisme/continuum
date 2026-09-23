@@ -1,0 +1,22 @@
+# KILL-09 leading-indicator trend: intent-diff exposure of gaming in supported fragments
+# Retained series. Append a row per measurement; never rewrite an earlier one.
+# The last row must equal the live measurement (kill09_intent_diff_indicator.rs,
+# the_trend_series_ends_at_this_measurement), so a moved figure fails the gate
+# until a named row is appended.
+#
+# columns: point | bone | commit | reached | unexposed | silent | affirmed | fail-closed | own-allow | controls allowed/controls | differential pairs | differential unsound/silent | assay exposed/gaming | verb-matrix allow cells
+#   reached       weakening mutants that reached the classifier (primary + held-out)
+#   unexposed     a target field with no record outside its benign set
+#   silent        allowed under the locked measurement policy (bounded or observed)
+#   affirmed      every target carries the affirmed direction; fail-closed = exposed by unknown/incomparable/unsupported
+#   own-allow     exposed mutants that the committed table allows by an owner verb
+#   "-"           not measured by that point's instrument
+#
+# T1: G0-DX-02 falsification, 18 hand-written attacks and 4 controls, graded under each fixture's own policy (not locked); DX02-B14 policy-only rewrite recorded as a boundary.
+T1 | bn-3cgt | 0318730 | 18 | 0 | 0 | - | - | - | 4/4 | - | - | - | -
+# T2: C020 hidden-mutant campaign lands. own-allow is the primary corpus only (12); the ledger does not report held-out own-allows.
+T2 | bn-bpz0 | 962e4c3 | 3291 | 0 | 0 | 2812 | 479 | 12 (primary only) | 396/396 | - | - | - | -
+# T3: bn-36luu routes accepted_evidence_classes membership changes to review; primary own-allow 12 -> 4. Exposure figures unchanged.
+T3 | bn-36luu | a82b604 | 3291 | 0 | 0 | 2812 | 479 | 4 (primary only) | 396/396 | - | - | - | -
+# T4: KILL-09 indicator. Same corpus re-run through this file's harness (own-allow now primary + held-out), plus the semantic differential falsifier (claim and assumption side), the 37-attack named assay, and the verb matrix.
+T4 | bn-3kql | - | 3291 | 0 | 0 | 2812 | 479 | 36 | 396/396 | 3000 | 0/0 | 37/37 | 31
