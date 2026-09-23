@@ -100,10 +100,10 @@ C020-die-hard-asr-drop-independent-checker-0 | Assurance/DowngradesAssurance | c
 C020-die-hard-asr-drop-clean-recompute-0 | Assurance/DowngradesAssurance | caught-affirmed | assurance:downgraded | block | block | block
 C020-die-hard-asr-raise-minimum+drop-flag-0 | Assurance/DowngradesAssurance | caught-affirmed | assurance:downgraded | block | block | block
 C020-die-hard-asr-raise-minimum+drop-flag-1 | Assurance/DowngradesAssurance | caught-affirmed | assurance:downgraded | block | block | block
-C020-die-hard-asr-accept-extra-evidence-class-0 | Assurance/ChangesAssurance | caught-affirmed | assurance[production-observation]:added | block | block | allow
-C020-die-hard-asr-accept-extra-evidence-class-1 | Assurance/ChangesAssurance | caught-affirmed | assurance[sampled]:added | block | block | allow
-C020-die-hard-asr-accept-extra-evidence-class-2 | Assurance/ChangesAssurance | caught-affirmed | assurance[bounded-schedules]:added | block | block | allow
-C020-die-hard-asr-accept-extra-evidence-class-3 | Assurance/ChangesAssurance | caught-affirmed | assurance[example]:added | block | block | allow
+C020-die-hard-asr-accept-extra-evidence-class-0 | Assurance/ChangesAssurance | caught-affirmed | assurance[production-observation]:added | block | block | review
+C020-die-hard-asr-accept-extra-evidence-class-1 | Assurance/ChangesAssurance | caught-affirmed | assurance[sampled]:added | block | block | review
+C020-die-hard-asr-accept-extra-evidence-class-2 | Assurance/ChangesAssurance | caught-affirmed | assurance[bounded-schedules]:added | block | block | review
+C020-die-hard-asr-accept-extra-evidence-class-3 | Assurance/ChangesAssurance | caught-affirmed | assurance[example]:added | block | block | review
 C020-die-hard-cmp-two-fields-0 | Properties/WeakensProperty+Assurance/DowngradesAssurance | caught-affirmed | assurance:downgraded,properties[TypeOK]:weakened | block | block | block
 C020-die-hard-cmp-two-fields-1 | Properties/WeakensProperty+Bounds/ShrinksBound | caught-affirmed | bounds:contracted,properties[NotSolved]:weakened | block | block | block
 C020-die-hard-cmp-two-fields-2 | Properties/WeakensProperty+Assumptions/StrengthensAssumption | caught-affirmed | assumptions[JugCapacities]:strengthened,properties[NotSolved]:weakened | block | block | block
@@ -237,10 +237,10 @@ C020-replicated-register-asr-drop-independent-checker-0 | Assurance/DowngradesAs
 C020-replicated-register-asr-drop-clean-recompute-0 | Assurance/DowngradesAssurance | caught-affirmed | assurance:downgraded | block | block | block
 C020-replicated-register-asr-raise-minimum+drop-flag-0 | Assurance/DowngradesAssurance | caught-affirmed | assurance:downgraded | block | block | block
 C020-replicated-register-asr-raise-minimum+drop-flag-1 | Assurance/DowngradesAssurance | caught-affirmed | assurance:downgraded | block | block | block
-C020-replicated-register-asr-accept-extra-evidence-class-0 | Assurance/ChangesAssurance | caught-affirmed | assurance[bounded-schedules]:added | block | block | allow
-C020-replicated-register-asr-accept-extra-evidence-class-1 | Assurance/ChangesAssurance | caught-affirmed | assurance[example]:added | block | block | allow
-C020-replicated-register-asr-accept-extra-evidence-class-2 | Assurance/ChangesAssurance | caught-affirmed | assurance[production-observation]:added | block | block | allow
-C020-replicated-register-asr-accept-extra-evidence-class-3 | Assurance/ChangesAssurance | caught-affirmed | assurance[sampled]:added | block | block | allow
+C020-replicated-register-asr-accept-extra-evidence-class-0 | Assurance/ChangesAssurance | caught-affirmed | assurance[bounded-schedules]:added | block | block | review
+C020-replicated-register-asr-accept-extra-evidence-class-1 | Assurance/ChangesAssurance | caught-affirmed | assurance[example]:added | block | block | review
+C020-replicated-register-asr-accept-extra-evidence-class-2 | Assurance/ChangesAssurance | caught-affirmed | assurance[production-observation]:added | block | block | review
+C020-replicated-register-asr-accept-extra-evidence-class-3 | Assurance/ChangesAssurance | caught-affirmed | assurance[sampled]:added | block | block | review
 C020-replicated-register-cmp-two-fields-0 | Properties/WeakensProperty+Faults/RemovesFault | caught-affirmed | faults[storage/append-log-v0]:removed,properties[Agreement]:weakened | block | block | block
 C020-replicated-register-cmp-two-fields-1 | Assumptions/StrengthensAssumption+Assurance/DowngradesAssurance | caught-affirmed | assumptions[fresh]:added,assurance:downgraded | block | block | block
 C020-replicated-register-cmp-two-fields-2 | Bounds/ShrinksBound+Faults/RemovesFault | caught-affirmed | bounds:contracted,faults[partition]:removed | block | block | block
@@ -391,7 +391,7 @@ C020-intent-contract-example-ctl-double-negation-atom-3 | control | control-allo
 mutants 383 = weakening 339 + control 44
 weakening: caught 335 (affirmed direction 291, fail-closed 44), rejected-at-decode 4, misses 0, silent passes 0
 controls: allowed 44 of 44
-own committed policy: 12 weakening mutants allowed by an owner verb (listed below)
+own committed policy: 4 weakening mutants allowed by an owner verb (listed below)
 # per operator: operator | n | caught | affirmed | rejected | misses | own-allow
 prop-join-fresh | 12 | 12 | 12 | 0 | 0 | 0
 prop-trivialize | 12 | 12 | 12 | 0 | 0 | 0
@@ -431,7 +431,7 @@ asr-lower-minimum | 8 | 8 | 8 | 0 | 0 | 0
 asr-drop-independent-checker | 3 | 3 | 3 | 0 | 0 | 0
 asr-drop-clean-recompute | 3 | 3 | 3 | 0 | 0 | 0
 asr-raise-minimum+drop-flag | 8 | 8 | 8 | 0 | 0 | 0
-asr-accept-extra-evidence-class | 8 | 8 | 8 | 0 | 0 | 8
+asr-accept-extra-evidence-class | 8 | 8 | 8 | 0 | 0 | 0
 cmp-two-fields | 12 | 12 | 12 | 0 | 0 | 0
 ctl-reorder | 8 | 0 | 0 | 0 | 0 | 0
 ctl-source-prose | 12 | 0 | 0 | 0 | 0 | 0
@@ -442,12 +442,4 @@ C020-die-hard-fair-add-0 | fairness:unlocked
 C020-die-hard-fair-add-1 | fairness:unlocked
 C020-die-hard-fair-add-2 | fairness:unlocked
 C020-die-hard-fair-add-3 | fairness:unlocked
-C020-die-hard-asr-accept-extra-evidence-class-0 | assurance:no-downgrade
-C020-die-hard-asr-accept-extra-evidence-class-1 | assurance:no-downgrade
-C020-die-hard-asr-accept-extra-evidence-class-2 | assurance:no-downgrade
-C020-die-hard-asr-accept-extra-evidence-class-3 | assurance:no-downgrade
-C020-replicated-register-asr-accept-extra-evidence-class-0 | assurance:no-downgrade
-C020-replicated-register-asr-accept-extra-evidence-class-1 | assurance:no-downgrade
-C020-replicated-register-asr-accept-extra-evidence-class-2 | assurance:no-downgrade
-C020-replicated-register-asr-accept-extra-evidence-class-3 | assurance:no-downgrade
 held-out sweep: 16 seeds x 2 variants; weakening 2990, caught 2956 (affirmed 2521), rejected-at-decode 34, misses 0, silent passes 0; controls allowed 352 of 352

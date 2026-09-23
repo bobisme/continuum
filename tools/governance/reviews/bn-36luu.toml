@@ -1,0 +1,39 @@
+[change]
+bone = "bn-36luu"
+author = "continuum-dev"
+summary = "PolicyTable::verdict routes an accepted_evidence_classes membership change (assurance added/removed) to review under no-downgrade and review on both paths, keeps the proposal-only human-path allow, per RFC 0031 correction 20; no-downgrade no longer auto-allows an added evidence class"
+
+[semantic]
+covers = [
+  "crates/continuum-intent/src/change_policy.rs",
+]
+reference_tests = [
+  "crates/continuum-semantic-diff/tests/evidence_class_membership_review.rs::an_added_evidence_class_under_no_downgrade_reaches_review_on_both_paths",
+  "crates/continuum-semantic-diff/tests/evidence_class_membership_review.rs::a_removed_evidence_class_under_no_downgrade_reaches_review_too",
+  "crates/continuum-semantic-diff/tests/evidence_class_membership_review.rs::every_admissible_assurance_verb_decides_a_membership_change_as_correction_20_says",
+  "crates/continuum-semantic-diff/tests/evidence_class_membership_review.rs::mutant_the_pre_fix_p4_rule_allows_the_added_class_and_the_check_rejects_it",
+  "crates/continuum-semantic-diff/tests/c020_hidden_mutant_evaluation.rs::the_evidence_ledger_is_byte_stable_and_matches_the_golden",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-semantic-diff/tests/evidence_class_membership_review.rs::metamorphic_set_insertion_order_of_evidence_classes_preserves_the_verdict", relation = "set/map insertion order" },
+]
+differential_tests = [
+  { test = "crates/continuum-semantic-diff/tests/evidence_class_membership_review.rs::differential_the_policy_table_and_the_assembler_agree_on_a_membership_change", oracle = "continuum-intent", subject = "continuum-semantic-diff" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "C020's docs/18 row wording and state do not move, so its claims-baseline pin is unchanged. Only the prose under the matrix moves: the C020 ledger's own-policy allows fall from 12 to 4, because the 8 no-downgrade allows on an added accepted evidence class now close to review. The locked-policy metric that C020 is observed on does not change"
+
+[semantic.schemas]
+updated = []
+reason = "no artifact shape moves: the verdict vocabulary (allow, review, block), the relation set, and the intent_changes record are unchanged; only the decision one record shape contributes changes"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-intent PolicyTable::verdict now contributes review, not allow, for an assurance added/removed record under no-downgrade on both paths; proposal-only, review, locked and unlocked keep their P3/P4 contributions; continuum-semantic-diff artifacts for such revisions carry policy.decision review. No published artifact is rewritten; a verdict is recomputed at intent.accept (P7), so a stored allow is never reused"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1tw2mx"
+verdict = "approved"

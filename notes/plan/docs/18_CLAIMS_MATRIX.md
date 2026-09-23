@@ -128,7 +128,9 @@ weakening mutants gave zero misses. All 44 meaning-preserving controls classifie
 `unchanged` and were allowed. The retained ledger is
 `crates/continuum-semantic-diff/tests/golden/c020_hidden_mutant_evidence.txt`. The
 property-diff and review-gate controls are the T09 evidence
-(`tools/governance/check_t09_evidence.py`). Under each contract's own policy, 12
-mutants are allowed by an owner verb: `fairness: unlocked` in Die Hard, and
-`no-downgrade` on an added accepted evidence class. The diff records each of them.
+(`tools/governance/check_t09_evidence.py`). Under each contract's own policy, 4
+mutants are allowed by an owner verb: `fairness: unlocked` in Die Hard. The diff
+records each of them. The campaign also found 8 mutants that `no-downgrade`
+allowed on an added accepted evidence class. RFC 0031 correction 20 (bn-36luu)
+now routes each of them to `review`.
 C033, agent repair of concurrent Rust, stays TARGET.

@@ -810,12 +810,15 @@ fn a_rename_disguise_arrives_as_removed_plus_added_with_units() {
 #[test]
 fn an_allowed_revision_still_invalidates_dependent_evidence() {
     let before = decode(FIXTURE);
-    // Remove an accepted evidence class: membership only, `removed`, and the
-    // fixture's `no-downgrade` verb does not deny it — an allow.
+    // Raise the assurance minimum: `upgraded`, which the fixture's `no-downgrade`
+    // verb does not deny — an allow. (This test once removed an accepted evidence
+    // class instead; RFC 0031 correction 20, bn-36luu, routes a membership change to
+    // `review` under `no-downgrade`, so that edit is no longer an allowed revision.
+    // `evidence_class_membership_review.rs` pins it.)
     let after = decode(&replace_once(
         FIXTURE,
-        r#""accepted_evidence_classes":["certificate","#,
-        r#""accepted_evidence_classes":["#,
+        r#""minimum":"validated""#,
+        r#""minimum":"proved""#,
     ));
     let mut allowed_request = request(&before, &after, level("bounded"));
     allowed_request.evidence = vec![
@@ -838,11 +841,10 @@ fn an_allowed_revision_still_invalidates_dependent_evidence() {
     ];
     let artifact = assemble(&allowed_request).expect("assembles");
 
-    // The membership record carries the class token as its unit — the recorded
-    // schema divergence (`assurance` has sub-units for this half of the field).
+    // The requirement-triple record carries no unit.
     assert_eq!(
-        wire_relation(&artifact, PolicyField::Assurance, Some("certificate")),
-        Relation::Removed
+        wire_relation(&artifact, PolicyField::Assurance, None),
+        Relation::Upgraded
     );
     assert_eq!(artifact.decision(), PolicyDecision::Allow);
     // The impact set is not the verdict: the allowed change still invalidates

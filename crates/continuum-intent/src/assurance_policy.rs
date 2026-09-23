@@ -105,7 +105,10 @@
 //! - **Membership changes carry no direction.** [`AssurancePolicy::evidence_class_changes`]
 //!   emits only [`Relation::Added`] and [`Relation::Removed`], because RFC 0031 says
 //!   `accepted_evidence_classes` "MUST NOT contribute an `upgraded` or `downgraded`
-//!   relation, and MUST NOT be ranked".
+//!   relation, and MUST NOT be ranked". The verdict reads them without a direction
+//!   too: under `no-downgrade`, both relations contribute `review`, and under
+//!   `proposal-only` they allow only on the human acceptance path (RFC 0031
+//!   correction 20, in `PolicyTable::verdict`).
 //! - **The contract identity is not here.** `in_*` is computed over the whole document
 //!   (ID1); this module supplies the `assurance` portion of that preimage.
 

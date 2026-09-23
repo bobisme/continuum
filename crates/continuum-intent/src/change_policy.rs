@@ -81,6 +81,10 @@
 //! - A non-affirmative relation — `unknown`, `unsupported`, `incomparable` — never
 //!   contributes `allow`, whatever the verb (P2). The fail-closed rule "is not a
 //!   property of the directional verbs alone".
+//! - A membership change to `assurance.accepted_evidence_classes` — an `assurance`
+//!   record whose relation is `added` or `removed` — never contributes `allow`
+//!   under `no-downgrade`, and under `proposal-only` contributes `allow` only on the
+//!   human acceptance path (RFC 0031 correction 20).
 //!
 //! # What is *not* here
 //!
@@ -1083,6 +1087,15 @@ impl PolicyTable {
     /// > - **P6.** `policy.reasons` MUST name the field and the relation of every
     /// >   record that forbade `allow`.
     ///
+    /// RFC 0031 correction 20 refines P4 for one record shape: an `assurance` record
+    /// whose relation is `added` or `removed` — a membership change to
+    /// `accepted_evidence_classes` — contributes `review` under `no-downgrade` and
+    /// `review` on either acceptance path, and `block` under `locked` (P3).
+    /// `proposal-only` keeps P4's path condition, because a human principal's
+    /// `intent.accept` is the review that verb requires; `unlocked` keeps `allow`.
+    /// The set is unordered and "MUST NOT be ranked", so neither direction is read
+    /// as the safe one, and `no-downgrade`'s ordinary authority never auto-allows it.
+    ///
     /// P7 — recomputation at `intent.accept` time — is a daemon obligation and not this
     /// function's, but this function is what makes it cheap: it is pure in its four
     /// arguments, so recomputing costs nothing and caching buys nothing.
@@ -1130,6 +1143,16 @@ impl PolicyTable {
                 if verb.denies(relation) {
                     // P3.
                     PolicyDecision::Block
+                } else if is_evidence_class_membership_change(field, relation)
+                    && !matches!(verb, PolicyVerb::Unlocked | PolicyVerb::ProposalOnly)
+                {
+                    // RFC 0031 correction 20: a membership change to
+                    // `accepted_evidence_classes` goes through the `review` path.
+                    // `locked` already blocked it at P3, so `no-downgrade` and
+                    // `review` reach here and contribute `review` on either
+                    // acceptance path. `unlocked` and `proposal-only` fall through
+                    // to P4: `allow`, and `allow` only on the human path.
+                    PolicyDecision::Review
                 } else {
                     // P4.
                     match verb {
@@ -1178,6 +1201,28 @@ impl PolicyTable {
         }
         Ok(Verdict { decision, reasons })
     }
+}
+
+/// Whether a record is a membership change to `assurance.accepted_evidence_classes`.
+///
+/// On `assurance`, only the evidence-class membership half of the field produces
+/// `added` or `removed`: the requirement triple produces `unchanged`, `upgraded`,
+/// `downgraded`, or `unknown` (`AssurancePolicy::evidence_class_changes` and
+/// RFC 0031, "`assurance`"). So the pair (field, relation) identifies the record
+/// without its unit locator.
+///
+/// > **`accepted_evidence_classes` membership changes go through the `review` path.**
+/// > [...] Normative: an `assurance` record whose relation is `added` or `removed`
+/// > contributes `review` under `no-downgrade` and under `review`, on either
+/// > acceptance path. Under `proposal-only` it keeps P4's authority: `allow` only on
+/// > a path where a human principal performs `intent.accept`, and `review` otherwise,
+/// > because that human acceptance is the review the verb requires. It contributes
+/// > `block` under `locked` and `allow` under `unlocked`.
+/// >
+/// > — RFC 0031, "Corrections recorded by this RFC", correction 20
+const fn is_evidence_class_membership_change(field: PolicyField, relation: Relation) -> bool {
+    matches!(field, PolicyField::Assurance)
+        && matches!(relation, Relation::Added | Relation::Removed)
 }
 
 impl PartialEq for PolicyTable {
