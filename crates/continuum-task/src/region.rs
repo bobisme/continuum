@@ -117,6 +117,23 @@
 //!   with two independent accountings — the outstanding *set* and the opened/discharged
 //!   *counters*.
 //!
+//! Two later additions keep the argument intact (RFC 0026 correction 51, bn-2318t):
+//!
+//! - **explicit abort and staging slots** — a running worker may drop a staged
+//!   publication itself ([`WorkerStep::Abort`]), and may hold several staged at once, one
+//!   per [`PublicationSlot`](worker::PublicationSlot). Each slot opens its own
+//!   `provisional-publication` obligation and is resolved exactly once, by a commit, an
+//!   abort, or the discard a drain or failure performs, so the unresolved-publication
+//!   conjunct still reads "nothing staged" and the ledger still pairs every stage with one
+//!   resolution;
+//! - **adapter obligations** — [`RegionTree::open_substrate`] is the one public way into
+//!   the ledger. It needs a holder that has begun and not terminated, in an open region,
+//!   and a fresh identity; [`RegionTree::discharge_substrate`] needs a matching open held
+//!   by the named worker, which may be parked or in a draining region.
+//!   Nothing in the calculus discharges an adapter obligation on the adapter's behalf, so
+//!   one left open at finalize makes [`Finalization::is_total`] false: a leak is reported,
+//!   never absorbed.
+//!
 //! `crates/continuum-task/tests/region_no_orphan.rs` is the instrumented half: it
 //! enumerates schedule spaces, tears each one down, and asserts the post-condition over
 //! every worker the tree ever admitted.
@@ -176,10 +193,14 @@ pub mod schedule;
 pub mod worker;
 
 use core::fmt;
+use std::collections::{BTreeMap, BTreeSet};
 
-use obligation::{Ledger, LedgerSummary, Obligation};
+use obligation::{
+    Ledger, LedgerSummary, Obligation, SubstrateId, SubstrateObligation, SubstrateOutcome,
+};
 use worker::{
-    CancelOutcome, Continuation, EvidenceLedger, Resumability, WorkerId, WorkerState, WorkerStep,
+    CancelOutcome, Continuation, EvidenceLedger, PublicationSlot, Resumability, WorkerId,
+    WorkerState, WorkerStep,
 };
 
 /// A region's identity inside one [`RegionTree`].
@@ -404,6 +425,10 @@ pub enum RegionFault {
     },
     /// A publication is already staged. At most one is in flight, which is the store's
     /// own linear typestate.
+    ///
+    /// [`WorkerStep::Reserve`] keeps that one-in-flight discipline;
+    /// [`WorkerStep::ReserveSlot`] is the step that stages a second publication (RFC 0026
+    /// correction 51).
     ReserveOverProvisional {
         /// The worker the call named.
         worker: WorkerId,
@@ -440,6 +465,106 @@ pub enum RegionFault {
     SuspendNonResumableWorker {
         /// The worker the call named.
         worker: WorkerId,
+    },
+    /// Nothing is staged, so there is nothing to abort (RFC 0026 correction 51).
+    AbortWithoutReserve {
+        /// The worker the call named.
+        worker: WorkerId,
+    },
+    /// [`WorkerStep::Commit`] or [`WorkerStep::Abort`] named no slot while more than one
+    /// publication is staged, so it cannot say which one it resolves. The slot-addressed
+    /// steps can.
+    AmbiguousResolution {
+        /// The worker the call named.
+        worker: WorkerId,
+        /// The step that was refused.
+        step: WorkerStep,
+        /// How many publications are staged.
+        staged: u32,
+    },
+    /// [`WorkerStep::ReserveSlot`] named a slot that already holds a staged publication.
+    /// Each slot is one linear resource, staged once and resolved once.
+    SlotAlreadyStaged {
+        /// The worker the call named.
+        worker: WorkerId,
+        /// The slot it named.
+        slot: PublicationSlot,
+    },
+    /// [`WorkerStep::CommitSlot`] or [`WorkerStep::AbortSlot`] named a slot that holds no
+    /// staged publication.
+    SlotNotStaged {
+        /// The worker the call named.
+        worker: WorkerId,
+        /// The step that was refused.
+        step: WorkerStep,
+    },
+    /// A worker in an adapter-obligation operation has terminated, so it may not open,
+    /// discharge, hand on, or receive one. A terminal holder's open obligation is a leak,
+    /// and a leak is not laundered by a later discharge.
+    SubstrateHolderNotLive {
+        /// The worker the call named.
+        worker: WorkerId,
+        /// What state it was in.
+        state: WorkerState,
+    },
+    /// A worker that has not begun takes no part in an adapter obligation — it may not
+    /// open or receive one — because it has taken no step and holds nothing (RFC 0026
+    /// correction 51).
+    SubstrateHolderNotBegun {
+        /// The worker the call named.
+        worker: WorkerId,
+    },
+    /// The region of a worker in an adapter-obligation operation does not admit it. An
+    /// open needs an [`RegionState::Open`] region — the rule that bounds what a teardown
+    /// must account for. A transfer needs both parties outside a cancelling region. A
+    /// discharge needs only a region that is not finalized (defence in depth, unreachable
+    /// while the holder is not terminal).
+    SubstrateRegionNotOpen {
+        /// The worker the call named.
+        worker: WorkerId,
+        /// Its region.
+        region: RegionId,
+        /// What state that region was in.
+        state: RegionState,
+    },
+    /// A committed discharge in a cancelling region. A task in cancellation only drains
+    /// and finalizes, so a discharge there must be [`SubstrateOutcome::Aborted`] cleanup
+    /// (RFC 0026 correction 51).
+    SubstrateCommitDuringCancellation {
+        /// The obligation the call named.
+        obligation: SubstrateObligation,
+        /// The holder that tried to commit it.
+        worker: WorkerId,
+    },
+    /// A transfer named the obligation's holder as its receiver. A hand-off to the holder
+    /// itself hands nothing, so it is refused rather than admitted as a no-op.
+    SubstrateSelfTransfer {
+        /// The obligation the call named.
+        obligation: SubstrateObligation,
+        /// The worker named as both giver and receiver.
+        worker: WorkerId,
+    },
+    /// This adapter obligation identity was opened before in this tree. An identity opens
+    /// once, so a discharged obligation cannot be reopened to move the counters twice.
+    SubstrateIdentityReused {
+        /// The obligation the call named.
+        obligation: SubstrateObligation,
+    },
+    /// No open adapter obligation has this identity and kind: it was never opened, it is
+    /// already discharged, or the call named the wrong kind.
+    SubstrateNotOpen {
+        /// The obligation the call named.
+        obligation: SubstrateObligation,
+    },
+    /// The worker the call named is not the obligation's holder — including a holder in
+    /// another region. Only the holder discharges or hands on what it holds.
+    SubstrateHolderMismatch {
+        /// The obligation the call named.
+        obligation: SubstrateObligation,
+        /// The worker the call named.
+        named: WorkerId,
+        /// The worker that holds it.
+        holder: WorkerId,
     },
 }
 
@@ -513,6 +638,56 @@ impl fmt::Display for RegionFault {
             Self::SuspendNonResumableWorker { worker } => {
                 write!(f, "{worker} was declared non-resumable, so it cannot park")
             }
+            Self::AbortWithoutReserve { worker } => {
+                write!(f, "{worker} has nothing staged to abort")
+            }
+            Self::AmbiguousResolution {
+                worker,
+                step,
+                staged,
+            } => write!(
+                f,
+                "{worker} holds {staged} staged publications, so {step} must name a slot"
+            ),
+            Self::SlotAlreadyStaged { worker, slot } => {
+                write!(f, "{worker} already holds a publication staged in {slot}")
+            }
+            Self::SlotNotStaged { worker, step } => {
+                write!(f, "{worker} has nothing staged in the slot {step} names")
+            }
+            Self::SubstrateHolderNotLive { worker, state } => write!(
+                f,
+                "{worker} is {state}, so it cannot take part in an obligation"
+            ),
+            Self::SubstrateHolderNotBegun { worker } => {
+                write!(f, "{worker} has not begun, so it cannot take an obligation")
+            }
+            Self::SubstrateRegionNotOpen {
+                worker,
+                region,
+                state,
+            } => write!(
+                f,
+                "{worker} is in {region}, which is {state}, so it cannot take an obligation"
+            ),
+            Self::SubstrateCommitDuringCancellation { obligation, worker } => write!(
+                f,
+                "{worker} is in a cancelling region, so it may abort {obligation} but not commit it"
+            ),
+            Self::SubstrateSelfTransfer { obligation, worker } => {
+                write!(f, "{worker} cannot hand {obligation} to itself")
+            }
+            Self::SubstrateIdentityReused { obligation } => {
+                write!(f, "{obligation} names an identity this tree already opened")
+            }
+            Self::SubstrateNotOpen { obligation } => {
+                write!(f, "{obligation} is not open, so it cannot be discharged")
+            }
+            Self::SubstrateHolderMismatch {
+                obligation,
+                named,
+                holder,
+            } => write!(f, "{obligation} is held by {holder}, not {named}"),
         }
     }
 }
@@ -534,6 +709,8 @@ struct WorkerRecord {
     region: RegionId,
     state: WorkerState,
     evidence: EvidenceLedger,
+    /// The slots holding a staged publication. Its size is `evidence.staged()`.
+    slots: BTreeSet<PublicationSlot>,
     resumability: Resumability,
     cancel_outcome: Option<CancelOutcome>,
 }
@@ -555,6 +732,17 @@ pub struct RegionTree {
     regions: Vec<RegionNode>,
     workers: Vec<WorkerRecord>,
     ledger: Ledger,
+    /// Every adapter obligation identity ever opened, with its kind and current holder,
+    /// and whether it is still open. Kept forever so an identity opens once.
+    substrate: BTreeMap<SubstrateId, SubstrateRecord>,
+}
+
+/// What the tree knows about one adapter obligation.
+#[derive(Debug, Clone, Copy)]
+struct SubstrateRecord {
+    obligation: SubstrateObligation,
+    holder: WorkerId,
+    open: bool,
 }
 
 impl Default for RegionTree {
@@ -576,6 +764,7 @@ impl RegionTree {
             }],
             workers: Vec::new(),
             ledger: Ledger::new(),
+            substrate: BTreeMap::new(),
         }
     }
 
@@ -750,6 +939,7 @@ impl RegionTree {
             region,
             state: WorkerState::Created,
             evidence: EvidenceLedger::empty(),
+            slots: BTreeSet::new(),
             resumability,
             cancel_outcome: None,
         });
@@ -778,8 +968,10 @@ impl RegionTree {
     /// [`RegionFault::IllegalWorkerStep`], [`RegionFault::ReserveOverProvisional`],
     /// [`RegionFault::CommitWithoutReserve`],
     /// [`RegionFault::SuspendWithProvisionalEvidence`],
-    /// [`RegionFault::CompleteWithProvisionalEvidence`] or
-    /// [`RegionFault::SuspendNonResumableWorker`].
+    /// [`RegionFault::CompleteWithProvisionalEvidence`],
+    /// [`RegionFault::SuspendNonResumableWorker`], [`RegionFault::AbortWithoutReserve`],
+    /// [`RegionFault::AmbiguousResolution`], [`RegionFault::SlotAlreadyStaged`] or
+    /// [`RegionFault::SlotNotStaged`].
     pub fn advance(
         &mut self,
         worker: WorkerId,
@@ -796,18 +988,43 @@ impl RegionTree {
                 if self.record(worker)?.evidence.is_provisional() {
                     return Err(RegionFault::ReserveOverProvisional { worker });
                 }
-                self.record_mut(worker)?.evidence.reserve();
-                self.ledger
-                    .open(Obligation::provisional_publication(worker));
+                self.stage(worker, PublicationSlot::PRIMARY)?;
                 WorkerState::Running
             }
-            (WorkerState::Running, WorkerStep::Commit) => {
-                if !self.record(worker)?.evidence.is_provisional() {
-                    return Err(RegionFault::CommitWithoutReserve { worker });
+            (WorkerState::Running, WorkerStep::ReserveSlot(slot)) => {
+                if self.record(worker)?.slots.contains(slot) {
+                    return Err(RegionFault::SlotAlreadyStaged {
+                        worker,
+                        slot: *slot,
+                    });
                 }
-                self.record_mut(worker)?.evidence.commit();
-                self.ledger
-                    .discharge(Obligation::provisional_publication(worker));
+                self.stage(worker, *slot)?;
+                WorkerState::Running
+            }
+            (WorkerState::Running, WorkerStep::Commit | WorkerStep::Abort) => {
+                let commit = step == WorkerStep::Commit;
+                let slots = &self.record(worker)?.slots;
+                let staged = u32::try_from(slots.len()).unwrap_or(u32::MAX);
+                let sole = match slots.first().copied() {
+                    None if commit => return Err(RegionFault::CommitWithoutReserve { worker }),
+                    None => return Err(RegionFault::AbortWithoutReserve { worker }),
+                    Some(slot) if staged == 1 => slot,
+                    Some(_) => {
+                        return Err(RegionFault::AmbiguousResolution {
+                            worker,
+                            step,
+                            staged,
+                        });
+                    }
+                };
+                self.resolve(worker, sole, commit)?;
+                WorkerState::Running
+            }
+            (WorkerState::Running, WorkerStep::CommitSlot(slot) | WorkerStep::AbortSlot(slot)) => {
+                if !self.record(worker)?.slots.contains(slot) {
+                    return Err(RegionFault::SlotNotStaged { worker, step });
+                }
+                self.resolve(worker, *slot, matches!(step, WorkerStep::CommitSlot(_)))?;
                 WorkerState::Running
             }
             (WorkerState::Running, WorkerStep::Suspend) => {
@@ -834,6 +1051,151 @@ impl RegionTree {
         };
         self.settle(worker, landed.clone())?;
         Ok(landed)
+    }
+
+    // --- adapter obligations -----------------------------------------------------------
+
+    /// Open an adapter obligation held by `holder` — the public entry point into this
+    /// tree's [`Ledger`] (RFC 0026 correction 51).
+    ///
+    /// An adapter lifting a substrate whose tasks hold obligations of their own (send
+    /// permits, acks, leases, …) opens each one here, so the ledger that
+    /// [`Finalization::is_total`] reads covers them, and a region that finalizes while one
+    /// is open reports it as owed. The entry point cannot forge balance:
+    ///
+    /// - `holder` must exist and have begun and not terminated — [`WorkerState::Running`]
+    ///   or [`WorkerState::Suspended`] — and its region must be [`RegionState::Open`], the
+    ///   same rule [`Self::spawn`] enforces, so an obligation cannot enter a scope whose
+    ///   teardown set has already stopped growing. A [`WorkerState::Created`] worker has
+    ///   not begun and holds nothing, so its open is refused as
+    ///   [`RegionFault::SubstrateHolderNotBegun`]. A parked worker may open, because the
+    ///   substrate applies an open after the poll that made it returns;
+    /// - an identity opens once in a tree's life, so a discharged obligation cannot be
+    ///   reopened to move the counters again;
+    /// - the only way out is [`Self::discharge_substrate`], which needs a matching open.
+    ///
+    /// # Errors
+    ///
+    /// [`RegionFault::UnknownWorker`], [`RegionFault::SubstrateHolderNotBegun`],
+    /// [`RegionFault::SubstrateHolderNotLive`], [`RegionFault::SubstrateRegionNotOpen`] or
+    /// [`RegionFault::SubstrateIdentityReused`].
+    pub fn open_substrate(
+        &mut self,
+        holder: WorkerId,
+        obligation: SubstrateObligation,
+    ) -> Result<(), RegionFault> {
+        self.check_opener(holder)?;
+        if self.substrate.contains_key(&obligation.id()) {
+            return Err(RegionFault::SubstrateIdentityReused { obligation });
+        }
+        self.substrate.insert(
+            obligation.id(),
+            SubstrateRecord {
+                obligation,
+                holder,
+                open: true,
+            },
+        );
+        self.ledger.open(obligation.obligation());
+        Ok(())
+    }
+
+    /// Discharge an adapter obligation that `holder` holds.
+    ///
+    /// Needs a matching open — the same identity *and* kind, still open — and `holder` must
+    /// be the worker holding it, which is what refuses a discharge from another region.
+    /// The holder must [hold substrate](WorkerState::holds_substrate) — running or
+    /// parked — and its region may be open or draining: the substrate discharges during a
+    /// cancellation, before the holder's lifecycle is terminal, and that cleanup must
+    /// balance. Once the holder is terminal an open obligation is a leak, and a discharge
+    /// after that would launder it.
+    ///
+    /// `outcome` says how the obligation ended. In an open or a normally closed region
+    /// both outcomes are admitted. In a cancelling region only
+    /// [`SubstrateOutcome::Aborted`] is: a task in cancellation only drains and
+    /// finalizes (docs/02 §7), so its discharges are cleanup, and a commit there is
+    /// refused as [`RegionFault::SubstrateCommitDuringCancellation`]. This is stricter
+    /// than the A7 conformance model, which admits a commit until the task itself
+    /// acknowledges cancellation. The calculus has no acknowledgement yet (bn-36wy3 adds
+    /// it), so it errs toward nonconformance, never toward false totality.
+    ///
+    /// # Errors
+    ///
+    /// [`RegionFault::UnknownWorker`], [`RegionFault::SubstrateNotOpen`],
+    /// [`RegionFault::SubstrateHolderMismatch`], [`RegionFault::SubstrateHolderNotLive`],
+    /// [`RegionFault::SubstrateCommitDuringCancellation`] or
+    /// [`RegionFault::SubstrateRegionNotOpen`] (a finalized region, defence in depth).
+    pub fn discharge_substrate(
+        &mut self,
+        holder: WorkerId,
+        obligation: SubstrateObligation,
+        outcome: SubstrateOutcome,
+    ) -> Result<(), RegionFault> {
+        let state = self.check_holder(holder, obligation)?;
+        if outcome == SubstrateOutcome::Committed
+            && state == RegionState::Draining(DrainCause::Cancelled)
+        {
+            return Err(RegionFault::SubstrateCommitDuringCancellation {
+                obligation,
+                worker: holder,
+            });
+        }
+        if let Some(record) = self.substrate.get_mut(&obligation.id()) {
+            record.open = false;
+        }
+        self.ledger.discharge(obligation.obligation());
+        Ok(())
+    }
+
+    /// Hand an open adapter obligation from `from` to another worker `to`, which may be in
+    /// another region.
+    ///
+    /// The obligation keeps its identity, so the ledger does not move: a transfer is not a
+    /// discharge and an open. `from` must hold the obligation, and both parties must be
+    /// *acting*: each [holds substrate](WorkerState::holds_substrate) — running or
+    /// parked — and neither is in a cancelling region. This is the A7 conformance model's
+    /// rule: ownership transfer is a causal act by an acting holder to an acting receiver,
+    /// and a task in cancellation only drains and finalizes. So, unlike a discharge, a
+    /// transfer has no cancellation-cleanup exception. A worker in a normally closed
+    /// region is not cancelling and may take part. `from == to` is refused: a hand-off to
+    /// the holder itself hands nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`RegionFault::UnknownWorker`], [`RegionFault::SubstrateNotOpen`] or
+    /// [`RegionFault::SubstrateHolderMismatch`] for `from`;
+    /// [`RegionFault::SubstrateSelfTransfer`]; and, for either party,
+    /// [`RegionFault::SubstrateHolderNotBegun`], [`RegionFault::SubstrateHolderNotLive`] or
+    /// [`RegionFault::SubstrateRegionNotOpen`] (a cancelling region, or a finalized one as
+    /// defence in depth).
+    pub fn transfer_substrate(
+        &mut self,
+        from: WorkerId,
+        obligation: SubstrateObligation,
+        to: WorkerId,
+    ) -> Result<(), RegionFault> {
+        self.check_holder(from, obligation)?;
+        if from == to {
+            return Err(RegionFault::SubstrateSelfTransfer {
+                obligation,
+                worker: from,
+            });
+        }
+        self.check_acting(from)?;
+        self.check_acting(to)?;
+        if let Some(record) = self.substrate.get_mut(&obligation.id()) {
+            record.holder = to;
+        }
+        Ok(())
+    }
+
+    /// The worker holding the adapter obligation with identity `id`, while it is open.
+    #[must_use]
+    pub fn substrate_holder(&self, id: SubstrateId) -> Option<WorkerId> {
+        self.substrate
+            .get(&id)
+            .filter(|record| record.open)
+            .map(|record| record.holder)
     }
 
     // --- request, drain, finalize ------------------------------------------------------
@@ -950,10 +1312,7 @@ impl RegionTree {
                         state,
                     });
                 }
-                self.discard_provisional(worker)?;
-                let outcome = self.cancel_outcome(worker)?;
-                self.record_mut(worker)?.cancel_outcome = Some(outcome);
-                self.settle(worker, WorkerState::Cancelled)?;
+                self.cancel_worker(worker)?;
             }
         }
         Ok(())
@@ -1038,6 +1397,90 @@ impl RegionTree {
 
     // --- internals ---------------------------------------------------------------------
 
+    /// `worker` exists and may take part in an adapter-obligation operation: it
+    /// [holds substrate](WorkerState::holds_substrate) — it has begun and has not
+    /// terminated — and its region is not finalized. Returns that region's state.
+    ///
+    /// The region check is defence in depth: [`Self::finalize`] refuses while any worker
+    /// in the subtree is not terminal, so a worker that holds substrate is never in a
+    /// finalized region.
+    fn check_substrate_party(&self, worker: WorkerId) -> Result<RegionState, RegionFault> {
+        let record = self.record(worker)?;
+        if !record.state.holds_substrate() {
+            return Err(if record.state == WorkerState::Created {
+                RegionFault::SubstrateHolderNotBegun { worker }
+            } else {
+                RegionFault::SubstrateHolderNotLive {
+                    worker,
+                    state: record.state.clone(),
+                }
+            });
+        }
+        let region = record.region;
+        let state = self.node(region)?.state;
+        if state == RegionState::Finalized {
+            return Err(RegionFault::SubstrateRegionNotOpen {
+                worker,
+                region,
+                state,
+            });
+        }
+        Ok(state)
+    }
+
+    /// A substrate party that is *acting*: its region is not cancelling. The rule for
+    /// both parties of a transfer.
+    fn check_acting(&self, worker: WorkerId) -> Result<(), RegionFault> {
+        let state = self.check_substrate_party(worker)?;
+        if state == RegionState::Draining(DrainCause::Cancelled) {
+            return Err(RegionFault::SubstrateRegionNotOpen {
+                worker,
+                region: self.record(worker)?.region,
+                state,
+            });
+        }
+        Ok(())
+    }
+
+    /// The rule for opening an adapter obligation: a substrate party whose region is
+    /// [`RegionState::Open`].
+    fn check_opener(&self, worker: WorkerId) -> Result<(), RegionFault> {
+        let state = self.check_substrate_party(worker)?;
+        if !state.accepts_work() {
+            return Err(RegionFault::SubstrateRegionNotOpen {
+                worker,
+                region: self.record(worker)?.region,
+                state,
+            });
+        }
+        Ok(())
+    }
+
+    /// `obligation` is open with this kind, `named` holds it, and `named` is a substrate
+    /// party — the rule for discharging an adapter obligation, and the holder half of a
+    /// transfer. Returns the holder's region state. The region may be open or draining: a cancellation drain is where
+    /// cleanup discharges happen. A transfer then adds [`Self::check_acting`].
+    fn check_holder(
+        &self,
+        named: WorkerId,
+        obligation: SubstrateObligation,
+    ) -> Result<RegionState, RegionFault> {
+        self.record(named)?;
+        let held = self
+            .substrate
+            .get(&obligation.id())
+            .filter(|held| held.open && held.obligation == obligation)
+            .ok_or(RegionFault::SubstrateNotOpen { obligation })?;
+        if held.holder != named {
+            return Err(RegionFault::SubstrateHolderMismatch {
+                obligation,
+                named,
+                holder: held.holder,
+            });
+        }
+        self.check_substrate_party(named)
+    }
+
     fn node(&self, region: RegionId) -> Result<&RegionNode, RegionFault> {
         self.regions
             .get(region.ordinal() as usize)
@@ -1068,11 +1511,59 @@ impl RegionTree {
     /// receipt, nothing a reader can observe". Committed publications are untouched,
     /// because INV-009 makes them monotone.
     fn discard_provisional(&mut self, worker: WorkerId) -> Result<(), RegionFault> {
-        if self.record_mut(worker)?.evidence.discard() {
+        let record = self.record_mut(worker)?;
+        let slots = core::mem::take(&mut record.slots);
+        record.evidence.discard();
+        for slot in slots {
             self.ledger
-                .discharge(Obligation::provisional_publication(worker));
+                .discharge(Obligation::staged_publication(worker, slot));
         }
         Ok(())
+    }
+
+    /// Stage a publication in `slot`, opening its obligation. The caller has checked the
+    /// step's guard.
+    fn stage(&mut self, worker: WorkerId, slot: PublicationSlot) -> Result<(), RegionFault> {
+        let record = self.record_mut(worker)?;
+        record.slots.insert(slot);
+        record.evidence.reserve();
+        self.ledger
+            .open(Obligation::staged_publication(worker, slot));
+        Ok(())
+    }
+
+    /// Resolve the publication staged in `slot` — committed or dropped — discharging its
+    /// obligation. The caller has checked that `slot` is staged.
+    fn resolve(
+        &mut self,
+        worker: WorkerId,
+        slot: PublicationSlot,
+        commit: bool,
+    ) -> Result<(), RegionFault> {
+        let record = self.record_mut(worker)?;
+        record.slots.remove(&slot);
+        if commit {
+            record.evidence.commit();
+        } else {
+            record.evidence.abort();
+        }
+        self.ledger
+            .discharge(Obligation::staged_publication(worker, slot));
+        Ok(())
+    }
+
+    /// Terminate one non-terminal worker by cancellation: discard what it staged, record
+    /// what the cancellation leaves behind, and settle it into
+    /// [`WorkerState::Cancelled`].
+    ///
+    /// The per-worker body of a cancelling drain, and the one place a worker is cancelled.
+    /// A single-task cancellation step (bn-36wy3's deadline cancellation) is this function
+    /// behind its own legality guard, not a second copy of it.
+    fn cancel_worker(&mut self, worker: WorkerId) -> Result<(), RegionFault> {
+        self.discard_provisional(worker)?;
+        let outcome = self.cancel_outcome(worker)?;
+        self.record_mut(worker)?.cancel_outcome = Some(outcome);
+        self.settle(worker, WorkerState::Cancelled)
     }
 
     /// What a cancellation leaves behind for one worker — RFC 0026's both-or-neither.

@@ -1,0 +1,68 @@
+[change]
+bone = "bn-2318t"
+author = "continuum-dev"
+summary = "continuum-task region calculus: an explicit-abort worker step (WorkerStep::Abort), several staged publications per worker in named slots each resolved exactly once, and a public typed ledger entry point (open/discharge/transfer_substrate) so adapter obligations are covered by Finalization::is_total without forging balance; RFC 0026 correction 51"
+
+[semantic]
+covers = [
+  "crates/continuum-task/src/",
+]
+reference_tests = [
+  "crates/continuum-task/tests/region_abort_and_slots.rs::an_explicit_abort_drops_the_staged_publication_and_publishes_nothing",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::an_abort_with_nothing_staged_is_refused_and_changes_nothing",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::an_abort_is_illegal_outside_running",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::an_abort_inside_a_cancelled_region_is_a_wind_down_step",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::an_abort_keeps_committed_evidence_and_its_continuation",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::a_worker_may_hold_several_staged_publications_and_resolve_them_in_any_order",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::each_slot_is_staged_once_and_resolved_once",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::an_unnamed_resolution_over_several_staged_publications_is_refused_as_ambiguous",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::the_one_in_flight_reserve_keeps_its_refusal_beside_slots",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::no_worker_parks_or_completes_while_any_slot_is_staged",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::a_failure_or_a_drain_discards_every_staged_slot",
+  "crates/continuum-task/tests/region_abort_and_slots.rs::every_interleaving_of_multi_slot_programs_tears_down_totally",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::a_discharged_adapter_obligation_balances_and_an_open_one_is_a_reported_leak",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::a_cancelling_teardown_does_not_absorb_an_adapter_obligation",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::an_adapter_obligation_discharged_during_cancellation_balances",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::a_transfer_moves_the_holder_across_regions_and_not_the_ledger",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_discharge_without_open_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_cross_region_discharge_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_open_by_a_holder_that_is_not_live_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_open_by_a_worker_that_has_not_begun_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::a_parked_worker_opens_hands_on_and_discharges",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::the_pr14_impl04_journal_shape_replays_as_a_total_teardown",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_transfer_with_a_party_in_a_cancelling_region_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_self_transfer_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_committed_discharge_during_cancellation_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_transfer_to_or_from_a_worker_outside_its_lifetime_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_discharge_after_the_cancelling_drain_terminated_the_holder_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_open_in_a_region_that_stopped_accepting_work_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_reopening_an_identity_is_refused_even_after_discharge",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_laundering_a_leak_after_the_holder_terminated_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::a_substrate_kind_token_must_be_canonical",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::substrate_steps_run_render_and_refuse_as_schedule_data",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-task/tests/region_abort_and_slots.rs::symmetry_renaming_of_slots_preserves_the_run", relation = "symmetry renaming" },
+  { test = "crates/continuum-task/tests/region_abort_and_slots.rs::independent_event_swap_of_two_slot_resolutions_preserves_the_render", relation = "independent-event swap" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/region_staging_differential.rs::the_calculus_and_an_independent_reference_model_agree_on_every_staging_transition", oracle = "continuum-engine-reference", subject = "continuum-task" },
+  { test = "crates/continuumd/tests/region_staging_differential.rs::a_mutated_reference_guard_is_told_apart", oracle = "continuum-engine-reference", subject = "continuum-task" },
+]
+
+[semantic.claim_impact]
+claims = ["C004", "C023"]
+reason = "C004 (the asupersync adapter captures all supported nondeterminism) and C023 (the triptych's A7 arrow, whose conformance model found the explicit-abort, multi-reservation and parallel-ledger lift gaps) both depend on the calculus admitting what the substrate does. This change gives the calculus those steps and the ledger entry point, and promotes neither claim: the continuum-asupersync lift does not adopt them yet (follow-up), so no docs/18 row changes state or wording"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the region calculus is in-process typed code with no wire schema, the protocol and IDL do not move, and the canonical renders of every run that stages at most one publication at a time are byte-identical to before, because the primary slot's obligation keeps its worker-keyed subject"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-task: every existing step keeps its meaning and its refusals, so every existing schedule, render and test is unchanged; the public enums WorkerStep, RegionFault, ObligationKind, Subject, schedule::Step and StepOutcome gain variants, and EvidenceLedger now counts staged publications (is_provisional is staged > 0). In-workspace callers (continuumd, continuum-asupersync) compile unchanged and match none of these enums exhaustively"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1ckhmw"
+verdict = "approved"

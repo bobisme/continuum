@@ -34,12 +34,13 @@
 
 use core::fmt;
 
+use super::obligation::{SubstrateObligation, SubstrateOutcome};
 use super::worker::{Resumability, WorkerId, WorkerStep};
 use super::{Finalization, RegionFault, RegionId, RegionState, RegionTree, WorkerState};
 
 /// One move against a [`RegionTree`].
 ///
-/// The seven variants are the tree's seven mutating operations, one for one. Identities
+/// The ten variants are the tree's ten mutating operations, one for one. Identities
 /// are named rather than returned, which works because they are dense ordinals allocated
 /// in call order: a schedule that opens two children knows they are `r1` and `r2` before
 /// it runs.
@@ -84,6 +85,31 @@ pub enum Step {
         /// The region to finalize.
         region: RegionId,
     },
+    /// [`RegionTree::open_substrate`].
+    OpenSubstrate {
+        /// The worker that takes the obligation.
+        holder: WorkerId,
+        /// The adapter obligation.
+        obligation: SubstrateObligation,
+    },
+    /// [`RegionTree::discharge_substrate`].
+    DischargeSubstrate {
+        /// The worker that holds the obligation.
+        holder: WorkerId,
+        /// The adapter obligation.
+        obligation: SubstrateObligation,
+        /// How it ended.
+        outcome: SubstrateOutcome,
+    },
+    /// [`RegionTree::transfer_substrate`].
+    TransferSubstrate {
+        /// The worker that holds the obligation.
+        from: WorkerId,
+        /// The adapter obligation.
+        obligation: SubstrateObligation,
+        /// The worker that receives it.
+        to: WorkerId,
+    },
 }
 
 impl Step {
@@ -113,6 +139,19 @@ impl Step {
             Self::Cancel { region } => format!("cancel {region}"),
             Self::Drain { region } => format!("drain {region}"),
             Self::Finalize { region } => format!("finalize {region}"),
+            Self::OpenSubstrate { holder, obligation } => {
+                format!("open-substrate {holder} {obligation}")
+            }
+            Self::DischargeSubstrate {
+                holder,
+                obligation,
+                outcome,
+            } => format!("discharge-substrate {holder} {obligation} {outcome}"),
+            Self::TransferSubstrate {
+                from,
+                obligation,
+                to,
+            } => format!("transfer-substrate {from} {obligation} {to}"),
         }
     }
 }
@@ -136,6 +175,8 @@ pub enum StepOutcome {
     Requested(RegionState),
     /// A subtree was finalized.
     Finalized(Box<Finalization>),
+    /// An adapter obligation was opened, discharged, or transferred.
+    Substrate(SubstrateObligation),
 }
 
 impl StepOutcome {
@@ -157,6 +198,7 @@ impl StepOutcome {
                 finalization.workers().len(),
                 finalization.is_total()
             ),
+            Self::Substrate(obligation) => format!("substrate {obligation}"),
         }
     }
 }
@@ -231,6 +273,23 @@ impl Schedule {
                 Step::Finalize { region } => tree
                     .finalize(region)
                     .map(|finalization| StepOutcome::Finalized(Box::new(finalization))),
+                Step::OpenSubstrate { holder, obligation } => tree
+                    .open_substrate(holder, obligation)
+                    .map(|()| StepOutcome::Substrate(obligation)),
+                Step::DischargeSubstrate {
+                    holder,
+                    obligation,
+                    outcome,
+                } => tree
+                    .discharge_substrate(holder, obligation, outcome)
+                    .map(|()| StepOutcome::Substrate(obligation)),
+                Step::TransferSubstrate {
+                    from,
+                    obligation,
+                    to,
+                } => tree
+                    .transfer_substrate(from, obligation, to)
+                    .map(|()| StepOutcome::Substrate(obligation)),
             };
             records.push((step.clone(), outcome));
         }

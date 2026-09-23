@@ -35,12 +35,18 @@ use core::fmt;
 use std::collections::BTreeSet;
 
 use super::RegionId;
-use super::worker::WorkerId;
+use super::worker::{PublicationSlot, ReasonError, WorkerId};
 
 /// What kind of work an obligation stands for.
 ///
-/// Four kinds, each one an act that creates work plus the act that finishes it. The
-/// middle two are RFC 0001's own named examples, quoted in this module's header.
+/// Four calculus kinds, each one an act that creates work plus the act that finishes it,
+/// and one adapter family. The middle two calculus kinds are RFC 0001's own named
+/// examples, quoted in this module's header. The fifth, [`Self::Substrate`], is how an
+/// adapter's own obligations (RFC 0001's "reply obligations, reserved channel capacity,
+/// outstanding durable-write acknowledgements") enter this ledger: only through
+/// [`RegionTree::open_substrate`](super::RegionTree::open_substrate), which checks that the
+/// holder has begun and not terminated, so [`Finalization::is_total`](super::Finalization::is_total) covers them too
+/// (RFC 0026 correction 51).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObligationKind {
     /// A spawned worker owes a quiescent state.
@@ -65,15 +71,29 @@ pub enum ObligationKind {
     CancellationFinalization,
     /// A staged publication owes a commit or a discard.
     ///
-    /// Opened by [`WorkerStep::Reserve`](super::worker::WorkerStep::Reserve), discharged
-    /// by [`Commit`](super::worker::WorkerStep::Commit) or by the drain that discards it.
+    /// Opened by [`WorkerStep::Reserve`](super::worker::WorkerStep::Reserve) or
+    /// [`ReserveSlot`](super::worker::WorkerStep::ReserveSlot), one per staged slot, and
+    /// discharged exactly once — by a commit, by an explicit
+    /// [`Abort`](super::worker::WorkerStep::Abort), or by the drain or failure that
+    /// discards it.
     /// While it is open, the artifact is neither committed nor absent — the state
     /// G0-DX-14's second conjunct forbids at rest.
     ProvisionalPublication,
+    /// An adapter's own obligation, of the adapter's own kind, held by one worker.
+    ///
+    /// Opened by [`RegionTree::open_substrate`](super::RegionTree::open_substrate) and
+    /// discharged by [`RegionTree::discharge_substrate`](super::RegionTree::discharge_substrate),
+    /// both of which refuse a holder that has not begun or has terminated. No calculus step opens or
+    /// discharges one, and no teardown discharges one on the adapter's behalf: a region
+    /// that finalizes while one is open reports it as owed, which is a leak.
+    Substrate(SubstrateKind),
 }
 
 impl ObligationKind {
     /// A stable token for canonical rendering.
+    ///
+    /// Every substrate kind shares the family token `substrate`; [`fmt::Display`] adds the
+    /// adapter's own kind token, so a calculus kind and an adapter kind never render alike.
     #[must_use]
     pub const fn token(self) -> &'static str {
         match self {
@@ -81,13 +101,170 @@ impl ObligationKind {
             Self::ChildRegionQuiescence => "child-region-quiescence",
             Self::CancellationFinalization => "cancellation-finalization",
             Self::ProvisionalPublication => "provisional-publication",
+            Self::Substrate(_) => "substrate",
+        }
+    }
+
+    /// The adapter's kind, when this is a substrate obligation.
+    #[must_use]
+    pub const fn substrate_kind(self) -> Option<SubstrateKind> {
+        match self {
+            Self::Substrate(kind) => Some(kind),
+            _ => None,
         }
     }
 }
 
 impl fmt::Display for ObligationKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Substrate(kind) => write!(f, "substrate({kind})"),
+            other => f.write_str(other.token()),
+        }
+    }
+}
+
+/// An adapter's own obligation kind, as one canonical token (`send-permit`, `lease`, …).
+///
+/// A carrier, not a vocabulary: the kinds are the adapter's, and this crate declares no
+/// edge to any adapter, so it checks only that the token *is* a token — non-empty,
+/// printable ASCII — as [`FailureReason`](super::worker::FailureReason) does. The token is
+/// `'static` because an adapter's kinds are a closed set it spells in code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SubstrateKind(&'static str);
+
+impl SubstrateKind {
+    /// A kind from its token.
+    ///
+    /// # Errors
+    ///
+    /// [`ReasonError`] when the token is empty or is not printable ASCII.
+    pub fn new(token: &'static str) -> Result<Self, ReasonError> {
+        if token.is_empty() {
+            return Err(ReasonError::Empty);
+        }
+        if let Some((index, character)) = token.char_indices().find(|(_, c)| !c.is_ascii_graphic())
+        {
+            return Err(ReasonError::NonCanonical { index, character });
+        }
+        Ok(Self(token))
+    }
+
+    /// The kind token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for SubstrateKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+/// An adapter obligation's identity inside one [`RegionTree`](super::RegionTree).
+///
+/// Chosen by the adapter — its own obligation ordinal is the natural choice — and used
+/// once: a tree refuses to open an identity it has opened before, discharged or not, so a
+/// discharged obligation cannot be reopened to move the counters twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SubstrateId(u64);
+
+impl SubstrateId {
+    /// The identity at `ordinal`.
+    #[must_use]
+    pub const fn at(ordinal: u64) -> Self {
+        Self(ordinal)
+    }
+
+    /// This identity's ordinal.
+    #[must_use]
+    pub const fn ordinal(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for SubstrateId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "s{}", self.0)
+    }
+}
+
+/// How an adapter obligation ended, as its discharge reports it.
+///
+/// docs/02 §7's effect protocol ends a reserved effect in one of two ways, and the
+/// distinction matters to the calculus: a task in cancellation only drains and
+/// finalizes, so in a cancelling region only [`Self::Aborted`] is admitted
+/// (RFC 0026 correction 51).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SubstrateOutcome {
+    /// The obligation was met: its effect is visible.
+    Committed,
+    /// The obligation was dropped: its effect is not visible.
+    Aborted,
+}
+
+impl SubstrateOutcome {
+    /// A stable token for canonical rendering.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Committed => "committed",
+            Self::Aborted => "aborted",
+        }
+    }
+}
+
+impl fmt::Display for SubstrateOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.token())
+    }
+}
+
+/// One adapter obligation: its kind and its identity — the handle the substrate entry
+/// points take.
+///
+/// A discharge names the kind as well as the identity, and a mismatch is refused as "not
+/// open": a caller cannot discharge a lease by naming a send permit's identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SubstrateObligation {
+    kind: SubstrateKind,
+    id: SubstrateId,
+}
+
+impl SubstrateObligation {
+    /// The obligation of `kind` with identity `id`.
+    #[must_use]
+    pub const fn new(kind: SubstrateKind, id: SubstrateId) -> Self {
+        Self { kind, id }
+    }
+
+    /// Its kind.
+    #[must_use]
+    pub const fn kind(self) -> SubstrateKind {
+        self.kind
+    }
+
+    /// Its identity.
+    #[must_use]
+    pub const fn id(self) -> SubstrateId {
+        self.id
+    }
+
+    /// The ledger entry it stands for.
+    #[must_use]
+    pub const fn obligation(self) -> Obligation {
+        Obligation::new(
+            ObligationKind::Substrate(self.kind),
+            Subject::Substrate(self.id),
+        )
+    }
+}
+
+impl fmt::Display for SubstrateObligation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.kind, self.id)
     }
 }
 
@@ -101,8 +278,15 @@ pub enum Subject {
     /// A region: the child that owes quiescence, or the region whose cancellation owes a
     /// finalization.
     Region(RegionId),
-    /// A worker: the one that owes a quiescent state, or holds the staged publication.
+    /// A worker: the one that owes a quiescent state, or holds the staged publication in
+    /// its [primary slot](PublicationSlot::PRIMARY).
     Worker(WorkerId),
+    /// A publication a worker staged in a non-primary slot. The tree never builds this
+    /// with the primary slot, whose subject is [`Self::Worker`].
+    Publication(WorkerId, PublicationSlot),
+    /// An adapter obligation. Its holder is the tree's record, not part of its identity,
+    /// so a transfer moves the holder without moving the ledger.
+    Substrate(SubstrateId),
 }
 
 impl fmt::Display for Subject {
@@ -110,6 +294,8 @@ impl fmt::Display for Subject {
         match self {
             Self::Region(region) => write!(f, "{region}"),
             Self::Worker(worker) => write!(f, "{worker}"),
+            Self::Publication(worker, slot) => write!(f, "{worker}{slot}"),
+            Self::Substrate(id) => write!(f, "{id}"),
         }
     }
 }
@@ -163,6 +349,23 @@ impl Obligation {
             ObligationKind::ProvisionalPublication,
             Subject::Worker(worker),
         )
+    }
+
+    /// The publication staged in `slot` owes a commit or a discard.
+    ///
+    /// The primary slot is keyed by the worker alone — it *is*
+    /// [`Self::provisional_publication`] — so a worker that stages one publication at a
+    /// time owes exactly the obligation it owed before slots existed.
+    #[must_use]
+    pub const fn staged_publication(worker: WorkerId, slot: PublicationSlot) -> Self {
+        if slot.ordinal() == PublicationSlot::PRIMARY.ordinal() {
+            Self::provisional_publication(worker)
+        } else {
+            Self::new(
+                ObligationKind::ProvisionalPublication,
+                Subject::Publication(worker, slot),
+            )
+        }
     }
 
     /// This obligation's kind.

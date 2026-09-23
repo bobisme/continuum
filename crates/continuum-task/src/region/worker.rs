@@ -150,6 +150,22 @@ impl WorkerState {
         !self.is_active()
     }
 
+    /// Whether a worker in this state may take part in an adapter obligation — open,
+    /// discharge, hand on, or receive one: it has begun and has not terminated, so
+    /// [`Self::Running`] or [`Self::Suspended`] (RFC 0026 correction 51).
+    ///
+    /// Not [`Self::is_active`]. A [`Self::Created`] worker has taken no step and holds
+    /// nothing. A [`Self::Suspended`] worker still acts for the substrate: the substrate
+    /// applies an open after the poll that made it returns, hands obligations between
+    /// parked tasks, and discharges them during a cancellation before the holder's
+    /// lifecycle is terminal. The calculus has no separate cancelling state — cancellation
+    /// is its region's [`Draining`](super::RegionState::Draining) — so a cancelling worker
+    /// is one of these two.
+    #[must_use]
+    pub const fn holds_substrate(&self) -> bool {
+        matches!(self, Self::Running | Self::Suspended)
+    }
+
     /// The typed failure reason, when this state is [`Self::Failed`].
     #[must_use]
     pub const fn failure_reason(&self) -> Option<&FailureReason> {
@@ -201,6 +217,32 @@ pub enum WorkerStep {
     Complete,
     /// `Created | Running → Failed`, naming why.
     Fail(FailureReason),
+    /// Drop the one staged publication: `Running → Running`, publishing nothing.
+    ///
+    /// The explicit-abort arm of the effect protocol — docs/02 §7's
+    /// `Reserved(token) → Aborted(reason)` and RFC 0001's `Reserved ↘ Aborted` — taken by
+    /// the worker itself rather than forced on it by a drain or a failure. It is legal only
+    /// from [`WorkerState::Running`] and only while a publication is staged; with nothing
+    /// staged it is refused as
+    /// [`RegionFault::AbortWithoutReserve`](super::RegionFault::AbortWithoutReserve), and
+    /// with more than one staged it is refused as ambiguous, like [`Self::Commit`]. The
+    /// store-side counterpart is `StagedPublication::abandon`: no index entry, no receipt,
+    /// nothing a reader can observe. Committed evidence is untouched (INV-009). RFC 0026
+    /// correction 51 records the step.
+    Abort,
+    /// Stage a publication in a named slot, alongside any already staged in other slots.
+    ///
+    /// The multi-staging discipline (RFC 0026 correction 51): a worker MAY hold several
+    /// staged publications at once, one per slot, and each is its own linear resource —
+    /// its own `provisional-publication` obligation, resolved exactly once by
+    /// [`Self::CommitSlot`], [`Self::AbortSlot`], or the drain or failure that discards it.
+    /// Staging a slot that is already staged is refused. [`Self::Reserve`] is
+    /// `ReserveSlot(PublicationSlot::PRIMARY)` under the stricter one-in-flight guard.
+    ReserveSlot(PublicationSlot),
+    /// Commit the publication staged in this slot.
+    CommitSlot(PublicationSlot),
+    /// Drop the publication staged in this slot, publishing nothing.
+    AbortSlot(PublicationSlot),
 }
 
 impl WorkerStep {
@@ -215,6 +257,19 @@ impl WorkerStep {
             Self::Resume => "resume",
             Self::Complete => "complete",
             Self::Fail(_) => "fail",
+            Self::Abort => "abort",
+            Self::ReserveSlot(_) => "reserve-slot",
+            Self::CommitSlot(_) => "commit-slot",
+            Self::AbortSlot(_) => "abort-slot",
+        }
+    }
+
+    /// The slot this step names, when it names one.
+    #[must_use]
+    pub const fn slot(&self) -> Option<PublicationSlot> {
+        match self {
+            Self::ReserveSlot(slot) | Self::CommitSlot(slot) | Self::AbortSlot(slot) => Some(*slot),
+            _ => None,
         }
     }
 }
@@ -223,8 +278,46 @@ impl fmt::Display for WorkerStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Fail(reason) => write!(f, "fail({reason})"),
+            Self::ReserveSlot(slot) | Self::CommitSlot(slot) | Self::AbortSlot(slot) => {
+                write!(f, "{}({slot})", self.token())
+            }
             other => f.write_str(other.token()),
         }
+    }
+}
+
+/// Which of a worker's staged publications a step names.
+///
+/// Slots are chosen by the caller and are scoped to one worker: `w0#1` and `w1#1` are two
+/// different publications. They are data, never drawn or timed, so one schedule names one
+/// set of slots on every run (INV-005). An adapter lifting a substrate that holds many
+/// reservations per task gives each reservation its own slot — its reservation ordinal is
+/// the natural choice. [`Self::PRIMARY`] is the slot the one-in-flight steps
+/// ([`WorkerStep::Reserve`]) use, and its obligation is keyed by the worker alone, so a
+/// ledger that never stages a second slot renders exactly as it did before slots existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PublicationSlot(u32);
+
+impl PublicationSlot {
+    /// The slot [`WorkerStep::Reserve`] stages into.
+    pub const PRIMARY: Self = Self(0);
+
+    /// The slot at `ordinal`.
+    #[must_use]
+    pub const fn at(ordinal: u32) -> Self {
+        Self(ordinal)
+    }
+
+    /// This slot's ordinal.
+    #[must_use]
+    pub const fn ordinal(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for PublicationSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "#{}", self.0)
     }
 }
 
@@ -241,12 +334,16 @@ impl fmt::Display for WorkerStep {
 /// >
 /// > — `notes/plan/rfcs/0026-continuumd-native-protocol.md`, "Atomicity of publication"
 ///
-/// At most one publication is in flight at a time, which is the store's own shape:
-/// `StagedPublication` and `CommittedContent` are linear typestates, each consumed by the
-/// call that advances it, so a worker cannot hold two.
+/// Each staged publication is one of the store's linear typestates — `StagedPublication`
+/// and `CommittedContent` are each consumed by the call that advances it — and a worker
+/// may hold several of them at once, one per [`PublicationSlot`] (RFC 0026 correction
+/// 51). The one-in-flight steps ([`WorkerStep::Reserve`], [`WorkerStep::Commit`],
+/// [`WorkerStep::Abort`]) keep the stricter discipline in which at most one is staged.
+/// This ledger counts them; which slots are staged is the region tree's record, and the
+/// obligation ledger keys one obligation per slot, so the two accountings are independent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EvidenceLedger {
-    provisional: bool,
+    staged: u32,
     committed: u32,
 }
 
@@ -255,7 +352,7 @@ impl EvidenceLedger {
     #[must_use]
     pub const fn empty() -> Self {
         Self {
-            provisional: false,
+            staged: 0,
             committed: 0,
         }
     }
@@ -263,7 +360,13 @@ impl EvidenceLedger {
     /// Whether a publication is staged and not yet resolved.
     #[must_use]
     pub const fn is_provisional(&self) -> bool {
-        self.provisional
+        self.staged > 0
+    }
+
+    /// How many publications are staged and not yet resolved.
+    #[must_use]
+    pub const fn staged(&self) -> u32 {
+        self.staged
     }
 
     /// How many publications this worker has committed.
@@ -279,23 +382,31 @@ impl EvidenceLedger {
     }
 
     pub(crate) const fn reserve(&mut self) {
-        self.provisional = true;
+        self.staged += 1;
     }
 
+    /// Resolve one staged publication by committing it. The caller has checked that one
+    /// is staged.
     pub(crate) const fn commit(&mut self) {
-        self.provisional = false;
+        self.staged = self.staged.saturating_sub(1);
         self.committed += 1;
     }
 
-    /// Drop the staged publication: nothing observable is left behind.
+    /// Resolve one staged publication by dropping it: nothing observable is left behind,
+    /// and `committed` does not move. The caller has checked that one is staged.
+    pub(crate) const fn abort(&mut self) {
+        self.staged = self.staged.saturating_sub(1);
+    }
+
+    /// Drop every staged publication: nothing observable is left behind.
     ///
     /// The store's counterpart is `StagedPublication::abandon` /
     /// `CommittedContent::abandon`, which report `AbortReason::Abandoned` and — as
     /// `PublicationAborted`'s doc puts it — leave "no index entry, no receipt, nothing a
     /// reader can observe".
     pub(crate) const fn discard(&mut self) -> bool {
-        let had = self.provisional;
-        self.provisional = false;
+        let had = self.staged > 0;
+        self.staged = 0;
         had
     }
 }
