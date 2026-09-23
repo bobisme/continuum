@@ -26,7 +26,7 @@
 //! | the lift can say no (anti-vacuity) | [`the_lift_rejects_nonconforming_journals`] |
 //! | a conforming teardown is total (no orphans) | [`a_conforming_teardown_is_total`] |
 //! | typed refusal on an unsupported primitive | [`an_unsupported_primitive_is_a_typed_refusal`] |
-//! | the extension point is the six families, five instrumented | [`the_extension_point_names_six_families_and_five_are_instrumented`] |
+//! | the extension point is the six families, all instrumented | [`the_extension_point_names_six_families_and_all_are_instrumented`] |
 //! | malformed choice logs are typed refusals | [`malformed_choice_logs_are_typed_refusals`] |
 
 use std::collections::BTreeMap;
@@ -332,15 +332,15 @@ fn the_decoder_refuses_every_second_spelling() {
         })
     ));
 
-    // A byte string claiming a family whose instrumentation has not landed.
-    let mut uninstrumented = bytes.clone();
-    uninstrumented[family_at] = Family::Channel.tag();
-    assert_eq!(
-        Journal::decode(&uninstrumented),
-        Err(DecodeError::FamilyNotInstrumented {
-            family: "channel",
-            seq: 0
-        })
+    // A lifecycle payload relabelled as another family is refused by that family's own
+    // decoder. Every family is instrumented since PR-14-IMPL-06 (bn-3xx9), so none
+    // answers `FamilyNotInstrumented` any more.
+    let mut relabelled = bytes.clone();
+    relabelled[family_at] = Family::Channel.tag();
+    let refused = Journal::decode(&relabelled).unwrap_err();
+    assert!(
+        !matches!(refused, DecodeError::FamilyNotInstrumented { .. }),
+        "{refused:?}"
     );
 
     // A drained set spelled out of order.
@@ -657,7 +657,7 @@ fn an_unsupported_primitive_is_a_typed_refusal() {
 }
 
 #[test]
-fn the_extension_point_names_six_families_and_five_are_instrumented() {
+fn the_extension_point_names_six_families_and_all_are_instrumented() {
     let table: Vec<(u8, &str, &str, bool)> = Family::ALL
         .iter()
         .map(|f| (f.tag(), f.token(), f.requirement(), f.is_instrumented()))
@@ -670,7 +670,7 @@ fn the_extension_point_names_six_families_and_five_are_instrumented() {
             (3, "cancellation", "PR-14-IMPL-03", true),
             (4, "obligation", "PR-14-IMPL-04", true),
             (5, "virtual-time", "PR-14-IMPL-05", true),
-            (6, "channel", "PR-14-IMPL-06", false),
+            (6, "channel", "PR-14-IMPL-06", true),
         ]
     );
     for family in Family::ALL {

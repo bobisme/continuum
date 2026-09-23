@@ -563,7 +563,12 @@ impl Account {
                 });
                 self.park(entry.holder);
             }
-            SubstrateOp::Sleep { .. } | SubstrateOp::Advance { .. } => {
+            SubstrateOp::Sleep { .. }
+            | SubstrateOp::Advance { .. }
+            | SubstrateOp::OpenChannel { .. }
+            | SubstrateOp::Send { .. }
+            | SubstrateOp::Recv { .. }
+            | SubstrateOp::CloseSenders { .. } => {
                 unreachable!("the ledger corpus does not sleep")
             }
             SubstrateOp::Transfer { reservation, to } => {
@@ -1300,11 +1305,12 @@ fn refusals_are_typed() {
         Some(InconclusiveReason::EngineError)
     );
 
-    // A family the binding does not bind is refused before the substrate runs.
-    let got = refusal(two().into_iter().map(|op| vec![op]).collect(), &{
-        config(SEED).observing(Family::Channel)
-    });
-    assert_eq!(got, BindingRefusal::FamilyNotBound(Family::Channel));
+    // Every family is bound since PR-14-IMPL-06 (bn-3xx9): observing the channel family
+    // too is accepted.
+    let everything = config(SEED).observing(Family::Channel);
+    let programs: Vec<Program> = two().into_iter().map(|op| vec![op]).collect();
+    let n: usize = programs.iter().map(Vec::len).sum();
+    assert!(run(&programs, &ChoiceLog::new(vec![0; n]), &everything).is_ok());
 
     // Bytes: an unknown kind tag and an unsorted balance set are refused, not guessed.
     let mut journal = Journal::new();

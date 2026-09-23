@@ -950,9 +950,18 @@ fn refusals_are_typed() {
         Some(InconclusiveReason::Unsupported)
     );
 
-    // A family the binding does not bind is refused before the substrate runs.
-    let got = refusal(with(vec![]), &config(SEED).observing(Family::Channel));
-    assert_eq!(got, BindingRefusal::FamilyNotBound(Family::Channel));
+    // Every family is bound since PR-14-IMPL-06 (bn-3xx9): observing the channel family
+    // too is accepted.
+    let started_only = with(vec![]);
+    let n = started_only[0].len();
+    assert!(
+        run(
+            &started_only,
+            &ChoiceLog::new(vec![0; n]),
+            &config(SEED).observing(Family::Channel)
+        )
+        .is_ok()
+    );
 
     // Bytes: an unknown event tag is refused, not guessed.
     let mut journal = Journal::new();

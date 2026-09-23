@@ -12,7 +12,7 @@
 //! | 3 | [`Family::Cancellation`] | `cancellation` | PR-14-IMPL-03 (bn-bx7i) |
 //! | 4 | [`Family::Obligation`] | `obligation` | PR-14-IMPL-04 (bn-6nm8) |
 //! | 5 | [`Family::Time`] | `virtual-time` | PR-14-IMPL-05 (bn-3m1d) |
-//! | 6 | [`Family::Channel`] | `channel` | PR-14-IMPL-06 |
+//! | 6 | [`Family::Channel`] | `channel` | PR-14-IMPL-06 (bn-3xx9) |
 //!
 //! The tags are part of the canonical encoding and never move. A seventh family (for
 //! example PR 15's fault events) takes tag 7 and a new line in each table below.
@@ -166,7 +166,7 @@ pub enum EventBody {
     Obligation(obligation::ObligationEvent),
     /// A virtual-time event (PR-14-IMPL-05, bn-3m1d).
     Time(time::TimeEvent),
-    /// A channel event. Uninhabited until PR-14-IMPL-06.
+    /// A channel event (PR-14-IMPL-06, bn-3xx9).
     Channel(channel::ChannelEvent),
 }
 
@@ -250,7 +250,7 @@ pub enum Report {
     Obligation(obligation::ObligationReport),
     /// A virtual-time step (PR-14-IMPL-05, bn-3m1d).
     Time(time::TimeReport),
-    /// Uninhabited until PR-14-IMPL-06.
+    /// A channel step (PR-14-IMPL-06, bn-3xx9).
     Channel(channel::ChannelReport),
     /// A primitive the source names but no family instruments yet. Recording it is the
     /// typed refusal [`RecordRefusal::UnsupportedPrimitive`], never a dropped event.

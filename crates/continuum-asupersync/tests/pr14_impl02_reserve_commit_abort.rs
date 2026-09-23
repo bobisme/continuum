@@ -442,7 +442,11 @@ impl Account {
             SubstrateOp::Acquire { .. }
             | SubstrateOp::Transfer { .. }
             | SubstrateOp::Sleep { .. }
-            | SubstrateOp::Advance { .. } => {
+            | SubstrateOp::Advance { .. }
+            | SubstrateOp::OpenChannel { .. }
+            | SubstrateOp::Send { .. }
+            | SubstrateOp::Recv { .. }
+            | SubstrateOp::CloseSenders { .. } => {
                 unreachable!("the effect corpus reserves transactions only")
             }
             SubstrateOp::Close { region } => {
@@ -977,11 +981,12 @@ fn refusals_are_typed() {
     );
     assert_eq!(got.inconclusive_reason(), None);
 
-    // A family the binding does not bind is refused before the substrate runs.
+    // Every family is bound since PR-14-IMPL-06 (bn-3xx9): observing the channel family
+    // too is accepted, and adds no event to a run without channels.
     let programs = siblings();
     let log = ChoiceLog::enumerate(&lengths(&programs)).remove(0);
-    let got = run(&programs, &log, &config(SEED).observing(Family::Channel)).unwrap_err();
-    assert_eq!(got, BindingRefusal::FamilyNotBound(Family::Channel));
+    let all = run(&programs, &log, &config(SEED).observing(Family::Channel)).unwrap();
+    assert_eq!(all, run(&programs, &log, &config(SEED)).unwrap());
 
     // A trace buffer too small for the run.
     let tiny = BindingConfig {

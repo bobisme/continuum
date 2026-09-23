@@ -3,17 +3,18 @@
 //!
 //! # What is bound, and what is not
 //!
-//! The binding observes five families: [`Family::Lifecycle`] (PR-14-IMPL-01, bn-lf4i),
-//! [`Family::Effect`] (PR-14-IMPL-02, bn-gzy1), [`Family::Cancellation`] (PR-14-IMPL-03,
-//! bn-bx7i), [`Family::Obligation`] (PR-14-IMPL-04, bn-6nm8) and [`Family::Time`]
-//! (PR-14-IMPL-05, bn-3m1d). A run observes the families
+//! The binding observes all six families: [`Family::Lifecycle`] (PR-14-IMPL-01,
+//! bn-lf4i), [`Family::Effect`] (PR-14-IMPL-02, bn-gzy1), [`Family::Cancellation`]
+//! (PR-14-IMPL-03, bn-bx7i), [`Family::Obligation`] (PR-14-IMPL-04, bn-6nm8),
+//! [`Family::Time`] (PR-14-IMPL-05, bn-3m1d) and [`Family::Channel`] (PR-14-IMPL-06,
+//! bn-3xx9). A run observes the families
 //! [`BindingConfig::families`] names. Lifecycle is always among them, because the
 //! other families name tasks by the ordinals its spawn events allocate. The default is
 //! lifecycle alone, whose journal is the one bn-lf4i pinned, byte for byte.
 //!
-//! The channel family is still uninstrumented (its file under `src/family/` says so), and for them [`substrate_binding`] answers with the typed absence
-//! [`BindingAbsence::FamilyNotBound`], whose INV-008 reading is
-//! [`InconclusiveReason::Unsupported`]. A run that asks for one is refused with
+//! A family a later PR adds starts unbound: [`substrate_binding`] answers it with the
+//! typed absence [`BindingAbsence::FamilyNotBound`], whose INV-008 reading is
+//! [`InconclusiveReason::Unsupported`], and a run that asks for it is refused with
 //! [`BindingRefusal::FamilyNotBound`]. A caller never gets an empty journal that looks
 //! like a run in which nothing happened.
 //!
@@ -90,6 +91,34 @@
 //! cancellation aborts every reservation it holds, for `Cancel`, before it returns.
 //! After each effect operation the binding confirms from the trace that the substrate
 //! took the step it asked for ([`BindingRefusal::EffectUnobserved`] otherwise).
+//!
+//! # Channels
+//!
+//! [`SubstrateOp::OpenChannel`] opens a bounded `channel::mpsc` channel and hands its
+//! receiver to one task; the binding keeps one sender. [`SubstrateOp::Send`] makes a
+//! task send one new message through a clone of it (`Sender::reserve_checked`, then
+//! `SendPermit::send`); [`SubstrateOp::Recv`] makes the receiving task receive once
+//! (`Receiver::recv`); [`SubstrateOp::CloseSenders`] drops the kept sender. A message is
+//! a dense ordinal the binding allocates when the send is commanded, and it is the
+//! payload itself, so a received message is named by what the substrate delivered.
+//! When [`Family::Channel`] is observed:
+//!
+//! | substrate observation | journal event |
+//! |---|---|
+//! | the binding's `mpsc::channel` call | [`ChannelEvent::Opened`] |
+//! | the send's `SendPermit` obligation commits (`ObligationCommit` trace event) | [`ChannelEvent::Sent`] |
+//! | channel gate: the reserve returned `Pending` / the channel's closed error | [`ChannelEvent::SendBlocked`] / [`ChannelEvent::SendClosed`] |
+//! | channel gate: `recv` returned a value / `Pending` / `Disconnected` | [`ChannelEvent::Received`] / [`ChannelEvent::RecvBlocked`] / [`ChannelEvent::RecvClosed`] |
+//! | channel gate: a cancellation dropped a blocked send or receive | [`ChannelEvent::SendAbandoned`] / [`ChannelEvent::RecvAbandoned`], placed canonically after the task's acknowledgement |
+//! | the binding dropped its kept sender | [`ChannelEvent::SendersClosed`] |
+//! | channel gate: the receiving task ended, with what was still queued | [`ChannelEvent::ReceiverGone`] |
+//!
+//! asupersync 0.5.0's channels write nothing into the trace themselves, so the channel
+//! gate writes its marks through `Cx::trace` when the substrate's call returns, in
+//! sequence with the substrate's own events. The binding also keeps its own account of
+//! each queue from the trace, and a delivered message or a dropped queue that disagrees
+//! with it is [`BindingRefusal::SubstrateChannelDisagrees`]. A task that waits on a
+//! channel is parked; an operation that commands it is [`BindingRefusal::TaskBlocked`].
 //!
 //! # Virtual time
 //!
@@ -170,6 +199,12 @@
 //!   else the substrate traces during an advance has no canonical place, and is
 //!   [`BindingRefusal::UnorderedDuringAdvance`]. [`run_witnessed`] returns the
 //!   substrate's raw fire order as evidence;
+//! - the tasks an operation wakes (a receiver a send fed, a sender a receive freed, the
+//!   senders a gone receiver releases) are journaled after the operation, one task at a
+//!   time, by ascending task ordinal. Several tasks woken together run in an order the
+//!   substrate's scheduler picks, and are independent only while none of them sends,
+//!   receives or moves an obligation: several woken tasks that do are
+//!   [`BindingRefusal::UnorderedWake`]. [`run_witnessed`] returns the raw wake order;
 //! - one completion's leaks are journaled together, by obligation ordinal. The
 //!   substrate traces them in the order the task drops its tokens, which follows the
 //!   program's labels, and labels must not reach the journal;
@@ -230,6 +265,9 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 
+use asupersync::channel::mpsc::{
+    self, CheckedSendError, Receiver as MpscReceiver, RecvError, Sender as MpscSender,
+};
 use asupersync::lab::oracle::ObligationLeakOracle;
 use asupersync::lab::oracle::TaskStateKind;
 use asupersync::record::{
@@ -248,6 +286,9 @@ use continuum_value::assurance::InconclusiveReason;
 
 use crate::choice::ChoiceLog;
 use crate::family::cancellation::{CancelCause, CancellationEvent};
+use crate::family::channel::{
+    ChannelEvent, ChannelLabel, ChannelOrdinal, MessageOrdinal, MessageSet,
+};
 use crate::family::effect::{AbortCause, EffectEvent, ReservationLabel, ReservationOrdinal};
 use crate::family::lifecycle::{
     LifecycleEvent, RegionLabel, RegionOrdinal, TaskLabel, TaskOrdinal, TaskSet, TaskStep,
@@ -316,8 +357,8 @@ pub const fn substrate_binding(family: Family) -> SubstrateBinding {
         | Family::Effect
         | Family::Cancellation
         | Family::Obligation
-        | Family::Time => SubstrateBinding::Bound,
-        other => SubstrateBinding::Absent(BindingAbsence::FamilyNotBound(other)),
+        | Family::Time
+        | Family::Channel => SubstrateBinding::Bound,
     }
 }
 
@@ -415,6 +456,36 @@ pub enum SubstrateOp {
         /// How long, in virtual nanoseconds. Zero is refused.
         nanos: u64,
     },
+    /// `mpsc::channel(capacity)`: open a bounded channel, bound to `channel`, and hand its
+    /// receiver to `receiver`. The binding keeps one sender.
+    OpenChannel {
+        /// The label the channel is bound to.
+        channel: ChannelLabel,
+        /// Its capacity. Zero is refused.
+        capacity: u32,
+        /// The task that holds the receiver.
+        receiver: TaskLabel,
+    },
+    /// Wake `task` with a command to send one new message on `channel` through a clone
+    /// of the binding's sender (`Sender::reserve_checked`, then `SendPermit::send`). A
+    /// full channel makes it wait.
+    Send {
+        /// The sending task.
+        task: TaskLabel,
+        /// The channel.
+        channel: ChannelLabel,
+    },
+    /// Wake the receiving task with a command to receive once on `channel`
+    /// (`Receiver::recv`). An empty channel makes it wait.
+    Recv {
+        /// The channel.
+        channel: ChannelLabel,
+    },
+    /// Drop the sender the binding keeps for `channel`.
+    CloseSenders {
+        /// The channel.
+        channel: ChannelLabel,
+    },
     /// `LabRuntime::advance_time`: move the virtual clock forward `nanos` nanoseconds,
     /// then let every timer that came due fire and its task run.
     Advance {
@@ -449,6 +520,10 @@ impl SubstrateOp {
             Self::Transfer { .. } => "transfer",
             Self::Sleep { .. } => "sleep",
             Self::Advance { .. } => "advance",
+            Self::OpenChannel { .. } => "open-channel",
+            Self::Send { .. } => "send",
+            Self::Recv { .. } => "recv",
+            Self::CloseSenders { .. } => "close-senders",
         }
     }
 }
@@ -677,6 +752,33 @@ pub enum BindingRefusal {
         /// The task's journal ordinal.
         task: u32,
     },
+    /// An operation commands a task that waits on a channel. The command would wait
+    /// unseen until the channel frees it.
+    TaskBlocked {
+        /// The task's journal ordinal.
+        task: u32,
+    },
+    /// An operation names a channel label no earlier operation bound.
+    UnboundChannel(u32),
+    /// An operation binds a channel label that is already bound.
+    ChannelLabelRebound(u32),
+    /// A channel of capacity zero.
+    ZeroCapacity(u32),
+    /// A send on a channel whose kept sender the program already dropped.
+    SendersAlreadyClosed(u32),
+    /// One operation woke more than one other task, or a cancellation woke a task it did
+    /// not cancel: their steps would interleave in an order the substrate's scheduler
+    /// picks.
+    UnorderedWake {
+        /// The task that woke.
+        task: u32,
+    },
+    /// The substrate delivered a message, or dropped a queue, other than the one the
+    /// trace's own sends imply.
+    SubstrateChannelDisagrees {
+        /// What disagrees.
+        detail: String,
+    },
     /// During an advance, the substrate traced an event that is not a timer fire or a
     /// woken task's step, so the batch has no canonical order.
     UnorderedDuringAdvance {
@@ -699,11 +801,12 @@ impl BindingRefusal {
             | Self::TaskPanicked { .. }
             | Self::FamilyNotBound(_)
             | Self::UnorderedDuringAdvance { .. }
+            | Self::UnorderedWake { .. }
             | Self::UnmappedCancelReason { .. }
             | Self::ReservationDropped { .. } => Some(InconclusiveReason::Unsupported),
-            Self::SubstrateProtocolViolation { .. } | Self::SubstrateLedgerDisagrees { .. } => {
-                Some(InconclusiveReason::EngineError)
-            }
+            Self::SubstrateProtocolViolation { .. }
+            | Self::SubstrateLedgerDisagrees { .. }
+            | Self::SubstrateChannelDisagrees { .. } => Some(InconclusiveReason::EngineError),
             Self::StepLimit => Some(InconclusiveReason::ResourceExhausted),
             Self::TraceOverflow { .. }
             | Self::TraceOutOfOrder { .. }
@@ -731,7 +834,12 @@ impl BindingRefusal {
             | Self::TaskNotBegun { .. }
             | Self::TaskEnded { .. }
             | Self::TaskAlreadyBegun { .. }
-            | Self::TaskAsleep { .. } => None,
+            | Self::TaskAsleep { .. }
+            | Self::TaskBlocked { .. }
+            | Self::UnboundChannel(_)
+            | Self::ChannelLabelRebound(_)
+            | Self::ZeroCapacity(_)
+            | Self::SendersAlreadyClosed(_) => None,
         }
     }
 }
@@ -854,6 +962,30 @@ impl fmt::Display for BindingRefusal {
                     "task t{task} is asleep on a timer and cannot take a command"
                 )
             }
+            Self::TaskBlocked { task } => {
+                write!(
+                    f,
+                    "task t{task} waits on a channel and cannot take a command"
+                )
+            }
+            Self::UnboundChannel(label) => write!(f, "channel label {label} is not bound"),
+            Self::ChannelLabelRebound(label) => {
+                write!(f, "channel label {label} is already bound")
+            }
+            Self::ZeroCapacity(label) => write!(f, "channel label {label} has capacity zero"),
+            Self::SendersAlreadyClosed(label) => {
+                write!(f, "channel label {label}'s kept sender was already dropped")
+            }
+            Self::UnorderedWake { task } => write!(
+                f,
+                "task t{task} woke in an operation that already woke another, or that did not cancel it"
+            ),
+            Self::SubstrateChannelDisagrees { detail } => {
+                write!(
+                    f,
+                    "the substrate's channel disagrees with the trace: {detail}"
+                )
+            }
             Self::UnorderedDuringAdvance { kind } => write!(
                 f,
                 "the substrate traced {kind} during an advance, which has no canonical place"
@@ -872,6 +1004,9 @@ const GATE_MARK: &str = "continuum.lifecycle-gate/1";
 /// The prefix of the runtime's own obligation-handoff trace message (asupersync 0.5.0,
 /// `trace::event::ObligationHandoff`).
 const HANDOFF_MARK: &str = "obligation_handoff_v";
+
+/// The prefix of every channel-gate mark in the substrate's trace.
+const CHANNEL_MARK: &str = "continuum.channel-gate/1";
 
 /// The prefix of the gate's cancellation acknowledgement mark.
 const CANCEL_MARK: &str = "continuum.cancellation-gate/1";
@@ -894,6 +1029,14 @@ enum Command {
     Transfer(ReservationLabel, Box<Cx>, Gate),
     /// Sleep this many nanoseconds on the `Cx`'s virtual timer driver.
     Sleep(u64),
+    /// Send `message` on `channel` through this sender clone.
+    Send {
+        channel: u32,
+        message: u64,
+        sender: MpscSender<u64>,
+    },
+    /// Receive once on `channel`, whose receiver this task holds.
+    Recv(u32),
 }
 
 #[derive(Debug)]
@@ -913,6 +1056,8 @@ struct GateState {
     settling: bool,
     /// Obligations transferred to this task, waiting for its body to take them.
     inbox: Vec<(ReservationLabel, ObligationToken)>,
+    /// Channel receivers handed to this task, waiting for its body to take them.
+    receiver_inbox: Vec<(u32, MpscReceiver<u64>)>,
 }
 
 type Gate = Arc<Mutex<GateState>>;
@@ -1008,6 +1153,96 @@ const fn journal_kind(kind: SubstrateObligationKind) -> ObligationKind {
     }
 }
 
+/// One channel operation (a reserve or a receive). It resolves to the operation's
+/// result, or to `None` when the substrate has requested cancellation (the ack mark
+/// written). The first `Pending` writes `blocked`, the channel-gate mark that the
+/// operation waits; the task is then parked, as a sleeping one is.
+struct ChannelWait<F> {
+    gate: Gate,
+    slot: usize,
+    inner: Pin<Box<F>>,
+    blocked: String,
+    marked: bool,
+}
+
+impl<F: Future> Future for ChannelWait<F> {
+    type Output = Option<F::Output>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let cx = Cx::current();
+        if let Some(cx) = &cx
+            && cx.checkpoint().is_err()
+        {
+            cx.trace(&format!("{CANCEL_MARK} ack {}", self.slot));
+            return Poll::Ready(None);
+        }
+        let outcome = self.inner.as_mut().poll(context);
+        let blocked = matches!(outcome, Poll::Pending) && !self.marked;
+        if blocked {
+            self.marked = true;
+        }
+        let mut state = lock(&self.gate);
+        let mut marks: Vec<String> = Vec::new();
+        if blocked {
+            marks.push(self.blocked.clone());
+        }
+        match outcome {
+            Poll::Ready(_) if state.phase == GatePhase::Suspended => {
+                state.phase = GatePhase::Running;
+                marks.push(format!("{GATE_MARK} resume {}", self.slot));
+            }
+            Poll::Pending if state.phase == GatePhase::Running && state.held == 0 => {
+                state.phase = GatePhase::Suspended;
+                marks.push(format!("{GATE_MARK} suspend {}", self.slot));
+            }
+            _ => {}
+        }
+        match &cx {
+            Some(cx) => {
+                for mark in marks {
+                    cx.trace(&mark);
+                }
+            }
+            None if !marks.is_empty() => state.untraced = true,
+            None => {}
+        }
+        drop(state);
+        outcome.map(Some)
+    }
+}
+
+/// Write a channel-gate mark through the current `Cx`.
+fn channel_mark(gate: &Gate, mark: &str) {
+    match Cx::current() {
+        Some(cx) => cx.trace(&format!("{CHANNEL_MARK} {mark}")),
+        None => lock(gate).untraced = true,
+    }
+}
+
+/// A task's end drops its receivers: each one's mark names what was still queued.
+fn drop_receivers(gate: &Gate, slot: usize, receivers: &mut BTreeMap<u32, MpscReceiver<u64>>) {
+    for (channel, receiver) in core::mem::take(receivers) {
+        channel_mark(
+            gate,
+            &format!("receiver-gone {slot} {channel} {}", receiver.len()),
+        );
+        drop(receiver);
+    }
+}
+
+/// A cancelled task's cleanup: abort every held obligation, drop every receiver.
+fn abandon_all(
+    gate: &Gate,
+    slot: usize,
+    held: &mut BTreeMap<ReservationLabel, ObligationToken>,
+    receivers: &mut BTreeMap<u32, MpscReceiver<u64>>,
+) {
+    for (_, token) in core::mem::take(held) {
+        token.abort(ObligationAbortReason::Cancel);
+    }
+    drop_receivers(gate, slot, receivers);
+}
+
 /// One sleep on the task's virtual timer. It resolves to `true` when the timer fires,
 /// or to `false` when the substrate has requested cancellation (the ack mark written).
 ///
@@ -1059,6 +1294,7 @@ async fn gated_body(gate: Gate, slot: usize) {
     // The task's own obligations, by program label. Ascending order makes the aborts a
     // cancellation issues deterministic within the task.
     let mut held: BTreeMap<ReservationLabel, ObligationToken> = BTreeMap::new();
+    let mut receivers: BTreeMap<u32, MpscReceiver<u64>> = BTreeMap::new();
     loop {
         let command = GateWait {
             gate: Arc::clone(&gate),
@@ -1067,6 +1303,7 @@ async fn gated_body(gate: Gate, slot: usize) {
         .await;
         // Obligations transferred here since the last poll are this task's now.
         held.extend(core::mem::take(&mut lock(&gate).inbox));
+        receivers.extend(core::mem::take(&mut lock(&gate).receiver_inbox));
         let settling = matches!(command, Some(Command::Commit(_) | Command::Abort(_)));
         let refused = match command {
             Some(Command::Park) => None,
@@ -1122,23 +1359,97 @@ async fn gated_body(gate: Gate, slot: usize) {
                         .await;
                         if !woke {
                             // Cancelled while asleep: the timer is gone, and the cleanup
-                            // is to abort every held obligation.
-                            for (_, token) in core::mem::take(&mut held) {
-                                token.abort(ObligationAbortReason::Cancel);
-                            }
+                            // is to abort every held obligation and drop every receiver.
+                            abandon_all(&gate, slot, &mut held, &mut receivers);
                             break;
                         }
                         None
                     }
                 }
             }
-            // Returning with obligations held drops them: the substrate records a leak.
-            Some(Command::Finish) => break,
-            // Cancellation observed: the cleanup is to abort every held obligation.
-            None => {
-                for (_, token) in core::mem::take(&mut held) {
-                    token.abort(ObligationAbortReason::Cancel);
+            Some(Command::Send {
+                channel,
+                message,
+                sender,
+            }) => match Cx::current() {
+                None => {
+                    lock(&gate).untraced = true;
+                    None
                 }
+                Some(cx) => {
+                    let outcome = ChannelWait {
+                        gate: Arc::clone(&gate),
+                        slot,
+                        inner: Box::pin(sender.reserve_checked(&cx)),
+                        blocked: format!("{CHANNEL_MARK} send-blocked {slot} {channel} {message}"),
+                        marked: false,
+                    }
+                    .await;
+                    match outcome {
+                        None => {
+                            channel_mark(
+                                &gate,
+                                &format!("send-abandoned {slot} {channel} {message}"),
+                            );
+                            abandon_all(&gate, slot, &mut held, &mut receivers);
+                            break;
+                        }
+                        // The permit's commit is the substrate's own trace of the send.
+                        Some(Ok(permit)) => permit
+                            .send(message)
+                            .is_err()
+                            .then(|| "the permit refused the message".to_owned()),
+                        Some(Err(CheckedSendError::Channel(_))) => {
+                            channel_mark(&gate, &format!("send-closed {slot} {channel} {message}"));
+                            None
+                        }
+                        Some(Err(other)) => Some(format!("{other:?}")),
+                    }
+                }
+            },
+            Some(Command::Recv(channel)) => match (Cx::current(), receivers.get_mut(&channel)) {
+                (None, _) => {
+                    lock(&gate).untraced = true;
+                    None
+                }
+                (_, None) => Some("this task holds no receiver of the channel".to_owned()),
+                (Some(cx), Some(receiver)) => {
+                    let outcome = ChannelWait {
+                        gate: Arc::clone(&gate),
+                        slot,
+                        inner: Box::pin(receiver.recv(&cx)),
+                        blocked: format!("{CHANNEL_MARK} recv-blocked {slot} {channel}"),
+                        marked: false,
+                    }
+                    .await;
+                    match outcome {
+                        None => {
+                            channel_mark(&gate, &format!("recv-abandoned {slot} {channel}"));
+                            abandon_all(&gate, slot, &mut held, &mut receivers);
+                            break;
+                        }
+                        Some(Ok(message)) => {
+                            channel_mark(&gate, &format!("recv {slot} {channel} {message}"));
+                            None
+                        }
+                        Some(Err(RecvError::Disconnected)) => {
+                            channel_mark(&gate, &format!("recv-closed {slot} {channel}"));
+                            None
+                        }
+                        Some(Err(other)) => Some(format!("{other:?}")),
+                    }
+                }
+            },
+            // Returning drops every receiver (marked) and every obligation held (the
+            // substrate records a leak).
+            Some(Command::Finish) => {
+                drop_receivers(&gate, slot, &mut receivers);
+                break;
+            }
+            // Cancellation observed: the cleanup is to abort every held obligation and
+            // drop every receiver.
+            None => {
+                abandon_all(&gate, slot, &mut held, &mut receivers);
                 break;
             }
         };
@@ -1212,6 +1523,13 @@ struct Held {
     standing: Standing,
 }
 
+/// A channel the run opened, and the binding's account of it from the trace.
+struct ChannelTrack {
+    receiver_slot: usize,
+    sender: Option<MpscSender<u64>>,
+    queue: VecDeque<u64>,
+}
+
 /// A timer the trace scheduled.
 #[derive(Debug, Clone, Copy)]
 struct TimerTrack {
@@ -1264,6 +1582,19 @@ struct Driver {
     pending_timer_cancels: BTreeMap<u32, BTreeSet<(u32, u64)>>,
     fire_order: Vec<TimerOrdinal>,
     pending_leaks: BTreeSet<u32>,
+    channels: Vec<ChannelTrack>,
+    channel_labels: BTreeMap<ChannelLabel, u32>,
+    next_message: u64,
+    pending_sends: BTreeMap<usize, (u32, u64)>,
+    op_channel: Vec<&'static str>,
+    acked: BTreeSet<u32>,
+    pending_channel: BTreeMap<u32, Vec<EventBody>>,
+    op_subject: Option<u32>,
+    op_woken: BTreeSet<u32>,
+    in_cancel: bool,
+    channel_blocked: BTreeSet<usize>,
+    wake_batch: BTreeMap<u32, Vec<EventBody>>,
+    wake_order: Vec<TaskOrdinal>,
     leak_order: Vec<ObligationOrdinal>,
     begun: BTreeSet<usize>,
     ended: BTreeSet<usize>,
@@ -1325,6 +1656,19 @@ impl Driver {
             pending_timer_cancels: BTreeMap::new(),
             fire_order: Vec::new(),
             pending_leaks: BTreeSet::new(),
+            channels: Vec::new(),
+            channel_labels: BTreeMap::new(),
+            next_message: 0,
+            pending_sends: BTreeMap::new(),
+            op_channel: Vec::new(),
+            acked: BTreeSet::new(),
+            pending_channel: BTreeMap::new(),
+            op_subject: None,
+            op_woken: BTreeSet::new(),
+            in_cancel: false,
+            channel_blocked: BTreeSet::new(),
+            wake_batch: BTreeMap::new(),
+            wake_order: Vec::new(),
             leak_order: Vec::new(),
             begun: BTreeSet::new(),
             ended: BTreeSet::new(),
@@ -1389,6 +1733,188 @@ impl Driver {
         self.config.families.contains(Family::Time)
     }
 
+    const fn observes_channel(&self) -> bool {
+        self.config.families.contains(Family::Channel)
+    }
+
+    fn channel_of(&self, label: ChannelLabel) -> Result<u32, BindingRefusal> {
+        self.channel_labels
+            .get(&label)
+            .copied()
+            .ok_or(BindingRefusal::UnboundChannel(label.0))
+    }
+
+    /// A task stepped in the current operation: note it when the operation woke it (it is
+    /// neither the task the operation commands nor one a cancellation cancels). Woken
+    /// tasks are ordered by `flush_wakes`; an advance orders its own batch.
+    fn note_task_mark(&mut self, task: u32) -> Result<(), BindingRefusal> {
+        if self.advancing.is_some() {
+            return Ok(());
+        }
+        let woken = if self.in_cancel {
+            !self.acked.contains(&task)
+        } else {
+            self.op_subject != Some(task)
+        };
+        if woken && self.op_woken.insert(task) {
+            self.wake_order.push(TaskOrdinal(task));
+        }
+        Ok(())
+    }
+
+    /// Journal a channel event of `task`: with its cancellation's phases when the task
+    /// is being cancelled, otherwise in trace order.
+    fn channel_event(&mut self, task: TaskOrdinal, event: ChannelEvent) {
+        if !self.observes_channel() {
+            return;
+        }
+        let body = EventBody::Channel(event);
+        if self.acked.contains(&task.0) {
+            self.pending_channel.entry(task.0).or_default().push(body);
+        } else {
+            self.append_task_event(task, body);
+        }
+    }
+
+    /// A `SendPermit` committed: the send it belongs to is a message on its channel.
+    fn observe_sent(&mut self, slot: usize, task: TaskOrdinal) -> Result<(), BindingRefusal> {
+        self.note_task_mark(task.0)?;
+        let (channel, message) =
+            self.pending_sends
+                .remove(&slot)
+                .ok_or(BindingRefusal::UnknownSubstrateEntity {
+                    what: "send permit",
+                })?;
+        self.channel_blocked.remove(&slot);
+        self.channels[channel as usize].queue.push_back(message);
+        self.op_channel.push("send");
+        self.channel_event(
+            task,
+            ChannelEvent::Sent {
+                channel: ChannelOrdinal(channel),
+                message: MessageOrdinal(message),
+                sender: task,
+            },
+        );
+        Ok(())
+    }
+
+    /// A channel-gate mark: `<kind> <slot> <channel> [<message or length>]`.
+    fn observe_channel(&mut self, rest: &str) -> Result<(), BindingRefusal> {
+        let unknown = BindingRefusal::UnknownSubstrateEntity {
+            what: "channel mark",
+        };
+        let mut parts = rest.split_whitespace();
+        let kind = parts.next().ok_or(unknown.clone())?;
+        let mut number = || -> Result<u64, BindingRefusal> {
+            parts
+                .next()
+                .and_then(|part| part.parse::<u64>().ok())
+                .ok_or(unknown.clone())
+        };
+        let slot = usize::try_from(number()?).map_err(|_| unknown.clone())?;
+        let channel = u32::try_from(number()?).map_err(|_| unknown.clone())?;
+        let value = number().ok();
+        if slot >= self.slots.len() || channel as usize >= self.channels.len() {
+            return Err(unknown);
+        }
+        let task = self.task_ordinal(slot)?;
+        self.note_task_mark(task.0)?;
+        let c = ChannelOrdinal(channel);
+        let pending = |driver: &Self, message: Option<u64>| -> Result<u64, BindingRefusal> {
+            let message = message.ok_or(unknown.clone())?;
+            if driver.pending_sends.get(&slot) == Some(&(channel, message)) {
+                Ok(message)
+            } else {
+                Err(unknown.clone())
+            }
+        };
+        let event = match kind {
+            "send-blocked" => {
+                let message = pending(self, value)?;
+                self.channel_blocked.insert(slot);
+                self.op_channel.push("send");
+                ChannelEvent::SendBlocked {
+                    channel: c,
+                    message: MessageOrdinal(message),
+                    sender: task,
+                }
+            }
+            "send-closed" | "send-abandoned" => {
+                let message = pending(self, value)?;
+                self.pending_sends.remove(&slot);
+                self.channel_blocked.remove(&slot);
+                self.op_channel.push("send");
+                let message = MessageOrdinal(message);
+                if kind == "send-closed" {
+                    ChannelEvent::SendClosed {
+                        channel: c,
+                        message,
+                        sender: task,
+                    }
+                } else {
+                    ChannelEvent::SendAbandoned {
+                        channel: c,
+                        message,
+                        sender: task,
+                    }
+                }
+            }
+            "recv" => {
+                let message = value.ok_or(unknown)?;
+                let queue = &mut self.channels[channel as usize].queue;
+                if queue.front() != Some(&message) {
+                    return Err(BindingRefusal::SubstrateChannelDisagrees {
+                        detail: format!(
+                            "c{channel} delivered m{message}, the oldest sent is {:?}",
+                            queue.front()
+                        ),
+                    });
+                }
+                queue.pop_front();
+                self.channel_blocked.remove(&slot);
+                self.op_channel.push("recv");
+                ChannelEvent::Received {
+                    channel: c,
+                    message: MessageOrdinal(message),
+                }
+            }
+            "recv-blocked" => {
+                self.channel_blocked.insert(slot);
+                self.op_channel.push("recv");
+                ChannelEvent::RecvBlocked { channel: c }
+            }
+            "recv-closed" => {
+                self.channel_blocked.remove(&slot);
+                self.op_channel.push("recv");
+                ChannelEvent::RecvClosed { channel: c }
+            }
+            "recv-abandoned" => {
+                self.channel_blocked.remove(&slot);
+                ChannelEvent::RecvAbandoned { channel: c }
+            }
+            "receiver-gone" => {
+                let length = value.ok_or(unknown)?;
+                let queue = core::mem::take(&mut self.channels[channel as usize].queue);
+                if queue.len() as u64 != length {
+                    return Err(BindingRefusal::SubstrateChannelDisagrees {
+                        detail: format!(
+                            "c{channel}'s receiver dropped {length} messages, the trace queued {}",
+                            queue.len()
+                        ),
+                    });
+                }
+                ChannelEvent::ReceiverGone {
+                    channel: c,
+                    discarded: MessageSet::new(queue.into_iter().map(MessageOrdinal)),
+                }
+            }
+            _ => return Err(unknown),
+        };
+        self.channel_event(task, event);
+        Ok(())
+    }
+
     /// Advance the virtual clock, let the due timers fire, and journal what the woken
     /// tasks did in canonical order.
     fn advance(&mut self, nanos: u64) -> Result<(), BindingRefusal> {
@@ -1435,10 +1961,57 @@ impl Driver {
 
     /// Journal an event of a woken task: into the advance's batch when one is open.
     fn append_task_event(&mut self, task: TaskOrdinal, body: EventBody) {
-        match &mut self.advancing {
-            Some(batch) => batch.per_task.entry(task.0).or_default().push(body),
-            None => self.append_body(body),
+        if let Some(batch) = &mut self.advancing {
+            batch.per_task.entry(task.0).or_default().push(body);
+        } else if (self.in_cancel && !self.acked.contains(&task.0))
+            || (!self.in_cancel && self.op_subject != Some(task.0))
+        {
+            // A task the operation woke: journaled after the operation, with the other
+            // woken tasks, in canonical order (flush_wakes).
+            self.wake_batch.entry(task.0).or_default().push(body);
+        } else {
+            self.append_body(body);
         }
+    }
+
+    /// Journal what the operation's woken tasks did, one task at a time, by ascending
+    /// task ordinal, after everything the operation itself did.
+    ///
+    /// A task wakes only after the operation's own task has parked or ended, so its
+    /// steps follow the operation's. Several tasks woken together (a receiver that goes
+    /// wakes every sender blocked on its channel) run in an order the substrate's
+    /// scheduler picks. They are independent only while none of them sends or receives
+    /// a message or moves an obligation, so several woken tasks that do are refused. A
+    /// cancellation's woken tasks (senders a cancelled receiver's drop woke) follow the
+    /// cancellation's whole batch under the same condition.
+    fn flush_wakes(&mut self) -> Result<(), BindingRefusal> {
+        let batch = core::mem::take(&mut self.wake_batch);
+        // Tasks a cancellation woke outside what it cancels follow its whole batch, so
+        // they must be as independent of it as several woken tasks are of each other.
+        if batch.len() > 1 || (self.in_cancel && !batch.is_empty()) {
+            for (task, bodies) in &batch {
+                let independent = bodies.iter().all(|body| {
+                    matches!(
+                        body,
+                        EventBody::Lifecycle(LifecycleEvent::TaskStepped { .. })
+                            | EventBody::Channel(
+                                ChannelEvent::SendClosed { .. } | ChannelEvent::RecvClosed { .. }
+                            )
+                    )
+                });
+                if !independent {
+                    return Err(BindingRefusal::UnorderedWake { task: *task });
+                }
+            }
+        }
+        self.flush_leaks();
+        self.flush_closes();
+        for (_, bodies) in batch {
+            for body in bodies {
+                self.record.append(body);
+            }
+        }
+        Ok(())
     }
 
     /// Send an effect command, then confirm from the trace that the substrate took the
@@ -1563,6 +2136,12 @@ impl Driver {
                 task: self.task_ordinal(slot)?.0,
             });
         }
+        if self.channel_blocked.contains(&slot) {
+            return Err(BindingRefusal::TaskBlocked {
+                task: self.task_ordinal(slot)?.0,
+            });
+        }
+        self.op_subject = Some(self.task_ordinal(slot)?.0);
         let waker = {
             let mut state = lock(&self.slots[slot].gate);
             state.commands.push_back(command);
@@ -1575,6 +2154,10 @@ impl Driver {
     }
 
     fn apply(&mut self, op: &SubstrateOp) -> Result<(), BindingRefusal> {
+        self.op_subject = None;
+        self.op_woken.clear();
+        self.in_cancel = false;
+        self.op_channel.clear();
         let refused = |detail: String| BindingRefusal::SubstrateRefused {
             operation: op.name(),
             detail,
@@ -1612,6 +2195,7 @@ impl Driver {
                     refused: None,
                     settling: false,
                     inbox: Vec::new(),
+                    receiver_inbox: Vec::new(),
                 }));
                 let (id, handle) = self
                     .lab
@@ -1640,6 +2224,7 @@ impl Driver {
                         task: self.task_ordinal(slot)?.0,
                     });
                 }
+                self.op_subject = Some(self.task_ordinal(slot)?.0);
                 let id = self.slots[slot].id;
                 self.lab
                     .scheduler
@@ -1666,6 +2251,7 @@ impl Driver {
                 self.run()
             }
             SubstrateOp::Cancel { region } => {
+                self.in_cancel = true;
                 let id = self.region(*region)?;
                 if self.lab.state.region(id).is_none() {
                     return Err(refused("the region record is gone".to_owned()));
@@ -1709,6 +2295,103 @@ impl Driver {
                 } else {
                     Err(BindingRefusal::EffectUnobserved { operation })
                 }
+            }
+            SubstrateOp::OpenChannel {
+                channel,
+                capacity,
+                receiver,
+            } => {
+                if self.channel_labels.contains_key(channel) {
+                    return Err(BindingRefusal::ChannelLabelRebound(channel.0));
+                }
+                if *capacity == 0 {
+                    return Err(BindingRefusal::ZeroCapacity(channel.0));
+                }
+                let slot = self.slot(*receiver)?;
+                let task = self.task_ordinal(slot)?;
+                if self.ended.contains(&slot) {
+                    return Err(BindingRefusal::TaskEnded { task: task.0 });
+                }
+                let (sender, receiving) = mpsc::channel::<u64>(*capacity as usize);
+                let ordinal = ordinal(self.channels.len());
+                lock(&self.slots[slot].gate)
+                    .receiver_inbox
+                    .push((ordinal, receiving));
+                self.channels.push(ChannelTrack {
+                    receiver_slot: slot,
+                    sender: Some(sender),
+                    queue: VecDeque::new(),
+                });
+                self.channel_labels.insert(*channel, ordinal);
+                if self.observes_channel() {
+                    self.append_body(EventBody::Channel(ChannelEvent::Opened {
+                        channel: ChannelOrdinal(ordinal),
+                        capacity: *capacity,
+                        receiver: task,
+                    }));
+                }
+                Ok(())
+            }
+            SubstrateOp::Send { task, channel } => {
+                let c = self.channel_of(*channel)?;
+                let sender = self.channels[c as usize]
+                    .sender
+                    .clone()
+                    .ok_or(BindingRefusal::SendersAlreadyClosed(channel.0))?;
+                let slot = self.slot(*task)?;
+                let message = self.next_message;
+                self.next_message = self.next_message.saturating_add(1);
+                self.pending_sends.insert(slot, (c, message));
+                self.command_slot(
+                    slot,
+                    Command::Send {
+                        channel: c,
+                        message,
+                        sender,
+                    },
+                )?;
+                if let Some(detail) = lock(&self.slots[slot].gate).refused.take() {
+                    return Err(BindingRefusal::SubstrateRefused {
+                        operation: "send",
+                        detail,
+                    });
+                }
+                if self.op_channel.contains(&"send") {
+                    Ok(())
+                } else {
+                    Err(BindingRefusal::EffectUnobserved { operation: "send" })
+                }
+            }
+            SubstrateOp::Recv { channel } => {
+                let c = self.channel_of(*channel)?;
+                let slot = self.channels[c as usize].receiver_slot;
+                self.command_slot(slot, Command::Recv(c))?;
+                if let Some(detail) = lock(&self.slots[slot].gate).refused.take() {
+                    return Err(BindingRefusal::SubstrateRefused {
+                        operation: "recv",
+                        detail,
+                    });
+                }
+                if self.op_channel.contains(&"recv") {
+                    Ok(())
+                } else {
+                    Err(BindingRefusal::EffectUnobserved { operation: "recv" })
+                }
+            }
+            SubstrateOp::CloseSenders { channel } => {
+                let c = self.channel_of(*channel)?;
+                let sender = self.channels[c as usize]
+                    .sender
+                    .take()
+                    .ok_or(BindingRefusal::SendersAlreadyClosed(channel.0))?;
+                if self.observes_channel() {
+                    self.append_body(EventBody::Channel(ChannelEvent::SendersClosed {
+                        channel: ChannelOrdinal(c),
+                    }));
+                }
+                // Dropping the last sender wakes a waiting receiver, which then runs.
+                drop(sender);
+                self.run()
             }
             SubstrateOp::Sleep { task, nanos } => {
                 if *nanos == 0 {
@@ -2014,6 +2697,9 @@ impl Driver {
                 if message.starts_with(HANDOFF_MARK) {
                     return self.observe_handoff();
                 }
+                if let Some(rest) = message.strip_prefix(CHANNEL_MARK) {
+                    return self.observe_channel(rest);
+                }
                 let Some(rest) = message.strip_prefix(GATE_MARK) else {
                     return Err(BindingRefusal::UninstrumentedEvent {
                         family: None,
@@ -2035,6 +2721,7 @@ impl Driver {
                     .filter(|slot| *slot < self.slots.len())
                     .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "gate" })?;
                 let task = self.task_ordinal(slot)?;
+                self.note_task_mark(task.0)?;
                 self.append_task_event(
                     task,
                     EventBody::Lifecycle(LifecycleEvent::TaskStepped { task, step }),
@@ -2208,18 +2895,24 @@ impl Driver {
                 if let Some(reservation) = reservation
                     && self.observes_effect()
                 {
-                    self.append_body(EventBody::Effect(EffectEvent::Reserved {
-                        reservation: ReservationOrdinal(reservation),
+                    self.append_task_event(
                         task,
-                    }));
+                        EventBody::Effect(EffectEvent::Reserved {
+                            reservation: ReservationOrdinal(reservation),
+                            task,
+                        }),
+                    );
                 }
                 if self.observes_obligation() {
-                    self.append_body(EventBody::Obligation(ObligationEvent::Opened {
-                        obligation: ObligationOrdinal(ordinal),
-                        kind: journal_kind(*kind),
-                        holder: task,
-                        region,
-                    }));
+                    self.append_task_event(
+                        task,
+                        EventBody::Obligation(ObligationEvent::Opened {
+                            obligation: ObligationOrdinal(ordinal),
+                            kind: journal_kind(*kind),
+                            holder: task,
+                            region,
+                        }),
+                    );
                 }
             }
             (TraceEventKind::ObligationCommit, TraceData::Obligation { obligation, .. }) => {
@@ -2228,15 +2921,28 @@ impl Driver {
                 if let Some(reservation) = held.reservation
                     && self.observes_effect()
                 {
-                    self.append_body(EventBody::Effect(EffectEvent::Committed {
-                        reservation: ReservationOrdinal(reservation),
-                    }));
+                    self.append_task_event(
+                        held.task,
+                        EventBody::Effect(EffectEvent::Committed {
+                            reservation: ReservationOrdinal(reservation),
+                        }),
+                    );
                 }
                 if self.observes_obligation() {
-                    self.append_body(EventBody::Obligation(ObligationEvent::Discharged {
-                        obligation: ObligationOrdinal(held.obligation),
-                        how: Discharge::Committed,
-                    }));
+                    self.append_task_event(
+                        held.task,
+                        EventBody::Obligation(ObligationEvent::Discharged {
+                            obligation: ObligationOrdinal(held.obligation),
+                            how: Discharge::Committed,
+                        }),
+                    );
+                }
+                // A channel send's permit. (A `SendPermit` a program acquires directly is
+                // only an obligation.)
+                if held.kind == SubstrateObligationKind::SendPermit
+                    && self.pending_sends.contains_key(&held.slot)
+                {
+                    self.observe_sent(held.slot, held.task)?;
                 }
             }
             (
@@ -2261,10 +2967,13 @@ impl Driver {
                                 .insert(reservation);
                         }
                         Some(ObligationAbortReason::Explicit) => {
-                            self.append_body(EventBody::Effect(EffectEvent::Aborted {
-                                reservation: ReservationOrdinal(reservation),
-                                cause: AbortCause::Explicit,
-                            }));
+                            self.append_task_event(
+                                held.task,
+                                EventBody::Effect(EffectEvent::Aborted {
+                                    reservation: ReservationOrdinal(reservation),
+                                    cause: AbortCause::Explicit,
+                                }),
+                            );
                         }
                         Some(ObligationAbortReason::Error) | None => {
                             return Err(BindingRefusal::ReservationDropped { reservation });
@@ -2279,10 +2988,13 @@ impl Driver {
                             .or_default()
                             .insert(held.obligation);
                     } else {
-                        self.append_body(EventBody::Obligation(ObligationEvent::Discharged {
-                            obligation: ObligationOrdinal(held.obligation),
-                            how: Discharge::Aborted,
-                        }));
+                        self.append_task_event(
+                            held.task,
+                            EventBody::Obligation(ObligationEvent::Discharged {
+                                obligation: ObligationOrdinal(held.obligation),
+                                how: Discharge::Aborted,
+                            }),
+                        );
                     }
                 }
             }
@@ -2470,6 +3182,8 @@ impl Driver {
             .filter(|slot| *slot < self.slots.len())
             .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "gate" })?;
         let task = self.task_ordinal(slot)?;
+        self.acked.insert(task.0);
+        self.note_task_mark(task.0)?;
         if self.observes_cancellation() {
             self.phases.entry(task.0).or_default().acknowledged = true;
         }
@@ -2501,6 +3215,10 @@ impl Driver {
                     at: VirtualInstant(at),
                 }));
             }
+            for body in self.pending_channel.remove(&task.0).unwrap_or_default() {
+                self.record.append(body);
+            }
+            self.acked.remove(&task.0);
             for reservation in self.pending_aborts.remove(&task.0).unwrap_or_default() {
                 self.record.append(EventBody::Effect(EffectEvent::Aborted {
                     reservation: ReservationOrdinal(reservation),
@@ -2538,6 +3256,7 @@ impl Driver {
             .keys()
             .chain(self.pending_discharges.keys())
             .chain(self.pending_timer_cancels.keys())
+            .chain(self.pending_channel.keys())
             .min()
         {
             return Err(BindingRefusal::UndrainedCancellation { task: *task });
@@ -2554,6 +3273,7 @@ impl Driver {
             substrate_close_order: self.close_order,
             substrate_fire_order: self.fire_order,
             substrate_leak_order: self.leak_order,
+            substrate_wake_order: self.wake_order,
         })
     }
 }
@@ -2614,6 +3334,10 @@ pub struct Witnessed {
     /// them (observed only with the obligations family). The journal orders one
     /// completion's leaks by obligation ordinal.
     pub substrate_leak_order: Vec<ObligationOrdinal>,
+    /// The tasks operations woke (besides the one each commands, or a cancellation's
+    /// own), in the order the substrate first stepped them. The lab seed can change it
+    /// when one operation wakes several; the journal orders them by task ordinal.
+    pub substrate_wake_order: Vec<TaskOrdinal>,
 }
 
 /// As [`run`], and also return the substrate's own close order.
@@ -2663,6 +3387,7 @@ pub fn run_witnessed(
                 enabled: enabled.len(),
             })?;
         driver.apply(&programs[actor][cursors[actor]])?;
+        driver.flush_wakes()?;
         cursors[actor] += 1;
     }
     driver.finish()

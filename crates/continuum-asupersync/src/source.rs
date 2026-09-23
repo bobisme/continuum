@@ -147,7 +147,7 @@ pub struct RecordContext {
     pub(crate) obligation: family::obligation::RecordState,
     #[allow(dead_code)] // empty by design: the time recorder judges nothing
     pub(crate) time: family::time::RecordState,
-    #[allow(dead_code)] // filled by PR-14-IMPL-06
+    #[allow(dead_code)] // empty by design: the channel recorder judges nothing
     pub(crate) channel: family::channel::RecordState,
 }
 

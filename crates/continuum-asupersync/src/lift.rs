@@ -72,6 +72,9 @@ pub enum Nonconformance {
     /// A virtual time event breaks the parallel clock and timer model (PR-14-IMPL-05;
     /// the reasons are the family's own).
     Time(family::time::TimeFault),
+    /// A channel event breaks the parallel channel model (PR-14-IMPL-06; the reasons are
+    /// the family's own).
+    Channel(family::channel::ChannelFault),
 }
 
 impl fmt::Display for Nonconformance {
@@ -102,6 +105,7 @@ impl fmt::Display for Nonconformance {
             Self::Effect(fault) => write!(f, "reserve/commit/abort: {fault}"),
             Self::Obligation(fault) => write!(f, "obligation ledger: {fault}"),
             Self::Time(fault) => write!(f, "virtual time: {fault}"),
+            Self::Channel(fault) => write!(f, "channel: {fault}"),
         }
     }
 }
@@ -132,7 +136,6 @@ pub struct LiftContext {
     pub(crate) cancellation: family::cancellation::LiftState,
     pub(crate) obligation: family::obligation::LiftState,
     pub(crate) time: family::time::LiftState,
-    #[allow(dead_code)] // filled by PR-14-IMPL-06
     pub(crate) channel: family::channel::LiftState,
 }
 
@@ -196,7 +199,8 @@ impl LiftVerdict {
 /// After the last event, the families that make a whole-journal claim check it, in
 /// family-tag order: the reserve/commit/abort family ([`family::effect`]), the
 /// cancellation family ([`family::cancellation`]), the obligations family
-/// ([`family::obligation`]) and the virtual time family ([`family::time`]). A violation one finds is reported
+/// ([`family::obligation`]), the virtual time family ([`family::time`]) and the channel
+/// family ([`family::channel`]). A violation one finds is reported
 /// at the last event's sequence number.
 #[must_use]
 pub fn lift(journal: &Journal) -> LiftVerdict {
@@ -224,6 +228,7 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
         .and_then(|()| family::cancellation::finish(&cx))
         .and_then(|()| family::obligation::finish(&cx))
         .and_then(|()| family::time::finish(&cx))
+        .and_then(|()| family::channel::finish(&cx))
     {
         let seq = journal.events().last().map_or(0, |event| event.seq());
         return match stop {

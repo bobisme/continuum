@@ -453,7 +453,11 @@ impl Account {
             | SubstrateOp::Acquire { .. }
             | SubstrateOp::Transfer { .. }
             | SubstrateOp::Sleep { .. }
-            | SubstrateOp::Advance { .. } => {
+            | SubstrateOp::Advance { .. }
+            | SubstrateOp::OpenChannel { .. }
+            | SubstrateOp::Send { .. }
+            | SubstrateOp::Recv { .. }
+            | SubstrateOp::CloseSenders { .. } => {
                 unreachable!("the cancellation corpus has no effect operations")
             }
         }
@@ -742,14 +746,15 @@ fn refusals_are_typed() {
     let programs = cascading();
     let log = ChoiceLog::enumerate(&lengths(&programs)).remove(0);
 
-    // A family the binding does not bind is refused before the substrate runs.
-    let refusal = run(&programs, &log, &config(SEED).observing(Family::Channel)).unwrap_err();
-    assert_eq!(refusal, BindingRefusal::FamilyNotBound(Family::Channel));
+    // Every family is bound since PR-14-IMPL-06 (bn-3xx9). The refusal for an unbound one
+    // keeps its INV-008 reading for a family a later PR adds.
+    let refusal = BindingRefusal::FamilyNotBound(Family::Channel);
     assert_eq!(
         refusal.inconclusive_reason(),
         Some(InconclusiveReason::Unsupported)
     );
     assert!(refusal.to_string().contains("PR-14-IMPL-06"), "{refusal}");
+    assert!(run(&programs, &log, &config(SEED).observing(Family::Channel)).is_ok());
 
     // Cancellation without lifecycle is a malformed configuration.
     let bare = BindingConfig {

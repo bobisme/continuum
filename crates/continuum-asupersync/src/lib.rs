@@ -80,10 +80,19 @@
 //! - [`binding`] observes it with tied timers in canonical order, so neither the host
 //!   clock nor the lab seed reaches the journal.
 //!
+//! # What has landed (PR-14-IMPL-06, bn-3xx9)
+//!
+//! - [`family::channel`] — the channel communication family: bounded `mpsc` channels'
+//!   sends, receives, blocks, closes and drops, with message identity the delivered
+//!   payload, lifted into a parallel checked FIFO model tied to the region calculus's
+//!   tasks;
+//! - [`binding`] observes it with woken tasks in canonical order. Every family is now
+//!   bound.
+//!
 //! # What is not here
 //!
-//! The channel family's binding: [`binding::substrate_binding`] answers each of
-//! them with the typed absence [`binding::BindingAbsence::FamilyNotBound`].
+//! A family a later PR adds starts unbound: [`binding::substrate_binding`] answers it
+//! with the typed absence [`binding::BindingAbsence::FamilyNotBound`].
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod binding;
