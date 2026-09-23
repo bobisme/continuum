@@ -10,7 +10,7 @@
 //! | 1 | [`Family::Lifecycle`] | `lifecycle` | PR-14-IMPL-01 (this bone, bn-lf4i) |
 //! | 2 | [`Family::Effect`] | `reserve-commit-abort` | PR-14-IMPL-02 (bn-gzy1) |
 //! | 3 | [`Family::Cancellation`] | `cancellation` | PR-14-IMPL-03 (bn-bx7i) |
-//! | 4 | [`Family::Obligation`] | `obligation` | PR-14-IMPL-04 |
+//! | 4 | [`Family::Obligation`] | `obligation` | PR-14-IMPL-04 (bn-6nm8) |
 //! | 5 | [`Family::Time`] | `virtual-time` | PR-14-IMPL-05 |
 //! | 6 | [`Family::Channel`] | `channel` | PR-14-IMPL-06 |
 //!
@@ -162,7 +162,7 @@ pub enum EventBody {
     Effect(effect::EffectEvent),
     /// A cancellation-phase event (PR-14-IMPL-03, bn-bx7i).
     Cancellation(cancellation::CancellationEvent),
-    /// An obligation event. Uninhabited until PR-14-IMPL-04.
+    /// An obligation-ledger event (PR-14-IMPL-04, bn-6nm8).
     Obligation(obligation::ObligationEvent),
     /// A virtual-time event. Uninhabited until PR-14-IMPL-05.
     Time(time::TimeEvent),
@@ -246,7 +246,7 @@ pub enum Report {
     Effect(effect::EffectReport),
     /// A cancellation phase (PR-14-IMPL-03, bn-bx7i).
     Cancellation(cancellation::CancellationReport),
-    /// Uninhabited until PR-14-IMPL-04.
+    /// An obligation-ledger step (PR-14-IMPL-04, bn-6nm8).
     Obligation(obligation::ObligationReport),
     /// Uninhabited until PR-14-IMPL-05.
     Time(time::TimeReport),

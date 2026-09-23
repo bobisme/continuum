@@ -62,9 +62,19 @@
 //! - [`binding`] observes it from asupersync's own obligation trace, for reservations a
 //!   task makes through its `Cx`.
 //!
+//! # What has landed (PR-14-IMPL-04, bn-6nm8)
+//!
+//! - [`family::obligation`] — the obligations family: the substrate's ledger of every
+//!   obligation kind — holder and region, discharge, transfer, leak, and each region's
+//!   balance at close — lifted beside the region calculus's own ledger, so a region
+//!   that closes with an open or leaked obligation is a violation even when the
+//!   calculus's `is_total` holds;
+//! - [`binding`] observes it from the substrate's trace and holds it to the substrate's
+//!   own obligation records and obligation-leak oracle.
+//!
 //! # What is not here
 //!
-//! The other three families' bindings: [`binding::substrate_binding`] answers each of
+//! The other two families' bindings: [`binding::substrate_binding`] answers each of
 //! them with the typed absence [`binding::BindingAbsence::FamilyNotBound`].
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 

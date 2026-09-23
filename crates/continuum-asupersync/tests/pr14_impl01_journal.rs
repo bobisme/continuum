@@ -26,7 +26,7 @@
 //! | the lift can say no (anti-vacuity) | [`the_lift_rejects_nonconforming_journals`] |
 //! | a conforming teardown is total (no orphans) | [`a_conforming_teardown_is_total`] |
 //! | typed refusal on an unsupported primitive | [`an_unsupported_primitive_is_a_typed_refusal`] |
-//! | the extension point is the six families, three instrumented | [`the_extension_point_names_six_families_and_three_are_instrumented`] |
+//! | the extension point is the six families, four instrumented | [`the_extension_point_names_six_families_and_four_are_instrumented`] |
 //! | malformed choice logs are typed refusals | [`malformed_choice_logs_are_typed_refusals`] |
 
 use std::collections::BTreeMap;
@@ -334,11 +334,11 @@ fn the_decoder_refuses_every_second_spelling() {
 
     // A byte string claiming a family whose instrumentation has not landed.
     let mut uninstrumented = bytes.clone();
-    uninstrumented[family_at] = Family::Obligation.tag();
+    uninstrumented[family_at] = Family::Time.tag();
     assert_eq!(
         Journal::decode(&uninstrumented),
         Err(DecodeError::FamilyNotInstrumented {
-            family: "obligation",
+            family: "virtual-time",
             seq: 0
         })
     );
@@ -635,29 +635,29 @@ fn an_unsupported_primitive_is_a_typed_refusal() {
             resumability: Resumability::Resumable,
         }),
         Report::Uninstrumented {
-            family: Family::Obligation,
-            operation: "transfer".to_owned(),
+            family: Family::Time,
+            operation: "sleep".to_owned(),
         },
     ]];
     let refusal = record(&scripts, &ChoiceLog::new([0, 0])).unwrap_err();
     assert_eq!(
         refusal,
         RecordRefusal::UnsupportedPrimitive {
-            family: Family::Obligation,
-            operation: "transfer".to_owned()
+            family: Family::Time,
+            operation: "sleep".to_owned()
         }
     );
     assert_eq!(
         refusal.inconclusive_reason(),
         Some(InconclusiveReason::Unsupported)
     );
-    assert!(refusal.to_string().contains("PR-14-IMPL-04"));
+    assert!(refusal.to_string().contains("PR-14-IMPL-05"));
     // A malformed input is not an inconclusive result.
     assert_eq!(RecordRefusal::UnboundTask(1).inconclusive_reason(), None);
 }
 
 #[test]
-fn the_extension_point_names_six_families_and_three_are_instrumented() {
+fn the_extension_point_names_six_families_and_four_are_instrumented() {
     let table: Vec<(u8, &str, &str, bool)> = Family::ALL
         .iter()
         .map(|f| (f.tag(), f.token(), f.requirement(), f.is_instrumented()))
@@ -668,7 +668,7 @@ fn the_extension_point_names_six_families_and_three_are_instrumented() {
             (1, "lifecycle", "PR-14-IMPL-01", true),
             (2, "reserve-commit-abort", "PR-14-IMPL-02", true),
             (3, "cancellation", "PR-14-IMPL-03", true),
-            (4, "obligation", "PR-14-IMPL-04", false),
+            (4, "obligation", "PR-14-IMPL-04", true),
             (5, "virtual-time", "PR-14-IMPL-05", false),
             (6, "channel", "PR-14-IMPL-06", false),
         ]

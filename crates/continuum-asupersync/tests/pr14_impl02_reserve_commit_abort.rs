@@ -439,6 +439,9 @@ impl Account {
                 }));
                 self.park(task);
             }
+            SubstrateOp::Acquire { .. } | SubstrateOp::Transfer { .. } => {
+                unreachable!("the effect corpus reserves transactions only")
+            }
             SubstrateOp::Close { region } => {
                 self.lc(LifecycleReport::Close { region: *region });
                 let ordinal = self.regions[region];
@@ -973,8 +976,8 @@ fn refusals_are_typed() {
     // A family the binding does not bind is refused before the substrate runs.
     let programs = siblings();
     let log = ChoiceLog::enumerate(&lengths(&programs)).remove(0);
-    let got = run(&programs, &log, &config(SEED).observing(Family::Obligation)).unwrap_err();
-    assert_eq!(got, BindingRefusal::FamilyNotBound(Family::Obligation));
+    let got = run(&programs, &log, &config(SEED).observing(Family::Time)).unwrap_err();
+    assert_eq!(got, BindingRefusal::FamilyNotBound(Family::Time));
 
     // A trace buffer too small for the run.
     let tiny = BindingConfig {

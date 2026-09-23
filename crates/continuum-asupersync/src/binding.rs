@@ -3,14 +3,15 @@
 //!
 //! # What is bound, and what is not
 //!
-//! The binding observes three families: [`Family::Lifecycle`] (PR-14-IMPL-01,
-//! bn-lf4i), [`Family::Effect`] (PR-14-IMPL-02, bn-gzy1) and [`Family::Cancellation`]
-//! (PR-14-IMPL-03, bn-bx7i). A run observes the families
+//! The binding observes four families: [`Family::Lifecycle`] (PR-14-IMPL-01, bn-lf4i),
+//! [`Family::Effect`] (PR-14-IMPL-02, bn-gzy1), [`Family::Cancellation`] (PR-14-IMPL-03,
+//! bn-bx7i) and [`Family::Obligation`] (PR-14-IMPL-04, bn-6nm8). A run observes the
+//! families
 //! [`BindingConfig::families`] names. Lifecycle is always among them, because the
 //! other families name tasks by the ordinals its spawn events allocate. The default is
 //! lifecycle alone, whose journal is the one bn-lf4i pinned, byte for byte.
 //!
-//! The other three families are still uninstrumented (their files under `src/family/`
+//! The other two families are still uninstrumented (their files under `src/family/`
 //! say so), and for them [`substrate_binding`] answers with the typed absence
 //! [`BindingAbsence::FamilyNotBound`], whose INV-008 reading is
 //! [`InconclusiveReason::Unsupported`]. A run that asks for one is refused with
@@ -90,6 +91,27 @@
 //! cancellation aborts every reservation it holds, for `Cancel`, before it returns.
 //! After each effect operation the binding confirms from the trace that the substrate
 //! took the step it asked for ([`BindingRefusal::EffectUnobserved`] otherwise).
+//!
+//! # The obligation ledger
+//!
+//! [`SubstrateOp::Acquire`] reserves an obligation of any kind the substrate has, and
+//! [`SubstrateOp::Transfer`] hands one to another task through the substrate's own
+//! `ObligationToken::try_transfer`. When [`Family::Obligation`] is observed, every
+//! obligation's ledger steps are journaled, whatever the kind:
+//!
+//! | substrate observation | journal event |
+//! |---|---|
+//! | `ObligationReserve` | [`ObligationEvent::Opened`], with kind, holder and region |
+//! | `ObligationCommit` / `ObligationAbort` | [`ObligationEvent::Discharged`]; a cancellation's aborts are placed canonically, after the task's effect aborts |
+//! | the runtime's `obligation_handoff_v1` trace message | [`ObligationEvent::Transferred`], holder and region read from the substrate's obligation record |
+//! | `ObligationLeak` | [`ObligationEvent::Leaked`] |
+//! | `RegionCloseComplete` | [`ObligationEvent::RegionSettled`] after the region's finalize, with the region's open and leaked obligations |
+//!
+//! A leak is never dropped: without this family observed, it is a typed refusal. At
+//! the end of a run the binding holds the ledger it journaled to the substrate's own:
+//! every obligation record the runtime keeps, and its obligation-leak oracle rebuilt
+//! from the runtime state (`ObligationLeakOracle::snapshot_from_state`). A disagreement
+//! is [`BindingRefusal::SubstrateLedgerDisagrees`].
 //!
 //! # The cancellation phases
 //!
@@ -174,8 +196,11 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 
+use asupersync::lab::oracle::ObligationLeakOracle;
 use asupersync::lab::oracle::TaskStateKind;
-use asupersync::record::{ObligationAbortReason, ObligationKind};
+use asupersync::record::{
+    ObligationAbortReason, ObligationKind as SubstrateObligationKind, ObligationState,
+};
 use asupersync::runtime::obligation_mailbox::ObligationToken;
 use asupersync::runtime::{JoinError, TaskHandle};
 use asupersync::trace::event::{TraceData, TraceEvent, TraceEventKind};
@@ -191,6 +216,9 @@ use crate::family::cancellation::{CancelCause, CancellationEvent};
 use crate::family::effect::{AbortCause, EffectEvent, ReservationLabel, ReservationOrdinal};
 use crate::family::lifecycle::{
     LifecycleEvent, RegionLabel, RegionOrdinal, TaskLabel, TaskOrdinal, TaskSet, TaskStep,
+};
+use crate::family::obligation::{
+    Discharge, ObligationEvent, ObligationKind, ObligationOrdinal, ObligationSet,
 };
 use crate::family::{EventBody, Family};
 use crate::journal::Journal;
@@ -248,7 +276,9 @@ impl SubstrateBinding {
 #[must_use]
 pub const fn substrate_binding(family: Family) -> SubstrateBinding {
     match family {
-        Family::Lifecycle | Family::Effect | Family::Cancellation => SubstrateBinding::Bound,
+        Family::Lifecycle | Family::Effect | Family::Cancellation | Family::Obligation => {
+            SubstrateBinding::Bound
+        }
         other => SubstrateBinding::Absent(BindingAbsence::FamilyNotBound(other)),
     }
 }
@@ -325,6 +355,27 @@ pub enum SubstrateOp {
         /// The reservation.
         reservation: ReservationLabel,
     },
+    /// As [`SubstrateOp::Reserve`], for an obligation of any `kind`. Only a
+    /// `Transaction` is a reservation of the reserve/commit/abort family; every kind is
+    /// the obligations family's. [`SubstrateOp::Commit`] and [`SubstrateOp::Abort`]
+    /// resolve it by label.
+    Acquire {
+        /// The task.
+        task: TaskLabel,
+        /// The label the new obligation is bound to.
+        reservation: ReservationLabel,
+        /// Its kind.
+        kind: ObligationKind,
+    },
+    /// Wake the holding task with a command to hand `reservation` to `to`
+    /// (`ObligationToken::try_transfer`, with `to`'s own `Cx`). A `Transaction` cannot
+    /// be transferred: the region calculus has one staged publication per worker.
+    Transfer {
+        /// The obligation.
+        reservation: ReservationLabel,
+        /// The new holder.
+        to: TaskLabel,
+    },
 }
 
 impl SubstrateOp {
@@ -340,6 +391,8 @@ impl SubstrateOp {
             Self::Reserve { .. } => "reserve",
             Self::Commit { .. } => "commit",
             Self::Abort { .. } => "abort",
+            Self::Acquire { .. } => "acquire",
+            Self::Transfer { .. } => "transfer",
         }
     }
 }
@@ -532,6 +585,14 @@ pub enum BindingRefusal {
         /// The reservation's journal ordinal.
         reservation: u32,
     },
+    /// A transfer names a `Transaction`: the effect family's reservation cannot move.
+    EffectNotTransferable(u32),
+    /// The substrate's own obligation records or its obligation-leak oracle disagree with
+    /// the ledger the trace produced.
+    SubstrateLedgerDisagrees {
+        /// What disagrees.
+        detail: String,
+    },
 }
 
 impl BindingRefusal {
@@ -549,7 +610,9 @@ impl BindingRefusal {
             | Self::FamilyNotBound(_)
             | Self::UnmappedCancelReason { .. }
             | Self::ReservationDropped { .. } => Some(InconclusiveReason::Unsupported),
-            Self::SubstrateProtocolViolation { .. } => Some(InconclusiveReason::EngineError),
+            Self::SubstrateProtocolViolation { .. } | Self::SubstrateLedgerDisagrees { .. } => {
+                Some(InconclusiveReason::EngineError)
+            }
             Self::StepLimit => Some(InconclusiveReason::ResourceExhausted),
             Self::TraceOverflow { .. }
             | Self::TraceOutOfOrder { .. }
@@ -571,7 +634,8 @@ impl BindingRefusal {
             | Self::LifecycleNotObserved
             | Self::UnboundReservation(_)
             | Self::ReservationLabelRebound(_)
-            | Self::ReservationResolved(_) => None,
+            | Self::ReservationResolved(_)
+            | Self::EffectNotTransferable(_) => None,
         }
     }
 }
@@ -671,6 +735,13 @@ impl fmt::Display for BindingRefusal {
                 f,
                 "e{reservation} was dropped unresolved and the substrate aborted it for error"
             ),
+            Self::EffectNotTransferable(label) => write!(
+                f,
+                "reservation label {label} is a transaction, which cannot be transferred"
+            ),
+            Self::SubstrateLedgerDisagrees { detail } => {
+                write!(f, "the substrate's obligation ledger disagrees: {detail}")
+            }
         }
     }
 }
@@ -682,6 +753,10 @@ impl core::error::Error for BindingRefusal {}
 /// The prefix of every gate mark in the substrate's trace.
 const GATE_MARK: &str = "continuum.lifecycle-gate/1";
 
+/// The prefix of the runtime's own obligation-handoff trace message (asupersync 0.5.0,
+/// `trace::event::ObligationHandoff`).
+const HANDOFF_MARK: &str = "obligation_handoff_v";
+
 /// The prefix of the gate's cancellation acknowledgement mark.
 const CANCEL_MARK: &str = "continuum.cancellation-gate/1";
 
@@ -692,13 +767,15 @@ enum GatePhase {
     Suspended,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 enum Command {
     Park,
     Finish,
-    Reserve(ReservationLabel),
+    Reserve(ReservationLabel, SubstrateObligationKind),
     Commit(ReservationLabel),
     Abort(ReservationLabel),
+    /// Hand the obligation to the task whose `Cx` and gate these are.
+    Transfer(ReservationLabel, Box<Cx>, Gate),
 }
 
 #[derive(Debug)]
@@ -716,6 +793,8 @@ struct GateState {
     /// returns, so the next pending poll yields once, unmarked, and only the poll after
     /// that may write `suspend`: the mark then follows the resolution in the trace.
     settling: bool,
+    /// Obligations transferred to this task, waiting for its body to take them.
+    inbox: Vec<(ReservationLabel, ObligationToken)>,
 }
 
 type Gate = Arc<Mutex<GateState>>;
@@ -783,12 +862,36 @@ impl Future for GateWait {
     }
 }
 
-/// The kind every bound reservation takes: a two-phase effect that commits or rolls
-/// back.
-const RESERVATION_KIND: ObligationKind = ObligationKind::Transaction;
+/// The kind every [`SubstrateOp::Reserve`] takes: a two-phase effect that commits or
+/// rolls back. Only this kind is the reserve/commit/abort family's.
+const RESERVATION_KIND: SubstrateObligationKind = SubstrateObligationKind::Transaction;
+
+/// The substrate kind for a journal kind.
+const fn substrate_kind(kind: ObligationKind) -> SubstrateObligationKind {
+    match kind {
+        ObligationKind::SendPermit => SubstrateObligationKind::SendPermit,
+        ObligationKind::Ack => SubstrateObligationKind::Ack,
+        ObligationKind::Lease => SubstrateObligationKind::Lease,
+        ObligationKind::IoOp => SubstrateObligationKind::IoOp,
+        ObligationKind::SemaphorePermit => SubstrateObligationKind::SemaphorePermit,
+        ObligationKind::Transaction => SubstrateObligationKind::Transaction,
+    }
+}
+
+/// The journal kind for a substrate kind.
+const fn journal_kind(kind: SubstrateObligationKind) -> ObligationKind {
+    match kind {
+        SubstrateObligationKind::SendPermit => ObligationKind::SendPermit,
+        SubstrateObligationKind::Ack => ObligationKind::Ack,
+        SubstrateObligationKind::Lease => ObligationKind::Lease,
+        SubstrateObligationKind::IoOp => ObligationKind::IoOp,
+        SubstrateObligationKind::SemaphorePermit => ObligationKind::SemaphorePermit,
+        SubstrateObligationKind::Transaction => ObligationKind::Transaction,
+    }
+}
 
 async fn gated_body(gate: Gate, slot: usize) {
-    // The task's own reservations, by program label. Ascending order makes the aborts a
+    // The task's own obligations, by program label. Ascending order makes the aborts a
     // cancellation issues deterministic within the task.
     let mut held: BTreeMap<ReservationLabel, ObligationToken> = BTreeMap::new();
     loop {
@@ -797,19 +900,20 @@ async fn gated_body(gate: Gate, slot: usize) {
             slot,
         }
         .await;
+        // Obligations transferred here since the last poll are this task's now.
+        held.extend(core::mem::take(&mut lock(&gate).inbox));
+        let settling = matches!(command, Some(Command::Commit(_) | Command::Abort(_)));
         let refused = match command {
             Some(Command::Park) => None,
-            Some(Command::Reserve(label)) => match Cx::current() {
-                Some(cx) => {
-                    match cx.try_register_obligation_checked(RESERVATION_KIND, cx.task_id()) {
-                        Ok(Some(token)) => {
-                            held.insert(label, token);
-                            None
-                        }
-                        Ok(None) => Some("the task's Cx carries no obligation runtime".to_owned()),
-                        Err(error) => Some(error.to_string()),
+            Some(Command::Reserve(label, kind)) => match Cx::current() {
+                Some(cx) => match cx.try_register_obligation_checked(kind, cx.task_id()) {
+                    Ok(Some(token)) => {
+                        held.insert(label, token);
+                        None
                     }
-                }
+                    Ok(None) => Some("the task's Cx carries no obligation runtime".to_owned()),
+                    Err(error) => Some(error.to_string()),
+                },
                 None => {
                     lock(&gate).untraced = true;
                     None
@@ -824,10 +928,23 @@ async fn gated_body(gate: Gate, slot: usize) {
                     .then(|| "abort was not accepted".to_owned()),
                 None => Some("no held reservation has this label".to_owned()),
             },
-            // Returning with reservations held drops them: the substrate aborts each one
-            // for `Error`, and the binding refuses the run.
+            Some(Command::Transfer(label, destination, inbox)) => match held.remove(&label) {
+                Some(token) => match token.try_transfer(&*destination) {
+                    Ok(next) => {
+                        lock(&inbox).inbox.push((label, next));
+                        None
+                    }
+                    Err(failure) => {
+                        let (reason, token) = failure.into_parts();
+                        held.insert(label, token);
+                        Some(reason.to_string())
+                    }
+                },
+                None => Some("no held reservation has this label".to_owned()),
+            },
+            // Returning with obligations held drops them: the substrate records a leak.
             Some(Command::Finish) => break,
-            // Cancellation observed: the cleanup is to abort every held reservation.
+            // Cancellation observed: the cleanup is to abort every held obligation.
             None => {
                 for (_, token) in core::mem::take(&mut held) {
                     token.abort(ObligationAbortReason::Cancel);
@@ -836,8 +953,12 @@ async fn gated_body(gate: Gate, slot: usize) {
             }
         };
         let mut state = lock(&gate);
-        state.settling = matches!(command, Some(Command::Commit(_) | Command::Abort(_)));
-        state.held = held.len();
+        state.settling = settling;
+        // Only a held reservation (the effect kind) keeps the task mid-effect.
+        state.held = held
+            .values()
+            .filter(|token| token.kind() == RESERVATION_KIND)
+            .count();
         if refused.is_some() {
             state.refused = refused;
         }
@@ -872,18 +993,33 @@ fn cause_of(kind: CancelKind) -> Result<CancelCause, BindingRefusal> {
     }
 }
 
-/// A program's reservation label: the holding task's slot, and whether it resolved.
+/// A program's obligation label: its obligation ordinal, and whether it resolved.
 #[derive(Debug, Clone, Copy)]
 struct LabelState {
-    slot: usize,
+    obligation: u32,
     resolved: bool,
 }
 
-/// A substrate obligation the run reserved: its journal ordinal and holding task.
+/// Where a traced obligation is in the substrate's ledger, as the trace shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    Open,
+    Discharged,
+    Leaked,
+}
+
+/// A substrate obligation the run reserved, as the trace shows it.
 #[derive(Debug, Clone, Copy)]
 struct Held {
-    ordinal: u32,
+    /// The obligations family's ordinal.
+    obligation: u32,
+    /// The reserve/commit/abort family's ordinal, for a `Transaction`.
+    reservation: Option<u32>,
+    kind: SubstrateObligationKind,
+    slot: usize,
     task: TaskOrdinal,
+    region: u32,
+    standing: Standing,
 }
 
 struct Driver {
@@ -904,9 +1040,13 @@ struct Driver {
     reservations: BTreeMap<ObligationId, Held>,
     reservation_owner_label: BTreeMap<u32, ReservationLabel>,
     next_reservation: u32,
+    next_obligation: u32,
     op_reserved: Vec<(u32, usize)>,
     op_resolved: Vec<u32>,
+    op_transferred: Vec<u32>,
+    pending_transfer: Option<(ObligationId, usize)>,
     pending_aborts: BTreeMap<u32, BTreeSet<u32>>,
+    pending_discharges: BTreeMap<u32, BTreeSet<u32>>,
     close_order: Vec<RegionOrdinal>,
     phases: BTreeMap<u32, CancelTrack>,
     next_task: u32,
@@ -949,9 +1089,13 @@ impl Driver {
             reservations: BTreeMap::new(),
             reservation_owner_label: BTreeMap::new(),
             next_reservation: 0,
+            next_obligation: 0,
             op_reserved: Vec::new(),
             op_resolved: Vec::new(),
+            op_transferred: Vec::new(),
+            pending_transfer: None,
             pending_aborts: BTreeMap::new(),
+            pending_discharges: BTreeMap::new(),
             close_order: Vec::new(),
             phases: BTreeMap::new(),
             next_task: 0,
@@ -997,6 +1141,10 @@ impl Driver {
         self.config.families.contains(Family::Effect)
     }
 
+    const fn observes_obligation(&self) -> bool {
+        self.config.families.contains(Family::Obligation)
+    }
+
     /// Send an effect command, then confirm from the trace that the substrate took the
     /// step. The gate's own report of a substrate refusal comes first.
     fn effect_command(
@@ -1007,6 +1155,7 @@ impl Driver {
     ) -> Result<(), BindingRefusal> {
         self.op_reserved.clear();
         self.op_resolved.clear();
+        self.op_transferred.clear();
         self.command_slot(slot, command)?;
         if let Some(detail) = lock(&self.slots[slot].gate).refused.take() {
             return Err(BindingRefusal::SubstrateRefused { operation, detail });
@@ -1073,6 +1222,10 @@ impl Driver {
                 .append(EventBody::Lifecycle(LifecycleEvent::RegionFinalized {
                     region,
                 }));
+            if self.observes_obligation() {
+                let settled = self.settled(region.0);
+                self.record.append(EventBody::Obligation(settled));
+            }
         }
     }
 
@@ -1130,6 +1283,7 @@ impl Driver {
                     held: 0,
                     refused: None,
                     settling: false,
+                    inbox: Vec::new(),
                 }));
                 let (id, handle) = self
                     .lab
@@ -1198,41 +1352,20 @@ impl Driver {
                 self.run()
             }
             SubstrateOp::Reserve { task, reservation } => {
-                let slot = self.slot(*task)?;
-                if self.reservation_labels.contains_key(reservation) {
-                    return Err(BindingRefusal::ReservationLabelRebound(reservation.0));
-                }
-                self.effect_command(slot, Command::Reserve(*reservation), "reserve")?;
-                match self.op_reserved.as_slice() {
-                    [(ordinal, holder)] if *holder == slot => {
-                        self.reservation_owner_label.insert(*ordinal, *reservation);
-                        self.reservation_labels.insert(
-                            *reservation,
-                            LabelState {
-                                slot,
-                                resolved: false,
-                            },
-                        );
-                        Ok(())
-                    }
-                    _ => Err(BindingRefusal::EffectUnobserved {
-                        operation: "reserve",
-                    }),
-                }
+                self.acquire(*task, *reservation, RESERVATION_KIND)
             }
+            SubstrateOp::Acquire {
+                task,
+                reservation,
+                kind,
+            } => self.acquire(*task, *reservation, substrate_kind(*kind)),
             SubstrateOp::Commit { reservation } | SubstrateOp::Abort { reservation } => {
-                let state = *self
-                    .reservation_labels
-                    .get(reservation)
-                    .ok_or(BindingRefusal::UnboundReservation(reservation.0))?;
-                if state.resolved {
-                    return Err(BindingRefusal::ReservationResolved(reservation.0));
-                }
+                let (held, _) = self.bound(*reservation)?;
                 let (command, operation) = match op {
                     SubstrateOp::Commit { .. } => (Command::Commit(*reservation), "commit"),
                     _ => (Command::Abort(*reservation), "abort"),
                 };
-                self.effect_command(state.slot, command, operation)?;
+                self.effect_command(held.slot, command, operation)?;
                 let resolved = self
                     .reservation_labels
                     .get(reservation)
@@ -1243,7 +1376,85 @@ impl Driver {
                     Err(BindingRefusal::EffectUnobserved { operation })
                 }
             }
+            SubstrateOp::Transfer { reservation, to } => {
+                let (held, id) = self.bound(*reservation)?;
+                if held.kind == RESERVATION_KIND {
+                    return Err(BindingRefusal::EffectNotTransferable(reservation.0));
+                }
+                let destination = self.slot(*to)?;
+                let cx = self
+                    .lab
+                    .state
+                    .task(self.slots[destination].id)
+                    .and_then(|record| record.cx.clone())
+                    .ok_or_else(|| refused("the destination task has no Cx".to_owned()))?;
+                let inbox = Arc::clone(&self.slots[destination].gate);
+                self.pending_transfer = Some((id, destination));
+                let result = self.effect_command(
+                    held.slot,
+                    Command::Transfer(*reservation, Box::new(cx), inbox),
+                    "transfer",
+                );
+                self.pending_transfer = None;
+                result?;
+                if self.op_transferred.len() == 1 {
+                    Ok(())
+                } else {
+                    Err(BindingRefusal::EffectUnobserved {
+                        operation: "transfer",
+                    })
+                }
+            }
         }
+    }
+
+    /// Acquire an obligation of `kind` for `task`, bound to `label`.
+    fn acquire(
+        &mut self,
+        task: TaskLabel,
+        label: ReservationLabel,
+        kind: SubstrateObligationKind,
+    ) -> Result<(), BindingRefusal> {
+        let slot = self.slot(task)?;
+        if self.reservation_labels.contains_key(&label) {
+            return Err(BindingRefusal::ReservationLabelRebound(label.0));
+        }
+        let operation = if kind == RESERVATION_KIND {
+            "reserve"
+        } else {
+            "acquire"
+        };
+        self.effect_command(slot, Command::Reserve(label, kind), operation)?;
+        match self.op_reserved.as_slice() {
+            [(obligation, holder)] if *holder == slot => {
+                self.reservation_owner_label.insert(*obligation, label);
+                self.reservation_labels.insert(
+                    label,
+                    LabelState {
+                        obligation: *obligation,
+                        resolved: false,
+                    },
+                );
+                Ok(())
+            }
+            _ => Err(BindingRefusal::EffectUnobserved { operation }),
+        }
+    }
+
+    /// The obligation a label is bound to, when it is bound and still unresolved.
+    fn bound(&self, label: ReservationLabel) -> Result<(Held, ObligationId), BindingRefusal> {
+        let state = *self
+            .reservation_labels
+            .get(&label)
+            .ok_or(BindingRefusal::UnboundReservation(label.0))?;
+        if state.resolved {
+            return Err(BindingRefusal::ReservationResolved(label.0));
+        }
+        self.reservations
+            .iter()
+            .find(|(_, held)| held.obligation == state.obligation)
+            .map(|(id, held)| (*held, *id))
+            .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "obligation" })
     }
 
     /// The reservation a traced obligation is, as the run allocated it.
@@ -1254,8 +1465,13 @@ impl Driver {
             .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "obligation" })
     }
 
-    /// Record that a reservation resolved, for the label bookkeeping.
-    fn resolve(&mut self, ordinal: u32) {
+    /// Record that an obligation resolved, for the label bookkeeping and the ledger.
+    fn resolve(&mut self, id: ObligationId, standing: Standing) {
+        let Some(held) = self.reservations.get_mut(&id) else {
+            return;
+        };
+        held.standing = standing;
+        let ordinal = held.obligation;
         self.op_resolved.push(ordinal);
         if let Some(label) = self.reservation_owner_label.get(&ordinal)
             && let Some(state) = self.reservation_labels.get_mut(label)
@@ -1431,6 +1647,9 @@ impl Driver {
                 if let Some(rest) = message.strip_prefix(CANCEL_MARK) {
                     return self.observe_ack(rest);
                 }
+                if message.starts_with(HANDOFF_MARK) {
+                    return self.observe_handoff();
+                }
                 let Some(rest) = message.strip_prefix(GATE_MARK) else {
                     return Err(BindingRefusal::UninstrumentedEvent {
                         family: None,
@@ -1519,15 +1738,6 @@ impl Driver {
                 }
             }
             (TraceEventKind::RegionCloseBegin, _) => {}
-            // A reservation of this run, dropped unresolved: the substrate recorded a
-            // leak. Any other leak stays an obligations-family event (below).
-            (TraceEventKind::ObligationLeak, TraceData::Obligation { obligation, .. })
-                if self.reservations.contains_key(obligation) =>
-            {
-                return Err(BindingRefusal::ReservationDropped {
-                    reservation: self.held(*obligation)?.ordinal,
-                });
-            }
             (
                 TraceEventKind::ObligationReserve,
                 TraceData::Obligation {
@@ -1538,32 +1748,60 @@ impl Driver {
                     ..
                 },
             ) => {
-                if *kind != RESERVATION_KIND {
-                    return Err(BindingRefusal::UnknownSubstrateEntity {
-                        what: "obligation kind",
-                    });
-                }
                 let slot = self.slot_of(*task)?;
                 let task = self.task_ordinal(slot)?;
-                self.ordinal_of(*region)?;
-                let ordinal = self.next_reservation;
-                self.next_reservation = self.next_reservation.saturating_add(1);
-                self.reservations
-                    .insert(*obligation, Held { ordinal, task });
-                self.op_reserved.push((ordinal, slot));
-                if self.observes_effect() {
-                    self.append_body(EventBody::Effect(EffectEvent::Reserved {
-                        reservation: ReservationOrdinal(ordinal),
+                let region = self.ordinal_of(*region)?;
+                let ordinal = self.next_obligation;
+                self.next_obligation = self.next_obligation.saturating_add(1);
+                let reservation = (*kind == RESERVATION_KIND).then(|| {
+                    let reservation = self.next_reservation;
+                    self.next_reservation = self.next_reservation.saturating_add(1);
+                    reservation
+                });
+                self.reservations.insert(
+                    *obligation,
+                    Held {
+                        obligation: ordinal,
+                        reservation,
+                        kind: *kind,
+                        slot,
                         task,
+                        region: region.0,
+                        standing: Standing::Open,
+                    },
+                );
+                self.op_reserved.push((ordinal, slot));
+                if let Some(reservation) = reservation
+                    && self.observes_effect()
+                {
+                    self.append_body(EventBody::Effect(EffectEvent::Reserved {
+                        reservation: ReservationOrdinal(reservation),
+                        task,
+                    }));
+                }
+                if self.observes_obligation() {
+                    self.append_body(EventBody::Obligation(ObligationEvent::Opened {
+                        obligation: ObligationOrdinal(ordinal),
+                        kind: journal_kind(*kind),
+                        holder: task,
+                        region,
                     }));
                 }
             }
             (TraceEventKind::ObligationCommit, TraceData::Obligation { obligation, .. }) => {
                 let held = self.held(*obligation)?;
-                self.resolve(held.ordinal);
-                if self.observes_effect() {
+                self.resolve(*obligation, Standing::Discharged);
+                if let Some(reservation) = held.reservation
+                    && self.observes_effect()
+                {
                     self.append_body(EventBody::Effect(EffectEvent::Committed {
-                        reservation: ReservationOrdinal(held.ordinal),
+                        reservation: ReservationOrdinal(reservation),
+                    }));
+                }
+                if self.observes_obligation() {
+                    self.append_body(EventBody::Obligation(ObligationEvent::Discharged {
+                        obligation: ObligationOrdinal(held.obligation),
+                        how: Discharge::Committed,
                     }));
                 }
             }
@@ -1576,28 +1814,65 @@ impl Driver {
                 },
             ) => {
                 let held = self.held(*obligation)?;
-                self.resolve(held.ordinal);
-                if self.observes_effect() {
+                self.resolve(*obligation, Standing::Discharged);
+                if let Some(reservation) = held.reservation
+                    && self.observes_effect()
+                {
                     match abort_reason {
                         // Buffered: journaled with the task's drain (journal_phases).
                         Some(ObligationAbortReason::Cancel) => {
                             self.pending_aborts
                                 .entry(held.task.0)
                                 .or_default()
-                                .insert(held.ordinal);
+                                .insert(reservation);
                         }
                         Some(ObligationAbortReason::Explicit) => {
                             self.append_body(EventBody::Effect(EffectEvent::Aborted {
-                                reservation: ReservationOrdinal(held.ordinal),
+                                reservation: ReservationOrdinal(reservation),
                                 cause: AbortCause::Explicit,
                             }));
                         }
                         Some(ObligationAbortReason::Error) | None => {
-                            return Err(BindingRefusal::ReservationDropped {
-                                reservation: held.ordinal,
-                            });
+                            return Err(BindingRefusal::ReservationDropped { reservation });
                         }
                     }
+                }
+                if self.observes_obligation() {
+                    if *abort_reason == Some(ObligationAbortReason::Cancel) {
+                        // Buffered like the effect abort, for the same reason.
+                        self.pending_discharges
+                            .entry(held.task.0)
+                            .or_default()
+                            .insert(held.obligation);
+                    } else {
+                        self.append_body(EventBody::Obligation(ObligationEvent::Discharged {
+                            obligation: ObligationOrdinal(held.obligation),
+                            how: Discharge::Aborted,
+                        }));
+                    }
+                }
+            }
+            (TraceEventKind::ObligationLeak, TraceData::Obligation { obligation, .. })
+                if self.reservations.contains_key(obligation) =>
+            {
+                let held = self.held(*obligation)?;
+                self.resolve(*obligation, Standing::Leaked);
+                if let Some(reservation) = held.reservation
+                    && self.observes_effect()
+                {
+                    return Err(BindingRefusal::ReservationDropped { reservation });
+                }
+                if self.observes_obligation() {
+                    self.append_body(EventBody::Obligation(ObligationEvent::Leaked {
+                        obligation: ObligationOrdinal(held.obligation),
+                    }));
+                } else {
+                    // A leak is never dropped silently: only the obligations family can
+                    // report it.
+                    return Err(BindingRefusal::UninstrumentedEvent {
+                        family: Some(Family::Obligation),
+                        kind: "ObligationLeak".to_owned(),
+                    });
                 }
             }
             (kind, _) => {
@@ -1608,6 +1883,136 @@ impl Driver {
             }
         }
         Ok(())
+    }
+
+    /// The runtime's handoff message. Its fields are the runtime's own serialization, so
+    /// the binding reads the handoff from the substrate's obligation record instead: it
+    /// must be the transfer this operation asked for, and the record must now name the
+    /// destination as holder.
+    fn observe_handoff(&mut self) -> Result<(), BindingRefusal> {
+        let (id, destination) = self
+            .pending_transfer
+            .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "handoff" })?;
+        let record = self
+            .lab
+            .state
+            .obligation(id)
+            .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "obligation" })?;
+        if record.holder != self.slots[destination].id {
+            return Err(BindingRefusal::SubstrateLedgerDisagrees {
+                detail: "the handoff's record does not name the destination".to_owned(),
+            });
+        }
+        let region = self.ordinal_of(record.region)?;
+        let task = self.task_ordinal(destination)?;
+        let held = self
+            .reservations
+            .get_mut(&id)
+            .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "obligation" })?;
+        held.slot = destination;
+        held.task = task;
+        held.region = region.0;
+        let obligation = held.obligation;
+        self.op_transferred.push(obligation);
+        if self.observes_obligation() {
+            self.append_body(EventBody::Obligation(ObligationEvent::Transferred {
+                obligation: ObligationOrdinal(obligation),
+                holder: task,
+                region,
+            }));
+        }
+        Ok(())
+    }
+
+    /// A region's balance at close, from the ledger the trace produced.
+    fn settled(&self, region: u32) -> ObligationEvent {
+        let members = |standing: Standing| {
+            ObligationSet::new(
+                self.reservations
+                    .values()
+                    .filter(|held| held.region == region && held.standing == standing)
+                    .map(|held| ObligationOrdinal(held.obligation)),
+            )
+        };
+        ObligationEvent::RegionSettled {
+            region: RegionOrdinal(region),
+            open: members(Standing::Open),
+            leaked: members(Standing::Leaked),
+        }
+    }
+
+    /// Hold the trace's ledger to the substrate's own: each obligation record it still
+    /// keeps, and its obligation-leak oracle rebuilt from the runtime state.
+    fn cross_check_ledger(&self) -> Result<(), BindingRefusal> {
+        let disagree = |detail: String| BindingRefusal::SubstrateLedgerDisagrees { detail };
+        let mut regions: BTreeMap<u32, SubstrateRegion> = BTreeMap::new();
+        for (substrate, ordinal) in &self.region_ordinals {
+            regions.insert(ordinal.0, *substrate);
+        }
+        for (id, held) in &self.reservations {
+            let Some(record) = self.lab.state.obligation(*id) else {
+                continue;
+            };
+            let standing = match record.state {
+                ObligationState::Reserved => Standing::Open,
+                ObligationState::Committed | ObligationState::Aborted => Standing::Discharged,
+                ObligationState::Leaked => Standing::Leaked,
+            };
+            if standing != held.standing
+                || record.kind != held.kind
+                || record.holder != self.slots[held.slot].id
+                || regions.get(&held.region) != Some(&record.region)
+            {
+                return Err(disagree(format!(
+                    "o{} is {:?} held by {:?} in {:?}, but the trace says {:?} in r{}",
+                    held.obligation,
+                    record.state,
+                    record.holder,
+                    record.region,
+                    held.standing,
+                    held.region
+                )));
+            }
+        }
+        let now = self.lab.now();
+        let mut oracle = ObligationLeakOracle::new();
+        oracle.snapshot_from_state(&self.lab.state, now);
+        // The oracle flags a closed region holding an obligation that did not succeed.
+        let mut unbalanced: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
+        for held in self.reservations.values() {
+            let closed = regions.get(&held.region).is_some_and(|region| {
+                self.lab
+                    .state
+                    .region(*region)
+                    .is_none_or(|record| record.state().is_terminal())
+            });
+            if held.standing == Standing::Leaked || (held.standing == Standing::Open && closed) {
+                unbalanced
+                    .entry(held.region)
+                    .or_default()
+                    .insert(held.obligation);
+            }
+        }
+        match (oracle.check(now), unbalanced.is_empty()) {
+            (Ok(()), true) => Ok(()),
+            (Ok(()), false) => Err(disagree(format!(
+                "the trace shows unbalanced regions {unbalanced:?}, the oracle none"
+            ))),
+            (Err(violation), _) => {
+                let region = self.ordinal_of(violation.region)?.0;
+                let mut flagged = BTreeSet::new();
+                for leak in &violation.leaked {
+                    flagged.insert(self.held(leak.obligation)?.obligation);
+                }
+                if unbalanced.get(&region) == Some(&flagged) {
+                    Ok(())
+                } else {
+                    Err(disagree(format!(
+                        "the oracle flags r{region} with {flagged:?}, the trace {unbalanced:?}"
+                    )))
+                }
+            }
+        }
     }
 
     /// The gate's acknowledgement mark: `ack <slot>`.
@@ -1649,6 +2054,13 @@ impl Driver {
                     cause: AbortCause::Cancel,
                 }));
             }
+            for obligation in self.pending_discharges.remove(&task.0).unwrap_or_default() {
+                self.record
+                    .append(EventBody::Obligation(ObligationEvent::Discharged {
+                        obligation: ObligationOrdinal(obligation),
+                        how: Discharge::Aborted,
+                    }));
+            }
             if let Some(cause) = track.completed {
                 self.record
                     .append(EventBody::Cancellation(CancellationEvent::Cancelled {
@@ -1668,8 +2080,16 @@ impl Driver {
         if let Some(task) = self.phases.keys().next() {
             return Err(BindingRefusal::CancellationUnfinished { task: *task });
         }
-        if let Some(task) = self.pending_aborts.keys().next() {
+        if let Some(task) = self
+            .pending_aborts
+            .keys()
+            .chain(self.pending_discharges.keys())
+            .min()
+        {
             return Err(BindingRefusal::UndrainedCancellation { task: *task });
+        }
+        if self.observes_obligation() {
+            self.cross_check_ledger()?;
         }
         let journal = self
             .record

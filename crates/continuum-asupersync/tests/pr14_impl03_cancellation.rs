@@ -449,7 +449,9 @@ impl Account {
             }
             SubstrateOp::Reserve { .. }
             | SubstrateOp::Commit { .. }
-            | SubstrateOp::Abort { .. } => {
+            | SubstrateOp::Abort { .. }
+            | SubstrateOp::Acquire { .. }
+            | SubstrateOp::Transfer { .. } => {
                 unreachable!("the cancellation corpus has no effect operations")
             }
         }
@@ -739,13 +741,13 @@ fn refusals_are_typed() {
     let log = ChoiceLog::enumerate(&lengths(&programs)).remove(0);
 
     // A family the binding does not bind is refused before the substrate runs.
-    let refusal = run(&programs, &log, &config(SEED).observing(Family::Obligation)).unwrap_err();
-    assert_eq!(refusal, BindingRefusal::FamilyNotBound(Family::Obligation));
+    let refusal = run(&programs, &log, &config(SEED).observing(Family::Time)).unwrap_err();
+    assert_eq!(refusal, BindingRefusal::FamilyNotBound(Family::Time));
     assert_eq!(
         refusal.inconclusive_reason(),
         Some(InconclusiveReason::Unsupported)
     );
-    assert!(refusal.to_string().contains("PR-14-IMPL-04"), "{refusal}");
+    assert!(refusal.to_string().contains("PR-14-IMPL-05"), "{refusal}");
 
     // Cancellation without lifecycle is a malformed configuration.
     let bare = BindingConfig {
