@@ -1,0 +1,18 @@
+{
+  "requirement": "TEST-6-01",
+  "rule": "instance-header-mismatch-detected",
+  "description": "an instance's schema_id does not match its governing schema's class identity",
+  "system": {
+    "kind": "instance-header",
+    "subject": "fixture:widget-instance",
+    "doc": {
+      "$id": "https://continuum.dev/schema/v1/widget.json",
+      "schema_epoch": 1,
+      "schema_kind": "artifact"
+    },
+    "instance": {
+      "schema_id": "https://continuum.dev/schema/wrong-name.json",
+      "schema_epoch": 1
+    }
+  }
+}

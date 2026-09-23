@@ -1,0 +1,10 @@
+{
+  "requirement": "TEST-6-03",
+  "rule": "certificate-routing-mismatch-detected",
+  "description": "a real CONTSATC magic is claimed to route to the Core family instead of Sat",
+  "system": {
+    "kind": "certificate-routing",
+    "bytes_hex": "434f4e545341544300000000",
+    "claimed": {"outcome": "routed", "family": "Core"}
+  }
+}

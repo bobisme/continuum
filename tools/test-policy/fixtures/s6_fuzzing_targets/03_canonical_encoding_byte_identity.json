@@ -1,0 +1,12 @@
+{
+  "requirement": "TEST-6-01",
+  "rule": "canonical-encoding-not-value-identical-detected",
+  "description": "a byte-identity policy assigns different identities to two byte-different encodings of the same content",
+  "system": {
+    "kind": "canonical-encoding",
+    "subject": "fixture:byte-identity",
+    "raw_a": "{\"a\": 1, \"b\": 2}",
+    "raw_b": "{\"b\": 2, \"a\": 1}",
+    "policy": "byte-identity"
+  }
+}

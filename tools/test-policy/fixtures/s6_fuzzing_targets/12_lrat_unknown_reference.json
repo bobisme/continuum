@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-6-06",
+  "rule": "lrat-reference-unknown-clause-detected",
+  "description": "an add step's hint names a clause id that was never declared",
+  "system": {
+    "kind": "lrat-body",
+    "variable_count": 2,
+    "formula": [[1]],
+    "steps": [
+      {"kind": "add", "id": 2, "clause": [2], "hints": [99]}
+    ]
+  }
+}

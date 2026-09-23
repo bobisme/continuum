@@ -1,0 +1,10 @@
+{
+  "expect": "clean",
+  "description": "a fully-evidenced, correctly-ordered trace import claim",
+  "system": {
+    "kind": "trace-import",
+    "observations": {"a": {"clock": 0}, "b": {"clock": 1}},
+    "claimed_order": ["a", "b"],
+    "outcome": "Conforms"
+  }
+}

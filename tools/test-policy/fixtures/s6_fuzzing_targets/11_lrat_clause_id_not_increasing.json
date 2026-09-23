@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-6-06",
+  "rule": "lrat-clause-id-not-increasing-detected",
+  "description": "an add step's declared id does not exceed the highest id already in use",
+  "system": {
+    "kind": "lrat-body",
+    "variable_count": 2,
+    "formula": [[1], [2]],
+    "steps": [
+      {"kind": "add", "id": 1, "clause": [], "hints": [1, 2]}
+    ]
+  }
+}

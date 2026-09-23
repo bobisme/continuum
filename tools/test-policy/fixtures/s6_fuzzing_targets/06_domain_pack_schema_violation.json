@@ -1,0 +1,18 @@
+{
+  "requirement": "TEST-6-04",
+  "rule": "domain-pack-schema-violation-detected",
+  "description": "a domain-pack profile declares faults as integers instead of strings",
+  "system": {
+    "kind": "domain-pack",
+    "instance": {
+      "schema_id": "https://continuum.dev/schema/domain-pack.json",
+      "schema_epoch": 1,
+      "pack": {"name": "x", "semantic_version": "x-v0"},
+      "operations": [],
+      "profiles": [
+        {"id": "p", "class": "ideal", "assumptions": [], "faults": [1, 2, 3]}
+      ],
+      "resources": []
+    }
+  }
+}

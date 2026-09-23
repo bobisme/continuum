@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-6-06",
+  "rule": "lrat-clause-literals-not-ascending-detected",
+  "description": "a formula clause's literals are not a strictly-ascending (variable, sign) set",
+  "system": {
+    "kind": "lrat-body",
+    "variable_count": 3,
+    "formula": [[3, 1]],
+    "steps": []
+  }
+}

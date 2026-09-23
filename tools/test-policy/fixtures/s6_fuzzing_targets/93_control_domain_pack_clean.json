@@ -1,0 +1,15 @@
+{
+  "expect": "clean",
+  "description": "a minimal but schema-valid domain-pack manifest",
+  "system": {
+    "kind": "domain-pack",
+    "instance": {
+      "schema_id": "https://continuum.dev/schema/domain-pack.json",
+      "schema_epoch": 1,
+      "pack": {"name": "x", "semantic_version": "x-v0"},
+      "operations": [],
+      "profiles": [],
+      "resources": []
+    }
+  }
+}

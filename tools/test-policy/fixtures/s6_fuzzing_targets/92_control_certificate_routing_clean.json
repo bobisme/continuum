@@ -1,0 +1,9 @@
+{
+  "expect": "clean",
+  "description": "the real CONTSATC magic correctly claimed to route to Sat",
+  "system": {
+    "kind": "certificate-routing",
+    "bytes_hex": "434f4e5453415443",
+    "claimed": {"outcome": "routed", "family": "Sat"}
+  }
+}

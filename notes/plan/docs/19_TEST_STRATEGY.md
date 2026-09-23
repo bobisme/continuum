@@ -91,12 +91,12 @@ Disagreement halts the relevant claim and creates a minimized fixture.
 
 ## 6. Fuzzing
 
-- parser and canonical encodings;
+- parser and canonical encodings; (delivered: bn-1zb9 — tools/test-policy/evidence/s6_fuzzing_targets.json)
 - CIR validator;
-- certificate formats;
+- certificate formats; (delivered: bn-1zb9 — tools/test-policy/evidence/s6_fuzzing_targets.json)
 - domain-pack commands/faults;
 - trace importers;
-- solver proof parsers;
+- solver proof parsers; (delivered: bn-1zb9 — tools/test-policy/evidence/s6_fuzzing_targets.json)
 - replay state machine;
 - schema migrations.
 

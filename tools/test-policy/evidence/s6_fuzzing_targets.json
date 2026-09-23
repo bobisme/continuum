@@ -1,0 +1,376 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "90_control_cir_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "91_control_lrat_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "92_control_certificate_routing_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "93_control_domain_pack_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "94_control_trace_import_clean.json",
+      "ok": true
+    }
+  ],
+  "module": "tools/test-policy/sections/s6_fuzzing_targets.py",
+  "requirements": {
+    "TEST-6-01": {
+      "boundaries": [
+        "This module's schema-id-grammar-detected rule is independently corroborated by a real, non-#[ignore]d Rust test: crates/continuumd/tests/gate_g2_01_acceptance.rs's every_shipped_schema_document_declares_the_readme_identity_triple() asserts, over the same real notes/plan/schemas/*.schema.json files, that each one declares the exact $id/schema_epoch/schema_kind triple this module also checks. The canonical- encoding half of the concept is independently corroborated by continuum-value's own canonical-content-identity test suite (crates/continuum-value/src/identity.rs, ADR-0013). Two rules this module also runs \u2014 instance-header-mismatch-detected and canonical-encoding-not-value-identical-detected \u2014 have no equivalent named Rust test: notes/plan/schemas/README.md itself assigns instance-level validation to validate_dossier.py (a separate Python tool using the real jsonschema library), not to Rust, and the byte-identity-vs-canonical re-encoding check is a freestanding property demonstration over real example content, not a port of any Rust logic."
+      ],
+      "corpus": {
+        "examples_matched_to_a_schema": 19,
+        "examples_re_encoded": 19,
+        "rust_tests_named": 3,
+        "rust_tests_present": 3,
+        "schema_documents": 20
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "schema-id-grammar-detected"
+          ],
+          "fixture": "01_schema_id_grammar.json",
+          "ok": true,
+          "requirement": "TEST-6-01",
+          "rule": "schema-id-grammar-detected"
+        },
+        {
+          "caught": [
+            "instance-header-mismatch-detected"
+          ],
+          "fixture": "02_instance_header_mismatch.json",
+          "ok": true,
+          "requirement": "TEST-6-01",
+          "rule": "instance-header-mismatch-detected"
+        },
+        {
+          "caught": [
+            "canonical-encoding-not-value-identical-detected"
+          ],
+          "fixture": "03_canonical_encoding_byte_identity.json",
+          "ok": true,
+          "requirement": "TEST-6-01",
+          "rule": "canonical-encoding-not-value-identical-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 19,
+        "detected": 19
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "canonical-encoding-not-value-identical-detected",
+        "instance-header-mismatch-detected",
+        "schema-id-grammar-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuumd/tests/gate_g2_01_acceptance.rs",
+          "present": true,
+          "test": "every_shipped_schema_document_declares_the_readme_identity_triple"
+        },
+        {
+          "path": "crates/continuum-value/src/identity.rs",
+          "present": true,
+          "test": "a_certified_identity_is_the_canonical_encoding"
+        },
+        {
+          "path": "crates/continuum-value/src/identity.rs",
+          "present": true,
+          "test": "non_canonical_bytes_are_not_an_identity"
+        }
+      ],
+      "status": "enforced",
+      "summary": "parser and canonical encodings"
+    },
+    "TEST-6-02": {
+      "absence": "continuum-cir is a 20-line stub; no Rust code validates CIR structure beyond one enum's vocabulary parity; see BOUNDARIES",
+      "boundaries": [
+        "continuum-cir/src/lib.rs (crates/continuum-cir/src/lib.rs) is a 20-line documented stub: no Rust code anywhere validates a CIR document's structure. The one related real, non-#[ignore]d Rust test is crates/continuum-value/src/value.rs's value_kinds_are_the_cir_schema_value_kinds(), which checks that Value's own ValueKind enum matches cir.schema.json's $defs.value tagged-kind vocabulary \u2014 real corroboration of one enum, not of required fields, patterns, event structure, or obligation shape, which is what this module's cir-schema-violation-detected rule actually enforces (via cir.schema.json directly, INV-003). The schema remains the normative source under INV-003, but per the coordinator's rule that a Python check of a real artifact still needs a corresponding real-implementation test to be claimed delivered, and no such test exists for CIR structural validity, this ID is partial."
+      ],
+      "corpus": {
+        "golden_checked": 1,
+        "mutations": 6
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "cir-schema-violation-detected"
+          ],
+          "fixture": "04_cir_schema_violation.json",
+          "ok": true,
+          "requirement": "TEST-6-02",
+          "rule": "cir-schema-violation-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 6,
+        "detected": 6
+      },
+      "registry_status": "active",
+      "rules": [
+        "cir-schema-violation-detected"
+      ],
+      "status": "partial",
+      "summary": "CIR validator"
+    },
+    "TEST-6-03": {
+      "boundaries": [
+        "crates/continuum-certificate/src/family.rs's Family::route dispatches on eight magic bytes read straight from each continuum-kernel-* crate's own wire::MAGIC (family.rs: 'The constants below are therefore taken from the kernels rather than restated'). This module extracts those four MAGIC literals from the real, committed crates/continuum-kernel-{core,sat,smt,temporal}/src/wire.rs at run time (regex over the source text, not a hand-copied constant \u2014 the drift tie), and re-implements route()'s documented algorithm (read <=8 bytes, compare in Core/Sat/Smt/Temporal declaration order, TooShortForMagic below length, UnknownFamily otherwise) to check it against adversarial byte strings. Four real, non-#[ignore]d Rust tests in crates/continuum-certificate/tests/family_routing.rs exercise the real Family::route/check_certificate composition over exactly these cases (partition, too-short, unclaimed magic, wrong-family magic) \u2014 named and existence-checked below. What this module cannot do is call Family::route itself (no cargo), so a change to the routing algorithm's *shape* (not just its magic values) would not be caught here, and the four kernels' own wire-body decoders (LRAT/Alethe/ranking-witness bytes past the first eight bytes) are exercised only for the LRAT case, by TEST-6-06."
+      ],
+      "corpus": {
+        "families_routed": 4,
+        "rust_tests_named": 4,
+        "rust_tests_present": 4,
+        "too_short_inputs": 3,
+        "unknown_magic_inputs": 1
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "certificate-routing-mismatch-detected"
+          ],
+          "fixture": "05_certificate_routing_mismatch.json",
+          "ok": true,
+          "requirement": "TEST-6-03",
+          "rule": "certificate-routing-mismatch-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 12,
+        "detected": 12
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "certificate-routing-mismatch-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuum-certificate/tests/family_routing.rs",
+          "present": true,
+          "test": "the_routing_table_is_the_kernels_own_magics_and_they_partition_the_input_space"
+        },
+        {
+          "path": "crates/continuum-certificate/tests/family_routing.rs",
+          "present": true,
+          "test": "bytes_too_short_to_carry_a_magic_reach_no_checker"
+        },
+        {
+          "path": "crates/continuum-certificate/tests/family_routing.rs",
+          "present": true,
+          "test": "an_unclaimed_magic_is_a_routing_fault_carrying_the_bytes_that_arrived"
+        },
+        {
+          "path": "crates/continuum-certificate/tests/family_routing.rs",
+          "present": true,
+          "test": "a_certificate_stamped_with_another_familys_magic_is_refused_by_the_kernel_it_names"
+        }
+      ],
+      "status": "enforced",
+      "summary": "certificate formats"
+    },
+    "TEST-6-04": {
+      "absence": "no Rust code validates domain-pack commands/faults content; continuum-pack-storage does not exist under crates/; see BOUNDARIES",
+      "boundaries": [
+        "notes/plan/schemas/domain-pack.schema.json + schemas/examples/storage-pack.manifest.json are real, committed artifacts, and this module's domain-pack-schema-violation-detected rule validates real content against the real schema. But the only related Rust test is crates/continuumd/tests/inv003_no_prose_only_evidence.rs's every_schema_file_is_claimed_by_exactly_one_table_row_and_vice_versa(), which checks only that the schema *file* is inventoried in a hand-maintained table \u2014 it never reads a manifest's operations or faults. continuum-pack-storage, the adapter crate the manifest itself names, does not exist anywhere under crates/. There is no real Rust code that validates domain-pack commands or faults content, so this ID is partial."
+      ],
+      "corpus": {
+        "fault_or_profile_mutations": 2,
+        "golden_checked": 1,
+        "mutations": 6,
+        "operation_mutations": 2
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "domain-pack-schema-violation-detected"
+          ],
+          "fixture": "06_domain_pack_schema_violation.json",
+          "ok": true,
+          "requirement": "TEST-6-04",
+          "rule": "domain-pack-schema-violation-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 6,
+        "detected": 6
+      },
+      "registry_status": "active",
+      "rules": [
+        "domain-pack-schema-violation-detected"
+      ],
+      "status": "partial",
+      "summary": "domain-pack commands/faults"
+    },
+    "TEST-6-05": {
+      "absence": "no crate or schema implements RFC 0006's import layer yet; see BOUNDARIES",
+      "boundaries": [
+        "notes/plan/rfcs/0006-production-trace-conformance.md is a real, committed RFC with a typed outcome vocabulary (Conforms/Violates/Inconclusive/Unsupported/ResourceExhausted) and an explicit rule ('MUST NOT invent a total event order that telemetry does not establish'), but continuum-corpus and continuum-observer (crates/continuum-corpus/src/lib.rs, crates/continuum-observer/src/lib.rs) are both acknowledged ~20-line stubs, and no schema for a trace-import artifact exists under notes/plan/schemas/. No Rust test anywhere references trace import. The check below models the RFC's own vocabulary and no-fabrication rule as a standalone reference importer; it is not a test of any production import layer, because none has landed yet."
+      ],
+      "corpus": {
+        "fully_evidenced_scenarios": 15,
+        "missing_evidence_scenarios": 15,
+        "scenarios": 30
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "trace-fabricated-order-detected"
+          ],
+          "fixture": "07_trace_fabricated_order.json",
+          "ok": true,
+          "requirement": "TEST-6-05",
+          "rule": "trace-fabricated-order-detected"
+        },
+        {
+          "caught": [
+            "trace-outcome-not-typed-detected"
+          ],
+          "fixture": "08_trace_outcome_not_typed.json",
+          "ok": true,
+          "requirement": "TEST-6-05",
+          "rule": "trace-outcome-not-typed-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 15,
+        "detected": 15
+      },
+      "registry_status": "active",
+      "rules": [
+        "trace-fabricated-order-detected",
+        "trace-outcome-not-typed-detected"
+      ],
+      "status": "partial",
+      "summary": "trace importers"
+    },
+    "TEST-6-06": {
+      "boundaries": [
+        "crates/continuum-kernel-sat/src/wire.rs's own doc comment gives the LRAT body grammar as an explicit BNF plus a 'Canonicity' section naming exactly which sequences must be strictly-ascending sets (clause literals, ordered by (variable, sign); a deletion step's id list) and which are meaning-bearing sequences left unsorted (the antecedent hint chain), plus the LRAT convention that an added clause's own id must exceed every id already in use. This module re-implements exactly those rules and runs them against adversarial bodies \u2014 a from-scratch Python model, not an execution of the real 846-line decoder (no cargo) \u2014 but a run-time drift check (_check_lrat_grammar_drift) re-reads wire.rs and fails if the exact phrases this model is built from are no longer present. Six real, non-#[ignore]d Rust tests exercise the real decoder over the matching cases: wire.rs's own the_canonical_literal_order_is_by_variable_then_polarity, and check.rs's unordered_or_duplicated_literals_are_rejected, a_reused_or_descending_clause_identifier_is_rejected, an_unordered_deletion_list_is_rejected, an_antecedent_naming_an_undefined_clause_is_rejected, and deleting_an_undefined_clause_is_rejected \u2014 named and existence-checked below. continuum-kernel-smt's Alethe grammar is not modeled at all."
+      ],
+      "corpus": {
+        "bodies": 40,
+        "bodies_with_a_delete_step": 26,
+        "multi_literal_clauses": 21,
+        "rust_tests_named": 6,
+        "rust_tests_present": 6
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "lrat-clause-literals-not-ascending-detected"
+          ],
+          "fixture": "09_lrat_literal_order.json",
+          "ok": true,
+          "requirement": "TEST-6-06",
+          "rule": "lrat-clause-literals-not-ascending-detected"
+        },
+        {
+          "caught": [
+            "lrat-deletion-ids-not-ascending-detected"
+          ],
+          "fixture": "10_lrat_deletion_order.json",
+          "ok": true,
+          "requirement": "TEST-6-06",
+          "rule": "lrat-deletion-ids-not-ascending-detected"
+        },
+        {
+          "caught": [
+            "lrat-clause-id-not-increasing-detected"
+          ],
+          "fixture": "11_lrat_clause_id_not_increasing.json",
+          "ok": true,
+          "requirement": "TEST-6-06",
+          "rule": "lrat-clause-id-not-increasing-detected"
+        },
+        {
+          "caught": [
+            "lrat-reference-unknown-clause-detected"
+          ],
+          "fixture": "12_lrat_unknown_reference.json",
+          "ok": true,
+          "requirement": "TEST-6-06",
+          "rule": "lrat-reference-unknown-clause-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 127,
+        "detected": 127
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "lrat-clause-id-not-increasing-detected",
+        "lrat-clause-literals-not-ascending-detected",
+        "lrat-deletion-ids-not-ascending-detected",
+        "lrat-reference-unknown-clause-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuum-kernel-sat/src/wire.rs",
+          "present": true,
+          "test": "the_canonical_literal_order_is_by_variable_then_polarity"
+        },
+        {
+          "path": "crates/continuum-kernel-sat/src/check.rs",
+          "present": true,
+          "test": "unordered_or_duplicated_literals_are_rejected"
+        },
+        {
+          "path": "crates/continuum-kernel-sat/src/check.rs",
+          "present": true,
+          "test": "a_reused_or_descending_clause_identifier_is_rejected"
+        },
+        {
+          "path": "crates/continuum-kernel-sat/src/check.rs",
+          "present": true,
+          "test": "an_unordered_deletion_list_is_rejected"
+        },
+        {
+          "path": "crates/continuum-kernel-sat/src/check.rs",
+          "present": true,
+          "test": "an_antecedent_naming_an_undefined_clause_is_rejected"
+        },
+        {
+          "path": "crates/continuum-kernel-sat/src/check.rs",
+          "present": true,
+          "test": "deleting_an_undefined_clause_is_rejected"
+        }
+      ],
+      "status": "enforced",
+      "summary": "solver proof parsers"
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a76 Fuzzing",
+  "unclaimed": [
+    "TEST-6-07",
+    "TEST-6-08"
+  ]
+}

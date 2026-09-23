@@ -1,0 +1,19 @@
+{
+  "requirement": "TEST-6-01",
+  "rule": "schema-id-grammar-detected",
+  "description": "a schema document's schema_epoch disagrees with the v<epoch> segment of its own $id",
+  "system": {
+    "kind": "schema-doc",
+    "subject": "fixture:widget",
+    "doc": {
+      "$id": "https://continuum.dev/schema/v2/widget.json",
+      "schema_epoch": 1,
+      "schema_kind": "artifact",
+      "required": ["schema_id", "schema_epoch"],
+      "properties": {
+        "schema_id": {"const": "https://continuum.dev/schema/widget.json"},
+        "schema_epoch": {"const": 2}
+      }
+    }
+  }
+}

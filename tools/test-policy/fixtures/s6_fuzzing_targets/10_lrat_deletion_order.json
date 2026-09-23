@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-6-06",
+  "rule": "lrat-deletion-ids-not-ascending-detected",
+  "description": "a deletion step's id list is not strictly ascending",
+  "system": {
+    "kind": "lrat-body",
+    "variable_count": 2,
+    "formula": [[1], [2]],
+    "steps": [
+      {"kind": "delete", "ids": [2, 1]}
+    ]
+  }
+}

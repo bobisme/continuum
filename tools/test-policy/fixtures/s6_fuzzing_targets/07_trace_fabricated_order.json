@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-6-05",
+  "rule": "trace-fabricated-order-detected",
+  "description": "two observations with no clock/seq evidence between them are claimed to Conform, inventing an order RFC 0006 forbids",
+  "system": {
+    "kind": "trace-import",
+    "observations": {"a": {"clock": null}, "b": {"clock": null}},
+    "claimed_order": ["a", "b"],
+    "outcome": "Conforms"
+  }
+}

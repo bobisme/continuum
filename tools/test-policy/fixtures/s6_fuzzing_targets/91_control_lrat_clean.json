@@ -1,0 +1,12 @@
+{
+  "expect": "clean",
+  "description": "a canonicity-clean LRAT body",
+  "system": {
+    "kind": "lrat-body",
+    "variable_count": 2,
+    "formula": [[1], [2]],
+    "steps": [
+      {"kind": "add", "id": 3, "clause": [-2], "hints": [1, 2]}
+    ]
+  }
+}

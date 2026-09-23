@@ -1,0 +1,14 @@
+{
+  "expect": "clean",
+  "description": "a minimal but schema-valid CIR instance",
+  "system": {
+    "kind": "cir",
+    "instance": {
+      "schema_id": "https://continuum.dev/schema/cir.json",
+      "schema_epoch": 1,
+      "semantics_version": "cir-0.1",
+      "roots": [],
+      "events": []
+    }
+  }
+}

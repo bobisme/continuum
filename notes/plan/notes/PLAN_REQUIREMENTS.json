@@ -9417,7 +9417,7 @@
         "line": 92,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "parser and canonical encodings"
     },
     {
@@ -9439,7 +9439,7 @@
         "line": 92,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "certificate formats"
     },
     {
@@ -9472,7 +9472,7 @@
         "line": 92,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "solver proof parsers"
     },
     {

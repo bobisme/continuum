@@ -1,0 +1,14 @@
+{
+  "requirement": "TEST-6-02",
+  "rule": "cir-schema-violation-detected",
+  "description": "a CIR instance missing the required roots field",
+  "system": {
+    "kind": "cir",
+    "instance": {
+      "schema_id": "https://continuum.dev/schema/cir.json",
+      "schema_epoch": 1,
+      "semantics_version": "cir-0.1",
+      "events": []
+    }
+  }
+}
