@@ -9032,7 +9032,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "alpha-renaming"
     },
     {
@@ -9043,7 +9043,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "stable reordering of declarations"
     },
     {
@@ -9054,7 +9054,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "set/map insertion order"
     },
     {
@@ -9065,7 +9065,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "splitting a deterministic action into stuttering substeps with a valid view"
     },
     {
@@ -9076,7 +9076,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "joining adjacent internal stutter steps"
     },
     {
@@ -9087,7 +9087,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "symmetry renaming"
     },
     {

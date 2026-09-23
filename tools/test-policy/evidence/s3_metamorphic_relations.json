@@ -1,0 +1,243 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "t01_alpha_rename_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "t02_declaration_reorder_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "t03_relation_order_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "t04_split_stutter_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "t05_join_stutter_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "t06_symmetry_rename_clean.json",
+      "ok": true
+    }
+  ],
+  "module": "tools/test-policy/sections/s3_metamorphic_relations.py",
+  "requirements": {
+    "TEST-3-01": {
+      "boundaries": [
+        "continuum-engine-reference's semantic oracle module (crates/continuum-engine-reference/src/semantic/, bn-1zgs) is a differential defect oracle for the same generated-system concept as TEST \u00a72; it exposes no alpha-renaming, reordering, splitting, or symmetry transform of its own. continuum-engine-explicit and continuum-engine-dpor, where a real reduction or symmetry engine would run, remain documented stubs (the same boundary TEST-2-04 records). This harness's own tsys-based oracle is therefore what checks every TEST-3-01..06 relation; no optimized or Rust-side engine is compared against it yet.",
+        "The renaming covers structural identifiers (variable, process, transition, and obligation names) only. Enum values are literal data, not identifiers, and are not renamed."
+      ],
+      "corpus": {
+        "identifiers_renamed": 2616,
+        "systems": 256
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "alpha-rename-preserved"
+          ],
+          "fixture": "t01_alpha_rename_partial.json",
+          "ok": true,
+          "requirement": "TEST-3-01",
+          "rule": "alpha-rename-preserved"
+        }
+      ],
+      "mutant": {
+        "applied": 256,
+        "detected": 256
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "alpha-rename-preserved"
+      ],
+      "status": "enforced",
+      "summary": "alpha-renaming"
+    },
+    "TEST-3-02": {
+      "boundaries": [
+        "continuum-engine-reference's semantic oracle module (crates/continuum-engine-reference/src/semantic/, bn-1zgs) is a differential defect oracle for the same generated-system concept as TEST \u00a72; it exposes no alpha-renaming, reordering, splitting, or symmetry transform of its own. continuum-engine-explicit and continuum-engine-dpor, where a real reduction or symmetry engine would run, remain documented stubs (the same boundary TEST-2-04 records). This harness's own tsys-based oracle is therefore what checks every TEST-3-01..06 relation; no optimized or Rust-side engine is compared against it yet.",
+        "'Declaration' means the system's own `variables` and `transitions` lists. tsys.compile_system already sorts both by name, so this relation also documents an existing invariant of the oracle, not just a property under test."
+      ],
+      "corpus": {
+        "orders_changed": 256,
+        "systems": 256
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "declaration-reorder-preserved"
+          ],
+          "fixture": "t02_declaration_reorder_dropped.json",
+          "ok": true,
+          "requirement": "TEST-3-02",
+          "rule": "declaration-reorder-preserved"
+        }
+      ],
+      "mutant": {
+        "applied": 231,
+        "detected": 231
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "declaration-reorder-preserved"
+      ],
+      "status": "enforced",
+      "summary": "stable reordering of declarations"
+    },
+    "TEST-3-03": {
+      "boundaries": [
+        "continuum-engine-reference's semantic oracle module (crates/continuum-engine-reference/src/semantic/, bn-1zgs) is a differential defect oracle for the same generated-system concept as TEST \u00a72; it exposes no alpha-renaming, reordering, splitting, or symmetry transform of its own. continuum-engine-explicit and continuum-engine-dpor, where a real reduction or symmetry engine would run, remain documented stubs (the same boundary TEST-2-04 records). This harness's own tsys-based oracle is therefore what checks every TEST-3-01..06 relation; no optimized or Rust-side engine is compared against it yet.",
+        "'Set/map' means the system's own unordered declaration lists \u2014 `independent`, `conflicts`, `obligations` \u2014 spelled as JSON arrays. tsys has no first-class set or map variable type (TEST-2-01's boundary: 'Records, sets, maps, and sequences are not generated'), so this is the closest set/map-shaped construct the modeled language has."
+      ],
+      "corpus": {
+        "shuffle_eligible": 218,
+        "systems": 256
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "relation-order-preserved"
+          ],
+          "fixture": "t03_relation_order_dropped.json",
+          "ok": true,
+          "requirement": "TEST-3-03",
+          "rule": "relation-order-preserved"
+        }
+      ],
+      "mutant": {
+        "applied": 126,
+        "detected": 126
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "relation-order-preserved"
+      ],
+      "status": "enforced",
+      "summary": "set/map insertion order"
+    },
+    "TEST-3-04": {
+      "boundaries": [
+        "continuum-engine-reference's semantic oracle module (crates/continuum-engine-reference/src/semantic/, bn-1zgs) is a differential defect oracle for the same generated-system concept as TEST \u00a72; it exposes no alpha-renaming, reordering, splitting, or symmetry transform of its own. continuum-engine-explicit and continuum-engine-dpor, where a real reduction or symmetry engine would run, remain documented stubs (the same boundary TEST-2-04 records). This harness's own tsys-based oracle is therefore what checks every TEST-3-01..06 relation; no optimized or Rust-side engine is compared against it yet.",
+        "Only the generator's straight-line per-process action sequence is split, and only at the last step of the lowest-named process (so no later step's guard needs renumbering). The view used to check the relation is fixed: every variable except the split process's own program counter. The view-indexed Indep(e,f | View, PropertyClass) of docs/02 \u00a74 is not modeled."
+      ],
+      "corpus": {
+        "extra_states_from_the_stutter": 813,
+        "systems": 256
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "split-stutter-preserved"
+          ],
+          "fixture": "t04_split_stutter_not_pure.json",
+          "ok": true,
+          "requirement": "TEST-3-04",
+          "rule": "split-stutter-preserved"
+        }
+      ],
+      "mutant": {
+        "applied": 168,
+        "detected": 151
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "split-stutter-preserved"
+      ],
+      "status": "enforced",
+      "summary": "splitting a deterministic action into stuttering substeps with a valid view"
+    },
+    "TEST-3-05": {
+      "boundaries": [
+        "continuum-engine-reference's semantic oracle module (crates/continuum-engine-reference/src/semantic/, bn-1zgs) is a differential defect oracle for the same generated-system concept as TEST \u00a72; it exposes no alpha-renaming, reordering, splitting, or symmetry transform of its own. continuum-engine-explicit and continuum-engine-dpor, where a real reduction or symmetry engine would run, remain documented stubs (the same boundary TEST-2-04 records). This harness's own tsys-based oracle is therefore what checks every TEST-3-01..06 relation; no optimized or Rust-side engine is compared against it yet.",
+        "Built on TEST-3-04's split (two adjacent stutter steps are produced by splitting with `extra=2`), so it shares that boundary's scope."
+      ],
+      "corpus": {
+        "systems": 256
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "join-stutter-preserved"
+          ],
+          "fixture": "t05_join_stutter_not_pure.json",
+          "ok": true,
+          "requirement": "TEST-3-05",
+          "rule": "join-stutter-preserved"
+        }
+      ],
+      "mutant": {
+        "applied": 168,
+        "detected": 151
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "join-stutter-preserved"
+      ],
+      "status": "enforced",
+      "summary": "joining adjacent internal stutter steps"
+    },
+    "TEST-3-06": {
+      "boundaries": [
+        "continuum-engine-reference's semantic oracle module (crates/continuum-engine-reference/src/semantic/, bn-1zgs) is a differential defect oracle for the same generated-system concept as TEST \u00a72; it exposes no alpha-renaming, reordering, splitting, or symmetry transform of its own. continuum-engine-explicit and continuum-engine-dpor, where a real reduction or symmetry engine would run, remain documented stubs (the same boundary TEST-2-04 records). This harness's own tsys-based oracle is therefore what checks every TEST-3-01..06 relation; no optimized or Rust-side engine is compared against it yet.",
+        "In this generator's model, processes never read one another's program counter, so swapping two process labels is *always* sound (an isomorphism), whether or not the two processes run the same code \u2014 it is mathematically the alpha-renaming of TEST-3-01 restricted to one transposition. Symmetry in the sense that matters for a symmetry-reduction engine (collapsing genuinely interchangeable states, recognizing that a swap is a no-op on the declaration, not just semantics-preserving) needs the swap to be checked against the declaration itself, which this harness does not do; continuum-engine-explicit/continuum-engine-dpor, where such a reduction would run, remain stubs (the same boundary TEST-2-04 records). Positive evidence here uses a purpose-built two-process-symmetric generator (`generate_symmetric`) so the corpus is at least about literally interchangeable components; the corruption mutant confirms the checker is not vacuous."
+      ],
+      "corpus": {
+        "symmetric_systems": 256
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "symmetry-rename-preserved"
+          ],
+          "fixture": "t06_symmetry_rename_partial.json",
+          "ok": true,
+          "requirement": "TEST-3-06",
+          "rule": "symmetry-rename-preserved"
+        }
+      ],
+      "mutant": {
+        "applied": 256,
+        "detected": 256
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "symmetry-rename-preserved"
+      ],
+      "status": "enforced",
+      "summary": "symmetry renaming"
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "seeds": "0..255",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a73 Metamorphic relations",
+  "unclaimed": [
+    "TEST-3-07",
+    "TEST-3-08",
+    "TEST-3-09",
+    "TEST-3-10"
+  ]
+}

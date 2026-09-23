@@ -1,0 +1,221 @@
+{
+  "description": "A partial rename (one init entry left under its pre-rename key) is caught.",
+  "requirement": "TEST-3-01",
+  "rule": "alpha-rename-preserved",
+  "system": {
+    "base": {
+      "conflicts": [],
+      "independent": [],
+      "init": {
+        "pc_p0": 0,
+        "x": false
+      },
+      "name": "tiny",
+      "obligations": [],
+      "transitions": [
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "x"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "x": {
+              "args": [
+                {
+                  "var": "x"
+                }
+              ],
+              "op": "not"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "x"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s1",
+          "process": "p0",
+          "reads": [
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "x",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 2,
+            "min": 0
+          }
+        }
+      ]
+    },
+    "relation": "alpha-rename",
+    "subject": "tiny (partial rename)",
+    "transformed": {
+      "conflicts": [],
+      "independent": [],
+      "init": {
+        "r_0p_cp": 0,
+        "x": false
+      },
+      "name": "r_ynit",
+      "obligations": [],
+      "transitions": [
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "r_0p_cp"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "r_0s.0p",
+          "process": "r_0p",
+          "reads": [
+            "r_0p_cp",
+            "r_x"
+          ],
+          "updates": {
+            "r_0p_cp": {
+              "args": [
+                {
+                  "var": "r_0p_cp"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "r_x": {
+              "args": [
+                {
+                  "var": "r_x"
+                }
+              ],
+              "op": "not"
+            }
+          },
+          "writes": [
+            "r_0p_cp",
+            "r_x"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "r_0p_cp"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "r_1s.0p",
+          "process": "r_0p",
+          "reads": [
+            "r_0p_cp"
+          ],
+          "updates": {
+            "r_0p_cp": {
+              "args": [
+                {
+                  "var": "r_0p_cp"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "r_0p_cp"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "r_x",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "r_0p_cp",
+          "type": {
+            "kind": "int",
+            "max": 2,
+            "min": 0
+          }
+        }
+      ]
+    }
+  }
+}

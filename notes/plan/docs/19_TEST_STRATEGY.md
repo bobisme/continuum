@@ -34,12 +34,12 @@ For small sizes, enumerate all interleavings and configurations. Compare every o
 
 Expected preservation:
 
-- alpha-renaming;
-- stable reordering of declarations;
-- set/map insertion order;
-- splitting a deterministic action into stuttering substeps with a valid view;
-- joining adjacent internal stutter steps;
-- symmetry renaming;
+- alpha-renaming; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
+- stable reordering of declarations; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
+- set/map insertion order; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
+- splitting a deterministic action into stuttering substeps with a valid view; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
+- joining adjacent internal stutter steps; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
+- symmetry renaming; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
 - independent-event swap;
 - equivalent guard normalization;
 - serialization round trip;

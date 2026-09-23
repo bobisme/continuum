@@ -1,0 +1,249 @@
+{
+  "description": "Reordering the independent/conflicts/obligations lists preserves reachable behaviour and sleep-set metrics.",
+  "expect": "clean",
+  "system": {
+    "base": {
+      "conflicts": [],
+      "independent": [
+        [
+          "p0.s0",
+          "p1.s0"
+        ]
+      ],
+      "init": {
+        "pc_p0": 0,
+        "pc_p1": 0,
+        "x": false,
+        "y": false
+      },
+      "name": "two-proc",
+      "obligations": [],
+      "transitions": [
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "x"
+          ],
+          "updates": {
+            "pc_p0": {
+              "const": 1
+            },
+            "x": {
+              "args": [
+                {
+                  "var": "x"
+                }
+              ],
+              "op": "not"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "x"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p1"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p1.s0",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "y"
+          ],
+          "updates": {
+            "pc_p1": {
+              "const": 1
+            },
+            "y": {
+              "args": [
+                {
+                  "var": "y"
+                }
+              ],
+              "op": "not"
+            }
+          },
+          "writes": [
+            "pc_p1",
+            "y"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "x",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "y",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 1,
+            "min": 0
+          }
+        },
+        {
+          "name": "pc_p1",
+          "type": {
+            "kind": "int",
+            "max": 1,
+            "min": 0
+          }
+        }
+      ]
+    },
+    "relation": "relation-order",
+    "transformed": {
+      "conflicts": [],
+      "independent": [
+        [
+          "p0.s0",
+          "p1.s0"
+        ]
+      ],
+      "init": {
+        "pc_p0": 0,
+        "pc_p1": 0,
+        "x": false,
+        "y": false
+      },
+      "name": "two-proc",
+      "obligations": [],
+      "transitions": [
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "x"
+          ],
+          "updates": {
+            "pc_p0": {
+              "const": 1
+            },
+            "x": {
+              "args": [
+                {
+                  "var": "x"
+                }
+              ],
+              "op": "not"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "x"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p1"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p1.s0",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "y"
+          ],
+          "updates": {
+            "pc_p1": {
+              "const": 1
+            },
+            "y": {
+              "args": [
+                {
+                  "var": "y"
+                }
+              ],
+              "op": "not"
+            }
+          },
+          "writes": [
+            "pc_p1",
+            "y"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "x",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "y",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 1,
+            "min": 0
+          }
+        },
+        {
+          "name": "pc_p1",
+          "type": {
+            "kind": "int",
+            "max": 1,
+            "min": 0
+          }
+        }
+      ]
+    }
+  }
+}

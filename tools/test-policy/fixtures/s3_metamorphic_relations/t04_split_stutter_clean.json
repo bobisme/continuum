@@ -1,0 +1,540 @@
+{
+  "description": "Splitting the last step into (real work, pure pc-advance stutter) preserves the view excluding that process's pc.",
+  "expect": "clean",
+  "system": {
+    "base": {
+      "conflicts": [],
+      "independent": [
+        [
+          "p0.s1",
+          "p1.s0"
+        ]
+      ],
+      "init": {
+        "pc_p0": 0,
+        "pc_p1": 0,
+        "v0": 0,
+        "v1": "a"
+      },
+      "name": "gen-0",
+      "obligations": [
+        {
+          "name": "o_p0",
+          "owner": "p0"
+        }
+      ],
+      "transitions": [
+        {
+          "guard": {
+            "args": [
+              {
+                "args": [
+                  {
+                    "var": "pc_p0"
+                  },
+                  {
+                    "const": 0
+                  }
+                ],
+                "op": "eq"
+              },
+              {
+                "args": [
+                  {
+                    "var": "v0"
+                  },
+                  {
+                    "const": 0
+                  }
+                ],
+                "op": "eq"
+              }
+            ],
+            "op": "and"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "v0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "v1": {
+              "const": "c"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "v1"
+          ]
+        },
+        {
+          "acquire": [
+            "o_p0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s1",
+          "process": "p0",
+          "reads": [
+            "obligation:o_p0",
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "obligation:o_p0",
+            "pc_p0"
+          ]
+        },
+        {
+          "discharge": [
+            "o_p0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 2
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s2",
+          "process": "p0",
+          "reads": [
+            "obligation:o_p0",
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "v1": {
+              "const": "b"
+            }
+          },
+          "writes": [
+            "obligation:o_p0",
+            "pc_p0",
+            "v1"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "args": [
+                  {
+                    "var": "pc_p1"
+                  },
+                  {
+                    "const": 0
+                  }
+                ],
+                "op": "eq"
+              },
+              {
+                "args": [
+                  {
+                    "var": "v0"
+                  },
+                  {
+                    "const": 1
+                  }
+                ],
+                "op": "lt"
+              }
+            ],
+            "op": "and"
+          },
+          "name": "p1.s0",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "v0"
+          ],
+          "updates": {
+            "pc_p1": {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "v1": {
+              "const": "a"
+            }
+          },
+          "writes": [
+            "pc_p1",
+            "v1"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "v0",
+          "type": {
+            "kind": "int",
+            "max": 2,
+            "min": 0
+          }
+        },
+        {
+          "name": "v1",
+          "type": {
+            "kind": "enum",
+            "values": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        },
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 3,
+            "min": 0
+          }
+        },
+        {
+          "name": "pc_p1",
+          "type": {
+            "kind": "int",
+            "max": 1,
+            "min": 0
+          }
+        }
+      ]
+    },
+    "pc": "pc_p0",
+    "relation": "split-stutter",
+    "transformed": {
+      "conflicts": [],
+      "independent": [
+        [
+          "p0.s1",
+          "p1.s0"
+        ]
+      ],
+      "init": {
+        "pc_p0": 0,
+        "pc_p1": 0,
+        "v0": 0,
+        "v1": "a"
+      },
+      "name": "gen-0",
+      "obligations": [
+        {
+          "name": "o_p0",
+          "owner": "p0"
+        }
+      ],
+      "transitions": [
+        {
+          "guard": {
+            "args": [
+              {
+                "args": [
+                  {
+                    "var": "pc_p0"
+                  },
+                  {
+                    "const": 0
+                  }
+                ],
+                "op": "eq"
+              },
+              {
+                "args": [
+                  {
+                    "var": "v0"
+                  },
+                  {
+                    "const": 0
+                  }
+                ],
+                "op": "eq"
+              }
+            ],
+            "op": "and"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "v0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "v1": {
+              "const": "c"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "v1"
+          ]
+        },
+        {
+          "acquire": [
+            "o_p0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s1",
+          "process": "p0",
+          "reads": [
+            "obligation:o_p0",
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "obligation:o_p0",
+            "pc_p0"
+          ]
+        },
+        {
+          "discharge": [
+            "o_p0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 2
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s2",
+          "process": "p0",
+          "reads": [
+            "obligation:o_p0",
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "v1": {
+              "const": "b"
+            }
+          },
+          "writes": [
+            "obligation:o_p0",
+            "pc_p0",
+            "v1"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "args": [
+                  {
+                    "var": "pc_p1"
+                  },
+                  {
+                    "const": 0
+                  }
+                ],
+                "op": "eq"
+              },
+              {
+                "args": [
+                  {
+                    "var": "v0"
+                  },
+                  {
+                    "const": 1
+                  }
+                ],
+                "op": "lt"
+              }
+            ],
+            "op": "and"
+          },
+          "name": "p1.s0",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "v0"
+          ],
+          "updates": {
+            "pc_p1": {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            },
+            "v1": {
+              "const": "a"
+            }
+          },
+          "writes": [
+            "pc_p1",
+            "v1"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 3
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.stutter0",
+          "process": "p0",
+          "reads": [
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "const": 4
+            }
+          },
+          "writes": [
+            "pc_p0"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "v0",
+          "type": {
+            "kind": "int",
+            "max": 2,
+            "min": 0
+          }
+        },
+        {
+          "name": "v1",
+          "type": {
+            "kind": "enum",
+            "values": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        },
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 4,
+            "min": 0
+          }
+        },
+        {
+          "name": "pc_p1",
+          "type": {
+            "kind": "int",
+            "max": 1,
+            "min": 0
+          }
+        }
+      ]
+    }
+  }
+}
