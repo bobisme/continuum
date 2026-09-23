@@ -395,7 +395,7 @@ changes without revisiting that ratification).
 
 Instrument narrow primitives:
 
-- task/region lifecycle;
+- task/region lifecycle (delivered: bn-lf4i — `crates/continuum-asupersync/src/binding.rs`: `binding::run` drives a fresh asupersync 0.5.0 `LabRuntime`, pinned at an exact version with 174 recorded dependency audits and trimmed features, through open-region, spawn, begin, continue, finish, close and cancel under a Continuum `ChoiceLog`. It reads the lifecycle journal from the substrate's own trace buffer, and a run it cannot see in full is a typed `BindingRefusal` with an INV-008 reason, never a short journal. Crashpack and harness paths are unreachable, pinned by a test and by `ASUPERSYNC_AUTO_ARTIFACTS = "0"` in `.cargo/config.toml`. The other five families are typed `FamilyNotBound` absences. Evidence: `tests/pr14_impl01_binding.rs` — byte-identical journals and digests over 11,606 logs, seed invariance over 5 seeds, a byte-equal differential between the substrate journal and the scripted-source journal, lift conformance into `continuum_task::region`, and typed refusals for malformed input. Narrowing: `is_total` is asserted for single-region teardown only, and child-region teardown asserts no orphans and no unresolved publications);
 - reserve/commit/abort;
 - cancellation phases;
 - obligations;
