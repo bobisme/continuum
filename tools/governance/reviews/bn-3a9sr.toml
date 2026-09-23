@@ -1,0 +1,55 @@
+[change]
+bone = "bn-3a9sr"
+author = "continuum-dev"
+summary = "continuum-cml-elab: the RFC 0003 run configuration (new run-config.schema.json) read strictly, bound to a model with typed refusals, and given to lowering explicitly; instantiated sorts and scalar constants lower, and a typed run identity pairs the model and configuration identities"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+  "crates/continuum-model-core/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/configured.rs::the_schema_example_reads_and_names_its_schema",
+  "crates/continuum-cml-elab/tests/configured.rs::the_replicated_register_binds_and_lowers_as_far_as_integer_state_allows",
+  "crates/continuum-cml-elab/tests/configured.rs::bindings_that_do_not_fit_the_model_are_refused_typed",
+  "crates/continuum-cml-elab/tests/configured.rs::structured_values_are_typed_and_function_constants_unbindable",
+  "crates/continuum-cml-elab/tests/configured.rs::documents_the_schema_does_not_admit_are_refused_by_the_reader",
+  "crates/continuum-cml-elab/tests/configured.rs::unconfigured_lowering_still_refuses_constants",
+  "crates/continuum-cml-elab/tests/configured.rs::two_configurations_always_give_two_run_identities",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::configuration_sizes_are_charged_and_grow_linearly",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::configuration_bounds_are_enforced_before_use",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::configured_domains_are_preflighted_against_model_core",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::element_constants_cost_a_table_lookup_not_a_scan",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_tight_work_limit_is_refused_before_any_element_lookup",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::long_string_constants_are_charged_by_their_bytes",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_configured_boundary_is_exact",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_model_identity_is_charged_before_it_is_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::constant_sizes_are_stored_at_read_time",
+  "crates/continuum-model-core/src/identity.rs::the_length_bound_is_exact_or_above",
+  "crates/continuum-model-core/tests/identity_golden.rs::the_model_identity_encoding_is_pinned_byte_for_byte",
+  "crates/continuum-cml-elab/tests/configured.rs::the_reader_agrees_with_the_schema_on_every_parity_case",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/configured.rs::equal_models_under_equal_configurations_share_a_run_identity", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/configured.rs::the_configured_ring_is_the_programmatic_ring", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/configured.rs::a_different_binding_is_told_apart_by_the_differential", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "a run configuration is what binds a corpus port's constants and unbounded sorts explicitly (ADR-0025), a precondition of Wave 0 ports reaching an engine (C021) and part of the expressiveness C022 claims; this change adds evidence toward both (a configured model lowers and equals its programmatic twin) and promotes neither: both stay TARGET, and collection-valued state (bn-15zfa) still does not lower"
+
+[semantic.schemas]
+updated = ["notes/plan/schemas/run-config.schema.json"]
+reason = "new artifact class run-config (schema epoch 1), approved by the lead: RFC 0003 correction 3 makes it normative for the run configuration; its example and the configured-lowering fixture are validated by the dossier validator"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-model-core gains Model::identity_len_bound and Model::identity_alloc_bound, new read-only methods, and Model::identity now encodes outcomes into one reused scratch buffer; its continuum-model/1 bytes are unchanged, pinned by tests/identity_golden.rs. continuum-cml-elab: lower() and every existing model, normalized AST, and Model::identity are unchanged; lower_configured, the config module, LowerErrorKind::Configuration, and RunIdentity are new surface with no prior artifact; run-config is a new schema class at epoch 1 with no prior instances"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1sxoia"
+verdict = "approved"

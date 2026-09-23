@@ -674,6 +674,10 @@ mod artifact_classes {
             file: "repair-transaction.schema.json",
         },
         SchemaBound {
+            class: "run-config",
+            file: "run-config.schema.json",
+        },
+        SchemaBound {
             class: "semantic-diff",
             file: "semantic-diff.schema.json",
         },

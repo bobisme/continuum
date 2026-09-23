@@ -12,6 +12,11 @@ continuum-cml-syntax = { path = "../continuum-cml-syntax" }
 # programmatic API builds (PR 15a). Plan §20: search consumes the model core, and so
 # does a front end.
 continuum-model-core = { path = "../continuum-model-core" }
+# The run configuration (RFC 0003 "Configurations and bounds") is a JSON artifact
+# (notes/plan/schemas/run-config.schema.json); it is read by the workspace's one strict
+# canonical-JSON reader and its identity is that module's canonical encoding, rather
+# than a second JSON reader or writer (ADR-0013).
+continuum-intent = { path = "../continuum-intent" }
 
 # The differential: `tests/diehard_differential.rs` checks the elaborated Die Hard
 # model with the reference engine and compares every answer with the programmatic

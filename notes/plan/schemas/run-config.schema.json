@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuum.dev/schema/v1/run-config.json",
+  "schema_epoch": 1,
+  "schema_kind": "artifact",
+  "title": "Continuum CML Run Configuration",
+  "description": "The finite instantiation of a CML model's sorts and the values of its constants, given to lowering explicitly (RFC 0003 'Configurations and bounds', correction 3). Faults and assumptions from RFC 0003's sketch are deferred to a later schema epoch. Beyond what this schema states, a reader MUST refuse a duplicate object key, a duplicate member of a `set`, and a duplicate key of a `map` (JSON Schema cannot state the last two by structural value). Identity: the canonical ID5 encoding of the document with `set` members and `map` entries sorted by their canonical encoding.",
+  "type": "object",
+  "required": [
+    "schema_id",
+    "schema_epoch",
+    "model",
+    "sorts",
+    "constants"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "https://continuum.dev/schema/run-config.json",
+      "description": "Artifact-class identity of the governing schema: its `$id` with the `v<schema_epoch>/` segment removed (schemas/README.md). Stable across schema epochs."
+    },
+    "schema_epoch": {
+      "const": 1,
+      "description": "Schema epoch this instance was written against (schemas/README.md). It advances only on a breaking change to this artifact class, is not one of the six independently versioned epochs (RFC 0026 `rule versioning.epoch_independence`), and pins no semantics."
+    },
+    "model": {
+      "$ref": "#/$defs/name",
+      "description": "The model (module) name the configuration is written for; lowering another model under it is a typed refusal."
+    },
+    "sorts": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/sort"
+      },
+      "description": "One finite instantiation per uninterpreted sort the model declares, and no other."
+    },
+    "constants": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/value"
+      },
+      "description": "One value per constant the model declares, and no other; each value must have the constant's declared type."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[!-~]{1,128}(?!\\n)$",
+      "description": "Printable ASCII (0x21-0x7E), 1 to 128 bytes: the model's own name limit (continuum_model_core MAX_IDENT_BYTES). The `(?!\\n)` guard makes the pattern reject a trailing line feed under Python's `re` as well as ECMA-262, where `$` differs."
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}(?!\\n)$",
+      "description": "A CML identifier."
+    },
+    "sort": {
+      "type": "object",
+      "required": [
+        "elements"
+      ],
+      "properties": {
+        "elements": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 65536,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/name"
+          },
+          "description": "The sort's elements. Order is significant: element i lowers to the integer i."
+        }
+      },
+      "additionalProperties": false
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "int"
+          ],
+          "properties": {
+            "int": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807
+            }
+          },
+          "additionalProperties": false,
+          "description": "An Int or Nat value (Nat: non-negative)."
+        },
+        {
+          "type": "object",
+          "required": [
+            "bool"
+          ],
+          "properties": {
+            "bool": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "description": "A Bool value."
+        },
+        {
+          "type": "object",
+          "required": [
+            "str"
+          ],
+          "properties": {
+            "str": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "A String value."
+        },
+        {
+          "type": "object",
+          "required": [
+            "elem"
+          ],
+          "properties": {
+            "elem": {
+              "type": "object",
+              "required": [
+                "sort",
+                "name"
+              ],
+              "properties": {
+                "sort": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "name": {
+                  "$ref": "#/$defs/name"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "description": "An element of a sort, qualified by the sort; the sort must be the constant's declared sort."
+        },
+        {
+          "type": "object",
+          "required": [
+            "variant"
+          ],
+          "properties": {
+            "variant": {
+              "type": "object",
+              "required": [
+                "enum",
+                "name"
+              ],
+              "properties": {
+                "enum": {
+                  "$ref": "#/$defs/identifier"
+                },
+                "name": {
+                  "$ref": "#/$defs/identifier"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "description": "A variant of an enumeration, qualified by the enumeration."
+        },
+        {
+          "type": "object",
+          "required": [
+            "tuple"
+          ],
+          "properties": {
+            "tuple": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/value"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "A tuple of two or more components."
+        },
+        {
+          "type": "object",
+          "required": [
+            "record"
+          ],
+          "properties": {
+            "record": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/identifier"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/value"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "A record; its fields are exactly the declared record type's."
+        },
+        {
+          "type": "object",
+          "required": [
+            "set"
+          ],
+          "properties": {
+            "set": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/value"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "A finite set; members are duplicate-free by value, and their order is not significant."
+        },
+        {
+          "type": "object",
+          "required": [
+            "seq"
+          ],
+          "properties": {
+            "seq": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/value"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "A finite sequence; order is significant."
+        },
+        {
+          "type": "object",
+          "required": [
+            "map"
+          ],
+          "properties": {
+            "map": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "$ref": "#/$defs/value"
+                  },
+                  {
+                    "$ref": "#/$defs/value"
+                  }
+                ],
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          },
+          "additionalProperties": false,
+          "description": "A finite map as [key, value] pairs; keys are duplicate-free by value, and pair order is not significant."
+        },
+        {
+          "type": "object",
+          "required": [
+            "none"
+          ],
+          "properties": {
+            "none": {
+              "type": "null"
+            }
+          },
+          "additionalProperties": false,
+          "description": "The empty Option value."
+        },
+        {
+          "type": "object",
+          "required": [
+            "some"
+          ],
+          "properties": {
+            "some": {
+              "$ref": "#/$defs/value"
+            }
+          },
+          "additionalProperties": false,
+          "description": "A present Option value."
+        }
+      ]
+    }
+  }
+}

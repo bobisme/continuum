@@ -35,6 +35,16 @@
 //! `Nat` is not silently bounded, a quantifier is not silently unrolled, and a fairness
 //! assumption is not silently dropped.
 //!
+//! # Under a run configuration
+//!
+//! [`lower_configured`] takes a [`RunConfig`] explicitly (RFC 0003 "Run configuration
+//! (normative)"). It checks every binding first, then lowers as above with three
+//! additions: a state variable of an instantiated sort is an integer in `0..size`, a
+//! constant bound to an integer, a Boolean, or a sort element is that literal, and
+//! sort values compare as integers. It returns the model with its configuration
+//! identity and one [`RunIdentity`] for the pair; [`Model::identity`] itself is left
+//! the transition system's alone.
+//!
 //! # Refinements are domains
 //!
 //! `big: Nat where big <= 5` becomes the declared domain `0..=5`. An update that leaves
@@ -55,6 +65,7 @@ use continuum_model_core::{
 };
 
 use crate::budget::{Budget, Fuel, Limits, Usage, lookup_cost, sort_cost};
+use crate::config::{ConfigIdentity, ConfigValue, RunConfig, RunIdentity};
 use crate::norm::{BinOp, Builtin, Expr, ExprKind, Next, NormModel, Temporal};
 use crate::types::Type;
 
@@ -241,6 +252,56 @@ pub enum LowerErrorKind {
     Model(ModelError),
     /// Evaluating the init predicate failed (for example, overflow).
     Evaluation(EvalError),
+    /// The run configuration does not bind this model (RFC 0003 "Configurations and
+    /// bounds"): a missing, extra, or ill-typed binding, or a configuration written for
+    /// another model.
+    Configuration(ConfigRefusal),
+}
+
+/// A binding a run configuration gets wrong, and the name it concerns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRefusal {
+    /// What is wrong.
+    pub kind: ConfigRefusalKind,
+    /// The sort, constant, or (for [`ConfigRefusalKind::OtherModel`]) model name.
+    pub name: String,
+}
+
+/// The kinds of [`ConfigRefusal`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConfigRefusalKind {
+    /// The configuration names another model.
+    OtherModel,
+    /// A sort the model declares has no instantiation.
+    MissingSort,
+    /// An instantiated sort the model does not declare.
+    ExtraSort,
+    /// A constant the model declares has no value.
+    MissingConstant,
+    /// A value for a constant the model does not declare.
+    ExtraConstant,
+    /// A value that does not have its constant's declared type: a wrong tag, an element
+    /// of another sort or not in it, an unknown variant, a negative `Nat`, a record with
+    /// other fields, or a tuple of another width.
+    IllTyped,
+    /// A constant of a function type, which the configuration has no value form for.
+    UnbindableType,
+}
+
+impl ConfigRefusalKind {
+    /// A stable, machine-readable code.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::OtherModel => "cml.config.other_model",
+            Self::MissingSort => "cml.config.missing_sort",
+            Self::ExtraSort => "cml.config.extra_sort",
+            Self::MissingConstant => "cml.config.missing_constant",
+            Self::ExtraConstant => "cml.config.extra_constant",
+            Self::IllTyped => "cml.config.ill_typed",
+            Self::UnbindableType => "cml.config.unbindable_type",
+        }
+    }
 }
 
 /// A source-located lowering error.
@@ -260,6 +321,7 @@ impl LowerError {
             LowerErrorKind::Unlowerable(u) => u.code(),
             LowerErrorKind::Model(_) => "cml.lower.model_refused",
             LowerErrorKind::Evaluation(_) => "cml.lower.evaluation",
+            LowerErrorKind::Configuration(r) => r.kind.code(),
         }
     }
 }
@@ -270,6 +332,9 @@ impl fmt::Display for LowerError {
             LowerErrorKind::Unlowerable(u) => write!(f, "{}: {}: {u}", self.span, self.code()),
             LowerErrorKind::Model(e) => write!(f, "{}: {}: {e}", self.span, self.code()),
             LowerErrorKind::Evaluation(e) => write!(f, "{}: {}: {e}", self.span, self.code()),
+            LowerErrorKind::Configuration(r) => {
+                write!(f, "{}: {}: `{}`", self.span, self.code(), r.name)
+            }
         }
     }
 }
@@ -310,6 +375,19 @@ struct Meter {
     /// read lowers to an indexed placeholder (`'3`), resolved once here and substituted
     /// in constant time per candidate.
     slots: std::collections::BTreeMap<String, usize>,
+    /// What a run configuration binds; empty for [`lower`].
+    bind: Bindings,
+}
+
+/// The scalar bindings of a run configuration, as the lowering reads them: each
+/// instantiated sort's size (its elements are the integers `0..size`), and each
+/// constant whose value is an integer, a Boolean, or a sort element (its index).
+#[derive(Debug, Default)]
+struct Bindings {
+    configured: bool,
+    sorts: std::collections::BTreeMap<String, i64>,
+    ints: std::collections::BTreeMap<String, i64>,
+    bools: std::collections::BTreeMap<String, bool>,
 }
 
 /// Spend `n` units of work, or refuse with [`Unlowerable::WorkLimitExceeded`].
@@ -329,6 +407,7 @@ pub fn lower_with(model: &NormModel, limits: Limits) -> (Result<Model, LowerErro
         vars: model.state.len(),
         post: false,
         slots: std::collections::BTreeMap::new(),
+        bind: Bindings::default(),
     };
     let result = lower_metered(model, &mut meter);
     let usage = Usage {
@@ -336,6 +415,415 @@ pub fn lower_with(model: &NormModel, limits: Limits) -> (Result<Model, LowerErro
         work: meter.fuel.used(),
     };
     (result, usage)
+}
+
+/// A model lowered under a run configuration, with its identities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Configured {
+    model: Model,
+    run: RunIdentity,
+}
+
+impl Configured {
+    /// The lowered model. Its [`Model::identity`] is that of the transition system alone,
+    /// so it equals a programmatic model built with the same values.
+    #[must_use]
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    /// The configuration's content identity (shared with the [`RunConfig`]).
+    #[must_use]
+    pub fn config_identity(&self) -> &ConfigIdentity {
+        self.run.config()
+    }
+
+    /// The one handle for this model under this configuration: two configurations always
+    /// give two run identities.
+    #[must_use]
+    pub fn run_identity(&self) -> &RunIdentity {
+        &self.run
+    }
+}
+
+thread_local! {
+    /// How many model identities `lower_configured` has encoded on this thread: the test
+    /// seam that shows a refusal came before the encoding.
+    static IDENTITY_ENCODINGS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many model identities [`lower_configured`] has encoded on the calling thread.
+/// A test reads it before and after a refused lowering to show the identity was never
+/// built.
+#[must_use]
+pub fn identity_encodings_on_this_thread() -> u64 {
+    IDENTITY_ENCODINGS.with(std::cell::Cell::get)
+}
+
+/// Lower `model` under the run configuration `config`, given explicitly (RFC 0003
+/// "Configurations and bounds"; it is never read from the environment).
+///
+/// The bindings are checked first, in a fixed order — the model name; the sorts,
+/// missing then extra; the constants, missing then extra; then each constant's value
+/// against its declared type, in name order — and the first defect is a typed
+/// [`ConfigRefusal`]. Every sort element and every value node is charged to the output
+/// and work budgets before its table is built. An instantiated sort lowers a state
+/// variable of that sort to the integers `0..size`, with its elements in configuration
+/// order; a constant whose value is an integer, a Boolean, or a sort element lowers to
+/// that literal. Everything else lowers exactly as [`lower`] does.
+pub fn lower_configured(
+    model: &NormModel,
+    config: &RunConfig,
+    limits: Limits,
+) -> (Result<Configured, LowerError>, Usage) {
+    let mut meter = Meter {
+        nodes: Budget::new(limits.nodes),
+        fuel: Fuel::new(limits.work),
+        vars: model.state.len(),
+        post: false,
+        slots: std::collections::BTreeMap::new(),
+        bind: Bindings::default(),
+    };
+    let result = bindings(model, config, &mut meter).and_then(|bind| {
+        meter.bind = bind;
+        let lowered = lower_metered(model, &mut meter)?;
+        // The model identity's buffers are the only new allocations here. Before any is
+        // made: the walks are charged — `identity_alloc_bound` visits the model twice,
+        // and `Model::identity` visits it three times (its two capacity walks and the
+        // encoding) — each visit covering every expression node (every one of which the
+        // lowering charged) and each initial-state value; then the peak allocation
+        // itself (`identity_alloc_bound`: the output buffer, the one reused outcome
+        // scratch buffer, and its range list, each allocated once at that capacity) is
+        // charged as output and as work. Only then is the identity encoded, and its
+        // length never exceeds the bound. The configuration identity is shared, not
+        // copied, and the run identity holds the two by value.
+        let at = whole_span(model);
+        let walk = (meter.nodes.used() as u64)
+            .saturating_add(
+                (lowered.initial_states().len() as u64).saturating_mul(lowered.arity() as u64 + 1),
+            )
+            .saturating_add(lowered.variables().len() as u64)
+            .saturating_add(lowered.actions().len() as u64)
+            .saturating_add(lowered.predicates().len() as u64);
+        burn(&mut meter, walk.saturating_mul(5), at)?;
+        let bound = lowered.identity_alloc_bound();
+        charge(&mut meter, crate::budget::text_cost(bound), at)?;
+        burn(&mut meter, bound as u64, at)?;
+        IDENTITY_ENCODINGS.with(|n| n.set(n.get().saturating_add(1)));
+        let identity = lowered.identity();
+        debug_assert!(identity.as_bytes().len() <= bound);
+        let run = RunIdentity::of(identity, config.shared_identity());
+        Ok(Configured {
+            model: lowered,
+            run,
+        })
+    });
+    let usage = Usage {
+        nodes: meter.nodes.used(),
+        work: meter.fuel.used(),
+    };
+    (result, usage)
+}
+
+fn whole_span(model: &NormModel) -> Span {
+    model.init.as_ref().map_or(
+        Span {
+            start: 0,
+            end: 0,
+            line: 1,
+            col: 1,
+        },
+        |i| i.span,
+    )
+}
+
+fn refuse<T>(kind: ConfigRefusalKind, name: &str, span: Span) -> R<T> {
+    Err(LowerError {
+        kind: LowerErrorKind::Configuration(ConfigRefusal {
+            kind,
+            name: name.to_owned(),
+        }),
+        span,
+    })
+}
+
+/// Check `config` against `model` and collect the scalar bindings (see
+/// [`lower_configured`] for the order).
+fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bindings> {
+    let whole = whole_span(model);
+    if config.model() != model.name {
+        return refuse(ConfigRefusalKind::OtherModel, config.model(), whole);
+    }
+    // The declared-name index is built after its charge (an entry per sort, and a sort
+    // over the names' bytes).
+    let sort_bytes: usize = model.sorts.iter().map(String::len).sum();
+    charge(budget, model.sorts.len(), whole)?;
+    burn(budget, sort_cost(model.sorts.len(), sort_bytes), whole)?;
+    let declared: std::collections::BTreeSet<&str> =
+        model.sorts.iter().map(String::as_str).collect();
+    // One lookup per name each way, charged by each name's own length.
+    let entries = declared.len().max(config.sorts().len());
+    let cost = model
+        .sorts
+        .iter()
+        .chain(config.sorts().keys())
+        .fold(0_u64, |acc, n| {
+            acc.saturating_add(lookup_cost(entries, n.len()))
+        });
+    burn(budget, cost, whole)?;
+    for s in &model.sorts {
+        if !config.sorts().contains_key(s) {
+            return refuse(ConfigRefusalKind::MissingSort, s, whole);
+        }
+    }
+    if let Some(extra) = config
+        .sorts()
+        .keys()
+        .find(|s| !declared.contains(s.as_str()))
+    {
+        return refuse(ConfigRefusalKind::ExtraSort, extra, whole);
+    }
+    // Every element is charged (a node and its text) before the element tables exist,
+    // and building each table — a sort of its names, comparing name bytes — is charged
+    // before it is built. Each table maps a name to its index, so a lookup is
+    // logarithmic in the sort and linear in the name, never a scan of the elements.
+    let mut tables = Tables::default();
+    for (sort, names) in config.sorts() {
+        let text: usize = names.iter().map(String::len).sum();
+        let cost = names.len().saturating_add(crate::budget::text_cost(text));
+        charge(budget, cost, whole)?;
+        burn(budget, sort_cost(names.len(), text), whole)?;
+        tables.elements.insert(
+            sort,
+            names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.as_str(), i))
+                .collect(),
+        );
+    }
+    for e in &model.enums {
+        let text: usize = e.variants.iter().map(String::len).sum();
+        let cost = e
+            .variants
+            .len()
+            .saturating_add(crate::budget::text_cost(text));
+        charge(budget, cost, whole)?;
+        burn(budget, sort_cost(e.variants.len(), text), whole)?;
+        tables
+            .variants
+            .insert(&e.name, e.variants.iter().map(String::as_str).collect());
+    }
+
+    let const_bytes: usize = model.constants.iter().map(|c| c.name.len()).sum();
+    charge(budget, model.constants.len(), whole)?;
+    burn(budget, sort_cost(model.constants.len(), const_bytes), whole)?;
+    let constants: std::collections::BTreeMap<&str, &crate::norm::ConstDecl> = model
+        .constants
+        .iter()
+        .map(|c| (c.name.as_str(), c))
+        .collect();
+    let entries = constants.len().max(config.constants().len());
+    let cost = model
+        .constants
+        .iter()
+        .map(|c| &c.name)
+        .chain(config.constants().keys())
+        .fold(0_u64, |acc, n| {
+            acc.saturating_add(lookup_cost(entries, n.len()))
+        });
+    burn(budget, cost, whole)?;
+    for c in &model.constants {
+        if !config.constants().contains_key(&c.name) {
+            return refuse(ConfigRefusalKind::MissingConstant, &c.name, c.span);
+        }
+    }
+    if let Some(extra) = config
+        .constants()
+        .keys()
+        .find(|c| !constants.contains_key(c.as_str()))
+    {
+        return refuse(ConfigRefusalKind::ExtraConstant, extra, whole);
+    }
+
+    let mut bind = Bindings {
+        configured: true,
+        ..Bindings::default()
+    };
+    for (sort, names) in config.sorts() {
+        // A binding owns its name: charged, with its insertion, before it is made.
+        charge(budget, 1 + crate::budget::text_cost(sort.len()), whole)?;
+        burn(budget, lookup_cost(bind.sorts.len(), sort.len()), whole)?;
+        bind.sorts.insert(sort.clone(), names.len() as i64);
+    }
+    for (name, value) in config.constants() {
+        let Some(decl) = constants.get(name.as_str()) else {
+            return refuse(ConfigRefusalKind::ExtraConstant, name, whole);
+        };
+        // The value is charged by its nodes and its text; the check charges each step,
+        // each table lookup included, before it takes it.
+        burn(
+            budget,
+            lookup_cost(config.constants().len(), name.len()),
+            decl.span,
+        )?;
+        let size = config.constant_size(name).unwrap_or(usize::MAX);
+        charge(budget, size, decl.span)?;
+        typecheck(value, &decl.ty, &tables, budget, decl.span)?.map_err(|kind| LowerError {
+            kind: LowerErrorKind::Configuration(ConfigRefusal {
+                kind,
+                name: name.clone(),
+            }),
+            span: decl.span,
+        })?;
+        let slot = match value {
+            ConfigValue::Int(n) => Some(Slot::Int(*n)),
+            ConfigValue::Bool(b) => Some(Slot::Bool(*b)),
+            ConfigValue::Elem { sort, name: e } => {
+                let index = tables.element(sort, e, budget, decl.span)?.unwrap_or(0);
+                Some(Slot::Int(index as i64))
+            }
+            _ => None,
+        };
+        if let Some(slot) = slot {
+            charge(budget, 1 + crate::budget::text_cost(name.len()), decl.span)?;
+            burn(
+                budget,
+                lookup_cost(bind.ints.len().max(bind.bools.len()), name.len()),
+                decl.span,
+            )?;
+            match slot {
+                Slot::Int(v) => bind.ints.insert(name.clone(), v).map(|_| ()),
+                Slot::Bool(v) => bind.bools.insert(name.clone(), v).map(|_| ()),
+            };
+        }
+    }
+    Ok(bind)
+}
+
+/// A scalar binding, before it is stored.
+enum Slot {
+    Int(i64),
+    Bool(bool),
+}
+
+/// The name tables the binding check reads: each sort's elements by name, with their
+/// indices, and each enumeration's variants.
+#[derive(Default)]
+struct Tables<'c> {
+    elements: std::collections::BTreeMap<&'c str, std::collections::BTreeMap<&'c str, usize>>,
+    variants: std::collections::BTreeMap<&'c str, std::collections::BTreeSet<&'c str>>,
+}
+
+impl Tables<'_> {
+    /// The index of element `name` of `sort`, charging the two lookups (logarithmic in
+    /// each table, linear in the name) before they are made.
+    fn element(&self, sort: &str, name: &str, budget: &mut Meter, at: Span) -> R<Option<usize>> {
+        burn(budget, lookup_cost(self.elements.len(), sort.len()), at)?;
+        let Some(names) = self.elements.get(sort) else {
+            return Ok(None);
+        };
+        burn(budget, lookup_cost(names.len(), name.len()), at)?;
+        Ok(names.get(name).copied())
+    }
+
+    /// Whether `name` is a variant of `enumeration`, charged the same way.
+    fn variant(&self, enumeration: &str, name: &str, budget: &mut Meter, at: Span) -> R<bool> {
+        burn(
+            budget,
+            lookup_cost(self.variants.len(), enumeration.len()),
+            at,
+        )?;
+        let Some(names) = self.variants.get(enumeration) else {
+            return Ok(false);
+        };
+        burn(budget, lookup_cost(names.len(), name.len()), at)?;
+        Ok(names.contains(name))
+    }
+}
+
+/// Whether `value` has type `ty`: `Ok(Err(kind))` when it does not. Each step is
+/// charged before it is taken: one unit per value node, the text of each name
+/// compared, and each table lookup. Recursion is bounded by the configuration's JSON
+/// depth bound.
+fn typecheck(
+    value: &ConfigValue,
+    ty: &Type,
+    tables: &Tables<'_>,
+    budget: &mut Meter,
+    at: Span,
+) -> R<Result<(), ConfigRefusalKind>> {
+    burn(budget, 1, at)?;
+    let ill = Ok(Err(ConfigRefusalKind::IllTyped));
+    Ok(match (value, ty) {
+        (_, Type::Function(..)) => Err(ConfigRefusalKind::UnbindableType),
+        (ConfigValue::Int(_), Type::Int)
+        | (ConfigValue::Bool(_), Type::Bool)
+        | (ConfigValue::Str(_), Type::Str)
+        | (ConfigValue::None, Type::Option(_)) => Ok(()),
+        (ConfigValue::Int(n), Type::Nat) if *n >= 0 => Ok(()),
+        (ConfigValue::Elem { sort, name }, Type::Sort(s)) => {
+            burn(budget, crate::budget::text_cost(s.len()) as u64, at)?;
+            if sort != s {
+                return ill;
+            }
+            match tables.element(s, name, budget, at)? {
+                Some(_) => Ok(()),
+                None => return ill,
+            }
+        }
+        (ConfigValue::Variant { enumeration, name }, Type::Enum(e)) => {
+            burn(budget, crate::budget::text_cost(e.len()) as u64, at)?;
+            if enumeration != e || !tables.variant(e, name, budget, at)? {
+                return ill;
+            }
+            Ok(())
+        }
+        (ConfigValue::Tuple(xs), Type::Tuple(ts)) if xs.len() == ts.len() => {
+            for (x, t) in xs.iter().zip(ts) {
+                if let Err(kind) = typecheck(x, t, tables, budget, at)? {
+                    return Ok(Err(kind));
+                }
+            }
+            Ok(())
+        }
+        (ConfigValue::Record(fields), Type::Record(ts)) => {
+            if fields.len() != ts.len() {
+                return ill;
+            }
+            for (name, t) in ts {
+                burn(budget, lookup_cost(fields.len(), name.len()), at)?;
+                let Some(x) = fields.get(name) else {
+                    return ill;
+                };
+                if let Err(kind) = typecheck(x, t, tables, budget, at)? {
+                    return Ok(Err(kind));
+                }
+            }
+            Ok(())
+        }
+        (ConfigValue::Set(xs), Type::Set(t)) | (ConfigValue::Seq(xs), Type::Seq(t)) => {
+            for x in xs {
+                if let Err(kind) = typecheck(x, t, tables, budget, at)? {
+                    return Ok(Err(kind));
+                }
+            }
+            Ok(())
+        }
+        (ConfigValue::Map(entries), Type::Map(k, v)) => {
+            for (a, b) in entries {
+                if let Err(kind) = typecheck(a, k, tables, budget, at)? {
+                    return Ok(Err(kind));
+                }
+                if let Err(kind) = typecheck(b, v, tables, budget, at)? {
+                    return Ok(Err(kind));
+                }
+            }
+            Ok(())
+        }
+        (ConfigValue::Some(x), Type::Option(t)) => return typecheck(x, t, tables, budget, at),
+        _ => Err(ConfigRefusalKind::IllTyped),
+    })
 }
 
 fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerError> {
@@ -394,7 +882,24 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             acc.saturating_add(crate::elab::measure(c).0 as u64)
         });
         burn(budget, visits.saturating_mul(2), v.span)?;
-        let (lo, hi) = domain_of(v.name.as_str(), &v.ty, &v.refinement, v.span)?;
+        if let Type::Sort(s) = &v.ty {
+            burn(
+                budget,
+                lookup_cost(budget.bind.sorts.len(), s.len()).saturating_mul(2),
+                v.span,
+            )?;
+        }
+        let (lo, hi) = match &v.ty {
+            // An instantiated sort: its elements are the integers `0..size`.
+            Type::Sort(s) if budget.bind.sorts.contains_key(s) => {
+                if let Some(c) = v.refinement.first() {
+                    return no(Unlowerable::NonIntervalRefinement, c.span);
+                }
+                let size = budget.bind.sorts.get(s).copied().unwrap_or(1);
+                (0, size.saturating_sub(1))
+            }
+            _ => domain_of(v.name.as_str(), &v.ty, &v.refinement, v.span)?,
+        };
         builder = builder.variable(&v.name, lo, hi);
         if let (Ok(name), Ok(domain)) = (Ident::new(&v.name), Domain::new(lo, hi)) {
             variables.push(Variable::new(name, domain));
@@ -1080,13 +1585,45 @@ fn node<T>(budget: &mut Meter, span: Span, parts: &[M], build: impl FnOnce() -> 
     Ok((build(), M { size, depth }))
 }
 
+/// Whether `ty` lowers to an integer: `Int`, `Nat`, or a sort the configuration
+/// instantiates.
+fn int_like(ty: &Type, budget: &Meter) -> bool {
+    match ty {
+        Type::Sort(s) => budget.bind.sorts.contains_key(s),
+        other => other.is_integer(),
+    }
+}
+
+/// [`reason`], except that a constant a run configuration has bound (to a value of a
+/// type that does not lower) is a non-integer value, not a missing configuration.
+fn reason_in(e: &Expr, budget: &Meter) -> Unlowerable {
+    match &e.kind {
+        ExprKind::Const(_) if budget.bind.configured => Unlowerable::NonIntegerValue,
+        _ => reason(e),
+    }
+}
+
 fn int_expr(e: &Expr, budget: &mut Meter) -> R<Sized<IntExpr>> {
-    if !e.ty.is_integer() {
-        return no(reason(e), e.span);
+    // A sort-typed node costs a lookup in the instantiated sorts, charged first.
+    if let Type::Sort(s) = &e.ty {
+        burn(
+            budget,
+            lookup_cost(budget.bind.sorts.len(), s.len()),
+            e.span,
+        )?;
+    }
+    if !int_like(&e.ty, budget) {
+        return no(reason_in(e, budget), e.span);
     }
     let sp = e.span;
     match &e.kind {
         ExprKind::Int(n) => node(budget, sp, &[], || IntExpr::Const(*n)),
+        // A constant the run configuration binds to an integer or a sort element.
+        ExprKind::Const(c) if budget.bind.ints.contains_key(c) => {
+            burn(budget, lookup_cost(budget.bind.ints.len(), c.len()), sp)?;
+            let v = budget.bind.ints.get(c).copied().unwrap_or(0);
+            node(budget, sp, &[], || IntExpr::Const(v))
+        }
         // The name is owned text: its cost travels with the node into every copy.
         ExprKind::State(v) => {
             let text = crate::budget::text_cost(v.len());
@@ -1138,7 +1675,7 @@ fn int_expr(e: &Expr, budget: &mut Meter) -> R<Sized<IntExpr>> {
             node(budget, sp, &[M::text(text)], || IntExpr::Var(name))
         }
         ExprKind::If(..) => no(Unlowerable::ConditionalValue, e.span),
-        _ => no(reason(e), e.span),
+        _ => no(reason_in(e, budget), e.span),
     }
 }
 
@@ -1156,6 +1693,12 @@ fn bool_expr(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
     let sp = e.span;
     match &e.kind {
         ExprKind::Bool(b) => node(budget, sp, &[], || BoolExpr::Const(*b)),
+        // A constant the run configuration binds to a Boolean.
+        ExprKind::Const(c) if budget.bind.bools.contains_key(c) => {
+            burn(budget, lookup_cost(budget.bind.bools.len(), c.len()), sp)?;
+            let v = budget.bind.bools.get(c).copied().unwrap_or(false);
+            node(budget, sp, &[], || BoolExpr::Const(v))
+        }
         ExprKind::Not(a) => {
             let (a, sa) = bool_expr(a, budget)?;
             node(budget, sp, &[sa], || BoolExpr::negate(a))
@@ -1211,7 +1754,7 @@ fn bool_expr(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
                 BinOp::Ge => cmp(CmpOp::Ge, budget),
                 BinOp::In | BinOp::NotIn => {
                     let ExprKind::Binary(BinOp::Range, lo, hi) = &b.kind else {
-                        return no(reason(b), b.span);
+                        return no(reason_in(b, budget), b.span);
                     };
                     let x = int_expr(a, budget)?;
                     let inside = match (constant(lo), constant(hi)) {
@@ -1238,10 +1781,10 @@ fn bool_expr(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
                         node(budget, sp, &[inside.1], || BoolExpr::negate(inside.0))
                     }
                 }
-                _ => no(reason(e), e.span),
+                _ => no(reason_in(e, budget), e.span),
             }
         }
-        _ => no(reason(e), e.span),
+        _ => no(reason_in(e, budget), e.span),
     }
 }
 

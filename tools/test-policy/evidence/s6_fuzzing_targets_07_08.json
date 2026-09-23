@@ -136,13 +136,13 @@
       ],
       "corpus": {
         "generated_chains": 20,
-        "genesis_checked": 20,
+        "genesis_checked": 21,
         "multi_step_chains": 13,
         "mutations_concurrency": 20,
         "mutations_genesis": 20,
         "mutations_monotonic": 20,
         "mutations_skip": 20,
-        "real_schema_classes": 20
+        "real_schema_classes": 21
       },
       "failures": [],
       "fixtures": [

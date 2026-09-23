@@ -39,11 +39,11 @@
         "This module's schema-id-grammar-detected rule is independently corroborated by a real, non-#[ignore]d Rust test: crates/continuumd/tests/gate_g2_01_acceptance.rs's every_shipped_schema_document_declares_the_readme_identity_triple() asserts, over the same real notes/plan/schemas/*.schema.json files, that each one declares the exact $id/schema_epoch/schema_kind triple this module also checks. The canonical- encoding half of the concept is independently corroborated by continuum-value's own canonical-content-identity test suite (crates/continuum-value/src/identity.rs, ADR-0013). Two rules this module also runs \u2014 instance-header-mismatch-detected and canonical-encoding-not-value-identical-detected \u2014 have no equivalent named Rust test: notes/plan/schemas/README.md itself assigns instance-level validation to validate_dossier.py (a separate Python tool using the real jsonschema library), not to Rust, and the byte-identity-vs-canonical re-encoding check is a freestanding property demonstration over real example content, not a port of any Rust logic."
       ],
       "corpus": {
-        "examples_matched_to_a_schema": 19,
-        "examples_re_encoded": 19,
+        "examples_matched_to_a_schema": 20,
+        "examples_re_encoded": 20,
         "rust_tests_named": 3,
         "rust_tests_present": 3,
-        "schema_documents": 20
+        "schema_documents": 21
       },
       "failures": [],
       "fixtures": [
@@ -76,8 +76,8 @@
         }
       ],
       "mutant": {
-        "applied": 19,
-        "detected": 19
+        "applied": 20,
+        "detected": 20
       },
       "registry_status": "satisfied",
       "rules": [

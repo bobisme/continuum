@@ -11,11 +11,13 @@ use std::thread;
 
 use continuum_cml_elab::budget::MAX_NODES;
 use continuum_cml_elab::budget::{MAX_TYPE_DEPTH, MAX_WORK};
+use continuum_cml_elab::config::{ConfigErrorKind, MAX_SORT_ELEMENTS, RunConfig};
 use continuum_cml_elab::elab::{
     MAX_INLINE_DEPTH, MAX_RECURSION_DEPTH, MAX_TREE_DEPTH, MAX_UNFOLD_NESTING,
 };
 use continuum_cml_elab::lower::MAX_INIT_BINDINGS;
 use continuum_cml_elab::lower::{MAX_RELATIONAL_CANDIDATES, init_work, successor_work};
+use continuum_cml_elab::lower::{identity_encodings_on_this_thread, lower_configured};
 use continuum_cml_elab::{
     ElabError, ElabErrorKind, Limits, LowerErrorKind, NormModel, Unlowerable, Unsupported,
     elaborate_source, elaborate_source_with, lower, lower_with,
@@ -1249,4 +1251,285 @@ fn generated_and_declared_names_are_preflighted() {
             .kind,
         LowerErrorKind::Unlowerable(Unlowerable::NameTooLong)
     );
+}
+
+// ---------------------------------------------------------------------------
+// bn-3a9sr: run configurations
+// ---------------------------------------------------------------------------
+
+/// A model with one sort `S` instantiated with `elements` names, a state variable of
+/// that sort, and a constant `C: Set[Nat]` bound to a set of `members` integers. Built
+/// one element at a time.
+fn sized_run(elements: usize, members: usize) -> (NormModel, String) {
+    let model = elaborate_source(
+        "module Z\ntype S\nconst C: Set[Nat]\nstate { s: S }\ninit { true }\naction A { unchanged s }\n",
+    )
+    .expect("elaborates");
+    let names: Vec<String> = (0..elements).map(|i| format!("\"e{i}\"")).collect();
+    let set: Vec<String> = (0..members).map(|i| format!("{{\"int\":{i}}}")).collect();
+    let doc = format!(
+        r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"Z","sorts":{{"S":{{"elements":[{}]}}}},"constants":{{"C":{{"set":[{}]}}}}}}"#,
+        names.join(","),
+        set.join(",")
+    );
+    (model, doc)
+}
+
+fn configured_usage(
+    elements: usize,
+    members: usize,
+    limits: Limits,
+) -> (bool, continuum_cml_elab::Usage) {
+    let (model, doc) = sized_run(elements, members);
+    let config = RunConfig::parse(doc.as_bytes()).expect("reads");
+    let (result, usage) = lower_configured(&model, &config, limits);
+    (result.is_ok(), usage)
+}
+
+/// Sort elements and value nodes are charged to the output budget (anti-vacuity: the
+/// usage covers them), and the work grows linearly with the configuration.
+#[test]
+fn configuration_sizes_are_charged_and_grow_linearly() {
+    let (ok, small) = configured_usage(1000, 4000, Limits::default());
+    assert!(ok, "lowers");
+    assert!(
+        small.nodes >= 1000 + 4000,
+        "elements and members are charged: {small:?}"
+    );
+    let (_, large) = configured_usage(2000, 8000, Limits::default());
+    assert_linear("configuration size", small.work, large.work);
+}
+
+/// At the sort bound the configuration reads and lowers (a 2^16-value domain); one
+/// element more is refused by the reader. A value past the output budget is refused
+/// typed before it is used, within the memory limit.
+#[test]
+fn configuration_bounds_are_enforced_before_use() {
+    fn body() {
+        let (ok, usage) = configured_usage(MAX_SORT_ELEMENTS, 1, Limits::default());
+        assert!(ok, "a sort at the bound lowers: {usage:?}");
+        let (_, doc) = sized_run(MAX_SORT_ELEMENTS + 1, 1);
+        assert_eq!(
+            RunConfig::parse(doc.as_bytes()).expect_err("too many").kind,
+            ConfigErrorKind::SortTooLarge
+        );
+        let (model, doc) = sized_run(3, 200_000);
+        let config = RunConfig::parse(doc.as_bytes()).expect("reads");
+        let tight = Limits {
+            nodes: 100_000,
+            ..Limits::default()
+        };
+        let (result, usage) = lower_configured(&model, &config, tight);
+        assert_eq!(
+            result.expect_err("over the output budget").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+        );
+        assert!(usage.nodes <= 100_000, "{usage:?}");
+    }
+    under_memory_limit("configuration_bounds_are_enforced_before_use", body);
+}
+
+/// The configuration's domains meet model-core's limits like any other: a sort-typed
+/// relational action over a 4097-element sort is refused by the action preflight.
+#[test]
+fn configured_domains_are_preflighted_against_model_core() {
+    let model =
+        elaborate_source("module Y\ntype S\nstate { s: S }\ninit { true }\naction A { s' != s }\n")
+            .expect("elaborates");
+    let names: Vec<String> = (0..MAX_ACTIONS + 1).map(|i| format!("\"e{i}\"")).collect();
+    let doc = format!(
+        r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"Y","sorts":{{"S":{{"elements":[{}]}}}},"constants":{{}}}}"#,
+        names.join(",")
+    );
+    let config = RunConfig::parse(doc.as_bytes()).expect("reads");
+    let e = lower_configured(&model, &config, Limits::default())
+        .0
+        .expect_err("4097 candidates");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::SuccessorDomainTooLarge)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// cr-1sxoia: element lookups by table, text charged by bytes, identities shared
+// ---------------------------------------------------------------------------
+
+/// `k` constants of a sort of `e` elements, each bound to the last element (the
+/// worst case for a scan of the element list).
+fn element_constants(k: usize, e: usize) -> (NormModel, RunConfig) {
+    let mut src = String::from("module K\ntype S\n");
+    for i in 0..k {
+        src.push_str(&format!("const c{i}: S\n"));
+    }
+    src.push_str("state { x: Nat where x <= 0 }\ninit { x == 0 }\naction A { unchanged x }\n");
+    let model = elaborate_source(&src).expect("elaborates");
+    let names: Vec<String> = (0..e).map(|i| format!("\"e{i}\"")).collect();
+    let last = e - 1;
+    let consts: Vec<String> = (0..k)
+        .map(|i| format!(r#""c{i}":{{"elem":{{"sort":"S","name":"e{last}"}}}}"#))
+        .collect();
+    let doc = format!(
+        r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"K","sorts":{{"S":{{"elements":[{}]}}}},"constants":{{{}}}}}"#,
+        names.join(","),
+        consts.join(",")
+    );
+    (model, RunConfig::parse(doc.as_bytes()).expect("reads"))
+}
+
+fn element_work(k: usize, e: usize) -> u64 {
+    let (model, config) = element_constants(k, e);
+    let (result, usage) = lower_configured(&model, &config, Limits::default());
+    result.unwrap_or_else(|err| panic!("lowers: {err}"));
+    usage.work
+}
+
+/// Two axes (constants × elements), operation-counted: the marginal work of one more
+/// element constant grows with the logarithm of the sort, not with its size. With a
+/// scan of the element list per constant (the defect cr-1sxoia found, checked by
+/// restoring it), doubling the sort doubles the marginal cost and this fails.
+#[test]
+fn element_constants_cost_a_table_lookup_not_a_scan() {
+    let (k, e) = (500, 4096);
+    let marginal = |e: usize| {
+        let one = element_work(k, e);
+        let two = element_work(2 * k, e);
+        (two - one) as f64 / k as f64
+    };
+    let small = marginal(e);
+    let large = marginal(2 * e);
+    assert!(
+        large / small < 1.5,
+        "per-constant work grew {:.2}x when the sort doubled ({small:.1} -> {large:.1})",
+        large / small
+    );
+}
+
+/// A work limit below the element table's own charge is refused before the table is
+/// built, so no element is ever looked up.
+#[test]
+fn a_tight_work_limit_is_refused_before_any_element_lookup() {
+    let (model, config) = element_constants(1, MAX_SORT_ELEMENTS);
+    let tight = Limits {
+        work: 50_000,
+        ..Limits::default()
+    };
+    let (result, usage) = lower_configured(&model, &config, tight);
+    assert_eq!(
+        result.expect_err("under the table's charge").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+    assert!(usage.work <= 50_000, "{usage:?}");
+    // The element table alone charges more than the limit: the refusal came first.
+    assert!(MAX_SORT_ELEMENTS as u64 > 50_000);
+}
+
+/// A string constant is charged by its bytes (cr-1sxoia): a 1 MiB string under a
+/// 10 000-node limit is refused, typed, where a one-node count would admit it.
+#[test]
+fn long_string_constants_are_charged_by_their_bytes() {
+    let model = elaborate_source(
+        "module L\nconst Text: String\nstate { x: Nat where x <= 0 }\ninit { x == 0 }\naction A { unchanged x }\n",
+    )
+    .expect("elaborates");
+    let long = "a".repeat(1 << 20);
+    let doc = format!(
+        r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"L","sorts":{{}},"constants":{{"Text":{{"str":"{long}"}}}}}}"#
+    );
+    let config = RunConfig::parse(doc.as_bytes()).expect("reads");
+    let (result, usage) = lower_configured(&model, &config, Limits::default());
+    result.expect("fits the default budget");
+    assert!(usage.nodes >= (1 << 20) / 32, "charged by bytes: {usage:?}");
+    let tight = Limits {
+        nodes: 10_000,
+        ..Limits::default()
+    };
+    let (result, _) = lower_configured(&model, &config, tight);
+    assert_eq!(
+        result.expect_err("over the node limit").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+}
+
+/// Every allocation of a configured lowering, the identities included, is inside the
+/// budget: at the measured usage it lowers, one node or one unit of work less is
+/// refused, typed.
+#[test]
+fn the_configured_boundary_is_exact() {
+    let (model, config) = element_constants(20, 300);
+    let (result, used) = lower_configured(&model, &config, Limits::default());
+    result.expect("lowers");
+    lower_configured(&model, &config, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits");
+    let e = lower_configured(&model, &config, used_limits(used.nodes - 1, used.work))
+        .0
+        .expect_err("one node less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+    let e = lower_configured(&model, &config, used_limits(used.nodes, used.work - 1))
+        .0
+        .expect_err("one unit less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// cr-1sxoia round 3: the model identity is precharged; value sizes are stored
+// ---------------------------------------------------------------------------
+
+/// The model identity's length bound is charged, as output and as work, before the
+/// identity is encoded: one node or one unit of work short of the full usage is
+/// refused at that charge, and the thread's encoding counter shows the identity was
+/// never built. At the full usage it is built exactly once.
+#[test]
+fn the_model_identity_is_charged_before_it_is_built() {
+    let (model, config) = element_constants(20, 300);
+    let (result, used) = lower_configured(&model, &config, Limits::default());
+    result.expect("lowers");
+    for limits in [
+        used_limits(used.nodes - 1, used.work),
+        used_limits(used.nodes, used.work - 1),
+    ] {
+        let before = identity_encodings_on_this_thread();
+        let e = lower_configured(&model, &config, limits)
+            .0
+            .expect_err("one short");
+        assert!(
+            matches!(
+                e.kind,
+                LowerErrorKind::Unlowerable(
+                    Unlowerable::OutputTooLarge | Unlowerable::WorkLimitExceeded
+                )
+            ),
+            "{e}"
+        );
+        assert_eq!(
+            identity_encodings_on_this_thread(),
+            before,
+            "the identity was not built"
+        );
+    }
+    let before = identity_encodings_on_this_thread();
+    lower_configured(&model, &config, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits");
+    assert_eq!(identity_encodings_on_this_thread(), before + 1);
+}
+
+/// A value's size is computed once while the document is read and stored: the
+/// lowering reads it by a charged lookup, not a walk. It counts nodes and text bytes.
+#[test]
+fn constant_sizes_are_stored_at_read_time() {
+    let doc = r#"{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"M","sorts":{},"constants":{"A":{"str":"0123456789012345678901234567890123456789"},"B":{"set":[{"int":1},{"int":2},{"int":3}]}}}"#;
+    let config = RunConfig::parse(doc.as_bytes()).expect("reads");
+    // A: one node and 40 bytes of text (two 32-byte nodes).
+    assert_eq!(config.constant_size("A"), Some(3));
+    // B: the set and its three members.
+    assert_eq!(config.constant_size("B"), Some(4));
+    assert_eq!(config.constant_size("C"), None);
 }

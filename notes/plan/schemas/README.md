@@ -179,6 +179,28 @@ the validator, so they cannot drift. Being a `value` schema, it carries
 no instance header — the artifact holding the stub declares the epoch
 for both.
 
+## Run configuration
+
+`run-config.schema.json` is the RFC 0003 "Configurations and bounds"
+artifact (correction 3): the finite instantiation of a CML model's
+sorts and the values of its constants, given to lowering explicitly.
+Two of its rules are value-level and cannot be stated in JSON Schema,
+so the schema's description states them and the reader
+(`continuum_cml_elab::config`) enforces them: a `set` has no duplicate
+member and a `map` no duplicate key, by value. Its identity is the
+canonical ID5 encoding with `set` members and `map` entries sorted by
+their own canonical encoding, so member order does not change it.
+
+The reader and the schema are held to one verdict by a differential
+(`notes/plan/tools/run_config_parity.py`, run by the dossier validator,
+and `continuum-cml-elab`'s `the_reader_agrees_with_the_schema_on_every_parity_case`)
+over the committed fixtures and generated edge names and shapes for every
+constrained field. The schema is read under its document profile: the
+strict JSON lexicon (no duplicate key, no floating-point number, no
+non-finite number, no lone surrogate) and the two value-level rules above.
+The reader's 16 MiB document cap and JSON depth bound of 64 are resource
+bounds outside both.
+
 ## Mechanical enforcement
 
 The convention is derived from the files, not asserted here.

@@ -17,6 +17,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 from traceability import strip_delivered, validate_checked_traceability
+import run_config_parity
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parents[1]
@@ -42,6 +43,7 @@ SCHEMA_PAIRS = {
     "schemas/redacted.schema.json": "schemas/examples/redacted.example.json",
     "schemas/promotion-receipt.schema.json": "schemas/examples/promotion-receipt.example.json",
     "schemas/whiteboard-note.schema.json": "schemas/examples/whiteboard-note.example.json",
+    "schemas/run-config.schema.json": "schemas/examples/replicated-register.run-config.json",
 }
 
 # Instances that live outside the dossier but are still governed by a dossier
@@ -73,6 +75,11 @@ EXTERNAL_SCHEMA_PAIRS = {
     "schemas/evidence-graph-edge.schema.json": (
         "crates/continuum-evidence/tests/fixtures/whiteboard/edge-supports-crash.json",
         "crates/continuum-evidence/tests/fixtures/whiteboard/edge-supports-model.json",
+    ),
+    # The run configurations `continuum-cml-elab`'s configured-lowering suite reads
+    # (bn-3a9sr): the schema, not the Rust reader, is normative for their shape.
+    "schemas/run-config.schema.json": (
+        "crates/continuum-cml-elab/tests/configs/ring.run-config.json",
     ),
 }
 
@@ -1252,6 +1259,10 @@ def main() -> None:
     checks = [
         ("json", check_json),
         ("schemas", check_schemas),
+        # The run-config reader/schema differential's schema half (bn-3a9sr): the
+        # committed parity corpus must be exactly what the schema decides today; the
+        # Rust reader is held to the same verdicts by continuum-cml-elab's test suite.
+        ("run_config_parity", run_config_parity.check),
         ("toml", check_toml),
         ("python", check_python),
         ("spikes", check_spikes),

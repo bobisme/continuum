@@ -270,7 +270,7 @@ fn every_inventoried_artifact_is_present() {
     );
     // The schema half, enumerated from the directory rather than from this file.
     let documents = schema_documents();
-    assert_eq!(documents.len(), 20, "schema documents under {SCHEMA_DIR}");
+    assert_eq!(documents.len(), 21, "schema documents under {SCHEMA_DIR}");
     // Every document has a committed example instance; `validate_dossier.py` validates
     // each pair. The pairing is what makes a schema a *tested* contract rather than a
     // published intention, so its absence would be a half-shipped artifact.
@@ -278,7 +278,7 @@ fn every_inventoried_artifact_is_present() {
         .into_iter()
         .filter_map(|path| Some(path.file_name()?.to_str()?.to_owned()))
         .collect();
-    assert_eq!(examples.len(), 20, "example instances");
+    assert_eq!(examples.len(), 21, "example instances");
 }
 
 #[test]
@@ -846,12 +846,14 @@ fn every_schema_the_idl_cites_resolves_to_a_document_that_ships() {
 }
 
 #[test]
-fn three_shipped_schema_documents_are_cited_nowhere_in_the_idl() {
-    // The reverse direction. Twenty documents ship; the IDL reaches seventeen. The three
-    // it never names are not defects of the schema directory — `corpus-port` governs a
-    // dossier corpus port and `domain-pack` an RFC 0002 manifest, neither of which is a
-    // wire payload — but `synthesis-candidate` is: `forge.create`'s `sketch: Opaque` is
-    // the payload it governs, and the IDL does not say so.
+fn four_shipped_schema_documents_are_cited_nowhere_in_the_idl() {
+    // The reverse direction. Twenty-one documents ship; the IDL reaches seventeen. The
+    // four it never names are not defects of the schema directory — `corpus-port`
+    // governs a dossier corpus port, `domain-pack` an RFC 0002 manifest, and
+    // `run-config` (bn-3a9sr) the RFC 0003 run configuration a snapshot commits to only
+    // as a `configuration` Commitment, none of which is a wire payload — but
+    // `synthesis-candidate` is: `forge.create`'s `sketch: Opaque` is the payload it
+    // governs, and the IDL does not say so.
     let cited = schemas_cited_by_the_idl();
     let uncited: Vec<String> = schema_documents()
         .into_iter()
@@ -862,6 +864,7 @@ fn three_shipped_schema_documents_are_cited_nowhere_in_the_idl() {
         [
             "corpus-port.schema.json",
             "domain-pack.schema.json",
+            "run-config.schema.json",
             "synthesis-candidate.schema.json",
         ]
     );

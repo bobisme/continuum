@@ -1,0 +1,29 @@
+// A small model whose sort and constants a run configuration binds (bn-3a9sr,
+// RFC 0003 "Run configuration (normative)"): a token passes between nodes of the
+// sort `Node`, starting at `Start`, for at most `Limit` rounds while `Open` holds.
+module Ring
+
+type Node
+
+const Start: Node
+const Limit: Nat
+const Open: Bool
+
+state {
+  leader: Node
+  round: Nat where round <= 3
+}
+
+init {
+  leader == Start && round == 0
+}
+
+action Pass {
+  require Open && round < Limit
+  leader' != leader
+  next round = round + 1
+}
+
+invariant Bounded {
+  round <= Limit
+}

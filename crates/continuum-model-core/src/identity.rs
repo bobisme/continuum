@@ -70,7 +70,12 @@ impl Model {
     /// exactly when they are the same transition system with the same named predicates.
     #[must_use]
     pub fn identity(&self) -> ModelIdentity {
-        let mut out: Vec<u8> = IDENTITY_TAG.to_vec();
+        // Every buffer is allocated once at its bound, so no buffer grows (and no
+        // reallocation copies) while the encoding is written: the peak allocation is
+        // exactly `identity_alloc_bound`.
+        let (scratch_bytes, max_outcomes) = self.outcome_scratch();
+        let mut out: Vec<u8> = Vec::with_capacity(self.identity_len_bound());
+        out.extend_from_slice(IDENTITY_TAG);
 
         count(&mut out, self.variables().len());
         for variable in self.variables() {
@@ -79,28 +84,33 @@ impl Model {
             out.extend_from_slice(&variable.domain().hi().to_be_bytes());
         }
 
+        // One action's outcomes are encoded into one reused scratch buffer, each as a
+        // byte range, sorted and deduplicated by their bytes, and copied into `out`.
+        // No per-outcome allocation: the scratch buffer and the range list are the
+        // only allocations besides `out`, and `identity_alloc_bound` counts them.
+        let mut scratch: Vec<u8> = Vec::with_capacity(scratch_bytes);
+        let mut ranges: Vec<(usize, usize)> = Vec::with_capacity(max_outcomes);
         count(&mut out, self.actions().len());
         for action in self.actions() {
             token(&mut out, action.name().as_str());
             bool_expr(&mut out, action.guard());
-            let mut outcomes: Vec<Vec<u8>> = action
-                .outcomes()
-                .iter()
-                .map(|outcome| {
-                    let mut encoded = Vec::new();
-                    count(&mut encoded, outcome.assignments().len());
-                    for assignment in outcome.assignments() {
-                        token(&mut encoded, assignment.variable().as_str());
-                        int_expr(&mut encoded, assignment.value());
-                    }
-                    encoded
-                })
-                .collect();
-            outcomes.sort();
-            outcomes.dedup();
-            count(&mut out, outcomes.len());
-            for encoded in outcomes {
-                out.extend_from_slice(&encoded);
+            scratch.clear();
+            ranges.clear();
+            for outcome in action.outcomes() {
+                let start = scratch.len();
+                count(&mut scratch, outcome.assignments().len());
+                for assignment in outcome.assignments() {
+                    token(&mut scratch, assignment.variable().as_str());
+                    int_expr(&mut scratch, assignment.value());
+                }
+                ranges.push((start, scratch.len()));
+            }
+            let bytes = |r: &(usize, usize)| scratch.get(r.0..r.1).unwrap_or_default();
+            ranges.sort_by(|a, b| bytes(a).cmp(bytes(b)));
+            ranges.dedup_by(|a, b| bytes(a) == bytes(b));
+            count(&mut out, ranges.len());
+            for r in &ranges {
+                out.extend_from_slice(bytes(r));
             }
         }
 
@@ -119,6 +129,121 @@ impl Model {
         }
 
         ModelIdentity { bytes: out }
+    }
+
+    /// An upper bound on every byte [`Model::identity`] allocates: the encoding's
+    /// length ([`Model::identity_len_bound`]), plus the scratch buffer one action's
+    /// outcomes are encoded into (the largest action's outcomes), plus that action's
+    /// range list (16 bytes per outcome). Allocation-free, one visit per node. A caller
+    /// that meters allocations charges this before calling [`Model::identity`].
+    #[must_use]
+    pub fn identity_alloc_bound(&self) -> usize {
+        let (scratch, outcomes) = self.outcome_scratch();
+        self.identity_len_bound()
+            .saturating_add(scratch)
+            .saturating_add(outcomes.saturating_mul(16))
+    }
+
+    /// The largest action's outcome encodings in bytes, and the most outcomes of one
+    /// action: the scratch buffer's and the range list's capacities.
+    fn outcome_scratch(&self) -> (usize, usize) {
+        let mut bytes = 0_usize;
+        let mut outcomes = 0_usize;
+        for action in self.actions() {
+            let mut block = 0_usize;
+            for outcome in action.outcomes() {
+                block = block.saturating_add(8);
+                for assignment in outcome.assignments() {
+                    block = block
+                        .saturating_add(8)
+                        .saturating_add(assignment.variable().as_str().len())
+                        .saturating_add(int_len(assignment.value()));
+                }
+            }
+            bytes = bytes.max(block);
+            outcomes = outcomes.max(action.outcomes().len());
+        }
+        (bytes, outcomes)
+    }
+
+    /// An upper bound on the length of [`Model::identity`]'s encoding, computed
+    /// without allocating: every field the encoding writes, counted with the same
+    /// widths, over every outcome before duplicates collapse (so the bound is exact for
+    /// a model with no duplicate outcomes and larger otherwise). A caller that meters
+    /// allocations charges this before calling [`Model::identity`].
+    ///
+    /// It visits each variable, action, outcome, assignment, initial-state value,
+    /// predicate, and expression node once; recursion is bounded as in
+    /// [`Model::identity`]. Saturates.
+    #[must_use]
+    pub fn identity_len_bound(&self) -> usize {
+        const COUNT: usize = 8;
+        let token = |t: &str| COUNT.saturating_add(t.len());
+        let mut n = IDENTITY_TAG.len().saturating_add(COUNT);
+        for variable in self.variables() {
+            n = n
+                .saturating_add(token(variable.name().as_str()))
+                .saturating_add(16);
+        }
+        n = n.saturating_add(COUNT);
+        for action in self.actions() {
+            n = n
+                .saturating_add(token(action.name().as_str()))
+                .saturating_add(bool_len(action.guard()))
+                .saturating_add(COUNT);
+            for outcome in action.outcomes() {
+                n = n.saturating_add(COUNT);
+                for assignment in outcome.assignments() {
+                    n = n
+                        .saturating_add(token(assignment.variable().as_str()))
+                        .saturating_add(int_len(assignment.value()));
+                }
+            }
+        }
+        n = n.saturating_add(COUNT);
+        for state in self.initial_states() {
+            n = n
+                .saturating_add(COUNT)
+                .saturating_add(state.arity().saturating_mul(8));
+        }
+        n = n.saturating_add(COUNT);
+        for predicate in self.predicates() {
+            n = n
+                .saturating_add(token(predicate.name().as_str()))
+                .saturating_add(bool_len(predicate.body()));
+        }
+        n
+    }
+}
+
+/// The bytes [`int_expr`] writes for `expr`.
+fn int_len(expr: &IntExpr) -> usize {
+    match expr {
+        IntExpr::Const(_) => 9,
+        IntExpr::Var(name) => 9_usize.saturating_add(name.len()),
+        IntExpr::Arith(_, left, right) => 2_usize
+            .saturating_add(int_len(left))
+            .saturating_add(int_len(right)),
+        IntExpr::Min(left, right) | IntExpr::Max(left, right) => 1_usize
+            .saturating_add(int_len(left))
+            .saturating_add(int_len(right)),
+    }
+}
+
+/// The bytes [`bool_expr`] writes for `expr`.
+fn bool_len(expr: &BoolExpr) -> usize {
+    match expr {
+        BoolExpr::Const(_) => 2,
+        BoolExpr::Compare { left, right, .. } => 2_usize
+            .saturating_add(int_len(left))
+            .saturating_add(int_len(right)),
+        BoolExpr::Not(inner) => 1_usize.saturating_add(bool_len(inner)),
+        BoolExpr::And(left, right) | BoolExpr::Or(left, right) | BoolExpr::Implies(left, right) => {
+            1_usize
+                .saturating_add(bool_len(left))
+                .saturating_add(bool_len(right))
+        }
+        BoolExpr::InRange { expr, .. } => 17_usize.saturating_add(int_len(expr)),
     }
 }
 
@@ -216,6 +341,18 @@ fn bool_expr(out: &mut Vec<u8>, expr: &BoolExpr) {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    /// The bound is exact without duplicate outcomes, and an upper bound with them.
+    #[test]
+    fn the_length_bound_is_exact_or_above() {
+        let distinct = two_outcomes(1, 2);
+        assert_eq!(
+            distinct.identity_len_bound(),
+            distinct.identity().as_bytes().len()
+        );
+        let duplicated = two_outcomes(1, 1);
+        assert!(duplicated.identity_len_bound() > duplicated.identity().as_bytes().len());
+    }
+
     use crate::expr::{BoolExpr, IntExpr};
     use crate::model::{ActionDecl, ModelBuilder};
 
