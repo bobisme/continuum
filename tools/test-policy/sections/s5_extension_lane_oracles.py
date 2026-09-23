@@ -380,7 +380,6 @@ def _run_5_07() -> tuple[list[str], dict]:
 
     return failures, {
         "scan_dirs": [str(d.relative_to(ROOT)) for d in SCAN_DIRS],
-        "scanned_files": scanned,
         "undeclared_tool_hits": len(scan_hits),
         "registration_contract_mutants_applied": applied,
         "registration_contract_mutants_detected": detected,
