@@ -11,9 +11,10 @@
   "module": "tools/test-policy/sections/s9_security_tests_07.py",
   "requirements": {
     "TEST-9-07": {
-      "absence": "No crate in `crates/*/Cargo.toml` or the workspace `Cargo.toml` depends on `ed25519`, `dalek`, `hmac`, `p256`, `secp256`, `rsa`, `ring`, or a `signature` crate (checked at run time by `_check_no_signature_dependency` below, against every real, committed `Cargo.toml` in the workspace \u2014 this is the one check in this module that reads real files rather than modeling a predicate). `ArtifactClass::SignedIntentBundle` is a name only: its `artifact_path.rs` arms (`\"inb\"` / `\"inb_\"`) are the same class-token mechanism every other artifact class gets, not a distinct signature-checking path, and `continuum-security::injection`'s `forged-receipt-json` cases test whether injected text can pass itself off as an accepted claim inside a prompt, not whether a cryptographic signature verifies. `check.rs`'s own `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` states, as a test, that the certificate checker cannot itself recompute or reject on a relabeled digest \u2014 binding a digest to a real artifact is `continuum-workspace::publication`'s job, which is what this module claims instead. Cryptographic signature verification is therefore not a `partial` implementation short one corner; it is zero lines, anywhere, and this ID stays `partial` even though its content-addressed-provenance half is `enforced`-grade on its own.",
+      "absence": "Production use of signatures is absent (review cr-3e3t1j). The library `continuum-evidence::signing` exists and its 21 named Rust tests below exercise it, but no crate outside `continuum-evidence` calls `SigningRegistry` or `SignatureVerifier` (checked at run time by `_check_no_production_signing_caller` against every real `crates/*/src` file), so no real receipt, intent bundle, or domain pack is signed or verified. Missing: bn-3glnv \u2014 daemon operations and wire form for signatures, allowed-signers sets and the authoritative registry head, and `intent.accept` checking a held bundle through `verify_for_ci_acceptance` (protocol 3.6 is frozen); bn-1hape \u2014 an OS `KeyEntropy` source in a boundary crate, an on-disk keystore, and signing inside the receipt, bundle, and pack producers. `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
       "boundaries": [
-        "`_check_publication_attest` ports `PublishedName::names`/`Published::attest` (`publication.rs`: `fn names(&self, handle: &ArtifactHandle) -> bool { self == handle }`) as plain equality on (class, identity) \u2014 the real predicate needs no hash to state, so the port is exact, not approximate. `_check_identity_outcome` ports the store's convergence/collision/distinctness trichotomy structurally (same content implies same identity; different content sharing a claimed identity is a collision that must abort; different content with different identity stands as two artifacts) \u2014 this is the property the real `ContentIdentifier::identify` doc contract states ('a pure function \u2026 two calls with equal arguments \u2026 must return equal handles', INV-005/INV-006) and that `an_identity_collision_aborts_rather_than_conflating_two_artifacts` and `distinct_artifacts_never_share_identity` corroborate; it is independent of which hash algorithm the real `ContentIdentifier` fixture uses; this module never computes one. `_check_digest_token` ports `Digest256::from_token` (`identity.rs`) as a length-and-character-class check, drift-tied by extracting `DIGEST_BITS` at run time and confirming the `DIGEST_LEN * 2`/`DIGEST_BITS / 8` arithmetic phrases are still present, so a change to the digest width is noticed, not just a change to the accept/reject outcome. What this cannot do: compute a real `blake3-256` digest, run `Value::encode`'s canonical-encoding rules, or exercise `ReferenceStore` concurrency itself (no cargo) \u2014 only the structural properties named above, which is what the named real Rust tests exercise for real."
+        "`_check_publication_attest` ports `PublishedName::names`/`Published::attest` (`publication.rs`: `fn names(&self, handle: &ArtifactHandle) -> bool { self == handle }`) as plain equality on (class, identity) \u2014 the real predicate needs no hash to state, so the port is exact, not approximate. `_check_identity_outcome` ports the store's convergence/collision/distinctness trichotomy structurally (same content implies same identity; different content sharing a claimed identity is a collision that must abort; different content with different identity stands as two artifacts) \u2014 this is the property the real `ContentIdentifier::identify` doc contract states ('a pure function \u2026 two calls with equal arguments \u2026 must return equal handles', INV-005/INV-006) and that `an_identity_collision_aborts_rather_than_conflating_two_artifacts` and `distinct_artifacts_never_share_identity` corroborate; it is independent of which hash algorithm the real `ContentIdentifier` fixture uses; this module never computes one. `_check_digest_token` ports `Digest256::from_token` (`identity.rs`) as a length-and-character-class check, drift-tied by extracting `DIGEST_BITS` at run time and confirming the `DIGEST_LEN * 2`/`DIGEST_BITS / 8` arithmetic phrases are still present, so a change to the digest width is noticed, not just a change to the accept/reject outcome. What this cannot do: compute a real `blake3-256` digest, run `Value::encode`'s canonical-encoding rules, or exercise `ReferenceStore` concurrency itself (no cargo) \u2014 only the structural properties named above, which is what the named real Rust tests exercise for real.",
+        "`_check_signature_verdict` ports `SignatureVerifier::check` (`signing.rs`) as its decision order over eight observable facts \u2014 present, well-formed, kind matches, authentic under the claimed key, registry current against the authoritative head, signer standing known, signer not revoked, signer allowed for the kind \u2014 and the two policies over it: `verify` (any failure is typed unverified provenance with the first failing reason) and `verify_for_ci_acceptance` (any failure is `AcceptanceChainInvalid`). The port is exact about order and outcome, and `_check_signing_drift` confirms at run time that the real `fn check` body still tests those facts in that order and that the real verifier still calls `verify_strict`. What it cannot do: compute an Ed25519 signature or a canonical encoding (no cargo). That is what the named Rust tests do for real, including the RFC 8032 \u00a77.1 known-answer vectors and a pinned envelope signature."
       ],
       "corpus": {
         "attest_cases": 4,
@@ -25,8 +26,13 @@
         "outcome_aborted": 2,
         "outcome_converged": 2,
         "outcome_distinct": 2,
-        "rust_tests_named": 10,
-        "rust_tests_present": 10
+        "production_signing_callers_absent": 1,
+        "rust_tests_named": 31,
+        "rust_tests_present": 31,
+        "signature_cases": 512,
+        "signature_ci_rejected": 255,
+        "signature_unverified": 255,
+        "signature_verified": 2
       },
       "failures": [],
       "fixtures": [
@@ -83,19 +89,58 @@
           "ok": true,
           "requirement": "TEST-9-07",
           "rule": "digest-token-tamper-not-rejected-detected"
+        },
+        {
+          "caught": [
+            "unverified-signature-accepted-detected"
+          ],
+          "fixture": "08_revoked_signature_accepted.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "unverified-signature-accepted-detected"
+        },
+        {
+          "caught": [
+            "verified-signature-rejected-detected"
+          ],
+          "fixture": "09_genuine_signature_rejected.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "verified-signature-rejected-detected"
+        },
+        {
+          "caught": [
+            "ci-acceptance-failed-open-detected"
+          ],
+          "fixture": "10_ci_absent_signature_accepted.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "ci-acceptance-failed-open-detected"
+        },
+        {
+          "caught": [
+            "unverified-signature-accepted-detected"
+          ],
+          "fixture": "11_unknown_standing_accepted.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "unverified-signature-accepted-detected"
         }
       ],
       "mutant": {
-        "applied": 22,
-        "detected": 22
+        "applied": 534,
+        "detected": 534
       },
       "registry_status": "active",
       "rules": [
+        "ci-acceptance-failed-open-detected",
         "digest-token-tamper-not-rejected-detected",
         "distinct-artifacts-conflated-detected",
         "identical-content-not-converged-detected",
         "identity-collision-not-aborted-detected",
-        "publication-name-substitution-not-rejected-detected"
+        "publication-name-substitution-not-rejected-detected",
+        "unverified-signature-accepted-detected",
+        "verified-signature-rejected-detected"
       ],
       "rust_tests": [
         {
@@ -147,6 +192,111 @@
           "path": "crates/continuum-value/src/identity.rs",
           "present": true,
           "test": "blake3_matches_the_published_test_vectors"
+        },
+        {
+          "path": "crates/continuum-evidence/src/signing.rs",
+          "present": true,
+          "test": "ed25519_matches_the_rfc_8032_test_vectors"
+        },
+        {
+          "path": "crates/continuum-evidence/src/signing.rs",
+          "present": true,
+          "test": "signature_tokens_round_trip_and_reject_malformed_text"
+        },
+        {
+          "path": "crates/continuum-evidence/src/signing.rs",
+          "present": true,
+          "test": "weak_and_non_point_public_keys_are_not_signer_identities"
+        },
+        {
+          "path": "crates/continuum-evidence/src/signing.rs",
+          "present": true,
+          "test": "an_overlong_token_or_record_is_refused_before_decoding"
+        },
+        {
+          "path": "crates/continuum-evidence/src/signing.rs",
+          "present": true,
+          "test": "a_signature_record_fits_the_decode_bound"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_signer_with_unknown_standing_is_unverified_not_active"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_stale_registry_missing_a_revocation_cannot_verify"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "an_empty_registry_verifies_no_signature"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "sign_verify_round_trips_for_every_signed_kind_from_wire_bytes"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_tampered_payload_downgrades_to_signature_mismatch"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_signature_under_the_wrong_key_does_not_verify"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_revoked_signers_signatures_downgrade_and_it_can_no_longer_sign"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_rotated_key_keeps_its_signatures_verifiable_but_cannot_sign_again"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_signer_outside_the_allowed_set_or_its_kinds_is_not_trusted"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_kind_relabel_is_refused_before_and_after_the_kind_field_is_rewritten"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "an_unverifiable_signature_downgrades_to_typed_unverified_provenance_not_fail_open"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "the_ci_acceptance_check_fails_closed_on_every_unverified_outcome"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "signatures_are_deterministic_and_pinned"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "the_local_key_is_minted_on_first_use_once_and_audited"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_lost_key_is_revoked_and_superseded_through_linked_audit_records"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "an_allowed_signers_set_round_trips_through_its_canonical_value"
         }
       ],
       "status": "partial",

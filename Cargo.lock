@@ -420,6 +420,8 @@ name = "continuum-evidence"
 version = "0.0.0"
 dependencies = [
  "continuum-value",
+ "ed25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
@@ -643,6 +645,7 @@ dependencies = [
  "fiat-crypto",
  "rustc_version",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -726,6 +729,7 @@ dependencies = [
  "sha2 0.10.9",
  "signature",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]

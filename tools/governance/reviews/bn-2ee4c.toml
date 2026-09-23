@@ -1,0 +1,57 @@
+[change]
+bone = "bn-2ee4c"
+author = "continuum-dev"
+summary = "Signing identities (plan 18.6, ADR-0054): continuum-evidence signs and verifies receipts, intent bundles and domain packs with Ed25519 over canonical bytes, with allowed signers, audited mint, rotation and revocation, typed unverified provenance, and a fail-closed CI check"
+
+[semantic]
+covers = [
+  "crates/continuum-evidence/src/signing.rs",
+  "crates/continuum-evidence/src/lib.rs",
+]
+reference_tests = [
+  "crates/continuum-evidence/src/signing.rs::ed25519_matches_the_rfc_8032_test_vectors",
+  "crates/continuum-evidence/src/signing.rs::signature_tokens_round_trip_and_reject_malformed_text",
+  "crates/continuum-evidence/src/signing.rs::weak_and_non_point_public_keys_are_not_signer_identities",
+  "crates/continuum-evidence/src/signing.rs::an_overlong_token_or_record_is_refused_before_decoding",
+  "crates/continuum-evidence/src/signing.rs::a_signature_record_fits_the_decode_bound",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_signer_with_unknown_standing_is_unverified_not_active",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_stale_registry_missing_a_revocation_cannot_verify",
+  "crates/continuum-evidence/tests/signing_identities.rs::an_empty_registry_verifies_no_signature",
+  "crates/continuum-evidence/tests/signing_identities.rs::sign_verify_round_trips_for_every_signed_kind_from_wire_bytes",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_tampered_payload_downgrades_to_signature_mismatch",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_signature_under_the_wrong_key_does_not_verify",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_revoked_signers_signatures_downgrade_and_it_can_no_longer_sign",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_rotated_key_keeps_its_signatures_verifiable_but_cannot_sign_again",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_signer_outside_the_allowed_set_or_its_kinds_is_not_trusted",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_kind_relabel_is_refused_before_and_after_the_kind_field_is_rewritten",
+  "crates/continuum-evidence/tests/signing_identities.rs::an_unverifiable_signature_downgrades_to_typed_unverified_provenance_not_fail_open",
+  "crates/continuum-evidence/tests/signing_identities.rs::the_ci_acceptance_check_fails_closed_on_every_unverified_outcome",
+  "crates/continuum-evidence/tests/signing_identities.rs::signatures_are_deterministic_and_pinned",
+  "crates/continuum-evidence/tests/signing_identities.rs::the_local_key_is_minted_on_first_use_once_and_audited",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_lost_key_is_revoked_and_superseded_through_linked_audit_records",
+  "crates/continuum-evidence/tests/signing_identities.rs::an_allowed_signers_set_round_trips_through_its_canonical_value",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-evidence/tests/signing_identities.rs::the_verdict_is_invariant_under_the_signature_records_serialization_round_trip", relation = "serialization round trip" },
+  { test = "crates/continuum-evidence/tests/signing_identities.rs::an_allowed_signers_set_is_invariant_under_insertion_order", relation = "set/map insertion order" },
+]
+differential_tests = [
+  { test = "crates/continuum-evidence/tests/signing_canonical_differential.rs::signing_records_match_an_independent_continuum_value_construction", oracle = "continuum-value", subject = "continuum-evidence" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers signing, signatures, or provenance verification; this change adds the signing library behind docs/19 TEST-9-07 and docs/09 T04's optional signing/attestation control, both of which stay partial or a typed absence until a production caller exists, and it moves no claim's evidence state"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the signature and allowed-signers records are library-level canonical values (ADR-0054 D4/D5); schemas keep their plain-string signature fields, and the wire spelling is a named follow-up because protocol 3.6 is frozen"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-evidence gains the additive signing module and ed25519-dalek and zeroize edges that add no package to Cargo.lock; no existing continuum-evidence type, wire value, or published artifact changes, and no artifact carries a signature yet"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3e3t1j"
+verdict = "approved"

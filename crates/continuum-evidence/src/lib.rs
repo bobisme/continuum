@@ -38,6 +38,7 @@
 //! | [`whiteboard`] | plan §11.5's seven sections, and the compiler that turns them into proposals | PHASE-A-DEL-04 |
 //! | [`view`] | the other direction: held graph state, rendered into those seven sections | PHASE-A-DEL-04 |
 //! | [`derivation`] | RFC 0038's `provenance` query in docs/44's derivation sense: the transitive ancestry over `provenance.inputs` | PHASE-A-DEL-04 |
+//! | [`signing`] | plan §18.6 signing identities: sign and verify receipts, intent bundles and domain packs; allowed signers; rotation and revocation; typed unverified provenance (ADR-0054) | bn-2ee4c |
 //!
 //! # The whiteboard runs in two directions, and only one of them has a wire verb
 //!
@@ -100,6 +101,9 @@
 //! - One workspace edge, to the leaf crate `continuum-value` (ADR-0013 identity, the
 //!   assurance payloads plan §11.4 attaches to two statuses, and the six epochs plan §4.6
 //!   scopes evidence by). The rationale is in `Cargo.toml`.
+//! - One external edge, `ed25519-dalek` (ADR-0054), for [`signing`] alone. Key generation
+//!   takes its seed through the [`signing::KeyEntropy`] capability; the crate reads no
+//!   entropy of its own.
 //! - **Not** `continuumd`. The daemon's `daemon::evidence`/`daemon::observe` pair models
 //!   INV-004 with a private-constructor promotion witness; [`authority`] mirrors that
 //!   pattern and imports none of it, because plan §20 puts `continuumd` at this crate's own
@@ -119,5 +123,6 @@ pub mod graph;
 pub mod identity;
 pub mod node;
 pub mod provenance;
+pub mod signing;
 pub mod view;
 pub mod whiteboard;

@@ -57,6 +57,28 @@ blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
 # ADR-0003). The lab runtime itself is not feature-gated upstream.
 asupersync = { version = "=0.5.0", default-features = false, features = ["deterministic-mode"] }
 
+# ed25519-dalek, the signature primitive behind plan §18.6's signing identities
+# (ADR-0054). Exact pin: 2.2.0 is the version asupersync's `nkeys` edge already
+# resolved and bn-lf4i already audited, so this edge adds no package to
+# Cargo.lock — it only makes a transitive package a direct one.
+#
+# `default-features = false` drops `std` (continuum-evidence never needs
+# `std::error::Error` on the signature error), `fast` (precomputed basepoint
+# tables: speed only, and 30 KiB of static data in the trust base), and nothing
+# that reaches entropy — `rand_core` is off, so `SigningKey::generate` does not
+# exist and a key can only be made from a 32-byte seed that arrived through
+# continuum-evidence's `KeyEntropy` capability (INV-005, ADR-0003). `zeroize`
+# is the one feature on: a dropped secret key is wiped, and `zeroize` is already
+# in the lock through the same audited tree.
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["zeroize"] }
+
+# zeroize: `Zeroizing<[u8; 32]>` carries continuum-evidence's key seed from the
+# KeyEntropy capability into key derivation and wipes it on every path
+# (ADR-0054, cr-3e3t1j). Exact pin at the version ed25519-dalek already
+# resolves and bn-lf4i audited, so no package is added. `default-features =
+# false` drops `alloc`; nothing here zeroizes a heap buffer.
+zeroize = { version = "=1.9.0", default-features = false }
+
 [workspace.package]
 version = "0.0.0"
 edition = "2024"

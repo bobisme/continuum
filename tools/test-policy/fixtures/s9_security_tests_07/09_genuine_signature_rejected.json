@@ -1,0 +1,18 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "verified-signature-rejected-detected",
+  "description": "A present, well-formed, authentic signature from an active, allowed signer is claimed unverified; the real verifier accepts it",
+  "system": {
+    "kind": "signature-verdict",
+    "present": true,
+    "well_formed": true,
+    "kind_matches": true,
+    "authentic": true,
+    "registry_current": true,
+    "standing_known": true,
+    "not_revoked": true,
+    "allowed": true,
+    "mode": "provenance",
+    "claimed_outcome": "unverified:signature-mismatch"
+  }
+}

@@ -67,5 +67,6 @@ ADRs are normative unless superseded.
 | ADR | Decision |
 |---|---|
 | [0053](0053-product-license-mit-or-apache-2.md) | Product license is `MIT OR Apache-2.0`; the asupersync rider is accepted and disclosed |
+| [0054](0054-signing-scheme.md) | Signing identities use Ed25519 through `ed25519-dalek`, over canonical bytes, with content-addressed signers |
 
 New ADRs use the next number and include context, decision, consequences, evidence requirements, and supersession rules.

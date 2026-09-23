@@ -31,6 +31,11 @@ publish = false
 # `tools/check_crate_boundaries.py` enforces that mechanically.
 [dependencies]
 continuum-value = { path = "../continuum-value" }
+# plan §18.6 signing identities (ADR-0054): sign and verify receipts, intent
+# bundles and domain packs over their canonical bytes, in `src/signing.rs`.
+ed25519-dalek.workspace = true
+# The key seed is wiped after derivation (ADR-0054, cr-3e3t1j).
+zeroize.workspace = true
 
 # The integration suite links the crate under test as a *separate* crate, which is what
 # makes `tests/pr7_evidence_graph.rs` evidence about the client's view rather than about

@@ -8,20 +8,22 @@ editing a line of the sibling module, `tsys.py`, or the `Justfile`.
 docs/19 §9's seventh bullet names two things in one phrase. Searched independently in
 `crates/`:
 
-1. **Cryptographic signatures — absent.** No crate anywhere in the workspace depends
-   on an asymmetric-signature or MAC library (`ed25519`, `dalek`, `hmac`, `p256`,
-   `secp256`, `rsa`, `ring`, a `signature` crate — grepped across every
-   `crates/*/Cargo.toml` and the workspace `Cargo.toml`; zero hits). The one type
-   named "signed" in the workspace, `ArtifactClass::SignedIntentBundle`
-   (`crates/continuum-workspace/src/artifact_path.rs`), is a path/prefix token like
-   every other artifact class (`"inb"` / `"inb_"`) with no distinct verification code
-   path — its integrity guarantee is the same content-addressed identity every other
-   class gets, not a signature. `continuum-security::injection`'s red-team corpus
-   includes a `"signature":"forged"` payload (`ForgedReceiptJson` vector), but that
-   tests prompt-injection resistance in an LLM-facing surface, not a cryptographic
-   verifier — there is nothing there that checks a signature, forged or genuine.
-   **Per the delivered bar, a named-but-unimplemented mechanism cannot be `enforced`,
-   so TEST-9-07 is `partial` regardless of what the second half has.**
+1. **Cryptographic signatures — library landed, production use absent.** bn-2ee4c
+   (ADR-0054) added `continuum-evidence::signing`: Ed25519 (`ed25519-dalek` `=2.2.0`,
+   strict verification) over a canonical envelope that binds the artifact's ADR-0013
+   canonical bytes, the kind, and the signer. Its `SignatureVerifier` is total: a
+   missing, malformed, kind-relabelled, tampered, wrong-key, stale-registry,
+   unknown-standing, revoked, or not-allowed signature is typed unverified provenance
+   (INV-008), never a pass, and `verify_for_ci_acceptance` turns each into
+   `AcceptanceChainInvalid`. `_check_signature_verdict` ports that decision order;
+   `_check_signing_drift` ties the port to the real `fn check` body; the named Rust
+   tests exercise the real code (RFC 8032 known-answer vectors among them); and
+   `_check_signature_dependency_placement` reads every real `Cargo.toml`.
+   **But no production path calls it** (review cr-3e3t1j): no real receipt, intent
+   bundle, or domain pack is signed or verified outside the module's tests. The daemon
+   wiring and `intent.accept`'s fail-closed check are bn-3glnv; the OS entropy source,
+   keystore, and producer-side signing are bn-1hape. A mechanism real systems do not
+   use is not "signature verification" of their artifacts, so this ID stays `partial`.
 2. **Content-addressed provenance — real, landed, non-stub.** Two production
    mechanisms bind an artifact's claimed identity to its actual bytes and reject a
    forged, tampered, or substituted claim:
@@ -38,6 +40,10 @@ docs/19 §9's seventh bullet names two things in one phrase. Searched independen
      identical content converge to one identity rather than mint a second.
    Both are drift-tied below to their real, committed source, and both are
    corroborated by real, non-`#[ignore]`d Rust `#[test]` functions.
+
+TEST-9-07 is `partial` until bn-3glnv and bn-1hape put the signing library on a
+production path; `_check_no_production_signing_caller` below keeps that absence
+checked, so the status cannot silently outlive it.
 
 Certificate wire-form checking (INV-004) was also searched:
 `crates/continuum-engine-reference/src/certificate.rs` writes the certificate and
@@ -81,6 +87,8 @@ ROOT = Path(__file__).resolve().parents[3]
 PUBLICATION_RS_PATH = ROOT / "crates/continuum-workspace/src/publication.rs"
 IDENTITY_RS_PATH = ROOT / "crates/continuum-value/src/identity.rs"
 CHECK_RS_PATH = ROOT / "crates/continuum-kernel-core/src/check.rs"
+SIGNING_RS_PATH = ROOT / "crates/continuum-evidence/src/signing.rs"
+SIGNING_TESTS_PATH = ROOT / "crates/continuum-evidence/tests/signing_identities.rs"
 CARGO_TOML_PATHS = sorted((ROOT / "crates").glob("*/Cargo.toml")) + [ROOT / "Cargo.toml"]
 
 OBLIGATIONS = {
@@ -93,6 +101,9 @@ RULES: dict[str, str] = {
     "distinct-artifacts-conflated-detected": "TEST-9-07",
     "identical-content-not-converged-detected": "TEST-9-07",
     "digest-token-tamper-not-rejected-detected": "TEST-9-07",
+    "unverified-signature-accepted-detected": "TEST-9-07",
+    "verified-signature-rejected-detected": "TEST-9-07",
+    "ci-acceptance-failed-open-detected": "TEST-9-07",
 }
 
 STATUS: dict[str, str] = {
@@ -123,28 +134,36 @@ _BOUNDARY_07 = (
     "structural properties named above, which is what the named real Rust tests "
     "exercise for real."
 )
-_ABSENCE_07 = (
-    "No crate in `crates/*/Cargo.toml` or the workspace `Cargo.toml` depends on "
-    "`ed25519`, `dalek`, `hmac`, `p256`, `secp256`, `rsa`, `ring`, or a `signature` "
-    "crate (checked at run time by `_check_no_signature_dependency` below, against "
-    "every real, committed `Cargo.toml` in the workspace — this is the one check in "
-    "this module that reads real files rather than modeling a predicate). "
-    "`ArtifactClass::SignedIntentBundle` is a name only: its `artifact_path.rs` arms "
-    "(`\"inb\"` / `\"inb_\"`) are the same class-token mechanism every other artifact "
-    "class gets, not a distinct signature-checking path, and "
-    "`continuum-security::injection`'s `forged-receipt-json` cases test whether "
-    "injected text can pass itself off as an accepted claim inside a prompt, not "
-    "whether a cryptographic signature verifies. `check.rs`'s own "
-    "`envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` states, as a "
-    "test, that the certificate checker cannot itself recompute or reject on a "
-    "relabeled digest — binding a digest to a real artifact is "
-    "`continuum-workspace::publication`'s job, which is what this module claims "
-    "instead. Cryptographic signature verification is therefore not a `partial` "
-    "implementation short one corner; it is zero lines, anywhere, and this ID stays "
-    "`partial` even though its content-addressed-provenance half is `enforced`-grade "
-    "on its own."
+_BOUNDARY_07_SIGNATURE = (
+    "`_check_signature_verdict` ports `SignatureVerifier::check` (`signing.rs`) as its "
+    "decision order over eight observable facts — present, well-formed, kind matches, "
+    "authentic under the claimed key, registry current against the authoritative head, "
+    "signer standing known, signer not revoked, signer allowed for the kind — and "
+    "the two policies over it: `verify` (any failure is typed unverified provenance with "
+    "the first failing reason) and `verify_for_ci_acceptance` (any failure is "
+    "`AcceptanceChainInvalid`). The port is exact about order and outcome, and "
+    "`_check_signing_drift` confirms at run time that the real `fn check` body still "
+    "tests those facts in that order and that the real verifier still calls "
+    "`verify_strict`. What it cannot do: compute an Ed25519 signature or a canonical "
+    "encoding (no cargo). That is what the named Rust tests do for real, including the "
+    "RFC 8032 §7.1 known-answer vectors and a pinned envelope signature."
 )
-BOUNDARIES: dict[str, list[str]] = {"TEST-9-07": [_BOUNDARY_07]}
+_ABSENCE_07 = (
+    "Production use of signatures is absent (review cr-3e3t1j). The library "
+    "`continuum-evidence::signing` exists and its 21 named Rust tests below exercise it, "
+    "but no crate outside `continuum-evidence` calls `SigningRegistry` or "
+    "`SignatureVerifier` (checked at run time by `_check_no_production_signing_caller` "
+    "against every real `crates/*/src` file), so no real receipt, intent bundle, or domain "
+    "pack is signed or verified. Missing: bn-3glnv — daemon operations and wire form for "
+    "signatures, allowed-signers sets and the authoritative registry head, and "
+    "`intent.accept` checking a held bundle through `verify_for_ci_acceptance` (protocol "
+    "3.6 is frozen); bn-1hape — an OS `KeyEntropy` source in a boundary crate, an on-disk "
+    "keystore, and signing inside the receipt, bundle, and pack producers. `check.rs`'s "
+    "`envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that "
+    "the certificate checker cannot recompute a relabeled digest; that is by design "
+    "(INV-004), and the certificate checker does not link the signature crate."
+)
+BOUNDARIES: dict[str, list[str]] = {"TEST-9-07": [_BOUNDARY_07, _BOUNDARY_07_SIGNATURE]}
 ABSENCE: dict[str, str] = {"TEST-9-07": _ABSENCE_07}
 
 # ---------------------------------------------------------------------------
@@ -163,6 +182,27 @@ RUST_TESTS: list[tuple[Path, str]] = [
     (IDENTITY_RS_PATH, "malformed_digest_tokens_are_typed_errors"),
     (IDENTITY_RS_PATH, "digest_tokens_round_trip"),
     (IDENTITY_RS_PATH, "blake3_matches_the_published_test_vectors"),
+    (SIGNING_RS_PATH, "ed25519_matches_the_rfc_8032_test_vectors"),
+    (SIGNING_RS_PATH, "signature_tokens_round_trip_and_reject_malformed_text"),
+    (SIGNING_RS_PATH, "weak_and_non_point_public_keys_are_not_signer_identities"),
+    (SIGNING_RS_PATH, "an_overlong_token_or_record_is_refused_before_decoding"),
+    (SIGNING_RS_PATH, "a_signature_record_fits_the_decode_bound"),
+    (SIGNING_TESTS_PATH, "a_signer_with_unknown_standing_is_unverified_not_active"),
+    (SIGNING_TESTS_PATH, "a_stale_registry_missing_a_revocation_cannot_verify"),
+    (SIGNING_TESTS_PATH, "an_empty_registry_verifies_no_signature"),
+    (SIGNING_TESTS_PATH, "sign_verify_round_trips_for_every_signed_kind_from_wire_bytes"),
+    (SIGNING_TESTS_PATH, "a_tampered_payload_downgrades_to_signature_mismatch"),
+    (SIGNING_TESTS_PATH, "a_signature_under_the_wrong_key_does_not_verify"),
+    (SIGNING_TESTS_PATH, "a_revoked_signers_signatures_downgrade_and_it_can_no_longer_sign"),
+    (SIGNING_TESTS_PATH, "a_rotated_key_keeps_its_signatures_verifiable_but_cannot_sign_again"),
+    (SIGNING_TESTS_PATH, "a_signer_outside_the_allowed_set_or_its_kinds_is_not_trusted"),
+    (SIGNING_TESTS_PATH, "a_kind_relabel_is_refused_before_and_after_the_kind_field_is_rewritten"),
+    (SIGNING_TESTS_PATH, "an_unverifiable_signature_downgrades_to_typed_unverified_provenance_not_fail_open"),
+    (SIGNING_TESTS_PATH, "the_ci_acceptance_check_fails_closed_on_every_unverified_outcome"),
+    (SIGNING_TESTS_PATH, "signatures_are_deterministic_and_pinned"),
+    (SIGNING_TESTS_PATH, "the_local_key_is_minted_on_first_use_once_and_audited"),
+    (SIGNING_TESTS_PATH, "a_lost_key_is_revoked_and_superseded_through_linked_audit_records"),
+    (SIGNING_TESTS_PATH, "an_allowed_signers_set_round_trips_through_its_canonical_value"),
 ]
 
 
@@ -241,21 +281,160 @@ def _extract_digest_token_len() -> int:
     return (bits // 8) * 2
 
 
-_SIGNATURE_DEP_RE = re.compile(r"^(ed25519[\w-]*|dalek[\w-]*|hmac|p256|secp256\w*|rsa|ring|signature)\s*=", re.M)
+_SIGNATURE_DEP_RE = re.compile(r"^(ed25519[\w-]*|dalek[\w-]*|hmac|p256|secp256\w*|rsa|ring|signature)\s*[=.]", re.M)
+_SIGNATURE_CRATE = "ed25519-dalek"
+_SIGNATURE_PIN_PHRASE = 'ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["zeroize"] }'
+_SIGNATURE_CONSUMERS = {"crates/continuum-evidence/Cargo.toml"}
+_CHECKER_MANIFESTS = {
+    "crates/continuum-certificate/Cargo.toml",
+    "crates/continuum-kernel-core/Cargo.toml",
+    "crates/continuum-kernel-sat/Cargo.toml",
+    "crates/continuum-kernel-smt/Cargo.toml",
+    "crates/continuum-kernel-temporal/Cargo.toml",
+}
 
 
-def _check_no_signature_dependency() -> list[str]:
-    """Reads every real, committed `Cargo.toml` in the workspace (not a model of one)
-    and confirms no crate declares a dependency on an asymmetric-signature or MAC
-    library. This is the one check in the module that is not a port: it is a direct
-    read of the real manifests, exactly as `s9_security_tests.py`'s TEST-9-01 calls
-    the real governance gates directly rather than modeling them."""
-    hits: list[str] = []
+def _signature_dependency_declarations() -> dict[str, list[str]]:
+    """Reads every real, committed `Cargo.toml` (not a model of one) and returns, per
+    manifest, the signature or MAC crates it declares."""
+    found: dict[str, list[str]] = {}
     for path in CARGO_TOML_PATHS:
         text = path.read_text(encoding="utf-8")
-        for m in _SIGNATURE_DEP_RE.finditer(text):
-            hits.append(f"{path.relative_to(ROOT)}: declares a dependency on {m.group(1)!r}")
-    return hits
+        hits = [m.group(1) for m in _SIGNATURE_DEP_RE.finditer(text)]
+        if hits:
+            found[str(path.relative_to(ROOT))] = hits
+    return found
+
+
+def _check_signature_dependency_placement() -> list[str]:
+    """The signature crate is pinned exactly at the workspace root, declared by
+    `continuum-evidence` alone, and by no certificate-checker crate (INV-004, ADR-0054
+    D3). A direct read of the real manifests, like `s9_security_tests.py`'s TEST-9-01
+    calling the real governance gates."""
+    problems: list[str] = []
+    root_text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    if _SIGNATURE_PIN_PHRASE not in root_text:
+        problems.append(f"drift: the workspace Cargo.toml no longer pins {_SIGNATURE_PIN_PHRASE!r}")
+    declared = _signature_dependency_declarations()
+    consumers = {path for path in declared if path != "Cargo.toml"}
+    for path in sorted(consumers - _SIGNATURE_CONSUMERS):
+        problems.append(f"{path} declares {declared[path]!r}; ADR-0054 D3 names continuum-evidence alone")
+    for path in sorted(consumers & _CHECKER_MANIFESTS):
+        problems.append(f"{path} is a certificate-checker crate and declares a signature crate (INV-004)")
+    for path in sorted(_SIGNATURE_CONSUMERS - consumers):
+        problems.append(f"{path} no longer declares {_SIGNATURE_CRATE}: the signing half has no implementation")
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# TEST-9-07: signature verification (SignatureVerifier::check and its two policies).
+# ---------------------------------------------------------------------------
+
+# The facts `fn check` tests, in the order it tests them, each with the unverified
+# reason its failure yields. `authentic` is `verify_strict`; `revoked` fails when true.
+_SIGNATURE_STEPS: list[tuple[str, str, str]] = [
+    ("present", "UnverifiedReason::Unsigned", "unsigned"),
+    ("well_formed", "UnverifiedReason::Malformed", "malformed"),
+    ("kind_matches", "UnverifiedReason::KindMismatch", "kind-mismatch"),
+    ("authentic", "UnverifiedReason::SignatureMismatch", "signature-mismatch"),
+    ("registry_current", "UnverifiedReason::StandingStale", "standing-stale"),
+    ("standing_known", "UnverifiedReason::StandingUnknown", "standing-unknown"),
+    ("not_revoked", "UnverifiedReason::SignerRevoked", "signer-revoked"),
+    ("allowed", "UnverifiedReason::SignerNotAllowed", "signer-not-allowed"),
+]
+_FACTS = [fact for fact, _, _ in _SIGNATURE_STEPS]
+_SIGNING_API_RE = re.compile(r"\b(SigningRegistry|SignatureVerifier|LocalKeyring)\b")
+
+
+def _check_no_production_signing_caller() -> tuple[list[str], list[str]]:
+    """The typed absence behind `partial`: no `src/` file of any crate other than
+    `continuum-evidence` names the signing API. Returns (callers, problems); a caller
+    means the absence is stale and this module needs its successor (bn-3glnv/bn-1hape)."""
+    callers: list[str] = []
+    for path in sorted((ROOT / "crates").glob("*/src/**/*.rs")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith("crates/continuum-evidence/"):
+            continue
+        if _SIGNING_API_RE.search(path.read_text(encoding="utf-8")):
+            callers.append(rel)
+    problems = [
+        f"{rel} calls the signing library: production use is no longer absent — re-derive "
+        "TEST-9-07's status from that path (bn-3glnv/bn-1hape) instead of this absence"
+        for rel in callers
+    ]
+    return callers, problems
+_CHECK_FN_RE = re.compile(r"    fn check\(\n(.*?)\n    }\n", re.S)
+
+
+def _check_signing_drift() -> list[str]:
+    """Ties `_SIGNATURE_STEPS` to the real `fn check` body: each reason's first mention
+    (and the `verify_strict` call for authenticity) must appear in the port's order.
+    `Malformed` is decided one layer up, in `verify_encoded`, before `check` runs."""
+    problems: list[str] = []
+    text = SIGNING_RS_PATH.read_text(encoding="utf-8")
+    m = _CHECK_FN_RE.search(text)
+    if not m:
+        return [f"drift: {SIGNING_RS_PATH} no longer declares `fn check(` on SignatureVerifier"]
+    body = m.group(1)
+    anchors = [
+        ("UnverifiedReason::Unsigned", body),
+        ("UnverifiedReason::KindMismatch", body),
+        (".verify_strict(", body),
+        ("UnverifiedReason::StandingStale", body),
+        ("UnverifiedReason::StandingUnknown", body),
+        ("UnverifiedReason::SignerRevoked", body),
+        ("UnverifiedReason::SignerNotAllowed", body),
+    ]
+    last = -1
+    for needle, hay in anchors:
+        at = hay.find(needle)
+        if at == -1:
+            problems.append(f"drift: `fn check` no longer mentions {needle}")
+            continue
+        if at < last:
+            problems.append(f"drift: `fn check` tests {needle} out of the ported order")
+        last = at
+    if "UnverifiedReason::Malformed(error)" not in text or "fn verify_encoded(" not in text:
+        problems.append("drift: `verify_encoded` no longer maps a decode failure to UnverifiedReason::Malformed")
+    if "Provenance::Unverified(unverified) => Err(AcceptanceChainInvalid {" not in text:
+        problems.append("drift: `verify_for_ci_acceptance` no longer maps every unverified outcome to AcceptanceChainInvalid")
+    if "fn check(" in text and "-> Provenance {" not in text:
+        problems.append("drift: `verify` no longer returns a total Provenance")
+    tests_text = SIGNING_TESTS_PATH.read_text(encoding="utf-8")
+    if "const PINNED_SIGNATURE: &str = \"ed25519:" not in tests_text:
+        problems.append(f"drift: {SIGNING_TESTS_PATH} no longer pins a known-answer envelope signature")
+    return problems
+
+
+def _signature_reference(facts: dict[str, bool], mode: str) -> str:
+    """The real outcome: `verified`, `unverified:<reason>`, or `ci-rejected:<reason>`."""
+    for fact, _, reason in _SIGNATURE_STEPS:
+        if not facts[fact]:
+            return f"{'ci-rejected' if mode == 'ci' else 'unverified'}:{reason}"
+    return "verified"
+
+
+def _check_signature_verdict(payload: dict) -> list[dict[str, str]]:
+    facts = {fact: bool(payload[fact]) for fact in _FACTS}
+    mode = payload["mode"]
+    expected = _signature_reference(facts, mode)
+    claimed = payload["claimed_outcome"]
+    if claimed == expected:
+        return []
+    if claimed == "verified":
+        rule = "ci-acceptance-failed-open-detected" if mode == "ci" else "unverified-signature-accepted-detected"
+    elif expected == "verified":
+        rule = "verified-signature-rejected-detected"
+    else:
+        rule = "ci-acceptance-failed-open-detected" if mode == "ci" else "unverified-signature-accepted-detected"
+    return [
+        _finding(
+            rule,
+            ",".join(f"{k}={int(v)}" for k, v in facts.items()) + f";mode={mode}",
+            f"real SignatureVerifier outcome is {expected!r} (checks run in the order "
+            f"{', '.join(_FACTS)}), fixture claims {claimed!r}",
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +558,8 @@ def check_fixture(system: Any) -> list[dict[str, str]]:
         return _check_identity_outcome(payload)
     if kind == "digest-token":
         return _check_digest_token(payload)
+    if kind == "signature-verdict":
+        return _check_signature_verdict(payload)
     return [
         _finding(
             "publication-name-substitution-not-rejected-detected",
@@ -412,14 +593,37 @@ def real_run() -> dict[str, Any]:
         if corpus.get(key, 0) == 0:
             failures.append(f"corpus exercises no {what} ({key} = 0): the pass would be vacuous")
 
-    # -- absence: no signature-verification dependency anywhere -----------------------
-    sig_hits = _check_no_signature_dependency()
+    # -- signature crate placement: real manifests ------------------------------------
     bump("cargo_toml_files_scanned", len(CARGO_TOML_PATHS))
-    if sig_hits:
-        # A hit here would mean the ABSENCE claim above is wrong — treat it as
-        # informational corroboration of the absence, not a failure of this module.
-        bump("unexpected_signature_dependencies", len(sig_hits))
+    failures.extend(_check_signature_dependency_placement())
+    _, caller_problems = _check_no_production_signing_caller()
+    failures.extend(caller_problems)
+    bump("production_signing_callers_absent", 0 if caller_problems else 1)
+    need("production_signing_callers_absent", "a checked absence of production signing callers")
     need("cargo_toml_files_scanned", "a real Cargo.toml to scan")
+
+    # -- signature-verdict: every fact combination, both policies -----------------------
+    failures.extend(_check_signing_drift())
+    for bits in range(1 << len(_FACTS)):
+        facts = {fact: bool(bits >> i & 1) for i, fact in enumerate(_FACTS)}
+        for mode in ("provenance", "ci"):
+            expected = _signature_reference(facts, mode)
+            bump("signature_cases")
+            bump(f"signature_{expected.split(':')[0].replace('-', '_')}")
+            payload = {**facts, "mode": mode}
+            if _check_signature_verdict({**payload, "claimed_outcome": expected}):
+                failures.append(f"signature {payload!r}: the reference's own honest claim was flagged")
+            wrong = "unverified:signature-mismatch" if expected == "verified" else "verified"
+            if mode == "ci" and expected == "verified":
+                wrong = "ci-rejected:signature-mismatch"
+            mut = _check_signature_verdict({**payload, "claimed_outcome": wrong})
+            mutate(bool(mut), f"signature {payload!r} (claimed {wrong!r} instead of {expected!r})")
+    for key, what in (
+        ("signature_verified", "a signature every check accepts"),
+        ("signature_unverified", "a downgraded (unverified) signature"),
+        ("signature_ci_rejected", "a CI fail-closed rejection"),
+    ):
+        need(key, what)
 
     # -- publication-attest ------------------------------------------------------------
     drift = _check_publication_drift()

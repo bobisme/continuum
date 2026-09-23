@@ -1,7 +1,7 @@
 {
   "artifact": "continuum.governance.evidence/t04",
   "authority": "notes/plan/docs/09_THREAT_MODEL.md T04 (Forged trace or artifact substitution)",
-  "boundary": "Two of six controls (hash chain/Merkle root over events; optional signing/attestation) are typed absences, not live enforcement \u2014 see the module docstring's 'Gap controls' section. The other four are bound to citations that are re-run, not merely read, on every invocation.",
+  "boundary": "Two of six controls (hash chain/Merkle root over events; optional signing/attestation, whose library exists but has no production caller) are typed absences, not live enforcement \u2014 see the module docstring's 'Gap controls' section. The other four are bound to citations that are re-run, not merely read, on every invocation.",
   "controls": {
     "build identity": {
       "citations": [
@@ -55,17 +55,27 @@
     "optional signing/attestation": {
       "absence_checks": [
         {
-          "artifact": "tools/governance/check_t04_evidence.py signing-dependency-gap",
-          "checks": "no known signing/attestation crate name appears in Cargo.toml [workspace.dependencies]",
+          "artifact": "tools/governance/check_t04_evidence.py signing-production-gap",
+          "checks": "the signing library is present, and no src/ file outside continuum-evidence names SigningRegistry, SignatureVerifier, or LocalKeyring",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_t04_evidence.py signing-dependency-placement",
+          "checks": "ed25519-dalek pinned exactly at the root; no certificate-checker crate declares a signing crate (INV-004)",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuum-evidence/tests/signing_identities.rs (six tests) and signing::tests::ed25519_matches_the_rfc_8032_test_vectors",
+          "checks": "the library the gap names is real: it round-trips, rejects tampering, wrong keys and revoked signers, fails closed in CI mode, and matches RFC 8032",
           "status": "pass"
         },
         {
           "artifact": "tools/governance/check_code_policy.py GOV-1-07",
-          "checks": "dependency-rationale.toml is the workspace's complete external-dependency inventory (every manifest's every edge, not only the root's); today it names exactly one external crate, blake3, so a signing dependency added anywhere in the workspace cannot go unrationalized even if it evaded the direct check above",
+          "checks": "the signing dependencies carry dependency-rationale entries and TCB classes",
           "status": "pass"
         }
       ],
-      "reason": "docs/09 marks this control optional, unlike its five siblings, and this workspace does not implement it. Assurance does not depend on it: reject digest mismatch and build identity above already deny an adversary a path to a forged pass without a signature.",
+      "reason": "Library present, production use absent. docs/09 marks this control optional. bn-2ee4c added continuum-evidence::signing (ADR-0054), but no production path calls it, so no real receipt, intent bundle, or domain pack is signed or verified (review cr-3e3t1j). Missing: bn-3glnv (daemon operations, wire form, intent.accept's fail-closed check) and bn-1hape (OS entropy, keystore, producer-side signing). Assurance does not depend on it: reject digest mismatch and build identity above already deny an adversary a path to a forged pass.",
       "status": "pass",
       "type": "gap"
     },
@@ -196,6 +206,30 @@
       "tests": [
         "an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone"
       ]
+    },
+    "signing_attestation_library": {
+      "args": [
+        "--test",
+        "signing_identities"
+      ],
+      "package": "continuum-evidence",
+      "tests": [
+        "sign_verify_round_trips_for_every_signed_kind_from_wire_bytes",
+        "a_tampered_payload_downgrades_to_signature_mismatch",
+        "a_signature_under_the_wrong_key_does_not_verify",
+        "a_revoked_signers_signatures_downgrade_and_it_can_no_longer_sign",
+        "the_ci_acceptance_check_fails_closed_on_every_unverified_outcome",
+        "signatures_are_deterministic_and_pinned"
+      ]
+    },
+    "signing_attestation_primitive": {
+      "args": [
+        "--lib"
+      ],
+      "package": "continuum-evidence",
+      "tests": [
+        "signing::tests::ed25519_matches_the_rfc_8032_test_vectors"
+      ]
     }
   },
   "self_test": {
@@ -203,7 +237,8 @@
       "checks_caught": [
         "adr-0013-states-canonical-identity",
         "event-hash-chain-gap",
-        "signing-dependency-gap"
+        "signing-dependency-placement",
+        "signing-production-gap"
       ],
       "failures": [],
       "status": "pass"
@@ -230,7 +265,7 @@
       "build_identity_receipt": {
         "package": "continuum-kernel-core",
         "status": "pass",
-        "tail": "running 2 tests\ntest receipt::tests::the_envelope_supplies_the_hashes_the_certificate_carries ... ok\ntest receipt::tests::the_trusted_inputs_are_exactly_the_seam ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 53 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running unittests src/lib.rs (target/debug/deps/continuum_kernel_core-7001eab8cfe257c8)",
+        "tail": "running 2 tests\ntest receipt::tests::the_trusted_inputs_are_exactly_the_seam ... ok\ntest receipt::tests::the_envelope_supplies_the_hashes_the_certificate_carries ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 53 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s\n     Running unittests src/lib.rs (target/debug/deps/continuum_kernel_core-7001eab8cfe257c8)",
         "tests": [
           "receipt::tests::the_trusted_inputs_are_exactly_the_seam",
           "receipt::tests::the_envelope_supplies_the_hashes_the_certificate_carries"
@@ -239,7 +274,7 @@
       "content_addressed_manifests_value": {
         "package": "continuum-value",
         "status": "pass",
-        "tail": "running 1 test\ntest identity::tests::blake3_is_a_pure_function_of_the_bytes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s\n     Running unittests src/lib.rs (target/debug/deps/continuum_value-63c2fd1030471b8c)",
+        "tail": "running 1 test\ntest identity::tests::blake3_is_a_pure_function_of_the_bytes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running unittests src/lib.rs (target/debug/deps/continuum_value-63c2fd1030471b8c)",
         "tests": [
           "identity::tests::blake3_is_a_pure_function_of_the_bytes"
         ]
@@ -247,7 +282,7 @@
       "content_addressed_manifests_workspace": {
         "package": "continuum-workspace",
         "status": "pass",
-        "tail": "running 1 test\ntest positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running tests/pr3_exit_evidence.rs (target/debug/deps/pr3_exit_evidence-aedea73190106755)",
+        "tail": "running 1 test\ntest positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/pr3_exit_evidence.rs (target/debug/deps/pr3_exit_evidence-aedea73190106755)",
         "tests": [
           "positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes"
         ]
@@ -255,7 +290,7 @@
       "preserve_redaction_commitments": {
         "package": "continuumd",
         "status": "pass",
-        "tail": "running 2 tests\ntest verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction ... ok\ntest a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 54 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s\n     Running tests/daemon_evidence.rs (target/debug/deps/daemon_evidence-bda7c0fc1046e505)",
+        "tail": "running 2 tests\ntest verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction ... ok\ntest a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 63 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/daemon_evidence.rs (target/debug/deps/daemon_evidence-1a73ce09d417f777)",
         "tests": [
           "a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission",
           "verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction"
@@ -264,7 +299,7 @@
       "reject_digest_mismatch_family_routing": {
         "package": "continuum-certificate",
         "status": "pass",
-        "tail": "test a_certificate_stamped_with_another_familys_magic_is_refused_by_the_kernel_it_names ... ok\ntest garbage_never_verifies_and_never_panics_through_the_composition ... ok\ntest a_single_byte_mutation_past_the_magic_keeps_the_route_and_the_kernels_own_answer ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running tests/family_routing.rs (target/debug/deps/family_routing-6dacaf40e7a2fa35)",
+        "tail": "test a_certificate_stamped_with_another_familys_magic_is_refused_by_the_kernel_it_names ... ok\ntest garbage_never_verifies_and_never_panics_through_the_composition ... ok\ntest a_single_byte_mutation_past_the_magic_keeps_the_route_and_the_kernels_own_answer ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/family_routing.rs (target/debug/deps/family_routing-6dacaf40e7a2fa35)",
         "tests": [
           "a_certificate_stamped_with_another_familys_magic_is_refused_by_the_kernel_it_names",
           "a_single_byte_mutation_past_the_magic_keeps_the_route_and_the_kernels_own_answer",
@@ -274,7 +309,7 @@
       "reject_digest_mismatch_publication": {
         "package": "continuum-workspace",
         "status": "pass",
-        "tail": "running 1 test\ntest publication::tests::an_identity_collision_aborts_rather_than_conflating_two_artifacts ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 149 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s\n     Running unittests src/lib.rs (target/debug/deps/continuum_workspace-6a83f555aa640b19)",
+        "tail": "running 1 test\ntest publication::tests::an_identity_collision_aborts_rather_than_conflating_two_artifacts ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 152 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running unittests src/lib.rs (target/debug/deps/continuum_workspace-6a83f555aa640b19)",
         "tests": [
           "publication::tests::an_identity_collision_aborts_rather_than_conflating_two_artifacts"
         ]
@@ -282,9 +317,30 @@
       "reject_digest_mismatch_wire_epoch": {
         "package": "continuum-kernel-core",
         "status": "pass",
-        "tail": "running 1 test\ntest an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s\n     Running tests/pr9_exit_evidence.rs (target/debug/deps/pr9_exit_evidence-3d901d51edcb5429)",
+        "tail": "running 1 test\ntest an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/pr9_exit_evidence.rs (target/debug/deps/pr9_exit_evidence-3d901d51edcb5429)",
         "tests": [
           "an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone"
+        ]
+      },
+      "signing_attestation_library": {
+        "package": "continuum-evidence",
+        "status": "pass",
+        "tail": "test signatures_are_deterministic_and_pinned ... ok\ntest sign_verify_round_trips_for_every_signed_kind_from_wire_bytes ... ok\ntest the_ci_acceptance_check_fails_closed_on_every_unverified_outcome ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.05s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/signing_identities.rs (target/debug/deps/signing_identities-f12d6e8c69ad11ac)",
+        "tests": [
+          "sign_verify_round_trips_for_every_signed_kind_from_wire_bytes",
+          "a_tampered_payload_downgrades_to_signature_mismatch",
+          "a_signature_under_the_wrong_key_does_not_verify",
+          "a_revoked_signers_signatures_downgrade_and_it_can_no_longer_sign",
+          "the_ci_acceptance_check_fails_closed_on_every_unverified_outcome",
+          "signatures_are_deterministic_and_pinned"
+        ]
+      },
+      "signing_attestation_primitive": {
+        "package": "continuum-evidence",
+        "status": "pass",
+        "tail": "running 1 test\ntest signing::tests::ed25519_matches_the_rfc_8032_test_vectors ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 182 filtered out; finished in 0.04s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s\n     Running unittests src/lib.rs (target/debug/deps/continuum_evidence-f014b54f40b5b51e)",
+        "tests": [
+          "signing::tests::ed25519_matches_the_rfc_8032_test_vectors"
         ]
       }
     },

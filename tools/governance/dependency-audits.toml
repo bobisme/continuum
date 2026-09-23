@@ -902,6 +902,15 @@ confirmed no actual `unsafe` code in non-test builds. src/hazmat.rs exposes low-
 operations behind a documented `hazmat` feature flag with explicit misuse warnings; it
 introduces no unsafe code, only a wider misuse surface for callers who opt in. No
 build script, no env, fs, process or network access.
+
+bn-2ee4c addendum (same version, same checksum; now also a direct `normal` edge of
+continuum-evidence, ADR-0054). Re-read the paths that edge calls: `SigningKey::from_bytes`
+derives the verifying key from the seed itself, so `Signer::sign` cannot be handed a
+mismatched public key (the ed25519-unsafe-libs double-key oracle does not apply);
+`VerifyingKey::verify_strict` decompresses R, rejects a small-order R or public key, and
+`InternalSignature::try_from` rejects a non-canonical s before the equation is checked;
+`VerifyingKey::is_weak` is the same small-order test. Built with default features off
+plus `zeroize`: `rand_core`, `batch`, `hazmat`, `pkcs8`, `pem` and `serde` stay off.
 """
 
 [[audits.either]]

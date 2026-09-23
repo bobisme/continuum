@@ -29,9 +29,11 @@
 #       Only ever a `[build-dependencies]` entry. In the build graph, not the
 #       runtime graph.
 #
-# The workspace declares two external dependencies: `blake3`, entered in
-# `bn-30eym` to fill the ADR-0013 hash seam, and `asupersync`, entered in
-# `bn-lf4i` as the Phase B substrate (ADR-0001, ADR-0053 D0). Every other entry
+# The workspace declares four external dependencies: `blake3`, entered in
+# `bn-30eym` to fill the ADR-0013 hash seam, `asupersync`, entered in
+# `bn-lf4i` as the Phase B substrate (ADR-0001, ADR-0053 D0), and
+# `ed25519-dalek` and `zeroize`, entered in `bn-2ee4c` for plan §18.6 signing
+# identities (ADR-0054). Every other entry
 # below is a workspace-internal path edge. The bar for each one is the same: an
 # honest class, a stated cost, and a tree someone has read.
 #
@@ -125,6 +127,37 @@ tcb_class = "engine"
 kinds = ["normal"]
 used_by = ["continuum-asupersync"]
 rationale = "The Phase B substrate itself (ADR-0001, plan §21): continuum-asupersync (PR-14-IMPL-01, src/binding.rs) drives asupersync's lab runtime under a Continuum ChoiceLog and observes the lifecycle journal from the substrate's own trace, so the region calculus in continuum-task is checked against runs of real asupersync code rather than against a scripted source alone. The licensee accepts the rider for linking (ADR-0053 D0) and has ruled on agent development-process exposure to it (ADR-0053 D7). Classed engine, not trusted-checking-base: continuum-asupersync is linked by no certificate checker and by no continuum-kernel-* crate (plan §20, INV-004, enforced by tools/check_crate_boundaries.py), and a journal it produces is lifted into continuum_task::region and checked there, so a substrate defect yields a wrong or rejected journal, never a certified claim. What the class does not discount: the substrate is the Program half of Model/Program/Proof, so a defect that reorders events consistently can make a conformance result wrong in a way only a differential run against the reference schedule detects; the journal's lift-vs-Schedule differential test exists for that reason. Declared with default-features = false and only `deterministic-mode`, whose sole effect is to remove SystemTime::now() from the lab oracles' violation stamps (INV-005); the root Cargo.toml and the section comment above give each choice."
+
+# --- ed25519-dalek, the signature edge ----------------------------------------
+#
+# Pinned once, in the root `[workspace.dependencies]`:
+#
+#     ed25519-dalek = { version = "=2.2.0", default-features = false,
+#                       features = ["zeroize"] }
+#
+# 2.2.0 is exactly the version asupersync's `nkeys` edge already resolved, so
+# this entry adds no package to Cargo.lock: `ed25519-dalek`, `ed25519`,
+# `curve25519-dalek`, `curve25519-dalek-derive`, `sha2 0.10.9`, `signature`,
+# `subtle`, `zeroize`, and `fiat-crypto` each already carry a bn-lf4i audit
+# entry for the exact checksum. The lock diff is two feature-unification edges
+# (`zeroize` under both dalek crates) and the new continuum-evidence edge.
+# ADR-0054 records the scheme choice and the alternatives.
+
+[[dependency]]
+name = "ed25519-dalek"
+origin = "external"
+tcb_class = "trusted-checking-base"
+kinds = ["normal"]
+used_by = ["continuum-evidence"]
+rationale = "The signature primitive behind plan §18.6 and docs/09 §10 signing identities (ADR-0054): continuum-evidence's signing module signs and verifies receipts, intent bundles and domain packs over their ADR-0013 canonical bytes, and verification is Ed25519 strict (`verify_strict`, RFC 8032 cofactorless with small-order and non-canonical rejection). Chosen over a hand-rolled primitive because a hand-rolled signature would look like one and not be one, and over ring/aws-lc (C and assembly in the trust base's build graph) and p256/ecdsa (a nonce per signature, so a signature is not a function of key and message — INV-005). The crate is `#![forbid(unsafe_code)]` outside tests; its curve25519-dalek backend is the one place unsafe SIMD code exists, and bn-lf4i's audit records it. Declared with default-features = false: no `std`, no `fast` precomputed tables, and no `rand_core`, so `SigningKey::generate` does not exist in this build and a key is only ever `SigningKey::from_bytes` over a seed that reached the crate through the explicit KeyEntropy capability (INV-005, ADR-0003); `zeroize` is on so a dropped secret is wiped. Classed trusted-checking-base, not engine: it is linked by continuum-evidence, itself trusted-checking-base, and a defect here makes a forged signature believable, which nothing downstream re-checks. It is NOT linked by continuum-certificate or any continuum-kernel-* crate (plan §20, INV-004): a signature binds authorship, never proof validity (RFC 0032 \"Signing\", ADR-0035). The same exact version was already in the resolved tree through asupersync's nkeys, so this edge adds no audited package."
+
+[[dependency]]
+name = "zeroize"
+origin = "external"
+tcb_class = "trusted-checking-base"
+kinds = ["normal"]
+used_by = ["continuum-evidence"]
+rationale = "Wipes continuum-evidence's 32-byte key seed after key derivation (ADR-0054, review cr-3e3t1j): KeyEntropy::seed returns Zeroizing<[u8; 32]>, and LocalSigner::from_seed takes it by value, so the seed is wiped on every success and error path of mint rather than dropped as a plain stack array; ed25519-dalek's own SigningKey already zeroizes its copy through the same crate. Pinned exactly at =1.9.0, the version ed25519-dalek already resolved and bn-lf4i audited, with default-features = false (no alloc), so the edge adds no package. Classed trusted-checking-base because continuum-evidence is; a defect here leaves a secret in memory, it cannot make a signature verify."
 
 [[dependency]]
 name = "continuum-value"

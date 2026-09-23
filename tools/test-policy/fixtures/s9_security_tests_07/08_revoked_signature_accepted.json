@@ -1,0 +1,18 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "unverified-signature-accepted-detected",
+  "description": "An authentic, allowed signature from a revoked signer is claimed verified; the real SignatureVerifier::verify downgrades it to SignerRevoked unverified provenance",
+  "system": {
+    "kind": "signature-verdict",
+    "present": true,
+    "well_formed": true,
+    "kind_matches": true,
+    "authentic": true,
+    "registry_current": true,
+    "standing_known": true,
+    "not_revoked": false,
+    "allowed": true,
+    "mode": "provenance",
+    "claimed_outcome": "verified"
+  }
+}

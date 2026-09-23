@@ -1,0 +1,18 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "ci-acceptance-failed-open-detected",
+  "description": "The plan 4.2.1 CI acceptance check is claimed to pass an intent bundle with no signature; the real verify_for_ci_acceptance fails closed with AcceptanceChainInvalid(Unsigned)",
+  "system": {
+    "kind": "signature-verdict",
+    "present": false,
+    "well_formed": true,
+    "kind_matches": true,
+    "authentic": true,
+    "registry_current": true,
+    "standing_known": true,
+    "not_revoked": true,
+    "allowed": true,
+    "mode": "ci",
+    "claimed_outcome": "verified"
+  }
+}

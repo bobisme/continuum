@@ -57,17 +57,13 @@ Control -> enforcement point map
         re-run for real.
 
     optional signing/attestation                                       GAP
-        No live producer, and none is claimed — docs/09 states this control
-        as *optional* in its own text, unlike its five siblings. See "Gap
-        controls" below: the direct check here is not "prove signing
-        exists" but "prove nothing in the tree falsely claims an unproven
-        attestation", which is the honest reading of an optional control.
-        Reinforced by `check_code_policy.py` GOV-1-07 (dependency-rationale),
-        which inventories every dependency edge in the whole workspace, not
-        only the root manifest's — today exactly one external crate,
-        `blake3` (`tools/governance/dependency-rationale.toml`) — so a
-        signing dependency added anywhere would need a rationale entry even
-        if it somehow evaded this file's own direct check.
+        Library present, production use absent (bn-2ee4c, review
+        cr-3e3t1j). `continuum-evidence::signing` (ADR-0054) signs and
+        verifies over canonical bytes, and its tests are re-run here as
+        evidence that the library is real. But no production path signs or
+        verifies a real receipt, intent bundle, or domain pack: daemon
+        wiring is bn-3glnv, producers and entropy are bn-1hape. See "Gap
+        controls" below.
 
     reject digest mismatch                                             PASS
         `continuum-workspace::publication`'s `AbortReason::IdentityCollision`
@@ -126,18 +122,19 @@ Two controls are typed absences, not failures:
    producer-shaped identifier appears anywhere under `crates/*/src`.
 
 2. **"optional signing/attestation"** — docs/09 marks this control
-   *optional*, unlike its five siblings, and this workspace does not
-   implement it: no signing/attestation dependency is pinned anywhere in
-   the workspace manifest. That absence does not weaken T04's assurance,
-   because none of the other five controls derive their soundness from a
-   signature — `reject digest mismatch` and `build identity` above already
-   give an adversary no path to a forged "pass" without it. `direct_checks`'
-   `signing-dependency-gap` proves the absence mechanically (no known
-   signing-crate name appears in `[workspace.dependencies]`) so that a
-   dependency silently starting to imply unproven attestation would be
-   caught, not merely undocumented.
+   *optional*. Since bn-2ee4c the signing *library* exists
+   (`continuum-evidence::signing`, ADR-0054), but nothing on a production
+   path calls it, so no real artifact is signed and the control is still a
+   typed absence. `direct_checks`' `signing-production-gap` checks both
+   halves mechanically: the library is present (its module declares
+   `SignatureVerifier` and `verify_for_ci_acceptance`), and no `src/` file
+   of any crate other than `continuum-evidence` names `SigningRegistry`,
+   `SignatureVerifier`, or `LocalKeyring`. The day bn-3glnv or bn-1hape
+   adds a caller, this check fails and the control needs a successor
+   citation, not a silent pass. `signing-dependency-placement` also keeps
+   the crate pinned exactly and out of the certificate checker (INV-004).
 
-Both gap direct-checks are exercised by `--self-test` the same way this
+The two gap direct-checks and the placement check are exercised by `--self-test` the same way this
 file's other direct checks are: a synthetic fixture (an overlay file/line
 that *does* match the producer-shaped pattern) must trip the check, proving
 the scanner is a real detector and not a hardcoded "always absent" stub.
@@ -149,12 +146,12 @@ Self-test
 
 1. This file's three source-level direct checks
    (`adr-0013-states-canonical-identity`, `event-hash-chain-gap`,
-   `signing-dependency-gap`) each catch a real mutation/fixture, generated
+   `signing-production-gap`, `signing-dependency-placement`) each catch a real mutation/fixture, generated
    against an anchor or via a synthetic overlay that must be unambiguous.
 2. Every Python delegate checker's own `--self-test` still exits 0
    (`check_kernel_covenant.py`, `check_crate_boundaries.py`, and
-   `check_code_policy.py` — the last cited only for GOV-1-07's reinforcement
-   of the signing-dependency gap).
+   `check_code_policy.py` — the last cited for GOV-1-07's rationale entry
+   behind the signing dependency).
 3. Every cited Rust test still passes when re-run for real, narrowly
    (`cargo test -p <crate> --test <file>|--lib --locked -- <exact names>
    --exact`) — the same tests `cargo test --workspace --locked` (this
@@ -193,7 +190,7 @@ Scope and honesty about limits
   zero-Lean-edge count takes for "extraction adapters isolated") and they
   regress loudly the moment a matching producer-shaped construct appears
   under a name this file's patterns anticipate. The day a real event-hash-
-  chain producer or a real signing/attestation dependency lands, this file's
+  chain producer or a production signing caller lands, this file's
   gap control needs a human successor citing it for real — that is out of
   this bone's scope to invent ahead of the code it would govern, exactly the
   posture `check_r16_evidence.py` takes for the still-scaffold Lean proof
@@ -296,6 +293,23 @@ RUST_DELEGATES: dict[str, RustGroup] = {
             "an_envelope_wire_epoch_this_build_does_not_implement_is_unsupported_from_bytes_alone",
         ],
     ),
+    "signing_attestation_library": (
+        "continuum-evidence",
+        ["--test", "signing_identities"],
+        [
+            "sign_verify_round_trips_for_every_signed_kind_from_wire_bytes",
+            "a_tampered_payload_downgrades_to_signature_mismatch",
+            "a_signature_under_the_wrong_key_does_not_verify",
+            "a_revoked_signers_signatures_downgrade_and_it_can_no_longer_sign",
+            "the_ci_acceptance_check_fails_closed_on_every_unverified_outcome",
+            "signatures_are_deterministic_and_pinned",
+        ],
+    ),
+    "signing_attestation_primitive": (
+        "continuum-evidence",
+        ["--lib"],
+        ["signing::tests::ed25519_matches_the_rfc_8032_test_vectors"],
+    ),
     "preserve_redaction_commitments": (
         "continuumd",
         ["--test", "daemon_evidence"],
@@ -337,9 +351,8 @@ EVENT_CHAIN_RUST_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bchained_event_hash\b"),
 )
 
-# Canary patterns for a signing/attestation dependency. Matched against dependency
-# *names* (TOML keys), not arbitrary prose, so a comment mentioning "signing" does
-# not trip this.
+# Signing/attestation crate names. Matched against dependency *names* (TOML keys),
+# not arbitrary prose, so a comment mentioning "signing" does not trip this.
 SIGNING_DEPENDENCY_NAMES: tuple[str, ...] = (
     "ed25519",
     "ed25519-dalek",
@@ -356,7 +369,15 @@ SIGNING_DEPENDENCY_NAMES: tuple[str, ...] = (
     "p256",
     "k256",
 )
-DEPENDENCY_NAME_PATTERN = re.compile(r"^([A-Za-z0-9_-]+)\s*=", re.MULTILINE)
+SIGNING_PIN = 'ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["zeroize"] }'
+CHECKER_MANIFESTS: tuple[str, ...] = (
+    "crates/continuum-certificate/Cargo.toml",
+    "crates/continuum-kernel-core/Cargo.toml",
+    "crates/continuum-kernel-sat/Cargo.toml",
+    "crates/continuum-kernel-smt/Cargo.toml",
+    "crates/continuum-kernel-temporal/Cargo.toml",
+)
+DEPENDENCY_NAME_PATTERN = re.compile(r"^([A-Za-z0-9_-]+)\s*[=.]", re.MULTILINE)
 
 
 def rule_event_hash_chain_gap(
@@ -375,16 +396,54 @@ def rule_event_hash_chain_gap(
     return hits
 
 
-def rule_signing_dependency_gap(cargo_toml_text: str | None) -> list[str]:
-    """Returns hits (evidence the gap is NOT real) — empty means the gap holds."""
+def rule_signing_dependency_placement(
+    cargo_toml_text: str | None,
+    checker_manifests: list[tuple[str, str]],
+) -> list[str]:
+    """ADR-0054 D2/D3: the signing crate is pinned exactly in the root manifest, and no
+    certificate-checker crate declares any signing crate (INV-004). Returns problems."""
     if cargo_toml_text is None:
         return ["Cargo.toml is missing"]
+    problems: list[str] = []
+    if SIGNING_PIN not in cargo_toml_text:
+        problems.append(f"Cargo.toml no longer pins {SIGNING_PIN!r}")
+    for rel, text in checker_manifests:
+        for match in DEPENDENCY_NAME_PATTERN.finditer(text):
+            name = match.group(1).lower()
+            if name in SIGNING_DEPENDENCY_NAMES:
+                problems.append(f"{rel} (certificate checker) declares signing dependency {name!r}")
+    return problems
+
+
+SIGNING_LIBRARY = "crates/continuum-evidence/src/signing.rs"
+SIGNING_LIBRARY_ANCHORS: tuple[str, ...] = ("pub struct SignatureVerifier", "pub fn verify_for_ci_acceptance(")
+SIGNING_API_PATTERN = re.compile(r"\b(SigningRegistry|SignatureVerifier|LocalKeyring)\b")
+
+
+def rule_signing_production_gap(library_text: str | None, rust_sources: list[tuple[str, str]]) -> list[str]:
+    """Returns hits (evidence the gap is NOT as declared) — empty means the library is
+    present and no production caller outside continuum-evidence exists."""
     hits: list[str] = []
-    for match in DEPENDENCY_NAME_PATTERN.finditer(cargo_toml_text):
-        name = match.group(1).lower()
-        if name in SIGNING_DEPENDENCY_NAMES:
-            hits.append(f"Cargo.toml declares dependency {name!r}")
+    if library_text is None:
+        hits.append(f"{SIGNING_LIBRARY} is missing: the declared library is absent")
+    else:
+        for anchor in SIGNING_LIBRARY_ANCHORS:
+            if anchor not in library_text:
+                hits.append(f"{SIGNING_LIBRARY} no longer declares {anchor!r}")
+    for rel, text in rust_sources:
+        if rel.startswith("crates/continuum-evidence/") or "/src/" not in rel:
+            continue
+        if SIGNING_API_PATTERN.search(text):
+            hits.append(f"{rel}: a production caller of the signing library exists; the gap is stale")
     return hits
+
+
+def real_checker_manifests() -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for rel in CHECKER_MANIFESTS:
+        path = ROOT / rel
+        out.append((rel, path.read_text(encoding="utf-8") if path.is_file() else ""))
+    return out
 
 
 def real_schema_names() -> list[str]:
@@ -413,7 +472,11 @@ def direct_checks() -> dict[str, list[str]]:
     return {
         "adr-0013-states-canonical-identity": rule_adr_0013_states_canonical_identity(adr_text),
         "event-hash-chain-gap": rule_event_hash_chain_gap(real_schema_names(), real_rust_sources()),
-        "signing-dependency-gap": rule_signing_dependency_gap(cargo_text),
+        "signing-dependency-placement": rule_signing_dependency_placement(cargo_text, real_checker_manifests()),
+        "signing-production-gap": rule_signing_production_gap(
+            (ROOT / SIGNING_LIBRARY).read_text(encoding="utf-8") if (ROOT / SIGNING_LIBRARY).is_file() else None,
+            real_rust_sources(),
+        ),
     }
 
 
@@ -454,17 +517,32 @@ def direct_self_test() -> dict[str, object]:
     else:
         caught.append("event-hash-chain-gap")
 
-    # signing-dependency-gap: prove an injected dependency line is caught.
+    # signing-dependency-placement: prove a loosened pin and a checker-side edge are
+    # both caught, without touching the real tree.
     real_cargo_text = (ROOT / ROOT_CARGO_TOML).read_text(encoding="utf-8") if (ROOT / ROOT_CARGO_TOML).is_file() else ""
-    anchor = "[workspace.dependencies]"
-    if real_cargo_text.count(anchor) != 1:
-        failures.append(f"signing-dependency-gap fixture anchor {anchor!r} matches {real_cargo_text.count(anchor)} times, expected 1")
+    checkers = real_checker_manifests()
+    if real_cargo_text.count(SIGNING_PIN) != 1:
+        failures.append(f"signing-dependency-placement fixture anchor matches {real_cargo_text.count(SIGNING_PIN)} times, expected 1")
     else:
-        dirty = real_cargo_text.replace(anchor, f'{anchor}\ned25519-dalek = "2"', 1)
-        if not rule_signing_dependency_gap(dirty):
-            failures.append("fixture: injecting ed25519-dalek into Cargo.toml did not trip signing-dependency-gap")
+        loosened = real_cargo_text.replace(SIGNING_PIN, 'ed25519-dalek = "2"', 1)
+        injected = [(rel, text + '\n[dependencies]\ned25519-dalek.workspace = true\n') if i == 0 else (rel, text) for i, (rel, text) in enumerate(checkers)]
+        if not rule_signing_dependency_placement(loosened, checkers):
+            failures.append("fixture: loosening the ed25519-dalek pin did not trip signing-dependency-placement")
+        elif not rule_signing_dependency_placement(real_cargo_text, injected):
+            failures.append("fixture: a certificate-checker ed25519-dalek edge did not trip signing-dependency-placement")
         else:
-            caught.append("signing-dependency-gap")
+            caught.append("signing-dependency-placement")
+
+    # signing-production-gap: prove a missing library and a synthetic production caller
+    # are both caught.
+    library = (ROOT / SIGNING_LIBRARY).read_text(encoding="utf-8") if (ROOT / SIGNING_LIBRARY).is_file() else ""
+    caller = [("crates/continuumd/src/fixture.rs", "use continuum_evidence::signing::SignatureVerifier;")]
+    if not rule_signing_production_gap(None, []):
+        failures.append("fixture: a missing signing library did not trip signing-production-gap")
+    elif not rule_signing_production_gap(library, caller):
+        failures.append("fixture: a synthetic continuumd caller did not trip signing-production-gap")
+    else:
+        caught.append("signing-production-gap")
 
     return {"status": "fail" if failures else "pass", "checks_caught": sorted(caught), "failures": failures}
 
@@ -672,21 +750,34 @@ def build_controls(
         },
         "optional signing/attestation": {
             "reason": (
-                "docs/09 marks this control optional, unlike its five "
-                "siblings, and this workspace does not implement it. "
-                "Assurance does not depend on it: reject digest mismatch and "
-                "build identity above already deny an adversary a path to a "
-                "forged pass without a signature."
+                "Library present, production use absent. docs/09 marks this control "
+                "optional. bn-2ee4c added continuum-evidence::signing (ADR-0054), but "
+                "no production path calls it, so no real receipt, intent bundle, or "
+                "domain pack is signed or verified (review cr-3e3t1j). Missing: "
+                "bn-3glnv (daemon operations, wire form, intent.accept's fail-closed "
+                "check) and bn-1hape (OS entropy, keystore, producer-side signing). "
+                "Assurance does not depend on it: reject digest mismatch and build "
+                "identity above already deny an adversary a path to a forged pass."
             ),
             "absence_checks": [
                 {
-                    "artifact": "tools/governance/check_t04_evidence.py signing-dependency-gap",
-                    "checks": "no known signing/attestation crate name appears in Cargo.toml [workspace.dependencies]",
-                    "status": direct_status("signing-dependency-gap"),
+                    "artifact": "tools/governance/check_t04_evidence.py signing-production-gap",
+                    "checks": "the signing library is present, and no src/ file outside continuum-evidence names SigningRegistry, SignatureVerifier, or LocalKeyring",
+                    "status": direct_status("signing-production-gap"),
+                },
+                {
+                    "artifact": "tools/governance/check_t04_evidence.py signing-dependency-placement",
+                    "checks": "ed25519-dalek pinned exactly at the root; no certificate-checker crate declares a signing crate (INV-004)",
+                    "status": direct_status("signing-dependency-placement"),
+                },
+                {
+                    "artifact": "crates/continuum-evidence/tests/signing_identities.rs (six tests) and signing::tests::ed25519_matches_the_rfc_8032_test_vectors",
+                    "checks": "the library the gap names is real: it round-trips, rejects tampering, wrong keys and revoked signers, fails closed in CI mode, and matches RFC 8032",
+                    "status": "pass" if rust_status("signing_attestation_library") == "pass" and rust_status("signing_attestation_primitive") == "pass" else "fail",
                 },
                 {
                     "artifact": "tools/governance/check_code_policy.py GOV-1-07",
-                    "checks": "dependency-rationale.toml is the workspace's complete external-dependency inventory (every manifest's every edge, not only the root's); today it names exactly one external crate, blake3, so a signing dependency added anywhere in the workspace cannot go unrationalized even if it evaded the direct check above",
+                    "checks": "the signing dependencies carry dependency-rationale entries and TCB classes",
                     "status": rid_status(code_policy, "GOV-1-07"),
                 },
             ],
@@ -751,8 +842,9 @@ def build_evidence(controls: dict[str, dict], direct_st: dict, py_st: dict, rust
         },
         "boundary": (
             "Two of six controls (hash chain/Merkle root over events; optional "
-            "signing/attestation) are typed absences, not live enforcement — see "
-            "the module docstring's 'Gap controls' section. The other four are "
+            "signing/attestation, whose library exists but has no production "
+            "caller) are typed absences, not live enforcement — see the module "
+            "docstring's 'Gap controls' section. The other four are "
             "bound to citations that are re-run, not merely read, on every "
             "invocation."
         ),
