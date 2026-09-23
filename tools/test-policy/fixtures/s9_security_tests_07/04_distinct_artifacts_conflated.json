@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "distinct-artifacts-conflated-detected",
+  "description": "Two genuinely different artifacts, with different content and different real identities, are wrongly claimed to converge into one identity (distinct_artifacts_never_share_identity)",
+  "system": {
+    "kind": "identity-outcome",
+    "content_a": "616c706861",
+    "content_b": "62657461",
+    "identity_a": "id-alpha",
+    "identity_b": "id-beta",
+    "claimed_outcome": "converged"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "digest-token-tamper-not-rejected-detected",
+  "description": "A digest token with a non-hex character spliced in (a tampered byte) is wrongly claimed accepted; Digest256::from_token rejects any character outside [0-9a-f]",
+  "system": {
+    "kind": "digest-token",
+    "token": "g111111111111111111111111111111111111111111111111111111111111111",
+    "claimed_accepted": true
+  }
+}

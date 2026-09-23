@@ -1,0 +1,12 @@
+{
+  "expect": "clean",
+  "description": "Honest claims for all three checks: a receipt attesting its own handle, identical content converging to one identity, distinct content with distinct identities standing apart, and a well-formed 64-character lowercase-hex digest token accepted",
+  "system": {
+    "kind": "publication-attest",
+    "receipt_class": "ev",
+    "receipt_identity": "cleanhandle01",
+    "offered_class": "ev",
+    "offered_identity": "cleanhandle01",
+    "claimed_accepted": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "publication-name-substitution-not-rejected-detected",
+  "description": "The same identity string reclassed under a different artifact class is wrongly claimed to attest the original receipt (Published::attest checks the whole handle, class included)",
+  "system": {
+    "kind": "publication-attest",
+    "receipt_class": "ev",
+    "receipt_identity": "aaaa1111",
+    "offered_class": "task",
+    "offered_identity": "aaaa1111",
+    "claimed_accepted": true
+  }
+}

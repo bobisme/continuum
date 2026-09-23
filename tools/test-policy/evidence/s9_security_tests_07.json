@@ -1,0 +1,158 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "07_clean.json",
+      "ok": true
+    }
+  ],
+  "module": "tools/test-policy/sections/s9_security_tests_07.py",
+  "requirements": {
+    "TEST-9-07": {
+      "absence": "No crate in `crates/*/Cargo.toml` or the workspace `Cargo.toml` depends on `ed25519`, `dalek`, `hmac`, `p256`, `secp256`, `rsa`, `ring`, or a `signature` crate (checked at run time by `_check_no_signature_dependency` below, against every real, committed `Cargo.toml` in the workspace \u2014 this is the one check in this module that reads real files rather than modeling a predicate). `ArtifactClass::SignedIntentBundle` is a name only: its `artifact_path.rs` arms (`\"inb\"` / `\"inb_\"`) are the same class-token mechanism every other artifact class gets, not a distinct signature-checking path, and `continuum-security::injection`'s `forged-receipt-json` cases test whether injected text can pass itself off as an accepted claim inside a prompt, not whether a cryptographic signature verifies. `check.rs`'s own `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` states, as a test, that the certificate checker cannot itself recompute or reject on a relabeled digest \u2014 binding a digest to a real artifact is `continuum-workspace::publication`'s job, which is what this module claims instead. Cryptographic signature verification is therefore not a `partial` implementation short one corner; it is zero lines, anywhere, and this ID stays `partial` even though its content-addressed-provenance half is `enforced`-grade on its own.",
+      "boundaries": [
+        "`_check_publication_attest` ports `PublishedName::names`/`Published::attest` (`publication.rs`: `fn names(&self, handle: &ArtifactHandle) -> bool { self == handle }`) as plain equality on (class, identity) \u2014 the real predicate needs no hash to state, so the port is exact, not approximate. `_check_identity_outcome` ports the store's convergence/collision/distinctness trichotomy structurally (same content implies same identity; different content sharing a claimed identity is a collision that must abort; different content with different identity stands as two artifacts) \u2014 this is the property the real `ContentIdentifier::identify` doc contract states ('a pure function \u2026 two calls with equal arguments \u2026 must return equal handles', INV-005/INV-006) and that `an_identity_collision_aborts_rather_than_conflating_two_artifacts` and `distinct_artifacts_never_share_identity` corroborate; it is independent of which hash algorithm the real `ContentIdentifier` fixture uses; this module never computes one. `_check_digest_token` ports `Digest256::from_token` (`identity.rs`) as a length-and-character-class check, drift-tied by extracting `DIGEST_BITS` at run time and confirming the `DIGEST_LEN * 2`/`DIGEST_BITS / 8` arithmetic phrases are still present, so a change to the digest width is noticed, not just a change to the accept/reject outcome. What this cannot do: compute a real `blake3-256` digest, run `Value::encode`'s canonical-encoding rules, or exercise `ReferenceStore` concurrency itself (no cargo) \u2014 only the structural properties named above, which is what the named real Rust tests exercise for real."
+      ],
+      "corpus": {
+        "attest_cases": 4,
+        "attest_substitution_cases": 2,
+        "cargo_toml_files_scanned": 43,
+        "digest_token_cases": 6,
+        "digest_token_len_extracted": 1,
+        "digest_token_tamper_cases": 5,
+        "outcome_aborted": 2,
+        "outcome_converged": 2,
+        "outcome_distinct": 2,
+        "rust_tests_named": 10,
+        "rust_tests_present": 10
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "publication-name-substitution-not-rejected-detected"
+          ],
+          "fixture": "01_publication_name_substitution.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "publication-name-substitution-not-rejected-detected"
+        },
+        {
+          "caught": [
+            "publication-name-substitution-not-rejected-detected"
+          ],
+          "fixture": "02_publication_name_class_substitution.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "publication-name-substitution-not-rejected-detected"
+        },
+        {
+          "caught": [
+            "identity-collision-not-aborted-detected"
+          ],
+          "fixture": "03_identity_collision_not_aborted.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "identity-collision-not-aborted-detected"
+        },
+        {
+          "caught": [
+            "distinct-artifacts-conflated-detected"
+          ],
+          "fixture": "04_distinct_artifacts_conflated.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "distinct-artifacts-conflated-detected"
+        },
+        {
+          "caught": [
+            "identical-content-not-converged-detected"
+          ],
+          "fixture": "05_identical_content_not_converged.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "identical-content-not-converged-detected"
+        },
+        {
+          "caught": [
+            "digest-token-tamper-not-rejected-detected"
+          ],
+          "fixture": "06_digest_token_tamper.json",
+          "ok": true,
+          "requirement": "TEST-9-07",
+          "rule": "digest-token-tamper-not-rejected-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 22,
+        "detected": 22
+      },
+      "registry_status": "active",
+      "rules": [
+        "digest-token-tamper-not-rejected-detected",
+        "distinct-artifacts-conflated-detected",
+        "identical-content-not-converged-detected",
+        "identity-collision-not-aborted-detected",
+        "publication-name-substitution-not-rejected-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuum-workspace/src/publication.rs",
+          "present": true,
+          "test": "published_attests_only_the_receipts_own_handle"
+        },
+        {
+          "path": "crates/continuum-workspace/src/publication.rs",
+          "present": true,
+          "test": "published_is_invariant_under_the_handles_serialization_round_trip"
+        },
+        {
+          "path": "crates/continuum-workspace/src/publication.rs",
+          "present": true,
+          "test": "a_receipt_names_the_identity_the_store_derived"
+        },
+        {
+          "path": "crates/continuum-workspace/src/publication.rs",
+          "present": true,
+          "test": "distinct_artifacts_never_share_identity"
+        },
+        {
+          "path": "crates/continuum-workspace/src/publication.rs",
+          "present": true,
+          "test": "an_identity_collision_aborts_rather_than_conflating_two_artifacts"
+        },
+        {
+          "path": "crates/continuum-workspace/src/publication.rs",
+          "present": true,
+          "test": "concurrent_identical_publication_yields_one_identity_and_every_receipt"
+        },
+        {
+          "path": "crates/continuum-value/src/identity.rs",
+          "present": true,
+          "test": "non_canonical_bytes_are_not_an_identity"
+        },
+        {
+          "path": "crates/continuum-value/src/identity.rs",
+          "present": true,
+          "test": "malformed_digest_tokens_are_typed_errors"
+        },
+        {
+          "path": "crates/continuum-value/src/identity.rs",
+          "present": true,
+          "test": "digest_tokens_round_trip"
+        },
+        {
+          "path": "crates/continuum-value/src/identity.rs",
+          "present": true,
+          "test": "blake3_matches_the_published_test_vectors"
+        }
+      ],
+      "status": "partial",
+      "summary": "signature/provenance verification."
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a79 Security validation"
+}

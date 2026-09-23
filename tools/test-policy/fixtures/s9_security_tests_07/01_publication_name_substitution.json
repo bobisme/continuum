@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "publication-name-substitution-not-rejected-detected",
+  "description": "A receipt issued for one artifact's handle is wrongly claimed to attest a different offered identity under the same class (Published::attest would reject this)",
+  "system": {
+    "kind": "publication-attest",
+    "receipt_class": "ev",
+    "receipt_identity": "aaaa1111",
+    "offered_class": "ev",
+    "offered_identity": "bbbb2222",
+    "claimed_accepted": true
+  }
+}

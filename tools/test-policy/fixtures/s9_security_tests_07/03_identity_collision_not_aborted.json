@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "identity-collision-not-aborted-detected",
+  "description": "Distinct content ('original' vs. an impostor payload) claiming the same identity is wrongly claimed to converge, instead of the real store's abort (AbortReason::IdentityCollision, never conflating two artifacts)",
+  "system": {
+    "kind": "identity-outcome",
+    "content_a": "6f726967696e616c",
+    "content_b": "696d706f73746f72",
+    "identity_a": "same-claimed-id",
+    "identity_b": "same-claimed-id",
+    "claimed_outcome": "converged"
+  }
+}

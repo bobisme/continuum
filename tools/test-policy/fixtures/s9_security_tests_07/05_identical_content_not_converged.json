@@ -1,0 +1,13 @@
+{
+  "requirement": "TEST-9-07",
+  "rule": "identical-content-not-converged-detected",
+  "description": "Two publications of byte-identical content sharing one real identity are wrongly claimed distinct, instead of the real store's convergence to one identity (concurrent_identical_publication_yields_one_identity_and_every_receipt)",
+  "system": {
+    "kind": "identity-outcome",
+    "content_a": "6964656e7469636161",
+    "content_b": "6964656e7469636161",
+    "identity_a": "id-same",
+    "identity_b": "id-same",
+    "claimed_outcome": "distinct"
+  }
+}
