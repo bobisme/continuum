@@ -87,28 +87,58 @@ A fingerprint-only deduplication mutant loses states, and the same exactness che
 rejects it. The optimized engine `continuum-engine-explicit` is a scaffold today. When
 it lands, C006 needs new evidence for it under ADR-0013.
 
-C023 is observed on the workspace dependency graph and on two cross-path arrows:
-the reference engine's certificate that the kernel checks from wire bytes, and the
-Rust reference oracle against the Python oracle. That is the whole scope. The
-evidence is `tools/check_triptych_independence.py` with its retained record
-`tools/triptych/evidence/c023.json` (bn-2270). The audit reads the full resolved
-graph, dev edges included, and derives the roles from the members. Over it, the
-checking base links only itself, no producer links the checking base, the model
-plane and the program plane do not link each other, and the graph has no cycle.
-Every public verdict entry of the checking base takes wire bytes only. A kernel
-entry that takes a decoded certificate makes the real Rust test
-`checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes` fail. Fourteen
-circular mutants are rejected by the audit. The boundary gate owns five of them,
-and it rejects each. For the other nine, the fixture states why the gate has no
-rule. Three manifest mutants are applied to
-a real copy of the workspace, and both tools reject them. The audit found one gap:
-the gate accepted `continuum-certificate -> continuum-asupersync`. bn-2270 closed
-it. Five of the seven RFC 0013 arrows have a scaffold side today: CIR journal to
+C023 is observed on the workspace dependency graph and on three cross-path arrows:
+the reference engine's certificate that the kernel checks from wire bytes, the
+Rust reference oracle against the Python oracle, and the asupersync adapter's
+journal against an executable primitive conformance model (A7). That is the whole
+scope. The evidence is `tools/check_triptych_independence.py` with its retained
+record `tools/triptych/evidence/c023.json` (bn-2270, A7 by bn-ujpz0). The audit
+reads the full resolved graph, dev edges included, and derives the roles from the
+members. Over it, the checking base links only itself, no producer links the
+checking base, the model plane and the program plane do not link each other, and
+the graph has no cycle. Every public verdict entry of the checking base takes wire
+bytes only. A kernel entry that takes a decoded certificate makes the real Rust
+test `checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes`
+fail. Seventeen circular mutants are rejected by the audit. The boundary gate owns
+five of them, and it rejects each. For the other twelve, the fixture states why
+the gate has no rule. Three manifest mutants are applied to a real copy of the
+workspace, and both tools reject them. The audit found one gap: the gate accepted
+`continuum-certificate -> continuum-asupersync`. bn-2270 closed it.
+
+The A7 witness is
+`crates/continuum-asupersync/tests/a7_primitive_conformance.rs`. Its model,
+`tests/support/primitive_conformance_model.rs`, is written from docs/02 §5 and §7,
+docs/01 §6 and plan §4.1. It covers region and task lifecycle, cancellation
+phases, reserve/commit/abort, the obligation ledger and virtual time. It imports
+`std` only and reads each journal from its canonical bytes with its own reader, so
+it shares no type, decoder, lift or scripted source with the adapter. The audit
+rule `a7-model-independent` holds that. The corpus is 6381 real `binding::run`
+journals over six program sets and three family alphabets, from a stride through
+each exhaustive interleaving space and a seeded random sample. The model accepts
+each one, and the lift agrees. At 24288 journal positions, the model's generated
+next steps include the step the substrate took, and the model's guard admits each
+generated step. A run that leaks an obligation is rejected by the model at its
+region's close. Sixteen curated perturbations of real journals are rejected by the
+model, each for its own fault. Over 19345 single-event deletions and adjacent swaps,
+the model never accepts a journal the lift rejects. In 666 of them the model rejects
+a journal that the lift accepts. These fall into seven classes, and each is a rule
+that docs/02 §7 or research/09 states and the lift does not check. Examples are a
+cancellation's effect abort before the task's acknowledgement, a task that completes
+as cancelled while it holds an obligation or an armed timer, and a finalize with no
+drain report. The evidence record retains one program-side mutant: the binding
+journals effect aborts before the acknowledgement. The A7 witness fails on it, and
+the lift-based conformance test of the same family passes.
+
+Four of the seven RFC 0013 arrows have a scaffold side today: CIR journal to
 refinement checker, CML reference to optimized evaluator, evaluator to SMT/PDR
-encodings, native checker to Lean reflective checker, and adapter to conformance
-models. On them the refinement rules hold only because the crates are empty. When
-a scaffold side lands, the evidence record goes stale, `just boundaries` fails,
-and C023 needs new evidence for that arrow. This first happened when bn-ybq gave `continuum-model-core` real code. CIR to refinement and CML reference to optimized evaluator keep a scaffold side, and adapter to conformance models now has code on both sides but no cross-path test. That arrow is outside the observed scope until a test checks the adapter journal against a conformance model, and the record `arrows` entry A7 says so.
+encodings, and native checker to Lean reflective checker. On them the refinement
+rules hold only because the crates are empty. When a scaffold side lands, the
+evidence record goes stale, `just boundaries` fails, and C023 needs new evidence
+for that arrow. This first happened when bn-ybq gave `continuum-model-core` real
+code, which left A7 with code on both sides and no cross-path test until bn-ujpz0.
+The A7 model is a second account of the primitives, not a proof. The adapter's
+lift is still the only check that `binding::run` runs, and the seven gap classes
+are not closed in it.
 
 C020 is observed on the intent classification and policy layer. That layer is
 the diff assembler `continuum_semantic_diff::artifact::assemble` and

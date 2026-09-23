@@ -1,0 +1,12 @@
+{
+  "id": "c023-m15-a7-model-reads-the-adapter",
+  "description": "The A7 conformance model imports the adapter's own lift, so the arrow would check the adapter against itself.",
+  "source_overlay": {
+    "crates/continuum-asupersync/tests/support/primitive_conformance_model.rs": "\nuse continuum_asupersync::lift::lift;\n"
+  },
+  "expect_audit": [
+    "a7-model-independent"
+  ],
+  "expect_gate": [],
+  "gate_note": "source-level mutant in a test support file; the gate reads the crate graph only, and a test file of continuum-asupersync may link the adapter by construction."
+}

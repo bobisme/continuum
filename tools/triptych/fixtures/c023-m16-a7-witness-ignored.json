@@ -1,0 +1,15 @@
+{
+  "id": "c023-m16-a7-witness-ignored",
+  "description": "The A7 cross-path test is switched off with #[ignore].",
+  "source_replace": {
+    "crates/continuum-asupersync/tests/a7_primitive_conformance.rs": [
+      "fn every_substrate_journal_is_a_trace_the_conformance_model_accepts(",
+      "#[ignore]\nfn every_substrate_journal_is_a_trace_the_conformance_model_accepts("
+    ]
+  },
+  "expect_audit": [
+    "cross-path-tests-live"
+  ],
+  "expect_gate": [],
+  "gate_note": "test-liveness mutant; the gate reads the graph only."
+}

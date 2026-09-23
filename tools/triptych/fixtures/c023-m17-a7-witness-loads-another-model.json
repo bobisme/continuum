@@ -1,0 +1,15 @@
+{
+  "id": "c023-m17-a7-witness-loads-another-model",
+  "description": "The A7 witness loads a different file as its model, so the audited model is no longer the one the substrate's journals are checked against.",
+  "source_replace": {
+    "crates/continuum-asupersync/tests/a7_primitive_conformance.rs": [
+      "#[path = \"support/primitive_conformance_model.rs\"]",
+      "#[path = \"support/lift_shim.rs\"]"
+    ]
+  },
+  "expect_audit": [
+    "a7-model-independent"
+  ],
+  "expect_gate": [],
+  "gate_note": "source-level mutant in a test file; the gate reads the crate graph only."
+}

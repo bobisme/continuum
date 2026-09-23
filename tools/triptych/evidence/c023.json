@@ -56,11 +56,22 @@
       "id": "A7",
       "scaffold_crates": [],
       "status": "present",
-      "witness": null
+      "witness": "crates/continuum-asupersync/tests/a7_primitive_conformance.rs"
     }
   ],
   "bone": "bn-2270",
   "campaign": {
+    "a7_rust_mutant": {
+      "applied": true,
+      "id": "c023-a7-rust-binding-cleanup-before-acknowledgement",
+      "lift_test": "continuum-asupersync --test pr14_impl02_reserve_commit_abort every_effect_journal_conforms_and_resolves_every_reservation_once",
+      "model_test": "continuum-asupersync --test a7_primitive_conformance every_substrate_journal_is_a_trace_the_conformance_model_accepts",
+      "mutated_compiled": true,
+      "mutated_lift_test_passed": true,
+      "mutated_model_test_failed": true,
+      "unmutated_lift_test_passed": true,
+      "unmutated_model_test_passed": true
+    },
     "e2e": [
       {
         "audit_exit": 0,
@@ -215,6 +226,27 @@
         ],
         "gate": [],
         "id": "c023-m14-differential-ignored"
+      },
+      {
+        "audit": [
+          "a7-model-independent"
+        ],
+        "gate": [],
+        "id": "c023-m15-a7-model-reads-the-adapter"
+      },
+      {
+        "audit": [
+          "cross-path-tests-live"
+        ],
+        "gate": [],
+        "id": "c023-m16-a7-witness-ignored"
+      },
+      {
+        "audit": [
+          "a7-model-independent"
+        ],
+        "gate": [],
+        "id": "c023-m17-a7-witness-loads-another-model"
       }
     ],
     "rust_mutant": {
@@ -368,6 +400,33 @@
       "expect_gate": [],
       "gate_note": "test-liveness mutant; the gate reads the graph only.",
       "id": "c023-m14-differential-ignored"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "a7-model-independent"
+      ],
+      "expect_gate": [],
+      "gate_note": "source-level mutant in a test support file; the gate reads the crate graph only, and a test file of continuum-asupersync may link the adapter by construction.",
+      "id": "c023-m15-a7-model-reads-the-adapter"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "cross-path-tests-live"
+      ],
+      "expect_gate": [],
+      "gate_note": "test-liveness mutant; the gate reads the graph only.",
+      "id": "c023-m16-a7-witness-ignored"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "a7-model-independent"
+      ],
+      "expect_gate": [],
+      "gate_note": "source-level mutant in a test file; the gate reads the crate graph only.",
+      "id": "c023-m17-a7-witness-loads-another-model"
     }
   ],
   "required_tests": [
@@ -384,7 +443,12 @@
     "crates/continuum-certificate/tests/inv004_no_self_certification.rs::the_manifest_names_no_forbidden_dependency_even_if_a_table_is_ever_added",
     "crates/continuum-engine-reference/tests/certificate_kernel_differential.rs::the_engines_die_hard_certificate_is_verified_by_the_independent_checker",
     "crates/continuum-engine-reference/tests/certificate_kernel_differential.rs::every_single_byte_mutation_of_the_state_table_is_rejected",
-    "crates/continuum-engine-reference/tests/semantic_differential.rs::differential_corpus_agrees_with_python_oracle"
+    "crates/continuum-engine-reference/tests/semantic_differential.rs::differential_corpus_agrees_with_python_oracle",
+    "crates/continuum-asupersync/tests/a7_primitive_conformance.rs::every_substrate_journal_is_a_trace_the_conformance_model_accepts",
+    "crates/continuum-asupersync/tests/a7_primitive_conformance.rs::the_models_enabled_steps_include_what_the_substrate_did",
+    "crates/continuum-asupersync/tests/a7_primitive_conformance.rs::a_leaking_run_is_rejected_by_the_model_and_by_the_lift",
+    "crates/continuum-asupersync/tests/a7_primitive_conformance.rs::perturbed_journals_are_rejected_by_the_conformance_model",
+    "crates/continuum-asupersync/tests/a7_primitive_conformance.rs::deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift"
   ],
   "roles": {
     "checker": [
@@ -422,6 +486,7 @@
     ]
   },
   "rules": {
+    "a7-model-independent": "the A7 conformance model imports std only, names no workspace crate or runtime, and the witness loads it",
     "acyclic": "the workspace graph with normal, build and dev edges is acyclic",
     "checker-closed": "the checking base links only checking-base crates, never the runtime",
     "checker-dev-closed": "no checking-base dev-dependency reaches a producer",

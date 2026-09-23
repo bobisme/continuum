@@ -56,6 +56,15 @@ Rules (each a finding with a witness path when it fails):
 - `cross-path-tests-live`: the Rust tests that pin the wire-form boundary and
   the engine-to-kernel differential exist and are not `#[ignore]`d. This is
   the tie from this audit to real Rust tests over the real code.
+- `a7-model-independent`: arrow A7's conformance model
+  (`crates/continuum-asupersync/tests/support/primitive_conformance_model.rs`,
+  bn-ujpz0) is a second path, not the adapter's own lift. It imports `std` or
+  `core` only, loads no other file (`mod x;`, `#[path]`, `include!`), and no code
+  line names a `continuum_*` crate or the `asupersync` runtime, so it can reach
+  neither the adapter's types, decoder, lift or scripted source, nor the region
+  calculus the lift uses. The A7 witness must load exactly that file. The model
+  lives beside the adapter's tests only because Cargo integration tests are
+  per-crate; the rule, not the directory, is what makes it the model side.
 - `gate-coverage`: the boundary gate's `KERNEL`, `ENGINES` and `CHECKER` lists
   equal the pattern-derived roles, and for every (checker, producer) pair an
   injected edge makes `check_crate_boundaries.evaluate` report a violation.
@@ -81,6 +90,12 @@ Mutation campaign (`--self-test`):
 The Rust mutant (run by `--evidence` only, since it compiles a crate) applies the in-memory entry-point mutant
 to a copy of `continuum-kernel-core` and runs the real Rust test that owns it;
 the test must pass before the edit and fail after it.
+
+The A7 Rust mutant (also `--evidence` only) edits a copy of the adapter's binding so
+it journals a cancelled task's effect aborts before the task's acknowledgement. The A7
+witness must pass before the edit and fail after it, and the lift-based conformance
+test of the same family must pass both times: the model catches what the adapter's own
+check admits.
 
 Usage:
 
@@ -139,6 +154,7 @@ RULES: dict[str, str] = {
     "acyclic": "the workspace graph with normal, build and dev edges is acyclic",
     "wire-form-only": "every public verdict-returning checker function takes exactly `bytes: &[u8]`",
     "cross-path-tests-live": "the Rust tests pinning the wire boundary and the differential are live",
+    "a7-model-independent": "the A7 conformance model imports std only, names no workspace crate or runtime, and the witness loads it",
     "gate-coverage": "the boundary gate's lists match the roles and catch every checker->producer edge",
 }
 
@@ -176,7 +192,22 @@ REQUIRED_TESTS: tuple[tuple[str, str], ...] = (
         "crates/continuum-engine-reference/tests/semantic_differential.rs",
         "differential_corpus_agrees_with_python_oracle",
     ),
+    *(
+        ("crates/continuum-asupersync/tests/a7_primitive_conformance.rs", name)
+        for name in (
+            "every_substrate_journal_is_a_trace_the_conformance_model_accepts",
+            "the_models_enabled_steps_include_what_the_substrate_did",
+            "a_leaking_run_is_rejected_by_the_model_and_by_the_lift",
+            "perturbed_journals_are_rejected_by_the_conformance_model",
+            "deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift",
+        )
+    ),
 )
+
+# Arrow A7's two sides (bn-ujpz0): the witness drives the real substrate; the model is
+# the independent path it is checked against.
+A7_WITNESS = "crates/continuum-asupersync/tests/a7_primitive_conformance.rs"
+A7_MODEL = "crates/continuum-asupersync/tests/support/primitive_conformance_model.rs"
 
 # RFC 0013 "Cross-path matrix", plus the two arrows the repository already has.
 # Each arrow is present only when every crate named in `needs` holds code.
@@ -221,7 +252,7 @@ ARROWS: tuple[dict, ...] = (
         "id": "A7",
         "arrow": "asupersync adapter <-> executable primitive conformance models",
         "needs": [ADAPTER, "continuum-model-core"],
-        "witness": None,
+        "witness": A7_WITNESS,
     },
 )
 
@@ -417,6 +448,7 @@ def evaluate(graph: Graph, root: pathlib.Path, gate) -> list[str]:
     out.extend(cycles(graph))
     out.extend(wire_form(graph, root, r))
     out.extend(tests_live(root, graph.overlay, graph.replace))
+    out.extend(a7_model(root, graph.overlay, graph.replace))
     if gate is not None:
         out.extend(gate_coverage(gate, r, graph.members))
     return out
@@ -490,6 +522,33 @@ def tests_live(root: pathlib.Path, overlay: dict[str, str], replace) -> list[str
             out.append(f"[cross-path-tests-live] {rel}::{name} is not a #[test]")
         if any(a.startswith("#[ignore") for a in attrs):
             out.append(f"[cross-path-tests-live] {rel}::{name} is #[ignore]d")
+    return out
+
+
+A7_USE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+(?:::)?(\w+)")
+A7_FOREIGN = re.compile(r"\b(continuum_\w+|asupersync)\b")
+A7_LOADS = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*;|#\[path\b|\binclude(?:_str|_bytes)?!|\bextern\s+crate\b")
+
+
+def a7_model(root: pathlib.Path, overlay: dict[str, str], replace) -> list[str]:
+    out: list[str] = []
+    text = read(root, A7_MODEL, overlay, replace)
+    if not code_lines(text):
+        return [f"[a7-model-independent] {A7_MODEL} does not exist or holds no code"]
+    for line in code_lines(text):
+        code = line.split("//", 1)[0]
+        use = A7_USE.match(code)
+        if use and use.group(1) not in ("std", "core"):
+            out.append(f"[a7-model-independent] {A7_MODEL} imports `{use.group(1)}`: {line.strip()}")
+        for ident in sorted(set(A7_FOREIGN.findall(code))):
+            out.append(f"[a7-model-independent] {A7_MODEL} names `{ident}`: {line.strip()}")
+        if A7_LOADS.search(code):
+            out.append(f"[a7-model-independent] {A7_MODEL} loads another file: {line.strip()}")
+    witness = read(root, A7_WITNESS, overlay, replace)
+    loaded = re.findall(r'#\[path\s*=\s*"([^"]+)"\]', witness)
+    expected = pathlib.PurePosixPath(A7_MODEL).relative_to(pathlib.PurePosixPath(A7_WITNESS).parent)
+    if loaded != [str(expected)]:
+        out.append(f"[a7-model-independent] {A7_WITNESS} loads {loaded}, not exactly {expected}")
     return out
 
 
@@ -664,6 +723,76 @@ RUST_MUTANT = {
 }
 
 
+# Arrow A7's program-side mutant (bn-ujpz0): the binding journals a cancelled task's
+# effect aborts before the task's acknowledgement, i.e. cleanup before the task entered
+# `Cancelling` (docs/02 §7). The adapter's own lift admits that order; the A7 model
+# must refuse it. So the A7 witness fails on the mutant while the lift-based
+# conformance test of the same family still passes.
+A7_ACK = """            if track.acknowledged {
+                self.record
+                    .append(EventBody::Cancellation(CancellationEvent::Acknowledged {
+                        task: *task,
+                    }));
+            }
+"""
+A7_ABORTS_END = """                    cause: AbortCause::Cancel,
+                }));
+            }
+"""
+A7_RUST_MUTANT = {
+    "id": "c023-a7-rust-binding-cleanup-before-acknowledgement",
+    "file": "crates/continuum-asupersync/src/binding.rs",
+    "edits": [(A7_ACK, ""), (A7_ABORTS_END, A7_ABORTS_END + A7_ACK)],
+    "model_test": ("a7_primitive_conformance", "every_substrate_journal_is_a_trace_the_conformance_model_accepts"),
+    "lift_test": ("pr14_impl02_reserve_commit_abort", "every_effect_journal_conforms_and_resolves_every_reservation_once"),
+}
+
+
+def run_a7_rust_mutant() -> tuple[dict, list[str]]:
+    work = scratch_copy()
+    env = {**os.environ, "CARGO_TARGET_DIR": str(work / "target")}
+
+    def test(target: str, name: str):
+        cmd = ["cargo", "test", "--locked", "--offline", "-p", ADAPTER, "--test", target, "--", "--exact", name]
+        return subprocess.run(cmd, cwd=work, capture_output=True, text=True, env=env)
+
+    try:
+        before_model = test(*A7_RUST_MUTANT["model_test"])
+        before_lift = test(*A7_RUST_MUTANT["lift_test"])
+        path = work / A7_RUST_MUTANT["file"]
+        text = path.read_text(encoding="utf-8")
+        applied = True
+        for old, new in A7_RUST_MUTANT["edits"]:
+            if text.count(old) != 1:
+                applied = False
+                break
+            text = text.replace(old, new, 1)
+        path.write_text(text, encoding="utf-8")
+        after_model = test(*A7_RUST_MUTANT["model_test"])
+        after_lift = test(*A7_RUST_MUTANT["lift_test"])
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    def passed(proc) -> bool:
+        return proc.returncode == 0 and "test result: ok. 1 passed" in proc.stdout
+
+    result = {
+        "id": A7_RUST_MUTANT["id"],
+        "model_test": f"{ADAPTER} --test {' '.join(A7_RUST_MUTANT['model_test'])}",
+        "lift_test": f"{ADAPTER} --test {' '.join(A7_RUST_MUTANT['lift_test'])}",
+        "applied": applied,
+        "mutated_compiled": "error[E" not in after_model.stderr + after_lift.stderr,
+        "unmutated_model_test_passed": passed(before_model),
+        "unmutated_lift_test_passed": passed(before_lift),
+        "mutated_model_test_failed": after_model.returncode != 0 and "1 failed" in after_model.stdout,
+        "mutated_lift_test_passed": passed(after_lift),
+    }
+    failures = []
+    if not all(v for k, v in result.items() if k not in ("id", "model_test", "lift_test")):
+        failures.append(f"a7 rust mutant: {result}")
+    return result, failures
+
+
 def run_rust_mutant() -> tuple[dict, list[str]]:
     work = scratch_copy()
     env = {**os.environ, "CARGO_TARGET_DIR": str(work / "target")}
@@ -757,9 +886,15 @@ def main() -> int:
             rust, rust_failures = run_rust_mutant()
             failures += rust_failures
             report["rust_mutant"] = rust
+            a7_rust, a7_failures = run_a7_rust_mutant()
+            failures += a7_failures
+            report["a7_rust_mutant"] = a7_rust
             report["self_test"] = "fail" if failures else "pass"
             if not failures:
-                record = {**stable_record(graph), "campaign": {"mutants": results, "e2e": e2e, "rust_mutant": rust}}
+                record = {
+                    **stable_record(graph),
+                    "campaign": {"mutants": results, "e2e": e2e, "rust_mutant": rust, "a7_rust_mutant": a7_rust},
+                }
                 EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
                 EVIDENCE.write_text(json.dumps(record, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
                 report["evidence"] = str(EVIDENCE.relative_to(ROOT))
