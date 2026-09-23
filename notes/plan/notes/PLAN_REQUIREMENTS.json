@@ -2100,8 +2100,8 @@
         "line": 394,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "channel communication."
+      "status": "satisfied",
+      "summary": "channel communication. (delivered: bn-3xx9 \u2014 crates/continuum-asupersync/src/family/channel.rs and binding.rs: with BindingConfig observing the channel family, the binding opens asupersync 0.5.0 bounded mpsc channels and hands each receiver to one task. Tasks send through Sender::reservechecked and SendPermit::send, and receive with Receiver::recv. binding::run journals each send at its SendPermit commit in the substrate's own trace, and receives, backpressure blocks, closed results, abandonment under cancellation, and a receiver's drop with its queue from channel-gate marks written through Cx::trace when the substrate's call returns. A message is the ordinal the send allocated, carried as the payload, so labels never reach the journal. Tasks an operation wakes are journaled after it by task ordinal, so the lab seed does not reach the journal. The region calculus has no channels, so the lift keeps a parallel checked FIFO model tied to its tasks: capacity, oldest-first delivery, no double delivery, no loss except the declared drop when a receiver goes, close semantics, and abandonment only under cancellation. Evidence: tests/pr14impl06channels.rs \u2014 byte-identical journals over 7,440 logs including sibling regions, multiple producers, backpressure, a cancelled blocked receiver and several senders closed at once; seed invariance over 7 seeds including 0, 1, 7, 99 and u64::MAX with the substrate's wake and close orders shown to vary; label-renaming invariance; a byte-equal differential against an independent scripted account; projection identities with all five other bound families; lift conformance; 7 mutation operators rejected; and typed refusals. Narrowing: bounded mpsc only, and several tasks woken at once must be independent or the run is refused)"
     },
     {
       "category": "pr-exit",
