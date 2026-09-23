@@ -122,7 +122,7 @@
 //! | `ObligationReserve` | [`ObligationEvent::Opened`], with kind, holder and region |
 //! | `ObligationCommit` / `ObligationAbort` | [`ObligationEvent::Discharged`]; a cancellation's aborts are placed canonically, after the task's effect aborts |
 //! | the runtime's `obligation_handoff_v1` trace message | [`ObligationEvent::Transferred`], holder and region read from the substrate's obligation record |
-//! | `ObligationLeak` | [`ObligationEvent::Leaked`] |
+//! | `ObligationLeak` | [`ObligationEvent::Leaked`]; one completion's leaks by ascending obligation ordinal |
 //! | `RegionCloseComplete` | [`ObligationEvent::RegionSettled`] after the region's finalize, with the region's open and leaked obligations |
 //!
 //! A leak is never dropped: without this family observed, it is a typed refusal. At
@@ -170,6 +170,9 @@
 //!   else the substrate traces during an advance has no canonical place, and is
 //!   [`BindingRefusal::UnorderedDuringAdvance`]. [`run_witnessed`] returns the
 //!   substrate's raw fire order as evidence;
+//! - one completion's leaks are journaled together, by obligation ordinal. The
+//!   substrate traces them in the order the task drops its tokens, which follows the
+//!   program's labels, and labels must not reach the journal;
 //! - consecutive `RegionCloseComplete` events (with the cancelled completions and
 //!   acknowledgements between them, which journal nothing by themselves) form one
 //!   batch, ended by the next event that journals anything or by the operation's end.
@@ -213,6 +216,12 @@
 //! A run that cannot be observed completely is a typed [`BindingRefusal`] and no
 //! journal (INV-008). [`BindingRefusal::inconclusive_reason`] gives the INV-008 reading
 //! of each refusal that has one.
+//!
+//! A command reaches a task only through its gate, and the gate is polled only while the
+//! task runs. So a command to a task that has not begun ([`BindingRefusal::TaskNotBegun`]),
+//! has ended ([`BindingRefusal::TaskEnded`]) or sleeps on a timer
+//! ([`BindingRefusal::TaskAsleep`]) is refused before it is sent: it would otherwise wait
+//! unseen, and the journal would lose the operation.
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -646,6 +655,22 @@ pub enum BindingRefusal {
         /// The operation.
         operation: &'static str,
     },
+    /// An operation commands a task that has not begun. The command would wait unseen
+    /// until the task's first poll.
+    TaskNotBegun {
+        /// The task's journal ordinal.
+        task: u32,
+    },
+    /// An operation commands a task that has ended. Nothing would ever take the command.
+    TaskEnded {
+        /// The task's journal ordinal.
+        task: u32,
+    },
+    /// An operation begins a task that has already begun.
+    TaskAlreadyBegun {
+        /// The task's journal ordinal.
+        task: u32,
+    },
     /// An operation commands a task that is asleep on a timer. The command would wait
     /// unseen until the timer fires.
     TaskAsleep {
@@ -703,6 +728,9 @@ impl BindingRefusal {
             | Self::ReservationResolved(_)
             | Self::EffectNotTransferable(_)
             | Self::ZeroDuration { .. }
+            | Self::TaskNotBegun { .. }
+            | Self::TaskEnded { .. }
+            | Self::TaskAlreadyBegun { .. }
             | Self::TaskAsleep { .. } => None,
         }
     }
@@ -813,6 +841,13 @@ impl fmt::Display for BindingRefusal {
             Self::ZeroDuration { operation } => {
                 write!(f, "{operation} of zero virtual nanoseconds")
             }
+            Self::TaskNotBegun { task } => {
+                write!(f, "task t{task} has not begun and cannot take a command")
+            }
+            Self::TaskEnded { task } => {
+                write!(f, "task t{task} has ended and cannot take a command")
+            }
+            Self::TaskAlreadyBegun { task } => write!(f, "task t{task} has already begun"),
             Self::TaskAsleep { task } => {
                 write!(
                     f,
@@ -1228,6 +1263,10 @@ struct Driver {
     advancing: Option<Advance>,
     pending_timer_cancels: BTreeMap<u32, BTreeSet<(u32, u64)>>,
     fire_order: Vec<TimerOrdinal>,
+    pending_leaks: BTreeSet<u32>,
+    leak_order: Vec<ObligationOrdinal>,
+    begun: BTreeSet<usize>,
+    ended: BTreeSet<usize>,
     close_order: Vec<RegionOrdinal>,
     phases: BTreeMap<u32, CancelTrack>,
     next_task: u32,
@@ -1285,6 +1324,10 @@ impl Driver {
             advancing: None,
             pending_timer_cancels: BTreeMap::new(),
             fire_order: Vec::new(),
+            pending_leaks: BTreeSet::new(),
+            leak_order: Vec::new(),
+            begun: BTreeSet::new(),
+            ended: BTreeSet::new(),
             close_order: Vec::new(),
             phases: BTreeMap::new(),
             next_task: 0,
@@ -1322,6 +1365,7 @@ impl Driver {
     }
 
     fn append_body(&mut self, body: EventBody) {
+        self.flush_leaks();
         if let Some(batch) = &mut self.advancing {
             // Nothing but timer fires and woken tasks' steps belongs in an advance.
             batch
@@ -1445,7 +1489,22 @@ impl Driver {
     /// scheduler picks, constrained only by children before parents. Post-order with
     /// siblings by ascending ordinal is one linearization of that partial order, so the
     /// lift still sees every child drained before its parent.
+    /// Journal a batch of leaks, by ascending obligation ordinal.
+    ///
+    /// The substrate detects every obligation a task still holds when it completes, and
+    /// traces the leaks in its own order. They are one completion's facts, so the batch
+    /// ends at the next event that journals anything.
+    fn flush_leaks(&mut self) {
+        for obligation in core::mem::take(&mut self.pending_leaks) {
+            self.record
+                .append(EventBody::Obligation(ObligationEvent::Leaked {
+                    obligation: ObligationOrdinal(obligation),
+                }));
+        }
+    }
+
     fn flush_closes(&mut self) {
+        self.flush_leaks();
         if self.pending_closes.is_empty() {
             return;
         }
@@ -1487,6 +1546,18 @@ impl Driver {
     }
 
     fn command_slot(&mut self, slot: usize, command: Command) -> Result<(), BindingRefusal> {
+        // A command to a task that is not polling its gate would wait unseen: before
+        // `begin`, after the task ended, or while it sleeps.
+        if !self.begun.contains(&slot) {
+            return Err(BindingRefusal::TaskNotBegun {
+                task: self.task_ordinal(slot)?.0,
+            });
+        }
+        if self.ended.contains(&slot) {
+            return Err(BindingRefusal::TaskEnded {
+                task: self.task_ordinal(slot)?.0,
+            });
+        }
         if self.sleeping.contains_key(&slot) {
             return Err(BindingRefusal::TaskAsleep {
                 task: self.task_ordinal(slot)?.0,
@@ -1563,7 +1634,13 @@ impl Driver {
                 self.sync()
             }
             SubstrateOp::Begin { task } => {
-                let id = self.slots[self.slot(*task)?].id;
+                let slot = self.slot(*task)?;
+                if !self.begun.insert(slot) {
+                    return Err(BindingRefusal::TaskAlreadyBegun {
+                        task: self.task_ordinal(slot)?.0,
+                    });
+                }
+                let id = self.slots[slot].id;
                 self.lab
                     .scheduler
                     .lock()
@@ -1872,6 +1949,7 @@ impl Driver {
             }
         }
         self.flush_requests();
+        self.flush_leaks();
         self.flush_closes();
         if self.record.is_full() {
             return Err(BindingRefusal::JournalFull);
@@ -1964,6 +2042,7 @@ impl Driver {
             }
             (TraceEventKind::Complete, TraceData::Task { task, region }) => {
                 let slot = self.slot_of(*task)?;
+                self.ended.insert(slot);
                 let region = self.ordinal_of(*region)?;
                 let ordinal = self.task_ordinal(slot)?;
                 match self.slots[slot].handle.try_join() {
@@ -2218,9 +2297,10 @@ impl Driver {
                     return Err(BindingRefusal::ReservationDropped { reservation });
                 }
                 if self.observes_obligation() {
-                    self.append_body(EventBody::Obligation(ObligationEvent::Leaked {
-                        obligation: ObligationOrdinal(held.obligation),
-                    }));
+                    // Buffered: the leaks of one completion are journaled together, by
+                    // obligation ordinal (flush_leaks).
+                    self.leak_order.push(ObligationOrdinal(held.obligation));
+                    self.pending_leaks.insert(held.obligation);
                 } else {
                     // A leak is never dropped silently: only the obligations family can
                     // report it.
@@ -2473,6 +2553,7 @@ impl Driver {
             journal,
             substrate_close_order: self.close_order,
             substrate_fire_order: self.fire_order,
+            substrate_leak_order: self.leak_order,
         })
     }
 }
@@ -2529,6 +2610,10 @@ pub struct Witnessed {
     /// can change this order for timers that come due in one advance; the journal
     /// orders them by deadline, then ordinal.
     pub substrate_fire_order: Vec<TimerOrdinal>,
+    /// The leaked obligations in the order the substrate traced `ObligationLeak` for
+    /// them (observed only with the obligations family). The journal orders one
+    /// completion's leaks by obligation ordinal.
+    pub substrate_leak_order: Vec<ObligationOrdinal>,
 }
 
 /// As [`run`], and also return the substrate's own close order.

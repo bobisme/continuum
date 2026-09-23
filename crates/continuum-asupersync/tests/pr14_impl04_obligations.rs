@@ -149,9 +149,9 @@ fn ledger() -> Vec<Program> {
 }
 
 /// Two actors. A region whose first task acquires a lease and hands it to the second,
-/// which commits it; both finish and the region closes normally. With `leak`, the first
-/// task also acquires an ack and returns while it is open. And a root task that commits
-/// a send permit.
+/// which commits it; both finish and the region closes normally. With `leak`, the
+/// second task acquires an ack first, receives the lease after it, and returns while
+/// both are open. And a root task that commits a send permit.
 fn closing(leak: bool) -> Vec<Program> {
     let (a, a2, b) = (TaskLabel(1), TaskLabel(2), TaskLabel(3));
     let r1 = RegionLabel(1);
@@ -161,12 +161,19 @@ fn closing(leak: bool) -> Vec<Program> {
         spawn(r1, a2),
         begin(a),
         begin(a2),
-        acquire(a, 1, ObligationKind::Lease),
-        transfer(1, a2),
-        commit(1),
+        acquire(a, if leak { 5 } else { 1 }, ObligationKind::Lease),
     ];
     if leak {
-        first.push(acquire(a, 2, ObligationKind::Ack));
+        // The second task acquires an ack, then receives the older lease, and returns
+        // holding both: one completion, two leaks. The substrate traces them in the
+        // order the task drops its tokens, which is the program's label order (ack,
+        // label 2, before lease, label 5). Labels must not reach the journal, which
+        // orders the leaks by obligation ordinal: lease first (bn-iey9f).
+        first.push(acquire(a2, 2, ObligationKind::Ack));
+        first.push(transfer(5, a2));
+    } else {
+        first.push(transfer(1, a2));
+        first.push(commit(1));
     }
     first.extend([
         SubstrateOp::Finish { task: a },
@@ -190,7 +197,7 @@ fn lengths(programs: &[Program]) -> Vec<usize> {
 
 const LEDGER_LOGS: usize = 12_376; // 17! / (6!·11!)
 const CLOSING_LOGS: usize = 1_365; // 15! / (11!·4!)
-const LEAKING_LOGS: usize = 1_820; // 16! / (12!·4!)
+const LEAKING_LOGS: usize = 1_365; // 15! / (11!·4!)
 
 /// A corpus entry: name, programs, logs, obligations per run.
 type Entry = (&'static str, Vec<Program>, Vec<ChoiceLog>, usize);
@@ -765,6 +772,108 @@ fn dropping_a_family_gives_that_projection_byte_for_byte() {
     );
 }
 
+/// The mutant the canonical leak order kills (bn-iey9f). A task that returns holding
+/// two obligations leaks both in one completion, and asupersync 0.5.0 traces the two
+/// leaks in the order the task drops its tokens — here the program's label order, which
+/// is not the obligations' ordinal order. A binding that journaled trace order would let
+/// a program-local name reach the journal: renaming the labels would change the bytes.
+/// The journal writes one completion's leaks by obligation ordinal, under every seed and
+/// every spelling of the labels.
+#[test]
+fn one_completions_leaks_are_journaled_by_ordinal_not_trace_order() {
+    let (_, programs, logs, _) = leaking();
+    // The same programs with the lease relabelled so that label order is ordinal order.
+    let renamed: Vec<Program> = programs
+        .iter()
+        .map(|program| {
+            program
+                .iter()
+                .map(|op| match op {
+                    SubstrateOp::Acquire {
+                        task,
+                        reservation: ReservationLabel(5),
+                        kind,
+                    } => SubstrateOp::Acquire {
+                        task: *task,
+                        reservation: ReservationLabel(1),
+                        kind: *kind,
+                    },
+                    SubstrateOp::Transfer {
+                        reservation: ReservationLabel(5),
+                        to,
+                    } => SubstrateOp::Transfer {
+                        reservation: ReservationLabel(1),
+                        to: *to,
+                    },
+                    other => other.clone(),
+                })
+                .collect()
+        })
+        .collect();
+    let mut renamed_in_order = 0;
+    let mut out_of_order = 0;
+    let mut seed_moved = 0;
+    for log in &logs {
+        let reference = run_witnessed(&programs, log, &config(SEEDS[0])).unwrap();
+        let alpha = run_witnessed(&renamed, log, &config(SEEDS[0])).unwrap();
+        assert_eq!(
+            alpha.journal, reference.journal,
+            "log {log}: labels reached the journal"
+        );
+        let mut sorted_alpha = alpha.substrate_leak_order.clone();
+        sorted_alpha.sort_unstable();
+        if alpha.substrate_leak_order == sorted_alpha {
+            renamed_in_order += 1;
+        }
+        for seed in SEEDS {
+            let witnessed = run_witnessed(&programs, log, &config(seed)).unwrap();
+            assert_eq!(
+                witnessed.journal, reference.journal,
+                "log {log} seed {seed:#x}"
+            );
+            if witnessed.substrate_leak_order != reference.substrate_leak_order {
+                seed_moved += 1;
+            }
+            let raw = witnessed.substrate_leak_order;
+            assert_eq!(raw.len(), 2, "log {log}");
+            let journaled: Vec<ObligationOrdinal> = ledger_events(&witnessed.journal)
+                .iter()
+                .filter_map(|e| match e {
+                    ObligationEvent::Leaked { obligation } => Some(*obligation),
+                    _ => None,
+                })
+                .collect();
+            let mut sorted = raw.clone();
+            sorted.sort_unstable();
+            assert_eq!(journaled, sorted, "log {log} seed {seed:#x}");
+            if raw != sorted {
+                out_of_order += 1;
+                // The raw-order mutant: the same journal with the two leaks in trace
+                // order. It is a different journal.
+                let mut events: Vec<EventBody> = bodies(&witnessed.journal);
+                let first = events
+                    .iter()
+                    .position(|b| {
+                        matches!(b, EventBody::Obligation(ObligationEvent::Leaked { .. }))
+                    })
+                    .unwrap();
+                for (offset, obligation) in raw.iter().enumerate() {
+                    events[first + offset] = EventBody::Obligation(ObligationEvent::Leaked {
+                        obligation: *obligation,
+                    });
+                }
+                assert_ne!(rebuilt(events), witnessed.journal, "log {log}");
+            }
+        }
+    }
+    // Anti-vacuity: the substrate's own order is not the journal's in every run, and a
+    // relabelling alone flips it. The seed does not move it in 0.5.0 (drop order is the
+    // task's own), which the count records.
+    assert_eq!(out_of_order, LEAKING_LOGS * SEEDS.len());
+    assert_eq!(renamed_in_order, LEAKING_LOGS);
+    assert_eq!(seed_moved, 0);
+}
+
 // --- conformance ---------------------------------------------------------------------
 
 #[test]
@@ -792,7 +901,7 @@ fn balanced_runs_conform_and_leaks_violate_at_close() {
         }
     }
     // Every leaking run is refused by the lift at the leaking region's close, naming the
-    // leaked ack (the third obligation, o2): the calculus's teardown is total, but the
+    // leaked lease and ack: the calculus's teardown is total, but the
     // substrate's ledger does not balance.
     let (_, programs, logs, _) = leaking();
     for log in &logs {
@@ -808,7 +917,7 @@ fn balanced_runs_conform_and_leaks_violate_at_close() {
                 ..
             } => {
                 assert!(open.is_empty(), "log {log}");
-                assert_eq!(leaked.len(), 1, "log {log}");
+                assert_eq!(leaked.len(), 2, "log {log}");
             }
             other => panic!("log {log}: {other:?}\n{}", journal.render()),
         }
@@ -1152,8 +1261,9 @@ fn refusals_are_typed() {
         "{got}"
     );
 
-    // An acquire sent to a task that has not begun: lost telemetry, never a short
-    // journal.
+    // Regression guard (bn-iey9f): a acquire sent to a task that has not begun used to
+    // wait unseen in its gate, so the step was lost telemetry. The binding now refuses
+    // the command before it is sent: the task is not polling its gate.
     let got = refusal(
         vec![vec![
             spawn(RegionLabel::ROOT, a),
@@ -1161,16 +1271,8 @@ fn refusals_are_typed() {
         ]],
         &config(SEED),
     );
-    assert_eq!(
-        got,
-        BindingRefusal::EffectUnobserved {
-            operation: "acquire"
-        }
-    );
-    assert_eq!(
-        got.inconclusive_reason(),
-        Some(InconclusiveReason::InsufficientTelemetry)
-    );
+    assert_eq!(got, BindingRefusal::TaskNotBegun { task: 0 });
+    assert_eq!(got.inconclusive_reason(), None);
 
     // A leak the configuration cannot report is refused, not dropped.
     let leaking = vec![vec![

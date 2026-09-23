@@ -931,17 +931,15 @@ fn refusals_are_typed() {
     let n = woken[0].len();
     assert!(run(&woken, &ChoiceLog::new(vec![0; n]), &config(SEED)).is_ok());
 
-    // A sleep sent to a task that has not begun: the trace shows no timer. Lost
-    // telemetry, never a short journal.
+    // Regression guard (bn-iey9f): a sleep sent to a task that has not begun used to
+    // wait unseen in its gate, so the step was lost telemetry. The binding now refuses
+    // the command before it is sent: the task is not polling its gate.
     let got = refusal(
         vec![vec![spawn(RegionLabel::ROOT, a), sleep(a, 10)]],
         &config(SEED),
     );
-    assert_eq!(got, BindingRefusal::EffectUnobserved { operation: "sleep" });
-    assert_eq!(
-        got.inconclusive_reason(),
-        Some(InconclusiveReason::InsufficientTelemetry)
-    );
+    assert_eq!(got, BindingRefusal::TaskNotBegun { task: 0 });
+    assert_eq!(got.inconclusive_reason(), None);
 
     // The INV-008 reading of the batch-order refusal no bound program reaches today.
     assert_eq!(

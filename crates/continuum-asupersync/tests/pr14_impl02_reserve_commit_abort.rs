@@ -934,17 +934,18 @@ fn refusals_are_typed() {
     ]]);
     assert_eq!(got, BindingRefusal::ReservationResolved(1));
 
-    // A reserve sent to a task that has not begun: the substrate never polls it, so
-    // the trace shows no reservation. Lost telemetry, never a short journal.
+    // Regression guard (bn-iey9f): a reserve sent to a task that has not begun used to
+    // wait unseen in its gate, so the step was lost telemetry. The binding now refuses
+    // the command before it is sent: the task is not polling its gate.
     let got = refusal(vec![vec![spawn(RegionLabel::ROOT, a), reserve(a, 1)]]);
+    assert_eq!(got, BindingRefusal::TaskNotBegun { task: 0 });
+    assert_eq!(got.inconclusive_reason(), None);
+    // A step the trace does not show stays lost telemetry.
     assert_eq!(
-        got,
         BindingRefusal::EffectUnobserved {
             operation: "reserve"
         }
-    );
-    assert_eq!(
-        got.inconclusive_reason(),
+        .inconclusive_reason(),
         Some(InconclusiveReason::InsufficientTelemetry)
     );
 

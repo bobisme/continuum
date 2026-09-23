@@ -666,6 +666,35 @@ fn malformed_programs_and_illegal_calls_are_typed_refusals() {
             ChoiceLog::new([0, 0]),
             BindingRefusal::ChoiceLogOverrun { position: 1 },
         ),
+        // Regression guards (bn-iey9f): a command to a task that is not polling its gate
+        // used to wait unseen, and the journal lost the operation. Now it is refused.
+        (
+            vec![vec![
+                spawn(RegionLabel::ROOT, a),
+                SubstrateOp::Continue { task: a },
+            ]],
+            ChoiceLog::new([0, 0]),
+            BindingRefusal::TaskNotBegun { task: 0 },
+        ),
+        (
+            vec![vec![
+                spawn(RegionLabel::ROOT, a),
+                SubstrateOp::Begin { task: a },
+                SubstrateOp::Finish { task: a },
+                SubstrateOp::Continue { task: a },
+            ]],
+            ChoiceLog::new([0, 0, 0, 0]),
+            BindingRefusal::TaskEnded { task: 0 },
+        ),
+        (
+            vec![vec![
+                spawn(RegionLabel::ROOT, a),
+                SubstrateOp::Begin { task: a },
+                SubstrateOp::Begin { task: a },
+            ]],
+            ChoiceLog::new([0, 0, 0]),
+            BindingRefusal::TaskAlreadyBegun { task: 0 },
+        ),
     ];
     for (programs, log, expected) in cases {
         let refusal = run(&programs, &log, &config(SEED)).unwrap_err();
