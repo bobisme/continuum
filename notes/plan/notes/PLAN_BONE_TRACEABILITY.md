@@ -35,7 +35,7 @@ Graph: **732** active Bones; **645** active leaves; **0** untraced Bones.
 
 ## Graph contract
 
-- Active blocking edges: **1603**.
+- Active blocking edges: **1608**.
 - Dependency layers: **13**.
 - Dispatch-ready leaves: **58**; dependency-suppressed Bones: **657**.
 - Dependency cycles: **0**.
@@ -48,7 +48,7 @@ Graph: **732** active Bones; **645** active leaves; **0** untraced Bones.
 - Risk-routing failures: **0**.
 - Missing phase barriers: **0**.
 - Phase exit-goal failures: **0**.
-- PR exit wiring failures: **5**.
+- PR exit wiring failures: **0**.
 - Gate wiring failures: **0**.
 - Risk/kill checkpoint wiring failures: **0**.
 - Frontier-lane wiring failures: **0**.
