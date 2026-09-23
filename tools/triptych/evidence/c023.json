@@ -19,7 +19,6 @@
       "id": "A3",
       "scaffold_crates": [
         "continuum-cir",
-        "continuum-model-core",
         "continuum-refinement"
       ],
       "status": "scaffold",
@@ -29,7 +28,6 @@
       "arrow": "CML reference <-> optimized Rust evaluator",
       "id": "A4",
       "scaffold_crates": [
-        "continuum-cml-elab",
         "continuum-engine-explicit"
       ],
       "status": "scaffold",
@@ -56,10 +54,8 @@
     {
       "arrow": "asupersync adapter <-> executable primitive conformance models",
       "id": "A7",
-      "scaffold_crates": [
-        "continuum-model-core"
-      ],
-      "status": "scaffold",
+      "scaffold_crates": [],
+      "status": "present",
       "witness": null
     }
   ],

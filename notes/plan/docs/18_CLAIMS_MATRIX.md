@@ -108,4 +108,4 @@ refinement checker, CML reference to optimized evaluator, evaluator to SMT/PDR
 encodings, native checker to Lean reflective checker, and adapter to conformance
 models. On them the refinement rules hold only because the crates are empty. When
 a scaffold side lands, the evidence record goes stale, `just boundaries` fails,
-and C023 needs new evidence for that arrow.
+and C023 needs new evidence for that arrow. This first happened when bn-ybq gave `continuum-model-core` real code. CIR to refinement and CML reference to optimized evaluator keep a scaffold side, and adapter to conformance models now has code on both sides but no cross-path test. That arrow is outside the observed scope until a test checks the adapter journal against a conformance model, and the record `arrows` entry A7 says so.
