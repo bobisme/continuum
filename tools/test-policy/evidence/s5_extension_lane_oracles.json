@@ -78,7 +78,7 @@
           "rule": "extension-lane-tool-undeclared-mention"
         }
       ],
-      "registry_status": "active",
+      "registry_status": "deferred",
       "rules": [
         "extension-lane-oracle-absence-not-typed",
         "extension-lane-oracle-no-process-boundary",

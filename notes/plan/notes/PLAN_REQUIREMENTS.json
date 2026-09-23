@@ -9406,7 +9406,7 @@
         "line": 78,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "deferred",
       "summary": "external temporal/probabilistic tools for extension lanes."
     },
     {

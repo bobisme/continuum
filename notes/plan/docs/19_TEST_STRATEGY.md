@@ -85,7 +85,7 @@ Use independently implemented systems where semantics overlap:
 - asupersync Lab reports versus Continuum obligation model;
 - Kani/Verus/other Rust tools for local components;
 - SAT/SMT solvers and proof checkers;
-- external temporal/probabilistic tools for extension lanes.
+- external temporal/probabilistic tools for extension lanes. (deferred: plan.md §24.5 register row "Timed/probabilistic semantics" — ADR-0016 lane not opened, defer post-1.0; bn-3iwa enforces the ADR-0029 registration contract and a drift guard in tools/test-policy/sections/s5_extension_lane_oracles.py meanwhile)
 
 Disagreement halts the relevant claim and creates a minimized fixture.
 
