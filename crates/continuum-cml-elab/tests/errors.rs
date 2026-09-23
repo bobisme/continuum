@@ -134,11 +134,15 @@ fn unsupported_semantics_are_typed_unsupported() {
     assert_eq!(e.code(), "cml.elab.unsupported.mutual_recursion");
     assert!(e.is_unsupported());
 
-    let e = fails(&model("action A { x' > x }"));
+    // A relational postcondition is supported (bn-2ouro); a prime on anything but a
+    // state variable is not.
+    elaborate_source(&model("action A { x' > x }")).expect("a relational action");
+    let e = fails(&model("action A { (x + 1)' > x }"));
     assert_eq!(
         e.kind,
-        ElabErrorKind::Unsupported(Unsupported::RelationalPostcondition)
+        ElabErrorKind::Unsupported(Unsupported::PrimedExpression)
     );
+    assert_eq!(e.code(), "cml.elab.unsupported.primed_expression");
     assert!(e.is_unsupported());
     assert_eq!(at(&e), (4, 12));
 }

@@ -112,6 +112,26 @@ An action denotes a relation \(A(s,p,s')\). The surface supports:
 
 Imperative sugar may elaborate to a relation only when deterministic assignment order cannot change meaning.
 
+### Relational actions
+
+This subsection is the Phase B semantics of relational postconditions, implemented by `continuum-cml-elab` (bn-2ouro). Later work MAY widen it (relational variables of non-integer types, symbolic successor sets, action schemas). It MUST NOT be narrowed without an epoch note (plan §4.6).
+
+**Post-state reads.** Inside an action, `x'` is the value of the state variable `x` in the post-state. Only a state variable can be primed. A prime on any other expression (`(x + 1)'`, `x''`, a parameter, a constant) is refused as `cml.elab.unsupported.primed_expression`. A prime outside an action is `cml.elab.prime_outside_action`. Unprimed names always read the pre-state.
+
+**Clauses.** An action's statements elaborate to three things:
+
+1. *updates*: `next x = e` or `x' == e`, where `e` reads no post-state, sets `x` to `e` evaluated in the pre-state. `x' == x` and `unchanged x` keep `x`;
+2. *guard clauses*: every other conjunct (of a `require` or a bare Boolean statement) that reads no post-state;
+3. *postconditions*: every conjunct that reads a post-state, and every `next x = e` whose `e` reads a post-state (through a `let`), which becomes the postcondition `x' == e`.
+
+**Frame rule.** Each state variable of an action is exactly one of: *updated*, *kept*, or *relational*. A variable is relational when no statement updates or keeps it and a postcondition primes it. A variable that is none of these is refused as `cml.elab.unspecified_state_change` (docs/11 §4: "The checker rejects unspecified state changes unless the action explicitly opts into relational postconditions"; priming the variable in a postcondition is that opt-in). A variable updated or kept twice is `cml.elab.conflicting_update`. There is no implicit `unchanged`.
+
+**Meaning.** In a postcondition, a primed read of an updated variable is its update expression, and of a kept variable is its pre-state value; the normalized AST records these substituted. The action then relates pre-state `s` to post-state `s'` exactly when every guard clause holds at `s`, every updated variable takes its update's value, every kept variable is unchanged, and every relational variable takes a value of its type such that all postconditions hold. The action is enabled at `s` when at least one such `s'` exists.
+
+**Explicit successor sets.** Lowering to the programmatic model (whose variables are bounded integers) enumerates the candidate post-states of the relational variables: the product of their declared domains, with the relational variables in name order, the last one varying fastest, and each domain in ascending order. Each candidate `c` becomes one programmatic action named `A[r1=c1,…,rn=cn]` whose guard is the guard clauses and the postconditions with each `r'` replaced by `c_r`, and whose updates are the action's updates plus `r := c_r`. The union of their transitions is the action's relation. An action with no relational variable keeps its name, and its postconditions join its guard.
+
+**Bounds and refusals.** A relational variable must be an integer with a finite declared domain, as every lowered state variable must be: otherwise the lowering refuses with `cml.lower.non_integer_state` or `cml.lower.unbounded_domain`. The programmatic model's own limits are checked before init enumeration and before any action is built: more than `MAX_RELATIONAL_CANDIDATES = 4096` candidates for one action (equal to the model's `MAX_ACTIONS`) is `cml.lower.successor_domain_too_large`; more than `MAX_ACTIONS = 4096` programmatic actions in total, counting every candidate of every relational action, is `cml.lower.too_many_actions`; a generated candidate name longer than `MAX_IDENT_BYTES = 128` bytes (its longest candidate, computed from the domain ends) is `cml.lower.name_too_long`, as is a declared name past that limit; more than `MAX_VARIABLES = 64` state variables is `cml.lower.too_many_variables`. The whole enumeration (candidates × the lowered size of the guard, postconditions, and updates, plus each candidate's name) is charged to the output budget, and checked against what the work budget has left, before the first candidate is built, as init enumeration is; exceeding either is `cml.lower.output_too_large` or `cml.lower.work_limit_exceeded`. Work is then charged as each candidate is built, one unit per node copied and per post-state read resolved; a read resolves by its variable's slot number, in constant time.
+
 ## Properties
 
 ### State predicates
@@ -239,3 +259,4 @@ Foreign adapters are untrusted translators. Their outputs can be compared with r
 Per plan §25, where plan prose or docs disagree with this RFC, this RFC governs. The corrections in force:
 
 1. **Termination of model functions.** docs/11 §8 lists "totality/termination for model functions" as a static analysis but gives no rule. Normative: the rule is "Model functions: totality and termination" above (bn-36x3b). Direction: RFC completes docs/11 §8; no contradiction.
+2. **Relational postconditions and the frame rule.** docs/11 §4 says unspecified state changes are rejected "unless the action explicitly opts into relational postconditions" but does not define the opt-in or the frame. Normative: "Relational actions" above (bn-2ouro). Direction: RFC completes docs/11 §4; no contradiction. The candidate bound is per action and equals the model's `MAX_ACTIONS`, and the total over all actions is checked in aggregate against the same limit before any action is built (cr-22lrdf).

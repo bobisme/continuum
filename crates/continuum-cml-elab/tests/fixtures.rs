@@ -8,7 +8,7 @@
 //! | Die Hard (TV-009, Wave 0) | `notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm` | elaborates; golden normalized AST; lowers |
 //! | Coffee Can, Tower of Hanoi | `continuum-cml-syntax/tests/fixtures/` (Wave 0 shapes) | elaborate; golden normalized ASTs |
 //! | Transitive Closure | same | elaborates (its recursive `def` passes the termination check, bn-36x3b); golden normalized AST; lowering refused, typed |
-//! | syntax coverage | same | typed unsupported: relational postcondition |
+//! | syntax coverage | same | elaborates, with a relational action (bn-2ouro); golden normalized AST; lowering refused, typed |
 //!
 //! The dossier and parser fixtures are read in place, so a change to them is a change to
 //! this test's input. Every accepted fixture is elaborated twice and must give the same
@@ -20,7 +20,7 @@
 use std::path::PathBuf;
 
 use continuum_cml_elab::{
-    ElabErrorKind, LowerErrorKind, NormModel, Unlowerable, Unsupported, elaborate_source, lower,
+    ElabErrorKind, LowerErrorKind, NormModel, Unlowerable, elaborate_source, lower,
 };
 
 fn manifest() -> PathBuf {
@@ -150,15 +150,24 @@ fn transitive_closure_elaborates_and_refuses_to_lower_with_a_reason() {
     );
 }
 
+/// `Receive` primes `phase` in `phase'[m.src] == Done` and updates no `phase`: `phase`
+/// is relational (RFC 0003 "Relational actions", bn-2ouro), and the fixture elaborates.
+/// It does not lower: the first reason, in the lowering's fixed order, is its
+/// `fairness` line; without it, the maps and sequences of its state.
 #[test]
-fn syntax_coverage_is_typed_unsupported_at_the_relational_postcondition() {
-    let err = elaborate_source(&read(&parser_fixture("SyntaxCoverage")))
-        .expect_err("`phase'[m.src] == Done` is a relational postcondition");
+fn syntax_coverage_elaborates_with_a_relational_action() {
+    let model = accept("SyntaxCoverage", &parser_fixture("SyntaxCoverage"));
+    let dump = model.dump();
+    assert!(dump.contains("(relational phase)"), "{dump}");
+    assert!(dump.contains("(post (eq (index (primed phase)"), "{dump}");
+    let err = lower(&model).expect_err("fairness, maps, sequences");
+    assert_eq!(err.kind, LowerErrorKind::Unlowerable(Unlowerable::Fairness));
+    let src = read(&parser_fixture("SyntaxCoverage")).replace("fairness strong Receive, Reset", "");
+    let err = lower(&elaborate_source(&src).expect("elaborates")).expect_err("maps");
     assert_eq!(
         err.kind,
-        ElabErrorKind::Unsupported(Unsupported::RelationalPostcondition)
+        LowerErrorKind::Unlowerable(Unlowerable::NonStandardBehavior)
     );
-    assert_eq!(err.span.line, 39);
 }
 
 #[test]

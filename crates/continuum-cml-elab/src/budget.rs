@@ -116,6 +116,11 @@ impl Fuel {
         }
     }
 
+    /// Units still allowed.
+    pub(crate) const fn left(&self) -> u64 {
+        self.left
+    }
+
     /// Units spent so far.
     pub(crate) const fn used(&self) -> u64 {
         self.limit.saturating_sub(self.left)

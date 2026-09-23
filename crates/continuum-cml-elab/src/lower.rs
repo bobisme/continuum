@@ -21,6 +21,10 @@
 //! - actions take no parameters, and every guard, update, and invariant uses only
 //!   integer arithmetic (`+ - *`, unary `-`, `min`, `max`), comparisons, `in a..b`, and
 //!   the boolean connectives;
+//! - a relational action (RFC 0003 "Relational actions") has at most
+//!   [`MAX_RELATIONAL_CANDIDATES`] candidate post-states; it lowers to one action per
+//!   candidate, named `A[r=c,…]`, whose guard includes the postconditions at that
+//!   candidate;
 //! - the init predicate is satisfied by at least one state of the (finite) domain;
 //! - every behavior is the standard specification `Init && always(step(N) ||
 //!   stutter(state))`, where `N` offers every action — which is exactly what the
@@ -38,11 +42,14 @@
 //! exploration time — the refinement type is enforced where the value lands (docs/16
 //! PO-MOD-003), and is never clamped.
 
+use std::borrow::Borrow;
 use std::fmt;
 
 use continuum_cml_syntax::Span;
 use continuum_model_core::domain::{Domain, Variable};
 use continuum_model_core::expr::{Environment, MAX_EXPR_DEPTH};
+use continuum_model_core::ident::MAX_IDENT_BYTES;
+use continuum_model_core::model::{MAX_ACTIONS, MAX_INITIAL_STATES, MAX_VARIABLES};
 use continuum_model_core::{
     ActionDecl, BoolExpr, CmpOp, EvalError, Ident, IntExpr, Model, ModelBuilder, ModelError,
 };
@@ -57,6 +64,14 @@ use crate::types::Type;
 /// over one reused value vector, with no allocation.
 pub const MAX_INIT_ENUMERATION: u128 = 1 << 22;
 
+/// The most candidate post-states one relational action may enumerate: the product of
+/// its relational variables' domains. Each candidate becomes one programmatic action.
+///
+/// It equals `continuum_model_core`'s `MAX_ACTIONS`, the most actions a whole model may
+/// have, so one action's expansion alone never passes it; the total over all actions
+/// is checked separately, before any action is built ([`Unlowerable::TooManyActions`]).
+pub const MAX_RELATIONAL_CANDIDATES: u128 = MAX_ACTIONS as u128;
+
 /// The most variable bindings (initial states times state variables) the lowering hands
 /// to the builder.
 ///
@@ -67,6 +82,10 @@ pub const MAX_INIT_ENUMERATION: u128 = 1 << 22;
 /// allocation (INV-016: source is untrusted). At the limit the bindings take a few tens
 /// of MiB.
 pub const MAX_INIT_BINDINGS: usize = 1 << 20;
+
+// Every accepted initial state holds at least one binding, so the binding bound also
+// keeps the initial-state count within the model's own limit.
+const _: () = assert!(MAX_INIT_BINDINGS <= MAX_INITIAL_STATES);
 
 /// Why a well-formed model does not lower to the programmatic model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -114,6 +133,22 @@ pub enum Unlowerable {
     /// A recursive call left in a hand-built model. Elaboration unfolds every call of a
     /// recursive `def`, so an elaborated model never has one.
     RecursiveCall,
+    /// A relational action whose candidate post-states (the product of its relational
+    /// variables' domains) number more than [`MAX_RELATIONAL_CANDIDATES`].
+    SuccessorDomainTooLarge,
+    /// More state variables than `continuum_model_core`'s `MAX_VARIABLES`. Checked
+    /// before any state is enumerated.
+    TooManyVariables,
+    /// More programmatic actions than `continuum_model_core`'s `MAX_ACTIONS`, counting
+    /// one per candidate of every relational action. Checked before any action is built.
+    TooManyActions,
+    /// A name longer than `continuum_model_core`'s `MAX_IDENT_BYTES`: a declared state
+    /// variable, action, or invariant, or the longest name a relational action's
+    /// candidates generate (`A[x=-5,y=12]`). Checked before any action is built.
+    NameTooLong,
+    /// A post-state read (`x'`) outside an action's postconditions, in a hand-built
+    /// model. Elaboration never produces one.
+    PrimedOutsidePostcondition,
     /// A refinement no integer satisfies, such as `x > c` at `c = i64::MAX` or bounds
     /// that cross. The domain is empty; it is never widened to make it non-empty.
     EmptyRefinement,
@@ -140,6 +175,11 @@ impl Unlowerable {
             Unlowerable::TooManyInitialStates => "cml.lower.too_many_initial_states",
             Unlowerable::EmptyRefinement => "cml.lower.empty_refinement",
             Unlowerable::RecursiveCall => "cml.lower.recursive_call",
+            Unlowerable::SuccessorDomainTooLarge => "cml.lower.successor_domain_too_large",
+            Unlowerable::TooManyVariables => "cml.lower.too_many_variables",
+            Unlowerable::TooManyActions => "cml.lower.too_many_actions",
+            Unlowerable::NameTooLong => "cml.lower.name_too_long",
+            Unlowerable::PrimedOutsidePostcondition => "cml.lower.primed_outside_postcondition",
             Unlowerable::OutputTooLarge => "cml.lower.output_too_large",
             Unlowerable::WorkLimitExceeded => "cml.lower.work_limit_exceeded",
             Unlowerable::ExpressionTooDeep => "cml.lower.expression_too_deep",
@@ -174,6 +214,17 @@ impl fmt::Display for Unlowerable {
             }
             Unlowerable::EmptyRefinement => "the refinement admits no integer value",
             Unlowerable::RecursiveCall => "a recursive call must be unfolded before lowering",
+            Unlowerable::SuccessorDomainTooLarge => {
+                "a relational action has too many candidate post-states to enumerate"
+            }
+            Unlowerable::TooManyVariables => "the model has more state variables than a model may",
+            Unlowerable::TooManyActions => {
+                "the lowered model would have more actions than a model may"
+            }
+            Unlowerable::NameTooLong => "a lowered name is longer than a model name may be",
+            Unlowerable::PrimedOutsidePostcondition => {
+                "a post-state read is allowed only in an action's postconditions"
+            }
             Unlowerable::OutputTooLarge => "the lowered model exceeds the output budget",
             Unlowerable::WorkLimitExceeded => "lowering exceeds the work bound",
             Unlowerable::ExpressionTooDeep => "the expression nests deeper than the model accepts",
@@ -252,6 +303,13 @@ struct Meter {
     nodes: Budget,
     fuel: Fuel,
     vars: usize,
+    /// Whether an action's postconditions are being lowered: only there does a primed
+    /// read (`x'`) lower, to the placeholder variable [`primed_placeholder`].
+    post: bool,
+    /// The slot of each relational variable of the action being lowered, so a primed
+    /// read lowers to an indexed placeholder (`'3`), resolved once here and substituted
+    /// in constant time per candidate.
+    slots: std::collections::BTreeMap<String, usize>,
 }
 
 /// Spend `n` units of work, or refuse with [`Unlowerable::WorkLimitExceeded`].
@@ -269,6 +327,8 @@ pub fn lower_with(model: &NormModel, limits: Limits) -> (Result<Model, LowerErro
         nodes: Budget::new(limits.nodes),
         fuel: Fuel::new(limits.work),
         vars: model.state.len(),
+        post: false,
+        slots: std::collections::BTreeMap::new(),
     };
     let result = lower_metered(model, &mut meter);
     let usage = Usage {
@@ -321,7 +381,11 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         }
     }
 
-    // State variables and their domains.
+    // State variables and their domains. The count is model-core's limit, checked
+    // before the domains are read.
+    if model.state.len() > MAX_VARIABLES {
+        return no(Unlowerable::TooManyVariables, whole);
+    }
     let mut builder = ModelBuilder::new();
     let mut variables: Vec<Variable> = Vec::new();
     for v in &model.state {
@@ -336,6 +400,12 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             variables.push(Variable::new(name, domain));
         }
     }
+
+    // Model-core's own limits, preflighted before anything is enumerated or built, so
+    // no expansion ever runs past a bound the builder would only report afterwards.
+    let by_name: std::collections::BTreeMap<&str, &Variable> =
+        variables.iter().map(|v| (v.name().as_str(), v)).collect();
+    preflight(model, &by_name, &mut *budget)?;
 
     // Initial states: every state of the domain the init predicate accepts.
     let Some(init) = &model.init else {
@@ -406,24 +476,69 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         }
     }
 
-    // Actions.
+    // Actions. A relational action becomes one programmatic action per candidate
+    // post-state of its relational variables (RFC 0003 "Relational actions").
+    let mut lowered_actions: Vec<String> = Vec::new();
     for a in &model.actions {
         if !a.params.is_empty() {
             return no(Unlowerable::ParameterizedAction, a.span);
         }
-        let guard = a
+        let mut clauses = a
             .guard
             .iter()
             .map(|c| top_bool(c, &mut *budget))
             .collect::<R<Vec<_>>>()?;
-        let guard = conjoin(guard, &mut *budget, a.span)?;
-        let mut updates: Vec<(&str, IntExpr)> = Vec::new();
+        // Each relational variable's domain and slot: one table lookup each.
+        burn(
+            budget,
+            (a.next.len() as u64).saturating_mul(lookup_cost(variables.len(), 32)),
+            a.span,
+        )?;
+        let relational: Vec<&Variable> = a
+            .next
+            .iter()
+            .filter(|(_, n)| matches!(n, Next::Relational))
+            .filter_map(|(v, _)| by_name.get(v.as_str()).copied())
+            .collect();
+        budget.slots = relational
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (v.name().as_str().to_owned(), i))
+            .collect();
+        budget.post = true;
+        let post = a
+            .post
+            .iter()
+            .map(|c| top_bool(c, &mut *budget))
+            .collect::<R<Vec<_>>>();
+        budget.post = false;
+        clauses.extend(post?);
+        let guard_size = clauses
+            .iter()
+            .fold(clauses.len(), |acc, c| acc.saturating_add(c.1.size));
+        let guard = conjoin(clauses, &mut *budget, a.span)?;
+        let mut updates: Vec<(&str, Sized<IntExpr>)> = Vec::new();
         for (var, next) in &a.next {
             if let Next::Set(e) = next {
-                updates.push((var.as_str(), top_int(e, &mut *budget)?));
+                updates.push((var.as_str(), top_int_sized(e, &mut *budget)?));
             }
         }
-        builder = builder.action(ActionDecl::deterministic(&a.name, guard, updates));
+        if relational.is_empty() {
+            let updates = updates.into_iter().map(|(v, x)| (v, x.0)).collect();
+            builder = builder.action(ActionDecl::deterministic(&a.name, guard, updates));
+            lowered_actions.push(a.name.clone());
+            continue;
+        }
+        builder = relational_action(
+            builder,
+            &a.name,
+            (guard, guard_size),
+            &updates,
+            &relational,
+            budget,
+            a.span,
+            &mut lowered_actions,
+        )?;
     }
 
     // Invariants become named predicates.
@@ -445,8 +560,8 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         bytes(&mut model.state.iter().map(|v| v.name.len())),
     )
     .saturating_add(sort_cost(
-        model.actions.len(),
-        bytes(&mut model.actions.iter().map(|a| a.name.len())),
+        lowered_actions.len(),
+        bytes(&mut lowered_actions.iter().map(String::len)),
     ))
     .saturating_add(sort_cost(
         model.invariants.len(),
@@ -471,10 +586,256 @@ pub fn init_work(candidates: u128, size: usize, vars: usize) -> u64 {
     u64::try_from(candidates.saturating_mul(per)).unwrap_or(u64::MAX)
 }
 
+/// The variable name a post-state read of the relational variable in `slot` lowers to
+/// while its action is enumerated: `'` and the slot number. `'` is not a CML identifier
+/// character, so it names no declared variable; every occurrence is replaced by a
+/// constant before the builder sees the expression.
+fn primed_placeholder(slot: usize) -> String {
+    format!("'{slot}")
+}
+
+/// The slot a placeholder names, read from its (at most twenty) digits: constant work,
+/// whatever the number of relational variables.
+fn placeholder_slot(v: &str) -> Option<usize> {
+    v.strip_prefix('\'')?.parse().ok()
+}
+
+/// The work (and output nodes) of enumerating `candidates` candidate post-states of a
+/// relational action whose lowered template (guard with postconditions, updates, and
+/// candidate constants) has `template` nodes and whose candidate names total
+/// `name_bytes` bytes each: per candidate, one copy of the template with the constants
+/// substituted, and its name. Saturates.
+pub fn successor_work(candidates: u128, template: usize, name_bytes: usize) -> u64 {
+    let per = (template as u128)
+        .saturating_add(crate::budget::text_cost(name_bytes) as u128)
+        .saturating_add(1);
+    u64::try_from(candidates.saturating_mul(per)).unwrap_or(u64::MAX)
+}
+
+/// One programmatic action per candidate post-state of the relational variables:
+/// guard `G && P[c]`, updates the action's own plus `r := c_r`, named
+/// `A[r1=c1,r2=c2]`. Candidates are enumerated with the relational variables in name
+/// order and the last one fastest, each over its domain in ascending order.
+///
+/// The count is bounded by [`MAX_RELATIONAL_CANDIDATES`], and the whole enumeration —
+/// candidates × template size, in nodes and in work ([`successor_work`]) — is charged
+/// before the first candidate is built, as init enumeration is. Nothing is built for a
+/// refused action.
+#[allow(clippy::too_many_arguments)]
+fn relational_action(
+    mut builder: ModelBuilder,
+    name: &str,
+    guard: (BoolExpr, usize),
+    updates: &[(&str, Sized<IntExpr>)],
+    relational: &[&Variable],
+    budget: &mut Meter,
+    span: Span,
+    lowered: &mut Vec<String>,
+) -> R<ModelBuilder> {
+    let candidates = candidate_count(relational);
+    if candidates > MAX_RELATIONAL_CANDIDATES {
+        return no(Unlowerable::SuccessorDomainTooLarge, span);
+    }
+    let name_bytes = widest_label(name, relational);
+    let template = updates
+        .iter()
+        .fold(guard.1, |acc, (_, x)| acc.saturating_add(x.1.size))
+        .saturating_add(relational.len());
+    // The output is exactly the candidates' copies: charged before the first is built.
+    // The work is the same product; it is checked against what the budget has left
+    // before the first candidate, then charged as each candidate is built (one unit per
+    // node copied, one per placeholder resolved), so the charge is what the
+    // substitution actually did and never exceeds the checked prediction.
+    let total = successor_work(candidates, template, name_bytes);
+    if total > budget.fuel.left() {
+        return no(Unlowerable::WorkLimitExceeded, span);
+    }
+    charge(budget, usize::try_from(total).unwrap_or(usize::MAX), span)?;
+
+    let mut values: Vec<i64> = relational.iter().map(|v| v.domain().lo()).collect();
+    loop {
+        let label: Vec<String> = relational
+            .iter()
+            .zip(&values)
+            .map(|(v, c)| format!("{}={c}", v.name().as_str()))
+            .collect();
+        let action = format!("{name}[{}]", label.join(","));
+        let mut steps = 0_u64;
+        let guard_c = subst_bool(&guard.0, &values, &mut steps);
+        let mut assigns: Vec<(&str, IntExpr)> =
+            updates.iter().map(|(v, x)| (*v, x.0.clone())).collect();
+        let copied = updates
+            .iter()
+            .fold(0_u64, |acc, (_, x)| acc.saturating_add(x.1.size as u64));
+        let per_name = crate::budget::text_cost(action.len()) as u64;
+        burn(
+            budget,
+            steps
+                .saturating_add(copied)
+                .saturating_add(relational.len() as u64)
+                .saturating_add(per_name)
+                .saturating_add(1),
+            span,
+        )?;
+        for (v, c) in relational.iter().zip(&values) {
+            assigns.push((v.name().as_str(), IntExpr::Const(*c)));
+        }
+        builder = builder.action(ActionDecl::deterministic(&action, guard_c, assigns));
+        lowered.push(action);
+        if !advance(&mut values, relational) {
+            break;
+        }
+    }
+    Ok(builder)
+}
+
+/// `e` with each placeholder `'k` replaced by `values[k]`. `steps` counts one per node
+/// visited; a placeholder is resolved by its slot number, in constant time. Recursion
+/// is bounded by the lowered depth ([`MAX_EXPR_DEPTH`]).
+fn subst_int(e: &IntExpr, values: &[i64], steps: &mut u64) -> IntExpr {
+    *steps = steps.saturating_add(1);
+    match e {
+        IntExpr::Var(v) => match placeholder_slot(v).and_then(|k| values.get(k)) {
+            Some(c) => IntExpr::Const(*c),
+            None => e.clone(),
+        },
+        IntExpr::Const(_) => e.clone(),
+        IntExpr::Arith(op, a, b) => IntExpr::Arith(
+            *op,
+            Box::new(subst_int(a, values, steps)),
+            Box::new(subst_int(b, values, steps)),
+        ),
+        IntExpr::Min(a, b) => IntExpr::Min(
+            Box::new(subst_int(a, values, steps)),
+            Box::new(subst_int(b, values, steps)),
+        ),
+        IntExpr::Max(a, b) => IntExpr::Max(
+            Box::new(subst_int(a, values, steps)),
+            Box::new(subst_int(b, values, steps)),
+        ),
+    }
+}
+
+fn subst_bool(e: &BoolExpr, values: &[i64], steps: &mut u64) -> BoolExpr {
+    *steps = steps.saturating_add(1);
+    match e {
+        BoolExpr::Const(_) => e.clone(),
+        BoolExpr::Compare { op, left, right } => BoolExpr::Compare {
+            op: *op,
+            left: subst_int(left, values, steps),
+            right: subst_int(right, values, steps),
+        },
+        BoolExpr::Not(a) => BoolExpr::Not(Box::new(subst_bool(a, values, steps))),
+        BoolExpr::And(x, y) => {
+            let x = subst_bool(x, values, steps);
+            BoolExpr::And(Box::new(x), Box::new(subst_bool(y, values, steps)))
+        }
+        BoolExpr::Or(x, y) => {
+            let x = subst_bool(x, values, steps);
+            BoolExpr::Or(Box::new(x), Box::new(subst_bool(y, values, steps)))
+        }
+        BoolExpr::Implies(x, y) => {
+            let x = subst_bool(x, values, steps);
+            BoolExpr::Implies(Box::new(x), Box::new(subst_bool(y, values, steps)))
+        }
+        BoolExpr::InRange { expr, lo, hi } => BoolExpr::InRange {
+            expr: subst_int(expr, values, steps),
+            lo: *lo,
+            hi: *hi,
+        },
+    }
+}
+
+/// The number of candidate post-states of a relational action: the product of its
+/// relational variables' domains. Saturates.
+fn candidate_count(relational: &[&Variable]) -> u128 {
+    relational.iter().fold(1_u128, |acc, v| {
+        acc.saturating_mul(v.domain().cardinality())
+    })
+}
+
+/// The byte length of the longest name `A[r1=c1,…,rn=cn]` the candidates of action
+/// `name` generate. Exact: a value's decimal text is longest at an end of its domain.
+fn widest_label(name: &str, relational: &[&Variable]) -> usize {
+    let digits = |v: i64| v.to_string().len();
+    let parts = relational.iter().fold(0_usize, |acc, v| {
+        let widest = digits(v.domain().lo()).max(digits(v.domain().hi()));
+        acc.saturating_add(v.name().as_str().len())
+            .saturating_add(1)
+            .saturating_add(widest)
+    });
+    let commas = relational.len().saturating_sub(1);
+    name.len()
+        .saturating_add(2)
+        .saturating_add(parts)
+        .saturating_add(commas)
+}
+
+/// Model-core's limits on the lowered model, checked before init enumeration and
+/// before any action is built: every declared name, the widest generated action name,
+/// each relational action's candidate count, and the total number of programmatic
+/// actions ([`MAX_ACTIONS`]). The variable count ([`MAX_VARIABLES`]) is checked before
+/// the domains are read, and the initial-state count is bounded by
+/// [`MAX_INIT_BINDINGS`] `<=` [`MAX_INITIAL_STATES`]. Work: a table lookup per action
+/// entry and a pass over the names, charged before the pass.
+fn preflight(
+    model: &NormModel,
+    by_name: &std::collections::BTreeMap<&str, &Variable>,
+    budget: &mut Meter,
+) -> R<()> {
+    let names = model
+        .state
+        .iter()
+        .map(|v| (v.name.len(), v.span))
+        .chain(model.actions.iter().map(|a| (a.name.len(), a.span)))
+        .chain(model.invariants.iter().map(|i| (i.name.len(), i.span)));
+    for (len, span) in names {
+        burn(budget, 1, span)?;
+        if len > MAX_IDENT_BYTES {
+            return no(Unlowerable::NameTooLong, span);
+        }
+    }
+    let mut total: u128 = 0;
+    for a in &model.actions {
+        burn(
+            budget,
+            (a.next.len() as u64).saturating_mul(lookup_cost(by_name.len(), 32)),
+            a.span,
+        )?;
+        let relational: Vec<&Variable> = a
+            .next
+            .iter()
+            .filter(|(_, n)| matches!(n, Next::Relational))
+            .filter_map(|(v, _)| by_name.get(v.as_str()).copied())
+            .collect();
+        let expanded = if relational.is_empty() {
+            1
+        } else {
+            let candidates = candidate_count(&relational);
+            if candidates > MAX_RELATIONAL_CANDIDATES {
+                return no(Unlowerable::SuccessorDomainTooLarge, a.span);
+            }
+            if widest_label(&a.name, &relational) > MAX_IDENT_BYTES {
+                return no(Unlowerable::NameTooLong, a.span);
+            }
+            candidates
+        };
+        total = total.saturating_add(expanded);
+        if total > MAX_ACTIONS as u128 {
+            return no(Unlowerable::TooManyActions, a.span);
+        }
+    }
+    Ok(())
+}
+
 /// Step `values` to the next vector of the domain product, last position fastest.
 /// Returns `false` after the last vector.
-fn advance(values: &mut [i64], variables: &[Variable]) -> bool {
-    for (slot, v) in values.iter_mut().zip(variables.iter()).rev() {
+fn advance<V: std::borrow::Borrow<Variable>>(values: &mut [i64], variables: &[V]) -> bool {
+    for (slot, v) in values
+        .iter_mut()
+        .zip(variables.iter().map(Borrow::borrow))
+        .rev()
+    {
         if *slot < v.domain().hi() {
             *slot = slot.saturating_add(1);
             return true;
@@ -639,6 +1000,7 @@ fn reason(e: &Expr) -> Unlowerable {
         ExprKind::Param(_) => Unlowerable::ParameterizedAction,
         ExprKind::Binary(BinOp::Div | BinOp::Mod, ..) => Unlowerable::DivisionOrModulo,
         ExprKind::Recur { .. } => Unlowerable::RecursiveCall,
+        ExprKind::Primed(_) => Unlowerable::PrimedOutsidePostcondition,
         _ => Unlowerable::NonIntegerValue,
     }
 }
@@ -689,9 +1051,9 @@ fn top_bool(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
     bool_expr(e, budget)
 }
 
-fn top_int(e: &Expr, budget: &mut Meter) -> R<IntExpr> {
+fn top_int_sized(e: &Expr, budget: &mut Meter) -> R<Sized<IntExpr>> {
     shallow(e, budget)?;
-    Ok(int_expr(e, budget)?.0)
+    int_expr(e, budget)
 }
 
 /// One new node over already-lowered children. Its depth is checked against
@@ -761,6 +1123,19 @@ fn int_expr(e: &Expr, budget: &mut Meter) -> R<Sized<IntExpr>> {
                 IntExpr::max(a, b)
             };
             node(budget, sp, &[sa, sb], || built)
+        }
+        // A post-state read, inside a postcondition: the placeholder the candidate
+        // enumeration replaces by each candidate value.
+        ExprKind::Primed(v) if budget.post => {
+            let cost = lookup_cost(budget.slots.len(), v.len());
+            burn(budget, cost, sp)?;
+            let Some(slot) = budget.slots.get(v).copied() else {
+                return no(Unlowerable::PrimedOutsidePostcondition, sp);
+            };
+            let name = primed_placeholder(slot);
+            let text = crate::budget::text_cost(name.len());
+            charge(budget, text, sp)?;
+            node(budget, sp, &[M::text(text)], || IntExpr::Var(name))
         }
         ExprKind::If(..) => no(Unlowerable::ConditionalValue, e.span),
         _ => no(reason(e), e.span),

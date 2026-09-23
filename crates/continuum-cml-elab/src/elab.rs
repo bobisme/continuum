@@ -104,12 +104,15 @@
 //!
 //! # Actions
 //!
-//! A clause of an action is a guard when it mentions no post-state, and an update when
-//! it is `next x = e` or `x' == e` for a state variable `x`. `unchanged x` and `x' == x`
-//! both keep `x`. Every state variable must be specified exactly once: docs/11 §4, "The
-//! checker rejects unspecified state changes unless the action explicitly opts into
-//! relational postconditions". Relational postconditions — any other use of a prime —
-//! are outside the Finite core fragment and are refused as unsupported.
+//! Decision: RFC 0003 "Relational actions" (and its correction 2, which completes
+//! docs/11 §4). A conjunct of an action is an update when it is `next x = e` or
+//! `x' == e` for a state variable `x` and `e` reads no post-state; `unchanged x` and
+//! `x' == x` keep `x`. A conjunct that reads a post-state (`y'`) is a postcondition, and
+//! every other conjunct is a guard clause. A variable no statement updates or keeps is
+//! relational when a postcondition primes it; otherwise it is an unspecified state
+//! change. In the normalized postconditions a primed read of an updated or kept
+//! variable is replaced by its post-state value, so only relational variables stay
+//! primed. Only a state variable can be primed.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -133,6 +136,11 @@ pub use crate::budget::MAX_NODES;
 /// an elaborated tree is at most this plus the parser's `MAX_NESTING` deep. It equals
 /// `MAX_NESTING`, so an inlined value is never deeper than one written out.
 pub const MAX_INLINE_DEPTH: usize = 64;
+
+/// The deepest tree elaboration builds: an expression at the parser's nesting bound
+/// around an inlined value at [`MAX_INLINE_DEPTH`]. Substituting an update into a
+/// postcondition is refused before it would build anything deeper.
+pub const MAX_TREE_DEPTH: usize = MAX_INLINE_DEPTH + continuum_cml_syntax::MAX_NESTING as usize;
 
 /// The longest chain of recursive calls one unfolding may follow: a call of a recursive
 /// def whose constant measure `v` and least decrement `step` allow more than
@@ -914,6 +922,7 @@ impl<'a> Elaborator<'a> {
             });
         }
         let mut guard: Vec<Expr> = Vec::new();
+        let mut post: Vec<Expr> = Vec::new();
         let mut updates: BTreeMap<String, (Next, Span)> = BTreeMap::new();
         let action = name.name.clone();
         let mut record = |var: &syn::Ident, next: Next, at: Span| -> R<()> {
@@ -937,7 +946,7 @@ impl<'a> Elaborator<'a> {
                 syn::StmtKind::Require(e) => {
                     let e = self.expr(e, &mut scope, Site::Action)?;
                     self.expect(&e, &Type::Bool)?;
-                    conjuncts(e, &mut guard);
+                    self.split_clauses(e, &mut guard, &mut post)?;
                 }
                 syn::StmtKind::Let(n, value) => {
                     let v = self.expr(value, &mut scope, Site::Action)?;
@@ -947,7 +956,9 @@ impl<'a> Elaborator<'a> {
                     let ty = self.state_type(var)?;
                     let v = self.expr(value, &mut scope, Site::Action)?;
                     self.expect(&v, &ty)?;
-                    record(var, self.next_of(var, v), s.span)?;
+                    let (n, clause) = self.update(var, v, s.span)?;
+                    record(var, n, s.span)?;
+                    post.extend(clause);
                 }
                 syn::StmtKind::Unchanged(vars) => {
                     for var in vars {
@@ -963,22 +974,34 @@ impl<'a> Elaborator<'a> {
                             let ty = self.state_type(var)?;
                             let v = self.expr(rhs, &mut scope, Site::Action)?;
                             self.expect(&v, &ty)?;
-                            record(var, self.next_of(var, v), part.span)?;
+                            let (n, clause) = self.update(var, v, part.span)?;
+                            record(var, n, part.span)?;
+                            post.extend(clause);
                         } else {
                             let g = self.expr(part, &mut scope, Site::Action)?;
                             self.expect(&g, &Type::Bool)?;
-                            conjuncts(g, &mut guard);
+                            self.split_clauses(g, &mut guard, &mut post)?;
                         }
                     }
                 }
             }
         }
+        // The variables the postconditions prime: one visit per node.
+        let mut primed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for clause in &post {
+            self.burn(measure(clause).0 as u64, clause.span)?;
+            primed_names(clause, &mut primed);
+        }
         // One entry per state variable per action: output (charged like a node, with its
-        // text) and a table lookup each.
+        // text) and a table lookup each (two with the primed set).
         let mut next = Vec::new();
         for var in state_names {
             self.charge(crate::budget::text_cost(var.len()).saturating_add(1), span)?;
-            self.burn(lookup_cost(updates.len(), var.len()), span)?;
+            self.burn(
+                lookup_cost(updates.len(), var.len())
+                    .saturating_add(lookup_cost(primed.len(), var.len())),
+                span,
+            )?;
             match updates.remove(var) {
                 Some((mut n, _)) => {
                     if let Next::Set(e) = &mut n {
@@ -986,6 +1009,9 @@ impl<'a> Elaborator<'a> {
                     }
                     next.push((var.clone(), n));
                 }
+                // The frame rule (RFC 0003 "Relational actions"): a variable no clause
+                // updates or keeps is specified only if a postcondition primes it.
+                None if primed.contains(var) => next.push((var.clone(), Next::Relational)),
                 None => {
                     return err(
                         ElabErrorKind::UnspecifiedStateChange {
@@ -998,13 +1024,131 @@ impl<'a> Elaborator<'a> {
             }
         }
         self.finish_all(&mut guard)?;
+        self.finish_all(&mut post)?;
+        // A primed read of a variable that is updated or kept is its post-state value:
+        // the update's expression, or the variable itself.
+        let frame: BTreeMap<&str, &Next> = next.iter().map(|(v, n)| (v.as_str(), n)).collect();
+        for clause in &mut post {
+            self.resolve_primes(clause, &frame, 1)?;
+        }
         Ok(Action {
             name: name.name.clone(),
             params: norm_params,
             guard,
             next,
+            post,
             span,
         })
+    }
+
+    /// `x'` in an action: the post-state of the state variable `x`. A prime on
+    /// anything else is [`Unsupported::PrimedExpression`].
+    #[inline(never)]
+    fn primed(&mut self, inner: &syn::Expr, scope: &Scope, span: Span) -> R<Expr> {
+        let syn::ExprKind::Name(id) = &inner.kind else {
+            return err(
+                ElabErrorKind::Unsupported(Unsupported::PrimedExpression),
+                span,
+            );
+        };
+        let cost = lookup_cost(scope.len(), id.name.len())
+            .saturating_add(lookup_cost(self.globals.len(), id.name.len()));
+        self.burn(cost, span)?;
+        if scope.contains(&id.name) {
+            return err(
+                ElabErrorKind::Unsupported(Unsupported::PrimedExpression),
+                span,
+            );
+        }
+        match self.globals.get(&id.name).cloned() {
+            Some(Global::State(t)) => self.node(ExprKind::Primed(id.name.clone()), t, span),
+            Some(_) => err(
+                ElabErrorKind::Unsupported(Unsupported::PrimedExpression),
+                span,
+            ),
+            None => err(ElabErrorKind::UnknownName(id.name.clone()), id.span),
+        }
+    }
+
+    /// An update `next x = v` (or `x' == v`). A value that reads the post-state (through
+    /// a `let`) makes `x` relational, with the postcondition `x' == v`.
+    fn update(&mut self, var: &syn::Ident, v: Expr, at: Span) -> R<(Next, Option<Expr>)> {
+        self.burn(measure(&v).0 as u64, at)?;
+        if !has_primed(&v) {
+            return Ok((self.next_of(var, v), None));
+        }
+        let ty = v.ty.clone();
+        let x = self.node(ExprKind::Primed(var.name.clone()), ty, var.span)?;
+        let eq = self.node(
+            ExprKind::Binary(BinOp::Eq, Box::new(x), Box::new(v)),
+            Type::Bool,
+            at,
+        )?;
+        Ok((Next::Relational, Some(eq)))
+    }
+
+    /// Split a Boolean clause into conjuncts: those that read the post-state are
+    /// postconditions, the rest are guard clauses. One visit per node.
+    fn split_clauses(&mut self, e: Expr, guard: &mut Vec<Expr>, post: &mut Vec<Expr>) -> R<()> {
+        self.burn(measure(&e).0 as u64, e.span)?;
+        let mut parts = Vec::new();
+        conjuncts(e, &mut parts);
+        for part in parts {
+            if has_primed(&part) {
+                post.push(part);
+            } else {
+                guard.push(part);
+            }
+        }
+        Ok(())
+    }
+
+    /// Replace each `y'` of a variable that is updated or kept by its post-state value.
+    /// A copied update is charged, and its depth bounded, before the copy is made;
+    /// `depth` is the depth of `e` in its clause. Recursion is bounded by the clause's
+    /// depth.
+    fn resolve_primes(
+        &mut self,
+        e: &mut Expr,
+        frame: &BTreeMap<&str, &Next>,
+        depth: usize,
+    ) -> R<()> {
+        self.burn(1, e.span)?;
+        if let ExprKind::Primed(v) = &e.kind {
+            match frame.get(v.as_str()) {
+                Some(Next::Set(value)) => {
+                    let (size, d) = measure(value);
+                    if depth.saturating_sub(1).saturating_add(d) > MAX_TREE_DEPTH {
+                        return err(ElabErrorKind::TooLarge, e.span);
+                    }
+                    self.charge(size, e.span)?;
+                    self.burn(size as u64, e.span)?;
+                    *e = value.clone();
+                }
+                Some(Next::Unchanged) => {
+                    let ty = e.ty.clone();
+                    *e = self.node(ExprKind::State(v.clone()), ty, e.span)?;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        let (_, kids) = kids_mut(&mut e.kind);
+        for kid in kids {
+            self.resolve_primes(kid, frame, depth.saturating_add(1))?;
+        }
+        // Binder domains are not among `kids_mut`'s children.
+        if let ExprKind::Quant(_, bs, _)
+        | ExprKind::SetComp(_, bs, _)
+        | ExprKind::MapComp(_, _, bs, _) = &mut e.kind
+        {
+            for (_, b) in bs.iter_mut() {
+                if let Some(d) = &mut b.domain {
+                    self.resolve_primes(d, frame, depth.saturating_add(1))?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// `x' == x` keeps `x`, exactly as `unchanged x` does.
@@ -1560,11 +1704,8 @@ impl<'a> Elaborator<'a> {
                     err(ElabErrorKind::TemporalOutsideBehavior, span)
                 }
             }
-            syn::ExprKind::Prime(_) => match site {
-                Site::Action => err(
-                    ElabErrorKind::Unsupported(Unsupported::RelationalPostcondition),
-                    span,
-                ),
+            syn::ExprKind::Prime(inner) => match site {
+                Site::Action => self.primed(inner, scope, span),
                 _ => err(ElabErrorKind::PrimeOutsideAction, span),
             },
             syn::ExprKind::Unary(op, inner) => self.e_unary(*op, inner, scope, site, span),
@@ -2550,6 +2691,29 @@ fn mentions_prime(e: &syn::Expr) -> bool {
     }
 }
 
+/// Whether a tree reads the post-state. Iterative.
+fn has_primed(e: &Expr) -> bool {
+    let mut stack = vec![e];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind, ExprKind::Primed(_)) {
+            return true;
+        }
+        stack.extend(children(node));
+    }
+    false
+}
+
+/// The state variables a tree primes. Iterative.
+fn primed_names(e: &Expr, out: &mut std::collections::BTreeSet<String>) {
+    let mut stack = vec![e];
+    while let Some(node) = stack.pop() {
+        if let ExprKind::Primed(v) = &node.kind {
+            out.insert(v.clone());
+        }
+        stack.extend(children(node));
+    }
+}
+
 /// Node count and depth of a tree, computed without recursion.
 pub(crate) fn measure(e: &Expr) -> (usize, usize) {
     measure_with(e, &BTreeMap::new())
@@ -2602,6 +2766,7 @@ pub(crate) fn own_cost(kind: &ExprKind) -> usize {
         | ExprKind::Field(_, t)
         | ExprKind::Step(t)
         | ExprKind::InitRef(t)
+        | ExprKind::Primed(t)
         | ExprKind::Bound { name: t, .. } => text(t),
         ExprKind::Variant {
             enumeration,
@@ -2634,7 +2799,8 @@ pub(crate) fn children(e: &Expr) -> Vec<&Expr> {
         | ExprKind::OptionNone
         | ExprKind::Step(_)
         | ExprKind::Stutter
-        | ExprKind::InitRef(_) => {}
+        | ExprKind::InitRef(_)
+        | ExprKind::Primed(_) => {}
         ExprKind::OptionSome(a)
         | ExprKind::Not(a)
         | ExprKind::Neg(a)
@@ -2722,7 +2888,8 @@ fn substitute(e: &Expr, subst: &BTreeMap<u32, Expr>) -> Expr {
         | ExprKind::OptionNone
         | ExprKind::Step(_)
         | ExprKind::Stutter
-        | ExprKind::InitRef(_) => e.kind.clone(),
+        | ExprKind::InitRef(_)
+        | ExprKind::Primed(_) => e.kind.clone(),
         ExprKind::OptionSome(a) => ExprKind::OptionSome(sb(a)),
         ExprKind::Not(a) => ExprKind::Not(sb(a)),
         ExprKind::Neg(a) => ExprKind::Neg(sb(a)),
@@ -3398,7 +3565,8 @@ fn kids_mut(kind: &mut ExprKind) -> Kids<'_> {
         | ExprKind::OptionNone
         | ExprKind::Step(_)
         | ExprKind::Stutter
-        | ExprKind::InitRef(_) => None,
+        | ExprKind::InitRef(_)
+        | ExprKind::Primed(_) => None,
         ExprKind::OptionSome(a)
         | ExprKind::Not(a)
         | ExprKind::Neg(a)

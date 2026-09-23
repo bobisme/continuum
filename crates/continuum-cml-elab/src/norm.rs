@@ -20,6 +20,8 @@
 //! | `def f(…, k: Nat, …): U = e` (recursive, see [`crate::elab`] "Recursive defs") | every call is its unfolding at the constant value of `k`, with the measure tests decided |
 //! | `next x = e` or `x' == e` | one [`Next::Set`] |
 //! | `unchanged x`, or `x' == x` | one [`Next::Unchanged`] |
+//! | a postcondition that primes `x`, with no update of `x` | [`Next::Relational`], the clause in [`Action::post`] |
+//! | `y'` in a postcondition, for `y` updated or unchanged | `y`'s post-state value: its update, or `y` |
 //! | `require a && b`, or `require a` and `require b` | a list of conjuncts |
 //! | `{b, a, a}` | the elements sorted by their canonical encoding and deduplicated |
 //! | `exists x, y` with no domain | each binder carries its inferred type |
@@ -122,6 +124,12 @@ pub struct Action {
     pub guard: Vec<Expr>,
     /// One entry per state variable, in state-variable order.
     pub next: Vec<(String, Next)>,
+    /// The relational postconditions, as conjuncts in source order (RFC 0003
+    /// "Relational actions"). They read the pre-state as usual and the post-state of
+    /// the [`Next::Relational`] variables through [`ExprKind::Primed`]; a primed read of
+    /// any other variable has been replaced by its post-state value. Empty for an
+    /// action that only assigns.
+    pub post: Vec<Expr>,
     /// The declaration.
     pub span: Span,
 }
@@ -142,6 +150,9 @@ pub enum Next {
     Unchanged,
     /// The variable takes this value, an expression over the pre-state.
     Set(Expr),
+    /// The variable takes any value of its type that satisfies the action's
+    /// postconditions ([`Action::post`]).
+    Relational,
 }
 
 /// A named disjunction of actions.
@@ -434,6 +445,9 @@ pub enum ExprKind {
     Stutter,
     /// A reference to the init predicate by name (behavior only).
     InitRef(String),
+    /// `x'`: the post-state value of the state variable `x`. Only in an action's
+    /// postconditions ([`Action::post`]), and only for a [`Next::Relational`] variable.
+    Primed(String),
     /// A call of the recursive `def` `function` from inside its own body.
     ///
     /// It exists only in the elaborated body of a recursive def, which is not part of
@@ -681,7 +695,12 @@ impl Writer {
                 let text = match next {
                     Next::Unchanged => format!("(unchanged {var})"),
                     Next::Set(e) => format!("(next {var} {})", self.render(e)),
+                    Next::Relational => format!("(relational {var})"),
                 };
+                self.line(2, &text);
+            }
+            for clause in &a.post {
+                let text = format!("(post {})", self.render(clause));
                 self.line(2, &text);
             }
             self.line(1, ")");
@@ -933,6 +952,9 @@ impl Writer {
             ExprKind::Stutter => self.out.push_str("(stutter)"),
             ExprKind::InitRef(name) => {
                 let _ = write!(self.out, "(init-ref {name})");
+            }
+            ExprKind::Primed(name) => {
+                let _ = write!(self.out, "(primed {name})");
             }
             ExprKind::Recur { function, args } => {
                 let head = format!("recur {function}");

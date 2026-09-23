@@ -1,0 +1,55 @@
+[change]
+bone = "bn-2ouro"
+author = "continuum-dev"
+summary = "continuum-cml-elab: relational postconditions and relational actions with an explicit frame rule; lowered to one programmatic action per candidate post-state, enumerated in a fixed order and charged up front like init enumeration"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/fixtures.rs::syntax_coverage_elaborates_with_a_relational_action",
+  "crates/continuum-cml-elab/tests/errors.rs::unsupported_semantics_are_typed_unsupported",
+  "crates/continuum-cml-elab/tests/relational.rs::a_primed_variable_is_relational_and_an_unmentioned_one_is_still_refused",
+  "crates/continuum-cml-elab/tests/relational.rs::primed_reads_of_updated_and_kept_variables_are_their_post_state_values",
+  "crates/continuum-cml-elab/tests/relational.rs::a_postcondition_without_relational_variables_joins_the_guard",
+  "crates/continuum-cml-elab/tests/relational.rs::a_prime_on_anything_but_a_state_variable_is_unsupported",
+  "crates/continuum-cml-elab/tests/relational.rs::a_relational_variable_that_cannot_be_enumerated_is_refused_typed",
+  "crates/continuum-cml-elab/tests/relational.rs::lowered_successors_match_an_independent_successor_computation",
+  "crates/continuum-cml-elab/tests/relational.rs::mutated_oracles_are_told_apart",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::relational_enumeration_is_charged_and_grows_linearly",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::relational_enumeration_is_refused_before_it_is_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_relational_boundary_is_exact",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::primed_read_copies_are_charged_before_they_are_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::primed_read_copies_are_depth_bounded_in_a_small_stack",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_late_primed_read_costs_constant_work_per_occurrence",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_low_work_limit_is_refused_before_substitution",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::model_core_variable_limit_is_preflighted",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::model_core_action_limit_is_preflighted_in_aggregate",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::generated_and_declared_names_are_preflighted",
+  "crates/continuum-cml-elab/tests/relational.rs::candidates_multiply_in_the_fixed_enumeration_order",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/relational.rs::equivalent_guard_normalization_of_a_relational_action_preserves_identity", relation = "equivalent guard normalization" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/relational.rs::a_nondeterministic_relational_action_explores_to_the_hand_enumerated_graph", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/relational.rs::a_mutated_relational_action_explores_differently", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "primed variables and relational actions are Wave 0 forces (PORTING_WAVES) the CML front end needs for corpus ports (C021) and part of the expressiveness C022 claims; this change adds evidence toward both (the SyntaxCoverage fixture elaborates, and a nondeterministic relational action lowers and is explored by the reference engine) and promotes neither: both stay TARGET"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the normalized AST dump and identity are in-process values with no wire schema; the new Next::Relational, Action::post, and ExprKind::Primed appear only for actions that prime a variable, which elaboration refused before, so every previously elaborated model keeps a byte-identical dump and identity; the lowered Model type is unchanged"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-cml-elab: every model that elaborated before elaborates to the same normalized AST and identity and lowers to the same Model; cml.elab.unsupported.relational_postcondition is replaced by acceptance plus the narrower cml.elab.unsupported.primed_expression, and in-repo tests are the only callers of the old variant; norm::Action gains the public field post, so a hand-built Action literal must add it"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-22lrdf"
+verdict = "approved"

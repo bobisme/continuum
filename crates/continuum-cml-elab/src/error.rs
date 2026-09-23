@@ -75,9 +75,10 @@ pub enum Unsupported {
     /// is unfolded during elaboration, and its depth must be bounded before anything is
     /// built, so the measure must fold to an integer literal.
     RecursionBoundNotConstant,
-    /// A primed expression that is not `x' == e` for a state variable `x`: a relational
-    /// postcondition (docs/11 §4).
-    RelationalPostcondition,
+    /// A prime on something other than a state variable (`(x + 1)'`, `x''`, a
+    /// parameter): a postcondition reads the post-state of state variables only (RFC 0003
+    /// "Relational actions").
+    PrimedExpression,
     /// An integer literal beyond `i64`.
     IntegerBeyondI64,
 }
@@ -92,7 +93,7 @@ impl Unsupported {
             Unsupported::RecursionBoundNotConstant => {
                 "cml.elab.unsupported.recursion_bound_not_constant"
             }
-            Unsupported::RelationalPostcondition => "cml.elab.unsupported.relational_postcondition",
+            Unsupported::PrimedExpression => "cml.elab.unsupported.primed_expression",
             Unsupported::IntegerBeyondI64 => "cml.elab.unsupported.integer_beyond_i64",
         }
     }
@@ -112,9 +113,7 @@ impl fmt::Display for Unsupported {
                 "the measure argument of a call of a recursive model function must be a \
                  constant"
             }
-            Unsupported::RelationalPostcondition => {
-                "only `x' == e` for a state variable `x` is supported as a post-state clause"
-            }
+            Unsupported::PrimedExpression => "only a state variable can be primed, as `x'`",
             Unsupported::IntegerBeyondI64 => "integer literals beyond i64 are not supported",
         })
     }

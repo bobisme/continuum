@@ -11,13 +11,17 @@ use std::thread;
 
 use continuum_cml_elab::budget::MAX_NODES;
 use continuum_cml_elab::budget::{MAX_TYPE_DEPTH, MAX_WORK};
-use continuum_cml_elab::elab::{MAX_INLINE_DEPTH, MAX_RECURSION_DEPTH, MAX_UNFOLD_NESTING};
+use continuum_cml_elab::elab::{
+    MAX_INLINE_DEPTH, MAX_RECURSION_DEPTH, MAX_TREE_DEPTH, MAX_UNFOLD_NESTING,
+};
 use continuum_cml_elab::lower::MAX_INIT_BINDINGS;
-use continuum_cml_elab::lower::init_work;
+use continuum_cml_elab::lower::{MAX_RELATIONAL_CANDIDATES, init_work, successor_work};
 use continuum_cml_elab::{
     ElabError, ElabErrorKind, Limits, LowerErrorKind, NormModel, Unlowerable, Unsupported,
     elaborate_source, elaborate_source_with, lower, lower_with,
 };
+use continuum_model_core::ident::MAX_IDENT_BYTES;
+use continuum_model_core::model::{MAX_ACTIONS, MAX_VARIABLES};
 
 /// A quarter of the default 2 MiB thread stack.
 const SMALL_STACK: usize = 512 * 1024;
@@ -914,4 +918,335 @@ fn an_unused_growing_argument_is_charged() {
         assert!(usage.nodes < 10_000, "{usage:?}");
     }
     under_memory_limit("an_unused_growing_argument_is_charged", body);
+}
+
+// ---------------------------------------------------------------------------
+// bn-2ouro: relational actions
+// ---------------------------------------------------------------------------
+
+/// `x` and `y` in `0..n-1`, both relational in one action whose postcondition has
+/// `pad` extra conjuncts: `n * n` candidates, each a copy of the template.
+fn relational_source(n: u64, pad: usize) -> String {
+    let extra = " && x' <= y' + 1000".repeat(pad);
+    format!(
+        "module R\nstate {{ x: Nat where x < {n}\n y: Nat where y < {n} }}\ninit {{ x == 0 && y == 0 }}\naction A {{ x' + y' == x + y{extra} }}\n"
+    )
+}
+
+fn lowering_usage(
+    src: &str,
+) -> (
+    Result<continuum_model_core::Model, continuum_cml_elab::LowerError>,
+    continuum_cml_elab::Usage,
+) {
+    let m = elaborate_source(src).unwrap_or_else(|e| panic!("elaborates: {e}"));
+    lower_with(&m, Limits::default())
+}
+
+/// The candidate enumeration is charged before it starts: the work of a lowering
+/// covers `successor_work` for its candidates (anti-vacuity: an uncharged enumeration
+/// would spend less), and doubling the candidates doubles the work, not more.
+#[test]
+fn relational_enumeration_is_charged_and_grows_linearly() {
+    let (result, small) = lowering_usage(&relational_source(16, 0));
+    let model = result.expect("256 candidates lower");
+    assert_eq!(model.actions().len(), 256);
+    assert!(
+        small.work >= successor_work(256, 1, 1),
+        "the enumeration is charged: {small:?}"
+    );
+    assert!(
+        small.nodes >= 256 * 8,
+        "each candidate's copy is charged: {small:?}"
+    );
+    let (_, large) = lowering_usage(&relational_source(16, 1));
+    let (_, doubled) = lowering_usage(&relational_source(23, 0));
+    // 23 * 23 = 529 candidates, about twice 256.
+    assert_linear("relational candidates", small.work, doubled.work);
+    assert!(
+        large.work > small.work,
+        "a larger template costs more per candidate"
+    );
+}
+
+/// Over the candidate bound, and over the budget with a candidate count under the
+/// bound: both are refused before the first candidate is built, so the refusal spends
+/// less work and allocates fewer nodes than one pass over the candidates would.
+#[test]
+fn relational_enumeration_is_refused_before_it_is_built() {
+    fn body() {
+        // 65 * 64 candidates: past MAX_RELATIONAL_CANDIDATES.
+        let src = "module R\nstate { x: Nat where x < 65\n y: Nat where y < 64 }\ninit { x == 0 && y == 0 }\naction A { x' + y' == x + y }\n";
+        let (result, usage) = lowering_usage(src);
+        assert_eq!(
+            result.expect_err("too many candidates").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::SuccessorDomainTooLarge)
+        );
+        // The same model with a stuttering action spends the init enumeration and the
+        // template; the refusal adds a constant to that, not a pass over the candidates.
+        let (_, baseline) = lowering_usage(&src.replace("x' + y' == x + y", "unchanged x, y"));
+        assert!(
+            usage.work < baseline.work + 1000,
+            "{usage:?} against {baseline:?}"
+        );
+
+        // 64 * 64 candidates (at the bound) with a 40-conjunct template: millions of
+        // nodes, refused by the up-front charge.
+        const _: () = assert!(64 * 64 == MAX_RELATIONAL_CANDIDATES);
+        let (result, usage) = lowering_usage(&relational_source(64, 40));
+        let e = result.expect_err("over budget");
+        assert!(
+            matches!(
+                e.kind,
+                LowerErrorKind::Unlowerable(
+                    Unlowerable::WorkLimitExceeded | Unlowerable::OutputTooLarge
+                )
+            ),
+            "{e}"
+        );
+        assert!(usage.nodes < 10_000, "no candidate was built: {usage:?}");
+        // The predicted enumeration work is charged (it fits the work budget); the
+        // predicted output does not fit, so nothing is built.
+    }
+    under_memory_limit("relational_enumeration_is_refused_before_it_is_built", body);
+}
+
+/// The boundary is exact: at the measured usage the lowering succeeds, one unit of
+/// work or one node less is refused, typed.
+#[test]
+fn the_relational_boundary_is_exact() {
+    let m = elaborate_source(&relational_source(8, 2)).expect("elaborates");
+    let (result, used) = lower_with(&m, Limits::default());
+    result.expect("lowers");
+    lower_with(&m, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits");
+    let e = lower_with(&m, used_limits(used.nodes, used.work - 1))
+        .0
+        .expect_err("one unit less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+    let e = lower_with(&m, used_limits(used.nodes - 1, used.work))
+        .0
+        .expect_err("one node less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+}
+
+/// A primed read of an updated variable copies the update into the postcondition. The
+/// copies are charged before they are made: an update of `2^16` nodes read `k` times
+/// fits for small `k` and is refused, typed, well before `k` copies are built.
+fn primed_copies(k: usize) -> String {
+    let mut body = String::from("  let a0 = x\n");
+    for i in 1..=15 {
+        body.push_str(&format!("  let a{i} = a{} + a{}\n", i - 1, i - 1));
+    }
+    let reads = vec!["y'"; k].join(" + ");
+    format!(
+        "module R\nstate {{ x: Int\n y: Int }}\ninit {{ x == 0 && y == 0 }}\naction A {{\n{body}  next y = a15\n  x' >= {reads}\n}}\n"
+    )
+}
+
+#[test]
+fn primed_read_copies_are_charged_before_they_are_built() {
+    let (result, small) = elaborate_source_with(&primed_copies(2), Limits::default());
+    result.expect("two copies fit");
+    assert!(
+        small.nodes >= 2 * (1 << 17),
+        "the copies are charged: {small:?}"
+    );
+    fn body() {
+        let (result, usage) = elaborate_source_with(&primed_copies(40), Limits::default());
+        assert_eq!(result.expect_err("40 copies").kind, ElabErrorKind::TooLarge);
+        assert!(usage.nodes <= MAX_NODES, "{usage:?}");
+    }
+    under_memory_limit("primed_read_copies_are_charged_before_they_are_built", body);
+}
+
+/// A copy is refused before it would make a postcondition deeper than
+/// [`MAX_TREE_DEPTH`]. The update is an inlined call at [`MAX_INLINE_DEPTH`] under a
+/// 60-level chain (`60 + 64` deep); the read `y'` sits under `>=` and `k` additions, so
+/// the clause is `k + 1 + 124` deep.
+fn primed_depth(k: usize) -> String {
+    format!(
+        "module R\nstate {{ x: Int\n y: Int }}\ninit {{ x == 0 && y == 0 }}\ndef f0(n: Int): Int = n{}\naction A {{\n  next y = f0(x){}\n  x' >= y'{}\n}}\n",
+        " + 0".repeat(MAX_INLINE_DEPTH - 1),
+        " + 0".repeat(60),
+        " + 0".repeat(k)
+    )
+}
+
+#[test]
+fn primed_read_copies_are_depth_bounded_in_a_small_stack() {
+    let at = MAX_TREE_DEPTH - 125;
+    let (elaborated, _) = pipeline(primed_depth(at));
+    elaborated.expect("a clause exactly at the depth bound elaborates in a small stack");
+    let (elaborated, _) = pipeline(primed_depth(at + 1));
+    assert_eq!(
+        elaborated.expect_err("one level more").kind,
+        ElabErrorKind::TooLarge
+    );
+}
+
+// ---------------------------------------------------------------------------
+// cr-22lrdf: substitution cost, and model-core's limits preflighted
+// ---------------------------------------------------------------------------
+
+/// `n` relational variables `a`, `b`, … with one-value domains (so one candidate) and
+/// `reads` separate postconditions that read the last of them. One-letter names keep
+/// the generated action name (`A[a=0,…]`) within the model's name limit.
+fn late_reads(n: usize, reads: usize) -> String {
+    let names: Vec<char> = ('a'..='z').take(n).collect();
+    let mut src = String::from("module L\nstate {\n");
+    for v in &names {
+        src.push_str(&format!("  {v}: Nat where {v} <= 0\n"));
+    }
+    src.push_str("}\ninit { true }\naction A {\n");
+    for v in &names {
+        src.push_str(&format!("  {v}' >= 0\n"));
+    }
+    let last = names[n - 1];
+    src.push_str(&format!("  {last}' >= 0\n").repeat(reads));
+    src.push_str("}\n");
+    src
+}
+
+fn lowering_work(src: &str) -> u64 {
+    let (result, usage) = lowering_usage(src);
+    result.unwrap_or_else(|e| panic!("lowers: {e}"));
+    usage.work
+}
+
+/// Finding a placeholder's value is constant work per occurrence (th-2s0fp8): with the
+/// reads fixed, going from 6 to 24 relational variables adds work for the variables
+/// themselves, not for every read times every variable. Anti-vacuity: a lookup that
+/// scans the relational variables per read would add at least `reads * 18` units here
+/// (checked by restoring the linear lookup, which fails this test).
+#[test]
+fn a_late_primed_read_costs_constant_work_per_occurrence() {
+    let reads = 2000;
+    let few = lowering_work(&late_reads(6, reads));
+    let many = lowering_work(&late_reads(24, reads));
+    let extra = many.saturating_sub(few);
+    assert!(
+        extra < (reads as u64) * 18 / 4,
+        "work grew by {extra} ({few} -> {many}) for {reads} reads"
+    );
+}
+
+/// With a work limit below the enumeration's prediction, the lowering is refused at
+/// the prediction, before any candidate is substituted or charged as output.
+#[test]
+fn a_low_work_limit_is_refused_before_substitution() {
+    let src = late_reads(24, 2000);
+    let m = elaborate_source(&src).expect("elaborates");
+    let (result, full) = lower_with(&m, Limits::default());
+    result.expect("lowers within the default budget");
+    let (result, usage) = lower_with(&m, used_limits(full.nodes, full.work - 1));
+    assert_eq!(
+        result.expect_err("one unit less").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+    assert!(
+        usage.nodes + 2000 < full.nodes,
+        "no candidate was charged: {usage:?} against {full:?}"
+    );
+}
+
+/// `n` variables with one-value domains and one action that keeps them all.
+fn wide_state(n: usize) -> String {
+    let mut src = String::from("module W\nstate {\n");
+    let mut keep = Vec::new();
+    for i in 0..n {
+        src.push_str(&format!("  v{i:02}: Nat where v{i:02} <= 0\n"));
+        keep.push(format!("v{i:02}"));
+    }
+    src.push_str(&format!(
+        "}}\ninit {{ true }}\naction A {{ unchanged {} }}\n",
+        keep.join(", ")
+    ));
+    src
+}
+
+#[test]
+fn model_core_variable_limit_is_preflighted() {
+    lower(&elaborate_source(&wide_state(MAX_VARIABLES)).expect("elaborates"))
+        .expect("at the limit it lowers");
+    let (result, usage) = lowering_usage(&wide_state(MAX_VARIABLES + 1));
+    assert_eq!(
+        result.expect_err("one variable more").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::TooManyVariables)
+    );
+    assert_eq!(
+        usage.nodes, 0,
+        "refused before anything is built: {usage:?}"
+    );
+}
+
+/// `k` relational actions over `x` in `0..63` (64 candidates each) and `plain` more
+/// that keep `x`.
+fn many_actions(k: usize, plain: usize) -> String {
+    let mut src = String::from("module M\nstate { x: Nat where x <= 63 }\ninit { x == 0 }\n");
+    for i in 0..k {
+        src.push_str(&format!("action R{i:02} {{ x' >= 0 }}\n"));
+    }
+    for i in 0..plain {
+        src.push_str(&format!("action P{i:02} {{ unchanged x }}\n"));
+    }
+    src
+}
+
+/// The total over all actions, candidates included, is model-core's `MAX_ACTIONS`
+/// (th-l7e98m): exactly at it the model lowers, one more is refused before any action
+/// is built.
+#[test]
+fn model_core_action_limit_is_preflighted_in_aggregate() {
+    const _: () = assert!(64 * 64 == MAX_ACTIONS);
+    let model = lower(&elaborate_source(&many_actions(64, 0)).expect("elaborates"))
+        .expect("4096 actions lower");
+    assert_eq!(model.actions().len(), MAX_ACTIONS);
+    let (result, usage) = lowering_usage(&many_actions(64, 1));
+    assert_eq!(
+        result.expect_err("4097 actions").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::TooManyActions)
+    );
+    assert!(usage.nodes < 100, "no action was built: {usage:?}");
+}
+
+/// A relational action named with `len` bytes over one variable `x` in `0..0`:
+/// candidate name `<name>[x=0]`, `len + 5` bytes.
+fn labelled(len: usize) -> String {
+    let name = format!("A{}", "b".repeat(len - 1));
+    format!(
+        "module N\nstate {{ x: Nat where x <= 0 }}\ninit {{ x == 0 }}\naction {name} {{ x' >= 0 }}\n"
+    )
+}
+
+#[test]
+fn generated_and_declared_names_are_preflighted() {
+    let model = lower(&elaborate_source(&labelled(MAX_IDENT_BYTES - 5)).expect("elaborates"))
+        .expect("a 128-byte generated name lowers");
+    let name = model.actions()[0].name().to_string();
+    assert_eq!(name.len(), MAX_IDENT_BYTES, "{name}");
+    let (result, usage) = lowering_usage(&labelled(MAX_IDENT_BYTES - 4));
+    assert_eq!(
+        result.expect_err("a 129-byte generated name").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::NameTooLong)
+    );
+    assert!(usage.nodes < 100, "no action was built: {usage:?}");
+    // A declared name past the limit is refused the same way.
+    let long = "a".repeat(MAX_IDENT_BYTES + 1);
+    let src = format!(
+        "module N\nstate {{ x: Nat where x <= 0 }}\ninit {{ x == 0 }}\naction A {{ unchanged x }}\ninvariant {long} {{ x == 0 }}\n"
+    );
+    assert_eq!(
+        lower(&elaborate_source(&src).expect("elaborates"))
+            .expect_err("a 129-byte invariant name")
+            .kind,
+        LowerErrorKind::Unlowerable(Unlowerable::NameTooLong)
+    );
 }
