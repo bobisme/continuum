@@ -574,6 +574,24 @@ def _extract_corpus(requirements: list[dict[str, Any]]) -> None:
         )
 
 
+def _bullet_status(summary: str) -> tuple[str, str]:
+    """Status of a policy bullet, and its summary without the annotation.
+
+    `(delivered: …)` marks the obligation satisfied. `(deferred: …)` marks it
+    deferred, and the annotation must cite the plan text that defers its
+    lane, as the frontier register does for the lanes it defers post-1.0. A
+    bullet with both is an error: a deferred obligation cannot also claim
+    evidence.
+    """
+    delivered = "(delivered:" in summary
+    deferred = "(deferred:" in summary
+    if delivered and deferred:
+        raise AssertionError(f"policy bullet is both delivered and deferred: {summary!r}")
+    status = "satisfied" if delivered else "deferred" if deferred else ACTIVE
+    summary = re.sub(r"\s*\((?:delivered|deferred):[^)]*\)", "", summary)
+    return status, summary
+
+
 def _extract_bullet_policy(
     requirements: list[dict[str, Any]],
     *,
@@ -586,9 +604,8 @@ def _extract_bullet_policy(
     for match, body in _blocks(section_pattern, text):
         section_id, _title = match.groups()
         line = _line_number(text, match.start())
-        for ordinal, summary in enumerate(_top_level_bullets(body), 1):
-            status = "satisfied" if "(delivered:" in summary else ACTIVE
-            summary = re.sub(r"\s*\(delivered:[^)]*\)", "", summary)
+        for ordinal, raw in enumerate(_top_level_bullets(body), 1):
+            status, summary = _bullet_status(raw)
             requirements.append(
                 _requirement(
                     f"{prefix}-{section_id}-{ordinal:02d}",
@@ -1820,6 +1837,29 @@ def self_test() -> int:
 
     annotated = _self_test_gates(**_SELF_TEST_ANNOTATIONS)
     plain = _self_test_gates()
+
+    print("self-test: policy bullet annotations")
+    check(
+        "B1 a deferred policy bullet is deferred and drops the annotation",
+        _bullet_status("x; (deferred: plan.md 24.5 post-1.0)") == ("deferred", "x;"),
+        f"got={_bullet_status('x; (deferred: plan.md 24.5 post-1.0)')!r}",
+    )
+    check(
+        "B2 a delivered policy bullet is satisfied",
+        _bullet_status("x; (delivered: bn-1 — e)")[0] == "satisfied",
+        "delivered bullet not satisfied",
+    )
+    check(
+        "B3 a plain policy bullet stays active",
+        _bullet_status("x;") == (ACTIVE, "x;"),
+        "plain bullet not active",
+    )
+    try:
+        _bullet_status("x (delivered: bn-1) (deferred: y)")
+        both_refused = False
+    except AssertionError:
+        both_refused = True
+    check("B4 a bullet both delivered and deferred is refused", both_refused, "accepted")
 
     print("self-test: delivered annotations on gate criteria")
     check(
