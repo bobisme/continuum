@@ -105,7 +105,8 @@ use std::fmt;
 
 use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle, ArtifactPath};
 use continuum_workspace::publication::{
-    CapabilityDenied, CapabilityToken, ReferenceStore, StoreDefect,
+    CapabilityDenied, CapabilityToken, Published, PublishedName, ReferenceStore, StoreAudit,
+    StoreDefect,
 };
 
 use crate::protocol::scalar::{TaskHandle, WorkspaceHandle};
@@ -851,6 +852,10 @@ pub enum RecordDefect {
     /// A continuation record's pin preimage does not derive the handle it claims, through
     /// the declared identity seam.
     HandleMismatch,
+    /// A record decodes and replays, but the store's receipt ledger holds no receipt for it,
+    /// or for a publication it names (bn-283p6). A restored task names only artifacts it
+    /// can tie to a receipt (INV-017), so the record is not restored.
+    Unreceipted,
 }
 
 impl RecordDefect {
@@ -871,6 +876,7 @@ impl RecordDefect {
             Self::NonCanonical => "non-canonical",
             Self::Ledger => "ledger",
             Self::HandleMismatch => "handle-mismatch",
+            Self::Unreceipted => "unreceipted",
         }
     }
 }
@@ -1040,6 +1046,11 @@ pub enum FailureReason {
     /// The task's sequences are not contiguous from zero, so a committed record is missing
     /// and the durable history is incomplete.
     SequenceGap,
+    /// The pass selected a continuation or terminal record, but the store's receipt ledger
+    /// holds no receipt for it, or for a campaign record it names (bn-283p6). A restored
+    /// task names only what it can tie to a receipt (INV-017), so the record is not
+    /// restored, and the task is not reported as `Restored` or `Terminal` either.
+    Unreceipted,
 }
 
 impl FailureReason {
@@ -1052,6 +1063,7 @@ impl FailureReason {
             Self::AmbiguousTerminal => "ambiguous-terminal",
             Self::AmbiguousHead => "ambiguous-head",
             Self::SequenceGap => "sequence-gap",
+            Self::Unreceipted => "unreceipted",
         }
     }
 }
@@ -1102,38 +1114,236 @@ impl Resolution {
     }
 }
 
-/// One task the pass found in the store, and what it resolved the task to.
+/// One task the pass found in the store, and what it resolved the task to, with every
+/// store identity it names tied to the receipt the ledger holds for it (bn-283p6).
+///
+/// Every field that names a published artifact holds [`Published`], and only a receipt
+/// mints one. So a resolution cannot claim, restore from, or emit an identity the ledger
+/// holds no receipt for. That is a property of the type, not of the path that built the
+/// value. [`tie_receipts`] is the one constructor from the store's records: it drops each
+/// identity with no receipt (and reports it in [`TaskResolution::unreceipted`]), and it
+/// withdraws to `Failed(Unreceipted)` any `Restored`, `Terminal` or `Settled` resolution
+/// that rested on one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTask {
     /// The task.
     pub task: TaskHandle,
-    /// Every record the task committed, in `(sequence, identity)` order.
-    pub records: Vec<CampaignRecord>,
+    /// Every record the task committed that the ledger holds a receipt for, in
+    /// `(sequence, identity)` order.
+    pub records: Vec<Published<CampaignRecord>>,
     /// Every continuation record of this task whose publication list is a prefix of the
-    /// task's committed records, by store identity, in identity order.
-    pub continuations: Vec<ArtifactHandle>,
+    /// task's committed records and that the ledger holds a receipt for, by store identity,
+    /// in identity order.
+    pub continuations: Vec<Published<ArtifactHandle>>,
     /// The continuation record the task is restored from, for [`Resolution::Restored`].
     pub continuation: Option<ContinuationRecord>,
+    /// The store identity of [`continuation`](Self::continuation), as the index named it,
+    /// tied to its receipt. A restore ties the record under this identity, never under one
+    /// re-derived by the successor's identity seam.
+    pub continuation_identity: Option<Published<ArtifactHandle>>,
     /// Every terminal record of this task whose publication list is exactly the task's
-    /// committed records, by store identity, in identity order (bn-2g3ei).
-    pub terminals: Vec<ArtifactHandle>,
+    /// committed records and that the ledger holds a receipt for, by store identity, in
+    /// identity order (bn-2g3ei).
+    pub terminals: Vec<Published<ArtifactHandle>>,
     /// The terminal record the task is restored from, for [`Resolution::Terminal`].
     pub terminal: Option<TerminalRecord>,
+    /// The store identity of [`terminal`](Self::terminal), tied to its receipt.
+    pub terminal_identity: Option<Published<ArtifactHandle>>,
     /// The outcome.
     pub resolution: Resolution,
 }
 
 impl ResolvedTask {
+    /// This task with its restoration withdrawn: `Failed(Unreceipted)`, and no record to
+    /// restore from (bn-283p6).
+    ///
+    /// The outcome of a restore that could not tie a selected record to its receipt. A
+    /// resolution that still said `Restored` or `Terminal` with no live task behind it would
+    /// be a false report, and a re-issued start could run the identity afresh. What it still
+    /// claims is receipt-tied by its type.
+    #[must_use]
+    pub fn unreceipted(&self) -> Self {
+        Self {
+            resolution: Resolution::Failed(FailureReason::Unreceipted),
+            continuation: None,
+            continuation_identity: None,
+            terminal: None,
+            terminal_identity: None,
+            ..self.clone()
+        }
+    }
+
     /// The store identities this task claims: every campaign record it committed, then every
-    /// continuation record it published, then its terminal record.
+    /// continuation record it published, then its terminal record. Each is the projection
+    /// of a receipt-tied name, so none lacks a receipt.
     #[must_use]
     pub fn claims(&self) -> Vec<ArtifactHandle> {
         self.records
             .iter()
-            .map(|record| record.identity.clone())
-            .chain(self.continuations.iter().cloned())
-            .chain(self.terminals.iter().cloned())
+            .map(|record| record.handle().identity.clone())
+            .chain(self.continuations.iter().map(|name| name.handle().clone()))
+            .chain(self.terminals.iter().map(|name| name.handle().clone()))
             .collect()
+    }
+}
+
+/// A campaign record names its own store identity (bn-283p6). So `Published<CampaignRecord>`
+/// exists only for a record whose identity the ledger holds a receipt for.
+impl PublishedName for CampaignRecord {
+    fn names(&self, handle: &ArtifactHandle) -> bool {
+        self.identity == *handle
+    }
+}
+
+/// One task as the durable records alone resolve it, **before** any identity is tied to a
+/// receipt (bn-283p6).
+///
+/// The output of [`resolve_records`], and the input of [`tie_receipts`], which is its one
+/// consumer. Its fields are private to this module and it has no claim accessor, so no
+/// bare identity it holds is claimed, stored in the task table, or emitted: only the
+/// receipt-tied [`ResolvedTask`] is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CandidateTask {
+    task: TaskHandle,
+    records: Vec<CampaignRecord>,
+    continuations: Vec<ArtifactHandle>,
+    continuation: Option<ContinuationRecord>,
+    continuation_identity: Option<ArtifactHandle>,
+    terminals: Vec<ArtifactHandle>,
+    terminal: Option<TerminalRecord>,
+    terminal_identity: Option<ArtifactHandle>,
+    resolution: Resolution,
+}
+
+impl CandidateTask {
+    /// The task.
+    #[must_use]
+    pub const fn task(&self) -> &TaskHandle {
+        &self.task
+    }
+
+    /// What the durable records alone resolve it to, before the receipt tie.
+    #[must_use]
+    pub const fn resolution(&self) -> Resolution {
+        self.resolution
+    }
+
+    /// Tie every identity to its receipt in `audit`'s ledger. Each identity with none is
+    /// pushed to `missing`, and never reaches the result.
+    fn tie(self, audit: &StoreAudit<'_>, missing: &mut Vec<ArtifactHandle>) -> ResolvedTask {
+        let before = missing.len();
+        let records = tie_all(
+            audit,
+            self.records
+                .into_iter()
+                .map(|record| (record.identity.clone(), record)),
+            missing,
+        );
+        // A resolution that rests on the task's history rests on every record of it.
+        let history_tied = missing.len() == before;
+        let continuations = tie_all(
+            audit,
+            self.continuations
+                .into_iter()
+                .map(|identity| (identity.clone(), identity)),
+            missing,
+        );
+        let terminals = tie_all(
+            audit,
+            self.terminals
+                .into_iter()
+                .map(|identity| (identity.clone(), identity)),
+            missing,
+        );
+        let tie_one = |identity: Option<ArtifactHandle>| {
+            identity.and_then(|identity| {
+                super::identity::published_in_ledger(audit, &identity, identity.clone())
+            })
+        };
+        let continuation_identity = tie_one(self.continuation_identity);
+        let terminal_identity = tie_one(self.terminal_identity);
+        let holds = history_tied
+            && match self.resolution {
+                Resolution::Restored(_) => match (&self.continuation, &continuation_identity) {
+                    (Some(record), Some(identity)) => {
+                        record.restore(audit, identity.handle()).is_ok()
+                    }
+                    _ => false,
+                },
+                Resolution::Terminal(_) => match (&self.terminal, &terminal_identity) {
+                    (Some(record), Some(_)) => record.restore(audit).is_ok(),
+                    _ => false,
+                },
+                Resolution::Settled => true,
+                // A failure keeps its own typed reason: it restores nothing, and what it
+                // claims is only what tied.
+                Resolution::Failed(_) => true,
+            };
+        let tied = ResolvedTask {
+            task: self.task,
+            records,
+            continuations,
+            continuation: self.continuation,
+            continuation_identity,
+            terminals,
+            terminal: self.terminal,
+            terminal_identity,
+            resolution: self.resolution,
+        };
+        match (holds, tied.resolution) {
+            (true, _) | (false, Resolution::Failed(_)) => tied,
+            (false, _) => tied.unreceipted(),
+        }
+    }
+}
+
+/// Each `(identity, name)` in `names` tied to the receipt `audit`'s ledger holds for
+/// `identity`. An identity with none goes to `missing`.
+fn tie_all<H: PublishedName>(
+    audit: &StoreAudit<'_>,
+    names: impl IntoIterator<Item = (ArtifactHandle, H)>,
+    missing: &mut Vec<ArtifactHandle>,
+) -> Vec<Published<H>> {
+    names
+        .into_iter()
+        .filter_map(|(identity, name)| {
+            match super::identity::published_in_ledger(audit, &identity, name) {
+                Some(published) => Some(published),
+                None => {
+                    missing.push(identity);
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// What the durable records alone say, before the receipt tie (bn-283p6): the output of
+/// [`resolve_records`] and [`read_inventory`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DurableInventory {
+    tasks: Vec<CandidateTask>,
+    unattributed: Vec<(ArtifactHandle, RecordDefect)>,
+    unclaimed: Vec<ArtifactHandle>,
+}
+
+impl DurableInventory {
+    /// Every task the store holds a record for, in task order, untied.
+    #[must_use]
+    pub fn tasks(&self) -> &[CandidateTask] {
+        &self.tasks
+    }
+
+    /// As [`TaskResolution::unattributed`].
+    #[must_use]
+    pub fn unattributed(&self) -> &[(ArtifactHandle, RecordDefect)] {
+        &self.unattributed
+    }
+
+    /// As [`TaskResolution::unclaimed`].
+    #[must_use]
+    pub fn unclaimed(&self) -> &[ArtifactHandle] {
+        &self.unclaimed
     }
 }
 
@@ -1147,9 +1357,20 @@ pub struct TaskResolution {
     tasks: Vec<ResolvedTask>,
     unattributed: Vec<(ArtifactHandle, RecordDefect)>,
     unclaimed: Vec<ArtifactHandle>,
+    unreceipted: Vec<ArtifactHandle>,
 }
 
 impl TaskResolution {
+    /// Report each task in `tasks` as [`ResolvedTask::unreceipted`]: the startup step that
+    /// could not restore it says so in the report too (bn-283p6).
+    pub fn withdraw(&mut self, tasks: &[TaskHandle]) {
+        for resolved in &mut self.tasks {
+            if tasks.contains(&resolved.task) {
+                *resolved = resolved.unreceipted();
+            }
+        }
+    }
+
     /// Every task the store holds a record for, in task order.
     #[must_use]
     pub fn tasks(&self) -> &[ResolvedTask] {
@@ -1175,6 +1396,17 @@ impl TaskResolution {
         &self.unclaimed
     }
 
+    /// Identities the index names, that decode and that a task would claim, but that the
+    /// store's receipt ledger holds no receipt for, in identity order (bn-283p6).
+    ///
+    /// Reported, not claimed: no [`ResolvedTask`] names one, so none is restored from,
+    /// claimed, or emitted in a response. The store's own API appends the receipt in the
+    /// index commit's critical section, so a store it wrote has none.
+    #[must_use]
+    pub fn unreceipted(&self) -> &[ArtifactHandle] {
+        &self.unreceipted
+    }
+
     /// The canonical rendering: one fact per line, in a fixed section order.
     #[must_use]
     pub fn render(&self) -> String {
@@ -1186,7 +1418,7 @@ impl TaskResolution {
                 resolved.task.as_str(),
                 resolved.resolution.token()
             ));
-            for record in &resolved.records {
+            for record in resolved.records.iter().map(Published::handle) {
                 out.push_str(&format!(
                     "record {} {} {} states={} {} frontier={}\n",
                     record.sequence,
@@ -1200,7 +1432,7 @@ impl TaskResolution {
                     record.frontier
                 ));
             }
-            for handle in &resolved.continuations {
+            for handle in resolved.continuations.iter().map(Published::handle) {
                 out.push_str(&format!("continuation-record {handle}\n"));
             }
             if let Some(record) = &resolved.continuation {
@@ -1211,7 +1443,7 @@ impl TaskResolution {
                     record.state.token()
                 ));
             }
-            for handle in &resolved.terminals {
+            for handle in resolved.terminals.iter().map(Published::handle) {
                 out.push_str(&format!("terminal-record {handle}\n"));
             }
             if let Some(record) = &resolved.terminal {
@@ -1223,6 +1455,9 @@ impl TaskResolution {
         }
         for handle in &self.unclaimed {
             out.push_str(&format!("unclaimed {handle}\n"));
+        }
+        for handle in &self.unreceipted {
+            out.push_str(&format!("unreceipted {handle}\n"));
         }
         out
     }
@@ -1265,6 +1500,31 @@ pub fn resolve_tasks(
     operator: &CapabilityToken,
 ) -> Result<TaskResolution, CapabilityDenied> {
     let audit = store.audit_view(operator)?;
+    Ok(resolve_tasks_in(store, &audit, operator))
+}
+
+/// [`resolve_tasks`] over an audit view the caller already holds.
+///
+/// [`read_inventory`], then [`tie_receipts`] under the same view: one view, so one audited
+/// `Audit` decision, as before. The startup pass keeps the view after the resolution, to
+/// restore each record under its receipt-tied identity (bn-283p6).
+#[must_use]
+pub fn resolve_tasks_in(
+    store: &ReferenceStore,
+    audit: &StoreAudit<'_>,
+    operator: &CapabilityToken,
+) -> TaskResolution {
+    tie_receipts(read_inventory(store, audit, operator), audit)
+}
+
+/// The durable records the index names, decoded and resolved per task, **before** any
+/// identity is tied to a receipt (bn-283p6). See [`resolve_tasks`] for the rules.
+#[must_use]
+pub fn read_inventory(
+    store: &ReferenceStore,
+    audit: &StoreAudit<'_>,
+    operator: &CapabilityToken,
+) -> DurableInventory {
     let mut identities: Vec<ArtifactHandle> = audit
         .identities()
         .into_iter()
@@ -1308,22 +1568,46 @@ pub fn resolve_tasks(
             Err(defect) => unattributed.push((identity, defect)),
         }
     }
-    Ok(resolve_records(
-        records,
-        continuations,
-        terminals,
-        unattributed,
-    ))
+    resolve_records(records, continuations, terminals, unattributed)
 }
 
-/// The pure half of [`resolve_tasks`]: group decoded records by task and resolve each.
+/// Tie every identity `inventory` names to the receipt `audit`'s ledger holds for it
+/// (bn-283p6). The one constructor of a [`TaskResolution`] from the store's records.
+///
+/// Per task, an identity with no receipt is dropped from what the task claims and reported
+/// in [`TaskResolution::unreceipted`]. A resolution that rests on one is withdrawn to
+/// `Failed(Unreceipted)` ([`ResolvedTask::unreceipted`]): `Restored` and `Terminal` when the
+/// selected record, or a campaign record, has none (or the record does not restore under
+/// the tied identity), and `Settled` when a campaign record has none. A `Failed` resolution
+/// keeps its typed reason. So the startup report never says a task was restored when the
+/// pass cannot restore it, and no resolution claims or emits an unreceipted identity.
+#[must_use]
+pub fn tie_receipts(inventory: DurableInventory, audit: &StoreAudit<'_>) -> TaskResolution {
+    let mut unreceipted = Vec::new();
+    let tasks = inventory
+        .tasks
+        .into_iter()
+        .map(|candidate| candidate.tie(audit, &mut unreceipted))
+        .collect();
+    unreceipted.sort();
+    unreceipted.dedup();
+    TaskResolution {
+        tasks,
+        unattributed: inventory.unattributed,
+        unclaimed: inventory.unclaimed,
+        unreceipted,
+    }
+}
+
+/// The pure half of [`resolve_tasks`]: group decoded records by task and resolve each,
+/// before the receipt tie ([`tie_receipts`]).
 #[must_use]
 pub fn resolve_records(
     records: Vec<CampaignRecord>,
     mut continuations: Vec<(ArtifactHandle, ContinuationRecord)>,
     mut terminals: Vec<(ArtifactHandle, TerminalRecord)>,
     mut unattributed: Vec<(ArtifactHandle, RecordDefect)>,
-) -> TaskResolution {
+) -> DurableInventory {
     continuations.sort_by(|a, b| a.0.cmp(&b.0));
     continuations.dedup_by(|a, b| a.0 == b.0);
     terminals.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1378,11 +1662,24 @@ pub fn resolve_records(
                 .collect();
             claimed.extend(finals.iter().map(|(identity, _)| identity.clone()));
             let (resolution, continuation, terminal) = resolve_one(&records, &own, &finals);
-            ResolvedTask {
+            let continuation_identity = continuation.as_ref().and_then(|chosen| {
+                own.iter()
+                    .find(|(_, record)| record == chosen)
+                    .map(|(identity, _)| identity.clone())
+            });
+            let terminal_identity = terminal.as_ref().and_then(|chosen| {
+                finals
+                    .iter()
+                    .find(|(_, record)| record == chosen)
+                    .map(|(identity, _)| identity.clone())
+            });
+            CandidateTask {
                 task,
                 records,
                 continuations: own.iter().map(|(identity, _)| identity.clone()).collect(),
                 continuation,
+                continuation_identity,
+                terminal_identity,
                 terminals: finals
                     .iter()
                     .map(|(identity, _)| identity.clone())
@@ -1401,7 +1698,7 @@ pub fn resolve_records(
     unclaimed.sort();
     unattributed.sort();
     unattributed.dedup();
-    TaskResolution {
+    DurableInventory {
         tasks,
         unattributed,
         unclaimed,
@@ -1731,7 +2028,9 @@ mod tests {
             resolution.unattributed(),
             &[(identity("junk"), RecordDefect::Truncated)]
         );
-        let settled = &resolution.tasks()[3];
+        let tied = tied(resolution);
+        let settled = &tied.tasks()[3];
+        assert_eq!(settled.resolution, Resolution::Settled);
         assert_eq!(settled.claims(), vec![identity("s0"), identity("s1")]);
     }
 
@@ -1745,8 +2044,14 @@ mod tests {
         let mut backward = forward.clone();
         backward.reverse();
         assert_eq!(
-            resolve_records(forward, Vec::new(), Vec::new(), Vec::new()).render(),
-            resolve_records(backward, Vec::new(), Vec::new(), Vec::new()).render()
+            tied(resolve_records(forward, Vec::new(), Vec::new(), Vec::new())).render(),
+            tied(resolve_records(
+                backward,
+                Vec::new(),
+                Vec::new(),
+                Vec::new()
+            ))
+            .render()
         );
     }
 
@@ -1889,6 +2194,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
         );
+        assert_eq!(resolution.unclaimed().len(), 1);
+        let resolution = tied(resolution);
         let resolved = &resolution.tasks()[0];
         assert_eq!(
             resolved.resolution,
@@ -1897,7 +2204,6 @@ mod tests {
         let restored = resolved.continuation.as_ref().expect("a record");
         assert_eq!(restored.revision, 2);
         assert_eq!(resolved.continuations.len(), 4);
-        assert_eq!(resolution.unclaimed().len(), 1);
         assert_eq!(
             resolved.claims().len(),
             6,
@@ -2020,8 +2326,29 @@ mod tests {
                 ("task_failed", Resolution::Terminal(TerminalState::Failed)),
             ]
         );
+        assert!(resolution.unclaimed().is_empty());
+        let resolution = tied(resolution);
+        assert_eq!(
+            resolution
+                .tasks()
+                .iter()
+                .map(|resolved| resolved.resolution)
+                .collect::<Vec<_>>(),
+            vec![
+                Resolution::Terminal(TerminalState::Completed),
+                Resolution::Terminal(TerminalState::Failed)
+            ],
+            "with every receipt in the ledger, the tie changes no resolution"
+        );
         let closed = &resolution.tasks()[0];
-        assert_eq!(closed.terminals, vec![identity_c.clone()]);
+        assert_eq!(
+            closed
+                .terminals
+                .iter()
+                .map(|name| name.handle().clone())
+                .collect::<Vec<_>>(),
+            vec![identity_c.clone()]
+        );
         assert_eq!(
             closed.claims().len(),
             4,
@@ -2093,5 +2420,237 @@ mod tests {
             Resolution::Failed(FailureReason::AmbiguousTerminal)
         );
         assert!(resolution.tasks()[0].terminal.is_none());
+    }
+
+    // --- the receipt tie (bn-283p6, cr-2n0xng) ------------------------------------------
+
+    use super::super::identity::testing;
+
+    /// Every identity `inventory` names: campaign, continuation and terminal records.
+    fn inventory_identities(inventory: &DurableInventory) -> BTreeSet<ArtifactHandle> {
+        inventory
+            .tasks
+            .iter()
+            .flat_map(|candidate| {
+                candidate
+                    .records
+                    .iter()
+                    .map(|record| record.identity.clone())
+                    .chain(candidate.continuations.iter().cloned())
+                    .chain(candidate.terminals.iter().cloned())
+            })
+            .collect()
+    }
+
+    /// `inventory` tied against a ledger that holds a receipt for each identity `receipted`
+    /// keeps, and for no other.
+    fn tied_where(
+        inventory: DurableInventory,
+        receipted: impl Fn(&ArtifactHandle) -> bool,
+    ) -> TaskResolution {
+        let (store, operator) = testing::store();
+        for identity in inventory_identities(&inventory) {
+            if receipted(&identity) {
+                testing::publish(&store, &operator, &identity.to_string(), identity.clone());
+            }
+        }
+        let audit = store.audit_view(&operator).expect("the operator audits");
+        tie_receipts(inventory, &audit)
+    }
+
+    /// `inventory` tied against a ledger that holds a receipt for every identity it names.
+    fn tied(inventory: DurableInventory) -> TaskResolution {
+        tied_where(inventory, |_| true)
+    }
+
+    /// One task per resolution the pass can reach, each naming campaign, continuation or
+    /// terminal records: `Settled`, `Restored`, `Terminal`, and `Failed` for a gap, an
+    /// ambiguous head, and a head with only an earlier head's continuation.
+    fn every_resolution() -> DurableInventory {
+        resolve_records(
+            vec![
+                record("task_settled", "s0", 0, false),
+                record("task_settled", "s1", 1, true),
+                record("task_parked", "p0", 0, false),
+                record("task_closed", "c0", 0, true),
+                record("task_gap", "g0", 0, false),
+                record("task_gap", "g2", 2, true),
+                record("task_ambiguous", "a0", 0, false),
+                record("task_ambiguous", "a1", 0, true),
+                record("task_early", "e0", 0, false),
+                record("task_early", "e1", 1, false),
+            ],
+            vec![
+                continuation("task_parked", &["p0"], 0, ParkState::Suspended),
+                continuation("task_early", &["e0"], 0, ParkState::Suspended),
+            ],
+            vec![terminal("task_closed", &["c0"], TerminalState::Completed)],
+            Vec::new(),
+        )
+    }
+
+    /// **cr-2n0xng: an empty ledger.** No resolution — `Settled`, `Restored`, `Terminal`, or
+    /// any `Failed` — claims, restores from, or would emit an identity the ledger holds no
+    /// receipt for. `Settled`, `Restored` and `Terminal` rest on their records, so each is
+    /// withdrawn to `Failed(Unreceipted)`. A `Failed` resolution keeps its typed reason and
+    /// claims nothing. Every identity is reported as unreceipted instead.
+    #[test]
+    fn an_empty_ledger_leaves_no_resolution_claiming_an_unreceipted_identity() {
+        let inventory = every_resolution();
+        let before: Vec<(String, Resolution)> = inventory
+            .tasks()
+            .iter()
+            .map(|candidate| (candidate.task().as_str().to_owned(), candidate.resolution()))
+            .collect();
+        assert_eq!(
+            before,
+            vec![
+                (
+                    "task_ambiguous".to_owned(),
+                    Resolution::Failed(FailureReason::AmbiguousHead)
+                ),
+                (
+                    "task_closed".to_owned(),
+                    Resolution::Terminal(TerminalState::Completed)
+                ),
+                (
+                    "task_early".to_owned(),
+                    Resolution::Failed(FailureReason::ContinuationNotDurable)
+                ),
+                (
+                    "task_gap".to_owned(),
+                    Resolution::Failed(FailureReason::SequenceGap)
+                ),
+                (
+                    "task_parked".to_owned(),
+                    Resolution::Restored(ParkState::Suspended)
+                ),
+                ("task_settled".to_owned(), Resolution::Settled),
+            ],
+            "the inventory reaches every resolution before the tie"
+        );
+        let every = inventory_identities(&inventory);
+        let resolution = tied_where(inventory, |_| false);
+        let after: Vec<Resolution> = resolution
+            .tasks()
+            .iter()
+            .map(|resolved| resolved.resolution)
+            .collect();
+        assert_eq!(
+            after,
+            vec![
+                Resolution::Failed(FailureReason::AmbiguousHead),
+                Resolution::Failed(FailureReason::Unreceipted),
+                Resolution::Failed(FailureReason::ContinuationNotDurable),
+                Resolution::Failed(FailureReason::SequenceGap),
+                Resolution::Failed(FailureReason::Unreceipted),
+                Resolution::Failed(FailureReason::Unreceipted),
+            ]
+        );
+        for resolved in resolution.tasks() {
+            let task = resolved.task.as_str();
+            assert!(resolved.claims().is_empty(), "{task} claims nothing");
+            assert!(resolved.records.is_empty(), "{task}: no record");
+            assert!(resolved.continuations.is_empty(), "{task}: no continuation");
+            assert!(resolved.terminals.is_empty(), "{task}: no terminal");
+            assert!(resolved.continuation.is_none() && resolved.continuation_identity.is_none());
+            assert!(resolved.terminal.is_none() && resolved.terminal_identity.is_none());
+        }
+        assert_eq!(
+            resolution
+                .unreceipted()
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            every,
+            "every identity is reported as unreceipted, and none is lost"
+        );
+        let rendered = resolution.render();
+        for identity in &every {
+            assert!(rendered.contains(&format!("unreceipted {identity}\n")));
+            assert!(!rendered.contains(&format!(" {identity} ")));
+            assert!(!rendered.contains(&format!("-record {identity}\n")));
+        }
+    }
+
+    /// **cr-2n0xng: a partial ledger.** Every task claims exactly the identities the ledger
+    /// holds a receipt for, whatever its resolution. A missing campaign record withdraws
+    /// `Settled`. A missing record that a `Failed` resolution names only leaves its claims.
+    #[test]
+    fn a_partial_ledger_claims_exactly_the_receipted_identities() {
+        let inventory = every_resolution();
+        let every = inventory_identities(&inventory);
+        let missing: BTreeSet<ArtifactHandle> =
+            [identity("s1"), identity("g2"), identity("a0")].into();
+        let resolution = tied_where(inventory, |identity| !missing.contains(identity));
+        let mut claimed = BTreeSet::new();
+        for resolved in resolution.tasks() {
+            for identity in resolved.claims() {
+                assert!(
+                    !missing.contains(&identity),
+                    "{} claims {identity}, which has no receipt",
+                    resolved.task.as_str()
+                );
+                claimed.insert(identity);
+            }
+        }
+        assert_eq!(
+            claimed,
+            every.difference(&missing).cloned().collect(),
+            "and every receipted identity stays claimed"
+        );
+        assert_eq!(
+            resolution
+                .unreceipted()
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            missing
+        );
+        let of = |name: &str| {
+            resolution
+                .tasks()
+                .iter()
+                .find(|resolved| resolved.task.as_str() == name)
+                .map(|resolved| resolved.resolution)
+        };
+        assert_eq!(
+            of("task_settled"),
+            Some(Resolution::Failed(FailureReason::Unreceipted))
+        );
+        assert_eq!(
+            of("task_gap"),
+            Some(Resolution::Failed(FailureReason::SequenceGap))
+        );
+        assert_eq!(
+            of("task_ambiguous"),
+            Some(Resolution::Failed(FailureReason::AmbiguousHead))
+        );
+        assert_eq!(
+            of("task_parked"),
+            Some(Resolution::Restored(ParkState::Suspended)),
+            "a task whose every identity is receipted is untouched"
+        );
+        assert_eq!(
+            of("task_closed"),
+            Some(Resolution::Terminal(TerminalState::Completed))
+        );
+    }
+
+    /// A withdrawn resolution keeps only receipt-tied claims: `unreceipted` clears what it
+    /// restores from, and the type admits nothing else.
+    #[test]
+    fn a_withdrawn_resolution_claims_only_what_tied() {
+        let resolution = tied(every_resolution());
+        for resolved in resolution.tasks() {
+            let withdrawn = resolved.unreceipted();
+            assert_eq!(
+                withdrawn.resolution,
+                Resolution::Failed(FailureReason::Unreceipted)
+            );
+            assert_eq!(withdrawn.claims(), resolved.claims());
+            assert!(withdrawn.continuation_identity.is_none());
+            assert!(withdrawn.terminal_identity.is_none());
+        }
     }
 }

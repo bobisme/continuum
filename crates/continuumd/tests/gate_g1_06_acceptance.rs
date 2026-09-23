@@ -630,6 +630,25 @@ fn the_store_enforces_no_budget_so_there_is_no_such_seam() {
 ///   whitespace-free image of each file with a line number per character, and maps every
 ///   match back to the line its receiver sits on.
 fn write_call_sites() -> Vec<(String, usize, String)> {
+    scan_write_calls().0
+}
+
+/// Store writes in `#[cfg(test)]` support code, adjudicated as not being seams (bn-283p6).
+///
+/// `daemon/identity.rs`'s `testing` module publishes into a scratch store it builds itself, so
+/// unit tests can hold a real `PublicationReceipt` and the `Published<H>` it mints. No daemon
+/// operation reaches it, and the scratch store is never a daemon's. A site is excluded only
+/// when its `(file, call)` is listed here **and** it sits below the file's first
+/// `#[cfg(test)]` line, so a production call in the same file is still a site.
+const TEST_SUPPORT_SITES: &[(&str, &str)] = &[("daemon/identity.rs", "store.publish(")];
+
+/// The store-write sites in the daemon's source, and separately the test-support sites
+/// [`TEST_SUPPORT_SITES`] excludes.
+/// One store-write site: file under `src`, line, call spelling.
+type WriteSite = (String, usize, String);
+
+fn scan_write_calls() -> (Vec<WriteSite>, Vec<WriteSite>) {
+    let mut excluded = Vec::new();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut sites = Vec::new();
     let mut stack = vec![root.clone()];
@@ -650,6 +669,10 @@ fn write_call_sites() -> Vec<(String, usize, String)> {
                 .to_string_lossy()
                 .replace('\\', "/");
             let text = std::fs::read_to_string(&path).expect("a readable source file");
+            let first_test_line = text
+                .lines()
+                .position(|line| line.trim() == "#[cfg(test)]")
+                .map_or(usize::MAX, |offset| offset + 1);
 
             let mut image = String::new();
             let mut lines = Vec::new();
@@ -667,7 +690,14 @@ fn write_call_sites() -> Vec<(String, usize, String)> {
                 let mut from = 0;
                 while let Some(found) = image[from..].find(call) {
                     let at = from + found;
-                    sites.push((relative.clone(), lines[at], (*call).to_owned()));
+                    let site = (relative.clone(), lines[at], (*call).to_owned());
+                    if lines[at] > first_test_line
+                        && TEST_SUPPORT_SITES.contains(&(relative.as_str(), *call))
+                    {
+                        excluded.push(site);
+                    } else {
+                        sites.push(site);
+                    }
                     from = at + 1;
                 }
             }
@@ -675,7 +705,9 @@ fn write_call_sites() -> Vec<(String, usize, String)> {
     }
     sites.sort();
     sites.dedup();
-    sites
+    excluded.sort();
+    excluded.dedup();
+    (sites, excluded)
 }
 
 // =========================================================================================
@@ -2155,6 +2187,16 @@ fn control_the_census_scanner_reads_control_flow_and_not_prose() {
             "daemon/workspace.rs",
         ]),
         "exactly five daemon modules reach the store's write surface"
+    );
+    // The test-support exclusion is exact: one listed site, found, and below `#[cfg(test)]`.
+    let (_, excluded) = scan_write_calls();
+    assert_eq!(
+        excluded
+            .iter()
+            .map(|(file, _, call)| (file.as_str(), call.as_str()))
+            .collect::<Vec<_>>(),
+        TEST_SUPPORT_SITES.to_vec(),
+        "every test-support exclusion matches exactly one test-only site"
     );
     // `daemon/output.rs` names `PublicationAborted` and INV-017 in prose and publishes
     // nothing. If the scanner counted comments it would appear above.

@@ -891,6 +891,8 @@ fn certificate_node(fixture: &mut Fixture, path: &str, bytes: Vec<u8>) -> Eviden
             inconclusive_reason: None,
         }],
         redaction: None,
+        // Appended out of band: no store publication, so no receipt-tied name (bn-283p6).
+        publication: None,
     };
     fixture
         .daemon

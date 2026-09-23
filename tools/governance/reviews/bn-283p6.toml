@@ -1,0 +1,48 @@
+[change]
+bone = "bn-283p6"
+author = "continuum-dev"
+summary = "Published<H>: a name tied to a publication receipt, held by the daemon records that name a published artifact and by every identity a startup resolution claims or emits (INV-017)"
+
+[semantic]
+covers = [
+  "crates/continuum-workspace/src/publication.rs",
+  "crates/continuum-workspace/src/seal.rs",
+]
+reference_tests = [
+  "crates/continuum-workspace/src/publication.rs::published_attests_only_the_receipts_own_handle",
+  "crates/continuum-workspace/src/seal.rs::the_root_receipt_is_the_descriptor_records",
+  "crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs::the_daemon_records_that_name_a_published_artifact_hold_a_receipt_tied_name",
+  "crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs::mutant_a_published_name_forged_without_a_receipt_is_caught",
+  "crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs::mutant_a_bare_handle_nested_in_a_record_the_task_table_stores_is_caught",
+  "crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs::mutant_a_resolution_holding_campaign_records_untied_is_caught",
+  "crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs::mutant_a_bare_handle_in_a_failure_reason_variant_is_caught",
+  "crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs::mutant_a_stale_opaque_adjudication_is_caught",
+  "crates/continuumd/src/daemon/recovery.rs::an_empty_ledger_leaves_no_resolution_claiming_an_unreceipted_identity",
+  "crates/continuumd/src/daemon/recovery.rs::a_withdrawn_resolution_claims_only_what_tied",
+  "crates/continuumd/src/daemon/recovery.rs::a_partial_ledger_claims_exactly_the_receipted_identities",
+  "crates/continuumd/tests/gate_g1_08_acceptance.rs::settled_and_failed_resolutions_over_an_empty_ledger_claim_and_emit_no_unreceipted_identity",
+  "crates/continuumd/tests/gate_g1_08_acceptance.rs::a_missing_receipt_withdraws_a_parked_or_terminal_resolution_to_a_typed_failure",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-workspace/src/publication.rs::published_is_invariant_under_the_handles_serialization_round_trip", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/published_name_differential.rs::the_daemon_and_the_store_attest_the_same_names", oracle = "continuum-workspace", subject = "continuumd" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers publication atomicity or daemon crash recovery; INV-017 is a plan section 2 invariant, and this change narrows its stated absence without moving any claim's evidence state. The startup resolution now ties every identity it claims or emits to a receipt (cr-2n0xng): Settled and Failed resolutions over a ledger with no receipt claim and emit nothing, and Settled withdraws to Failed(Unreceipted); no claim row reads startup resolution"
+
+[semantic.schemas]
+updated = []
+reason = "no artifact shape moves: Published<H> is an in-process type that projects to its handle at every wire and durable boundary; no IDL, protocol, or schema change"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-workspace gains Published<H>, PublishedName, NameNotPublished and SealedWorkspace::root_receipt, all additive; continuumd records switch to them in memory only, and no published artifact, wire value, or stored record changes. The recovery pass splits into read_inventory (untied DurableInventory) and tie_receipts (receipt-tied TaskResolution); the in-process startup report gains `unreceipted <handle>` lines, which no schema names. A store this build writes holds a receipt for every indexed identity, so its resolutions are unchanged"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-4fkgye"
+verdict = "approved"

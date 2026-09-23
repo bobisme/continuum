@@ -1515,7 +1515,7 @@ fn class_envelope_names_a_different_snapshot() {
             .daemon
             .state()
             .workspace(&elsewhere)
-            .is_some_and(|record| record.sealed),
+            .is_some_and(|record| record.sealed()),
         "the named snapshot is real, held and sealed",
     );
 
@@ -1555,7 +1555,7 @@ fn class_lineage_superseded_the_pinned_snapshot() {
 /// The pinned snapshot is held but no longer sealed.
 ///
 /// **Grafted**, and the graft is stated: this daemon has no operation that unseals a
-/// snapshot, so the record's `sealed` flag is cleared through `DaemonState::workspace_mut`.
+/// snapshot, so the record's `seal` is cleared through `DaemonState::workspace_mut`.
 /// Everything else — the continuation, the lineage, the epochs — is authentic.
 #[test]
 fn class_pinned_snapshot_is_no_longer_sealed() {
@@ -1566,7 +1566,7 @@ fn class_pinned_snapshot_is_no_longer_sealed() {
         .state_mut()
         .workspace_mut(&snapshot)
         .expect("held")
-        .sealed = false;
+        .seal = None;
 
     let continuation = deployment.continuation.clone();
     let plan = probe(&continuation, "req_resume");

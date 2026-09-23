@@ -134,7 +134,7 @@ use continuum_evidence::node::NodeKind;
 use continuum_intent::canonical_json::Json;
 use continuum_value::assurance::ValidationBasis;
 use continuum_workspace::artifact_path::ArtifactClass;
-use continuum_workspace::publication::ReferenceStore;
+use continuum_workspace::publication::{Published, ReferenceStore};
 
 use super::family::{
     Arguments, Call, Effect, ErrorData, Fault, OperationFamily, Payload, ScopeClaim,
@@ -1569,7 +1569,7 @@ fn link(
     //    audits the write against the identity the wire presented (ADR-0037).
     let token =
         identity::capability_to_store(&call.envelope.capability).map_err(|_| Fault::denied())?;
-    store
+    let receipt = store
         .publish(ArtifactClass::Evidence, staged.content.clone(), &token)
         .map_err(|refusal| match refusal {
             continuum_workspace::publication::PublishRefusal::CapabilityDenied(_) => {
@@ -1611,6 +1611,7 @@ fn link(
             inconclusive_reason: None,
         }],
         redaction: None,
+        publication: Some(Published::of(&receipt)),
     };
     let (_, node_appended) = state.append_evidence(receipt_handle.clone(), receipt_node);
     if node_appended {

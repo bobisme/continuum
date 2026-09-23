@@ -35,11 +35,13 @@ use core::fmt;
 
 use continuum_value::identity::{Blake3Hasher, ContentHasher};
 use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
-use continuum_workspace::publication::{ContentIdentifier, IdentityUnavailable};
+use continuum_workspace::publication::{
+    ContentIdentifier, IdentityUnavailable, Published, PublishedName, StoreAudit,
+};
 
 use crate::protocol::scalar::{
-    ActorId, AuditCorrelationId, CapabilityHandle, DiffHandle, IntentHandle, RequestId,
-    WorkspaceHandle,
+    ActorId, AuditCorrelationId, CapabilityHandle, Commitment, ContinuationHandle, DiffHandle,
+    IntentHandle, RequestId, WorkspaceHandle,
 };
 
 /// The production content identity: BLAKE3 over the canonical record, spelled as the
@@ -213,6 +215,54 @@ pub fn actor_to_store(actor: &ActorId) -> continuum_workspace::publication::Acto
     continuum_workspace::publication::ActorId::new(actor.as_str())
 }
 
+// --- names tied to a publication receipt (INV-017, bn-283p6) ---------------------------------
+
+/// The one comparison between a daemon spelling and a store handle that
+/// [`Published::attest`](continuum_workspace::publication::Published::attest) runs.
+///
+/// A wire handle and a store handle spell one identity exactly when the store handle's
+/// rendering is the wire handle's text. That is the rule [`render`] and [`parse`] already
+/// apply, and a `Commitment` is compared the same way (`verification::publish_record`
+/// checked it so before bn-283p6).
+fn spells(text: &str, handle: &ArtifactHandle) -> bool {
+    handle.to_string() == text
+}
+
+impl PublishedName for WorkspaceHandle {
+    fn names(&self, handle: &ArtifactHandle) -> bool {
+        spells(self.as_str(), handle)
+    }
+}
+
+impl PublishedName for ContinuationHandle {
+    fn names(&self, handle: &ArtifactHandle) -> bool {
+        spells(self.as_str(), handle)
+    }
+}
+
+impl PublishedName for Commitment {
+    fn names(&self, handle: &ArtifactHandle) -> bool {
+        spells(self.as_str(), handle)
+    }
+}
+
+/// The name `name`, tied to the first receipt the store's ledger holds for `handle`.
+///
+/// The door a startup restoration uses (bn-283p6). A restarted daemon holds no receipt of
+/// its own, and the ledger survives the crash (`recovery`'s split), so a record read back
+/// from the store is tied to the receipt the ledger kept for it. [`None`] when the ledger
+/// holds no receipt for `handle`, or when `name` does not spell it.
+#[must_use]
+pub fn published_in_ledger<H: PublishedName>(
+    audit: &StoreAudit<'_>,
+    handle: &ArtifactHandle,
+    name: H,
+) -> Option<Published<H>> {
+    let receipts = audit.receipts(handle);
+    let receipt = receipts.first()?;
+    Published::attest(receipt, name).ok()
+}
+
 fn parse(class: ArtifactClass, text: &str) -> Result<ArtifactHandle, HandleMismatch> {
     let identity = text
         .strip_prefix(class.prefix())
@@ -229,4 +279,62 @@ fn render<T, E>(
         return Err(HandleMismatch { class });
     }
     build(&handle.to_string()).map_err(|_| HandleMismatch { class })
+}
+
+/// A store whose ledger holds a receipt for named handles, for unit tests that need a
+/// [`Published`] and so need a real receipt (bn-283p6).
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
+    use continuum_workspace::publication::{
+        ActorId, AuditLog, AuthorityLevel, CapabilityDescriptor, CapabilityToken,
+        ContentIdentifier, IdentityUnavailable, Published, PublishedName, ReferenceStore,
+    };
+
+    /// Names content by its own bytes, so publishing the identity half of a handle files
+    /// it under exactly that handle.
+    struct Verbatim;
+
+    impl ContentIdentifier for Verbatim {
+        fn identify(
+            &self,
+            class: ArtifactClass,
+            content: &[u8],
+        ) -> Result<ArtifactHandle, IdentityUnavailable> {
+            let text = std::str::from_utf8(content).map_err(|_| IdentityUnavailable)?;
+            ArtifactHandle::new(class, text).map_err(|_| IdentityUnavailable)
+        }
+    }
+
+    /// A store and an operator capability that may publish and audit.
+    pub(crate) fn store() -> (ReferenceStore, CapabilityToken) {
+        let operator = CapabilityToken::mint("operator").expect("a capability token");
+        let store = ReferenceStore::builder(Verbatim, Arc::new(AuditLog::new()))
+            .capability(CapabilityDescriptor::new(
+                operator.clone(),
+                ActorId::new("operator"),
+                AuthorityLevel::Promote,
+            ))
+            .build();
+        (store, operator)
+    }
+
+    /// Publish `spelling` (a store handle's text) into `store`, and tie `name` to its receipt.
+    pub(crate) fn publish<H: PublishedName>(
+        store: &ReferenceStore,
+        operator: &CapabilityToken,
+        spelling: &str,
+        name: H,
+    ) -> Published<H> {
+        let handle = ArtifactHandle::from_str(spelling).expect("a store handle spelling");
+        let prefix = handle.class().prefix();
+        let identity = spelling.strip_prefix(prefix).expect("the class prefix");
+        let receipt = store
+            .publish(handle.class(), identity.as_bytes().to_vec(), operator)
+            .expect("the operator may publish");
+        Published::attest(&receipt, name).expect("the receipt names the handle")
+    }
 }

@@ -1057,6 +1057,121 @@ impl PublicationReceipt {
     }
 }
 
+// --- names tied to a receipt ---------------------------------------------------------------
+
+/// A name that can spell a published artifact's handle.
+///
+/// The consumer's half of [`Published`]. A daemon names artifacts with its own handle
+/// types — one per wire class — and the store names them with one [`ArtifactHandle`]. This
+/// trait is the one comparison between the two spellings, so [`Published::attest`] can
+/// refuse a name that is not the receipt's.
+///
+/// An implementation MUST answer `true` exactly when `self` and `handle` spell one
+/// identity. It is a pure function of its two arguments.
+pub trait PublishedName {
+    /// Whether this name spells `handle`.
+    fn names(&self, handle: &ArtifactHandle) -> bool;
+}
+
+impl PublishedName for ArtifactHandle {
+    fn names(&self, handle: &ArtifactHandle) -> bool {
+        self == handle
+    }
+}
+
+/// A name that is not the handle of the receipt it was offered with.
+///
+/// [`fmt::Display`] names neither side: the name can come off the wire (INV-016).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct NameNotPublished;
+
+impl fmt::Display for NameNotPublished {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("the name is not the handle the publication receipt was issued for")
+    }
+}
+
+impl core::error::Error for NameNotPublished {}
+
+/// A handle that names a **published** artifact, tied at the type level to its receipt
+/// (INV-017, bn-283p6).
+///
+/// A consumer that records "this artifact is published" in its own volatile state — a
+/// daemon's workspace record, task record, or evidence node — holds this type in place of
+/// the bare handle. A value exists only after a [`PublicationReceipt`] for the same
+/// identity existed, and a receipt exists only after [`CommittedContent::commit_index`]
+/// wrote the index and the ledger. So a record that holds a `Published<H>` cannot be
+/// written before the publication it names has committed. The order is a property of
+/// what compiles, not of the order of two statements.
+///
+/// It is a *name*, not the receipt. It carries no actor, capability, or cost, and it
+/// confers no authority (plan §4.4). At a wire boundary it projects to its handle through
+/// [`handle`](Self::handle) or [`into_handle`](Self::into_handle). The wire shape does
+/// not change.
+///
+/// # Only a receipt mints one
+///
+/// [`attest`](Self::attest) takes a receipt and a name, and refuses a name that is not the
+/// receipt's handle. [`of`](Self::of) takes the receipt's own handle. There is no other
+/// constructor, and the field is private, so a caller outside this crate cannot build one
+/// from a bare name:
+///
+/// ```compile_fail,E0451
+/// # use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
+/// # use continuum_workspace::publication::Published;
+/// let forged = Published {
+///     name: ArtifactHandle::new(ArtifactClass::Evidence, "never-published").unwrap(),
+/// };
+/// ```
+///
+/// Inside the crate, `tests/inv017_publication_atomicity_evidence.rs` keeps these two
+/// constructors the only ones, and keeps the consumer records that name a published
+/// artifact holding this type.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Published<H> {
+    name: H,
+}
+
+impl<H: PublishedName> Published<H> {
+    /// The name `name`, as published by the publication `receipt` records.
+    ///
+    /// # Errors
+    ///
+    /// [`NameNotPublished`] when `name` does not spell `receipt`'s handle. A receipt for
+    /// one artifact never attests a name of another.
+    pub fn attest(receipt: &PublicationReceipt, name: H) -> Result<Self, NameNotPublished> {
+        if name.names(receipt.handle()) {
+            Ok(Self { name })
+        } else {
+            Err(NameNotPublished)
+        }
+    }
+}
+
+impl Published<ArtifactHandle> {
+    /// The store's own name for the artifact `receipt` records.
+    #[must_use]
+    pub fn of(receipt: &PublicationReceipt) -> Self {
+        Self {
+            name: receipt.handle().clone(),
+        }
+    }
+}
+
+impl<H> Published<H> {
+    /// The handle: the projection a wire value or a lookup key reads.
+    #[must_use]
+    pub const fn handle(&self) -> &H {
+        &self.name
+    }
+
+    /// The handle, taken by value.
+    #[must_use]
+    pub fn into_handle(self) -> H {
+        self.name
+    }
+}
+
 // --- the store -------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
@@ -2960,5 +3075,65 @@ mod tests {
                 (ArtifactClass::ProofArtifact, 6)
             ])
         );
+    }
+
+    // --- Published<H> (bn-283p6) ------------------------------------------------------
+
+    /// A receipt attests its own handle, and refuses every other name: a different
+    /// identity, and the same identity under a different class.
+    #[test]
+    fn published_attests_only_the_receipts_own_handle() {
+        let f = fixture();
+        let receipt = f
+            .store
+            .publish(CLASS, b"published".to_vec(), &f.author)
+            .expect("the author publishes");
+        let own = Published::attest(&receipt, receipt.handle().clone()).expect("its own handle");
+        assert_eq!(own.handle(), receipt.handle());
+        assert_eq!(own, Published::of(&receipt));
+
+        let other = f
+            .store
+            .publish(CLASS, b"another".to_vec(), &f.author)
+            .expect("the author publishes");
+        assert_eq!(
+            Published::attest(&receipt, other.handle().clone()),
+            Err(NameNotPublished),
+            "a receipt for one artifact never attests another"
+        );
+        let text = receipt.handle().to_string();
+        let identity = text.strip_prefix(CLASS.prefix()).expect("the class prefix");
+        let reclassed =
+            ArtifactHandle::new(ArtifactClass::Task, identity).expect("a well-formed handle");
+        assert_eq!(
+            Published::attest(&receipt, reclassed),
+            Err(NameNotPublished),
+            "nor the same identity under another class"
+        );
+        assert_eq!(own.into_handle(), receipt.handle().clone());
+    }
+
+    /// **Metamorphic relation: serialization round trip.** A handle carried through its
+    /// wire spelling and parsed back is attested exactly as the receipt's own handle is:
+    /// `attest(r, parse(display(h)))` equals `of(r)` for every published `h`.
+    #[test]
+    fn published_is_invariant_under_the_handles_serialization_round_trip() {
+        let f = fixture();
+        for content in [&b"a"[..], b"bb", b"", b"\x00\xff"] {
+            let receipt = f
+                .store
+                .publish(CLASS, content.to_vec(), &f.author)
+                .expect("the author publishes");
+            let round_tripped: ArtifactHandle = receipt
+                .handle()
+                .to_string()
+                .parse()
+                .expect("a handle parses from its own spelling");
+            assert_eq!(
+                Published::attest(&receipt, round_tripped),
+                Ok(Published::of(&receipt)),
+                "serialization round trip"
+            );
+        }
     }
 }

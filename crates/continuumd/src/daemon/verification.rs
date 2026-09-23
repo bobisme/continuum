@@ -81,7 +81,7 @@ use continuum_task::budget::dimension::CostDimension;
 use continuum_task::region::worker::WorkerStep;
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::{
-    CapabilityToken, ContentIdentifier, PublishRefusal, ReferenceStore,
+    CapabilityToken, ContentIdentifier, PublishRefusal, Published, ReferenceStore,
 };
 use continuum_workspace::snapshot::Snapshot;
 use continuum_workspace::staleness::{LineageError, check_current};
@@ -490,12 +490,16 @@ pub fn advance(
 /// record, and [`ErrorCode::PublicationAborted`] when the publication could not complete
 /// atomically or when the two identity seams disagree. On every error path nothing is
 /// published and nothing is truncated.
+///
+/// On success, `named` tied to the store's receipt (bn-283p6): the one value
+/// [`Publications::commit`](super::budget::Publications::commit) accepts, so the task can
+/// name the record only after the store has committed it (INV-017).
 fn publish_record(
     store: &ReferenceStore,
     publisher: &CapabilityToken,
     record: Vec<u8>,
     named: &Commitment,
-) -> Result<(), Fault> {
+) -> Result<Published<Commitment>, Fault> {
     let aborted = || {
         Fault::new(
             ErrorCode::PublicationAborted,
@@ -510,12 +514,10 @@ fn publish_record(
             PublishRefusal::CapabilityDenied(_) => Fault::denied(),
             PublishRefusal::Aborted(_) => aborted(),
         })?;
-    if receipt.handle().to_string() != named.as_str() {
-        // The two identity seams disagree on the same bytes, so a retry derives the same
-        // disagreement: deterministic, whatever the taxonomy default says.
-        return Err(aborted().not_retryable());
-    }
-    Ok(())
+    // The two identity seams disagree on the same bytes when the receipt does not attest
+    // the daemon's name, so a retry derives the same disagreement: deterministic, whatever
+    // the taxonomy default says.
+    Published::attest(&receipt, named.clone()).map_err(|_| aborted().not_retryable())
 }
 
 /// Publish a terminal record (bn-2g3ei) through [`publish_record`], under the identity the
@@ -532,7 +534,9 @@ fn publish_terminal(
     record: &TerminalRecord,
 ) -> Result<(), Fault> {
     let named = record.commitment(services.identifier())?;
-    publish_record(store, publisher, record.encode(), &named)
+    // No daemon record names the terminal record: a restart finds it by reading the store
+    // (`recovery::resolve_tasks`). So its receipt-tied name is not kept.
+    publish_record(store, publisher, record.encode(), &named).map(|_| ())
 }
 
 /// One run, inside the scope that owns it. See [`advance`] for the step table.
@@ -772,13 +776,19 @@ fn run_in(
     // An abort discards the staged publication and returns, which is the both-or-neither
     // direction: no commitment on the task, no continuation parked, no `Suspended` status
     // claiming committed evidence that is not there.
-    if let Some((_, record)) = &parked {
-        if let Err(fault) = continuation::publish(store, publisher, services.identifier(), record) {
-            state.regions_mut().fail(scope, fault.code);
-            discard(handle, state);
-            return Err(fault);
+    let parked_record = match &parked {
+        Some((_, record)) => {
+            match continuation::publish(store, publisher, services.identifier(), record) {
+                Ok(published) => Some(published),
+                Err(fault) => {
+                    state.regions_mut().fail(scope, fault.code);
+                    discard(handle, state);
+                    return Err(fault);
+                }
+            }
         }
-    }
+        None => None,
+    };
     // A closing run's terminal record goes first for the same reason (bn-2g3ei): a crash
     // between the two leaves a terminal record no task claims, never a `closed` head without
     // its terminal record.
@@ -789,11 +799,14 @@ fn run_in(
             return Err(fault);
         }
     }
-    if let Err(fault) = publish_record(store, publisher, record, &staged) {
-        state.regions_mut().fail(scope, fault.code);
-        discard(handle, state);
-        return Err(fault);
-    }
+    let published = match publish_record(store, publisher, record, &staged) {
+        Ok(published) => published,
+        Err(fault) => {
+            state.regions_mut().fail(scope, fault.code);
+            discard(handle, state);
+            return Err(fault);
+        }
+    };
 
     // Park before the status moves, so a `Suspended` task never exists without the
     // continuation `rule task.status_monotonic` says it has by definition.
@@ -837,7 +850,7 @@ fn run_in(
         let committed = entry.publications() + 1;
         match entry.ledger.checkpoint(committed) {
             Ok(checkpoint) => {
-                let named = entry.evidence.commit(checkpoint);
+                let named = entry.evidence.commit(checkpoint, published);
                 debug_assert!(
                     named.is_some(),
                     "the publication staged before the park is the one committed here"
@@ -869,8 +882,8 @@ fn run_in(
             now.as_ref(),
         );
     }
-    if let Some(record) = &durable {
-        continuation::settle(state.tasks_mut(), record);
+    if let (Some(record), Some(published)) = (&durable, parked_record) {
+        continuation::settle(state.tasks_mut(), record, published);
     }
     if let Some(record) = &closing {
         terminal::settle(state.tasks().get(handle), record);
@@ -1037,7 +1050,7 @@ fn start(
     // sealed where sealing is required**" — a campaign is required over a sealed snapshot,
     // because a result pinned to a mutable tree pins nothing.
     let record = state.workspace(snapshot).ok_or_else(Fault::denied)?;
-    if !record.sealed {
+    if !record.sealed() {
         return Err(Fault::new(
             ErrorCode::StaleSnapshot,
             "a verification campaign runs over a sealed snapshot",
@@ -1126,9 +1139,16 @@ fn start(
             Resolution::Settled => {
                 state.tasks_mut().supersede(&handle);
             }
-            // Unreachable: a restored or terminal task is loaded into the live table, not the
-            // resolved set (bn-20142, bn-2g3ei), and the live lookup below answers it.
-            Resolution::Restored(_) | Resolution::Terminal(_) => {}
+            // A restored or terminal task is loaded into the live table, not the resolved set
+            // (bn-20142, bn-2g3ei), and the live lookup below answers it. Startup never files
+            // one here: a restore that fails is filed as `Failed(Unreceipted)` (bn-283p6).
+            // If one is here with no live task anyway, it is answered as resolved and never
+            // falls through to a fresh run under the same identity.
+            Resolution::Restored(_) | Resolution::Terminal(_) => {
+                if state.tasks().get(&handle).is_none() {
+                    return resolved_terminal(resolved);
+                }
+            }
         }
     }
 
@@ -1284,9 +1304,12 @@ fn terminal(entry: &TaskEntry) -> Effect {
 /// artifacts are the records the task committed before the crash, which the resolution
 /// claims. The task record itself was not durable, and the omission says so.
 fn resolved_terminal(resolved: &ResolvedTask) -> Result<Effect, Fault> {
+    // Every record is receipt-tied by `ResolvedTask`'s type (bn-283p6), so the response
+    // names no identity the ledger holds no receipt for.
     let artifacts = resolved
         .records
         .iter()
+        .map(Published::handle)
         .map(|record| {
             Ok(ArtifactRef {
                 kind: ArtifactClass::Task.token().to_owned(),

@@ -97,7 +97,7 @@ use continuum_task::budget::BudgetLedger;
 use continuum_task::budget::dimension::CostDimension;
 use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
 use continuum_workspace::publication::{
-    CapabilityToken, ContentIdentifier, PublishRefusal, ReferenceStore,
+    CapabilityToken, ContentIdentifier, PublishRefusal, Published, ReferenceStore, StoreAudit,
 };
 
 use super::budget::{self, Publications};
@@ -541,10 +541,19 @@ impl ContinuationRecord {
     /// # Errors
     ///
     /// [`RecordDefect::Ledger`] when the ledger does not replay. Unreachable for a record
-    /// [`Self::decode`] returned, which runs the same replay.
-    pub fn restore(&self) -> Result<Restored, RecordDefect> {
+    /// [`Self::decode`] returned, which runs the same replay. [`RecordDefect::Unreceipted`]
+    /// when `audit`'s ledger holds no receipt for this record's store handle `stored`, or
+    /// for a campaign record it names (bn-283p6): a restored task names only what the
+    /// store has committed.
+    pub fn restore(
+        &self,
+        audit: &StoreAudit<'_>,
+        stored: &ArtifactHandle,
+    ) -> Result<Restored, RecordDefect> {
         let ledger = self.ledger()?;
-        let evidence = publications_of(&self.publications, &ledger)?;
+        let evidence = publications_of(&self.publications, &ledger, audit)?;
+        let record = super::identity::published_in_ledger(audit, stored, stored.clone())
+            .ok_or(RecordDefect::Unreceipted)?;
         let entry = TaskEntry {
             handle: self.task.clone(),
             operation: self.operation.clone(),
@@ -583,6 +592,7 @@ impl ContinuationRecord {
             frontier: self.frontier.clone(),
             revision: self.revision,
             states: self.states,
+            record,
         })
     }
 }
@@ -646,14 +656,24 @@ pub(super) fn checkpoints_of(ledger: &BudgetLedger) -> Vec<Checkpointed> {
 /// # Errors
 ///
 /// [`RecordDefect::Ledger`] when a publication cannot be committed at its checkpoint.
+///
+/// Each publication is tied to the receipt `audit`'s ledger holds for it (bn-283p6).
+/// [`RecordDefect::Unreceipted`] when one has none.
 pub(super) fn publications_of(
     publications: &[Commitment],
     ledger: &BudgetLedger,
+    audit: &StoreAudit<'_>,
 ) -> Result<Publications, RecordDefect> {
     let mut evidence = Publications::new();
     for (publication, checkpoint) in publications.iter().zip(ledger.checkpoints()) {
+        let stored: ArtifactHandle = publication
+            .as_str()
+            .parse()
+            .map_err(|_| RecordDefect::Unreceipted)?;
+        let published = super::identity::published_in_ledger(audit, &stored, publication.clone())
+            .ok_or(RecordDefect::Unreceipted)?;
         evidence.stage(publication.clone());
-        if evidence.commit(*checkpoint).is_none() {
+        if evidence.commit(*checkpoint, published).is_none() {
             return Err(RecordDefect::Ledger);
         }
     }
@@ -710,7 +730,14 @@ pub fn current(
 /// record of the task as it is now must equal the projection that was published before the
 /// change. A disagreement is a defect in this wiring, so it is a `debug_assert`, and the
 /// suites run every path that reaches it.
-pub fn settle(tasks: &mut TaskTable, projected: &ContinuationRecord) {
+///
+/// `record` is the projection's store handle tied to its receipt, as [`publish`] returned
+/// it (bn-283p6). It is what the table keeps as the durable revision.
+pub fn settle(
+    tasks: &mut TaskTable,
+    projected: &ContinuationRecord,
+    record: Published<ArtifactHandle>,
+) {
     debug_assert_eq!(
         held(
             tasks,
@@ -723,7 +750,12 @@ pub fn settle(tasks: &mut TaskTable, projected: &ContinuationRecord) {
         Some(projected),
         "the published continuation record is not the record of the task the daemon holds"
     );
-    tasks.record_revision(&projected.handle, projected.revision, projected.states);
+    tasks.record_revision(
+        &projected.handle,
+        projected.revision,
+        projected.states,
+        record,
+    );
 }
 
 /// The milestone `name` at `now`, appended to `record`, when a time reading was supplied.
@@ -751,6 +783,8 @@ pub struct Restored {
     pub revision: u32,
     /// The state count the continuation's pins name.
     pub states: u64,
+    /// The record's store handle, tied to the receipt the ledger kept (bn-283p6).
+    pub record: Published<ArtifactHandle>,
 }
 
 pub(super) fn unbounded() -> Budget {
@@ -944,12 +978,16 @@ pub(super) fn decode_budget(parts: &mut Parts<'_>) -> Result<Budget, RecordDefec
 /// [`Fault::denied`] when `publisher` may not publish a `cont_` artifact, and
 /// [`ErrorCode::PublicationAborted`] when the publication did not complete atomically or the
 /// two identity seams disagree. Nothing is published on an error path.
+///
+/// On success, the record's store handle tied to its receipt (bn-283p6). [`settle`] takes
+/// it, so the task table can record a durable revision only after the store committed it
+/// (INV-017).
 pub fn publish(
     store: &ReferenceStore,
     publisher: &CapabilityToken,
     identifier: &dyn ContentIdentifier,
     record: &ContinuationRecord,
-) -> Result<ArtifactHandle, Fault> {
+) -> Result<Published<ArtifactHandle>, Fault> {
     let aborted = || {
         Fault::new(
             ErrorCode::PublicationAborted,
@@ -968,16 +1006,13 @@ pub fn publish(
             PublishRefusal::CapabilityDenied(_) => Fault::denied(),
             PublishRefusal::Aborted(_) => aborted(),
         })?;
-    if receipt.handle() != &named {
-        return Err(aborted().not_retryable());
-    }
-    Ok(named)
+    Published::attest(&receipt, named).map_err(|_| aborted().not_retryable())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::identity::Blake3Identity;
+    use crate::daemon::identity::{Blake3Identity, testing};
 
     fn epoch(token: &str) -> Nullable<EpochIdentity> {
         Nullable::Value(EpochIdentity::new(token).expect("a well-formed epoch"))
@@ -1070,9 +1105,26 @@ mod tests {
         );
     }
 
+    /// A store whose ledger holds a receipt for the record's campaign record, and for the
+    /// record itself under `cont_record`.
+    fn ledger() -> (
+        continuum_workspace::publication::ReferenceStore,
+        continuum_workspace::publication::CapabilityToken,
+        ArtifactHandle,
+    ) {
+        let (store, operator) = testing::store();
+        testing::publish(&store, &operator, "task_p0", Commitment::new("task_p0"));
+        let stored: ArtifactHandle = "cont_record".parse().expect("a store handle");
+        testing::publish(&store, &operator, "cont_record", stored.clone());
+        (store, operator, stored)
+    }
+
     #[test]
     fn the_restored_ledger_is_the_recorded_one() {
-        let restored = record().restore().expect("restores");
+        let (store, operator, stored) = ledger();
+        let audit = store.audit_view(&operator).expect("the operator audits");
+        let restored = record().restore(&audit, &stored).expect("restores");
+        assert_eq!(restored.record.handle(), &stored);
         let entry = &restored.entry;
         assert_eq!(entry.status, TaskStatus::Suspended);
         assert_eq!(entry.publications(), 1);
@@ -1093,6 +1145,31 @@ mod tests {
             ParkState::Suspended,
         );
         assert_eq!(again, record(), "record → restore → record is the identity");
+    }
+
+    /// bn-283p6: a restored task names only what the store's ledger holds a receipt for. A
+    /// record whose campaign record, or whose own store handle, has no receipt is not
+    /// restored, and the defect is typed.
+    #[test]
+    fn a_record_the_ledger_holds_no_receipt_for_is_not_restored() {
+        let (store, operator) = testing::store();
+        let stored: ArtifactHandle = "cont_record".parse().expect("a store handle");
+        testing::publish(&store, &operator, "cont_record", stored.clone());
+        let audit = store.audit_view(&operator).expect("the operator audits");
+        assert_eq!(
+            record().restore(&audit, &stored).map(|_| ()),
+            Err(RecordDefect::Unreceipted),
+            "the campaign record `task_p0` has no receipt"
+        );
+
+        let (store, operator, _) = ledger();
+        let audit = store.audit_view(&operator).expect("the operator audits");
+        let unpublished: ArtifactHandle = "cont_elsewhere".parse().expect("a store handle");
+        assert_eq!(
+            record().restore(&audit, &unpublished).map(|_| ()),
+            Err(RecordDefect::Unreceipted),
+            "the record's own store handle has no receipt"
+        );
     }
 
     #[test]

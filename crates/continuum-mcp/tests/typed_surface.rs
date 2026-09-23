@@ -854,6 +854,8 @@ fn certificate_node(fixture: &mut Fixture, bytes: Vec<u8>) -> EvidenceHandle {
             inconclusive_reason: None,
         }],
         redaction: None,
+        // Appended out of band: no store publication, so no receipt-tied name (bn-283p6).
+        publication: None,
     };
     fixture
         .server

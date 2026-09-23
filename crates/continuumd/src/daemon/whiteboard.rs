@@ -449,6 +449,8 @@ fn proposal(
             inconclusive_reason: None,
         }],
         redaction: None,
+        // A proposal publishes nothing, so there is no receipt to tie (bn-283p6).
+        publication: None,
     };
     Ok((handle, node))
 }

@@ -528,7 +528,7 @@ fn sealing_an_existing_workspace_answers_with_its_root_digest() {
             .state()
             .workspace(&handle)
             .expect("held")
-            .sealed
+            .sealed()
     );
 }
 

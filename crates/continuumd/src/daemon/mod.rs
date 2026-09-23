@@ -1062,32 +1062,61 @@ impl Builder {
             // task table: a `Restored` task as a live entry with its continuation (the resume
             // branch, bn-20142), a `Terminal` task as a live terminal entry (bn-2g3ei), every
             // other task into the resolved set.
-            let startup = match identity::capability_to_store(&self.services.connection)
+            //
+            // A restored record is tied to the receipt the store's ledger kept for it
+            // (bn-283p6), through the one audit view the pass reads under. A record with no
+            // receipt is not restored: the task is filed, and reported, as
+            // `Failed(Unreceipted)`, never as a `Restored` or `Terminal` it is not.
+            let audit = identity::capability_to_store(&self.services.connection)
                 .map_err(|_| continuum_workspace::publication::CapabilityDenied)
-                .and_then(|operator| recovery::resolve_tasks(&durable.store, &operator))
-            {
-                Ok(resolution) => {
+                .and_then(|operator| {
+                    durable
+                        .store
+                        .audit_view(&operator)
+                        .map(|audit| (audit, operator))
+                });
+            let startup = match audit {
+                Ok((audit, operator)) => {
+                    let mut resolution =
+                        recovery::resolve_tasks_in(&durable.store, &audit, &operator);
+                    let mut withdrawn = Vec::new();
                     for resolved in resolution.tasks() {
-                        let restored = match (&resolved.resolution, &resolved.continuation) {
-                            (recovery::Resolution::Restored(_), Some(record)) => {
-                                record.restore().ok()
+                        // `resolve_tasks_in` tied every identity to its receipt and withdrew
+                        // every resolution that rested on one with none
+                        // (`Failed(Unreceipted)`, bn-283p6), so each restore below succeeds.
+                        // It restores the record under its receipt-tied index identity, never
+                        // one this build re-derives. If a restore fails anyway, the task is
+                        // withdrawn the same way here: a `Restored` or `Terminal` resolution
+                        // never stands without the live task it names.
+                        let loaded = match &resolved.resolution {
+                            recovery::Resolution::Restored(_) => {
+                                match (&resolved.continuation, &resolved.continuation_identity) {
+                                    (Some(record), Some(identity)) => record
+                                        .restore(&audit, identity.handle())
+                                        .ok()
+                                        .map(|restored| {
+                                            self.state.tasks_mut().restore(restored);
+                                        }),
+                                    _ => None,
+                                }
                             }
-                            _ => None,
-                        };
-                        let terminal = match (&resolved.resolution, &resolved.terminal) {
-                            (recovery::Resolution::Terminal(_), Some(record)) => {
-                                record.restore().ok()
+                            recovery::Resolution::Terminal(_) => match &resolved.terminal {
+                                Some(record) => record.restore(&audit).ok().map(|entry| {
+                                    self.state.tasks_mut().put(entry);
+                                }),
+                                None => None,
+                            },
+                            recovery::Resolution::Settled | recovery::Resolution::Failed(_) => {
+                                self.state.tasks_mut().resolve(resolved.clone());
+                                Some(())
                             }
-                            _ => None,
                         };
-                        // A `Restored` or `Terminal` resolution always carries a record that
-                        // restores: the pass decoded it, and decoding runs the same replay.
-                        match (restored, terminal) {
-                            (Some(restored), _) => self.state.tasks_mut().restore(restored),
-                            (None, Some(entry)) => self.state.tasks_mut().put(entry),
-                            (None, None) => self.state.tasks_mut().resolve(resolved.clone()),
+                        if loaded.is_none() {
+                            self.state.tasks_mut().resolve(resolved.unreceipted());
+                            withdrawn.push(resolved.task.clone());
                         }
                     }
+                    resolution.withdraw(&withdrawn);
                     recovery::Startup::Resolved(resolution)
                 }
                 Err(denied) => recovery::Startup::Refused(denied),

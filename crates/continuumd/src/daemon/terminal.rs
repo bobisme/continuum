@@ -86,7 +86,7 @@
 //! - the continuations a completed task held before it closed. The task's
 //!   `TaskRecord.continuation` is absent once it closed, so `task.status` does not read them.
 
-use continuum_workspace::publication::ContentIdentifier;
+use continuum_workspace::publication::{ContentIdentifier, StoreAudit};
 
 use super::budget;
 use super::continuation::{
@@ -446,10 +446,12 @@ impl TerminalRecord {
     /// # Errors
     ///
     /// [`RecordDefect::Ledger`] when the ledger does not replay. Unreachable for a record
-    /// [`Self::decode`] returned, which runs the same replay.
-    pub fn restore(&self) -> Result<TaskEntry, RecordDefect> {
+    /// [`Self::decode`] returned, which runs the same replay. [`RecordDefect::Unreceipted`]
+    /// when `audit`'s ledger holds no receipt for a campaign record this record names
+    /// (bn-283p6).
+    pub fn restore(&self, audit: &StoreAudit<'_>) -> Result<TaskEntry, RecordDefect> {
         let ledger = self.ledger()?;
-        let evidence = continuation::publications_of(&self.publications, &ledger)?;
+        let evidence = continuation::publications_of(&self.publications, &ledger, audit)?;
         Ok(TaskEntry {
             handle: self.task.clone(),
             operation: self.operation.clone(),
@@ -583,11 +585,21 @@ mod tests {
 
     #[test]
     fn the_decoder_is_the_inverse_of_the_encoder_for_both_terminal_states() {
+        let (store, operator) = crate::daemon::identity::testing::store();
+        for spelling in ["task_p0", "task_p1"] {
+            crate::daemon::identity::testing::publish(
+                &store,
+                &operator,
+                spelling,
+                Commitment::new(spelling),
+            );
+        }
+        let audit = store.audit_view(&operator).expect("the operator audits");
         for record in [record(), failed()] {
             let bytes = record.encode();
             assert!(TerminalRecord::is_terminal_record(&bytes));
             assert_eq!(TerminalRecord::decode(&bytes), Ok(record.clone()));
-            let entry = record.restore().expect("restores");
+            let entry = record.restore(&audit).expect("restores");
             assert_eq!(
                 TerminalRecord::current(&entry),
                 Some(record),

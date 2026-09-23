@@ -84,8 +84,8 @@ use continuum_engine_reference::model::State;
 use continuum_task::budget::BudgetLedger;
 use continuum_task::region::RegionId;
 use continuum_task::region::worker::{WorkerId, WorkerStep};
-use continuum_workspace::artifact_path::ArtifactClass;
-use continuum_workspace::publication::{ContentIdentifier, ReferenceStore};
+use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
+use continuum_workspace::publication::{ContentIdentifier, Published, ReferenceStore};
 use continuum_workspace::staleness::{LineageError, check_current};
 
 use super::budget::{self, Publications};
@@ -593,8 +593,10 @@ pub struct TaskTable {
     /// `task.resume` reads them back through the model ([`Self::materialize`]).
     pending: BTreeMap<ContinuationHandle, Vec<Vec<i64>>>,
     /// The last durable revision of each continuation record this daemon published or
-    /// restored ([`continuation`](super::continuation)), and the state count its pins name.
-    revisions: BTreeMap<ContinuationHandle, (u32, u64)>,
+    /// restored ([`continuation`](super::continuation)), the state count its pins name, and
+    /// the revision's store handle tied to its receipt (bn-283p6). A revision is recorded
+    /// as durable only with the receipt-tied name of the record that makes it so.
+    revisions: BTreeMap<ContinuationHandle, DurableRevision>,
 }
 
 impl TaskTable {
@@ -669,8 +671,14 @@ impl TaskTable {
     /// held as vectors until [`Self::materialize`] reads it back through the model.
     pub fn restore(&mut self, restored: super::continuation::Restored) {
         let handle = restored.continuation.handle.clone();
-        self.revisions
-            .insert(handle.clone(), (restored.revision, restored.states));
+        self.revisions.insert(
+            handle.clone(),
+            DurableRevision {
+                revision: restored.revision,
+                states: restored.states,
+                record: restored.record,
+            },
+        );
         self.pending.insert(handle, restored.frontier);
         self.park(restored.continuation);
         self.put(restored.entry);
@@ -723,19 +731,54 @@ impl TaskTable {
     pub fn next_revision(&self, handle: &ContinuationHandle) -> u32 {
         self.revisions
             .get(handle)
-            .map_or(0, |(revision, _)| revision.saturating_add(1))
+            .map_or(0, |durable| durable.revision.saturating_add(1))
     }
 
     /// The state count the pins of `handle` name, once a record of it is durable.
     #[must_use]
     pub fn pinned_states(&self, handle: &ContinuationHandle) -> Option<u64> {
-        self.revisions.get(handle).map(|(_, states)| *states)
+        self.revisions.get(handle).map(|durable| durable.states)
     }
 
-    /// Record that the continuation record for `handle` at `revision` is durable.
-    pub fn record_revision(&mut self, handle: &ContinuationHandle, revision: u32, states: u64) {
-        self.revisions.insert(handle.clone(), (revision, states));
+    /// The store handle of the last durable continuation record for `handle`, tied to its
+    /// receipt, or [`None`] when no record of it is durable.
+    #[must_use]
+    pub fn durable_record(
+        &self,
+        handle: &ContinuationHandle,
+    ) -> Option<&Published<ArtifactHandle>> {
+        self.revisions.get(handle).map(|durable| &durable.record)
     }
+
+    /// Record that the continuation record for `handle` at `revision` is durable, under the
+    /// store handle `record` its receipt names.
+    pub fn record_revision(
+        &mut self,
+        handle: &ContinuationHandle,
+        revision: u32,
+        states: u64,
+        record: Published<ArtifactHandle>,
+    ) {
+        self.revisions.insert(
+            handle.clone(),
+            DurableRevision {
+                revision,
+                states,
+                record,
+            },
+        );
+    }
+}
+
+/// One durable revision of a continuation record (bn-283p6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DurableRevision {
+    /// The revision the record is at.
+    revision: u32,
+    /// The state count the continuation's pins name.
+    states: u64,
+    /// The record's store handle, tied to the receipt the store issued for it.
+    record: Published<ArtifactHandle>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,11 +1127,16 @@ fn cancel(
             },
         )
     };
-    if let Some(record) = &durable {
-        let publisher = super::identity::capability_to_store(&call.envelope.capability)
-            .map_err(|_| Fault::denied())?;
-        continuation::publish(store, &publisher, services.identifier(), record)?;
-    }
+    let durable = match durable {
+        Some(record) => {
+            let publisher = super::identity::capability_to_store(&call.envelope.capability)
+                .map_err(|_| Fault::denied())?;
+            let published =
+                continuation::publish(store, &publisher, services.identifier(), &record)?;
+            Some((record, published))
+        }
+        None => None,
+    };
     let task = request.task.clone();
     let (moved, settlement) = region::scoped(
         state,
@@ -1103,8 +1151,8 @@ fn cancel(
             Ok(moved)
         },
     )?;
-    if let Some(record) = &durable {
-        continuation::settle(state.tasks_mut(), record);
+    if let Some((record, published)) = durable {
+        continuation::settle(state.tasks_mut(), &record, published);
     }
 
     let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
@@ -1260,11 +1308,16 @@ fn update_budget(
             )
         }
     };
-    if let Some(record) = &durable {
-        let publisher = super::identity::capability_to_store(&call.envelope.capability)
-            .map_err(|_| Fault::denied())?;
-        continuation::publish(store, &publisher, services.identifier(), record)?;
-    }
+    let durable = match durable {
+        Some(record) => {
+            let publisher = super::identity::capability_to_store(&call.envelope.capability)
+                .map_err(|_| Fault::denied())?;
+            let published =
+                continuation::publish(store, &publisher, services.identifier(), &record)?;
+            Some((record, published))
+        }
+        None => None,
+    };
     let entry = state
         .tasks_mut()
         .get_mut(&request.task)
@@ -1299,8 +1352,8 @@ fn update_budget(
         }
         StructuralOutcome::Updated
     };
-    if let Some(record) = &durable {
-        continuation::settle(state.tasks_mut(), record);
+    if let Some((record, published)) = durable {
+        continuation::settle(state.tasks_mut(), &record, published);
     }
     let entry = state.tasks().get(&request.task).ok_or_else(Fault::denied)?;
     let payload = Payload::TaskUpdateBudget(TaskUpdateBudgetResponse {
@@ -1433,7 +1486,7 @@ fn resume(
     let record = state
         .workspace(&continuation.snapshot)
         .ok_or_else(Fault::denied)?;
-    if !record.sealed {
+    if !record.sealed() {
         return Err(stale().with_recovery(super::workspace::reseal_current_head(
             state,
             &record.lineage,

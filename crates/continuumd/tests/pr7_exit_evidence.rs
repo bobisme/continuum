@@ -623,6 +623,8 @@ fn certificate_node(
             inconclusive_reason: None,
         }],
         redaction: None,
+        // Appended out of band: no store publication, so no receipt-tied name (bn-283p6).
+        publication: None,
     };
     world
         .daemon

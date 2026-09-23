@@ -37,6 +37,7 @@ use continuum_intent::contract::IntentContract;
 use continuum_value::assurance::ValidationBasis;
 use continuum_workspace::components::WorkspaceDescriptor;
 use continuum_workspace::lineage::{Fork, ForkName};
+use continuum_workspace::publication::Published;
 use continuum_workspace::snapshot::WorkspacePath;
 
 use super::family::Arguments;
@@ -166,8 +167,21 @@ pub struct WorkspaceRecord {
     /// The lineage this workspace's source tree belongs to. `workspace.fork` advances it
     /// and `workspace.seal` checks against it, which is where `StaleSnapshot` comes from.
     pub lineage: ForkName,
+    /// The seal: the workspace's own handle, tied to the receipt of its descriptor record,
+    /// or [`None`] while the workspace is unsealed.
+    ///
+    /// A `bool` until bn-283p6. A flag could be set before, or without, the publication it
+    /// reports. A [`Published`] exists only after the store issued the receipt, so a record
+    /// that reads as sealed names a descriptor the store has published (INV-017).
+    pub seal: Option<Published<WorkspaceHandle>>,
+}
+
+impl WorkspaceRecord {
     /// Whether the workspace has been sealed — published as immutable records.
-    pub sealed: bool,
+    #[must_use]
+    pub const fn sealed(&self) -> bool {
+        self.seal.is_some()
+    }
 }
 
 /// One staged file: the content a `Commitment` in a `SnapshotComponents` names.
@@ -266,6 +280,15 @@ pub struct EvidenceNode {
     /// Present when the content this node references has stopped being readable
     /// (summarized, purged, or lost — plan §4.5).
     pub redaction: Option<Redacted>,
+    /// The store handle of the content this append published, tied to the store's receipt
+    /// (bn-283p6), or [`None`] for a node whose append published nothing.
+    ///
+    /// `observe.ingest` and `evidence.link` publish the referenced content before they
+    /// append, and this is the value that says so. It exists only after the store issued
+    /// the receipt, so a node cannot claim a publication that has not committed (INV-017).
+    /// `whiteboard.compile` proposes a node and publishes nothing, so its nodes hold
+    /// [`None`]. Daemon-side only: the node's wire projection does not carry it.
+    pub publication: Option<Published<continuum_workspace::artifact_path::ArtifactHandle>>,
 }
 
 impl EvidenceNode {

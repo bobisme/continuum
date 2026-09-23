@@ -69,6 +69,7 @@
 //! | [`Violation::ForbiddenDerive`], [`Violation::UnexpectedWitnessImpl`], [`Violation::WitnessFieldNotPrivate`] | `publication.rs` | the witnesses stay linear (no `Clone`, no `Default`) and gain no constructor through a new `impl` |
 //! | [`Violation::WitnessHeldAcrossStatements`] | every crate | every `.commit_content()` is chained directly into `?.commit_index()`, so no consumer does other work between the two commits |
 //! | [`Violation::UnadjudicatedPublicationSite`], [`Violation::StalePublicationSite`] | every crate | the set of items that reach the write surface is closed ([`PUBLICATION_SITES`]) |
+//! | [`Violation::UnadjudicatedBareHandleField`], [`Violation::StaleHandleFieldAdjudication`], [`Violation::ReceiptTiedFieldLost`], [`Violation::DaemonRecordMissing`] | the daemon's records ([`DAEMON_RECORDS`]) and every daemon type they hold at any depth ([`walk`]) | a record that names a published artifact holds `Published<H>`, which only a receipt mints ([`RECEIPT_TIED_FIELDS`]), and every bare handle field — struct, tuple or enum variant, nested or direct — is adjudicated as not claiming a publication ([`BARE_HANDLE_FIELDS`]); the walk stops only at `Published<…>` and at the members [`OPAQUE_FIELDS`] names (bn-283p6, cr-2n0xng) |
 //!
 //! # The mutants
 //!
@@ -83,16 +84,22 @@
 //!
 //! # Absences (INV-007)
 //!
-//! 1. **The daemon's volatile records are outside this guard.** An evidence node, a task
-//!    record, or a workspace record in `DaemonState` can name a published handle. The type
-//!    system does not tie that record to a `PublicationReceipt`. The daemon computes
-//!    the name before it publishes, and the order of the two statements is a matter of
-//!    discipline. G1-06 probes this behaviourally for every seam that exists today: an
-//!    aborted publication leaves the namespace and the task record byte-identical. It also
-//!    states that the daemon-side reference record is volatile (G1-06 scope statement 4).
-//!    A type-level tie (a `Published<H>` newtype mintable only from a receipt) would touch
-//!    the record types of five daemon families and their test fixtures. It is not done
-//!    here.
+//! 1. **Closed by bn-283p6: the daemon's volatile records are tied to a receipt.** A
+//!    record that says an artifact is published holds `Published<H>`, which
+//!    `Published::attest` and `Published::of` mint only from a `PublicationReceipt`:
+//!    `WorkspaceRecord::seal` (was `sealed: bool`), `EvidenceNode::publication`,
+//!    `Publication::commitment`, the continuation record's durable revision, and every
+//!    identity a startup resolution (`ResolvedTask`) claims, restores from, or emits
+//!    (cr-2n0xng). The record census keeps the set closed: it walks every daemon type the
+//!    listed records hold at any depth, enum variants and tuple fields included, not only
+//!    their direct fields. The walk reads only `continuumd`'s own types: a type from another
+//!    crate (`continuum_task`'s ledger, `continuum_context`'s items) is a leaf. What remains
+//!    is narrower. A `Published<H>` proves that
+//!    *a* store committed the name, not that this daemon's store did: a value carried from
+//!    another store type-checks (G1-08's orphan plant does exactly this). The
+//!    `PublishedName` impls that compare a daemon spelling with a store handle are
+//!    reviewed code, not census-checked. The records stay volatile (G1-06 scope
+//!    statement 4).
 //! 2. **Spelling, not types.** The census reads tokens, not resolved types. A write
 //!    surface reached through a trait object, a macro, or a re-export under another name
 //!    would escape it. None exists. `ReferenceStore` implements no trait with a write
@@ -670,6 +677,28 @@ enum Violation {
         item: String,
         call: &'static str,
     },
+    /// A daemon record field of bare handle type that [`BARE_HANDLE_FIELDS`] does not
+    /// adjudicate. A record that names a published artifact holds `Published<H>`.
+    UnadjudicatedBareHandleField {
+        file: String,
+        record: String,
+        field: String,
+        line: usize,
+    },
+    /// A [`BARE_HANDLE_FIELDS`] row that no longer names a bare handle field.
+    StaleHandleFieldAdjudication {
+        file: String,
+        record: String,
+        field: String,
+    },
+    /// A [`RECEIPT_TIED_FIELDS`] row whose field is gone, or no longer holds `Published<H>`.
+    ReceiptTiedFieldLost {
+        file: String,
+        record: String,
+        field: String,
+    },
+    /// A [`DAEMON_RECORDS`] row whose record type is not in its file.
+    DaemonRecordMissing { file: String, record: String },
 }
 
 /// The file the store's state machine lives in, relative to `crates/`.
@@ -701,12 +730,17 @@ const READ_METHODS: &[&str] = &[
     "range",
 ];
 
-/// Each witness type, and the one item that may construct it.
-const WITNESS_MINTS: &[(&str, &str)] = &[
-    ("StagedPublication", "ReferenceStore::stage"),
-    ("CommittedContent", "StagedPublication::commit_content"),
-    ("PublicationReceipt", "CommittedContent::commit_index"),
-    ("StoreState", "ReferenceStoreBuilder::build"),
+/// Each witness type, and the items that may construct it.
+///
+/// `Published` (bn-283p6) has two: `attest` checks a name against a receipt, and `of` takes
+/// the receipt's own handle. Both take a `&PublicationReceipt`, so both are downstream of
+/// `CommittedContent::commit_index`.
+const WITNESS_MINTS: &[(&str, &[&str])] = &[
+    ("StagedPublication", &["ReferenceStore::stage"]),
+    ("CommittedContent", &["StagedPublication::commit_content"]),
+    ("PublicationReceipt", &["CommittedContent::commit_index"]),
+    ("StoreState", &["ReferenceStoreBuilder::build"]),
+    ("Published", &["Published::attest", "Published::of"]),
 ];
 
 /// The closed set of `impl` blocks each witness type may have. A new inherent method is
@@ -717,6 +751,7 @@ const WITNESS_IMPLS: &[(&str, &[Option<&str>])] = &[
     ("CommittedContent", &[None, Some("Debug"), Some("Drop")]),
     ("PublicationReceipt", &[None]),
     ("StoreState", &[]),
+    ("Published", &[None]),
 ];
 
 /// Derives that would forge a witness (`Default`, deserialization) or duplicate a linear
@@ -732,6 +767,7 @@ const FORBIDDEN_DERIVES: &[(&str, &[&str])] = &[
     ),
     ("PublicationReceipt", &["Default", "Deserialize"]),
     ("StoreState", &["Clone", "Copy", "Deserialize"]),
+    ("Published", &["Default", "Deserialize"]),
 ];
 
 /// The receiver-independent spellings of the store's write surface, as token sequences.
@@ -1007,6 +1043,7 @@ fn check_store(parsed: &Parsed) -> Vec<Violation> {
                 "StagedPublication",
                 "CommittedContent",
                 "PublicationReceipt",
+                "Published",
             ]
             .contains(&witness)
         {
@@ -1040,10 +1077,10 @@ fn witness_literals(file: &str, parsed: &Parsed) -> Vec<Violation> {
             Some(named)
         };
         let Some(witness) = witness else { continue };
-        let Some((_, mint)) = WITNESS_MINTS.iter().find(|(w, _)| *w == witness) else {
+        let Some((_, mints)) = WITNESS_MINTS.iter().find(|(w, _)| *w == witness) else {
             continue;
         };
-        if !(file == PUBLICATION_RS && placed.item == *mint) {
+        if !(file == PUBLICATION_RS && mints.contains(&placed.item.as_str())) {
             violations.push(Violation::WitnessMintedOutsideCommitPath {
                 file: file.to_owned(),
                 witness: witness.to_owned(),
@@ -1111,6 +1148,897 @@ fn publication_sites(file: &str, parsed: &Parsed) -> (Vec<Site>, Vec<Violation>)
     (sites, violations)
 }
 
+// -----------------------------------------------------------------------------------------
+// The daemon's records: a name of a published artifact is a `Published<H>` (bn-283p6)
+// -----------------------------------------------------------------------------------------
+
+const STATE_RS: &str = "continuumd/src/daemon/state.rs";
+const BUDGET_RS: &str = "continuumd/src/daemon/budget.rs";
+const TASK_RS: &str = "continuumd/src/daemon/task.rs";
+const CONTINUATION_RS: &str = "continuumd/src/daemon/continuation.rs";
+const TERMINAL_RS: &str = "continuumd/src/daemon/terminal.rs";
+const RECOVERY_RS: &str = "continuumd/src/daemon/recovery.rs";
+const CONTEXT_RS: &str = "continuumd/src/daemon/context.rs";
+const VERIFICATION_RS: &str = "continuumd/src/daemon/verification.rs";
+const ENVELOPE_RS: &str = "continuumd/src/protocol/envelope.rs";
+const WIRE_TASK_RS: &str = "continuumd/src/protocol/task.rs";
+
+/// The crate whose types the record walk descends into.
+const DAEMON_CRATE: &str = "continuumd/src/";
+
+/// The roots of the record walk ([`walk`]): the daemon record types of the five families
+/// that publish — workspace, task (campaign records), continuation, terminal, and evidence
+/// (`observe.ingest`, `evidence.link`) — the state and table that hold them, the value a
+/// restore hands the table, and the startup report. Every member of these types, and of
+/// every daemon type a member names at any depth, is read (cr-2n0xng). Each root must
+/// exist.
+const DAEMON_RECORDS: &[(&str, &str)] = &[
+    (STATE_RS, "DaemonState"),
+    (STATE_RS, "WorkspaceRecord"),
+    (STATE_RS, "EvidenceNode"),
+    (STATE_RS, "EvidenceEdge"),
+    (BUDGET_RS, "Publications"),
+    (BUDGET_RS, "Publication"),
+    (TASK_RS, "TaskTable"),
+    (TASK_RS, "TaskEntry"),
+    (TASK_RS, "Continuation"),
+    (TASK_RS, "DurableRevision"),
+    (CONTINUATION_RS, "ContinuationRecord"),
+    (CONTINUATION_RS, "Restored"),
+    (TERMINAL_RS, "TerminalRecord"),
+    (RECOVERY_RS, "TaskResolution"),
+    (RECOVERY_RS, "ResolvedTask"),
+];
+
+/// Members the record walk does not descend through, each with the reason its nested
+/// types cannot hold a claim that an artifact is published. The member's own bare handles
+/// are still judged. A row whose member is gone is stale.
+const OPAQUE_FIELDS: &[(&str, &str, &str, &str)] = &[
+    (
+        STATE_RS,
+        "DaemonState",
+        "idempotency",
+        "the replay ledger: answers already sent, replayed byte for byte; each answer's \
+         artifacts were bound from receipt-tied records when it was built",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "capabilities",
+        "the capability registry: wire descriptors of authority, not content",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "components",
+        "registered component sets, wire values held as registered and never published by \
+         registration",
+    ),
+];
+
+/// The fields that say "this artifact is published", each holding `Published<H>`.
+const RECEIPT_TIED_FIELDS: &[(&str, &str, &str)] = &[
+    // `sealed: bool` until bn-283p6.
+    (STATE_RS, "WorkspaceRecord", "seal"),
+    // The content `observe.ingest` and `evidence.link` publish before they append.
+    (STATE_RS, "EvidenceNode", "publication"),
+    // A campaign record the task committed.
+    (BUDGET_RS, "Publication", "commitment"),
+    // The last durable continuation record, live and restored.
+    (TASK_RS, "DurableRevision", "record"),
+    (CONTINUATION_RS, "Restored", "record"),
+    // What a startup resolution claims, restores from, and emits (cr-2n0xng).
+    (RECOVERY_RS, "ResolvedTask", "records"),
+    (RECOVERY_RS, "ResolvedTask", "continuations"),
+    (RECOVERY_RS, "ResolvedTask", "continuation_identity"),
+    (RECOVERY_RS, "ResolvedTask", "terminals"),
+    (RECOVERY_RS, "ResolvedTask", "terminal_identity"),
+];
+
+/// The closed set of bare handle fields in [`DAEMON_RECORDS`], each with the reason it
+/// does not claim a publication. A new bare handle field is a violation until it is
+/// either tied to a receipt or adjudicated here.
+const BARE_HANDLE_FIELDS: &[(&str, &str, &str, &str)] = &[
+    // Lookup keys. The claim, where there is one, is in the value record.
+    (
+        STATE_RS,
+        "DaemonState",
+        "capabilities",
+        "key: a capability, which is not content",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "workspaces",
+        "key: the seal is `WorkspaceRecord::seal`",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "content",
+        "key: staged content, never published by staging",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "components",
+        "key: a registered component set, not published",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "intents",
+        "key: the intent registry is volatile, not the store",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "evidence",
+        "key: a graph node identity; see `EvidenceNode::publication`",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "edges",
+        "key: a graph edge identity, never published",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "context_packs",
+        "key: a context pack, held and not published",
+    ),
+    (
+        TASK_RS,
+        "TaskTable",
+        "tasks",
+        "key: a task identity, not a store artifact",
+    ),
+    (
+        TASK_RS,
+        "TaskTable",
+        "continuations",
+        "key: a continuation's pins identity",
+    ),
+    (
+        TASK_RS,
+        "TaskTable",
+        "resolved",
+        "key: a task identity, not a store artifact",
+    ),
+    (
+        TASK_RS,
+        "TaskTable",
+        "pending",
+        "key: a continuation's pins identity",
+    ),
+    (
+        TASK_RS,
+        "TaskTable",
+        "revisions",
+        "key: the durable record is `DurableRevision::record`",
+    ),
+    // References to what a record is about, which the record does not claim is published.
+    (
+        STATE_RS,
+        "WorkspaceRecord",
+        "intent",
+        "the governing contract, by identity (plan §4.2)",
+    ),
+    (
+        STATE_RS,
+        "EvidenceNode",
+        "artifact",
+        "staged content by commitment; the claim is `publication`",
+    ),
+    (
+        STATE_RS,
+        "EvidenceEdge",
+        "from",
+        "a graph node identity, never published",
+    ),
+    (
+        STATE_RS,
+        "EvidenceEdge",
+        "to",
+        "a graph node identity, never published",
+    ),
+    (
+        BUDGET_RS,
+        "Publications",
+        "staged",
+        "staged, not yet published: the typestate's open half",
+    ),
+    (TASK_RS, "TaskEntry", "handle", "the task's own identity"),
+    (
+        TASK_RS,
+        "TaskEntry",
+        "snapshot",
+        "the workspace the run is over; its seal is on its record",
+    ),
+    (
+        TASK_RS,
+        "TaskEntry",
+        "intent",
+        "the governing contract, by identity",
+    ),
+    (
+        TASK_RS,
+        "TaskEntry",
+        "model",
+        "the model source identity, catalogued and not published",
+    ),
+    (
+        TASK_RS,
+        "TaskEntry",
+        "committed_evidence",
+        "graph node identities, never published",
+    ),
+    (
+        TASK_RS,
+        "TaskEntry",
+        "continuation",
+        "the pins identity; the durable record is `DurableRevision::record`",
+    ),
+    (
+        TASK_RS,
+        "Continuation",
+        "handle",
+        "the pins identity, not a store handle",
+    ),
+    (TASK_RS, "Continuation", "task", "the task it resumes"),
+    (
+        TASK_RS,
+        "Continuation",
+        "snapshot",
+        "the pinned workspace, by identity",
+    ),
+    (
+        TASK_RS,
+        "Continuation",
+        "intent",
+        "the pinned contract, by identity",
+    ),
+    // Durable encodings: the bytes the store holds, projected from the live task and
+    // decoded on restart. A restore ties them to the ledger (`restore(&audit, …)`).
+    (
+        CONTINUATION_RS,
+        "ContinuationRecord",
+        "handle",
+        "durable encoding",
+    ),
+    (
+        CONTINUATION_RS,
+        "ContinuationRecord",
+        "task",
+        "durable encoding",
+    ),
+    (
+        CONTINUATION_RS,
+        "ContinuationRecord",
+        "snapshot",
+        "durable encoding",
+    ),
+    (
+        CONTINUATION_RS,
+        "ContinuationRecord",
+        "intent",
+        "durable encoding",
+    ),
+    (
+        CONTINUATION_RS,
+        "ContinuationRecord",
+        "model",
+        "durable encoding",
+    ),
+    (
+        CONTINUATION_RS,
+        "ContinuationRecord",
+        "publications",
+        "durable encoding; restore ties each to its receipt",
+    ),
+    (
+        CONTINUATION_RS,
+        "ContinuationRecord",
+        "committed_evidence",
+        "durable encoding",
+    ),
+    (TERMINAL_RS, "TerminalRecord", "task", "durable encoding"),
+    (
+        TERMINAL_RS,
+        "TerminalRecord",
+        "snapshot",
+        "durable encoding",
+    ),
+    (TERMINAL_RS, "TerminalRecord", "intent", "durable encoding"),
+    (TERMINAL_RS, "TerminalRecord", "model", "durable encoding"),
+    (
+        TERMINAL_RS,
+        "TerminalRecord",
+        "publications",
+        "durable encoding; restore ties each to its receipt",
+    ),
+    (
+        TERMINAL_RS,
+        "TerminalRecord",
+        "committed_evidence",
+        "durable encoding",
+    ),
+    (
+        TERMINAL_RS,
+        "TerminalRecord",
+        "continuation",
+        "durable encoding",
+    ),
+    // Reached only by the walk (cr-2n0xng): nested in the records above.
+    (
+        RECOVERY_RS,
+        "ResolvedTask",
+        "task",
+        "the task's own identity, not a store artifact",
+    ),
+    (
+        RECOVERY_RS,
+        "TaskResolution",
+        "unattributed",
+        "report: an index entry that does not decode, claimed by no task",
+    ),
+    (
+        RECOVERY_RS,
+        "TaskResolution",
+        "unclaimed",
+        "report: a record no task claims, reported and not used",
+    ),
+    (
+        RECOVERY_RS,
+        "TaskResolution",
+        "unreceipted",
+        "report: an identity with no receipt, which no `ResolvedTask` can hold",
+    ),
+    (
+        STATE_RS,
+        "AdmissionRecord",
+        "capability",
+        "the admitting capability, which is not content",
+    ),
+    (
+        STATE_RS,
+        "IntentRecord",
+        "supersedes",
+        "the intent registry is volatile, not the store",
+    ),
+    (
+        STATE_RS,
+        "IntentRecord",
+        "superseded_by",
+        "the intent registry is volatile, not the store",
+    ),
+    (
+        CONTEXT_RS,
+        "ContextPackRecord",
+        "snapshot",
+        "a registered pack's workspace, by identity; registration publishes nothing",
+    ),
+    (
+        CONTEXT_RS,
+        "ContextCompileSource",
+        "snapshot",
+        "a registered answer header, provisioned out of band (IDL section 7)",
+    ),
+    (
+        CONTEXT_RS,
+        "ContextCompileSource",
+        "intent",
+        "a registered answer header, provisioned out of band (IDL section 7)",
+    ),
+    (
+        CONTEXT_RS,
+        "ContextCompileSource",
+        "evidence",
+        "a registered answer header, provisioned out of band (IDL section 7)",
+    ),
+    (
+        VERIFICATION_RS,
+        "ModelCatalog",
+        "models",
+        "key: a model source commitment, catalogued and not published",
+    ),
+    (
+        ENVELOPE_RS,
+        "Redacted",
+        "commitment",
+        "the commitment of redacted content, stated and not published",
+    ),
+    (
+        WIRE_TASK_RS,
+        "EvidenceEvent",
+        "node",
+        "a graph node identity, never published",
+    ),
+    (
+        WIRE_TASK_RS,
+        "EvidenceEvent",
+        "edge",
+        "a graph edge identity, never published",
+    ),
+    (WIRE_TASK_RS, "TaskEvent", "task", "the task's own identity"),
+];
+
+/// One named member of a type: a struct field, a tuple field (`0`, `1`, …), an enum
+/// variant's field (`Variant.0`, `Variant.field`), or a type alias's right side (`type`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Field {
+    name: String,
+    ty: Vec<String>,
+    line: usize,
+}
+
+/// The types the record walk reached, by `(file, name)`, with their members.
+type Reached = BTreeMap<(String, String), Vec<Field>>;
+
+/// One type the daemon crate defines, with its members.
+#[derive(Debug, Clone)]
+struct TypeDef {
+    file: String,
+    members: Vec<Field>,
+}
+
+/// A handle type, by spelling: every `*Handle`, and `Commitment`.
+fn is_handle_type(ident: &str) -> bool {
+    ident == "Commitment" || (ident.len() > "Handle".len() && ident.ends_with("Handle"))
+}
+
+/// The handle types in `ty` that no enclosing `Published<…>` wraps.
+fn bare_handles(ty: &[String]) -> Vec<String> {
+    let mut bare = Vec::new();
+    for (index, ident) in unwrapped_idents(ty) {
+        if is_handle_type(&ty[index]) {
+            bare.push(ident);
+        }
+    }
+    bare
+}
+
+/// Every identifier in `ty` that no enclosing `Published<…>` wraps, with its index.
+fn unwrapped_idents(ty: &[String]) -> Vec<(usize, String)> {
+    let mut owners: Vec<String> = Vec::new();
+    let mut last_ident: Option<String> = None;
+    let mut found = Vec::new();
+    for (index, token) in ty.iter().enumerate() {
+        match token.as_str() {
+            "<" => owners.push(last_ident.take().unwrap_or_default()),
+            ">" => {
+                owners.pop();
+            }
+            ident if ident.chars().next().is_some_and(char::is_alphabetic) => {
+                if !owners.iter().any(|owner| owner == "Published") {
+                    found.push((index, ident.to_owned()));
+                }
+                last_ident = Some(ident.to_owned());
+            }
+            _ => last_ident = None,
+        }
+    }
+    found
+}
+
+/// The types `ty` names that the walk descends into: every type name no `Published<…>`
+/// wraps, except the handle types themselves, each with the module that qualifies it
+/// (`super::task::TaskTable` → `task`), if any.
+fn nested_types(ty: &[String]) -> Vec<(String, Option<String>)> {
+    unwrapped_idents(ty)
+        .into_iter()
+        .filter(|(_, ident)| {
+            ident.chars().next().is_some_and(char::is_uppercase) && !is_handle_type(ident)
+        })
+        .map(|(index, ident)| {
+            let qualifier = (index >= 3 && ty[index - 1] == ":" && ty[index - 2] == ":")
+                .then(|| ty[index - 3].clone())
+                .filter(|module| !matches!(module.as_str(), "super" | "crate" | "self"));
+            (ident, qualifier)
+        })
+        .collect()
+}
+
+/// `tokens` without attributes (`#[…]`).
+fn without_attributes<'a>(tokens: &[&'a Token]) -> Vec<&'a Token> {
+    let mut kept = Vec::new();
+    let mut at = 0;
+    while at < tokens.len() {
+        if tokens[at].text == "#" && tokens.get(at + 1).is_some_and(|t| t.text == "[") {
+            let mut brackets = 0usize;
+            while at < tokens.len() {
+                match tokens[at].text.as_str() {
+                    "[" => brackets += 1,
+                    "]" => {
+                        brackets -= 1;
+                        if brackets == 0 {
+                            at += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                at += 1;
+            }
+            continue;
+        }
+        kept.push(tokens[at]);
+        at += 1;
+    }
+    kept
+}
+
+/// `tokens` split at top-level `,` and `;` (a `protocol_struct!` body ends fields with
+/// `;`), attributes dropped, empty segments skipped.
+fn split_members<'a>(tokens: &[&'a Token]) -> Vec<Vec<&'a Token>> {
+    let tokens = without_attributes(tokens);
+    let mut segments = Vec::new();
+    let mut segment: Vec<&Token> = Vec::new();
+    let mut depth = 0usize;
+    for token in tokens {
+        match token.text.as_str() {
+            "<" | "(" | "[" | "{" => depth += 1,
+            ">" | ")" | "]" | "}" => depth = depth.saturating_sub(1),
+            "," | ";" if depth == 0 => {
+                if !segment.is_empty() {
+                    segments.push(std::mem::take(&mut segment));
+                }
+                continue;
+            }
+            _ => {}
+        }
+        segment.push(token);
+    }
+    if !segment.is_empty() {
+        segments.push(segment);
+    }
+    segments
+}
+
+/// A member segment without its visibility (`pub`, `pub(crate)`, …).
+fn without_visibility<'a, 'b>(segment: &'b [&'a Token]) -> &'b [&'a Token] {
+    let mut rest = segment;
+    if rest.first().is_some_and(|t| t.text == "pub") {
+        rest = &rest[1..];
+        if rest.first().is_some_and(|t| t.text == "(") {
+            let close = rest.iter().position(|t| t.text == ")").unwrap_or(0);
+            rest = &rest[close + 1..];
+        }
+    }
+    rest
+}
+
+/// Named fields (`name: Type`), each prefixed with `prefix`.
+fn named_members(tokens: &[&Token], prefix: &str) -> Vec<Field> {
+    split_members(tokens)
+        .iter()
+        .filter_map(|segment| {
+            let rest = without_visibility(segment);
+            (rest.len() > 2 && rest[1].text == ":" && rest[2].text != ":").then(|| Field {
+                name: format!("{prefix}{}", rest[0].text),
+                ty: rest[2..].iter().map(|t| t.text.clone()).collect(),
+                line: rest[0].line,
+            })
+        })
+        .collect()
+}
+
+/// Positional fields, named `{prefix}0`, `{prefix}1`, ….
+fn tuple_members(tokens: &[&Token], prefix: &str) -> Vec<Field> {
+    split_members(tokens)
+        .iter()
+        .enumerate()
+        .filter_map(|(index, segment)| {
+            let rest = without_visibility(segment);
+            (!rest.is_empty()).then(|| Field {
+                name: format!("{prefix}{index}"),
+                ty: rest.iter().map(|t| t.text.clone()).collect(),
+                line: rest[0].line,
+            })
+        })
+        .collect()
+}
+
+/// The index of the delimiter that closes the one at `open`.
+fn closing(tokens: &[&Token], open: usize) -> usize {
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open) {
+        match token.text.as_str() {
+            "(" | "[" | "{" => depth += 1,
+            ")" | "]" | "}" => {
+                depth -= 1;
+                if depth == 0 {
+                    return index;
+                }
+            }
+            _ => {}
+        }
+    }
+    tokens.len()
+}
+
+/// Every non-test `struct`, `enum`, and module-level `type` alias in `parsed`, by name, with
+/// its members. Tuple structs, enum variants and `protocol_struct!` bodies included.
+fn type_definitions(parsed: &Parsed) -> Vec<(String, Vec<Field>)> {
+    let placed: Vec<&Placed> = parsed.tokens.iter().filter(|p| !p.test).collect();
+    let tokens: Vec<&Token> = placed.iter().map(|p| &p.token).collect();
+    let mut definitions = Vec::new();
+    for at in 0..tokens.len() {
+        let keyword = tokens[at].text.as_str();
+        if !matches!(keyword, "struct" | "enum" | "type") {
+            continue;
+        }
+        let Some(name) = tokens.get(at + 1).filter(|t| t.kind == TokenKind::Ident) else {
+            continue;
+        };
+        if keyword == "type" && placed[at].impl_type.is_some() {
+            continue;
+        }
+        let mut cursor = at + 2;
+        if tokens.get(cursor).is_some_and(|t| t.text == "<") {
+            let mut angles = 0usize;
+            while let Some(token) = tokens.get(cursor) {
+                match token.text.as_str() {
+                    "<" => angles += 1,
+                    ">" => {
+                        angles -= 1;
+                        if angles == 0 {
+                            cursor += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                cursor += 1;
+            }
+        }
+        if tokens.get(cursor).is_some_and(|t| t.text == "where") {
+            while tokens
+                .get(cursor)
+                .is_some_and(|t| !matches!(t.text.as_str(), "{" | ";"))
+            {
+                cursor += 1;
+            }
+        }
+        let Some(open) = tokens.get(cursor) else {
+            continue;
+        };
+        let members = match (keyword, open.text.as_str()) {
+            ("type", "=") => {
+                let end = (cursor..tokens.len())
+                    .find(|&i| tokens[i].text == ";")
+                    .unwrap_or(tokens.len());
+                vec![Field {
+                    name: "type".to_owned(),
+                    ty: tokens[cursor + 1..end]
+                        .iter()
+                        .map(|t| t.text.clone())
+                        .collect(),
+                    line: name.line,
+                }]
+            }
+            ("struct", "{") => named_members(&tokens[cursor + 1..closing(&tokens, cursor)], ""),
+            ("struct", "(") => tuple_members(&tokens[cursor + 1..closing(&tokens, cursor)], ""),
+            ("struct", ";") => Vec::new(),
+            ("enum", "{") => split_members(&tokens[cursor + 1..closing(&tokens, cursor)])
+                .iter()
+                .flat_map(|variant| {
+                    let Some(head) = variant.first() else {
+                        return Vec::new();
+                    };
+                    let prefix = format!("{}.", head.text);
+                    match variant.get(1).map(|t| t.text.as_str()) {
+                        Some("(") => tuple_members(
+                            &variant[2..closing(variant, 1).min(variant.len())],
+                            &prefix,
+                        ),
+                        Some("{") => named_members(
+                            &variant[2..closing(variant, 1).min(variant.len())],
+                            &prefix,
+                        ),
+                        _ => Vec::new(),
+                    }
+                })
+                .collect(),
+            _ => continue,
+        };
+        definitions.push((name.text.clone(), members));
+    }
+    definitions
+}
+
+/// Every type the daemon crate (`continuumd/src`) defines, by name. A name can have more
+/// than one definition, in different modules.
+fn daemon_types(tree: &BTreeMap<String, String>) -> BTreeMap<String, Vec<TypeDef>> {
+    let mut types: BTreeMap<String, Vec<TypeDef>> = BTreeMap::new();
+    for (file, text) in tree {
+        if !file.starts_with(DAEMON_CRATE) {
+            continue;
+        }
+        for (name, members) in type_definitions(&parse(text)) {
+            types.entry(name).or_default().push(TypeDef {
+                file: file.clone(),
+                members,
+            });
+        }
+    }
+    types
+}
+
+/// The definitions `ident` names from `file`: the module that qualifies it if there is
+/// one, else one in the same file, else every definition by that name (conservative).
+fn resolve<'t>(
+    types: &'t BTreeMap<String, Vec<TypeDef>>,
+    ident: &str,
+    qualifier: Option<&str>,
+    file: &str,
+) -> Vec<&'t TypeDef> {
+    let Some(candidates) = types.get(ident) else {
+        return Vec::new();
+    };
+    if let Some(module) = qualifier {
+        let in_module: Vec<&TypeDef> = candidates
+            .iter()
+            .filter(|def| {
+                def.file.ends_with(&format!("/{module}.rs"))
+                    || def.file.ends_with(&format!("/{module}/mod.rs"))
+            })
+            .collect();
+        if !in_module.is_empty() {
+            return in_module;
+        }
+    }
+    let local: Vec<&TypeDef> = candidates.iter().filter(|def| def.file == file).collect();
+    if !local.is_empty() {
+        return local;
+    }
+    candidates.iter().collect()
+}
+
+/// Every type reachable from [`DAEMON_RECORDS`] through the members of the types it reaches,
+/// keyed by `(file, name)`, with its members (bn-283p6, cr-2n0xng).
+///
+/// A member's type is descended into when it names a type the daemon crate defines, at any
+/// depth of generic nesting (`BTreeMap<K, Vec<Option<T>>>` reaches `T`), except inside
+/// `Published<…>`: a receipt-tied value is tied as a whole, and its `PublishedName` impl
+/// is what compares its identity with the receipt's. [`OPAQUE_FIELDS`] names the members
+/// the walk does not descend through, each with its reason.
+fn walk(
+    tree: &BTreeMap<String, String>,
+    types: &BTreeMap<String, Vec<TypeDef>>,
+) -> (Reached, Vec<Violation>) {
+    walk_from(tree, types, DAEMON_RECORDS)
+}
+
+/// [`walk`] from `roots`.
+fn walk_from(
+    tree: &BTreeMap<String, String>,
+    types: &BTreeMap<String, Vec<TypeDef>>,
+    roots: &[(&str, &str)],
+) -> (Reached, Vec<Violation>) {
+    let mut violations = Vec::new();
+    let mut queue: Vec<(String, String)> = Vec::new();
+    for &(file, record) in roots {
+        if !tree.contains_key(file) {
+            continue;
+        }
+        if types
+            .get(record)
+            .is_some_and(|defs| defs.iter().any(|def| def.file == file))
+        {
+            queue.push((file.to_owned(), record.to_owned()));
+        } else {
+            violations.push(Violation::DaemonRecordMissing {
+                file: file.to_owned(),
+                record: record.to_owned(),
+            });
+        }
+    }
+    let mut reached: Reached = BTreeMap::new();
+    while let Some((file, record)) = queue.pop() {
+        if reached.contains_key(&(file.clone(), record.clone())) {
+            continue;
+        }
+        let Some(def) = types
+            .get(&record)
+            .and_then(|defs| defs.iter().find(|def| def.file == file))
+        else {
+            continue;
+        };
+        for field in &def.members {
+            let opaque = OPAQUE_FIELDS
+                .iter()
+                .any(|(f, r, n, _)| *f == file && *r == record && *n == field.name);
+            if opaque {
+                continue;
+            }
+            for (ident, qualifier) in nested_types(&field.ty) {
+                for next in resolve(types, &ident, qualifier.as_deref(), &file) {
+                    queue.push((next.file.clone(), ident.clone()));
+                }
+            }
+        }
+        reached.insert((file, record), def.members.clone());
+    }
+    (reached, violations)
+}
+
+/// The record rules, over every type [`walk`] reaches from the daemon's records.
+fn check_records(tree: &BTreeMap<String, String>) -> Vec<Violation> {
+    let types = daemon_types(tree);
+    let (reached, mut violations) = walk(tree, &types);
+    let mut bare_found: BTreeSet<(String, String, String)> = BTreeSet::new();
+    for ((file, record), fields) in &reached {
+        for field in fields {
+            if bare_handles(&field.ty).is_empty() {
+                continue;
+            }
+            bare_found.insert((file.clone(), record.clone(), field.name.clone()));
+            let adjudicated = BARE_HANDLE_FIELDS
+                .iter()
+                .any(|(f, r, n, _)| f == file && r == record && *n == field.name);
+            if !adjudicated {
+                violations.push(Violation::UnadjudicatedBareHandleField {
+                    file: file.clone(),
+                    record: record.clone(),
+                    field: field.name.clone(),
+                    line: field.line,
+                });
+            }
+        }
+    }
+    // Only a tree that holds the daemon's records judges the rows: a partial tree under
+    // test is judged on what it contains.
+    let judged = |file: &str| tree.contains_key(file);
+    for &(file, record, field, _) in BARE_HANDLE_FIELDS {
+        if judged(file)
+            && !bare_found.contains(&(file.to_owned(), record.to_owned(), field.to_owned()))
+        {
+            violations.push(Violation::StaleHandleFieldAdjudication {
+                file: file.to_owned(),
+                record: record.to_owned(),
+                field: field.to_owned(),
+            });
+        }
+    }
+    for &(file, record, field, _) in OPAQUE_FIELDS {
+        let present = types.get(record).is_some_and(|defs| {
+            defs.iter()
+                .any(|def| def.file == file && def.members.iter().any(|m| m.name == field))
+        });
+        if judged(file) && !present {
+            violations.push(Violation::StaleHandleFieldAdjudication {
+                file: file.to_owned(),
+                record: record.to_owned(),
+                field: field.to_owned(),
+            });
+        }
+    }
+    for &(file, record, field) in RECEIPT_TIED_FIELDS {
+        if !judged(file) {
+            continue;
+        }
+        let tied = reached
+            .get(&(file.to_owned(), record.to_owned()))
+            .is_some_and(|fields| {
+                fields.iter().any(|f| {
+                    f.name == field
+                        && f.ty.iter().any(|t| t == "Published")
+                        && bare_handles(&f.ty).is_empty()
+                })
+            });
+        if !tied {
+            violations.push(Violation::ReceiptTiedFieldLost {
+                file: file.to_owned(),
+                record: record.to_owned(),
+                field: field.to_owned(),
+            });
+        }
+    }
+    violations
+}
+
 /// Run every rule over a source tree given as `crates/`-relative path → text.
 fn check_tree(tree: &BTreeMap<String, String>) -> (Vec<Site>, Vec<Violation>) {
     let mut sites = Vec::new();
@@ -1125,6 +2053,7 @@ fn check_tree(tree: &BTreeMap<String, String>) -> (Vec<Site>, Vec<Violation>) {
         sites.extend(found);
         violations.extend(held);
     }
+    violations.extend(check_records(tree));
     if !tree.contains_key(PUBLICATION_RS) {
         violations.push(Violation::StateNotPrivate {
             what: format!("`{PUBLICATION_RS}` is missing from the tree"),
@@ -1295,8 +2224,9 @@ fn the_store_rules_see_the_real_writes() {
         .collect();
     assert_eq!(
         impls.len(),
-        7,
-        "three impls on each state and one on the receipt: {impls:#?}"
+        8,
+        "three impls on each state, and inherent ones on the receipt and on `Published`: \
+         {impls:#?}"
     );
 }
 
@@ -1553,9 +2483,9 @@ fn mutant_a_receipt_literal_in_the_daemon_is_caught() {
     let file = "continuumd/src/daemon/continuation.rs";
     let tree = mutate(
         file,
-        "    if receipt.handle() != &named {\n",
+        "    Published::attest(&receipt, named).map_err(|_| aborted().not_retryable())\n",
         "    let _forged = PublicationReceipt { handle: named.clone() };\n    \
-         if receipt.handle() != &named {\n",
+         Published::attest(&receipt, named).map_err(|_| aborted().not_retryable())\n",
     );
     let violations = violations_of(&tree);
     assert_eq!(violations.len(), 1, "{violations:#?}");
@@ -1564,6 +2494,314 @@ fn mutant_a_receipt_literal_in_the_daemon_is_caught() {
         Violation::WitnessMintedOutsideCommitPath { file: f, witness, .. }
             if f == file && witness == "PublicationReceipt"
     ));
+}
+
+/// **bn-283p6's mutant.** A daemon record gains a field that names a published artifact by
+/// a bare handle. Nothing ties the name to a receipt, so the record could be written before
+/// the publication commits. The census names the field and nothing else.
+#[test]
+fn mutant_a_bare_published_handle_on_a_daemon_record_is_caught() {
+    let tree = mutate(
+        STATE_RS,
+        "    pub seal: Option<Published<WorkspaceHandle>>,\n",
+        "    pub seal: Option<Published<WorkspaceHandle>>,\n    \
+         pub descriptor_published_as: Option<continuum_workspace::artifact_path::ArtifactHandle>,\n",
+    );
+    let violations = violations_of(&tree);
+    assert_eq!(violations.len(), 1, "{violations:#?}");
+    assert!(
+        matches!(
+            &violations[0],
+            Violation::UnadjudicatedBareHandleField { file, record, field, .. }
+                if file == STATE_RS
+                    && record == "WorkspaceRecord"
+                    && field == "descriptor_published_as"
+        ),
+        "{violations:#?}"
+    );
+}
+
+/// A tied field reverted to its bare handle: the task names a campaign record by a
+/// commitment nothing ties to a receipt. Caught twice, once as a new bare field and once as
+/// a lost tie.
+#[test]
+fn mutant_a_receipt_tied_field_reverted_to_a_bare_handle_is_caught() {
+    let tree = mutate(
+        BUDGET_RS,
+        "    commitment: Published<Commitment>,\n",
+        "    commitment: Commitment,\n",
+    );
+    let mut violations = violations_of(&tree);
+    violations.sort();
+    let mut expected = vec![
+        Violation::UnadjudicatedBareHandleField {
+            file: BUDGET_RS.to_owned(),
+            record: "Publication".to_owned(),
+            field: "commitment".to_owned(),
+            line: violations
+                .iter()
+                .find_map(|v| match v {
+                    Violation::UnadjudicatedBareHandleField { line, .. } => Some(*line),
+                    _ => None,
+                })
+                .unwrap_or(0),
+        },
+        Violation::ReceiptTiedFieldLost {
+            file: BUDGET_RS.to_owned(),
+            record: "Publication".to_owned(),
+            field: "commitment".to_owned(),
+        },
+    ];
+    expected.sort();
+    assert_eq!(violations, expected);
+}
+
+/// `Published` forged from a bare name through a trait `impl`: a constructor by another
+/// name. Caught as an unexpected `impl` and as a mint outside the two sanctioned items.
+#[test]
+fn mutant_a_published_name_forged_without_a_receipt_is_caught() {
+    let tree = mutate(
+        PUBLICATION_RS,
+        "impl Published<ArtifactHandle> {\n",
+        "impl<H> From<H> for Published<H> {\n    fn from(name: H) -> Self {\n        \
+         Self { name }\n    }\n}\n\nimpl Published<ArtifactHandle> {\n",
+    );
+    let violations = violations_of(&tree);
+    assert!(
+        violations.contains(&Violation::UnexpectedWitnessImpl {
+            witness: "Published".to_owned(),
+            trait_name: Some("From".to_owned()),
+        }),
+        "{violations:#?}"
+    );
+    assert!(
+        violations.iter().any(|v| matches!(
+            v,
+            Violation::WitnessMintedOutsideCommitPath { witness, item, .. }
+                if witness == "Published" && item == "Published::from"
+        )),
+        "{violations:#?}"
+    );
+    assert_eq!(violations.len(), 2, "{violations:#?}");
+}
+
+/// **cr-2n0xng's mutant: a nested record.** A record the task table stores holds a new
+/// record type, and that type names a published artifact by a bare handle. The field on
+/// `ResolvedTask` holds no handle type itself, so a direct-field census passes it. The walk
+/// descends into the nested type and names its field.
+#[test]
+fn mutant_a_bare_handle_nested_in_a_record_the_task_table_stores_is_caught() {
+    let tree = mutate(
+        RECOVERY_RS,
+        "pub struct ResolvedTask {\n",
+        "pub struct Echo(pub ArtifactHandle);\n\npub struct ResolvedTask {\n    pub echoes: Vec<Echo>,\n",
+    );
+    assert!(
+        bare_handles(&["Vec", "<", "Echo", ">"].map(str::to_owned)).is_empty(),
+        "the direct-field rule alone does not see it"
+    );
+    let violations = violations_of(&tree);
+    assert_eq!(violations.len(), 1, "{violations:#?}");
+    assert!(
+        matches!(
+            &violations[0],
+            Violation::UnadjudicatedBareHandleField { file, record, field, .. }
+                if file == RECOVERY_RS && record == "Echo" && field == "0"
+        ),
+        "{violations:#?}"
+    );
+}
+
+/// **cr-2n0xng's mutant: a resolution that holds its campaign records untied.** The
+/// finding's own shape: `ResolvedTask::records` back to bare `CampaignRecord`s, whose
+/// identities `claims()` and `verification.start` would emit with no receipt. Caught as a
+/// lost tie, and as the nested record's bare identity.
+#[test]
+fn mutant_a_resolution_holding_campaign_records_untied_is_caught() {
+    let tree = mutate(
+        RECOVERY_RS,
+        "    pub records: Vec<Published<CampaignRecord>>,\n",
+        "    pub records: Vec<CampaignRecord>,\n",
+    );
+    let violations = violations_of(&tree);
+    assert!(
+        violations.contains(&Violation::ReceiptTiedFieldLost {
+            file: RECOVERY_RS.to_owned(),
+            record: "ResolvedTask".to_owned(),
+            field: "records".to_owned(),
+        }),
+        "{violations:#?}"
+    );
+    assert!(
+        violations.iter().any(|v| matches!(
+            v,
+            Violation::UnadjudicatedBareHandleField { file, record, field, .. }
+                if file == RECOVERY_RS && record == "CampaignRecord" && field == "identity"
+        )),
+        "{violations:#?}"
+    );
+    assert!(
+        violations.iter().all(|v| match v {
+            Violation::ReceiptTiedFieldLost { record, .. } => record == "ResolvedTask",
+            Violation::UnadjudicatedBareHandleField { record, .. } => record == "CampaignRecord",
+            _ => false,
+        }),
+        "only the reverted field and the record it exposes: {violations:#?}"
+    );
+}
+
+/// **cr-2n0xng's mutant: an enum variant.** A resolution's typed failure reason gains a
+/// payload that names an artifact by a bare handle. The walk reads enum variants too,
+/// reached through `ResolvedTask::resolution`.
+#[test]
+fn mutant_a_bare_handle_in_a_failure_reason_variant_is_caught() {
+    let tree = mutate(
+        RECOVERY_RS,
+        "    /// restored, and the task is not reported as `Restored` or `Terminal` either.\n    Unreceipted,\n",
+        "    /// restored, and the task is not reported as `Restored` or `Terminal` either.\n    Unreceipted(ArtifactHandle),\n",
+    );
+    let violations = violations_of(&tree);
+    assert_eq!(violations.len(), 1, "{violations:#?}");
+    assert!(
+        matches!(
+            &violations[0],
+            Violation::UnadjudicatedBareHandleField { file, record, field, .. }
+                if file == RECOVERY_RS && record == "FailureReason" && field == "Unreceipted.0"
+        ),
+        "{violations:#?}"
+    );
+}
+
+/// An adjudication that stops the walk cannot outlive its field.
+#[test]
+fn mutant_a_stale_opaque_adjudication_is_caught() {
+    let tree = mutate(
+        STATE_RS,
+        "    components: BTreeMap<Commitment, SnapshotComponents>,\n",
+        "    registered_components: BTreeMap<Commitment, SnapshotComponents>,\n",
+    );
+    let violations = violations_of(&tree);
+    assert!(
+        violations.contains(&Violation::StaleHandleFieldAdjudication {
+            file: STATE_RS.to_owned(),
+            record: "DaemonState".to_owned(),
+            field: "components".to_owned(),
+        }),
+        "{violations:#?}"
+    );
+}
+
+/// **Positive, and not vacuous.** The record census walks every listed record and every
+/// daemon type they hold at any depth, finds every adjudicated bare field and every tied
+/// field, and each tied field holds `Published`.
+#[test]
+fn the_daemon_records_that_name_a_published_artifact_hold_a_receipt_tied_name() {
+    let tree = source_tree();
+    assert!(
+        check_records(&tree).is_empty(),
+        "{:#?}",
+        check_records(&tree)
+    );
+    let types = daemon_types(&tree);
+    let (reached, missing) = walk(&tree, &types);
+    assert!(missing.is_empty(), "{missing:#?}");
+    for &(file, record) in DAEMON_RECORDS {
+        let fields = reached
+            .get(&(file.to_owned(), record.to_owned()))
+            .unwrap_or_else(|| panic!("{file} defines {record}"));
+        assert!(!fields.is_empty(), "{record} has fields the census read");
+    }
+    assert!(
+        reached.len() > DAEMON_RECORDS.len(),
+        "the walk descends past the listed records ({} types)",
+        reached.len()
+    );
+    let tied = RECEIPT_TIED_FIELDS
+        .iter()
+        .filter(|(file, record, field)| {
+            reached
+                .get(&((*file).to_owned(), (*record).to_owned()))
+                .is_some_and(|fields| fields.iter().any(|f| f.name == *field))
+        })
+        .count();
+    assert_eq!(tied, RECEIPT_TIED_FIELDS.len(), "every tied field is found");
+
+    // cr-2n0xng: what the task table stores is walked, not only its direct fields. From the
+    // table alone the walk reaches the resolution records a restart files, the records a
+    // resolution restores from, and the enums its outcome is spelled in.
+    let (from_table, _) = walk_from(&tree, &types, &[(TASK_RS, "TaskTable")]);
+    for (file, record) in [
+        (RECOVERY_RS, "ResolvedTask"),
+        (RECOVERY_RS, "Resolution"),
+        (RECOVERY_RS, "FailureReason"),
+        (CONTINUATION_RS, "ContinuationRecord"),
+        (TERMINAL_RS, "TerminalRecord"),
+        (TASK_RS, "TaskEntry"),
+        (TASK_RS, "Continuation"),
+        (TASK_RS, "DurableRevision"),
+    ] {
+        assert!(
+            from_table.contains_key(&(file.to_owned(), record.to_owned())),
+            "the task table reaches {record}: {:#?}",
+            from_table.keys().collect::<Vec<_>>()
+        );
+    }
+    assert!(
+        !reached.contains_key(&(RECOVERY_RS.to_owned(), "CampaignRecord".to_owned())),
+        "a campaign record is held only as `Published<CampaignRecord>`, so the walk does \
+         not descend into it"
+    );
+    assert!(
+        !reached.contains_key(&(RECOVERY_RS.to_owned(), "CandidateTask".to_owned())),
+        "the untied pass output is stored by no daemon record"
+    );
+    assert_eq!(
+        bare_handles(&["Option", "<", "Published", "<", "Commitment", ">", ">"].map(str::to_owned)),
+        Vec::<String>::new(),
+        "a handle inside `Published<…>` is tied"
+    );
+    assert_eq!(
+        bare_handles(
+            &[
+                "BTreeMap",
+                "<",
+                "TaskHandle",
+                ",",
+                "Published",
+                "<",
+                "Commitment",
+                ">",
+                ">"
+            ]
+            .map(str::to_owned)
+        ),
+        vec!["TaskHandle".to_owned()],
+        "a sibling of `Published<…>` is not"
+    );
+    assert_eq!(
+        nested_types(
+            &[
+                "BTreeMap",
+                "<",
+                "TaskHandle",
+                ",",
+                "super",
+                ":",
+                ":",
+                "recovery",
+                ":",
+                ":",
+                "ResolvedTask",
+                ">"
+            ]
+            .map(str::to_owned)
+        ),
+        vec![
+            ("BTreeMap".to_owned(), None),
+            ("ResolvedTask".to_owned(), Some("recovery".to_owned()))
+        ],
+        "a nested record is found at any depth, with its module"
+    );
 }
 
 // =========================================================================================

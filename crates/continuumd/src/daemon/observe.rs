@@ -72,7 +72,7 @@
 
 use continuum_evidence::claim_status::ClaimStatus;
 use continuum_workspace::artifact_path::ArtifactClass;
-use continuum_workspace::publication::{PublishRefusal, ReferenceStore};
+use continuum_workspace::publication::{PublishRefusal, Published, ReferenceStore};
 
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
 use super::state::{DaemonState, EvidenceNode, StatusWrite};
@@ -185,7 +185,7 @@ fn ingest(
     // by the store's own record rather than by this function's say-so.
     let token =
         identity::capability_to_store(&call.envelope.capability).map_err(|_| Fault::denied())?;
-    store
+    let receipt = store
         .publish(ArtifactClass::Evidence, staged.content.clone(), &token)
         .map_err(|refusal| match refusal {
             PublishRefusal::CapabilityDenied(_) => Fault::denied(),
@@ -233,6 +233,7 @@ fn ingest(
             inconclusive_reason: None,
         }],
         redaction: None,
+        publication: Some(Published::of(&receipt)),
     };
 
     let (_, appended) = state.append_evidence(handle.clone(), node);

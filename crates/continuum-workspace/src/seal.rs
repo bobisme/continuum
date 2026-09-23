@@ -244,6 +244,23 @@ impl SealedWorkspace {
         &self.receipts
     }
 
+    /// The receipt of the descriptor record: the root, published last.
+    ///
+    /// The receipt a consumer ties its "this workspace is sealed" record to
+    /// ([`Published`](crate::publication::Published), INV-017). [`None`] is unreachable for
+    /// a value [`Self::seal`] returned: every descriptor's records end with its own.
+    ///
+    /// It is the root's receipt because RFC 0026 makes atomicity per artifact: "a composite
+    /// MAY leave earlier records published, never its root". The root's index commit is
+    /// the one that makes the workspace fetchable under its own name.
+    #[must_use]
+    pub fn root_receipt(&self) -> Option<&PublicationReceipt> {
+        self.receipts
+            .iter()
+            .rev()
+            .find(|receipt| receipt.handle() == self.descriptor.identity())
+    }
+
     /// The descriptor, taken by value.
     #[must_use]
     pub fn into_descriptor(self) -> WorkspaceDescriptor {
@@ -355,6 +372,25 @@ mod tests {
             .collect();
         assert_eq!(published, expected);
         assert_eq!(sealed.descriptor_identity(), expected.last().expect("root"));
+    }
+
+    /// bn-283p6: the root receipt is the descriptor record's, the last one published, so a
+    /// consumer that ties "sealed" to it ties it to the commit that makes the workspace
+    /// fetchable under its own name.
+    #[test]
+    fn the_root_receipt_is_the_descriptor_records() {
+        let (store, capability) = store_and_capability();
+        let sealed = SealedWorkspace::seal(descriptor(), &store, &capability).expect("seal");
+        let root = sealed
+            .root_receipt()
+            .expect("every seal publishes its descriptor");
+        assert_eq!(root.handle(), sealed.descriptor_identity());
+        assert_eq!(Some(root), sealed.receipts().last());
+        assert_ne!(
+            root.handle(),
+            sealed.snapshot_identity(),
+            "the root is the descriptor, not the file tree"
+        );
     }
 
     #[test]

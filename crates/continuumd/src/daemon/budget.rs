@@ -73,7 +73,7 @@ use continuum_task::budget::dimension::{Ceiling, CostDimension, MeterSet};
 use continuum_task::budget::partial::Checkpoint;
 use continuum_task::budget::{Budget as LedgerBudget, BudgetLedger, ChargeOutcome, UpdateOutcome};
 use continuum_workspace::artifact_path::ArtifactClass;
-use continuum_workspace::publication::ContentIdentifier;
+use continuum_workspace::publication::{ContentIdentifier, Published};
 
 use super::family::Fault;
 use super::task::{Preimage, unsupported};
@@ -340,7 +340,9 @@ pub fn would_suspend(ledger: &BudgetLedger, budget: &Budget) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Publication {
     sequence: u32,
-    commitment: Commitment,
+    /// The content identity, tied to the receipt the store issued for it (bn-283p6). A
+    /// publication the task names is one the store has committed (INV-017).
+    commitment: Published<Commitment>,
     checkpoint: Checkpoint,
 }
 
@@ -357,7 +359,7 @@ impl Publication {
     /// The content identity of what was committed.
     #[must_use]
     pub const fn commitment(&self) -> &Commitment {
-        &self.commitment
+        self.commitment.handle()
     }
 
     /// The budget checkpoint this commit was priced at.
@@ -395,7 +397,7 @@ impl Publication {
                 )
                 .not_retryable()
             })?,
-            commitment: Optional::Present(self.commitment.clone()),
+            commitment: Optional::Present(self.commitment.handle().clone()),
             redacted: Optional::Absent,
         })
     }
@@ -472,18 +474,31 @@ impl Publications {
         self.staged = Some(commitment);
     }
 
-    /// Commit the staged publication at `checkpoint`, naming it.
+    /// Commit the staged publication at `checkpoint`, naming it by `published`.
+    ///
+    /// `published` is the staged name tied to the store's receipt (bn-283p6), so a task
+    /// cannot name a publication the store has not committed (INV-017). The order "publish,
+    /// then record" is what compiles, not a convention.
     ///
     /// [`None`] when nothing was staged — a commit with no publication in flight is the
     /// caller's bug, and it is reported rather than invented, because minting a name for a
     /// publication that was never staged is exactly the half-visible artifact this type
-    /// exists to make unconstructable.
-    pub fn commit(&mut self, checkpoint: Checkpoint) -> Option<&Publication> {
-        let commitment = self.staged.take()?;
+    /// exists to make unconstructable. [`None`] too when `published` names another
+    /// publication than the staged one. The staged publication is then dropped, as by
+    /// [`discard`](Self::discard): a commit is both-or-neither.
+    pub fn commit(
+        &mut self,
+        checkpoint: Checkpoint,
+        published: Published<Commitment>,
+    ) -> Option<&Publication> {
+        let staged = self.staged.take()?;
+        if &staged != published.handle() {
+            return None;
+        }
         let sequence = self.count();
         self.committed.push(Publication {
             sequence,
-            commitment,
+            commitment: published,
             checkpoint,
         });
         self.committed.last()
@@ -518,7 +533,7 @@ impl Publications {
             out.push_str(&format!(
                 "publication {} {} {}\n",
                 publication.sequence,
-                publication.commitment.as_str(),
+                publication.commitment().as_str(),
                 publication.checkpoint.render()
             ));
         }
@@ -643,7 +658,7 @@ fn optional<T>(value: Option<T>) -> Optional<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::identity::Blake3Identity;
+    use crate::daemon::identity::{Blake3Identity, testing};
     use crate::protocol::scalar::TaskHandle;
 
     fn budget() -> Budget {
@@ -816,13 +831,18 @@ mod tests {
         assert!(!publications.is_staging());
         assert_eq!(publications.count(), 0, "a discard publishes nothing");
 
-        publications.stage(Commitment::new("commit-2"));
+        let (store, operator) = testing::store();
+        let commit_2 = Commitment::new("task_commit-2");
+        publications.stage(commit_2.clone());
         let spend = continuum_task::budget::Spend::measured_by(METERS);
         let named = publications
-            .commit(Checkpoint::new(0, 1, spend))
+            .commit(
+                Checkpoint::new(0, 1, spend),
+                testing::publish(&store, &operator, "task_commit-2", commit_2),
+            )
             .expect("a staged publication commits");
         assert_eq!(named.sequence(), 0);
-        assert_eq!(named.commitment().as_str(), "commit-2");
+        assert_eq!(named.commitment().as_str(), "task_commit-2");
         assert_eq!(publications.count(), 1);
         assert!(!publications.is_staging());
         assert_eq!(publications.artifacts(&task()).expect("named").len(), 1);
@@ -830,11 +850,42 @@ mod tests {
 
     #[test]
     fn committing_nothing_names_nothing() {
+        let (store, operator) = testing::store();
+        let published = |spelling: &str| {
+            testing::publish(&store, &operator, spelling, Commitment::new(spelling))
+        };
         let mut publications = Publications::new();
         let spend = continuum_task::budget::Spend::measured_by(METERS);
-        assert!(publications.commit(Checkpoint::new(0, 0, spend)).is_none());
+        assert!(
+            publications
+                .commit(Checkpoint::new(0, 0, spend), published("task_c0"))
+                .is_none()
+        );
         assert_eq!(publications.count(), 0);
         assert!(!publications.discard());
+    }
+
+    /// bn-283p6: a receipt for one publication does not commit another. The staged one is
+    /// dropped, both-or-neither, and nothing is named.
+    #[test]
+    fn a_receipt_for_another_publication_commits_nothing() {
+        let (store, operator) = testing::store();
+        let mut publications = Publications::new();
+        publications.stage(Commitment::new("task_staged"));
+        let other = testing::publish(
+            &store,
+            &operator,
+            "task_other",
+            Commitment::new("task_other"),
+        );
+        let spend = continuum_task::budget::Spend::measured_by(METERS);
+        assert!(
+            publications
+                .commit(Checkpoint::new(0, 1, spend), other)
+                .is_none()
+        );
+        assert_eq!(publications.count(), 0, "nothing is named");
+        assert!(!publications.is_staging(), "and nothing is left in flight");
     }
 
     #[test]
@@ -871,12 +922,17 @@ mod tests {
     #[test]
     fn the_publication_render_is_byte_identical_across_two_runs() {
         let build = || {
+            let (store, operator) = testing::store();
             let mut publications = Publications::new();
             let spend = continuum_task::budget::Spend::measured_by(METERS);
-            publications.stage(Commitment::new("commit-1"));
-            publications.commit(Checkpoint::new(0, 1, spend));
-            publications.stage(Commitment::new("commit-2"));
-            publications.commit(Checkpoint::new(1, 2, spend));
+            for (sequence, spelling) in [(0, "task_commit-1"), (1, "task_commit-2")] {
+                let name = Commitment::new(spelling);
+                publications.stage(name.clone());
+                publications.commit(
+                    Checkpoint::new(sequence, sequence + 1, spend),
+                    testing::publish(&store, &operator, spelling, name),
+                );
+            }
             publications.render()
         };
         assert_eq!(build().as_bytes(), build().as_bytes());

@@ -159,7 +159,7 @@ use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::components::{WorkspaceDescriptor, WorkspaceDescriptorBuilder};
 use continuum_workspace::lineage::{Fork, ForkName};
 use continuum_workspace::overlay::Overlay;
-use continuum_workspace::publication::{PublishRefusal, ReferenceStore};
+use continuum_workspace::publication::{PublishRefusal, Published, ReferenceStore};
 use continuum_workspace::seal::{SealError, SealedWorkspace, rebind_components};
 use continuum_workspace::snapshot::{Snapshot, WorkspaceContent, WorkspacePath};
 use continuum_workspace::staleness::{
@@ -427,9 +427,11 @@ fn create(
     let handle = wire_handle(&descriptor)?;
     let lineage = lineage_name(&handle)?;
     let requested_seal = matches!(request.seal, Optional::Present(true));
-    if requested_seal {
-        publish(call, &descriptor, store)?;
-    }
+    let seal = if requested_seal {
+        Some(publish(call, &descriptor, &handle, store)?)
+    } else {
+        None
+    };
 
     // A create is convergent, not destructive. See "Creating a workspace this daemon
     // already holds" in this module's documentation for the whole reading; the three lines
@@ -437,11 +439,11 @@ fn create(
     // (`open_lineage` is put-if-absent), the held record is not replaced, and `sealed` is
     // monotone — a create can seal an unsealed snapshot, and no create un-seals one.
     state.open_lineage(Fork::diverge(lineage.clone(), descriptor.source()));
-    let sealed = match state.workspace(&handle).map(|held| held.sealed) {
+    let sealed = match state.workspace(&handle).map(WorkspaceRecord::sealed) {
         Some(already) => {
-            if requested_seal && !already {
+            if !already && let Some(seal) = seal {
                 if let Some(held) = state.workspace_mut(&handle) {
-                    held.sealed = true;
+                    held.seal = Some(seal);
                 }
             }
             already || requested_seal
@@ -453,7 +455,7 @@ fn create(
                     descriptor,
                     intent: request.components.intent.clone(),
                     lineage,
-                    sealed: requested_seal,
+                    seal,
                 },
             );
             requested_seal
@@ -592,7 +594,7 @@ fn fork(
             descriptor,
             intent: intent.clone(),
             lineage: lineage_name,
-            sealed: false,
+            seal: None,
         },
     );
 
@@ -640,7 +642,7 @@ fn fork(
 fn diff(request: &WorkspaceDiffRequest, state: &DaemonState) -> Result<Effect, Fault> {
     for snapshot in [&request.before, &request.after] {
         let record = state.workspace(snapshot).ok_or_else(Fault::denied)?;
-        if !record.sealed {
+        if !record.sealed() {
             return Err(Fault::new(
                 ErrorCode::StaleSnapshot,
                 "a diff classifies only sealed snapshots",
@@ -678,8 +680,12 @@ fn seal(
             GuardedSealError::Seal(seal) => seal_fault(&seal),
         })?;
 
+    let seal = sealed
+        .root_receipt()
+        .and_then(|receipt| Published::attest(receipt, request.snapshot.clone()).ok())
+        .ok_or_else(identity_disagreement)?;
     if let Some(record) = state.workspace_mut(&request.snapshot) {
-        record.sealed = true;
+        record.seal = Some(seal);
     }
     let root = Commitment::new(&sealed.snapshot_identity().to_string());
     Ok(Effect::new(
@@ -693,16 +699,38 @@ fn seal(
 }
 
 /// Publish every record a descriptor is made of, mapping the store's refusals to the wire.
+///
+/// Returns `handle` tied to the descriptor record's receipt (bn-283p6), which is the only
+/// value a [`WorkspaceRecord`] can read as sealed.
 fn publish(
     call: &Call<'_>,
     descriptor: &WorkspaceDescriptor,
+    handle: &WorkspaceHandle,
     store: &ReferenceStore,
-) -> Result<(), Fault> {
+) -> Result<Published<WorkspaceHandle>, Fault> {
     let token =
         identity::capability_to_store(&call.envelope.capability).map_err(|_| Fault::denied())?;
-    SealedWorkspace::seal(descriptor.clone(), store, &token)
-        .map(|_| ())
-        .map_err(|error| seal_fault(&error))
+    let sealed = SealedWorkspace::seal(descriptor.clone(), store, &token)
+        .map_err(|error| seal_fault(&error))?;
+    sealed
+        .root_receipt()
+        .and_then(|receipt| Published::attest(receipt, handle.clone()).ok())
+        .ok_or_else(identity_disagreement)
+}
+
+/// The daemon's name for a sealed workspace is not the handle its descriptor record was
+/// published under.
+///
+/// Unreachable while `wire_handle` renders the descriptor identity: the two spellings are
+/// one rule. A typed refusal rather than a panic, and deterministic, so not retryable. The
+/// records are published and converge on a retry, as for a partial seal (RFC 0026's
+/// per-artifact contract), but no workspace record reads as sealed.
+fn identity_disagreement() -> Fault {
+    Fault::new(
+        ErrorCode::PublicationAborted,
+        "the sealed descriptor's receipt does not name the workspace handle",
+    )
+    .not_retryable()
 }
 
 /// `SnapshotComponents.epochs` against the epochs the daemon serves.

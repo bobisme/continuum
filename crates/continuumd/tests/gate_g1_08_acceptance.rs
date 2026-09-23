@@ -211,8 +211,8 @@ use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
 use continuum_workspace::lineage::ForkName;
 use continuum_workspace::publication::{
     AbortReason, ActorId as StoreActor, AuditLog, AuthorityLevel as StoreLevel, CapabilityToken,
-    ContentIdentifier, IdentityUnavailable, PublicationPhase, ReferenceStore, StorageFaults,
-    StoreDefect,
+    ContentIdentifier, IdentityUnavailable, PublicationPhase, PublicationReceipt, Published,
+    ReferenceStore, StorageFaults, StoreDefect,
 };
 use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::budget::Publications;
@@ -221,7 +221,8 @@ use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
 use continuumd::daemon::recovery::{
-    self, CrashInjector, CrashPoint, Disposition, FailureReason, Resolution, Startup, VolatileFact,
+    self, CrashInjector, CrashPoint, Disposition, FailureReason, Resolution, Startup,
+    TaskResolution, VolatileFact,
 };
 use continuumd::daemon::state::{IntentRecord, RegistryStatus};
 use continuumd::daemon::task::TaskFamily;
@@ -773,8 +774,14 @@ fn now() -> Timestamp {
 
 /// The one builder a cold start and a restart both go through.
 fn builder() -> Builder {
+    builder_with(Blake3Identity)
+}
+
+/// [`builder`] over another identity seam: a deployment that changed its seam between two
+/// runs (bn-283p6).
+fn builder_with(identifier: impl ContentIdentifier + Clone + 'static) -> Builder {
     let root = Some(cap("cap_root"));
-    Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
+    Daemon::builder(identifier, negotiated(), cap("cap_root"))
         .epochs(epochs())
         .now(now())
         .capability(
@@ -2792,6 +2799,38 @@ fn no_task_claims_an_artifact_the_store_does_not_hold_across_the_mix() {
 // D. negative controls
 // =============================================================================================
 
+/// A receipt for `handle` from a scratch store that is not the daemon's: its identifier names
+/// content by the content's own text, so publishing the identity half files it under
+/// `handle` (bn-283p6).
+fn scratch_receipt(handle: &ArtifactHandle) -> PublicationReceipt {
+    struct Verbatim;
+    impl ContentIdentifier for Verbatim {
+        fn identify(
+            &self,
+            class: ArtifactClass,
+            content: &[u8],
+        ) -> Result<ArtifactHandle, IdentityUnavailable> {
+            let text = std::str::from_utf8(content).map_err(|_| IdentityUnavailable)?;
+            ArtifactHandle::new(class, text).map_err(|_| IdentityUnavailable)
+        }
+    }
+    let token = CapabilityToken::mint("scratch").expect("a capability token");
+    let scratch = ReferenceStore::builder(Verbatim, Arc::new(AuditLog::new()))
+        .capability(continuum_workspace::publication::CapabilityDescriptor::new(
+            token.clone(),
+            StoreActor::new("scratch"),
+            StoreLevel::Propose,
+        ))
+        .build();
+    let text = handle.to_string();
+    let identity = text
+        .strip_prefix(handle.class().prefix())
+        .expect("a handle spells its class prefix");
+    scratch
+        .publish(handle.class(), identity.as_bytes().to_vec(), &token)
+        .expect("the scratch store publishes")
+}
+
 /// **Negative control — a planted orphan task is detected, and the withheld mirror is clean.**
 ///
 /// The plant goes through the out-of-band administration seam (`Daemon::state_mut`), which is
@@ -2799,6 +2838,13 @@ fn no_task_claims_an_artifact_the_store_does_not_hold_across_the_mix() {
 /// and committed onto a live task under a `task_*` commitment whose bytes were never published.
 /// That is precisely an orphan task — a task claiming an artifact the store does not hold — and
 /// it is the state O2's recovery would have to reap.
+///
+/// Since bn-283p6 a task commits only a name tied to a publication receipt
+/// (`Published<Commitment>`), so a bare fabricated commitment no longer compiles as a plant.
+/// The plant therefore carries a receipt from a **second, scratch store** that did publish the
+/// fabricated identity. That is the narrowing the type leaves: a `Published` value proves that
+/// a store committed the name, not that *this* daemon's store did. This census is what
+/// catches the rest.
 ///
 /// The mirror is the same daemon, the same drive, without the plant. Both halves are asserted,
 /// so a detector that always fires and a detector that never fires both fail this test.
@@ -2845,10 +2891,14 @@ fn negative_control_a_planted_orphan_task_is_detected() {
         .tasks_mut()
         .get_mut(&witnesses.task)
         .expect("the task is held");
+    let receipt = scratch_receipt(&fabricated);
+    let name = Commitment::new(&fabricated.to_string());
+    let published = Published::attest(&receipt, name.clone())
+        .expect("the scratch store's receipt names the fabricated identity");
     let evidence: &mut Publications = &mut entry.evidence;
-    evidence.stage(Commitment::new(&fabricated.to_string()));
+    evidence.stage(name);
     assert!(
-        evidence.commit(checkpoint).is_some(),
+        evidence.commit(checkpoint, published).is_some(),
         "the plant landed on the record"
     );
 
@@ -3159,5 +3209,351 @@ fn two_independently_crashed_daemons_census_identically() {
         renders[0].lines().count() > 6,
         "anti-vacuity: the rendering is not a stub:\n{}",
         renders[0]
+    );
+}
+
+// =============================================================================================
+// E. receipt-tied restoration (bn-283p6, security review cr-106znn)
+// =============================================================================================
+
+/// A seam that is not the one the store was written under: BLAKE3 over the content with a
+/// one-byte suffix, so every identity it derives differs from [`Blake3Identity`]'s.
+#[derive(Debug, Clone, Copy)]
+struct DriftedIdentity;
+
+impl ContentIdentifier for DriftedIdentity {
+    fn identify(
+        &self,
+        class: ArtifactClass,
+        content: &[u8],
+    ) -> Result<ArtifactHandle, IdentityUnavailable> {
+        let mut drifted = content.to_vec();
+        drifted.push(0x5a);
+        Blake3Identity.identify(class, &drifted)
+    }
+}
+
+/// Every `Restored` or `Terminal` resolution the startup report carries has the live task it
+/// names, and none sits in the resolved set, where `verification.start` could run it afresh.
+fn assert_every_restoration_is_live(daemon: &Daemon) -> TaskResolution {
+    let Startup::Resolved(resolution) = daemon.startup() else {
+        panic!("expected a resolved startup, got {:?}", daemon.startup());
+    };
+    for resolved in resolution.tasks() {
+        if matches!(
+            resolved.resolution,
+            Resolution::Restored(_) | Resolution::Terminal(_)
+        ) {
+            assert!(
+                daemon.state().tasks().get(&resolved.task).is_some(),
+                "{} is reported {:?} with no live task",
+                resolved.task.as_str(),
+                resolved.resolution
+            );
+            assert!(daemon.state().tasks().resolution(&resolved.task).is_none());
+        }
+    }
+    resolution.clone()
+}
+
+/// A completed campaign on a sealed snapshot: the terminal path.
+fn completed(mut prepared: Prepared) -> (Prepared, TaskHandle) {
+    let snapshot = seal(&mut prepared, "req_create", "idem-create");
+    let task = started_task(&start(
+        &mut prepared,
+        &snapshot,
+        "req_start",
+        "idem-start",
+        64,
+    ));
+    (prepared, task)
+}
+
+/// **A changed identity seam across a restart, parked path.** Before bn-283p6's fix the
+/// successor re-derived the continuation record's store handle through its own seam, found no
+/// receipt under it, dropped the failure, and kept a `Restored` resolution with no live task.
+/// The record is now tied under the identity the index named it by, so the task is live and
+/// holds its receipt-tied durable revision.
+#[test]
+fn a_changed_identity_seam_across_a_restart_still_restores_a_parked_task_live() {
+    let (prepared, witnesses) = driven(prepare(daemon()));
+    let restarted = builder_with(DriftedIdentity)
+        .over(prepared.daemon.crash())
+        .build();
+    let resolution = assert_every_restoration_is_live(&restarted);
+    assert_eq!(resolution.tasks().len(), 1);
+    assert_eq!(
+        resolution.tasks()[0].resolution,
+        Resolution::Restored(ParkState::Suspended)
+    );
+    let entry = restarted
+        .state()
+        .tasks()
+        .get(&witnesses.task)
+        .expect("the parked task is live");
+    let continuation = entry
+        .continuation
+        .clone()
+        .expect("it holds its continuation");
+    let durable = restarted
+        .state()
+        .tasks()
+        .durable_record(&continuation)
+        .expect("its durable revision is tied to a receipt");
+    assert_eq!(
+        durable.handle(),
+        resolution.tasks()[0]
+            .continuation_identity
+            .as_ref()
+            .expect("the pass kept the selected record's store identity")
+            .handle(),
+    );
+}
+
+/// **A changed identity seam across a restart, terminal path.** The terminal record is tied
+/// to its receipt under its index identity too, so a completed task comes back live.
+#[test]
+fn a_changed_identity_seam_across_a_restart_still_restores_a_terminal_task_live() {
+    let (prepared, task) = completed(prepare(daemon()));
+    let restarted = builder_with(DriftedIdentity)
+        .over(prepared.daemon.crash())
+        .build();
+    let resolution = assert_every_restoration_is_live(&restarted);
+    assert_eq!(
+        resolution.tasks()[0].resolution,
+        Resolution::Terminal(TerminalState::Completed)
+    );
+    assert_eq!(
+        restarted
+            .state()
+            .tasks()
+            .get(&task)
+            .map(|entry| entry.status),
+        Some(TaskStatus::Completed)
+    );
+}
+
+/// An empty ledger that can be audited: a store no publication ever reached.
+fn empty_ledger() -> ReferenceStore {
+    ReferenceStore::builder(Blake3Identity, Arc::new(AuditLog::new()))
+        .capability(continuum_workspace::publication::CapabilityDescriptor::new(
+            operator(),
+            StoreActor::new("service:continuumd"),
+            StoreLevel::Promote,
+        ))
+        .build()
+}
+
+/// **A missing receipt, parked and terminal paths.** The store's own API cannot drop a
+/// receipt (the ledger is appended in the index commit's critical section), so the missing
+/// receipt is a ledger that holds none: the resolution of a real crashed store, confirmed
+/// against an empty ledger. Each selected record is withdrawn to the typed
+/// `Failed(Unreceipted)`, never left as a `Restored` or `Terminal` with nothing behind it.
+#[test]
+fn a_missing_receipt_withdraws_a_parked_or_terminal_resolution_to_a_typed_failure() {
+    let (parked, _) = driven(prepare(daemon()));
+    let (closed, _) = completed(prepare(daemon()));
+    for (daemon, expected) in [
+        (parked.daemon, Resolution::Restored(ParkState::Suspended)),
+        (
+            closed.daemon,
+            Resolution::Terminal(TerminalState::Completed),
+        ),
+    ] {
+        let durable = daemon.crash();
+        let own = durable
+            .store()
+            .audit_view(&operator())
+            .expect("the operator audits");
+        let inventory = recovery::read_inventory(durable.store(), &own, &operator());
+        let resolution = recovery::tie_receipts(inventory.clone(), &own);
+        assert_eq!(
+            resolution.tasks()[0].resolution,
+            expected,
+            "with its own ledger the record restores"
+        );
+        let empty = empty_ledger();
+        let audit = empty.audit_view(&operator()).expect("the operator audits");
+        let confirmed = recovery::tie_receipts(inventory, &audit);
+        assert!(
+            confirmed.tasks()[0].claims().is_empty(),
+            "a withdrawn resolution keeps no unreceipted identity"
+        );
+        assert_eq!(
+            confirmed.tasks()[0].resolution,
+            Resolution::Failed(FailureReason::Unreceipted),
+            "a record the ledger holds no receipt for is a typed failure"
+        );
+        assert!(confirmed.tasks()[0].continuation.is_none());
+        assert!(confirmed.tasks()[0].terminal.is_none());
+        assert!(
+            confirmed.render().contains("unreceipted"),
+            "and the startup report names the cause"
+        );
+    }
+}
+
+/// **`verification.start` never runs a resolved identity afresh.** A `Restored` or
+/// `Terminal` resolution with no live task behind it — the state cr-106znn found reachable —
+/// is planted through the out-of-band seam. A re-issued start for that identity opens no
+/// region and publishes nothing, on both paths.
+#[test]
+fn a_restoration_with_no_live_task_is_never_run_afresh() {
+    for states in [4, 64] {
+        let (source, task) = {
+            let mut prepared = prepare(daemon());
+            let snapshot = seal(&mut prepared, "req_create", "idem-create");
+            let task = started_task(&start(
+                &mut prepared,
+                &snapshot,
+                "req_start",
+                "idem-start",
+                states,
+            ));
+            (prepared.daemon.crash(), task)
+        };
+        let resolution =
+            recovery::resolve_tasks(source.store(), &operator()).expect("the operator audits");
+        let resolved = resolution.tasks()[0].clone();
+        assert!(matches!(
+            resolved.resolution,
+            Resolution::Restored(_) | Resolution::Terminal(_)
+        ));
+
+        let mut fresh = prepare(daemon());
+        let snapshot = seal(&mut fresh, "req_create", "idem-create");
+        fresh.daemon.state_mut().tasks_mut().resolve(resolved);
+        let opened = fresh.daemon.state().regions().opened();
+        let answer = start(&mut fresh, &snapshot, "req_start", "idem-start", states);
+        assert_eq!(answer.envelope.status, ResultStatus::Ok);
+        assert_eq!(
+            fresh.daemon.state().regions().opened(),
+            opened,
+            "states={states}: no task ran"
+        );
+        assert!(
+            fresh.daemon.state().tasks().get(&task).is_none(),
+            "states={states}: no fresh live task under the resolved identity"
+        );
+        let published = recovery::resolve_tasks(fresh.daemon.store(), &operator())
+            .expect("the operator audits");
+        assert!(
+            published.tasks().is_empty() && published.unclaimed().is_empty(),
+            "states={states}: no task record was published"
+        );
+    }
+}
+
+/// **cr-2n0xng: `Settled` and `Failed` resolutions over an empty ledger.** Before the fix, the
+/// receipt check ran for `Restored` and `Terminal` only, and a withdrawn resolution kept its
+/// bare campaign, continuation and terminal identities: `claims()` returned them, and a
+/// re-issued `verification.start` emitted the campaign records as committed artifacts.
+///
+/// Both stores are real crashed stores ([`legacy`] for `Failed(ContinuationNotDurable)`,
+/// [`legacy_closed`] for `Settled`), read once and tied twice: to their own ledger (the
+/// positive control), and to an empty one. Against the empty ledger no resolution claims an
+/// identity, every identity is reported as unreceipted, `Settled` is withdrawn to
+/// `Failed(Unreceipted)`, and a start re-issued against the planted resolution answers with
+/// no artifact. Against the store's own ledger the `Failed` answer names exactly its claims.
+#[test]
+fn settled_and_failed_resolutions_over_an_empty_ledger_claim_and_emit_no_unreceipted_identity() {
+    let (failed, witnesses) = legacy(prepare(daemon()));
+    let (settled, settled_task, _) = legacy_closed(prepare(daemon()));
+    for (crashed, task, states, own_resolution, empty_resolution) in [
+        (
+            failed.daemon,
+            witnesses.task,
+            4,
+            Resolution::Failed(FailureReason::ContinuationNotDurable),
+            Resolution::Failed(FailureReason::ContinuationNotDurable),
+        ),
+        (
+            settled.daemon,
+            settled_task,
+            64,
+            Resolution::Settled,
+            Resolution::Failed(FailureReason::Unreceipted),
+        ),
+    ] {
+        let durable = crashed.crash();
+        let own = durable
+            .store()
+            .audit_view(&operator())
+            .expect("the operator audits");
+        let inventory = recovery::read_inventory(durable.store(), &own, &operator());
+        let receipted = recovery::tie_receipts(inventory.clone(), &own);
+        let claimed = receipted.tasks()[0].claims();
+        assert_eq!(receipted.tasks()[0].task, task);
+        assert_eq!(receipted.tasks()[0].resolution, own_resolution);
+        assert!(
+            !claimed.is_empty(),
+            "anti-vacuity: the task claims a record"
+        );
+        assert!(receipted.unreceipted().is_empty());
+
+        let empty = empty_ledger();
+        let none = empty.audit_view(&operator()).expect("the operator audits");
+        let tied = recovery::tie_receipts(inventory, &none);
+        let resolved = tied.tasks()[0].clone();
+        assert_eq!(resolved.resolution, empty_resolution);
+        assert!(
+            resolved.claims().is_empty(),
+            "{:?}: no claim lacks a receipt",
+            own_resolution
+        );
+        assert!(resolved.records.is_empty() && resolved.continuations.is_empty());
+        assert!(resolved.terminals.is_empty());
+        assert_eq!(
+            tied.unreceipted(),
+            claimed.as_slice(),
+            "{:?}: every identity is reported, not claimed",
+            own_resolution
+        );
+
+        // The response artifacts: a start re-issued against the planted resolution.
+        let mut fresh = prepare(daemon());
+        let snapshot = seal(&mut fresh, "req_create", "idem-create");
+        fresh.daemon.state_mut().tasks_mut().resolve(resolved);
+        let opened = fresh.daemon.state().regions().opened();
+        let answer = start(&mut fresh, &snapshot, "req_start", "idem-start", states);
+        assert_eq!(answer.envelope.status, ResultStatus::Ok);
+        assert_eq!(answer.envelope.task.value(), Some(&task));
+        assert!(
+            answer.envelope.artifacts.is_empty(),
+            "{:?}: the answer emits no unreceipted identity: {:?}",
+            own_resolution,
+            answer.envelope.artifacts
+        );
+        assert_eq!(
+            fresh.daemon.state().regions().opened(),
+            opened,
+            "nothing ran"
+        );
+    }
+
+    // The positive control for the response: the same `Failed` resolution tied to its own
+    // ledger answers with exactly the records it claims.
+    let (failed, witnesses) = legacy(prepare(daemon()));
+    let durable = failed.daemon.crash();
+    let resolved = recovery::resolve_tasks(durable.store(), &operator())
+        .expect("the operator audits")
+        .tasks()[0]
+        .clone();
+    let mut fresh = prepare(daemon());
+    let snapshot = seal(&mut fresh, "req_create", "idem-create");
+    let claimed = resolved.claims();
+    fresh.daemon.state_mut().tasks_mut().resolve(resolved);
+    let answer = start(&mut fresh, &snapshot, "req_start", "idem-start", 4);
+    assert_eq!(answer.envelope.task.value(), Some(&witnesses.task));
+    let emitted: Vec<String> = answer
+        .envelope
+        .artifacts
+        .iter()
+        .filter_map(|artifact| artifact.commitment.value().map(|c| c.as_str().to_owned()))
+        .collect();
+    assert_eq!(
+        emitted,
+        claimed.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "a receipted resolution emits exactly its claims"
     );
 }
