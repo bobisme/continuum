@@ -47,6 +47,14 @@
 //!   written as `CONTCERT` wire bytes, the only form in which anything this crate
 //!   computes reaches the trusted checking base.
 //!
+//! It also carries the **tiny exhaustive oracle** of docs/19 §2 ([`semantic`], bn-1zgs):
+//! a seeded generator of finite semantic systems (a [`model::Model`] plus footprints,
+//! conflicts, obligations, cancellation phases and fairness), an oracle that enumerates
+//! every configuration and bounded interleaving into a canonical artifact, and seeded
+//! defects with a shrinker (RFC 0013, "Generated finite universes"). It is the
+//! reference later reduction engines are checked against, and it uses only the
+//! modules above.
+//!
 //! Each module was written to attach to the ones before it without changing them, and
 //! did: the seam tables in [`model`] and [`bfs`] are the contracts that made that
 //! possible, and they are kept because they record which primitive each answer comes
@@ -108,6 +116,7 @@ pub mod domain;
 pub mod expr;
 pub mod ident;
 pub mod model;
+pub mod semantic;
 pub mod witness;
 
 pub use bfs::{
