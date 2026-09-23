@@ -1,0 +1,6 @@
+//! Fixture-only file for governance self-tests (bn-4x90). Not part of the crate.
+//! A second revision, so base != head for freshness fixtures.
+
+pub fn gov4_fixture_marker() -> u8 {
+    2
+}

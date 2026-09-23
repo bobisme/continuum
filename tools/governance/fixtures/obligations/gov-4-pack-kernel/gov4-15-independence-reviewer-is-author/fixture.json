@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "independence-review-independent",
+  "description": "The independence reviewer is also the change author.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture"
+  },
+  "id": "gov4-15-independence-reviewer-is-author",
+  "requirement": "GOV-4-15",
+  "rule": "independence-review"
+}

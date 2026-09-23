@@ -1,0 +1,694 @@
+{
+  "artifact": "continuum.governance.evidence/gov-4-pack-kernel",
+  "authority": {
+    "requirement_ids": "notes/plan/notes/PLAN_REQUIREMENTS.json",
+    "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements"
+  },
+  "determinism": "No timestamp, commit id, or absolute path: an unchanged tree reproduces this file byte-for-byte. Delta-rule verdicts are functions of history and are not recorded.",
+  "harness_at_head": {
+    "checks": "review-record envelope over every record at head; delivery link for every discovered set",
+    "result": "pass",
+    "violations": []
+  },
+  "harness_self_test": {
+    "failures": [],
+    "fixtures": 7,
+    "status": "pass",
+    "violating_by_check": {
+      "delivery-agrees-with-registry": [
+        "harness-delivered-id-not-satisfied",
+        "harness-undelivered-id-marked-satisfied"
+      ],
+      "review-record-change-table": [
+        "harness-change-table-malformed"
+      ],
+      "review-record-parses": [
+        "harness-record-does-not-parse"
+      ],
+      "review-record-sections-closed": [
+        "harness-unknown-key",
+        "harness-unknown-section"
+      ]
+    }
+  },
+  "notes": [
+    "GOV-4-12 (fidelity profile), the first Pack-changes item, is sibling Bone bn-2tm3's; this set imports its `pack_changes`/`pack_records`/`_record_coverage` rather than re-deriving what a pack change is.",
+    "GOV-4-19..GOV-4-21 (the remaining Kernel-changes obligations: mutation tests, code-size report, no unchecked optimization) are a later Bone's (bn-2b4e, running in parallel); `KERNEL_SECTION_ITEMS` names them so the list check still catches drift in the whole section.",
+    "`KERNEL_CORE` is `check_code_policy.KERNEL` (the four `continuum-kernel-*` crates), read live rather than restated; kernel crates are also `SEMANTIC_CORE` members, so a kernel change is a semantic change too and separately ships `gov4_semantic.py`'s obligations."
+  ],
+  "produced_by": "tools/governance/check_obligations.py (tools/governance/obligations/gov4_pack_kernel.py)",
+  "regime": "The delta rules are in force for a delta whose base contains tools/governance/obligations/gov4_pack_kernel.py; for an older base their findings are deferred (printed, reported, not failures).",
+  "reproduce": "python3 tools/governance/check_obligations.py --set gov-4-pack-kernel --evidence",
+  "requirements": {
+    "GOV-4-13": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-13-18-vocabulary-lab-gone",
+        "gov4-13-host-lab-test-did-not-move",
+        "gov4-13-host-lab-test-does-not-exist",
+        "gov4-13-host-lab-test-names-neither",
+        "gov4-13-host-lab-test-unrelated-crate",
+        "gov4-13-host-lab-tests-missing"
+      ],
+      "rules": [
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour. `host`/`lab` are checked as literal words, not as a cross-implementation comparison like GOV-4-03/GOV-4-08's oracle/subject pairs \u2014 no host crate distinct from the pack exists in the workspace to name.",
+          "checks": [
+            "host-lab-tests-named",
+            "host-lab-test-resolves",
+            "host-lab-test-exercises-the-change",
+            "host-lab-test-is-fresh",
+            "host-lab-test-names-both-paths"
+          ],
+          "enforces": "`pack.host_lab_conformance_tests` names at least one test that resolves, reaches the change, is new or changed, and names both `host` and `lab` in its doc comment or body (RFC 0002 \"Pack qualification\": differential testing across production/Lab paths).",
+          "fixtures_proven_caught": {
+            "host-lab-test-exercises-the-change": [
+              "gov4-13-host-lab-test-unrelated-crate"
+            ],
+            "host-lab-test-is-fresh": [
+              "gov4-13-host-lab-test-did-not-move"
+            ],
+            "host-lab-test-names-both-paths": [
+              "gov4-13-host-lab-test-names-neither"
+            ],
+            "host-lab-test-resolves": [
+              "gov4-13-host-lab-test-does-not-exist"
+            ],
+            "host-lab-tests-named": [
+              "gov4-13-host-lab-tests-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "host-lab-conformance",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-13-18-list-registered",
+            "gov4-13-18-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Pack changes and Kernel changes lists, and the generated registry's GOV-4-13..18 summaries, still name these ids in order; RFC 0002 still carries the fault-algebra vocabulary and the production/Lab-paths wording these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-13-18-list-registered": [
+              "gov4-13-18-kernel-list-drifted"
+            ],
+            "gov4-13-18-vocabulary-present": [
+              "gov4-13-18-vocabulary-lab-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-13-18-review-list",
+          "shared_with": [
+            "GOV-4-14",
+            "GOV-4-15",
+            "GOV-4-16",
+            "GOV-4-17",
+            "GOV-4-18"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "host/Lab conformance"
+    },
+    "GOV-4-14": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-14-fault-coverage-breadth",
+        "gov4-14-fault-coverage-test-did-not-move",
+        "gov4-14-fault-coverage-test-does-not-exist",
+        "gov4-14-fault-coverage-test-unrelated-crate",
+        "gov4-14-fault-coverage-tests-missing",
+        "gov4-14-fault-not-registered"
+      ],
+      "rules": [
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour. Coverage is measured by how many distinct fault operators are named, not by whether the test actually injects the claimed fault.",
+          "checks": [
+            "fault-coverage-tests-named",
+            "fault-coverage-test-resolves",
+            "fault-coverage-fault-registered",
+            "fault-coverage-test-exercises-the-change",
+            "fault-coverage-test-is-fresh",
+            "fault-coverage-breadth"
+          ],
+          "enforces": "`pack.fault_coverage_tests` names at least two entries, each pairing a test with one of RFC 0002's `Fault algebra` operators; every test resolves, reaches the change, and at least one is new or changed; the named faults span at least two distinct operators.",
+          "fixtures_proven_caught": {
+            "fault-coverage-breadth": [
+              "gov4-14-fault-coverage-breadth"
+            ],
+            "fault-coverage-fault-registered": [
+              "gov4-14-fault-not-registered"
+            ],
+            "fault-coverage-test-exercises-the-change": [
+              "gov4-14-fault-coverage-test-unrelated-crate"
+            ],
+            "fault-coverage-test-is-fresh": [
+              "gov4-14-fault-coverage-test-did-not-move"
+            ],
+            "fault-coverage-test-resolves": [
+              "gov4-14-fault-coverage-test-does-not-exist"
+            ],
+            "fault-coverage-tests-named": [
+              "gov4-14-fault-coverage-tests-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "fault-coverage",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-13-18-list-registered",
+            "gov4-13-18-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Pack changes and Kernel changes lists, and the generated registry's GOV-4-13..18 summaries, still name these ids in order; RFC 0002 still carries the fault-algebra vocabulary and the production/Lab-paths wording these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-13-18-list-registered": [
+              "gov4-13-18-kernel-list-drifted"
+            ],
+            "gov4-13-18-vocabulary-present": [
+              "gov4-13-18-vocabulary-lab-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-13-18-review-list",
+          "shared_with": [
+            "GOV-4-13",
+            "GOV-4-15",
+            "GOV-4-16",
+            "GOV-4-17",
+            "GOV-4-18"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "fault coverage"
+    },
+    "GOV-4-15": {
+      "delivery": {
+        "reason": "The record names an independent reviewer, a review id, and a verdict, and the check holds them to independence and approval, but Seal keeps review state outside the repository: no committed artifact lets a checker confirm the review exists, covers this change, and approved it. Same limit as GOV-4-06.",
+        "status": "not-delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-15-independence-review-missing",
+        "gov4-15-independence-review-not-approved",
+        "gov4-15-independence-reviewer-is-author"
+      ],
+      "rules": [
+        {
+          "boundary": "The record is a pointer, not the review: Seal keeps review state outside the repository, so no committed artifact lets this check confirm that the named review exists, covers this change, or carries the claimed verdict \u2014 the same limit GOV-4-06 documents. The rule still holds the pointer to a typed shape (independence from the author, or two distinct non-author reviewers) and to a syntactically valid review id.",
+          "checks": [
+            "independence-review-present",
+            "independence-review-independent",
+            "independence-review-approved"
+          ],
+          "enforces": "`[pack.independence_review]` names a reviewer other than the change author, a review id, and the verdict `approved`.",
+          "fixtures_proven_caught": {
+            "independence-review-approved": [
+              "gov4-15-independence-review-not-approved"
+            ],
+            "independence-review-independent": [
+              "gov4-15-independence-reviewer-is-author"
+            ],
+            "independence-review-present": [
+              "gov4-15-independence-review-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "independence-review",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-13-18-list-registered",
+            "gov4-13-18-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Pack changes and Kernel changes lists, and the generated registry's GOV-4-13..18 summaries, still name these ids in order; RFC 0002 still carries the fault-algebra vocabulary and the production/Lab-paths wording these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-13-18-list-registered": [
+              "gov4-13-18-kernel-list-drifted"
+            ],
+            "gov4-13-18-vocabulary-present": [
+              "gov4-13-18-vocabulary-lab-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-13-18-review-list",
+          "shared_with": [
+            "GOV-4-13",
+            "GOV-4-14",
+            "GOV-4-16",
+            "GOV-4-17",
+            "GOV-4-18"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "independence review"
+    },
+    "GOV-4-16": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-16-version-bump-does-not-increase",
+        "gov4-16-version-bump-malformed",
+        "gov4-16-version-bump-missing",
+        "gov4-16-version-bump-note-too-short"
+      ],
+      "rules": [
+        {
+          "boundary": "Proves a typed field exists and a note of minimum length names a changed crate. Whether the note is accurate is a review judgement. No pack crate carries its own `Cargo.toml` version today (`version.workspace = true`), so the claimed bump is not cross-checked against a manifest; only its own internal consistency (typed, increasing) is proven.",
+          "checks": [
+            "version-bump-present",
+            "version-bump-well-formed",
+            "version-bump-increases",
+            "version-bump-names-the-change"
+          ],
+          "enforces": "`[pack.version_bump]` carries `from`/`to` `major.minor.patch` versions with `to` strictly greater than `from`, and a `note` of minimum length naming a changed pack crate.",
+          "fixtures_proven_caught": {
+            "version-bump-increases": [
+              "gov4-16-version-bump-does-not-increase"
+            ],
+            "version-bump-names-the-change": [
+              "gov4-16-version-bump-note-too-short"
+            ],
+            "version-bump-present": [
+              "gov4-16-version-bump-missing"
+            ],
+            "version-bump-well-formed": [
+              "gov4-16-version-bump-malformed"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "version-bump",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-13-18-list-registered",
+            "gov4-13-18-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Pack changes and Kernel changes lists, and the generated registry's GOV-4-13..18 summaries, still name these ids in order; RFC 0002 still carries the fault-algebra vocabulary and the production/Lab-paths wording these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-13-18-list-registered": [
+              "gov4-13-18-kernel-list-drifted"
+            ],
+            "gov4-13-18-vocabulary-present": [
+              "gov4-13-18-vocabulary-lab-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-13-18-review-list",
+          "shared_with": [
+            "GOV-4-13",
+            "GOV-4-14",
+            "GOV-4-15",
+            "GOV-4-17",
+            "GOV-4-18"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "version bump"
+    },
+    "GOV-4-17": {
+      "delivery": {
+        "reason": "The record names two distinct, non-author reviewers with review ids and verdicts, and the check holds them to distinctness and approval, but Seal keeps review state outside the repository: no committed artifact lets a checker confirm either review exists, covers this change, or approved it. Same limit as GOV-4-06.",
+        "status": "not-delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-13-18-kernel-list-drifted",
+        "gov4-17-kernel-covers-mismatch",
+        "gov4-17-kernel-no-record",
+        "gov4-17-reviewers-includes-author",
+        "gov4-17-reviewers-missing",
+        "gov4-17-reviewers-not-approved",
+        "gov4-17-reviewers-not-distinct"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-change-has-review-record",
+            "kernel-review-record-covers-a-kernel-change"
+          ],
+          "enforces": "Every kernel change (a `continuum-kernel-*` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `kernel.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "kernel-change-has-review-record": [
+              "gov4-17-kernel-no-record"
+            ],
+            "kernel-review-record-covers-a-kernel-change": [
+              "gov4-17-kernel-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-review-record",
+          "shared_with": [
+            "GOV-4-18"
+          ]
+        },
+        {
+          "boundary": "The record is a pointer, not the review: Seal keeps review state outside the repository, so no committed artifact lets this check confirm that the named review exists, covers this change, or carries the claimed verdict \u2014 the same limit GOV-4-06 documents. The rule still holds the pointer to a typed shape (independence from the author, or two distinct non-author reviewers) and to a syntactically valid review id.",
+          "checks": [
+            "kernel-reviewers-present",
+            "kernel-reviewers-distinct",
+            "kernel-reviewers-approved"
+          ],
+          "enforces": "`[kernel.reviewers]` names at least two reviewer entries, all distinct from each other and from the change author, each with a review id and the verdict `approved`.",
+          "fixtures_proven_caught": {
+            "kernel-reviewers-approved": [
+              "gov4-17-reviewers-not-approved"
+            ],
+            "kernel-reviewers-distinct": [
+              "gov4-17-reviewers-includes-author",
+              "gov4-17-reviewers-not-distinct"
+            ],
+            "kernel-reviewers-present": [
+              "gov4-17-reviewers-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-two-reviewers",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-13-18-list-registered",
+            "gov4-13-18-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Pack changes and Kernel changes lists, and the generated registry's GOV-4-13..18 summaries, still name these ids in order; RFC 0002 still carries the fault-algebra vocabulary and the production/Lab-paths wording these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-13-18-list-registered": [
+              "gov4-13-18-kernel-list-drifted"
+            ],
+            "gov4-13-18-vocabulary-present": [
+              "gov4-13-18-vocabulary-lab-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-13-18-review-list",
+          "shared_with": [
+            "GOV-4-13",
+            "GOV-4-14",
+            "GOV-4-15",
+            "GOV-4-16",
+            "GOV-4-18"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "two reviewers"
+    },
+    "GOV-4-18": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-18-fuzz-corpus-file-missing",
+        "gov4-18-fuzz-corpus-missing",
+        "gov4-18-fuzz-corpus-test-did-not-move",
+        "gov4-18-fuzz-corpus-test-does-not-exist",
+        "gov4-18-fuzz-corpus-test-unrelated-crate"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-change-has-review-record",
+            "kernel-review-record-covers-a-kernel-change"
+          ],
+          "enforces": "Every kernel change (a `continuum-kernel-*` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `kernel.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "kernel-change-has-review-record": [
+              "gov4-17-kernel-no-record"
+            ],
+            "kernel-review-record-covers-a-kernel-change": [
+              "gov4-17-kernel-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-review-record",
+          "shared_with": [
+            "GOV-4-17"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour. A committed file's *presence* is proven, not that the named test actually replays it, and not that the corpus exercises the kernel crate's decoders with any particular coverage.",
+          "checks": [
+            "fuzz-corpus-present",
+            "fuzz-corpus-files-exist",
+            "fuzz-corpus-test-resolves",
+            "fuzz-corpus-test-exercises-the-change",
+            "fuzz-corpus-test-is-fresh"
+          ],
+          "enforces": "`[kernel.fuzz_corpus]` names a non-empty list of committed corpus files (present at head) and a test that resolves, reaches the change, and is new or changed.",
+          "fixtures_proven_caught": {
+            "fuzz-corpus-files-exist": [
+              "gov4-18-fuzz-corpus-file-missing"
+            ],
+            "fuzz-corpus-present": [
+              "gov4-18-fuzz-corpus-missing"
+            ],
+            "fuzz-corpus-test-exercises-the-change": [
+              "gov4-18-fuzz-corpus-test-unrelated-crate"
+            ],
+            "fuzz-corpus-test-is-fresh": [
+              "gov4-18-fuzz-corpus-test-did-not-move"
+            ],
+            "fuzz-corpus-test-resolves": [
+              "gov4-18-fuzz-corpus-test-does-not-exist"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-fuzz-corpus",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-13-18-list-registered",
+            "gov4-13-18-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Pack changes and Kernel changes lists, and the generated registry's GOV-4-13..18 summaries, still name these ids in order; RFC 0002 still carries the fault-algebra vocabulary and the production/Lab-paths wording these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-13-18-list-registered": [
+              "gov4-13-18-kernel-list-drifted"
+            ],
+            "gov4-13-18-vocabulary-present": [
+              "gov4-13-18-vocabulary-lab-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-13-18-review-list",
+          "shared_with": [
+            "GOV-4-13",
+            "GOV-4-14",
+            "GOV-4-15",
+            "GOV-4-16",
+            "GOV-4-17"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "fuzz corpus"
+    }
+  },
+  "self_test": {
+    "clean": [
+      "gov4-kernel-17-18-complete-record-is-clean",
+      "gov4-pack-13-18-complete-record-is-clean"
+    ],
+    "deferred": [
+      "gov4-pack-kernel-before-the-set-landed"
+    ],
+    "failures": [],
+    "fixtures": 34,
+    "status": "pass",
+    "violating_by_check": {
+      "fault-coverage-breadth": [
+        "gov4-14-fault-coverage-breadth"
+      ],
+      "fault-coverage-fault-registered": [
+        "gov4-14-fault-not-registered"
+      ],
+      "fault-coverage-test-exercises-the-change": [
+        "gov4-14-fault-coverage-test-unrelated-crate"
+      ],
+      "fault-coverage-test-is-fresh": [
+        "gov4-14-fault-coverage-test-did-not-move"
+      ],
+      "fault-coverage-test-resolves": [
+        "gov4-14-fault-coverage-test-does-not-exist"
+      ],
+      "fault-coverage-tests-named": [
+        "gov4-14-fault-coverage-tests-missing"
+      ],
+      "fuzz-corpus-files-exist": [
+        "gov4-18-fuzz-corpus-file-missing"
+      ],
+      "fuzz-corpus-present": [
+        "gov4-18-fuzz-corpus-missing"
+      ],
+      "fuzz-corpus-test-exercises-the-change": [
+        "gov4-18-fuzz-corpus-test-unrelated-crate"
+      ],
+      "fuzz-corpus-test-is-fresh": [
+        "gov4-18-fuzz-corpus-test-did-not-move"
+      ],
+      "fuzz-corpus-test-resolves": [
+        "gov4-18-fuzz-corpus-test-does-not-exist"
+      ],
+      "gov4-13-18-list-registered": [
+        "gov4-13-18-kernel-list-drifted"
+      ],
+      "gov4-13-18-vocabulary-present": [
+        "gov4-13-18-vocabulary-lab-gone"
+      ],
+      "host-lab-test-exercises-the-change": [
+        "gov4-13-host-lab-test-unrelated-crate"
+      ],
+      "host-lab-test-is-fresh": [
+        "gov4-13-host-lab-test-did-not-move"
+      ],
+      "host-lab-test-names-both-paths": [
+        "gov4-13-host-lab-test-names-neither"
+      ],
+      "host-lab-test-resolves": [
+        "gov4-13-host-lab-test-does-not-exist"
+      ],
+      "host-lab-tests-named": [
+        "gov4-13-host-lab-tests-missing"
+      ],
+      "independence-review-approved": [
+        "gov4-15-independence-review-not-approved"
+      ],
+      "independence-review-independent": [
+        "gov4-15-independence-reviewer-is-author"
+      ],
+      "independence-review-present": [
+        "gov4-15-independence-review-missing"
+      ],
+      "kernel-change-has-review-record": [
+        "gov4-17-kernel-no-record"
+      ],
+      "kernel-review-record-covers-a-kernel-change": [
+        "gov4-17-kernel-covers-mismatch"
+      ],
+      "kernel-reviewers-approved": [
+        "gov4-17-reviewers-not-approved"
+      ],
+      "kernel-reviewers-distinct": [
+        "gov4-17-reviewers-includes-author",
+        "gov4-17-reviewers-not-distinct"
+      ],
+      "kernel-reviewers-present": [
+        "gov4-17-reviewers-missing"
+      ],
+      "version-bump-increases": [
+        "gov4-16-version-bump-does-not-increase"
+      ],
+      "version-bump-names-the-change": [
+        "gov4-16-version-bump-note-too-short"
+      ],
+      "version-bump-present": [
+        "gov4-16-version-bump-missing"
+      ],
+      "version-bump-well-formed": [
+        "gov4-16-version-bump-malformed"
+      ]
+    },
+    "violating_by_requirement": {
+      "GOV-4-13": [
+        "gov4-13-18-vocabulary-lab-gone",
+        "gov4-13-host-lab-test-did-not-move",
+        "gov4-13-host-lab-test-does-not-exist",
+        "gov4-13-host-lab-test-names-neither",
+        "gov4-13-host-lab-test-unrelated-crate",
+        "gov4-13-host-lab-tests-missing"
+      ],
+      "GOV-4-14": [
+        "gov4-14-fault-coverage-breadth",
+        "gov4-14-fault-coverage-test-did-not-move",
+        "gov4-14-fault-coverage-test-does-not-exist",
+        "gov4-14-fault-coverage-test-unrelated-crate",
+        "gov4-14-fault-coverage-tests-missing",
+        "gov4-14-fault-not-registered"
+      ],
+      "GOV-4-15": [
+        "gov4-15-independence-review-missing",
+        "gov4-15-independence-review-not-approved",
+        "gov4-15-independence-reviewer-is-author"
+      ],
+      "GOV-4-16": [
+        "gov4-16-version-bump-does-not-increase",
+        "gov4-16-version-bump-malformed",
+        "gov4-16-version-bump-missing",
+        "gov4-16-version-bump-note-too-short"
+      ],
+      "GOV-4-17": [
+        "gov4-13-18-kernel-list-drifted",
+        "gov4-17-kernel-covers-mismatch",
+        "gov4-17-kernel-no-record",
+        "gov4-17-reviewers-includes-author",
+        "gov4-17-reviewers-missing",
+        "gov4-17-reviewers-not-approved",
+        "gov4-17-reviewers-not-distinct"
+      ],
+      "GOV-4-18": [
+        "gov4-18-fuzz-corpus-file-missing",
+        "gov4-18-fuzz-corpus-missing",
+        "gov4-18-fuzz-corpus-test-did-not-move",
+        "gov4-18-fuzz-corpus-test-does-not-exist",
+        "gov4-18-fuzz-corpus-test-unrelated-crate"
+      ]
+    }
+  },
+  "status": "pass",
+  "title": "GOV \u00a74 host/Lab conformance, fault coverage, independence review, version bump, and the first Kernel-changes obligations \u2014 GOV-4-13..18"
+}

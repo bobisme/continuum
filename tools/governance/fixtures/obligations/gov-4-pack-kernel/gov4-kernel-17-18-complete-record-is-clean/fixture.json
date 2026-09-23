@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "kernel-change-has-review-record",
+  "description": "A kernel-core change shipping a complete `[kernel]` record: two distinct, non-author, approved reviewers and a fuzz corpus whose files exist and whose replay test is fresh and reaches the change.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture_13_18.rs": "crates_continuum-kernel-core_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-kernel-core/tests/gov4-fixture-corpus/case-001.txt": "crates_continuum-kernel-core_tests_gov4-fixture-corpus_case-001.txt.fixture",
+    "crates/continuum-kernel-core/tests/gov4_fixture_13_18.rs": "crates_continuum-kernel-core_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-kernel-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-kernel-fixture.toml.fixture"
+  },
+  "id": "gov4-kernel-17-18-complete-record-is-clean",
+  "requirement": "GOV-4-17",
+  "rule": "kernel-review-record"
+}

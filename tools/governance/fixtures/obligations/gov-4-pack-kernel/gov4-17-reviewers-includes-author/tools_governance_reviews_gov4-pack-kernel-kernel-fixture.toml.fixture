@@ -1,0 +1,17 @@
+[change]
+bone = "bn-4x90"
+author = "fixture-reviewer-one"
+summary = "fixture: a kernel-core change whose reviewer list includes the change author"
+
+[kernel]
+covers = ["crates/continuum-kernel-core/src/gov4_fixture_13_18.rs"]
+
+[kernel.reviewers]
+entries = [
+  { reviewer = "fixture-reviewer-one", review = "seal-rev-010", verdict = "approved" },
+  { reviewer = "fixture-reviewer-two", review = "seal-rev-011", verdict = "approved" },
+]
+
+[kernel.fuzz_corpus]
+files = ["crates/continuum-kernel-core/tests/gov4-fixture-corpus/case-001.txt"]
+test = "crates/continuum-kernel-core/tests/gov4_fixture_13_18.rs::replays_committed_corpus"

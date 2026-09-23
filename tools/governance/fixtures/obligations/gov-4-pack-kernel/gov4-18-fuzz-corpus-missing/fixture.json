@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "fuzz-corpus-present",
+  "description": "A kernel-core change with no `[kernel.fuzz_corpus]` at all.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture_13_18.rs": "crates_continuum-kernel-core_src_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-kernel-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-kernel-fixture.toml.fixture"
+  },
+  "id": "gov4-18-fuzz-corpus-missing",
+  "requirement": "GOV-4-18",
+  "rule": "kernel-fuzz-corpus"
+}

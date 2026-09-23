@@ -1,0 +1,6 @@
+//! Fixture tests in an unrelated crate (inert data; never compiled).
+
+#[test]
+fn replays_committed_corpus() {
+    assert_eq!(1, 1);
+}

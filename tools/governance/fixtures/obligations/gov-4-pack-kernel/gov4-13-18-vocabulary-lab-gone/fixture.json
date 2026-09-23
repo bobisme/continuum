@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "gov4-13-18-vocabulary-present",
+  "description": "RFC 0002 no longer names \"production/Lab paths\"; GOV-4-13 host/Lab conformance is grounded there.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "notes/plan/rfcs/0002-controlled-effects-and-domain-packs.md": [
+      {
+        "find": "differential testing across production/Lab paths;\n",
+        "replace": "differential testing across staging paths;\n"
+      }
+    ]
+  },
+  "id": "gov4-13-18-vocabulary-lab-gone",
+  "requirement": "GOV-4-13",
+  "rule": "gov4-13-18-review-list"
+}

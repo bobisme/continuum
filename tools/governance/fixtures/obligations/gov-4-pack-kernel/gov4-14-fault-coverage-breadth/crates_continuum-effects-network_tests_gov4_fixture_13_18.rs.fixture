@@ -1,0 +1,17 @@
+//! Fixture tests (inert data; never compiled).
+
+#[test]
+fn host_matches_lab() {
+    assert_eq!(1, 1);
+}
+
+/// Both entries point at fault coverage tests, but only one distinct fault kind.
+#[test]
+fn crash_mid_write() {
+    assert_eq!(1, 1);
+}
+
+#[test]
+fn crash_mid_write_again() {
+    assert_eq!(1, 1);
+}

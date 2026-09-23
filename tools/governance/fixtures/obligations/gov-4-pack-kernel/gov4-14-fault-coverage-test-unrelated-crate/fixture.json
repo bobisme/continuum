@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "fault-coverage-test-exercises-the-change",
+  "description": "The named fault-coverage tests live in a crate that never reaches continuum-effects-network.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-storage/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-storage_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture"
+  },
+  "id": "gov4-14-fault-coverage-test-unrelated-crate",
+  "requirement": "GOV-4-14",
+  "rule": "fault-coverage"
+}

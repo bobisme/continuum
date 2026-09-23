@@ -1,0 +1,23 @@
+[change]
+bone = "bn-4x90"
+author = "fixture-reviewer"
+summary = "fixture: a network pack change whose independence reviewer is also the author"
+
+[pack]
+covers = ["crates/continuum-effects-network/src/gov4_fixture_13_18.rs"]
+
+host_lab_conformance_tests = ["crates/continuum-effects-network/tests/gov4_fixture_13_18.rs::host_matches_lab"]
+fault_coverage_tests = [
+  { test = "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs::crash_mid_write", fault = "crash" },
+  { test = "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs::partitions_both_ways", fault = "partition" },
+]
+
+[pack.independence_review]
+reviewer = "fixture-reviewer"
+review = "seal-rev-001"
+verdict = "approved"
+
+[pack.version_bump]
+from = "0.3.0"
+to = "0.4.0"
+note = "continuum-effects-network widened its contract for this fixture change; consumers must re-pin"

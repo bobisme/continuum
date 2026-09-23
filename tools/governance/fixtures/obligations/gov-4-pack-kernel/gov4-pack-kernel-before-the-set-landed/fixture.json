@@ -1,0 +1,14 @@
+{
+  "base": {
+    "tools/governance/obligations/gov4_pack_kernel.py": null
+  },
+  "check": "kernel-change-has-review-record",
+  "description": "The same uncovered kernel change on a base cut before this set existed: reported, not enforced.",
+  "expect": "deferred",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture_13_18.rs": "crates_continuum-kernel-core_src_gov4_fixture_13_18.rs.fixture"
+  },
+  "id": "gov4-pack-kernel-before-the-set-landed",
+  "requirement": "GOV-4-17",
+  "rule": "kernel-review-record"
+}

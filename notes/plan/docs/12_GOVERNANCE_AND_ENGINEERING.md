@@ -127,27 +127,44 @@ RFC 0014's `Evaluation` metrics.
 Require:
 
 - fidelity profile; (delivered: bn-2tm3)
-- host/Lab conformance;
-- fault coverage;
+- host/Lab conformance; (delivered: bn-4x90)
+- fault coverage; (delivered: bn-4x90)
 - independence review;
-- version bump.
+- version bump. (delivered: bn-4x90)
 
-The first of these obligations is enforced by the same
-`gov-4-impact-reduction-pack` obligation set. A change to a domain pack (a
-`continuum-effects-*` crate, RFC 0002) ships a review record's `[pack]` table
-naming one of RFC 0002's required fidelity profiles. The remaining four
-(host/Lab conformance, fault coverage, independence review, version bump) are
-a later Bone's.
+The first of these obligations is enforced by the `gov-4-impact-reduction-pack`
+obligation set (bn-2tm3). A change to a domain pack (a `continuum-effects-*`
+crate, RFC 0002) ships a review record's `[pack]` table naming one of RFC
+0002's required fidelity profiles. The `gov-4-pack-kernel` obligation set
+(bn-4x90) extends the same `[pack]` table with the next three: host/Lab
+conformance tests naming both paths, fault-coverage tests spanning at least
+two of RFC 0002's fault-algebra operators, and a typed, increasing version
+bump. Independence review is enforced at the record level only (a reviewer
+distinct from the author, a review id, an `approved` verdict) and is not
+delivered, for the same reason GOV-4-06's security review is not: Seal keeps
+review state outside the repository, so no committed artifact lets a checker
+confirm the named review exists, covers this change, and approved it.
 
 ### Kernel changes
 
 Require:
 
 - two reviewers;
-- fuzz corpus;
+- fuzz corpus; (delivered: bn-4x90)
 - mutation tests; (delivered: bn-2b4e)
 - code-size report; (delivered: bn-2b4e)
 - no unchecked optimization. (delivered: bn-2b4e)
+
+The first two of these obligations are enforced by the same
+`gov-4-pack-kernel` obligation set. A change to a `continuum-kernel-*` crate
+(RFC 0005 "Kernel layering") ships a review record's `[kernel]` table naming a
+committed fuzz corpus (files present at head, replayed by a fresh test that
+reaches the change) and two reviewer entries. Two reviewers is enforced at the
+record level only, for the same reason independence review above is not
+delivered: the record names two distinct, non-author, approved reviewers, but
+neither review's existence is checkable from a committed artifact. The
+remaining three (mutation tests, code-size report, no unchecked optimization)
+are a later Bone's.
 
 ## 5. Reproducibility
 

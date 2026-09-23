@@ -1,0 +1,16 @@
+{
+  "base": {
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture"
+  },
+  "check": "fault-coverage-test-is-fresh",
+  "description": "Both fault-coverage tests already existed, unchanged, at the base.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture"
+  },
+  "id": "gov4-14-fault-coverage-test-did-not-move",
+  "requirement": "GOV-4-14",
+  "rule": "fault-coverage"
+}

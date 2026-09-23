@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "gov4-13-18-list-registered",
+  "description": "docs/12 \u00a74 `### Kernel changes` no longer lists `fuzz corpus` in the wording GOV-4-18 binds.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md": [
+      {
+        "find": "- two reviewers;\n",
+        "replace": "- two reviewers, always;\n"
+      }
+    ]
+  },
+  "id": "gov4-13-18-kernel-list-drifted",
+  "requirement": "GOV-4-17",
+  "rule": "gov4-13-18-review-list"
+}

@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "host-lab-tests-named",
+  "description": "A network pack change shipping a complete extension of `[pack]`: host/Lab conformance, fault coverage across two operators, an independent approved review, and a well-formed version bump.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture"
+  },
+  "id": "gov4-pack-13-18-complete-record-is-clean",
+  "requirement": "GOV-4-13",
+  "rule": "host-lab-conformance"
+}

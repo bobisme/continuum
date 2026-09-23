@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "fuzz-corpus-test-resolves",
+  "description": "`fuzz_corpus.test` names a test function that is not declared at head.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture_13_18.rs": "crates_continuum-kernel-core_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-kernel-core/tests/gov4-fixture-corpus/case-001.txt": "crates_continuum-kernel-core_tests_gov4-fixture-corpus_case-001.txt.fixture",
+    "crates/continuum-kernel-core/tests/gov4_fixture_13_18.rs": "crates_continuum-kernel-core_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-kernel-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-kernel-fixture.toml.fixture"
+  },
+  "id": "gov4-18-fuzz-corpus-test-does-not-exist",
+  "requirement": "GOV-4-18",
+  "rule": "kernel-fuzz-corpus"
+}
