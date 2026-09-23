@@ -1,0 +1,10 @@
+{
+  "requirement": "TEST-9-04",
+  "rule": "identity-character-class-violation-not-rejected-detected",
+  "description": "a crashpack identity spelling a parent-directory traversal is claimed accepted, but the real validate_identity rejects any character outside [A-Za-z0-9_-]",
+  "system": {
+    "kind": "crashpack-identity",
+    "identity": "../../etc/passwd",
+    "claimed": "accepted"
+  }
+}

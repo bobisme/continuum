@@ -1,0 +1,12 @@
+{
+  "requirement": "TEST-9-03",
+  "rule": "byte-ceiling-exhaustion-not-refused-detected",
+  "description": "a minimal-child measurement of 1000 bytes against a ceiling of 500 is claimed not-refused, but the real BudgetError::Exhausted refuses it",
+  "system": {
+    "kind": "ceiling",
+    "ceiling_kind": "byte",
+    "ceiling": 500,
+    "requested": 1000,
+    "claimed_refused": false
+  }
+}

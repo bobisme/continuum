@@ -128,12 +128,12 @@ Benchmarks have confidence intervals, warm/cold distinctions, and hardware manif
 
 ## 9. Security validation
 
-- dependency and `unsafe` audits;
+- dependency and `unsafe` audits; (delivered: bn-35hb — tools/test-policy/evidence/s9_security_tests.json)
 - malformed untrusted trace/certificate inputs;
-- denial-of-service limits;
-- path traversal in crashpacks;
+- denial-of-service limits; (delivered: bn-35hb — tools/test-policy/evidence/s9_security_tests.json)
+- path traversal in crashpacks; (delivered: bn-35hb — tools/test-policy/evidence/s9_security_tests.json)
 - solver sandboxing;
-- secret-redaction tests;
+- secret-redaction tests; (delivered: bn-35hb — tools/test-policy/evidence/s9_security_tests.json)
 - signature/provenance verification.
 
 ## 10. Release gates

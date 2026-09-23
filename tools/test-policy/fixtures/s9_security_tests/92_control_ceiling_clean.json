@@ -1,0 +1,11 @@
+{
+  "expect": "clean",
+  "description": "a request exactly at the ceiling, honestly claimed not-refused, is not flagged",
+  "system": {
+    "kind": "ceiling",
+    "ceiling_kind": "node",
+    "ceiling": 4,
+    "requested": 4,
+    "claimed_refused": false
+  }
+}

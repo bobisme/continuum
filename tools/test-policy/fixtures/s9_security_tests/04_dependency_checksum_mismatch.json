@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-01",
+  "rule": "dependency-checksum-mismatch-detected",
+  "description": "corrupting blake3's recorded checksum in the real dependency-audits.toml, so it no longer matches Cargo.lock's pinned checksum, is caught by the real dependency-audit-posture gate",
+  "system": {
+    "kind": "governance-gate",
+    "gate": "dependency-checksum",
+    "package": "blake3",
+    "subject": "tools/governance/dependency-audits.toml audits.blake3.checksum"
+  }
+}

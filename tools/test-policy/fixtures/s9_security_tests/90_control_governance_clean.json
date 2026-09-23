@@ -1,0 +1,8 @@
+{
+  "expect": "clean",
+  "description": "the real, unmodified repository passes both the GOV-1-02 unsafe-forbidden gate and the dependency-audit-posture gate",
+  "system": {
+    "kind": "governance-gate",
+    "gate": "clean"
+  }
+}

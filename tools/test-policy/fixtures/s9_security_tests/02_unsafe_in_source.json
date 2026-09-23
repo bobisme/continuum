@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-01",
+  "rule": "unsafe-in-source-detected",
+  "description": "an unsafe {} block appended to a real, existing crate source file is caught by the real GOV-1-02 gate's crates/**/*.rs scan",
+  "system": {
+    "kind": "governance-gate",
+    "gate": "unsafe-source",
+    "path": "crates/continuum-value/src/lib.rs",
+    "subject": "crates/continuum-value/src/lib.rs"
+  }
+}

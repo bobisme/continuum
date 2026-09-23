@@ -1,0 +1,9 @@
+{
+  "expect": "clean",
+  "description": "a 'budget' omission, honestly claimed expandable, is not flagged (only redaction/unsupported are irretrievable)",
+  "system": {
+    "kind": "redacted-irretrievability",
+    "reason": "budget",
+    "claimed_expandable": true
+  }
+}

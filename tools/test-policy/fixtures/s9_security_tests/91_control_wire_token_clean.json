@@ -1,0 +1,10 @@
+{
+  "expect": "clean",
+  "description": "a well-formed 3-byte printable token, honestly claimed 'ok', is not flagged",
+  "system": {
+    "kind": "wire-token",
+    "kernel": "Core",
+    "raw_hex": "0003414243",
+    "claimed": "ok"
+  }
+}

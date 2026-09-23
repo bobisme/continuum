@@ -1,0 +1,9 @@
+{
+  "expect": "clean",
+  "description": "a real, three-segment class/shard/identity derived path, honestly claimed safe, is not flagged",
+  "system": {
+    "kind": "crashpack-derived-path",
+    "segments": ["crash", "cp", "cp7m3x9"],
+    "claimed_safe": true
+  }
+}

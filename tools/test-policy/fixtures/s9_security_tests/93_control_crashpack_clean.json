@@ -1,0 +1,9 @@
+{
+  "expect": "clean",
+  "description": "a traversal-free identity, honestly claimed accepted, and its safe derived path, are not flagged",
+  "system": {
+    "kind": "crashpack-identity",
+    "identity": "cp7m3x9",
+    "claimed": "accepted"
+  }
+}

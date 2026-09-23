@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-02",
+  "rule": "wire-token-non-printable-rejected-detected",
+  "description": "a 3-byte token whose first byte is NUL is claimed 'ok' but Reader::token rejects any byte outside is_ascii_graphic",
+  "system": {
+    "kind": "wire-token",
+    "kernel": "Smt",
+    "raw_hex": "0003004142",
+    "claimed": "ok"
+  }
+}

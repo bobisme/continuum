@@ -1,0 +1,446 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "90_control_governance_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "91_control_wire_token_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "92_control_ceiling_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "93_control_crashpack_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "94_control_sandbox_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "95_control_redacted_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "96_control_redacted_irretrievability_clean.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "97_control_crashpack_derived_path_clean.json",
+      "ok": true
+    }
+  ],
+  "module": "tools/test-policy/sections/s9_security_tests.py",
+  "requirements": {
+    "TEST-9-01": {
+      "boundaries": [
+        "This ID's checks are not a Python port: `_check_governance_gate` dynamically loads the real, committed `tools/governance/check_code_policy.py` and `check_dependency_audit.py` modules (importlib, from their real file paths) and calls their real `rule_unsafe_forbidden`/`rule_dependency_audit` functions \u2014 the exact code `just check` runs for GOV-1-02 and dependency-audit-posture \u2014 against the real repository tree for the clean case, and against the same functions' own `Tree.with_changes` fixture-overlay mechanism (a real Cargo.toml/dependency-audits.toml text, textually mutated by this module, never hand-authored from scratch) for the violating fixtures. `unsafe-in-source-detected` overlays one real, existing crate source file with itself plus an appended `unsafe {}` block, so the scan runs the real `crates/**/*.rs` glob and the real comment-stripping/regex logic. What this cannot reach: a change to the *shape* of either rule function itself (no cargo means this module cannot compile a modified copy to check that), and the `unsafe`-in-source scan is textual (`strip_rust_comments` + a token regex), exactly as the production gate's own is \u2014 a Rust macro that could hide the token is out of scope for both."
+      ],
+      "corpus": {
+        "externally_sourced_dependencies": 184,
+        "mutations": 4,
+        "workspace_crates_scanned": 42
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "unsafe-lint-not-forbid-detected"
+          ],
+          "fixture": "01_unsafe_lint_not_forbid.json",
+          "ok": true,
+          "requirement": "TEST-9-01",
+          "rule": "unsafe-lint-not-forbid-detected"
+        },
+        {
+          "caught": [
+            "unsafe-in-source-detected"
+          ],
+          "fixture": "02_unsafe_in_source.json",
+          "ok": true,
+          "requirement": "TEST-9-01",
+          "rule": "unsafe-in-source-detected"
+        },
+        {
+          "caught": [
+            "dependency-not-audited-detected"
+          ],
+          "fixture": "03_dependency_not_audited.json",
+          "ok": true,
+          "requirement": "TEST-9-01",
+          "rule": "dependency-not-audited-detected"
+        },
+        {
+          "caught": [
+            "dependency-checksum-mismatch-detected"
+          ],
+          "fixture": "04_dependency_checksum_mismatch.json",
+          "ok": true,
+          "requirement": "TEST-9-01",
+          "rule": "dependency-checksum-mismatch-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 4,
+        "detected": 4
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "dependency-checksum-mismatch-detected",
+        "dependency-not-audited-detected",
+        "unsafe-in-source-detected",
+        "unsafe-lint-not-forbid-detected"
+      ],
+      "status": "enforced",
+      "summary": "dependency and unsafe audits"
+    },
+    "TEST-9-02": {
+      "absence": "docs/19 \u00a79's TEST-9-02 bullet, and docs/09's trust-boundary list, both name 'trace' and 'certificate' as two distinct untrusted input kinds. The certificate half (kernel wire.rs malformed-token/truncation rejection, above) is real, landed, and Rust-test-corroborated. The trace half has no real implementation at all: `continuum-corpus` and `continuum-observer` (`crates/continuum-corpus/src/lib.rs`, `crates/continuum-observer/src/lib.rs`) are both ~20-line documented stubs, and no schema for a trace-import artifact exists under `notes/plan/schemas/` \u2014 the identical absence `s6_fuzzing_targets.py`'s TEST-6-05 already documents for the same two crates. No Rust test anywhere references trace import, so this ID is `partial` rather than `enforced` even though its certificate half alone would meet the bar.",
+      "boundaries": [
+        "The four `continuum-kernel-*` crates each define their own `Reader` independently (docs/03 \u00a78 diversity: 'this crate depends on nothing'), but every one names the same `MAX_TOKEN_BYTES` constant and the same `Reader::token` grammar (empty -> `TokenFault::Empty`, over `MAX_TOKEN_BYTES` -> `TokenFault::TooLong`, insufficient bytes -> `Rejection::Truncated`, a non-`is_ascii_graphic` byte -> `TokenFault::NonPrintable`), confirmed identical by grep across all four `wire.rs` files. `_extract_max_token_bytes` reads each kernel's real `MAX_TOKEN_BYTES` at run time (the drift tie); `_reader_token_reference` re-implements the four-way outcome exactly in that order. Eight real, non-`#[ignore]`d Rust tests (two per kernel) corroborate exactly this grammar. What this module cannot do is call `Reader::token` itself (no cargo), so a change to the *order* the four checks run in, rather than their outcomes, would not be caught here \u2014 only TEST-6-06's LRAT-specific model executes past the header. This ID stays `partial` regardless of that strong certificate-side corroboration: see ABSENCE for the missing 'trace' half."
+      ],
+      "corpus": {
+        "kernels_checked": 4,
+        "outcomes_empty": 16,
+        "outcomes_non_printable": 16,
+        "outcomes_ok": 16,
+        "outcomes_oversized": 16,
+        "outcomes_truncated": 16,
+        "rust_tests_named": 8,
+        "rust_tests_present": 8
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "wire-token-empty-rejected-detected"
+          ],
+          "fixture": "05_wire_token_empty.json",
+          "ok": true,
+          "requirement": "TEST-9-02",
+          "rule": "wire-token-empty-rejected-detected"
+        },
+        {
+          "caught": [
+            "wire-token-oversized-rejected-detected"
+          ],
+          "fixture": "06_wire_token_oversized.json",
+          "ok": true,
+          "requirement": "TEST-9-02",
+          "rule": "wire-token-oversized-rejected-detected"
+        },
+        {
+          "caught": [
+            "wire-token-non-printable-rejected-detected"
+          ],
+          "fixture": "07_wire_token_non_printable.json",
+          "ok": true,
+          "requirement": "TEST-9-02",
+          "rule": "wire-token-non-printable-rejected-detected"
+        },
+        {
+          "caught": [
+            "wire-reader-truncated-rejected-detected"
+          ],
+          "fixture": "08_wire_token_truncated.json",
+          "ok": true,
+          "requirement": "TEST-9-02",
+          "rule": "wire-reader-truncated-rejected-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 64,
+        "detected": 64
+      },
+      "registry_status": "active",
+      "rules": [
+        "wire-reader-truncated-rejected-detected",
+        "wire-token-empty-rejected-detected",
+        "wire-token-non-printable-rejected-detected",
+        "wire-token-oversized-rejected-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuum-kernel-core/src/wire.rs",
+          "present": true,
+          "test": "reader_reports_truncation_instead_of_panicking"
+        },
+        {
+          "path": "crates/continuum-kernel-core/src/wire.rs",
+          "present": true,
+          "test": "tokens_reject_empty_oversized_and_non_printable"
+        },
+        {
+          "path": "crates/continuum-kernel-sat/src/wire.rs",
+          "present": true,
+          "test": "reader_reports_truncation_instead_of_panicking"
+        },
+        {
+          "path": "crates/continuum-kernel-sat/src/wire.rs",
+          "present": true,
+          "test": "tokens_reject_empty_oversized_and_non_printable"
+        },
+        {
+          "path": "crates/continuum-kernel-smt/src/wire.rs",
+          "present": true,
+          "test": "reader_reports_truncation_instead_of_panicking"
+        },
+        {
+          "path": "crates/continuum-kernel-smt/src/wire.rs",
+          "present": true,
+          "test": "tokens_reject_empty_oversized_and_non_printable"
+        },
+        {
+          "path": "crates/continuum-kernel-temporal/src/wire.rs",
+          "present": true,
+          "test": "reader_reports_truncation_instead_of_panicking"
+        },
+        {
+          "path": "crates/continuum-kernel-temporal/src/wire.rs",
+          "present": true,
+          "test": "tokens_reject_empty_oversized_and_non_printable"
+        }
+      ],
+      "status": "partial",
+      "summary": "malformed untrusted trace/certificate inputs"
+    },
+    "TEST-9-03": {
+      "boundaries": [
+        "`continuum-context` is real, substantial, non-stub code (`pack.rs`, `budget.rs`; thousands of lines with their own unit and integration test suites), not a scaffold. `_check_ceiling` models the shared shape of both real refusals \u2014 a request whose size exceeds a stated ceiling is always a typed error (`PackError::OverNodeCeiling` / `BudgetError::Exhausted`), never a silent truncation, an unbounded allocation, or a hang \u2014 and the drift check confirms both error names and their `selected`/`ceiling` (`minimal`/`ceiling`) fields are still literally present in the real source. Three real, non-`#[ignore]`d Rust tests exercise the real refusal at the real boundary (the ceiling exactly met vs. one unit under it) for both mechanisms. What this cannot do: call `RootPack::to_json`/`ChildPack::pack_at` itself (no cargo), so it cannot observe whether a *third*, not-yet-named resource dimension (wall-clock time, thread count) is bounded \u2014 only the two ceilings docs/19 \u00a79's DoS-limit obligation already has named production mechanisms for."
+      ],
+      "corpus": {
+        "byte_cases": 3,
+        "node_cases": 3,
+        "rust_tests_named": 3,
+        "rust_tests_present": 3
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "node-ceiling-exceeded-not-refused-detected"
+          ],
+          "fixture": "09_node_ceiling_not_refused.json",
+          "ok": true,
+          "requirement": "TEST-9-03",
+          "rule": "node-ceiling-exceeded-not-refused-detected"
+        },
+        {
+          "caught": [
+            "byte-ceiling-exhaustion-not-refused-detected"
+          ],
+          "fixture": "10_byte_ceiling_not_refused.json",
+          "ok": true,
+          "requirement": "TEST-9-03",
+          "rule": "byte-ceiling-exhaustion-not-refused-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 6,
+        "detected": 6
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "byte-ceiling-exhaustion-not-refused-detected",
+        "node-ceiling-exceeded-not-refused-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuum-context/src/pack.rs",
+          "present": true,
+          "test": "a_root_records_its_node_ceiling_and_refuses_to_break_it"
+        },
+        {
+          "path": "crates/continuum-context/src/budget.rs",
+          "present": true,
+          "test": "a_ceiling_below_the_minimal_child_publishes_nothing"
+        },
+        {
+          "path": "crates/continuum-context/tests/pr11_impl06_byte_and_token_budgets.rs",
+          "present": true,
+          "test": "an_over_budget_expansion_publishes_a_smaller_child_recording_the_shortfall"
+        }
+      ],
+      "status": "enforced",
+      "summary": "denial-of-service limits"
+    },
+    "TEST-9-04": {
+      "boundaries": [
+        "`crates/continuum-workspace/src/artifact_path.rs`'s own module doc cites docs/19 \u00a79 and docs/09 by name for exactly this obligation ('the defense is at construction, not at use'), and `ArtifactClass::Crashpack` (`crash_*`) is one of the twelve classes `validate_identity` gates uniformly \u2014 there is no separate, weaker path for crashpacks. `identity-character-class-violation-not-rejected-detected` ports `validate_identity` (a one-line character-class test, drift-tied by checking the literal predicate text is still present) against the real traversal corpus the production `#[test]` also uses. `derived-artifact-path-escapes-root-detected` checks the structural property `no_derived_path_has_a_relative_or_absolute_segment` and `resolve_stays_under_the_root` assert directly (three non-empty, non-`.`/`..`, separator-free segments) against supplied path segments, independent of `validate_identity` \u2014 the second, independent layer those two real tests check. Three real, non-`#[ignore]`d Rust tests corroborate both layers. What this cannot do: extract a real crashpack archive (no cargo, no filesystem write) \u2014 only the path-construction defense, which is the one docs/19 \u00a79 and the module's own doc comment name."
+      ],
+      "corpus": {
+        "derived_paths_checked": 4,
+        "identities_checked": 10,
+        "rust_tests_named": 3,
+        "rust_tests_present": 3,
+        "traversal_identities": 8,
+        "traversal_paths": 4
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "identity-character-class-violation-not-rejected-detected"
+          ],
+          "fixture": "11_crashpack_identity_traversal.json",
+          "ok": true,
+          "requirement": "TEST-9-04",
+          "rule": "identity-character-class-violation-not-rejected-detected"
+        },
+        {
+          "caught": [
+            "derived-artifact-path-escapes-root-detected"
+          ],
+          "fixture": "12_crashpack_derived_path_traversal.json",
+          "ok": true,
+          "requirement": "TEST-9-04",
+          "rule": "derived-artifact-path-escapes-root-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 14,
+        "detected": 14
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "derived-artifact-path-escapes-root-detected",
+        "identity-character-class-violation-not-rejected-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuum-workspace/src/artifact_path.rs",
+          "present": true,
+          "test": "traversal_and_separator_attempts_are_rejected"
+        },
+        {
+          "path": "crates/continuum-workspace/src/artifact_path.rs",
+          "present": true,
+          "test": "no_derived_path_has_a_relative_or_absolute_segment"
+        },
+        {
+          "path": "crates/continuum-workspace/src/artifact_path.rs",
+          "present": true,
+          "test": "resolve_stays_under_the_root"
+        }
+      ],
+      "status": "enforced",
+      "summary": "path traversal in crashpacks"
+    },
+    "TEST-9-05": {
+      "absence": "plan.md \u00a718.3 'Sandboxing' states the requirement in prose only: 'Foreign solvers, Lean workers, generated code, corpus oracles, and agent code run in isolated, resource-bounded environments with pinned images/toolchains and read-only inputs. Output is parsed as untrusted data.' A repository-wide search finds no `continuum-solver` crate, and zero uses anywhere in `crates/**/*.rs` of `std::process::Command`, `seccomp`, `setrlimit`/`rlimit`, or `landlock` \u2014 nothing spawns a foreign solver process at all yet, so nothing sandboxes one. The check below is a standalone reference model of the five named properties (isolation/no-ambient-network, resource bounds, pinned image, read-only inputs, untrusted output), drift-tied to the cited plan.md sentence, and demonstrates the model itself is not vacuous \u2014 it is not, and cannot yet be, a test of any production sandboxing mechanism, because none exists.",
+      "corpus": {
+        "compliant_configs": 1,
+        "violating_configs": 5
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "sandbox-isolation-property-violated-detected"
+          ],
+          "fixture": "13_sandbox_not_isolated.json",
+          "ok": true,
+          "requirement": "TEST-9-05",
+          "rule": "sandbox-isolation-property-violated-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 5,
+        "detected": 5
+      },
+      "registry_status": "active",
+      "rules": [
+        "sandbox-isolation-property-violated-detected"
+      ],
+      "status": "partial",
+      "summary": "solver sandboxing"
+    },
+    "TEST-9-06": {
+      "boundaries": [
+        "`notes/plan/schemas/redacted.schema.json` + `schemas/examples/redacted.example.json` are real, committed artifacts; `redacted-example-schema-violation-detected` reads and validates them directly (required keys, the `reason` enum, the `redacted: true` const) rather than porting unrelated logic. `continuum-context::compile::RedactionPolicy` / `RedactionReason` and `omission::OmissionReason::admits_irretrievability` are real, landed, non-stub production code: a withheld candidate is recorded with `OmissionReason::Redaction`, and `admits_irretrievability()` is `true` for exactly `redaction` and `unsupported` \u2014 the property that makes a purge permanent rather than a soft delete a later stage could still surface. Both the wire-token vocabulary (`compile.rs`) and the irretrievability set (`omission.rs`) are extracted at run time (drift-tied), not hand-copied. Three real, non-`#[ignore]`d Rust tests corroborate the ordering guarantee (redaction is a pre-pass, before every compiler stage), the irretrievability property, and that it survives every later stage on a concrete compiled example. What this cannot do: run `CausalCompile` itself (no cargo), so it cannot observe whether a withheld candidate's *content* (rather than its presence in `selected()`) ever reaches an intermediate structure \u2014 only the typed-omission guarantee, which is what `redacted.schema.json` and the omission manifest make checkable without executing the compiler."
+      ],
+      "corpus": {
+        "golden_checked": 1,
+        "irretrievable_reasons_checked": 2,
+        "mutations": 5,
+        "omission_reasons_checked": 5,
+        "rust_tests_named": 3,
+        "rust_tests_present": 3
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "redacted-example-schema-violation-detected"
+          ],
+          "fixture": "14_redacted_schema_violation.json",
+          "ok": true,
+          "requirement": "TEST-9-06",
+          "rule": "redacted-example-schema-violation-detected"
+        },
+        {
+          "caught": [
+            "redacted-item-wrongly-marked-expandable-detected"
+          ],
+          "fixture": "15_redacted_wrongly_expandable.json",
+          "ok": true,
+          "requirement": "TEST-9-06",
+          "rule": "redacted-item-wrongly-marked-expandable-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 10,
+        "detected": 10
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "redacted-example-schema-violation-detected",
+        "redacted-item-wrongly-marked-expandable-detected"
+      ],
+      "rust_tests": [
+        {
+          "path": "crates/continuum-context/src/omission.rs",
+          "present": true,
+          "test": "only_two_reasons_can_spell_irretrievability"
+        },
+        {
+          "path": "crates/continuum-context/src/stage.rs",
+          "present": true,
+          "test": "redaction_cannot_be_recorded_after_root_selection"
+        },
+        {
+          "path": "crates/continuum-context/tests/pr11_compiler_stages_5_7.rs",
+          "present": true,
+          "test": "redaction_still_wins_over_every_stage_of_this_group"
+        }
+      ],
+      "status": "enforced",
+      "summary": "secret-redaction tests"
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a79 Security validation",
+  "unclaimed": [
+    "TEST-9-07"
+  ]
+}

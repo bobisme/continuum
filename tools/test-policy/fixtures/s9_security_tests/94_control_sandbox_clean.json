@@ -1,0 +1,14 @@
+{
+  "expect": "clean",
+  "description": "a sandbox config satisfying every plan.md §18.3 property is not flagged",
+  "system": {
+    "kind": "sandbox-config",
+    "config": {
+      "isolated": true,
+      "resource_bounded": true,
+      "pinned_image": true,
+      "read_only_inputs": true,
+      "output_untrusted": true
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "requirement": "TEST-9-03",
+  "rule": "node-ceiling-exceeded-not-refused-detected",
+  "description": "7 selected nodes against a ceiling of 4 is claimed not-refused, but the real PackError::OverNodeCeiling refuses it",
+  "system": {
+    "kind": "ceiling",
+    "ceiling_kind": "node",
+    "ceiling": 4,
+    "requested": 7,
+    "claimed_refused": false
+  }
+}

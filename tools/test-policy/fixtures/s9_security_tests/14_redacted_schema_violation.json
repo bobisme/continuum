@@ -1,0 +1,14 @@
+{
+  "requirement": "TEST-9-06",
+  "rule": "redacted-example-schema-violation-detected",
+  "description": "a redacted-value instance with a reason outside the real redacted.schema.json enum {summarized, lost, purged}",
+  "system": {
+    "kind": "redacted-instance",
+    "instance": {
+      "commitment": "blake3:7777777777777777777777777777777777777777777777777777777777777777",
+      "original_class": "crash",
+      "reason": "not-a-real-reason",
+      "redacted": true
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-02",
+  "rule": "wire-reader-truncated-rejected-detected",
+  "description": "a declared length of 5 with only 2 bytes remaining is claimed 'ok' but Reader::take reports Rejection::Truncated",
+  "system": {
+    "kind": "wire-token",
+    "kernel": "Temporal",
+    "raw_hex": "00054142",
+    "claimed": "ok"
+  }
+}

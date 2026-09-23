@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-02",
+  "rule": "wire-token-empty-rejected-detected",
+  "description": "a zero-length token prefix (declared length 0) is claimed 'ok' but Reader::token rejects it as empty",
+  "system": {
+    "kind": "wire-token",
+    "kernel": "Sat",
+    "raw_hex": "0000",
+    "claimed": "ok"
+  }
+}

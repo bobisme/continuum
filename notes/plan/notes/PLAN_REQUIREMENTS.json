@@ -9637,7 +9637,7 @@
         "line": 129,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "dependency and unsafe audits"
     },
     {
@@ -9659,7 +9659,7 @@
         "line": 129,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "denial-of-service limits"
     },
     {
@@ -9670,7 +9670,7 @@
         "line": 129,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "path traversal in crashpacks"
     },
     {
@@ -9692,7 +9692,7 @@
         "line": 129,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "secret-redaction tests"
     },
     {

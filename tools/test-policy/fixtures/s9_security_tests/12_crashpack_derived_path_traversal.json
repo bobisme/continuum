@@ -1,0 +1,10 @@
+{
+  "requirement": "TEST-9-04",
+  "rule": "derived-artifact-path-escapes-root-detected",
+  "description": "a derived crashpack store path with a '..' shard segment is claimed safe, but a '..' segment is exactly what resolve_stays_under_the_root and no_derived_path_has_a_relative_or_absolute_segment forbid",
+  "system": {
+    "kind": "crashpack-derived-path",
+    "segments": ["crash", "..", "cp7m3x9"],
+    "claimed_safe": true
+  }
+}

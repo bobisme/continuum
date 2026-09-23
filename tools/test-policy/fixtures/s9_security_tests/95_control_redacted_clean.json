@@ -1,0 +1,13 @@
+{
+  "expect": "clean",
+  "description": "the real, committed redacted.example.json golden validates against redacted.schema.json, and a 'redaction' reason honestly claimed non-expandable is not flagged",
+  "system": {
+    "kind": "redacted-instance",
+    "instance": {
+      "commitment": "blake3:7777777777777777777777777777777777777777777777777777777777777777",
+      "original_class": "crash",
+      "reason": "purged",
+      "redacted": true
+    }
+  }
+}

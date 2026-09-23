@@ -1,0 +1,15 @@
+{
+  "requirement": "TEST-9-05",
+  "rule": "sandbox-isolation-property-violated-detected",
+  "description": "a sandbox config allowing ambient network access violates plan.md §18.3's isolation property (standalone model; no production mechanism exists yet)",
+  "system": {
+    "kind": "sandbox-config",
+    "config": {
+      "isolated": false,
+      "resource_bounded": true,
+      "pinned_image": true,
+      "read_only_inputs": true,
+      "output_untrusted": true
+    }
+  }
+}

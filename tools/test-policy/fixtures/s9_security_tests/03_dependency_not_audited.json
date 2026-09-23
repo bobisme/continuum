@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-01",
+  "rule": "dependency-not-audited-detected",
+  "description": "removing blake3's [[audits.blake3]] entry from the real dependency-audits.toml, while Cargo.lock still resolves it externally, is caught by the real dependency-audit-posture gate",
+  "system": {
+    "kind": "governance-gate",
+    "gate": "dependency-missing",
+    "package": "blake3",
+    "subject": "tools/governance/dependency-audits.toml audits.blake3"
+  }
+}

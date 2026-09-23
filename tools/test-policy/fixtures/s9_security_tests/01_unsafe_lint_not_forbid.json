@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-01",
+  "rule": "unsafe-lint-not-forbid-detected",
+  "description": "Cargo.toml's [workspace.lints.rust] unsafe_code relaxed from \"forbid\" to \"warn\" is caught by the real GOV-1-02 gate",
+  "system": {
+    "kind": "governance-gate",
+    "gate": "unsafe-lint-level",
+    "level": "warn",
+    "subject": "Cargo.toml [workspace.lints.rust] unsafe_code"
+  }
+}

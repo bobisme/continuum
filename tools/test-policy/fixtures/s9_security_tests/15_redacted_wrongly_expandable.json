@@ -1,0 +1,10 @@
+{
+  "requirement": "TEST-9-06",
+  "rule": "redacted-item-wrongly-marked-expandable-detected",
+  "description": "an omission with reason 'redaction' is claimed expandable, but the real OmissionReason::admits_irretrievability makes redaction permanently irretrievable",
+  "system": {
+    "kind": "redacted-irretrievability",
+    "reason": "redaction",
+    "claimed_expandable": true
+  }
+}

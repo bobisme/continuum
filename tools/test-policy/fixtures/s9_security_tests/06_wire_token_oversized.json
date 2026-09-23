@@ -1,0 +1,11 @@
+{
+  "requirement": "TEST-9-02",
+  "rule": "wire-token-oversized-rejected-detected",
+  "description": "a declared length of 200 exceeds every kernel's real MAX_TOKEN_BYTES (128) and is claimed 'ok'",
+  "system": {
+    "kind": "wire-token",
+    "kernel": "Core",
+    "raw_hex": "00c84141414141",
+    "claimed": "ok"
+  }
+}
