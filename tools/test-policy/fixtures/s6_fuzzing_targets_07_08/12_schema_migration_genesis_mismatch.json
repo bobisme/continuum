@@ -1,0 +1,15 @@
+{
+  "requirement": "TEST-6-08",
+  "rule": "schema-epoch-migration-genesis-mismatch-detected",
+  "description": "a migration claims to start from schema_epoch 4, but the real committed domain-pack.schema.json declares schema_epoch 1",
+  "system": {
+    "kind": "schema-migration",
+    "class": "domain-pack",
+    "advances": [
+      4
+    ],
+    "concurrently_held": [
+      4
+    ]
+  }
+}

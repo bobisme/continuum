@@ -1,0 +1,18 @@
+{
+  "requirement": "TEST-6-08",
+  "rule": "schema-epoch-migration-cycle-detected",
+  "description": "a migration chain that revisits an epoch it already minted",
+  "system": {
+    "kind": "schema-migration",
+    "class": "cir",
+    "advances": [
+      1,
+      2,
+      1
+    ],
+    "concurrently_held": [
+      1,
+      2
+    ]
+  }
+}

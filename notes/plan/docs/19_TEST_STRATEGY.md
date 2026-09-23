@@ -97,7 +97,7 @@ Disagreement halts the relevant claim and creates a minimized fixture.
 - domain-pack commands/faults;
 - trace importers;
 - solver proof parsers; (delivered: bn-1zb9 — tools/test-policy/evidence/s6_fuzzing_targets.json)
-- replay state machine;
+- replay state machine; (delivered: bn-215u — tools/test-policy/evidence/s6_fuzzing_targets_07_08.json)
 - schema migrations.
 
 Fuzzing is resource-limited and includes malicious cyclic/oversized artifacts.

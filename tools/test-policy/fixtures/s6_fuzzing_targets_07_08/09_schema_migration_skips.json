@@ -1,0 +1,17 @@
+{
+  "requirement": "TEST-6-08",
+  "rule": "schema-epoch-advance-skips-detected",
+  "description": "an advance from epoch 1 straight to epoch 3, with no v2 document ever minted",
+  "system": {
+    "kind": "schema-migration",
+    "class": "cir",
+    "advances": [
+      1,
+      3
+    ],
+    "concurrently_held": [
+      1,
+      3
+    ]
+  }
+}

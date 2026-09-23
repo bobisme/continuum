@@ -1,0 +1,19 @@
+{
+  "requirement": "TEST-6-08",
+  "rule": "schema-epoch-concurrency-limit-exceeded-detected",
+  "description": "three distinct schema epochs claimed concurrently held at once",
+  "system": {
+    "kind": "schema-migration",
+    "class": "cir",
+    "advances": [
+      1,
+      2,
+      3
+    ],
+    "concurrently_held": [
+      1,
+      2,
+      3
+    ]
+  }
+}

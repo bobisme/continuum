@@ -1,0 +1,18 @@
+{
+  "requirement": "TEST-6-08",
+  "rule": "schema-epoch-advance-non-monotonic-detected",
+  "description": "an advance from epoch 2 to epoch 1 (a decrease, never a real advance)",
+  "system": {
+    "kind": "schema-migration",
+    "class": "domain-pack",
+    "advances": [
+      1,
+      2,
+      1
+    ],
+    "concurrently_held": [
+      1,
+      2
+    ]
+  }
+}

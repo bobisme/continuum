@@ -1,0 +1,14 @@
+{
+  "expect": "clean",
+  "description": "a real schema class's genesis epoch, checked against itself, produces no findings",
+  "system": {
+    "kind": "schema-migration",
+    "class": "cir",
+    "advances": [
+      1
+    ],
+    "concurrently_held": [
+      1
+    ]
+  }
+}

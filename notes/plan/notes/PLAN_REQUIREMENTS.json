@@ -9483,7 +9483,7 @@
         "line": 92,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "replay state machine"
     },
     {

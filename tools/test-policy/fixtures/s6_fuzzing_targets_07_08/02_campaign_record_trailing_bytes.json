@@ -1,0 +1,9 @@
+{
+  "requirement": "TEST-6-07",
+  "rule": "campaign-record-trailing-bytes-detected",
+  "description": "a frontier-0 campaign record with one undeclared trailing component appended",
+  "system": {
+    "kind": "campaign-record",
+    "bytes_hex": "00000000000000077461736b5f7431000000000000000400000003000000000000000577735f73320000000000000008000000000000002a0000000000000007626f756e6465640000000000000008000000000000000000000000000000080000000000000001"
+  }
+}
