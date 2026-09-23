@@ -1,0 +1,10 @@
+{
+  "expect": "clean",
+  "description": "a well-formed (non-duplicate-id) case declared accepted is not flagged",
+  "system": {
+    "kind": "double-counting",
+    "target": "canonical.json",
+    "class": "well-formed",
+    "expect": "accepted"
+  }
+}

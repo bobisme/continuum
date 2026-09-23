@@ -1,0 +1,27 @@
+{
+  "expect": "clean",
+  "description": "the true fairness edge (t0 enabled at the initial state) is claimed correctly",
+  "system": {
+    "kind": "fairness-edges",
+    "fair": ["t0"],
+    "claimed_edges": [["t0", "[[false],[]]"]],
+    "system": {
+      "name": "fx-fairness-1",
+      "variables": [{"name": "v0", "type": {"kind": "bool"}}],
+      "init": {"v0": false},
+      "obligations": [],
+      "transitions": [
+        {
+          "name": "t0",
+          "process": "p0",
+          "guard": {"op": "eq", "args": [{"var": "v0"}, {"const": false}]},
+          "updates": {"v0": {"const": true}},
+          "reads": ["v0"],
+          "writes": ["v0"]
+        }
+      ],
+      "independent": [],
+      "conflicts": []
+    }
+  }
+}

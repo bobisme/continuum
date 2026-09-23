@@ -1,0 +1,15 @@
+{
+  "description": "the begin_txn drop-mutant of the G0-DX-01 first demonstration is recorded as not held",
+  "requirement": "TEST-4-10",
+  "rule": "first-demo-mutant-not-held-detected",
+  "system": {
+    "kind": "first-demo-mutants",
+    "mutants": {
+      "begin_txn": {
+        "observed": "disabled_at_submit_write",
+        "pre_registered": "disabled_at_submit_write",
+        "held": false
+      }
+    }
+  }
+}

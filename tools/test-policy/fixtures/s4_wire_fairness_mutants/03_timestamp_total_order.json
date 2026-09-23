@@ -1,0 +1,10 @@
+{
+  "description": "zeta and alpha share a millisecond timestamp; sorting by `at` alone (lexical tie-break) reorders them ahead of the true append order",
+  "requirement": "TEST-4-09",
+  "rule": "timestamp-total-order-detected",
+  "system": {
+    "kind": "timestamp-order",
+    "true_order": ["zeta", "alpha"],
+    "timestamps_ms": {"zeta": 1000, "alpha": 1000}
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "description": "an unknown auth_token field's value was remapped onto the declared actor field instead of being ignored",
+  "requirement": "TEST-4-07",
+  "rule": "unknown-field-remapped-detected",
+  "system": {
+    "kind": "unknown-field",
+    "decoded": {
+      "actor": "legacy-secret",
+      "auth_token": "legacy-secret",
+      "protocol_version": "3.2",
+      "request_id": "req_1"
+    },
+    "reference": {
+      "actor": "agent:fuzz",
+      "protocol_version": "3.2",
+      "request_id": "req_1"
+    }
+  }
+}

@@ -1,0 +1,296 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_double_counting.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_fairness_edges.json",
+      "ok": true
+    }
+  ],
+  "module": "tools/test-policy/sections/s4_wire_fairness_mutants.py",
+  "out_of_scope": "TEST-4-13..18 (Protocol corpus: non-idempotent retry / ack-before-durability / forgotten loser drain / timeout via silent drop / restart timer leak / recovery livelock) is bn-2dt2's job, claimed in parallel",
+  "requirements": {
+    "TEST-4-07": {
+      "boundaries": [
+        "the real committed wire-fuzz-corpus golden crates/continuumd/tests/wire-fuzz-corpus/frame.request-envelope.json/well-formed-workspace-create.case: its own decoded keys are the known-field set (not a parse of the protocol IDL, which the no-generator gate gate_g2_01_acceptance.rs forbids a new tool from reading, and not a hand-copied duplicate of its struct). RFC 0026's own rule ('a daemon MUST ignore unknown optional request fields ... MUST NOT emit fields the negotiated version does not define') is the production rule this mutant targets, and real Rust tests exercise the real decoder against exactly this class of mutant: codec_canonical_form.rs::an_unknown_optional_field_is_ignored_and_an_unknown_closed_enum_member_is_not and codec_canonical_cbor.rs::an_unknown_field_and_an_unknown_enum_member_behave_the_same_in_cbor each widen a real decoded value with an extra field and assert the decode is unchanged; wire_fuzz.rs::the_campaign_finds_no_defect drives the RequestEnvelope frame itself (wire_fuzz/target.rs's RequestEnvelopeJson/RequestEnvelopeCbor probes) and treats an unknown-field acceptance as normal form. `_RUST_TESTS['TEST-4-07']` names all three; this harness checks their existence, `#[test]` status and drift fingerprint (real_run, below) but does not execute them (no cargo, README-test.md). This Python check itself compares a candidate decode's output against the real golden's own keys and true values."
+      ],
+      "corpus": {
+        "golden_fields_present": 10,
+        "known_fields_checked": 10
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "unknown-field-remapped-detected"
+          ],
+          "fixture": "01_unknown_field_remapped.json",
+          "ok": true,
+          "requirement": "TEST-4-07",
+          "rule": "unknown-field-remapped-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 1,
+        "detected": 1
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "unknown-field-remapped-detected"
+      ],
+      "rust_tests": [
+        {
+          "exists": true,
+          "fn": "an_unknown_optional_field_is_ignored_and_an_unknown_closed_enum_member_is_not",
+          "hash": "8a7e93c861c74862c6cff42901fd5e5d6b337dd020c4ed1a933ed727cb686d99",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuumd/tests/codec_canonical_form.rs"
+        },
+        {
+          "exists": true,
+          "fn": "an_unknown_field_and_an_unknown_enum_member_behave_the_same_in_cbor",
+          "hash": "7cee9ee990545e765e1462082e7d69b1030a2c5406b3a5e2efd10c858310f549",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuumd/tests/codec_canonical_cbor.rs"
+        },
+        {
+          "exists": true,
+          "fn": "the_campaign_finds_no_defect",
+          "hash": "4bddeb1057aa08ef33e7cfc6f6636c64f462701dec7c47aab2dffe520e4fc002",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuumd/tests/wire_fuzz.rs"
+        }
+      ],
+      "status": "enforced",
+      "summary": "accept unknown field as old meaning"
+    },
+    "TEST-4-08": {
+      "boundaries": [
+        "tsys.compile_system / tsys.explore / tsys.enabled (the real oracle substance TEST-2-04's reduction-agrees and TEST-4-01's causal-edge-drop-detected, bn-1ccq, already rely on) compute the true (fair-transition, reachable-state) edge set directly; the mutant drops one, the same operation TEST-4-01 performs on causal edges \u2014 the same bar TEST-4-01 meets without citing a Rust test, because the substance under test is this harness's own oracle, not continuumd. continuum-engine-reference/tests/semantic_oracle.rs::a_weakly_fair_discharge_closes_the_lasso_and_an_unfair_one_does_not and its sibling every_seeded_defect_class_is_detected_with_a_replayable_witness (sweeping DefectClass::Fairness) are real, closely-matching corroborating production surface \u2014 a scheduler-level weak-fairness test with a starvation witness \u2014 cited and existence/drift-checked in `_RUST_TESTS['TEST-4-08']` for extra rigor, though not required by this ID's own concept (tsys's semantic-engine oracle, not continuumd protocol/codec). Distinct from TEST-2-08's fairness-annotation well-formedness check (sections/s2_cancellation_fairness.py, bn-1fqu), not edited here."
+      ],
+      "corpus": {
+        "systems": 128,
+        "systems_with_fairness_edges": 112
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "fairness-edge-drop-detected"
+          ],
+          "fixture": "02_fairness_edge_drop.json",
+          "ok": true,
+          "requirement": "TEST-4-08",
+          "rule": "fairness-edge-drop-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 112,
+        "detected": 112
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "fairness-edge-drop-detected"
+      ],
+      "rust_tests": [
+        {
+          "exists": true,
+          "fn": "a_weakly_fair_discharge_closes_the_lasso_and_an_unfair_one_does_not",
+          "hash": "2edce68ab58a8e0210d4770382fe9e74cdcaf046596b3c7fb2a5386f1e6516a9",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuum-engine-reference/tests/semantic_oracle.rs"
+        },
+        {
+          "exists": true,
+          "fn": "every_seeded_defect_class_is_detected_with_a_replayable_witness",
+          "hash": "b04931c6a369ef687ede1f0502bc323cdf3d31bb20555201598ffc2d8bc2511f",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuum-engine-reference/tests/semantic_oracle.rs"
+        }
+      ],
+      "status": "enforced",
+      "summary": "omit fairness edge"
+    },
+    "TEST-4-09": {
+      "absence": "no adapter in this repository reconstructs an order from committed milestones/events for this harness to call; see BOUNDARIES",
+      "boundaries": [
+        "RFC 0026's protocol IDL declares Milestone.at: Timestamp required and 'milestones reached so far, in order' (list order authoritative), a monotonic-status rule, and the Timestamp scalar's millisecond precision (a real, structural collision hazard) \u2014 but no adapter anywhere in this repository reconstructs an order from committed milestones/events for this harness to call, and no real crates/continuumd test exercises a timestamp-total-order mutant by name (checked; none found). The check below is a freestanding model of the one hazard the rule names (a bare comparison on `at` cannot recover the true append order when two entries share a millisecond), not a mutation of running harness or engine logic and not tied to any Rust test, hence `partial` rather than `enforced` (README-test.md step 5; bn-3mo3's Rust-test-citation rule, common.md) despite passing with zero failures."
+      ],
+      "corpus": {
+        "cases": 1
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "timestamp-total-order-detected"
+          ],
+          "fixture": "03_timestamp_total_order.json",
+          "ok": true,
+          "requirement": "TEST-4-09",
+          "rule": "timestamp-total-order-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 1,
+        "detected": 1
+      },
+      "registry_status": "active",
+      "rules": [
+        "timestamp-total-order-detected"
+      ],
+      "status": "partial",
+      "summary": "use timestamp total order."
+    },
+    "TEST-4-10": {
+      "boundaries": [
+        "crates/continuumd/tests/golden/dx01_falsification_evidence.txt (bn-37gu / bn-1y4qc, G0-DX-01, plan \u00a725's 'first demonstration'), a byte-pinned artifact a real cargo test run produced and committed. This module reads that committed evidence's [leg1 replay-preserving core] section. The real Rust test that runs the drop-one campaign is dx01_falsification.rs::a01_dropping_any_causal_event_fails_the_pre_registered_way (asserts each of the four drop-one mutants against its pre-registered outcome); dx01_falsification.rs::d_the_campaign_renders_one_byte_stable_evidence_artifact is what writes the golden this module reads. `_RUST_TESTS['TEST-4-10']` names both; this harness checks their existence, `#[test]` status and drift fingerprint but does not re-run them (no cargo, README-test.md)."
+      ],
+      "corpus": {
+        "mutants_in_golden": 4
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "first-demo-mutant-not-held-detected"
+          ],
+          "fixture": "04_first_demo_mutant_not_held.json",
+          "ok": true,
+          "requirement": "TEST-4-10",
+          "rule": "first-demo-mutant-not-held-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 1,
+        "detected": 1
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "first-demo-mutant-not-held-detected"
+      ],
+      "rust_tests": [
+        {
+          "exists": true,
+          "fn": "a01_dropping_any_causal_event_fails_the_pre_registered_way",
+          "hash": "975b0d350e4844add359644f0e6592aca6204f06eb4ee750249bb836dfd46a60",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuumd/tests/dx01_falsification.rs"
+        },
+        {
+          "exists": true,
+          "fn": "d_the_campaign_renders_one_byte_stable_evidence_artifact",
+          "hash": "23791908eaf0a2f9aad2302106450f418a0e7296a4b1aed29f65bebd1a2df740",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuumd/tests/dx01_falsification.rs"
+        }
+      ],
+      "status": "enforced",
+      "summary": "all first-demo mutants"
+    },
+    "TEST-4-11": {
+      "absence": "no Python-callable adapter decides epoch staleness (epochs are Rust content identities, ADR-0018); see BOUNDARIES",
+      "boundaries": [
+        "RFC 0026's protocol IDL declares the ErrorCode vocabulary (StaleSnapshot, ContinuationEpochMismatch, EpochUnsupported) and an epoch-independence rule states the obligation. idl_conformance.rs::the_error_taxonomy_is_the_complete_idl_set asserts these codes are named in the taxonomy, but exercises no request or continuation actually being rejected for a stale epoch \u2014 the taxonomy's completeness, not the mutant this ID names. No Python-callable adapter decides epoch staleness either way: epochs are content identities (ADR-0018), and the daemon that dispatches on them is Rust this no-cargo harness cannot execute. The check below is a freestanding acceptance-predicate model over hand-built epoch pairs, not a mutation of running harness or engine logic and not tied to any Rust test that exercises staleness rejection, hence `partial` (README-test.md step 5; bn-3mo3's Rust-test-citation rule, common.md)."
+      ],
+      "corpus": {
+        "cases": 1
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "stale-epoch-accepted-detected"
+          ],
+          "fixture": "05_stale_epoch_accepted.json",
+          "ok": true,
+          "requirement": "TEST-4-11",
+          "rule": "stale-epoch-accepted-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 1,
+        "detected": 1
+      },
+      "registry_status": "active",
+      "rules": [
+        "stale-epoch-accepted-detected"
+      ],
+      "status": "partial",
+      "summary": "stale term/epoch"
+    },
+    "TEST-4-12": {
+      "boundaries": [
+        "crates/continuumd/tests/wire-fuzz-corpus/*/duplicate-id-*.case, the real committed corpus. The real Rust tests that drive it against the real decoders are wire_fuzz.rs::every_committed_case_lands_where_it_declares (every committed case, asserting each lands where its own `expect` field declares) and wire_fuzz.rs::regression_duplicate_id_cases_reach_their_uniqueness_rules (the duplicate-id class specifically). `_RUST_TESTS['TEST-4-12']` names both; this harness checks their existence, `#[test]` status and drift fingerprint but does not execute the drive itself (no cargo). This module reads the committed expect field of every duplicate-id case (nine of the ten targets; frame.length-prefix has no keyed content)."
+      ],
+      "corpus": {
+        "duplicate_id_cases": 9
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "duplicate-id-accepted-detected"
+          ],
+          "fixture": "06_duplicate_id_accepted.json",
+          "ok": true,
+          "requirement": "TEST-4-12",
+          "rule": "duplicate-id-accepted-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 1,
+        "detected": 1
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "duplicate-id-accepted-detected"
+      ],
+      "rust_tests": [
+        {
+          "exists": true,
+          "fn": "every_committed_case_lands_where_it_declares",
+          "hash": "080da3ce139a3e47ba05ce28c1aea4233e12813da5e3cc2bd30b019079bb7599",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuumd/tests/wire_fuzz.rs"
+        },
+        {
+          "exists": true,
+          "fn": "regression_duplicate_id_cases_reach_their_uniqueness_rules",
+          "hash": "03ac1e6382487feeab07af7056b26d445d9cfe71afb6e615f799552b70142c8b",
+          "ignored": false,
+          "is_test": true,
+          "path": "crates/continuumd/tests/wire_fuzz.rs"
+        }
+      ],
+      "status": "enforced",
+      "summary": "double counting"
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "seeds": "0..127",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a74 Mutation testing",
+  "unclaimed": [
+    "TEST-4-13",
+    "TEST-4-14",
+    "TEST-4-15",
+    "TEST-4-16",
+    "TEST-4-17",
+    "TEST-4-18"
+  ]
+}

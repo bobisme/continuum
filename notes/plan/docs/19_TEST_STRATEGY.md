@@ -57,15 +57,15 @@ Expected non-preservation tests deliberately alter observations, fairness, or ef
 - use hash equality only;
 - ignore epoch;
 - map submitted to stable;
-- accept unknown field as old meaning;
-- omit fairness edge;
+- accept unknown field as old meaning; (delivered: bn-3mo3 — tools/test-policy/evidence/s4_wire_fairness_mutants.json)
+- omit fairness edge; (delivered: bn-3mo3 — tools/test-policy/evidence/s4_wire_fairness_mutants.json)
 - use timestamp total order.
 
 ### Protocol corpus
 
-- all first-demo mutants;
+- all first-demo mutants; (delivered: bn-3mo3 — tools/test-policy/evidence/s4_wire_fairness_mutants.json)
 - stale term/epoch;
-- double counting;
+- double counting; (delivered: bn-3mo3 — tools/test-policy/evidence/s4_wire_fairness_mutants.json)
 - non-idempotent retry; (delivered: bn-2dt2 — tools/test-policy/evidence/s4_protocol_corpus.json)
 - ack-before-durability; (delivered: bn-2dt2 — tools/test-policy/evidence/s4_protocol_corpus.json)
 - forgotten loser drain;

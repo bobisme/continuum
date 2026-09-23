@@ -9208,7 +9208,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "accept unknown field as old meaning"
     },
     {
@@ -9219,7 +9219,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "omit fairness edge"
     },
     {
@@ -9241,7 +9241,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "all first-demo mutants"
     },
     {
@@ -9263,7 +9263,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "double counting"
     },
     {

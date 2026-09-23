@@ -1,0 +1,11 @@
+{
+  "description": "a request pinned to epoch sem:aaa was accepted against a daemon whose current epoch is sem:bbb",
+  "requirement": "TEST-4-11",
+  "rule": "stale-epoch-accepted-detected",
+  "system": {
+    "kind": "stale-epoch",
+    "pinned_epoch": "sem:aaa",
+    "current_epoch": "sem:bbb",
+    "accepted": true
+  }
+}

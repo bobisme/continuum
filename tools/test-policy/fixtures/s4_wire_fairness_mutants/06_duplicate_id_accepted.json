@@ -1,0 +1,11 @@
+{
+  "description": "a duplicate-id wire-fuzz case is declared accepted instead of rejected: the repeated identifier would be double-counted",
+  "requirement": "TEST-4-12",
+  "rule": "duplicate-id-accepted-detected",
+  "system": {
+    "kind": "double-counting",
+    "target": "canonical.json",
+    "class": "duplicate-id",
+    "expect": "accepted"
+  }
+}
