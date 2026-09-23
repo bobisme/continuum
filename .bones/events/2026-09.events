@@ -380,3 +380,6 @@
 1790144705288881	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy9RI		item.update	bn-1hape	{"field":"labels","value":{"action":"add","label":"req:test-9-07"}}	blake3:1-X7leBcMpC9Tg6hmeOYCOC06YkUsZvZJayMY_VqFOU
 1790144725210117	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy9hI		item.move	bn-2ee4c	{"state":"done"}	blake3:E3XhZZe87ZbV5D9g3Bq-a5l61dzl-VC-KopAZ66HzaY
 1790144725269202	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy9xI		item.comment	bn-2ee4c	{"body":"Merged. Codex review cr-3e3t1j approved 993e611 in round 2. The only post-LGTM commit adds the security review table. req:test-9-07 moved to bn-1hape, which owns the production signing path."}	blake3:n0rc_zLIMsvW1b0Z2Sm5MbYQcpOHpM7TxMdfF_2FxOI
+1790144759183765	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy-BI		item.move	bn-1hape	{"state":"doing"}	blake3:18nB6YVXmhCDl_tfR1mNzK52iv4TS_BQ8qwHtsGw6ZA
+1790144759197506	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy-RI		item.assign	bn-1hape	{"action":"assign","agent":"continuum-dev"}	blake3:8OZZpF6KAqrmdZ46E6Ao35WRpYS8IgCdi2aLJa5_d_M
+1790145111332527	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy-hI		item.move	bn-2ouro	{"state":"done"}	blake3:sXCufHyQ12xg7n4-kGcV_6nb8JLuCBHfH5ZF4uxV7OA

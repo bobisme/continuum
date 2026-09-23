@@ -188,8 +188,8 @@
         "line": 2240,
         "path": "plan.md"
       },
-      "status": "active",
-      "summary": "CML core-fragment parser and elaborator (Finite fragment; enough for the replicated register and Wave 0 ports; the programmatic model API remains supported)"
+      "status": "satisfied",
+      "summary": "CML core-fragment parser and elaborator (Finite fragment; enough for the replicated register and Wave 0 ports; the programmatic model API remains supported) (delivered: bn-1sf, bn-ybq, bn-36x3b, bn-2ouro \u2014 at the elaboration surface, per STARTHERE PR 15a; lowering beyond bounded integers is carried by bn-15zfa, bn-3a9sr, bn-3bq78 and bn-1ln12)"
     },
     {
       "category": "phase-deliverable",
@@ -2218,8 +2218,8 @@
         "line": 418,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "enough surface for the replicated register and the Wave 0 corpus ports"
+      "status": "satisfied",
+      "summary": "enough surface for the replicated register and the Wave 0 corpus ports (delivered: bn-ybq, bn-36x3b, bn-2ouro \u2014 at the elaboration surface: every Wave 0 language force elaborates, namely finite sets and bounded integers, functions, records, tuples, sequences, quantifiers and comprehensions, primed variables and relational actions per RFC 0003 correction 2, stuttering, and recursive definitions under the RFC 0003 termination rule, and the replicated register and every parser fixture elaborate. Evidence: crates/continuum-cml-elab/tests/fixtures.rs, recursion.rs, relational.rs, and resourcebounds.rs under one pre-charged output, depth and work budget reviewed by dedicated security reviews cr-8zf003, cr-15xb20 and cr-22lrdf. Narrowing: lowering to an engine covers bounded-integer models only; collection-valued state and quantifiers are bn-15zfa, run-configuration constants bn-3a9sr, parameterized actions bn-3bq78, and fairness bn-1ln12; the Wave 0 ports themselves beyond TV-009 Die Hard are PR 27a work)"
     },
     {
       "category": "pr-deliverable",

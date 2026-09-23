@@ -2249,7 +2249,7 @@ Deliver:
   asupersync);
 - CML core-fragment parser and elaborator (Finite fragment; enough for the
   replicated register and Wave 0 ports; the programmatic model API remains
-  supported);
+  supported) (delivered: bn-1sf, bn-ybq, bn-36x3b, bn-2ouro — at the elaboration surface, per START_HERE PR 15a; lowering beyond bounded integers is carried by bn-15zfa, bn-3a9sr, bn-3bq78 and bn-1ln12);
 - storage/network/process packs;
 - replicated register;
 - causal minimizer;
