@@ -1,0 +1,15 @@
+{
+  "description": "an extension-lane oracle registration that invokes the tool silently, forbidden by ADR-0029 rule 3",
+  "requirement": "TEST-5-07",
+  "rule": "extension-lane-oracle-silent-invocation",
+  "system": {
+    "kind": "registration",
+    "name": "uppaal-silent-demo",
+    "adapter_crate": "continuum-adapter-uppaal",
+    "boundary": "separate-process",
+    "ships_in_release": false,
+    "invocation": "silent",
+    "recorded_evidence": {"tool_identity": "uppaal", "tool_version": "4.1.26"},
+    "absence_behavior": "typed-unsupported"
+  }
+}

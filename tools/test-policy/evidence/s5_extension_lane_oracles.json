@@ -1,0 +1,96 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_registration.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_scan.json",
+      "ok": true
+    }
+  ],
+  "module": "tools/test-policy/sections/s5_extension_lane_oracles.py",
+  "note": "TEST-5-07 is 'partial': no extension-lane oracle (UPPAAL/IMITATOR/Storm/PRISM) is landed or reachable in this workspace, and ADR-0016 defers the lane to G4; see the 'absence' entry.",
+  "requirements": {
+    "TEST-5-07": {
+      "absence": "No adapter crate for UPPAAL, IMITATOR, Storm, or PRISM (ADR-0016's own named comparison targets, repeated verbatim by research/06's G6 gate) exists anywhere in this workspace: crates/ has 37 members and none is named or shaped as one, and a repository-wide, case-insensitive scan of crates/, tools/, and notes/plan/schemas/ for the four tool names finds zero hits (real_run() re-runs that scan for real, not a prose assertion). continuum-kernel-temporal (128 lines, PR 9, real and landed) checks ranking/fair-SCC-exclusion certificates a search procedure already inside this repository computed; it never invokes an external temporal or probabilistic tool and is not the differential comparison against an independently implemented system docs/19 \u00a75 asks for. ADR-0016 itself defers the whole lane: 'No implementation before G4 unless a concrete project demands it.' No registry, schema, or release-asset scanner exists for a declared oracle's ADR-0029 boundary either \u2014 ADR-0029's own Validation section names one and it is unbuilt. The enforced substance is therefore two real things: (1) a repository-wide drift guard against an undeclared future mention of any of the four tool names, so a lane cannot silently land outside this policy between one run of this checker and the next, and (2) a freestanding contract checker \u2014 not a real registry, since none exists \u2014 over the shape any declared extension-lane oracle registration would have to satisfy under ADR-0029 rules 1/3/4/6 and ADR-0019's adapter-crate/process-boundary requirement, self-consistency- and mutation-tested against itself. Neither compares against a real UPPAAL/IMITATOR/Storm/PRISM run. Follow-up (lead-owned, new bone): land one adapter crate behind this boundary and bind this module's registration contract to its real manifest the way s4_protocol_corpus.py's RUST_BINDING binds a Python port to crates/continuumd's real tests.",
+      "evidence": {
+        "registration_contract_mutants_applied": 4,
+        "registration_contract_mutants_detected": 4,
+        "scan_dirs": [
+          "crates",
+          "tools",
+          "notes/plan/schemas"
+        ],
+        "scanned_files": 1029,
+        "undeclared_tool_hits": 0
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "extension-lane-oracle-ships-in-release"
+          ],
+          "fixture": "01_ships_in_release.json",
+          "ok": true,
+          "requirement": "TEST-5-07",
+          "rule": "extension-lane-oracle-ships-in-release"
+        },
+        {
+          "caught": [
+            "extension-lane-oracle-silent-invocation"
+          ],
+          "fixture": "02_silent_invocation.json",
+          "ok": true,
+          "requirement": "TEST-5-07",
+          "rule": "extension-lane-oracle-silent-invocation"
+        },
+        {
+          "caught": [
+            "extension-lane-oracle-absence-not-typed"
+          ],
+          "fixture": "03_absence_not_typed.json",
+          "ok": true,
+          "requirement": "TEST-5-07",
+          "rule": "extension-lane-oracle-absence-not-typed"
+        },
+        {
+          "caught": [
+            "extension-lane-oracle-no-process-boundary"
+          ],
+          "fixture": "04_no_process_boundary.json",
+          "ok": true,
+          "requirement": "TEST-5-07",
+          "rule": "extension-lane-oracle-no-process-boundary"
+        },
+        {
+          "caught": [
+            "extension-lane-tool-undeclared-mention"
+          ],
+          "fixture": "05_undeclared_mention.json",
+          "ok": true,
+          "requirement": "TEST-5-07",
+          "rule": "extension-lane-tool-undeclared-mention"
+        }
+      ],
+      "registry_status": "active",
+      "rules": [
+        "extension-lane-oracle-absence-not-typed",
+        "extension-lane-oracle-no-process-boundary",
+        "extension-lane-oracle-ships-in-release",
+        "extension-lane-oracle-silent-invocation",
+        "extension-lane-tool-undeclared-mention"
+      ],
+      "status": "partial",
+      "summary": "external temporal/probabilistic tools for extension lanes."
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a75 Differential oracles",
+  "unclaimed": []
+}

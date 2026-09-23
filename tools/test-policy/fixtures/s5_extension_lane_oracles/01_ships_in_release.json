@@ -1,0 +1,15 @@
+{
+  "description": "an extension-lane oracle registration that declares it ships inside release artifacts, forbidden by ADR-0029 rule 1",
+  "requirement": "TEST-5-07",
+  "rule": "extension-lane-oracle-ships-in-release",
+  "system": {
+    "kind": "registration",
+    "name": "prism-in-release-demo",
+    "adapter_crate": "continuum-adapter-prism",
+    "boundary": "separate-process",
+    "ships_in_release": true,
+    "invocation": "explicit",
+    "recorded_evidence": {"tool_identity": "prism", "tool_version": "4.8"},
+    "absence_behavior": "typed-unsupported"
+  }
+}

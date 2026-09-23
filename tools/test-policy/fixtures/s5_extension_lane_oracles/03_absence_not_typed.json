@@ -1,0 +1,15 @@
+{
+  "description": "an extension-lane oracle registration whose declared absence behavior silently downgrades instead of producing a typed Unsupported result, forbidden by ADR-0029 rule 4 and INV-008",
+  "requirement": "TEST-5-07",
+  "rule": "extension-lane-oracle-absence-not-typed",
+  "system": {
+    "kind": "registration",
+    "name": "imitator-silent-downgrade-demo",
+    "adapter_crate": "continuum-adapter-imitator",
+    "boundary": "separate-process",
+    "ships_in_release": false,
+    "invocation": "explicit",
+    "recorded_evidence": {"tool_identity": "imitator", "tool_version": "3.4"},
+    "absence_behavior": "silent-success"
+  }
+}

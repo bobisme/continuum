@@ -1,0 +1,10 @@
+{
+  "expect": "clean",
+  "description": "a source file that mentions none of the extension-lane tool names",
+  "system": {
+    "kind": "scan",
+    "files": {
+      "crates/continuum-fake/src/lib.rs": "//! a fake source file with no extension-lane tool mentions\nfn call_reference_engine() {}\n"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "expect": "clean",
+  "description": "a self-consistent extension-lane oracle registration that satisfies every ADR-0029/ADR-0019 rule",
+  "system": {
+    "kind": "registration",
+    "name": "storm-clean-demo",
+    "adapter_crate": "continuum-adapter-storm",
+    "boundary": "separate-process",
+    "ships_in_release": false,
+    "invocation": "explicit",
+    "recorded_evidence": {"tool_identity": "storm", "tool_version": "1.8.1"},
+    "absence_behavior": "typed-unsupported"
+  }
+}

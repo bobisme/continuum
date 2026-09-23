@@ -1,0 +1,15 @@
+{
+  "description": "an extension-lane oracle registration that declares an in-process boundary inside a trusted kernel crate, forbidden by ADR-0029 rule 6, ADR-0019, and INV-004",
+  "requirement": "TEST-5-07",
+  "rule": "extension-lane-oracle-no-process-boundary",
+  "system": {
+    "kind": "registration",
+    "name": "storm-in-kernel-demo",
+    "adapter_crate": "continuum-kernel-temporal",
+    "boundary": "in-process",
+    "ships_in_release": false,
+    "invocation": "explicit",
+    "recorded_evidence": {"tool_identity": "storm", "tool_version": "1.8.1"},
+    "absence_behavior": "typed-unsupported"
+  }
+}

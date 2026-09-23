@@ -1,0 +1,11 @@
+{
+  "description": "a source file that mentions Storm directly with no accompanying oracle-registration record or adapter crate",
+  "requirement": "TEST-5-07",
+  "rule": "extension-lane-tool-undeclared-mention",
+  "system": {
+    "kind": "scan",
+    "files": {
+      "crates/continuum-fake/src/lib.rs": "//! integrates directly with the Storm probabilistic model checker\nfn call_storm() {}\n"
+    }
+  }
+}
