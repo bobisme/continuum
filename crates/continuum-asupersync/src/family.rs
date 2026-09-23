@@ -9,7 +9,7 @@
 //! |---|---|---|---|
 //! | 1 | [`Family::Lifecycle`] | `lifecycle` | PR-14-IMPL-01 (this bone, bn-lf4i) |
 //! | 2 | [`Family::Effect`] | `reserve-commit-abort` | PR-14-IMPL-02 |
-//! | 3 | [`Family::Cancellation`] | `cancellation` | PR-14-IMPL-03 |
+//! | 3 | [`Family::Cancellation`] | `cancellation` | PR-14-IMPL-03 (bn-bx7i) |
 //! | 4 | [`Family::Obligation`] | `obligation` | PR-14-IMPL-04 |
 //! | 5 | [`Family::Time`] | `virtual-time` | PR-14-IMPL-05 |
 //! | 6 | [`Family::Channel`] | `channel` | PR-14-IMPL-06 |
@@ -160,7 +160,7 @@ pub enum EventBody {
     Lifecycle(lifecycle::LifecycleEvent),
     /// A reserve / commit / abort event. Uninhabited until PR-14-IMPL-02.
     Effect(effect::EffectEvent),
-    /// A cancellation-phase event. Uninhabited until PR-14-IMPL-03.
+    /// A cancellation-phase event (PR-14-IMPL-03, bn-bx7i).
     Cancellation(cancellation::CancellationEvent),
     /// An obligation event. Uninhabited until PR-14-IMPL-04.
     Obligation(obligation::ObligationEvent),
@@ -244,7 +244,7 @@ pub enum Report {
     Lifecycle(lifecycle::LifecycleReport),
     /// Uninhabited until PR-14-IMPL-02.
     Effect(effect::EffectReport),
-    /// Uninhabited until PR-14-IMPL-03.
+    /// A cancellation phase (PR-14-IMPL-03, bn-bx7i).
     Cancellation(cancellation::CancellationReport),
     /// Uninhabited until PR-14-IMPL-04.
     Obligation(obligation::ObligationReport),

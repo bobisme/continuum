@@ -45,9 +45,17 @@
 //!   substrate's journal is byte-equal to the scripted source's at every interleaving
 //!   the tests enumerate.
 //!
+//! # What has landed (PR-14-IMPL-03, bn-bx7i)
+//!
+//! - [`family::cancellation`] — the cancellation phases family: each cancelled task's
+//!   `requested → acknowledged → cancelled`, with its cause, lifted as a refinement of
+//!   the region calculus's cancel → drain step;
+//! - [`binding`] observes it when [`binding::BindingConfig::families`] names it, from
+//!   the substrate's own trace, in a canonical order the lab seed does not reach.
+//!
 //! # What is not here
 //!
-//! The other five families' bindings: [`binding::substrate_binding`] answers each of
+//! The other four families' bindings: [`binding::substrate_binding`] answers each of
 //! them with the typed absence [`binding::BindingAbsence::FamilyNotBound`].
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 

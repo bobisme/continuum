@@ -26,7 +26,7 @@
 //! | the lift can say no (anti-vacuity) | [`the_lift_rejects_nonconforming_journals`] |
 //! | a conforming teardown is total (no orphans) | [`a_conforming_teardown_is_total`] |
 //! | typed refusal on an unsupported primitive | [`an_unsupported_primitive_is_a_typed_refusal`] |
-//! | the extension point is the six families, one instrumented | [`the_extension_point_names_six_families_and_one_is_instrumented`] |
+//! | the extension point is the six families, two instrumented | [`the_extension_point_names_six_families_and_two_are_instrumented`] |
 //! | malformed choice logs are typed refusals | [`malformed_choice_logs_are_typed_refusals`] |
 
 use std::collections::BTreeMap;
@@ -657,7 +657,7 @@ fn an_unsupported_primitive_is_a_typed_refusal() {
 }
 
 #[test]
-fn the_extension_point_names_six_families_and_one_is_instrumented() {
+fn the_extension_point_names_six_families_and_two_are_instrumented() {
     let table: Vec<(u8, &str, &str, bool)> = Family::ALL
         .iter()
         .map(|f| (f.tag(), f.token(), f.requirement(), f.is_instrumented()))
@@ -667,7 +667,7 @@ fn the_extension_point_names_six_families_and_one_is_instrumented() {
         vec![
             (1, "lifecycle", "PR-14-IMPL-01", true),
             (2, "reserve-commit-abort", "PR-14-IMPL-02", false),
-            (3, "cancellation", "PR-14-IMPL-03", false),
+            (3, "cancellation", "PR-14-IMPL-03", true),
             (4, "obligation", "PR-14-IMPL-04", false),
             (5, "virtual-time", "PR-14-IMPL-05", false),
             (6, "channel", "PR-14-IMPL-06", false),

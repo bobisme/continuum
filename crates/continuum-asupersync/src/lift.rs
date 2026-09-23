@@ -60,6 +60,9 @@ pub enum Nonconformance {
         /// Tasks the model's drain terminated.
         model: Vec<u32>,
     },
+    /// A cancellation-phase event does not refine the calculus's cancel → drain step
+    /// (PR-14-IMPL-03; the reasons are the family's own).
+    Cancellation(family::cancellation::CancellationFault),
 }
 
 impl fmt::Display for Nonconformance {
@@ -86,6 +89,7 @@ impl fmt::Display for Nonconformance {
                 f,
                 "draining r{region} reported cancelled {reported:?} but the model cancelled {model:?}"
             ),
+            Self::Cancellation(fault) => write!(f, "cancellation phases: {fault}"),
         }
     }
 }
@@ -114,7 +118,6 @@ pub struct LiftContext {
     pub(crate) finalizations: Vec<(u64, Finalization)>,
     #[allow(dead_code)] // filled by PR-14-IMPL-02
     pub(crate) effect: family::effect::LiftState,
-    #[allow(dead_code)] // filled by PR-14-IMPL-03
     pub(crate) cancellation: family::cancellation::LiftState,
     #[allow(dead_code)] // filled by PR-14-IMPL-04
     pub(crate) obligation: family::obligation::LiftState,
@@ -180,6 +183,10 @@ impl LiftVerdict {
 }
 
 /// Lift `journal` into a fresh region tree.
+///
+/// After the last event, the families that make a whole-journal claim check it. Today
+/// that is the cancellation family ([`family::cancellation`]): a violation it finds is
+/// reported at the last event's sequence number.
 #[must_use]
 pub fn lift(journal: &Journal) -> LiftVerdict {
     let mut cx = LiftContext::default();
@@ -201,6 +208,17 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
                 };
             }
         }
+    }
+    if let Err(stop) = family::cancellation::finish(&cx) {
+        let seq = journal.events().last().map_or(0, |event| event.seq());
+        return match stop {
+            LiftStop::Violation(reason) => LiftVerdict::Violates { seq, reason },
+            LiftStop::Unsupported(family) => LiftVerdict::Inconclusive {
+                seq,
+                family,
+                reason: InconclusiveReason::Unsupported,
+            },
+        };
     }
     LiftVerdict::Conforms(Lifted {
         tree: cx.tree,

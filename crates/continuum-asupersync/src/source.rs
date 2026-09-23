@@ -141,7 +141,7 @@ pub struct RecordContext {
     pub(crate) lifecycle: family::lifecycle::RecordState,
     #[allow(dead_code)] // filled by PR-14-IMPL-02
     pub(crate) effect: family::effect::RecordState,
-    #[allow(dead_code)] // filled by PR-14-IMPL-03
+    #[allow(dead_code)] // empty by design: the cancellation recorder judges nothing
     pub(crate) cancellation: family::cancellation::RecordState,
     #[allow(dead_code)] // filled by PR-14-IMPL-04
     pub(crate) obligation: family::obligation::RecordState,

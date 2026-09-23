@@ -1,13 +1,19 @@
 //! The substrate binding: asupersync's lab runtime, driven by a Continuum [`ChoiceLog`],
-//! observed into the lifecycle family's journal events.
+//! observed into the journal events of the families it binds.
 //!
 //! # What is bound, and what is not
 //!
-//! The binding drives one family, [`Family::Lifecycle`]. The other five families are
-//! still uninstrumented (their files under `src/family/` say so), and for them
-//! [`substrate_binding`] answers with the typed absence
+//! The binding observes two families: [`Family::Lifecycle`] (PR-14-IMPL-01, bn-lf4i)
+//! and [`Family::Cancellation`] (PR-14-IMPL-03, bn-bx7i). A run observes the families
+//! [`BindingConfig::families`] names. Lifecycle is always among them, because the
+//! other families name tasks by the ordinals its spawn events allocate. The default is
+//! lifecycle alone, whose journal is the one bn-lf4i pinned, byte for byte.
+//!
+//! The other four families are still uninstrumented (their files under `src/family/`
+//! say so), and for them [`substrate_binding`] answers with the typed absence
 //! [`BindingAbsence::FamilyNotBound`], whose INV-008 reading is
-//! [`InconclusiveReason::Unsupported`]. A caller never gets an empty journal that looks
+//! [`InconclusiveReason::Unsupported`]. A run that asks for one is refused with
+//! [`BindingRefusal::FamilyNotBound`]. A caller never gets an empty journal that looks
 //! like a run in which nothing happened.
 //!
 //! # Who decides the schedule
@@ -39,7 +45,7 @@
 //! | `Complete`, join result `Ok` | [`LifecycleEvent::TaskStepped`] `complete` |
 //! | `Complete`, join result `Cancelled` | the task joins the next drain set of an enclosing region |
 //! | `RegionCancelled`, first in its subtree | [`LifecycleEvent::RegionCancelRequested`] |
-//! | `RegionCloseComplete` | [`LifecycleEvent::RegionDrained`] then [`LifecycleEvent::RegionFinalized`] |
+//! | `RegionCloseComplete` | [`LifecycleEvent::RegionDrained`] then [`LifecycleEvent::RegionFinalized`], in canonical order within a batch (below) |
 //!
 //! [`LifecycleEvent::RegionCloseRequested`] is the one exception. The substrate traces no
 //! event for a normal close request, so the binding records it when `begin_close` on the
@@ -53,12 +59,67 @@
 //! cancellation through `Cx::checkpoint`, as asupersync's cooperative cancellation
 //! requires.
 //!
-//! Some recognized trace events have no lifecycle event of their own:
-//! `RegionCloseBegin` (the start of a close that the request event already reports),
-//! and the task-level `CancelRequest` / `CancelAck` phases. Those phases are
-//! PR-14-IMPL-03's family. At lifecycle grain they are summarized by the drain's
-//! cancelled set. A trace event of any other kind is a typed refusal
-//! ([`BindingRefusal::UninstrumentedEvent`]), never a dropped event.
+//! `RegionCloseBegin` is recognized and has no event of its own: it is the start of a
+//! close that the request event already reports. A trace event of a kind the binding
+//! does not map is a typed refusal ([`BindingRefusal::UninstrumentedEvent`]), never a
+//! dropped event.
+//!
+//! # The cancellation phases
+//!
+//! When [`Family::Cancellation`] is observed, the task-level phases of a cancellation
+//! become events of their own ([`CancellationEvent`]). When it is not, they are
+//! summarized by the lifecycle drain's cancelled set, as before.
+//!
+//! | substrate observation | journal event |
+//! |---|---|
+//! | `CancelRequest` trace event, with its reason's kind | [`CancellationEvent::Requested`] |
+//! | gate trace `ack`: `Cx::checkpoint` returned the cancellation error | [`CancellationEvent::Acknowledged`] |
+//! | `Complete`, join result `Cancelled`, with its reason's kind | [`CancellationEvent::Cancelled`] |
+//!
+//! asupersync 0.5.0 declares a `CancelAck` trace kind but never pushes it. Its
+//! acknowledgement is the checkpoint: a checkpoint that returns the cancellation error
+//! is what moves the task from `CancelRequested` to `Cancelling`. So the gate writes an
+//! `ack` mark into the substrate's trace at that return, in sequence with the
+//! substrate's own events, exactly as it writes `begin`, `suspend` and `resume`.
+//! `Cancelling → Finalizing → Completed(Cancelled)` then happens inside the poll that
+//! returns the task's result, and the `Complete` event observes it. After each
+//! operation the binding asks the substrate's own cancellation-protocol oracle
+//! (`LabRuntime::check_cancellation_protocol`) and confirms each cancelled completion
+//! against the oracle's task state. A disagreement is
+//! [`BindingRefusal::SubstrateProtocolViolation`], not an event.
+//!
+//! # Canonical order
+//!
+//! The choice log fixes which operation runs, but inside one operation the substrate's
+//! seeded scheduler picks the order in which concurrently cancelled tasks are polled,
+//! and so the order in which sibling regions finish closing. That order is not
+//! controlled, so it must not reach the journal (INV-005). The binding therefore
+//! journals a canonical linearization of the substrate's partial order:
+//!
+//! - consecutive `RegionCloseComplete` events (with the cancelled completions and
+//!   acknowledgements between them, which journal nothing by themselves) form one
+//!   batch, ended by the next event that journals anything or by the operation's end.
+//!   A batch's drains and finalizes are journaled in post-order over the region tree,
+//!   siblings by ascending region ordinal. The substrate only orders a child's close
+//!   before its parent's, so this is one of its admitted orders, and the lift still
+//!   sees every child drained before its parent. [`run_witnessed`] returns the
+//!   substrate's raw close order beside the journal, as evidence that the two differ;
+//! - the requests of one operation, which the substrate issues before any poll, are
+//!   journaled together, by ascending task ordinal, right after the region cancel
+//!   request;
+//! - each task's acknowledgement and completion are journaled immediately before the
+//!   lifecycle drain that absorbs the task, by ascending task ordinal.
+//!
+//! Per task, `requested → acknowledged → cancelled` keeps its substrate order, and all
+//! three precede the drain, as they do in the trace. Only the relative order of
+//! independent tasks and independent sibling regions inside one operation is fixed
+//! canonically.
+//!
+//! Refusals name one instance. [`BindingRefusal::UndrainedCancellation`] names the
+//! smallest task ordinal. When one operation produces several distinct faults at once
+//! (for example two cancelled completions the substrate's oracle does not confirm),
+//! the refusal reports the first in trace order, which the seed can move. No journal
+//! is returned in that case, so no journal content depends on it.
 //!
 //! # No ambient output
 //!
@@ -84,16 +145,18 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 
+use asupersync::lab::oracle::TaskStateKind;
 use asupersync::runtime::{JoinError, TaskHandle};
 use asupersync::trace::event::{TraceData, TraceEvent, TraceEventKind};
 use asupersync::{
-    Budget, CancelReason, Cx, LabConfig, LabRuntime, RegionId as SubstrateRegion,
+    Budget, CancelKind, CancelReason, Cx, LabConfig, LabRuntime, RegionId as SubstrateRegion,
     TaskId as SubstrateTask,
 };
 use continuum_task::region::worker::Resumability;
 use continuum_value::assurance::InconclusiveReason;
 
 use crate::choice::ChoiceLog;
+use crate::family::cancellation::{CancelCause, CancellationEvent};
 use crate::family::lifecycle::{
     LifecycleEvent, RegionLabel, RegionOrdinal, TaskLabel, TaskOrdinal, TaskSet, TaskStep,
 };
@@ -153,7 +216,7 @@ impl SubstrateBinding {
 #[must_use]
 pub const fn substrate_binding(family: Family) -> SubstrateBinding {
     match family {
-        Family::Lifecycle => SubstrateBinding::Bound,
+        Family::Lifecycle | Family::Cancellation => SubstrateBinding::Bound,
         other => SubstrateBinding::Absent(BindingAbsence::FamilyNotBound(other)),
     }
 }
@@ -230,6 +293,33 @@ impl SubstrateOp {
 /// One actor's operations, in program order.
 pub type Program = Vec<SubstrateOp>;
 
+/// A set of families, as the families a run observes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Families(u8);
+
+impl Families {
+    /// No family.
+    pub const NONE: Self = Self(0);
+    /// The lifecycle family alone: the default, and bn-lf4i's journal.
+    pub const LIFECYCLE: Self = Self::NONE.with(Family::Lifecycle);
+
+    const fn bit(family: Family) -> u8 {
+        1 << family.tag()
+    }
+
+    /// This set with `family` added.
+    #[must_use]
+    pub const fn with(self, family: Family) -> Self {
+        Self(self.0 | Self::bit(family))
+    }
+
+    /// Whether `family` is in the set.
+    #[must_use]
+    pub const fn contains(self, family: Family) -> bool {
+        self.0 & Self::bit(family) != 0
+    }
+}
+
 /// The explicit parameters of a run. Nothing else configures the substrate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BindingConfig {
@@ -239,6 +329,8 @@ pub struct BindingConfig {
     pub trace_capacity: usize,
     /// The lab runtime's step limit. A run that reaches it is refused.
     pub max_steps: u64,
+    /// The families the run observes. Lifecycle must be one of them.
+    pub families: Families,
 }
 
 impl BindingConfig {
@@ -249,7 +341,15 @@ impl BindingConfig {
             lab_seed,
             trace_capacity: 1 << 16,
             max_steps: 1 << 20,
+            families: Families::LIFECYCLE,
         }
+    }
+
+    /// This configuration, observing `family` too.
+    #[must_use]
+    pub const fn observing(mut self, family: Family) -> Self {
+        self.families = self.families.with(family);
+        self
     }
 }
 
@@ -330,12 +430,34 @@ pub enum BindingRefusal {
         /// The task's journal ordinal.
         task: u32,
     },
-    /// The substrate traced an event of a kind the lifecycle binding does not map.
+    /// The substrate traced an event of a kind the binding does not map.
     UninstrumentedEvent {
         /// The family the kind belongs to, when it belongs to one.
         family: Option<Family>,
         /// The substrate's name for the kind.
         kind: String,
+    },
+    /// The configuration asks to observe a family the binding does not bind.
+    FamilyNotBound(Family),
+    /// The configuration does not observe the lifecycle family, which every other
+    /// family's task ordinals come from.
+    LifecycleNotObserved,
+    /// A cancellation carries a reason kind the cancellation family has no cause for.
+    UnmappedCancelReason {
+        /// The substrate's name for the kind.
+        kind: String,
+    },
+    /// The substrate's own cancellation-protocol oracle found a violation, or does not
+    /// confirm a cancelled completion the trace reports.
+    SubstrateProtocolViolation {
+        /// The oracle's description.
+        detail: String,
+    },
+    /// A task's cancellation was requested or acknowledged, but no drain absorbed its
+    /// completion before the run ended.
+    CancellationUnfinished {
+        /// The task's journal ordinal.
+        task: u32,
     },
 }
 
@@ -349,16 +471,21 @@ impl BindingRefusal {
     #[must_use]
     pub const fn inconclusive_reason(&self) -> Option<InconclusiveReason> {
         match self {
-            Self::UninstrumentedEvent { .. } | Self::TaskPanicked { .. } => {
-                Some(InconclusiveReason::Unsupported)
-            }
+            Self::UninstrumentedEvent { .. }
+            | Self::TaskPanicked { .. }
+            | Self::FamilyNotBound(_)
+            | Self::UnmappedCancelReason { .. } => Some(InconclusiveReason::Unsupported),
+            Self::SubstrateProtocolViolation { .. } => Some(InconclusiveReason::EngineError),
             Self::StepLimit => Some(InconclusiveReason::ResourceExhausted),
             Self::TraceOverflow { .. }
             | Self::TraceOutOfOrder { .. }
             | Self::UnknownSubstrateEntity { .. }
             | Self::GateUntraced
             | Self::TaskOutcomeUnobserved { .. }
-            | Self::UndrainedCancellation { .. } => Some(InconclusiveReason::InsufficientTelemetry),
+            | Self::UndrainedCancellation { .. }
+            | Self::CancellationUnfinished { .. } => {
+                Some(InconclusiveReason::InsufficientTelemetry)
+            }
             Self::SubstrateRefused { .. }
             | Self::UnboundRegion(_)
             | Self::UnboundTask(_)
@@ -367,7 +494,8 @@ impl BindingRefusal {
             | Self::ChoiceOutOfRange { .. }
             | Self::ChoiceLogExhausted { .. }
             | Self::ChoiceLogOverrun { .. }
-            | Self::JournalFull => None,
+            | Self::JournalFull
+            | Self::LifecycleNotObserved => None,
         }
     }
 }
@@ -429,6 +557,27 @@ impl fmt::Display for BindingRefusal {
                 ),
                 None => write!(f, "the substrate traced {kind}, which no family maps"),
             },
+            Self::FamilyNotBound(family) => write!(
+                f,
+                "the {family} family is not bound to the substrate ({})",
+                family.requirement()
+            ),
+            Self::LifecycleNotObserved => f.write_str(
+                "a run must observe the lifecycle family, which allocates task ordinals",
+            ),
+            Self::UnmappedCancelReason { kind } => {
+                write!(
+                    f,
+                    "the cancellation family has no cause for reason kind {kind}"
+                )
+            }
+            Self::SubstrateProtocolViolation { detail } => {
+                write!(f, "the substrate's cancellation oracle disagrees: {detail}")
+            }
+            Self::CancellationUnfinished { task } => write!(
+                f,
+                "task t{task}'s cancellation began but no drain absorbed its completion"
+            ),
         }
     }
 }
@@ -439,6 +588,9 @@ impl core::error::Error for BindingRefusal {}
 
 /// The prefix of every gate mark in the substrate's trace.
 const GATE_MARK: &str = "continuum.lifecycle-gate/1";
+
+/// The prefix of the gate's cancellation acknowledgement mark.
+const CANCEL_MARK: &str = "continuum.cancellation-gate/1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GatePhase {
@@ -479,7 +631,12 @@ impl Future for GateWait {
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let cx = Cx::current();
-        if cx.as_ref().is_some_and(|cx| cx.checkpoint().is_err()) {
+        if let Some(cx) = &cx
+            && cx.checkpoint().is_err()
+        {
+            // The substrate's acknowledgement: this return is what moves the task
+            // from `CancelRequested` to `Cancelling`.
+            cx.trace(&format!("{CANCEL_MARK} ack {}", self.slot));
             return Poll::Ready(None);
         }
         let mut marks: Vec<&'static str> = Vec::new();
@@ -536,6 +693,24 @@ struct Slot {
     ordinal: Option<TaskOrdinal>,
 }
 
+/// What the trace has shown of one task's cancellation, before its drain journals it.
+#[derive(Debug, Default)]
+struct CancelTrack {
+    acknowledged: bool,
+    completed: Option<CancelCause>,
+}
+
+/// The cancellation family's cause for a substrate reason kind.
+fn cause_of(kind: CancelKind) -> Result<CancelCause, BindingRefusal> {
+    match kind {
+        CancelKind::User => Ok(CancelCause::User),
+        CancelKind::ParentCancelled => Ok(CancelCause::ParentCancelled),
+        other => Err(BindingRefusal::UnmappedCancelReason {
+            kind: format!("{other:?}"),
+        }),
+    }
+}
+
 struct Driver {
     lab: LabRuntime,
     config: BindingConfig,
@@ -548,6 +723,10 @@ struct Driver {
     parents: Vec<Option<u32>>,
     cancelled: BTreeSet<u32>,
     pending_cancelled: Vec<(TaskOrdinal, u32)>,
+    pending_requests: Vec<(TaskOrdinal, CancelCause)>,
+    pending_closes: Vec<RegionOrdinal>,
+    close_order: Vec<RegionOrdinal>,
+    phases: BTreeMap<u32, CancelTrack>,
     next_task: u32,
     observed: BTreeSet<u64>,
     last_seq: Option<u64>,
@@ -582,6 +761,10 @@ impl Driver {
             parents: Vec::new(),
             cancelled: BTreeSet::new(),
             pending_cancelled: Vec::new(),
+            pending_requests: Vec::new(),
+            pending_closes: Vec::new(),
+            close_order: Vec::new(),
+            phases: BTreeMap::new(),
             next_task: 0,
             observed: BTreeSet::new(),
             last_seq: None,
@@ -610,8 +793,75 @@ impl Driver {
             .ok_or(BindingRefusal::UnboundTask(label.0))
     }
 
+    /// Append a lifecycle event. A pending batch of region closes is journaled first,
+    /// because every close in it came before this event in the trace.
     fn append(&mut self, event: LifecycleEvent) {
+        self.flush_closes();
         self.record.append(EventBody::Lifecycle(event));
+    }
+
+    /// Every region, children before parents and siblings by ascending ordinal: the
+    /// canonical order for closes the substrate completes in one batch.
+    fn post_order(&self) -> Vec<u32> {
+        let mut children: Vec<Vec<u32>> = vec![Vec::new(); self.parents.len()];
+        for (region, parent) in self.parents.iter().enumerate() {
+            if let Some(parent) = parent {
+                children[*parent as usize].push(ordinal(region));
+            }
+        }
+        let mut out = Vec::with_capacity(self.parents.len());
+        // Iterative post-order from the root; `children` is ascending by construction.
+        let mut stack: Vec<(u32, usize)> = vec![(0, 0)];
+        while let Some((region, next)) = stack.pop() {
+            if let Some(child) = children[region as usize].get(next) {
+                stack.push((region, next + 1));
+                stack.push((*child, 0));
+            } else {
+                out.push(region);
+            }
+        }
+        out
+    }
+
+    /// Journal a batch of region closes in canonical order: each close's cancellation
+    /// phases, then its drain and finalize.
+    ///
+    /// The substrate completes a cancelled subtree's closes in an order its seeded
+    /// scheduler picks, constrained only by children before parents. Post-order with
+    /// siblings by ascending ordinal is one linearization of that partial order, so the
+    /// lift still sees every child drained before its parent.
+    fn flush_closes(&mut self) {
+        if self.pending_closes.is_empty() {
+            return;
+        }
+        let batch: BTreeSet<u32> = core::mem::take(&mut self.pending_closes)
+            .into_iter()
+            .map(|region| region.0)
+            .collect();
+        for region in self.post_order() {
+            if !batch.contains(&region) {
+                continue;
+            }
+            let (drained, kept): (Vec<_>, Vec<_>) = self
+                .pending_cancelled
+                .iter()
+                .partition(|(_, owner)| self.in_subtree(*owner, region));
+            self.pending_cancelled = kept;
+            let cancelled = TaskSet::new(drained.into_iter().map(|(task, _)| task));
+            if self.observes_cancellation() {
+                self.journal_phases(&cancelled);
+            }
+            let region = RegionOrdinal(region);
+            self.record
+                .append(EventBody::Lifecycle(LifecycleEvent::RegionDrained {
+                    region,
+                    cancelled,
+                }));
+            self.record
+                .append(EventBody::Lifecycle(LifecycleEvent::RegionFinalized {
+                    region,
+                }));
+        }
     }
 
     fn command(&mut self, label: TaskLabel, command: Command) -> Result<(), BindingRefusal> {
@@ -736,7 +986,35 @@ impl Driver {
         if !self.lab.scheduler.lock().is_empty() {
             return Err(BindingRefusal::StepLimit);
         }
-        self.sync()
+        self.sync()?;
+        if self.observes_cancellation() {
+            self.lab
+                .check_cancellation_protocol()
+                .map_err(|violation| BindingRefusal::SubstrateProtocolViolation {
+                    detail: violation.to_string(),
+                })?;
+        }
+        Ok(())
+    }
+
+    const fn observes_cancellation(&self) -> bool {
+        self.config.families.contains(Family::Cancellation)
+    }
+
+    /// Journal the requests one operation issued, by ascending task ordinal.
+    fn flush_requests(&mut self) {
+        if self.pending_requests.is_empty() {
+            return;
+        }
+        let mut requests = core::mem::take(&mut self.pending_requests);
+        requests.sort_unstable();
+        for (task, cause) in requests {
+            self.record
+                .append(EventBody::Cancellation(CancellationEvent::Requested {
+                    task,
+                    cause,
+                }));
+        }
     }
 
     fn ordinal_of(&self, region: SubstrateRegion) -> Result<RegionOrdinal, BindingRefusal> {
@@ -808,6 +1086,11 @@ impl Driver {
                 return Err(BindingRefusal::JournalFull);
             }
         }
+        self.flush_requests();
+        self.flush_closes();
+        if self.record.is_full() {
+            return Err(BindingRefusal::JournalFull);
+        }
         if self.slots.iter().any(|slot| lock(&slot.gate).untraced) {
             return Err(BindingRefusal::GateUntraced);
         }
@@ -815,6 +1098,16 @@ impl Driver {
     }
 
     fn observe(&mut self, event: &TraceEvent) -> Result<(), BindingRefusal> {
+        // An operation's requests are issued together, before any poll: the first
+        // event of another kind ends them.
+        if !matches!(
+            event.kind,
+            TraceEventKind::RegionCancelled
+                | TraceEventKind::RegionCloseBegin
+                | TraceEventKind::CancelRequest
+        ) {
+            self.flush_requests();
+        }
         match (&event.kind, &event.data) {
             (TraceEventKind::RegionCreated, TraceData::Region { region, parent }) => match parent {
                 None if *region == self.root && self.region_ordinals.is_empty() => {
@@ -852,6 +1145,9 @@ impl Driver {
             (TraceEventKind::UserTrace, TraceData::Message(message)) => {
                 // Only the gate writes user traces in a bound run. Any other message is
                 // an event this binding cannot place, so it is refused, not dropped.
+                if let Some(rest) = message.strip_prefix(CANCEL_MARK) {
+                    return self.observe_ack(rest);
+                }
                 let Some(rest) = message.strip_prefix(GATE_MARK) else {
                     return Err(BindingRefusal::UninstrumentedEvent {
                         family: None,
@@ -884,8 +1180,22 @@ impl Driver {
                         task: ordinal,
                         step: TaskStep::Complete,
                     }),
-                    Err(JoinError::Cancelled(_)) => {
+                    Err(JoinError::Cancelled(reason)) => {
                         self.pending_cancelled.push((ordinal, region.0));
+                        if self.observes_cancellation() {
+                            let cause = cause_of(reason.kind)?;
+                            let confirmed =
+                                self.lab.oracles.cancellation_protocol.task_state(*task);
+                            if confirmed != Some(TaskStateKind::CompletedCancelled) {
+                                return Err(BindingRefusal::SubstrateProtocolViolation {
+                                    detail: format!(
+                                        "t{} completed as cancelled but the oracle has {confirmed:?}",
+                                        ordinal.0
+                                    ),
+                                });
+                            }
+                            self.phases.entry(ordinal.0).or_default().completed = Some(cause);
+                        }
                     }
                     Err(JoinError::Panicked(_)) => {
                         return Err(BindingRefusal::TaskPanicked { task: ordinal.0 });
@@ -903,24 +1213,29 @@ impl Driver {
                 }
             }
             (TraceEventKind::RegionCloseComplete, TraceData::Region { region, .. }) => {
+                // Buffered: the batch is journaled in canonical order (flush_closes).
                 let region = self.ordinal_of(*region)?;
-                let (drained, kept): (Vec<_>, Vec<_>) = self
-                    .pending_cancelled
-                    .iter()
-                    .partition(|(_, owner)| self.in_subtree(*owner, region.0));
-                self.pending_cancelled = kept;
-                self.append(LifecycleEvent::RegionDrained {
-                    region,
-                    cancelled: TaskSet::new(drained.into_iter().map(|(task, _)| task)),
-                });
-                self.append(LifecycleEvent::RegionFinalized { region });
+                self.close_order.push(region);
+                self.pending_closes.push(region);
             }
             (
-                TraceEventKind::RegionCloseBegin
-                | TraceEventKind::CancelRequest
-                | TraceEventKind::CancelAck,
-                _,
-            ) => {}
+                TraceEventKind::CancelRequest,
+                TraceData::Cancel {
+                    task,
+                    region: _,
+                    reason,
+                },
+            ) => {
+                if self.observes_cancellation() {
+                    // Requests start a new batch: closes already pending came first.
+                    self.flush_closes();
+                    let ordinal = self.task_ordinal(self.slot_of(*task)?)?;
+                    let cause = cause_of(reason.kind)?;
+                    self.pending_requests.push((ordinal, cause));
+                    self.phases.entry(ordinal.0).or_default();
+                }
+            }
+            (TraceEventKind::RegionCloseBegin, _) => {}
             (kind, _) => {
                 return Err(BindingRefusal::UninstrumentedEvent {
                     family: family_of(*kind),
@@ -931,14 +1246,62 @@ impl Driver {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<Journal, BindingRefusal> {
+    /// The gate's acknowledgement mark: `ack <slot>`.
+    fn observe_ack(&mut self, rest: &str) -> Result<(), BindingRefusal> {
+        let mut parts = rest.split_whitespace();
+        if parts.next() != Some("ack") {
+            return Err(BindingRefusal::UnknownSubstrateEntity { what: "gate mark" });
+        }
+        let slot = parts
+            .next()
+            .and_then(|slot| slot.parse::<usize>().ok())
+            .filter(|slot| *slot < self.slots.len())
+            .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "gate" })?;
+        let task = self.task_ordinal(slot)?;
+        if self.observes_cancellation() {
+            self.phases.entry(task.0).or_default().acknowledged = true;
+        }
+        Ok(())
+    }
+
+    /// Journal the acknowledgement and completion of each task a drain absorbs, by
+    /// ascending task ordinal.
+    fn journal_phases(&mut self, drained: &TaskSet) {
+        for task in drained.as_slice() {
+            let track = self.phases.remove(&task.0).unwrap_or_default();
+            if track.acknowledged {
+                self.record
+                    .append(EventBody::Cancellation(CancellationEvent::Acknowledged {
+                        task: *task,
+                    }));
+            }
+            if let Some(cause) = track.completed {
+                self.record
+                    .append(EventBody::Cancellation(CancellationEvent::Cancelled {
+                        task: *task,
+                        cause,
+                    }));
+            }
+        }
+    }
+
+    fn finish(mut self) -> Result<Witnessed, BindingRefusal> {
         self.sync()?;
-        if let Some((task, _)) = self.pending_cancelled.first() {
+        // The smallest ordinal, not the first in trace order, which the seed can move.
+        if let Some((task, _)) = self.pending_cancelled.iter().min() {
             return Err(BindingRefusal::UndrainedCancellation { task: task.0 });
         }
-        self.record
+        if let Some(task) = self.phases.keys().next() {
+            return Err(BindingRefusal::CancellationUnfinished { task: *task });
+        }
+        let journal = self
+            .record
             .into_journal()
-            .ok_or(BindingRefusal::JournalFull)
+            .ok_or(BindingRefusal::JournalFull)?;
+        Ok(Witnessed {
+            journal,
+            substrate_close_order: self.close_order,
+        })
     }
 }
 
@@ -964,8 +1327,8 @@ const fn family_of(kind: TraceEventKind) -> Option<Family> {
     }
 }
 
-/// Run `programs` on the substrate, interleaved by `log`, and observe the lifecycle
-/// journal.
+/// Run `programs` on the substrate, interleaved by `log`, and observe the journal of the
+/// families `config` names.
 ///
 /// # Errors
 ///
@@ -976,6 +1339,41 @@ pub fn run(
     log: &ChoiceLog,
     config: &BindingConfig,
 ) -> Result<Journal, BindingRefusal> {
+    run_witnessed(programs, log, config).map(|witnessed| witnessed.journal)
+}
+
+/// A journal, with the one substrate order the binding canonicalizes, as the substrate
+/// produced it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Witnessed {
+    /// The canonical journal, as [`run`] returns it.
+    pub journal: Journal,
+    /// The regions in the order the substrate traced `RegionCloseComplete` for them.
+    /// The lab seed can change this order for sibling regions; the journal's drain
+    /// order does not follow it. It is evidence about the substrate, never journal
+    /// content.
+    pub substrate_close_order: Vec<RegionOrdinal>,
+}
+
+/// As [`run`], and also return the substrate's own close order.
+///
+/// # Errors
+///
+/// As for [`run`].
+pub fn run_witnessed(
+    programs: &[Program],
+    log: &ChoiceLog,
+    config: &BindingConfig,
+) -> Result<Witnessed, BindingRefusal> {
+    for family in Family::ALL {
+        if config.families.contains(family) && substrate_binding(family) != SubstrateBinding::Bound
+        {
+            return Err(BindingRefusal::FamilyNotBound(family));
+        }
+    }
+    if !config.families.contains(Family::Lifecycle) {
+        return Err(BindingRefusal::LifecycleNotObserved);
+    }
     let mut driver = Driver::new(*config)?;
     let mut cursors = vec![0_usize; programs.len()];
     let mut choices = log.choices().iter().enumerate();
