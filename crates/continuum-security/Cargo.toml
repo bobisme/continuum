@@ -19,7 +19,18 @@ publish = false
 # The direction is the islands': `continuum-workspace` declares no `continuum-security`
 # edge, so no cycle and no forbidden edge is created, and nothing here imports an engine, an
 # adapter, or `continuum-forge` (this crate's own boundary contract, `src/lib.rs`).
+# Two more, for plan §18.6 signing sources (bn-1hape, ADR-0054):
+#
+# - `continuum-evidence` owns the signing library — `KeyEntropy`, `SigningRegistry`,
+#   `LocalSigner` — that `entropy::OsEntropy` and `keystore::LocalKeystore` supply. The OS
+#   source and the keystore live here, in a boundary crate, because ambient entropy and
+#   filesystem access are this tier's job and never the semantic core's (INV-005,
+#   ADR-0003). The edge runs boundary -> semantic core only; `tests/entropy_isolation.rs`
+#   checks from the real manifests that no semantic-core crate reaches back here.
+# - `continuum-value` for the canonical `Value` decoder the audit log is persisted in.
 [dependencies]
+continuum-evidence = { path = "../continuum-evidence" }
+continuum-value = { path = "../continuum-value" }
 continuum-workspace = { path = "../continuum-workspace" }
 
 [lints]

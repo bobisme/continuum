@@ -152,6 +152,66 @@ pub struct Services {
     connection: CapabilityHandle,
     epochs: EpochSet,
     now: Option<Timestamp>,
+    receipt_signer: Option<ReceiptSigner>,
+}
+
+/// The daemon's receipt-signing identity (plan §18.6, ADR-0054, bn-1hape).
+///
+/// A deployment that supplies one ([`Builder::receipt_signer`]) has every receipt
+/// `evidence.link` publishes signed over its canonical bytes through
+/// [`SigningRegistry::sign`](continuum_evidence::signing::SigningRegistry::sign), before the
+/// receipt is published. The signature is held in [`DaemonState::receipt_signature`]; it has
+/// no wire spelling at protocol 3.6 (bn-3glnv). The keypair normally comes from
+/// `continuum_security::keystore::LocalKeystore`, the solo-developer key minted on first use.
+/// The daemon holds the key; agents never do (INV-015, RFC 0032 "Signing").
+pub struct ReceiptSigner {
+    registry: continuum_evidence::signing::SigningRegistry,
+    signer: continuum_evidence::signing::LocalSigner,
+}
+
+impl ReceiptSigner {
+    /// A receipt signer from a registry and a signer it holds standing for.
+    #[must_use]
+    pub const fn new(
+        registry: continuum_evidence::signing::SigningRegistry,
+        signer: continuum_evidence::signing::LocalSigner,
+    ) -> Self {
+        Self { registry, signer }
+    }
+
+    /// The registry whose standing governs this signer.
+    #[must_use]
+    pub const fn registry(&self) -> &continuum_evidence::signing::SigningRegistry {
+        &self.registry
+    }
+
+    /// The identity receipts are signed as.
+    #[must_use]
+    pub const fn identity(&self) -> &continuum_evidence::signing::SignerIdentity {
+        self.signer.identity()
+    }
+
+    pub(crate) fn sign_receipt(
+        &self,
+        artifact: &continuum_value::identity::ContentIdentity,
+    ) -> Result<
+        continuum_evidence::signing::ArtifactSignature,
+        continuum_evidence::signing::SignRefusal,
+    > {
+        self.registry.sign(
+            &self.signer,
+            continuum_evidence::signing::SignedArtifactKind::Receipt,
+            artifact,
+        )
+    }
+}
+
+impl fmt::Debug for ReceiptSigner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReceiptSigner")
+            .field("identity", &self.identity().handle())
+            .finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for Services {
@@ -163,6 +223,7 @@ impl fmt::Debug for Services {
             .field("connection", &self.connection)
             .field("epochs", &self.epochs)
             .field("now", &self.now)
+            .field("receipt_signer", &self.receipt_signer)
             .finish_non_exhaustive()
     }
 }
@@ -202,6 +263,12 @@ impl Services {
     #[must_use]
     pub const fn now(&self) -> Option<&Timestamp> {
         self.now.as_ref()
+    }
+
+    /// The deployment's receipt-signing identity, when it supplied one.
+    #[must_use]
+    pub const fn receipt_signer(&self) -> Option<&ReceiptSigner> {
+        self.receipt_signer.as_ref()
     }
 }
 
@@ -299,6 +366,7 @@ impl Daemon {
                 connection,
                 epochs: result::unpinned(protocol),
                 now: None,
+                receipt_signer: None,
             },
             store_identifier: Box::new(identifier),
             state: DaemonState::new(),
@@ -935,6 +1003,17 @@ impl Builder {
     #[must_use]
     pub fn now(mut self, now: Timestamp) -> Self {
         self.services.now = Some(now);
+        self
+    }
+
+    /// Supply the receipt-signing identity (plan §18.6, bn-1hape). Every receipt
+    /// `evidence.link` publishes is then signed before it is published, and a signer the
+    /// registry no longer holds active refuses the publication rather than publishing it
+    /// unsigned. A deployment that omits it publishes receipts unsigned, which a verifier
+    /// reads as `UnverifiedReason::Unsigned`.
+    #[must_use]
+    pub fn receipt_signer(mut self, signer: ReceiptSigner) -> Self {
+        self.services.receipt_signer = Some(signer);
         self
     }
 

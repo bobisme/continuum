@@ -1565,6 +1565,25 @@ fn link(
     let edge_handle = edge_identity(services, &relation, &request.subject, &receipt_handle)
         .map_err(|_| identity_unavailable())?;
 
+    // 6a. Sign the receipt's canonical bytes before anything is published (plan §18.6,
+    //     ADR-0054, bn-1hape). A deployment with a signing identity that is no longer active
+    //     publishes nothing rather than an unsigned receipt; one with none publishes
+    //     unsigned, which a verifier reads as typed `Unsigned` provenance.
+    let signature = match services.receipt_signer() {
+        None => None,
+        Some(signer) => Some(
+            signer
+                .sign_receipt(&signed_receipt_identity(&staged.content))
+                .map_err(|_| {
+                    Fault::new(
+                        ErrorCode::UnsupportedSemanticFeature,
+                        "this daemon's receipt-signing identity is not active; nothing was \
+                         published",
+                    )
+                })?,
+        ),
+    };
+
     // 7. Publish the receipt under the caller's own capability, so the store decides and
     //    audits the write against the identity the wire presented (ADR-0037).
     let token =
@@ -1614,6 +1633,9 @@ fn link(
         publication: Some(Published::of(&receipt)),
     };
     let (_, node_appended) = state.append_evidence(receipt_handle.clone(), receipt_node);
+    if let Some(signature) = signature {
+        state.record_receipt_signature(receipt_handle.clone(), signature);
+    }
     if node_appended {
         state.record_evidence_event(crate::protocol::task::EvidenceEvent {
             at: created_at.clone(),
@@ -1669,6 +1691,19 @@ fn link(
         edge_artifact(&receipt_handle)?,
         edge_artifact(&edge_handle)?,
     ]))
+}
+
+/// The ADR-0013 identity a receipt's signature covers: the receipt's staged content as one
+/// canonical `Bytes` value (plan §18.6, ADR-0054 D4, bn-1hape).
+///
+/// A receipt blob is opaque bytes, not itself a canonical `Value` encoding, so it is wrapped
+/// rather than reinterpreted. The signer (`evidence.link`) and any verifier call this one
+/// function, so the two cannot disagree about what was signed.
+#[must_use]
+pub fn signed_receipt_identity(content: &[u8]) -> continuum_value::identity::ContentIdentity {
+    continuum_value::identity::ContentIdentity::of(&continuum_value::value::Value::bytes(
+        content.to_vec(),
+    ))
 }
 
 /// One evidence edge as `schemas/evidence-graph-edge.schema.json` writes it.

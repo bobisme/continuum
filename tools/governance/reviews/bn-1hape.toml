@@ -1,0 +1,43 @@
+[change]
+bone = "bn-1hape"
+author = "continuum-dev"
+summary = "Production signing sources (plan 18.6, ADR-0054): OS KeyEntropy and an on-disk keystore in continuum-security, audit-log replay and seed restore in continuum-evidence, and evidence.link signing each receipt before publishing it"
+
+[semantic]
+covers = [
+  "crates/continuum-evidence/src/signing.rs",
+]
+reference_tests = [
+  "crates/continuum-evidence/tests/signing_identities.rs::replay_refuses_an_illegal_or_resequenced_log",
+  "crates/continuum-evidence/tests/signing_identities.rs::restore_rederives_only_a_minted_key",
+  "crates/continuum-security/tests/keystore.rs::first_use_mints_once_with_os_entropy_and_reopening_restores_the_same_key",
+  "crates/continuum-security/tests/keystore.rs::a_corrupt_key_file_is_refused_and_never_re_minted",
+  "crates/continuum-security/tests/keystore.rs::a_missing_or_corrupt_audit_log_is_refused",
+  "crates/continuum-security/tests/keystore.rs::a_hostile_audit_log_is_refused_within_a_memory_limit",
+  "crates/continuum-security/src/keystore.rs::swap_after_open_reads_the_original_descriptor",
+  "crates/continuumd/tests/receipt_signing.rs::a_receipt_evidence_link_produces_is_signed_and_verifies",
+  "crates/continuumd/tests/receipt_signing.rs::a_receipt_tampered_after_production_does_not_verify",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-evidence/tests/signing_identities.rs::a_registry_replays_from_its_persisted_audit_log", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/receipt_signing.rs::the_daemons_receipt_signature_matches_the_library_signing_the_same_bytes", oracle = "continuum-evidence", subject = "continuumd" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers signing, signatures, or provenance verification; this change puts receipt signing on a production path while TEST-9-07 stays partial and docs/09 T04's signing control stays a typed absence until bn-3glnv verifies in production, so no claim's evidence state moves"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the keystore files and the persisted audit log are local formats, and the daemon holds receipt signatures in state with no wire spelling because protocol 3.6 is frozen (bn-3glnv)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-evidence gains additive SigningAuditRecord::from_value, SigningRegistry::audit_value, replay, replay_record (the record-at-a-time form the keystore uses, cr-3l3n47) and restore, and derives PartialEq on SigningRegistry; continuumd gains an optional ReceiptSigner, and a daemon built without one behaves exactly as before; no published artifact or wire value changes"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3l3n47"
+verdict = "approved"

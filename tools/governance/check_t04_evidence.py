@@ -57,12 +57,14 @@ Control -> enforcement point map
         re-run for real.
 
     optional signing/attestation                                       GAP
-        Library present, production use absent (bn-2ee4c, review
-        cr-3e3t1j). `continuum-evidence::signing` (ADR-0054) signs and
-        verifies over canonical bytes, and its tests are re-run here as
-        evidence that the library is real. But no production path signs or
-        verifies a real receipt, intent bundle, or domain pack: daemon
-        wiring is bn-3glnv, producers and entropy are bn-1hape. See "Gap
+        Attestation produced, verification absent. Since bn-1hape the
+        daemon's receipt producer (`evidence.link`) signs every receipt's
+        canonical bytes with the keystore's solo-developer key, minted on
+        first use from `OsEntropy` (`continuumd/tests/receipt_signing.rs`,
+        re-run here). But no production consumer verifies a signature
+        (bn-3glnv: daemon operations, wire form, `intent.accept`), and no
+        intent-bundle or domain-pack producer exists, so an adversary's
+        substitute is still not *rejected* by a signature check. See "Gap
         controls" below.
 
     reject digest mismatch                                             PASS
@@ -122,17 +124,20 @@ Two controls are typed absences, not failures:
    producer-shaped identifier appears anywhere under `crates/*/src`.
 
 2. **"optional signing/attestation"** — docs/09 marks this control
-   *optional*. Since bn-2ee4c the signing *library* exists
-   (`continuum-evidence::signing`, ADR-0054), but nothing on a production
-   path calls it, so no real artifact is signed and the control is still a
-   typed absence. `direct_checks`' `signing-production-gap` checks both
-   halves mechanically: the library is present (its module declares
-   `SignatureVerifier` and `verify_for_ci_acceptance`), and no `src/` file
-   of any crate other than `continuum-evidence` names `SigningRegistry`,
-   `SignatureVerifier`, or `LocalKeyring`. The day bn-3glnv or bn-1hape
-   adds a caller, this check fails and the control needs a successor
-   citation, not a silent pass. `signing-dependency-placement` also keeps
-   the crate pinned exactly and out of the certificate checker (INV-004).
+   *optional*. The signing library exists (`continuum-evidence::signing`,
+   ADR-0054, bn-2ee4c), and bn-1hape put its signing half on a production
+   path: `evidence.link` signs each receipt before publishing it. The
+   control stays a typed absence because nothing *checks* those signatures
+   in production, and a signature nobody verifies rejects no substitution.
+   `direct_checks`' `signing-production-scope` checks the exact scope
+   mechanically: the library is present; `continuumd/src/daemon/evidence.rs`
+   still signs before it publishes (a regression fails); no `src/` file
+   outside `continuum-evidence` names `SignatureVerifier` (when bn-3glnv adds
+   one, this check fails and the control needs a successor citation, not a
+   silent pass); and nothing signs `SignedArtifactKind::IntentBundle` or
+   `::DomainPack` outside `continuum-evidence`, because no such producer
+   exists on trunk. `signing-dependency-placement` keeps the crate pinned
+   exactly and out of the certificate checker (INV-004).
 
 The two gap direct-checks and the placement check are exercised by `--self-test` the same way this
 file's other direct checks are: a synthetic fixture (an overlay file/line
@@ -146,7 +151,7 @@ Self-test
 
 1. This file's three source-level direct checks
    (`adr-0013-states-canonical-identity`, `event-hash-chain-gap`,
-   `signing-production-gap`, `signing-dependency-placement`) each catch a real mutation/fixture, generated
+   `signing-production-scope`, `signing-dependency-placement`) each catch a real mutation/fixture, generated
    against an anchor or via a synthetic overlay that must be unambiguous.
 2. Every Python delegate checker's own `--self-test` still exits 0
    (`check_kernel_covenant.py`, `check_crate_boundaries.py`, and
@@ -310,6 +315,16 @@ RUST_DELEGATES: dict[str, RustGroup] = {
         ["--lib"],
         ["signing::tests::ed25519_matches_the_rfc_8032_test_vectors"],
     ),
+    "signing_receipt_production": (
+        "continuumd",
+        ["--test", "receipt_signing"],
+        [
+            "a_receipt_evidence_link_produces_is_signed_and_verifies",
+            "a_receipt_tampered_after_production_does_not_verify",
+            "a_daemon_without_a_signer_publishes_unsigned_and_a_verifier_says_so",
+            "a_revoked_signing_identity_refuses_the_link_rather_than_publishing_unsigned",
+        ],
+    ),
     "preserve_redaction_commitments": (
         "continuumd",
         ["--test", "daemon_evidence"],
@@ -417,12 +432,17 @@ def rule_signing_dependency_placement(
 
 SIGNING_LIBRARY = "crates/continuum-evidence/src/signing.rs"
 SIGNING_LIBRARY_ANCHORS: tuple[str, ...] = ("pub struct SignatureVerifier", "pub fn verify_for_ci_acceptance(")
-SIGNING_API_PATTERN = re.compile(r"\b(SigningRegistry|SignatureVerifier|LocalKeyring)\b")
+RECEIPT_SIGNING_SITE = "crates/continuumd/src/daemon/evidence.rs"
+RECEIPT_SIGN_PHRASE = ".sign_receipt(&signed_receipt_identity(&staged.content))"
+RECEIPT_PUBLISH_PHRASE = ".publish(ArtifactClass::Evidence, staged.content.clone(), &token)"
+VERIFIER_PATTERN = re.compile(r"\bSignatureVerifier\b")
+ABSENT_PRODUCER_PATTERN = re.compile(r"SignedArtifactKind::(IntentBundle|DomainPack)\b")
 
 
-def rule_signing_production_gap(library_text: str | None, rust_sources: list[tuple[str, str]]) -> list[str]:
-    """Returns hits (evidence the gap is NOT as declared) — empty means the library is
-    present and no production caller outside continuum-evidence exists."""
+def rule_signing_production_scope(library_text: str | None, rust_sources: list[tuple[str, str]]) -> list[str]:
+    """Returns hits (evidence the declared scope is NOT what the tree holds) — empty means:
+    the library is present, the receipt producer signs before publishing, no production
+    verifier exists, and no bundle or pack producer signs."""
     hits: list[str] = []
     if library_text is None:
         hits.append(f"{SIGNING_LIBRARY} is missing: the declared library is absent")
@@ -430,11 +450,21 @@ def rule_signing_production_gap(library_text: str | None, rust_sources: list[tup
         for anchor in SIGNING_LIBRARY_ANCHORS:
             if anchor not in library_text:
                 hits.append(f"{SIGNING_LIBRARY} no longer declares {anchor!r}")
+    sources = dict(rust_sources)
+    site = sources.get(RECEIPT_SIGNING_SITE)
+    if site is None:
+        hits.append(f"{RECEIPT_SIGNING_SITE} is missing: the receipt producer is gone")
+    else:
+        sign_at, publish_at = site.find(RECEIPT_SIGN_PHRASE), site.find(RECEIPT_PUBLISH_PHRASE)
+        if sign_at == -1 or publish_at == -1 or sign_at > publish_at:
+            hits.append(f"{RECEIPT_SIGNING_SITE}: evidence.link no longer signs the receipt before publishing it")
     for rel, text in rust_sources:
         if rel.startswith("crates/continuum-evidence/") or "/src/" not in rel:
             continue
-        if SIGNING_API_PATTERN.search(text):
-            hits.append(f"{rel}: a production caller of the signing library exists; the gap is stale")
+        if VERIFIER_PATTERN.search(text):
+            hits.append(f"{rel}: a production verifier exists; the verification gap is stale")
+        for match in ABSENT_PRODUCER_PATTERN.finditer(text):
+            hits.append(f"{rel}: signs {match.group(0)}; a producer exists and must be bound")
     return hits
 
 
@@ -473,7 +503,7 @@ def direct_checks() -> dict[str, list[str]]:
         "adr-0013-states-canonical-identity": rule_adr_0013_states_canonical_identity(adr_text),
         "event-hash-chain-gap": rule_event_hash_chain_gap(real_schema_names(), real_rust_sources()),
         "signing-dependency-placement": rule_signing_dependency_placement(cargo_text, real_checker_manifests()),
-        "signing-production-gap": rule_signing_production_gap(
+        "signing-production-scope": rule_signing_production_scope(
             (ROOT / SIGNING_LIBRARY).read_text(encoding="utf-8") if (ROOT / SIGNING_LIBRARY).is_file() else None,
             real_rust_sources(),
         ),
@@ -533,16 +563,28 @@ def direct_self_test() -> dict[str, object]:
         else:
             caught.append("signing-dependency-placement")
 
-    # signing-production-gap: prove a missing library and a synthetic production caller
-    # are both caught.
+    # signing-production-scope: prove a missing library, an unsigned receipt path, a
+    # synthetic production verifier, and a synthetic bundle producer are each caught.
     library = (ROOT / SIGNING_LIBRARY).read_text(encoding="utf-8") if (ROOT / SIGNING_LIBRARY).is_file() else ""
-    caller = [("crates/continuumd/src/fixture.rs", "use continuum_evidence::signing::SignatureVerifier;")]
-    if not rule_signing_production_gap(None, []):
-        failures.append("fixture: a missing signing library did not trip signing-production-gap")
-    elif not rule_signing_production_gap(library, caller):
-        failures.append("fixture: a synthetic continuumd caller did not trip signing-production-gap")
+    real = real_rust_sources()
+    site = dict(real).get(RECEIPT_SIGNING_SITE, "")
+    unsigned = [(rel, text.replace(RECEIPT_SIGN_PHRASE, ".unsigned()")) if rel == RECEIPT_SIGNING_SITE else (rel, text) for rel, text in real]
+    verifier = real + [("crates/continuumd/src/fixture.rs", "use continuum_evidence::signing::SignatureVerifier;")]
+    bundle = real + [("crates/continuumd/src/fixture.rs", "sign(SignedArtifactKind::IntentBundle, x)")]
+    if rule_signing_production_scope(library, real):
+        failures.append("the real tree already violates signing-production-scope")
+    elif not site:
+        failures.append(f"signing-production-scope fixture anchor {RECEIPT_SIGNING_SITE} is missing")
+    elif not rule_signing_production_scope(None, real):
+        failures.append("fixture: a missing signing library did not trip signing-production-scope")
+    elif not rule_signing_production_scope(library, unsigned):
+        failures.append("fixture: an evidence.link that no longer signs did not trip signing-production-scope")
+    elif not rule_signing_production_scope(library, verifier):
+        failures.append("fixture: a synthetic production verifier did not trip signing-production-scope")
+    elif not rule_signing_production_scope(library, bundle):
+        failures.append("fixture: a synthetic intent-bundle producer did not trip signing-production-scope")
     else:
-        caught.append("signing-production-gap")
+        caught.append("signing-production-scope")
 
     return {"status": "fail" if failures else "pass", "checks_caught": sorted(caught), "failures": failures}
 
@@ -750,20 +792,26 @@ def build_controls(
         },
         "optional signing/attestation": {
             "reason": (
-                "Library present, production use absent. docs/09 marks this control "
-                "optional. bn-2ee4c added continuum-evidence::signing (ADR-0054), but "
-                "no production path calls it, so no real receipt, intent bundle, or "
-                "domain pack is signed or verified (review cr-3e3t1j). Missing: "
-                "bn-3glnv (daemon operations, wire form, intent.accept's fail-closed "
-                "check) and bn-1hape (OS entropy, keystore, producer-side signing). "
-                "Assurance does not depend on it: reject digest mismatch and build "
-                "identity above already deny an adversary a path to a forged pass."
+                "Attestation produced, verification absent. docs/09 marks this control "
+                "optional. Since bn-1hape, continuumd's evidence.link signs every "
+                "receipt's canonical bytes before publishing, with the keystore's "
+                "solo-developer key minted on first use from OsEntropy. No production "
+                "consumer verifies those signatures yet (bn-3glnv: daemon operations, "
+                "wire form, intent.accept's fail-closed check), and no intent-bundle or "
+                "domain-pack producer exists on trunk, so a substitute is not rejected by "
+                "a signature. Assurance does not depend on it: reject digest mismatch and "
+                "build identity above already deny an adversary a path to a forged pass."
             ),
             "absence_checks": [
                 {
-                    "artifact": "tools/governance/check_t04_evidence.py signing-production-gap",
-                    "checks": "the signing library is present, and no src/ file outside continuum-evidence names SigningRegistry, SignatureVerifier, or LocalKeyring",
-                    "status": direct_status("signing-production-gap"),
+                    "artifact": "tools/governance/check_t04_evidence.py signing-production-scope",
+                    "checks": "the signing library is present; evidence.link signs each receipt before publishing it; no src/ outside continuum-evidence names SignatureVerifier; nothing signs IntentBundle or DomainPack outside continuum-evidence",
+                    "status": direct_status("signing-production-scope"),
+                },
+                {
+                    "artifact": "crates/continuumd/tests/receipt_signing.rs (four tests)",
+                    "checks": "the attestation half is real: a receipt evidence.link produces carries a signature that verifies, a tampered receipt does not, a daemon without a signer publishes unsigned, and a revoked identity refuses the link",
+                    "status": rust_status("signing_receipt_production"),
                 },
                 {
                     "artifact": "tools/governance/check_t04_evidence.py signing-dependency-placement",
@@ -842,8 +890,8 @@ def build_evidence(controls: dict[str, dict], direct_st: dict, py_st: dict, rust
         },
         "boundary": (
             "Two of six controls (hash chain/Merkle root over events; optional "
-            "signing/attestation, whose library exists but has no production "
-            "caller) are typed absences, not live enforcement — see the module "
+            "signing/attestation, whose receipts are signed in production but "
+            "verified by no production consumer) are typed absences, not live enforcement — see the module "
             "docstring's 'Gap controls' section. The other four are "
             "bound to citations that are re-run, not merely read, on every "
             "invocation."

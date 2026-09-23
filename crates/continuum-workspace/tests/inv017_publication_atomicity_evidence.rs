@@ -1289,6 +1289,12 @@ const BARE_HANDLE_FIELDS: &[(&str, &str, &str, &str)] = &[
         "key: a context pack, held and not published",
     ),
     (
+        STATE_RS,
+        "DaemonState",
+        "receipt_signatures",
+        "key: a receipt node identity; the publication is `EvidenceNode::publication`",
+    ),
+    (
         TASK_RS,
         "TaskTable",
         "tasks",

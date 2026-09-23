@@ -152,12 +152,15 @@ revocation are all keyed by the exact identity.
 
 - TEST-9-07's signature half has a library and real tests, in
   `crates/continuum-evidence/src/signing.rs` and
-  `crates/continuum-evidence/tests/signing_identities.rs`. **No production path calls
-  them yet**: no real receipt, intent bundle, or domain pack is signed or verified. So
-  TEST-9-07 stays `partial` and docs/09 T04's signing control stays a typed absence,
-  whose check requires the library present and no caller outside `continuum-evidence`
-  (review cr-3e3t1j). Production use is bn-3glnv (wiring) and bn-1hape (producers and
-  entropy).
+  `crates/continuum-evidence/tests/signing_identities.rs`. bn-1hape put the signing half
+  on a production path: `continuum-security::entropy::OsEntropy` is the production
+  `KeyEntropy`, `continuum-security::keystore::LocalKeystore` persists the solo-developer
+  key minted on first use, and `continuumd`'s `evidence.link` signs each receipt's
+  canonical bytes before publishing it. **No production path verifies yet**, and no
+  intent-bundle or domain-pack producer exists on trunk. So TEST-9-07 stays `partial` and
+  docs/09 T04's signing control stays a typed absence, whose check binds the receipt path
+  and fails when a production verifier or a bundle or pack producer appears (review
+  cr-3e3t1j). Production verification is bn-3glnv.
 - `continuum-evidence` gains its first external edge. The crate documentation and
   `dependency-rationale.toml` record it, classed `trusted-checking-base`.
 - Nothing in the wire changes. The protocol stays at 3.6. `continuumd`'s `intent.accept`
@@ -171,10 +174,15 @@ revocation are all keyed by the exact identity.
    the authoritative `RegistryHead`; and
    `intent.accept` verifying a held bundle's chain through `verify_for_ci_acceptance`. This
    needs an RFC 0026/0037 revision and a protocol version, which the 3.6 freeze excludes.
-2. **An operating-system `KeyEntropy` source** in a boundary crate, and an on-disk keystore
-   for `LocalKeyring` (bn-1hape).
-3. **Signing at the producers (bn-1hape).** Kernel and promotion receipts, intent-bundle export, and
-   domain-pack publication call `SigningRegistry::sign` once those producers exist.
+2. **An operating-system `KeyEntropy` source and an on-disk keystore — done (bn-1hape).**
+   `OsEntropy` and `LocalKeystore` in `continuum-security`. Persisting later rotations and
+   revocations to the keystore belongs with the daemon operations of follow-up 1.
+3. **Signing at the producers — receipts done (bn-1hape).** `evidence.link`, the daemon's
+   receipt producer, signs through `SigningRegistry::sign`. The kernel crates never sign
+   (INV-004); their receipts are signed where the daemon publishes them. Promotion
+   receipts (`repair.promote` is not served), intent-bundle export, and domain-pack
+   publication have no producer on trunk, and sign when they land. No deployment launcher
+   on trunk builds a daemon from the keystore; that wiring is follow-up 1.
 4. **Distributed revocation.** Revocation and rotation records are local audit records
    today. Distributing them inside the intent bundle, signed, is RFC 0037's open question on
    revocation and expiry.

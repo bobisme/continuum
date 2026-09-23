@@ -474,6 +474,7 @@ pub struct DaemonState {
     models: super::verification::ModelCatalog,
     context_packs: BTreeMap<ContextHandle, super::context::ContextPackRecord>,
     compile_sources: BTreeMap<String, super::context::ContextCompileSource>,
+    receipt_signatures: BTreeMap<EvidenceHandle, continuum_evidence::signing::ArtifactSignature>,
 }
 
 impl DaemonState {
@@ -617,6 +618,29 @@ impl DaemonState {
     #[must_use]
     pub fn staged(&self, commitment: &Commitment) -> Option<&StagedFile> {
         self.content.get(commitment)
+    }
+
+    // --- receipt signatures (plan §18.6, bn-1hape) -------------------------------------
+
+    /// Record the signature `evidence.link` made over a receipt it published.
+    pub(crate) fn record_receipt_signature(
+        &mut self,
+        receipt: EvidenceHandle,
+        signature: continuum_evidence::signing::ArtifactSignature,
+    ) {
+        self.receipt_signatures.insert(receipt, signature);
+    }
+
+    /// The signature over a published receipt, when the deployment signs receipts.
+    ///
+    /// It signs [`signed_receipt_identity`](super::evidence::signed_receipt_identity) of the
+    /// receipt's staged content. No wire operation returns it at protocol 3.6 (bn-3glnv).
+    #[must_use]
+    pub fn receipt_signature(
+        &self,
+        receipt: &EvidenceHandle,
+    ) -> Option<&continuum_evidence::signing::ArtifactSignature> {
+        self.receipt_signatures.get(receipt)
     }
 
     // --- component sets (`rule snapshot.by_reference`, protocol 3.6) ----------------

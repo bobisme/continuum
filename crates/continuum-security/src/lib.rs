@@ -33,5 +33,15 @@
 //! its one edge is `continuum-workspace`, for the closed plan §4.4
 //! [`ArtifactClass`](continuum_workspace::artifact_path::ArtifactClass) the corpus
 //! enumerates its surfaces against rather than restating.
+//!
+//! [`entropy`] and [`keystore`] (bn-1hape, plan §18.6, ADR-0054) — the production sources
+//! of the signing library in `continuum-evidence`: [`entropy::OsEntropy`], the
+//! operating-system entropy capability, and [`keystore::LocalKeystore`], the on-disk
+//! solo-developer key minted on first use. They are here because owning an ambient
+//! resource behind an explicit capability is a boundary crate's job (INV-005, ADR-0003); no
+//! semantic-core crate depends on this one (`tests/entropy_isolation.rs`). This adds two
+//! edges, `continuum-evidence` and `continuum-value`; the rationale is in `Cargo.toml`.
 
+pub mod entropy;
 pub mod injection;
+pub mod keystore;

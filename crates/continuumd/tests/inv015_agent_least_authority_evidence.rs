@@ -11,7 +11,7 @@
 //! | INV-015 clause | live site | direct evidence |
 //! |---|---|---|
 //! | alter evidence status | `daemon/evidence.rs` — [`Promotion`] has private fields and no public constructor, so producer code (`daemon/observe.rs`, a *different module*) can name the type and never build one; `observe.ingest`'s wire shape declares no status field, so an append lands at the lattice's bottom as a property of the request's *type* | `daemon_evidence.rs`: `a_producers_append_lands_at_the_lattices_bottom`, `the_producers_request_body_has_no_field_that_could_name_a_status`, `the_status_written_is_what_the_checker_established_not_what_the_caller_named`, `no_operation_in_either_family_removes_or_edits_an_appended_node` — cited via [`status_authority`], plus this file's own registry-grain sweep [`privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status`] |
-//! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; the cryptographic-signing lifecycle (plan §18.6, docs/09) has **no producer** — pinned as a gap |
+//! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; cryptographic signing (plan §18.6, bn-1hape): the daemon holds the key, installed only by the deployment, and signs only inside `evidence.link` after the service gate; no wire type carries key material — [`receipt_authority::positive_only_the_daemon_holds_the_receipt_key_and_only_a_service_check_signs`] |
 //! | access ungranted production traces | `daemon/admission.rs` — R-4: `observe.ingest` requires `DataGrant::ProductionTrace` beyond its `execute` level, decided by [`required_grant`] *before* any family runs; the denial is the zero-bit [`Denied`] (X1) and precedes the index (X3), so a refused caller learns nothing (X2) | live here: [`trace_grant::positive_exactly_one_operation_requires_a_data_grant_and_it_is_the_production_trace`], [`trace_grant::positive_a_denial_carries_zero_bits`]; cited: `the_production_trace_grant_is_required_beyond_the_execute_level`, `every_admission_failure_is_one_byte_identical_answer`, `a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does` |
 //! | execute unrestricted host effects | structurally: the 75-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-*`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
 //!
@@ -78,9 +78,12 @@
 //!    for "capability model, sandboxing … audit trail, and signing identities" has
 //!    zero public items; the live capability model ships in `continuumd`
 //!    (admission/capability) and `continuum-workspace` (publication) instead — pinned.
-//! 3. **Signing identities have no producer** (plan §18.6, docs/09): the daemon stores
-//!    an acceptance signature "verbatim as supplied" and verifies nothing; no
-//!    `continuumd` source mints or verifies a keypair — swept live.
+//! 3. **Signing identities: receipts are signed, nothing is verified yet** (plan §18.6,
+//!    docs/09, bn-1hape). `evidence.link` signs each receipt it publishes with a key the
+//!    deployment installs through `Builder::receipt_signer` and the daemon holds; the
+//!    keystore and OS entropy live in `continuum-security`, which the daemon neither links
+//!    nor names. The daemon still stores an acceptance signature "verbatim as supplied"
+//!    and verifies none (bn-3glnv) — swept live.
 //! 4. **The §18.4 capture-time contract has no producer**: salted payload commitments,
 //!    per-artifact encryption, and the retention clock are unimplemented ("salted"
 //!    appears in no `continuumd` source). The *redaction* half is live and cited
@@ -130,6 +133,7 @@ const EVIDENCE: &str = include_str!("../src/daemon/evidence.rs");
 const OBSERVE: &str = include_str!("../src/daemon/observe.rs");
 const OBLIGATION: &str = include_str!("../src/daemon/obligation.rs");
 const STATE: &str = include_str!("../src/daemon/state.rs");
+const DAEMON_MOD: &str = include_str!("../src/daemon/mod.rs");
 const HANDSHAKE: &str = include_str!("../src/protocol/handshake.rs");
 
 const DAEMON_EVIDENCE_TESTS: &str = include_str!("daemon_evidence.rs");
@@ -314,6 +318,31 @@ fn host_effect_lines(source: &str) -> Vec<&str> {
         })
         .collect()
 }
+
+/// The two `continuum-security` files that perform host effects on purpose: the signing
+/// sources bn-1hape added (plan §18.6). Only filesystem facilities are allowed in them.
+fn is_signing_source(path: &std::path::Path) -> bool {
+    path.ends_with("entropy.rs") || path.ends_with("keystore.rs")
+}
+
+/// What the signing sources may name: the filesystem, its I/O, and the Unix permission
+/// extensions.
+const SIGNING_SOURCE_FACILITIES: &[&str] = &["std::fs", "std::io", "std::os"];
+
+/// What they may never name, even inside an allowed path (`std::os::unix::process`).
+const NON_FILESYSTEM_FACILITIES: &[&str] = &[
+    "std::net",
+    "std::process",
+    "std::thread",
+    "std::time",
+    "std::env",
+    "process::",
+    "net::",
+    "SystemTime",
+    "Instant",
+    "Command",
+    "TcpStream",
+];
 
 /// The dependency names declared under `[dependencies]` of a manifest, read as text.
 ///
@@ -598,7 +627,8 @@ mod status_authority {
 
 mod receipt_authority {
     use super::{
-        DAEMON_EVIDENCE_TESTS, DEFAULT_SERVICE, EVIDENCE, PLAN_MD, STATE, continuumd_sources, pin,
+        DAEMON_EVIDENCE_TESTS, DAEMON_MOD, DEFAULT_SERVICE, EVIDENCE, PLAN_MD, STATE,
+        continuumd_sources, pin,
     };
 
     /// A check receipt is the checker's own artifact: the caller *is* the checker (no
@@ -627,13 +657,17 @@ mod receipt_authority {
         );
     }
 
-    /// The honest half: *cryptographic* signing (plan §18.6, docs/09 lifecycle) has no
-    /// producer. The daemon stores an acceptance signature verbatim and verifies
-    /// nothing; no source mints or verifies a keypair. An agent therefore cannot sign
-    /// a receipt because *nothing* signs a receipt — an absence, stated rather than
-    /// dressed up, and swept so the row flips the day a signer lands.
+    /// The cryptographic half (plan §18.6, bn-1hape). Until bn-1hape this was a gap
+    /// pinned as a tripwire: nothing signed a receipt. Now `evidence.link` signs each
+    /// receipt it publishes, and this guards that an *agent* still cannot:
+    ///
+    /// - the signing key is installed only by the deployment, through
+    ///   `Builder::receipt_signer`, and held by the daemon ("agents never do");
+    /// - signing happens inside `evidence.link` only after the caller is admitted as a
+    ///   `service:` checker, so an `agent:` capability never reaches the signer;
+    /// - no wire type carries a key: no `protocol/` source names a signer or key type.
     #[test]
-    fn boundary_signing_identities_have_no_producer() {
+    fn positive_only_the_daemon_holds_the_receipt_key_and_only_a_service_check_signs() {
         pin(
             "plan.md",
             PLAN_MD,
@@ -645,18 +679,52 @@ mod receipt_authority {
         pin(
             "daemon/state.rs",
             STATE,
-            &["the acceptance signature, verbatim as supplied"],
+            &[
+                "the acceptance signature, verbatim as supplied",
+                "fn record_receipt_signature(",
+            ],
         );
+        let service_gate = EVIDENCE
+            .find("ServiceIdentity::parse(call.grant.actor.as_str())")
+            .expect("evidence.link admits its checker as a service identity");
+        let signs = EVIDENCE
+            .find(".sign_receipt(")
+            .expect("evidence.link signs the receipt");
+        assert!(
+            service_gate < signs,
+            "evidence.link signs before it has refused a non-service caller"
+        );
+        let mut installers = 0;
         for (path, text) in continuumd_sources() {
-            for token in ["verify_signature", "keypair", "signing_key"] {
-                assert!(
-                    !text.contains(token),
-                    "{} now contains {token:?}: a signing producer landed; \
-                     re-audit INV-015's sign-receipts row",
-                    path.display()
-                );
+            let rel = path.display().to_string();
+            if rel.contains("/protocol/") {
+                for token in ["ReceiptSigner", "LocalSigner", "SigningKey", "signing_key"] {
+                    assert!(
+                        !text.contains(token),
+                        "{rel} names {token:?}: a wire type now carries signing material"
+                    );
+                }
             }
+            installers += text.matches("pub fn receipt_signer(mut self").count();
+            let reaches_keystore = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .any(|line| line.contains("continuum_security"));
+            assert!(
+                !reaches_keystore,
+                "{rel} names continuum_security in code: the daemon would reach the keystore itself"
+            );
         }
+        assert_eq!(
+            installers, 1,
+            "the builder is the one place a receipt signer is installed"
+        );
+        pin(
+            "daemon/mod.rs",
+            DAEMON_MOD,
+            &["The daemon holds the key; agents never do"],
+        );
     }
 }
 
@@ -764,9 +832,10 @@ mod no_widening {
     use super::{
         ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
         EFFECTS_PROCESS_LIB, EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_MANIFEST,
-        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST, administrative_callers,
-        continuumd_sources, declared_dependencies, forge_sources, host_effect_lines, pin,
-        pub_items, security_sources,
+        NON_FILESYSTEM_FACILITIES, PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST,
+        SIGNING_SOURCE_FACILITIES, administrative_callers, continuumd_sources,
+        declared_dependencies, forge_sources, host_effect_lines, is_signing_source, pin, pub_items,
+        security_sources,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -1047,38 +1116,71 @@ mod no_widening {
     /// longer empty, so the tripwire becomes an inventory. An unrecorded public item fails
     /// the audit below, so this surface cannot grow past what INV-015 has examined without
     /// the examination being redone.
-    const SECURITY_PUBLIC_SURFACE: [&str; 31] = [
+    const SECURITY_PUBLIC_SURFACE: [&str; 64] = [
         "pub carrier: &'static str,",
         "pub const ALL: [Self; 10] = [",
         "pub const ALL: [Self; 3] = [",
         "pub const ALL: [Self; 7] = [",
         "pub const ALL: [Self; 8] = [",
+        "pub const AUDIT_FILE: &str = \"signing-audit.log\";",
+        "pub const AUDIT_MAGIC: [u8; 8] = *b\"CTMAUD01\";",
         "pub const CASES: &[Case] = &[",
+        "pub const KEY_FILE: &str = \"signer.key\";",
+        "pub const KEY_FILE_LEN: usize = KEY_MAGIC.len() + SEED_LEN + PUBLIC_KEY_LEN;",
+        "pub const KEY_MAGIC: [u8; 8] = *b\"CTMKEY01\";",
+        "pub const MAX_AUDIT_RECORDS: u32 = 4096;",
+        "pub const MAX_AUDIT_RECORD_LEN: u32 = 1024;",
         "pub const MAX_PAYLOAD_BYTES: usize = 4096;",
+        "pub const OS_ENTROPY_PATH: &str = \"/dev/urandom\";",
         "pub const fn bullet(self) -> &'static str {",
         "pub const fn bullet(self) -> &'static str {",
         "pub const fn bullet(self) -> &'static str {",
         "pub const fn bullet(self) -> &'static str {",
+        "pub const fn expecting_owner(mut self, uid: u32) -> Self {",
+        "pub const fn minted(&self) -> bool {",
+        "pub const fn new() -> Self {",
         "pub const fn readability(class: ArtifactClass) -> Readability {",
+        "pub const fn registry(&self) -> &SigningRegistry {",
+        "pub const fn signer(&self) -> &LocalSigner {",
         "pub const fn token(self) -> &'static str {",
         "pub enum IntentPolicyBlock {",
         "pub enum IsolationControl {",
+        "pub enum KeystoreError {",
         "pub enum ProhibitedOutcome {",
         "pub enum Readability {",
         "pub enum RedTeamClass {",
         "pub enum Vector {",
         "pub fn case(id: &str) -> Option<&'static Case> {",
+        "pub fn dir(&self) -> &Path {",
+        "pub fn encode_audit_log(registry: &SigningRegistry) -> Result<Vec<u8>, KeystoreError> {",
+        "pub fn into_parts(self) -> (SigningRegistry, LocalSigner) {",
         "pub fn isolation_cases() -> impl Iterator<Item = &'static Case> {",
+        "pub fn new(dir: impl Into<PathBuf>) -> Self {",
+        "pub fn open(&self) -> Result<OpenedKeystore, KeystoreError> {",
+        "pub fn open_or_mint(",
         "pub fn policy_block_cases() -> impl Iterator<Item = &'static Case> {",
         "pub fn red_team_cases() -> impl Iterator<Item = &'static Case> {",
         "pub id: &'static str,",
+        "pub mod entropy;",
         "pub mod injection;",
+        "pub mod keystore;",
         "pub operation: &'static str,",
         "pub outcome: ProhibitedOutcome,",
         "pub payload: &'static str,",
         "pub struct Case {",
+        "pub struct LocalKeystore {",
+        "pub struct OpenedKeystore {",
+        "pub struct OsEntropy {",
         "pub surface: ArtifactClass,",
         "pub vector: Vector,",
+        "pub(super) const O_NOFOLLOW: i32 = 0;",
+        "pub(super) const O_NOFOLLOW: i32 = 0o100_000;",
+        "pub(super) const O_NOFOLLOW: i32 = 0o400_000;",
+        "pub(super) const O_NOFOLLOW: i32 = 0x0100;",
+        "pub(super) fn mint(",
+        "pub(super) fn open(store: &LocalKeystore) -> Result<OpenedKeystore, KeystoreError> {",
+        "pub(super) fn open_bound(",
+        "pub(super) fn read_audit(mut file: File) -> Result<SigningRegistry, KeystoreError> {",
     ];
 
     /// `continuum-security` stopped being a zero-pub-item scaffold when bn-ymw landed the
@@ -1135,8 +1237,33 @@ mod no_widening {
         // load-bearing leg for a red-team corpus specifically: its payloads are prose
         // *describing* exfiltration and process spawning, and the crate must carry them as
         // inert bytes without ever naming a facility that could perform one.
+        //
+        // bn-1hape added the signing sources (plan §18.6): `entropy.rs` reads the kernel's
+        // entropy device and `keystore.rs` reads and writes the key files. Those two are
+        // the crate's only effectful files, and their effects are the filesystem alone —
+        // no process, network, thread, clock, or environment facility. Every other file,
+        // the corpus included, stays inert.
         for (path, text) in security_sources() {
             let effects = host_effect_lines(&text);
+            if is_signing_source(&path) {
+                let wider: Vec<&&str> = effects
+                    .iter()
+                    .filter(|line| {
+                        !SIGNING_SOURCE_FACILITIES
+                            .iter()
+                            .any(|allowed| line.contains(allowed))
+                            || NON_FILESYSTEM_FACILITIES
+                                .iter()
+                                .any(|facility| line.contains(facility))
+                    })
+                    .collect();
+                assert!(
+                    wider.is_empty(),
+                    "{} names host-effect facilities beyond the filesystem: {wider:?}",
+                    path.display()
+                );
+                continue;
+            }
             assert!(
                 effects.is_empty(),
                 "{} names host-effect facilities {effects:?}; the corpus is supposed to be \
@@ -1145,13 +1272,18 @@ mod no_widening {
             );
         }
 
-        // 3. One declared dependency, and it is model-side. `continuum-workspace` owns the
-        // closed plan §4.4 `ArtifactClass` the corpus classifies its surfaces against; an
-        // effect crate, an engine, or the daemon among them would give the corpus authority
-        // through a neighbour.
+        // 3. Three declared dependencies, all model-side. `continuum-workspace` owns the
+        // closed plan §4.4 `ArtifactClass` the corpus classifies its surfaces against;
+        // `continuum-evidence` and `continuum-value` are the signing library and canonical
+        // encoding the signing sources supply (bn-1hape). An effect crate, an engine, or the
+        // daemon among them would give the crate authority through a neighbour.
         assert_eq!(
             declared_dependencies(SECURITY_MANIFEST),
-            vec!["continuum-workspace".to_owned()],
+            vec![
+                "continuum-evidence".to_owned(),
+                "continuum-value".to_owned(),
+                "continuum-workspace".to_owned()
+            ],
             "continuum-security's dependency set widened; re-derive what the corpus can \
              now reach"
         );
@@ -1459,8 +1591,9 @@ mod mutants {
 
     use super::{
         ADMISSION, CAPABILITY, DOCS_49, EFFECTS_PROCESS_LIB, EVIDENCE, FORGE_MANIFEST,
-        SECURITY_MANIFEST, administrative_callers, declared_dependencies, forge_sources,
-        host_effect_lines, isolation_bullets, missing_pin, pub_items, security_sources,
+        NON_FILESYSTEM_FACILITIES, SECURITY_MANIFEST, administrative_callers,
+        declared_dependencies, forge_sources, host_effect_lines, is_signing_source,
+        isolation_bullets, missing_pin, pub_items, security_sources,
     };
     use crate::privileged_perimeter::{PRIVILEGED, privileged_names};
 
@@ -1629,9 +1762,18 @@ mod mutants {
         );
         // And the real crate is clean by the same predicate — the corpus's hostile strings
         // included.
-        for (_, text) in security_sources() {
-            assert!(host_effect_lines(&text).is_empty());
+        for (path, text) in security_sources() {
+            if !is_signing_source(&path) {
+                assert!(host_effect_lines(&text).is_empty());
+            }
         }
+        // And a process spawn planted in a signing source is still caught.
+        let spawned = "let _ = std::process::Command::new(\"sh\").status();\n";
+        assert!(
+            host_effect_lines(spawned)
+                .iter()
+                .any(|line| NON_FILESYSTEM_FACILITIES.iter().any(|f| line.contains(f)))
+        );
 
         // Leg 1: an added public item is detected.
         let (_, first) = security_sources()
@@ -1646,8 +1788,8 @@ mod mutants {
 
         // Leg 3: a widened dependency set is detected.
         let widened = SECURITY_MANIFEST.replacen(
-            "[dependencies]\ncontinuum-workspace",
-            "[dependencies]\ncontinuum-effects-process = { path = \"../continuum-effects-process\" }\ncontinuum-workspace",
+            "[dependencies]\ncontinuum-evidence",
+            "[dependencies]\ncontinuum-effects-process = { path = \"../continuum-effects-process\" }\ncontinuum-evidence",
             1,
         );
         assert_ne!(widened, SECURITY_MANIFEST, "the doctoring did nothing");

@@ -8,9 +8,9 @@
 use continuum_evidence::actor::ActorId;
 use continuum_evidence::signing::{
     AllowedSigners, ArtifactSignature, EntropyUnavailable, KeyEntropy, LocalKeyring, MintError,
-    Provenance, RevocationReason, SEED_LEN, SignRefusal, Signature, SignatureVerifier,
-    SignedArtifactKind, SignerIdentity, SignerStanding, SigningEvent, SigningRegistry,
-    StandingError, UnverifiedReason, VerifiedStanding, WireError, Zeroizing,
+    Provenance, ReplayError, RestoreError, RevocationReason, SEED_LEN, SignRefusal, Signature,
+    SignatureVerifier, SignedArtifactKind, SignerIdentity, SignerStanding, SigningEvent,
+    SigningRegistry, StandingError, UnverifiedReason, VerifiedStanding, WireError, Zeroizing,
 };
 use continuum_value::identity::ContentIdentity;
 use continuum_value::value::{Name, Value};
@@ -738,4 +738,82 @@ fn an_empty_registry_verifies_no_signature() {
                 .is_err()
         );
     }
+}
+
+/// bn-1hape. Metamorphic relation: **serialization round trip** (docs/19 §3). A persisted
+/// audit log replays into the same registry — same standings, same head — through its
+/// canonical wire bytes, so persisting and reloading is invisible to every verdict.
+#[test]
+fn a_registry_replays_from_its_persisted_audit_log() {
+    let mut registry = SigningRegistry::new();
+    let mut entropy = FixedEntropy::new(30);
+    let first = registry.mint(&actor(), &mut entropy).expect("mint");
+    let second = registry
+        .rotate(&first, &actor(), &mut entropy)
+        .expect("rotate");
+    let lost = registry.mint(&actor(), &mut entropy).expect("mint");
+    registry
+        .revoke(second.identity(), &actor(), RevocationReason::Compromised)
+        .expect("revoke");
+    registry
+        .supersede_lost(lost.identity(), &actor(), &mut entropy)
+        .expect("supersede");
+    let bytes = registry.audit_value().encode();
+    let replayed =
+        SigningRegistry::replay(&Value::decode(&bytes).expect("canonical")).expect("replays");
+    assert_eq!(replayed, registry);
+    assert_eq!(replayed.head(), registry.head());
+}
+
+/// bn-1hape: replay re-derives standing, so a reordered, resequenced, or illegal log is
+/// refused rather than trusted.
+#[test]
+fn replay_refuses_an_illegal_or_resequenced_log() {
+    let mut registry = SigningRegistry::new();
+    let mut entropy = FixedEntropy::new(40);
+    let signer = registry.mint(&actor(), &mut entropy).expect("mint");
+    registry
+        .revoke(signer.identity(), &actor(), RevocationReason::Compromised)
+        .expect("revoke");
+    let Value::Seq(records) = registry.audit_value() else {
+        panic!("a log is a sequence");
+    };
+    // Revocation before the mint: sequence numbers no longer match positions.
+    let reversed = Value::seq(records.iter().rev().cloned()).expect("seq");
+    assert!(matches!(
+        SigningRegistry::replay(&reversed),
+        Err(ReplayError::Sequence { .. })
+    ));
+    // The mint alone, twice: an illegal second mint of one key.
+    let twice = Value::seq([records[0].clone(), records[0].clone()]).expect("seq");
+    assert!(matches!(
+        SigningRegistry::replay(&twice),
+        Err(ReplayError::Sequence { .. } | ReplayError::IllegalTransition { .. })
+    ));
+    assert!(matches!(
+        SigningRegistry::replay(&Value::text("not a log")),
+        Err(ReplayError::Wire(_))
+    ));
+}
+
+/// bn-1hape: a persisted seed restores only a key the registry minted.
+#[test]
+fn restore_rederives_only_a_minted_key() {
+    let mut registry = SigningRegistry::new();
+    let minted = registry
+        .mint(&actor(), &mut FixedEntropy::new(50))
+        .expect("mint");
+    let restored = registry
+        .restore(Zeroizing::new([50; SEED_LEN]))
+        .expect("the minted seed restores");
+    assert_eq!(restored.identity(), minted.identity());
+    assert_eq!(
+        registry.audit_log().len(),
+        1,
+        "restoring is not an audit event"
+    );
+    assert!(matches!(
+        registry.restore(Zeroizing::new([51; SEED_LEN])),
+        Err(RestoreError::UnknownSigner)
+    ));
 }

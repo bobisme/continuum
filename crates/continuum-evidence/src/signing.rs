@@ -67,13 +67,13 @@
 //!
 //! # What is not here
 //!
-//! No production path calls this module yet: no receipt, intent bundle, or domain pack is
-//! signed or verified outside its tests. The daemon operations, the wire spelling of
-//! signatures, allowed-signers sets and the authoritative registry head, and
-//! `intent.accept`'s use of [`SignatureVerifier::verify_for_ci_acceptance`] are bn-3glnv;
-//! the operating-system entropy source, the on-disk keystore, and signing inside the
-//! producers are bn-1hape (ADR-0054, "Follow-ups"). The protocol is frozen at 3.6; this
-//! module is the library those bones wire.
+//! The production signing path is outside this crate (bn-1hape): the operating-system
+//! entropy capability and the on-disk keystore are in `continuum-security`, a boundary
+//! crate, and `continuumd`'s `evidence.link` signs each receipt it publishes. No production
+//! path verifies yet: the daemon operations, the wire spelling of signatures,
+//! allowed-signers sets and the authoritative registry head, and `intent.accept`'s use of
+//! [`SignatureVerifier::verify_for_ci_acceptance`] are bn-3glnv (ADR-0054, "Follow-ups").
+//! The protocol is frozen at 3.6.
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -794,6 +794,95 @@ impl SigningAuditRecord {
             ("sequence", Value::Nat(u128::from(self.sequence))),
         ])
     }
+
+    /// Read a record from its canonical value — the inverse of
+    /// [`to_value`](Self::to_value), for a persisted audit log (bn-1hape).
+    ///
+    /// # Errors
+    ///
+    /// [`WireError`] on any shape, token, actor, key, or sequence defect.
+    pub fn from_value(value: &Value) -> Result<Self, WireError> {
+        exact_fields(value, &["actor", "event", "sequence"])?;
+        let actor =
+            ActorId::new(text_field(value, "actor")?).map_err(|_| WireError::Shape("actor"))?;
+        let sequence = match field(value, "sequence")? {
+            Value::Nat(n) => u64::try_from(*n).map_err(|_| WireError::Shape("sequence"))?,
+            _ => return Err(WireError::Shape("sequence")),
+        };
+        let event = field(value, "event")?;
+        let signer_at = |key| SignerIdentity::from_value(field(event, key)?);
+        let event = match text_field(event, "op")? {
+            "mint" => {
+                exact_fields(event, &["op", "signer"])?;
+                SigningEvent::Minted {
+                    signer: signer_at("signer")?,
+                }
+            }
+            "rotate" => {
+                exact_fields(event, &["from", "op", "to"])?;
+                SigningEvent::Rotated {
+                    from: signer_at("from")?,
+                    to: signer_at("to")?,
+                }
+            }
+            "revoke" => {
+                exact_fields(event, &["op", "reason", "signer"])?;
+                let reason = match text_field(event, "reason")? {
+                    "compromised" => RevocationReason::Compromised,
+                    "key-lost" => RevocationReason::KeyLost,
+                    _ => return Err(WireError::Shape("revocation reason")),
+                };
+                SigningEvent::Revoked {
+                    signer: signer_at("signer")?,
+                    reason,
+                }
+            }
+            "supersede" => {
+                exact_fields(event, &["lost", "op", "successor"])?;
+                SigningEvent::Superseded {
+                    lost: signer_at("lost")?,
+                    successor: signer_at("successor")?,
+                }
+            }
+            _ => return Err(WireError::Shape("audit operation")),
+        };
+        Ok(Self {
+            sequence,
+            actor,
+            event,
+        })
+    }
+}
+
+/// Why a persisted audit log could not be replayed into a registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayError {
+    /// The log is not a sequence of well-formed records.
+    Wire(WireError),
+    /// A record's sequence number is not its position.
+    Sequence {
+        /// The position.
+        expected: u64,
+        /// The number the record carries.
+        found: u64,
+    },
+    /// A record is not a legal transition from the standing the earlier records built —
+    /// a second mint of one key, a rotation of an inactive signer, a revocation of a
+    /// revoked or unknown one, or a supersession that does not follow a key-lost revocation.
+    IllegalTransition {
+        /// The record's position.
+        sequence: u64,
+    },
+}
+
+/// Why [`SigningRegistry::restore`] refused a persisted seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreError {
+    /// The seed derives a key the registry holds no record of. A persisted key is only
+    /// ever one this registry minted; anything else is refused, not adopted.
+    UnknownSigner,
+    /// The seed derives a weak key.
+    WeakKey,
 }
 
 /// Why minting failed.
@@ -833,7 +922,7 @@ pub enum SignRefusal {
 /// The registry holds no secret: a [`LocalSigner`] is returned to the caller (normally a
 /// [`LocalKeyring`]), and verification reads only public state. That is what lets a
 /// verifier hold a registry without holding a key.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SigningRegistry {
     standing: BTreeMap<SignerIdentity, SignerStanding>,
     audit: Vec<SigningAuditRecord>,
@@ -1024,9 +1113,120 @@ impl SigningRegistry {
     /// against the authoritative head to know it holds every rotation and revocation.
     #[must_use]
     pub fn head(&self) -> RegistryHead {
-        let log = Value::seq(self.audit.iter().map(SigningAuditRecord::to_value))
-            .expect("a sequence of records is well-formed");
-        RegistryHead(ContentIdentity::of(&log))
+        RegistryHead(ContentIdentity::of(&self.audit_value()))
+    }
+
+    /// The whole audit log as one canonical value: what a keystore persists, and what
+    /// [`replay`](Self::replay) reads back.
+    #[must_use]
+    pub fn audit_value(&self) -> Value {
+        Value::seq(self.audit.iter().map(SigningAuditRecord::to_value))
+            .expect("a sequence of records is well-formed")
+    }
+
+    /// Rebuild a registry from a persisted audit log, re-deriving every standing from the
+    /// records in order. The result's [`head`](Self::head) is the log's own identity, so a
+    /// replayed registry is current exactly when the persisted log was.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplayError`] on a malformed record, a sequence gap, or an illegal transition.
+    pub fn replay(log: &Value) -> Result<Self, ReplayError> {
+        let Value::Seq(records) = log else {
+            return Err(ReplayError::Wire(WireError::Shape("audit log sequence")));
+        };
+        let mut registry = Self::new();
+        for value in records {
+            let record = SigningAuditRecord::from_value(value).map_err(ReplayError::Wire)?;
+            registry.replay_record(record)?;
+        }
+        Ok(registry)
+    }
+
+    /// Apply one persisted record to this registry, as [`replay`](Self::replay) does for
+    /// each record in order. This is the incremental form a store uses to replay a log one
+    /// bounded record at a time, so no whole-log value is ever materialized (bn-1hape,
+    /// cr-3l3n47). On an error the registry is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplayError::Sequence`] when the record's number is not the next position;
+    /// [`ReplayError::IllegalTransition`] when it is not a legal transition.
+    pub fn replay_record(&mut self, record: SigningAuditRecord) -> Result<(), ReplayError> {
+        let expected = u64::try_from(self.audit.len()).expect("a log fits in u64");
+        if record.sequence != expected {
+            return Err(ReplayError::Sequence {
+                expected,
+                found: record.sequence,
+            });
+        }
+        let illegal = ReplayError::IllegalTransition { sequence: expected };
+        match &record.event {
+            SigningEvent::Minted { signer } => {
+                if self.standing.contains_key(signer) {
+                    return Err(illegal);
+                }
+                self.standing.insert(signer.clone(), SignerStanding::Active);
+            }
+            SigningEvent::Rotated { from, to } => {
+                if self.standing.get(from) != Some(&SignerStanding::Active)
+                    || self.standing.get(to) != Some(&SignerStanding::Active)
+                    || from == to
+                {
+                    return Err(illegal);
+                }
+                self.standing.insert(
+                    from.clone(),
+                    SignerStanding::Rotated {
+                        successor: to.clone(),
+                        record: expected,
+                    },
+                );
+            }
+            SigningEvent::Revoked { signer, reason } => match self.standing.get(signer) {
+                None | Some(SignerStanding::Revoked { .. }) => return Err(illegal),
+                Some(_) => {
+                    self.standing.insert(
+                        signer.clone(),
+                        SignerStanding::Revoked {
+                            reason: *reason,
+                            record: expected,
+                        },
+                    );
+                }
+            },
+            SigningEvent::Superseded { lost, successor } => {
+                let lost_ok = matches!(
+                    self.standing.get(lost),
+                    Some(SignerStanding::Revoked {
+                        reason: RevocationReason::KeyLost,
+                        ..
+                    })
+                );
+                if !lost_ok || !self.standing.contains_key(successor) {
+                    return Err(illegal);
+                }
+            }
+        }
+        self.audit.push(record);
+        Ok(())
+    }
+
+    /// Re-derive a key this registry already minted from its persisted seed. Not an audit
+    /// event: restoring is reading a key back, not minting one. The seed is taken by value
+    /// and wiped on every path.
+    ///
+    /// # Errors
+    ///
+    /// [`RestoreError::UnknownSigner`] when the registry holds no record of the derived
+    /// identity; [`RestoreError::WeakKey`] for a weak key.
+    pub fn restore(&self, seed: Zeroizing<[u8; SEED_LEN]>) -> Result<LocalSigner, RestoreError> {
+        let signer = LocalSigner::from_seed(seed).map_err(|_| RestoreError::WeakKey)?;
+        if self.standing.contains_key(signer.identity()) {
+            Ok(signer)
+        } else {
+            Err(RestoreError::UnknownSigner)
+        }
     }
 }
 

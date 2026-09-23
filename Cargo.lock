@@ -501,6 +501,8 @@ version = "0.0.0"
 name = "continuum-security"
 version = "0.0.0"
 dependencies = [
+ "continuum-evidence",
+ "continuum-value",
  "continuum-workspace",
 ]
 

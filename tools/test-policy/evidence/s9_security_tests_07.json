@@ -11,7 +11,7 @@
   "module": "tools/test-policy/sections/s9_security_tests_07.py",
   "requirements": {
     "TEST-9-07": {
-      "absence": "Production use of signatures is absent (review cr-3e3t1j). The library `continuum-evidence::signing` exists and its 21 named Rust tests below exercise it, but no crate outside `continuum-evidence` calls `SigningRegistry` or `SignatureVerifier` (checked at run time by `_check_no_production_signing_caller` against every real `crates/*/src` file), so no real receipt, intent bundle, or domain pack is signed or verified. Missing: bn-3glnv \u2014 daemon operations and wire form for signatures, allowed-signers sets and the authoritative registry head, and `intent.accept` checking a held bundle through `verify_for_ci_acceptance` (protocol 3.6 is frozen); bn-1hape \u2014 an OS `KeyEntropy` source in a boundary crate, an on-disk keystore, and signing inside the receipt, bundle, and pack producers. `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
+      "absence": "Production *verification* of signatures is absent, and so are intent-bundle and domain-pack producers. Signing is live for receipts (bn-1hape): `evidence.link` signs each receipt's canonical bytes with the keystore's solo-developer key before publishing, and `_check_production_signing_paths` binds that path in the real source. But no `src/` outside `continuum-evidence` names `SignatureVerifier` (checked at run time), so no production consumer verifies a signature: the daemon operations, the wire form of signatures, allowed-signers sets and the authoritative registry head, and `intent.accept` checking a held bundle through `verify_for_ci_acceptance` are bn-3glnv (protocol 3.6 is frozen). The receipt signature is held in daemon state with no wire spelling. No intent-bundle or domain-pack producer exists on trunk \u2014 the daemon holds and exports no bundles, and the `continuum-effects-*` packs are declared-data stubs \u2014 so nothing signs those kinds (checked: no `SignedArtifactKind::IntentBundle` or `::DomainPack` outside `continuum-evidence`). `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
       "boundaries": [
         "`_check_publication_attest` ports `PublishedName::names`/`Published::attest` (`publication.rs`: `fn names(&self, handle: &ArtifactHandle) -> bool { self == handle }`) as plain equality on (class, identity) \u2014 the real predicate needs no hash to state, so the port is exact, not approximate. `_check_identity_outcome` ports the store's convergence/collision/distinctness trichotomy structurally (same content implies same identity; different content sharing a claimed identity is a collision that must abort; different content with different identity stands as two artifacts) \u2014 this is the property the real `ContentIdentifier::identify` doc contract states ('a pure function \u2026 two calls with equal arguments \u2026 must return equal handles', INV-005/INV-006) and that `an_identity_collision_aborts_rather_than_conflating_two_artifacts` and `distinct_artifacts_never_share_identity` corroborate; it is independent of which hash algorithm the real `ContentIdentifier` fixture uses; this module never computes one. `_check_digest_token` ports `Digest256::from_token` (`identity.rs`) as a length-and-character-class check, drift-tied by extracting `DIGEST_BITS` at run time and confirming the `DIGEST_LEN * 2`/`DIGEST_BITS / 8` arithmetic phrases are still present, so a change to the digest width is noticed, not just a change to the accept/reject outcome. What this cannot do: compute a real `blake3-256` digest, run `Value::encode`'s canonical-encoding rules, or exercise `ReferenceStore` concurrency itself (no cargo) \u2014 only the structural properties named above, which is what the named real Rust tests exercise for real.",
         "`_check_signature_verdict` ports `SignatureVerifier::check` (`signing.rs`) as its decision order over eight observable facts \u2014 present, well-formed, kind matches, authentic under the claimed key, registry current against the authoritative head, signer standing known, signer not revoked, signer allowed for the kind \u2014 and the two policies over it: `verify` (any failure is typed unverified provenance with the first failing reason) and `verify_for_ci_acceptance` (any failure is `AcceptanceChainInvalid`). The port is exact about order and outcome, and `_check_signing_drift` confirms at run time that the real `fn check` body still tests those facts in that order and that the real verifier still calls `verify_strict`. What it cannot do: compute an Ed25519 signature or a canonical encoding (no cargo). That is what the named Rust tests do for real, including the RFC 8032 \u00a77.1 known-answer vectors and a pinned envelope signature."
@@ -26,9 +26,10 @@
         "outcome_aborted": 2,
         "outcome_converged": 2,
         "outcome_distinct": 2,
-        "production_signing_callers_absent": 1,
-        "rust_tests_named": 31,
-        "rust_tests_present": 31,
+        "production_signing_callers": 2,
+        "production_signing_phrases_bound": 16,
+        "rust_tests_named": 57,
+        "rust_tests_present": 57,
         "signature_cases": 512,
         "signature_ci_rejected": 255,
         "signature_unverified": 255,
@@ -232,6 +233,136 @@
           "path": "crates/continuum-evidence/tests/signing_identities.rs",
           "present": true,
           "test": "an_empty_registry_verifies_no_signature"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_registry_replays_from_its_persisted_audit_log"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "replay_refuses_an_illegal_or_resequenced_log"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "restore_rederives_only_a_minted_key"
+        },
+        {
+          "path": "crates/continuum-security/src/entropy.rs",
+          "present": true,
+          "test": "os_entropy_supplies_distinct_nonzero_seeds"
+        },
+        {
+          "path": "crates/continuum-security/tests/entropy_isolation.rs",
+          "present": true,
+          "test": "no_semantic_core_crate_can_reach_the_os_entropy_source"
+        },
+        {
+          "path": "crates/continuum-security/tests/entropy_isolation.rs",
+          "present": true,
+          "test": "the_entropy_device_is_named_in_exactly_one_source_file"
+        },
+        {
+          "path": "crates/continuum-security/tests/entropy_isolation.rs",
+          "present": true,
+          "test": "continuum_evidence_names_no_entropy_source"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "first_use_mints_once_with_os_entropy_and_reopening_restores_the_same_key"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "the_store_is_private_to_its_owner"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "an_exposed_key_file_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_corrupt_key_file_is_refused_and_never_re_minted"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_missing_or_corrupt_audit_log_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "an_absent_store_opens_as_absent_and_a_failed_source_mints_nothing"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_group_or_world_writable_store_directory_is_refused_and_not_re_minted"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_store_owned_by_another_user_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_symlinked_key_file_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_symlinked_store_directory_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_world_writable_non_sticky_ancestor_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_hostile_audit_log_is_refused_within_a_memory_limit"
+        },
+        {
+          "path": "crates/continuum-security/src/keystore.rs",
+          "present": true,
+          "test": "swap_after_open_reads_the_original_descriptor"
+        },
+        {
+          "path": "crates/continuum-security/src/keystore.rs",
+          "present": true,
+          "test": "o_nofollow_refuses_a_symlink_at_open"
+        },
+        {
+          "path": "crates/continuum-security/src/keystore.rs",
+          "present": true,
+          "test": "audit_records_fit_the_record_bound"
+        },
+        {
+          "path": "crates/continuumd/tests/receipt_signing.rs",
+          "present": true,
+          "test": "a_receipt_evidence_link_produces_is_signed_and_verifies"
+        },
+        {
+          "path": "crates/continuumd/tests/receipt_signing.rs",
+          "present": true,
+          "test": "a_receipt_tampered_after_production_does_not_verify"
+        },
+        {
+          "path": "crates/continuumd/tests/receipt_signing.rs",
+          "present": true,
+          "test": "a_daemon_without_a_signer_publishes_unsigned_and_a_verifier_says_so"
+        },
+        {
+          "path": "crates/continuumd/tests/receipt_signing.rs",
+          "present": true,
+          "test": "a_revoked_signing_identity_refuses_the_link_rather_than_publishing_unsigned"
         },
         {
           "path": "crates/continuum-evidence/tests/signing_identities.rs",

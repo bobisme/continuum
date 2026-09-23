@@ -8,22 +8,29 @@ editing a line of the sibling module, `tsys.py`, or the `Justfile`.
 docs/19 §9's seventh bullet names two things in one phrase. Searched independently in
 `crates/`:
 
-1. **Cryptographic signatures — library landed, production use absent.** bn-2ee4c
-   (ADR-0054) added `continuum-evidence::signing`: Ed25519 (`ed25519-dalek` `=2.2.0`,
-   strict verification) over a canonical envelope that binds the artifact's ADR-0013
-   canonical bytes, the kind, and the signer. Its `SignatureVerifier` is total: a
-   missing, malformed, kind-relabelled, tampered, wrong-key, stale-registry,
-   unknown-standing, revoked, or not-allowed signature is typed unverified provenance
-   (INV-008), never a pass, and `verify_for_ci_acceptance` turns each into
-   `AcceptanceChainInvalid`. `_check_signature_verdict` ports that decision order;
-   `_check_signing_drift` ties the port to the real `fn check` body; the named Rust
-   tests exercise the real code (RFC 8032 known-answer vectors among them); and
-   `_check_signature_dependency_placement` reads every real `Cargo.toml`.
-   **But no production path calls it** (review cr-3e3t1j): no real receipt, intent
-   bundle, or domain pack is signed or verified outside the module's tests. The daemon
-   wiring and `intent.accept`'s fail-closed check are bn-3glnv; the OS entropy source,
-   keystore, and producer-side signing are bn-1hape. A mechanism real systems do not
-   use is not "signature verification" of their artifacts, so this ID stays `partial`.
+1. **Cryptographic signatures — receipts signed in production; verification not yet.**
+   bn-2ee4c (ADR-0054) added `continuum-evidence::signing`: Ed25519 (`ed25519-dalek`
+   `=2.2.0`, strict verification) over a canonical envelope that binds the artifact's
+   ADR-0013 canonical bytes, the kind, and the signer. Its `SignatureVerifier` is total
+   and fails closed in CI mode. bn-1hape put the *signing* half on a production path:
+   - `continuum-security::entropy::OsEntropy` is the production `KeyEntropy` capability,
+     in a boundary crate that no semantic-core crate reaches;
+   - `continuum-security::keystore::LocalKeystore` persists the solo-developer key,
+     minted on first use through `SigningRegistry::mint` (an audit record), `0600`/`0700`,
+     zeroized, with typed refusal of a corrupt, incomplete, or exposed store;
+   - `continuumd`'s `evidence.link`, the daemon's one receipt producer, signs the
+     receipt's canonical bytes through `SigningRegistry::sign` (`ReceiptSigner`) before
+     publishing, and refuses to publish when its identity is not active.
+   `_check_production_signing_paths` binds those call sites in the real source.
+   **Still absent**, and checked absent by the same function: (a) any production
+   *verifier* — no `src/` outside `continuum-evidence` names `SignatureVerifier`; the
+   daemon operations, wire form, and `intent.accept`'s `verify_for_ci_acceptance` are
+   bn-3glnv (protocol 3.6 is frozen); (b) intent-bundle and domain-pack producers — none
+   exists on trunk (the daemon holds no bundles and exports none; the
+   `continuum-effects-*` packs are declared-data stubs), so nothing names
+   `SignedArtifactKind::IntentBundle` or `::DomainPack` outside `continuum-evidence`.
+   Signing without a production verifier is not yet "signature verification", so this
+   ID stays `partial`.
 2. **Content-addressed provenance — real, landed, non-stub.** Two production
    mechanisms bind an artifact's claimed identity to its actual bytes and reject a
    forged, tampered, or substituted claim:
@@ -41,9 +48,10 @@ docs/19 §9's seventh bullet names two things in one phrase. Searched independen
    Both are drift-tied below to their real, committed source, and both are
    corroborated by real, non-`#[ignore]`d Rust `#[test]` functions.
 
-TEST-9-07 is `partial` until bn-3glnv and bn-1hape put the signing library on a
-production path; `_check_no_production_signing_caller` below keeps that absence
-checked, so the status cannot silently outlive it.
+TEST-9-07 is `partial` until bn-3glnv puts verification on a production path;
+`_check_production_signing_paths` below keeps both the bound signing path and the
+absent verification path checked, so the status can neither regress nor silently
+outlive the absence.
 
 Certificate wire-form checking (INV-004) was also searched:
 `crates/continuum-engine-reference/src/certificate.rs` writes the certificate and
@@ -89,6 +97,11 @@ IDENTITY_RS_PATH = ROOT / "crates/continuum-value/src/identity.rs"
 CHECK_RS_PATH = ROOT / "crates/continuum-kernel-core/src/check.rs"
 SIGNING_RS_PATH = ROOT / "crates/continuum-evidence/src/signing.rs"
 SIGNING_TESTS_PATH = ROOT / "crates/continuum-evidence/tests/signing_identities.rs"
+ENTROPY_RS_PATH = ROOT / "crates/continuum-security/src/entropy.rs"
+ENTROPY_ISOLATION_PATH = ROOT / "crates/continuum-security/tests/entropy_isolation.rs"
+KEYSTORE_TESTS_PATH = ROOT / "crates/continuum-security/tests/keystore.rs"
+KEYSTORE_RS_PATH = ROOT / "crates/continuum-security/src/keystore.rs"
+RECEIPT_SIGNING_PATH = ROOT / "crates/continuumd/tests/receipt_signing.rs"
 CARGO_TOML_PATHS = sorted((ROOT / "crates").glob("*/Cargo.toml")) + [ROOT / "Cargo.toml"]
 
 OBLIGATIONS = {
@@ -149,16 +162,19 @@ _BOUNDARY_07_SIGNATURE = (
     "RFC 8032 §7.1 known-answer vectors and a pinned envelope signature."
 )
 _ABSENCE_07 = (
-    "Production use of signatures is absent (review cr-3e3t1j). The library "
-    "`continuum-evidence::signing` exists and its 21 named Rust tests below exercise it, "
-    "but no crate outside `continuum-evidence` calls `SigningRegistry` or "
-    "`SignatureVerifier` (checked at run time by `_check_no_production_signing_caller` "
-    "against every real `crates/*/src` file), so no real receipt, intent bundle, or domain "
-    "pack is signed or verified. Missing: bn-3glnv — daemon operations and wire form for "
-    "signatures, allowed-signers sets and the authoritative registry head, and "
-    "`intent.accept` checking a held bundle through `verify_for_ci_acceptance` (protocol "
-    "3.6 is frozen); bn-1hape — an OS `KeyEntropy` source in a boundary crate, an on-disk "
-    "keystore, and signing inside the receipt, bundle, and pack producers. `check.rs`'s "
+    "Production *verification* of signatures is absent, and so are intent-bundle and "
+    "domain-pack producers. Signing is live for receipts (bn-1hape): `evidence.link` signs "
+    "each receipt's canonical bytes with the keystore's solo-developer key before "
+    "publishing, and `_check_production_signing_paths` binds that path in the real source. "
+    "But no `src/` outside `continuum-evidence` names `SignatureVerifier` (checked at run "
+    "time), so no production consumer verifies a signature: the daemon operations, the "
+    "wire form of signatures, allowed-signers sets and the authoritative registry head, and "
+    "`intent.accept` checking a held bundle through `verify_for_ci_acceptance` are bn-3glnv "
+    "(protocol 3.6 is frozen). The receipt signature is held in daemon state with no wire "
+    "spelling. No intent-bundle or domain-pack producer exists on trunk — the daemon holds "
+    "and exports no bundles, and the `continuum-effects-*` packs are declared-data stubs — "
+    "so nothing signs those kinds (checked: no `SignedArtifactKind::IntentBundle` or "
+    "`::DomainPack` outside `continuum-evidence`). `check.rs`'s "
     "`envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that "
     "the certificate checker cannot recompute a relabeled digest; that is by design "
     "(INV-004), and the certificate checker does not link the signature crate."
@@ -190,6 +206,32 @@ RUST_TESTS: list[tuple[Path, str]] = [
     (SIGNING_TESTS_PATH, "a_signer_with_unknown_standing_is_unverified_not_active"),
     (SIGNING_TESTS_PATH, "a_stale_registry_missing_a_revocation_cannot_verify"),
     (SIGNING_TESTS_PATH, "an_empty_registry_verifies_no_signature"),
+    (SIGNING_TESTS_PATH, "a_registry_replays_from_its_persisted_audit_log"),
+    (SIGNING_TESTS_PATH, "replay_refuses_an_illegal_or_resequenced_log"),
+    (SIGNING_TESTS_PATH, "restore_rederives_only_a_minted_key"),
+    (ENTROPY_RS_PATH, "os_entropy_supplies_distinct_nonzero_seeds"),
+    (ENTROPY_ISOLATION_PATH, "no_semantic_core_crate_can_reach_the_os_entropy_source"),
+    (ENTROPY_ISOLATION_PATH, "the_entropy_device_is_named_in_exactly_one_source_file"),
+    (ENTROPY_ISOLATION_PATH, "continuum_evidence_names_no_entropy_source"),
+    (KEYSTORE_TESTS_PATH, "first_use_mints_once_with_os_entropy_and_reopening_restores_the_same_key"),
+    (KEYSTORE_TESTS_PATH, "the_store_is_private_to_its_owner"),
+    (KEYSTORE_TESTS_PATH, "an_exposed_key_file_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_corrupt_key_file_is_refused_and_never_re_minted"),
+    (KEYSTORE_TESTS_PATH, "a_missing_or_corrupt_audit_log_is_refused"),
+    (KEYSTORE_TESTS_PATH, "an_absent_store_opens_as_absent_and_a_failed_source_mints_nothing"),
+    (KEYSTORE_TESTS_PATH, "a_group_or_world_writable_store_directory_is_refused_and_not_re_minted"),
+    (KEYSTORE_TESTS_PATH, "a_store_owned_by_another_user_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_symlinked_key_file_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_symlinked_store_directory_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_world_writable_non_sticky_ancestor_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_hostile_audit_log_is_refused_within_a_memory_limit"),
+    (KEYSTORE_RS_PATH, "swap_after_open_reads_the_original_descriptor"),
+    (KEYSTORE_RS_PATH, "o_nofollow_refuses_a_symlink_at_open"),
+    (KEYSTORE_RS_PATH, "audit_records_fit_the_record_bound"),
+    (RECEIPT_SIGNING_PATH, "a_receipt_evidence_link_produces_is_signed_and_verifies"),
+    (RECEIPT_SIGNING_PATH, "a_receipt_tampered_after_production_does_not_verify"),
+    (RECEIPT_SIGNING_PATH, "a_daemon_without_a_signer_publishes_unsigned_and_a_verifier_says_so"),
+    (RECEIPT_SIGNING_PATH, "a_revoked_signing_identity_refuses_the_link_rather_than_publishing_unsigned"),
     (SIGNING_TESTS_PATH, "sign_verify_round_trips_for_every_signed_kind_from_wire_bytes"),
     (SIGNING_TESTS_PATH, "a_tampered_payload_downgrades_to_signature_mismatch"),
     (SIGNING_TESTS_PATH, "a_signature_under_the_wrong_key_does_not_verify"),
@@ -343,26 +385,84 @@ _SIGNATURE_STEPS: list[tuple[str, str, str]] = [
     ("allowed", "UnverifiedReason::SignerNotAllowed", "signer-not-allowed"),
 ]
 _FACTS = [fact for fact, _, _ in _SIGNATURE_STEPS]
-_SIGNING_API_RE = re.compile(r"\b(SigningRegistry|SignatureVerifier|LocalKeyring)\b")
+_SIGNING_API_RE = re.compile(r"\b(SigningRegistry|SignatureVerifier|LocalKeyring|ReceiptSigner|LocalSigner)\b")
+# The production call sites bn-1hape added, each bound by phrases that must still be present.
+_SIGNING_PATHS: dict[str, list[str]] = {
+    "crates/continuum-security/src/entropy.rs": [
+        "impl KeyEntropy for OsEntropy",
+        "OS_ENTROPY_PATH",
+    ],
+    "crates/continuum-security/src/keystore.rs": [
+        ".mint(actor, &mut capture)",
+        ".mode(0o600)",
+        ".mode(0o700)",
+        "registry.restore(seed)",
+        # cr-3l3n47: descriptor-bound reads and a bounded, record-at-a-time replay.
+        ".custom_flags(O_NOFOLLOW)",
+        "(opened.dev(), opened.ino()) != (examined.dev(), examined.ino())",
+        "return Err(KeystoreError::SymlinkedStore);",
+        "if count > MAX_AUDIT_RECORDS {",
+        ".replay_record(parsed)",
+    ],
+    "crates/continuumd/src/daemon/mod.rs": [
+        "self.registry.sign(",
+        "continuum_evidence::signing::SignedArtifactKind::Receipt",
+    ],
+    "crates/continuumd/src/daemon/state.rs": ["fn record_receipt_signature("],
+    "crates/continuumd/src/daemon/evidence.rs": [
+        ".sign_receipt(&signed_receipt_identity(&staged.content))",
+        "state.record_receipt_signature(receipt_handle.clone(), signature)",
+    ],
+}
+_SIGN_BEFORE_PUBLISH = (".sign_receipt(&signed_receipt_identity(&staged.content))", ".publish(ArtifactClass::Evidence, staged.content.clone(), &token)")
+_ABSENT_VERIFIER_RE = re.compile(r"\bSignatureVerifier\b")
+_ABSENT_KINDS_RE = re.compile(r"SignedArtifactKind::(IntentBundle|DomainPack)\b")
 
 
-def _check_no_production_signing_caller() -> tuple[list[str], list[str]]:
-    """The typed absence behind `partial`: no `src/` file of any crate other than
-    `continuum-evidence` names the signing API. Returns (callers, problems); a caller
-    means the absence is stale and this module needs its successor (bn-3glnv/bn-1hape)."""
-    callers: list[str] = []
+def _check_production_signing_paths() -> tuple[dict[str, int], list[str]]:
+    """Binds the real production signing path and keeps the still-absent halves checked.
+
+    Bound: every phrase in `_SIGNING_PATHS` is present, and `evidence.link` signs before
+    it publishes. Allowed callers: a `src/` file outside `continuum-evidence` that names the
+    signing API must be one of `_SIGNING_PATHS`. Absent (a hit is a stale absence, not a
+    pass): no production `SignatureVerifier` (bn-3glnv), and no intent-bundle or
+    domain-pack signing (no producer on trunk)."""
+    counts = {"bound_phrases": 0, "production_callers": 0}
+    problems: list[str] = []
+    for rel, phrases in _SIGNING_PATHS.items():
+        path = ROOT / rel
+        if not path.is_file():
+            problems.append(f"{rel} is missing: the bound signing path is gone")
+            continue
+        text = path.read_text(encoding="utf-8")
+        for phrase in phrases:
+            if phrase in text:
+                counts["bound_phrases"] += 1
+            else:
+                problems.append(f"drift: {rel} no longer contains {phrase!r}")
+    evidence_text = (ROOT / "crates/continuumd/src/daemon/evidence.rs").read_text(encoding="utf-8")
+    sign_at, publish_at = (evidence_text.find(p) for p in _SIGN_BEFORE_PUBLISH)
+    if sign_at == -1 or publish_at == -1 or sign_at > publish_at:
+        problems.append("evidence.link no longer signs the receipt before it publishes it")
     for path in sorted((ROOT / "crates").glob("*/src/**/*.rs")):
         rel = path.relative_to(ROOT).as_posix()
         if rel.startswith("crates/continuum-evidence/"):
             continue
-        if _SIGNING_API_RE.search(path.read_text(encoding="utf-8")):
-            callers.append(rel)
-    problems = [
-        f"{rel} calls the signing library: production use is no longer absent — re-derive "
-        "TEST-9-07's status from that path (bn-3glnv/bn-1hape) instead of this absence"
-        for rel in callers
-    ]
-    return callers, problems
+        text = path.read_text(encoding="utf-8")
+        if _SIGNING_API_RE.search(text):
+            counts["production_callers"] += 1
+            if rel not in _SIGNING_PATHS:
+                problems.append(f"{rel} calls the signing library outside the bound paths; bind it here")
+        if _ABSENT_VERIFIER_RE.search(text):
+            problems.append(
+                f"{rel} names SignatureVerifier: production verification is no longer absent — "
+                "re-derive TEST-9-07 from that path (bn-3glnv) instead of this absence"
+            )
+        for m in _ABSENT_KINDS_RE.finditer(text):
+            problems.append(f"{rel} signs {m.group(0)}: a producer now exists — bind it here")
+    return counts, problems
+
+
 _CHECK_FN_RE = re.compile(r"    fn check\(\n(.*?)\n    }\n", re.S)
 
 
@@ -596,10 +696,12 @@ def real_run() -> dict[str, Any]:
     # -- signature crate placement: real manifests ------------------------------------
     bump("cargo_toml_files_scanned", len(CARGO_TOML_PATHS))
     failures.extend(_check_signature_dependency_placement())
-    _, caller_problems = _check_no_production_signing_caller()
-    failures.extend(caller_problems)
-    bump("production_signing_callers_absent", 0 if caller_problems else 1)
-    need("production_signing_callers_absent", "a checked absence of production signing callers")
+    path_counts, path_problems = _check_production_signing_paths()
+    failures.extend(path_problems)
+    bump("production_signing_phrases_bound", path_counts["bound_phrases"])
+    bump("production_signing_callers", path_counts["production_callers"])
+    need("production_signing_phrases_bound", "a bound production signing call site")
+    need("production_signing_callers", "a production caller of the signing library")
     need("cargo_toml_files_scanned", "a real Cargo.toml to scan")
 
     # -- signature-verdict: every fact combination, both policies -----------------------
