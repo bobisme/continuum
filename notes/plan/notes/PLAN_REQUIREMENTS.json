@@ -2088,8 +2088,8 @@
         "line": 394,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "virtual time"
+      "status": "satisfied",
+      "summary": "virtual time (delivered: bn-3m1d \u2014 crates/continuum-asupersync/src/family/time.rs and binding.rs: with BindingConfig observing the virtual time family, bound tasks sleep on their Cx's virtual timer driver \u2014 time::sleepuntil; a Cx without it is refused, so no wall-clock fallback is reachable \u2014 and the choice log advances asupersync 0.5.0's lab clock with LabRuntime::advancetime. binding::run journals timers scheduled, fired and cancelled from the Sleep future's own trace events, and each advance from the lab clock. Tasks one advance wakes are placed canonically by the deadline, then the ordinal, of the timer that woke each, so neither the host clock nor the lab seed reaches the journal. The region calculus has no time, so the lift keeps a parallel checked model tied to its tasks: a monotone clock from zero, each timer scheduled once by a live task, fired at or after its deadline or cancelled under its region's cancellation, none late, none outliving its task. Evidence: tests/pr14impl05virtualtime.rs \u2014 byte-identical journals over 30,310 logs including sibling regions and timer ties, seed invariance over 7 seeds including 0, 1, 7, 99 and u64::MAX with the substrate's fire and close orders shown to vary, a byte-equal differential against an independent scripted account, projection identities with all four other bound families, lift conformance, 7 mutation operators rejected, typed refusals, and a host-clock scan. Narrowing: budget-deadline cancellation, CancelKind::Deadline at Cx::checkpoint, is not bound because the region calculus has no single-task cancellation outside a region drain \u2014 bn-36wy3)"
     },
     {
       "category": "pr-deliverable",
