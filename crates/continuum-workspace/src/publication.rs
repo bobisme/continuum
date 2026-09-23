@@ -990,6 +990,39 @@ impl PublicationCost {
 /// It also carries no storage attribution: RFC 0026 makes attribution "operational
 /// telemetry" that "MUST NOT appear inside a receipt". See
 /// [`StoreAudit::storage_attribution`].
+///
+/// # Only the index commit mints one (INV-017)
+///
+/// A receipt is the provenance half of a publication, so a receipt that no index commit
+/// issued would be provenance for nothing. [`CommittedContent::commit_index`] is its one
+/// constructor. Every value a receipt holds is public to build:
+///
+/// ```
+/// # use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
+/// # use continuum_workspace::publication::*;
+/// let handle = ArtifactHandle::new(ArtifactClass::Evidence, "forged").unwrap();
+/// let actor = ActorId::new("forger");
+/// let capability = CapabilityToken::mint("k1").unwrap();
+/// let cost = PublicationCost::for_content(b"");
+/// # let _ = (handle, actor, capability, cost);
+/// ```
+///
+/// but the fields are private, so the receipt itself cannot be built from them outside
+/// this crate:
+///
+/// ```compile_fail,E0451
+/// # use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
+/// # use continuum_workspace::publication::*;
+/// let forged = PublicationReceipt {
+///     handle: ArtifactHandle::new(ArtifactClass::Evidence, "forged").unwrap(),
+///     actor: ActorId::new("forger"),
+///     capability: CapabilityToken::mint("k1").unwrap(),
+///     cost: PublicationCost::for_content(b""),
+/// };
+/// ```
+///
+/// Inside the crate, `tests/inv017_publication_atomicity_evidence.rs` keeps the one
+/// constructor the only one.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PublicationReceipt {
     handle: ArtifactHandle,
@@ -1670,6 +1703,37 @@ impl Drop for StagedPublication<'_> {
 /// #     .build();
 /// let staged = store.stage(ArtifactClass::Evidence, b"x".to_vec(), &author).unwrap();
 /// let receipt = staged.commit_index().unwrap();
+/// ```
+///
+/// Nor can the witness be forged to skip the content commit. Its fields are private, so a
+/// caller outside this crate cannot build one:
+///
+/// ```compile_fail,E0451
+/// # use continuum_workspace::artifact_path::{ArtifactClass, ArtifactHandle};
+/// # use continuum_workspace::publication::*;
+/// # use std::sync::Arc;
+/// # struct Id;
+/// # impl ContentIdentifier for Id {
+/// #     fn identify(&self, class: ArtifactClass, content: &[u8])
+/// #         -> Result<ArtifactHandle, IdentityUnavailable> {
+/// #         ArtifactHandle::new(class, &format!("len{}", content.len()))
+/// #             .map_err(|_| IdentityUnavailable)
+/// #     }
+/// # }
+/// # let author = CapabilityToken::mint("k1").unwrap();
+/// # let store = ReferenceStore::builder(Id, Arc::new(AuditLog::new()))
+/// #     .capability(CapabilityDescriptor::new(
+/// #         author.clone(), ActorId::new("a"), AuthorityLevel::Propose))
+/// #     .build();
+/// let forged = CommittedContent {
+///     store: &store,
+///     handle: ArtifactHandle::new(ArtifactClass::Evidence, "len1").unwrap(),
+///     actor: ActorId::new("a"),
+///     capability: author.clone(),
+///     cost: PublicationCost::for_content(b"x"),
+///     settled: false,
+/// };
+/// let receipt = forged.commit_index().unwrap();
 /// ```
 #[must_use = "dropping committed content leaves unreachable content and no receipt"]
 pub struct CommittedContent<'store> {

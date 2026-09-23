@@ -377,7 +377,7 @@ Agents cannot alter evidence status, sign receipts, access ungranted production 
 
 Comments, logs, docs, model strings, and production payloads cannot issue instructions to the workbench or proof service.
 
-### INV-017 — Semantic atomicity of publication
+### INV-017 — Semantic atomicity of publication (delivered: bn-svf6 — crates/continuum-workspace/tests/inv017_publication_atomicity_evidence.rs: architectural guard = the type-level witness, where only `CommittedContent::commit_index` writes the index and the receipt ledger in one critical section and `compile_fail` doctests pin that no caller outside the crate can forge a receipt or the witness, kept closed by a token census over every crate's src with item attribution and eleven in-test source mutants, each caught by its own rule; behaviour cited from DX-13 and G1-06, not re-run; absences: daemon-side volatile records that name a published handle are not type-tied to a receipt, only ordered by discipline and probed by G1-06, and the store is in memory)
 
 Artifacts become visible only after their content, provenance, and references are durably committed.
 
