@@ -1,0 +1,115 @@
+{
+  "description": "Single-process system: the declared-fair transition is never co-enabled with any other transition in any reachable state, so the annotation is vacuous.",
+  "requirement": "TEST-2-08",
+  "rule": "fairness-witnessed-choice",
+  "system": {
+    "base": {
+      "conflicts": [],
+      "independent": [],
+      "init": {
+        "pc_p0": 0
+      },
+      "name": "single-proc-no-choice",
+      "obligations": [
+        {
+          "name": "o0",
+          "owner": "p0"
+        }
+      ],
+      "transitions": [
+        {
+          "acquire": [
+            "o0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "obligation:o0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "obligation:o0"
+          ]
+        },
+        {
+          "discharge": [
+            "o0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s1",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "obligation:o0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "obligation:o0"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 2,
+            "min": 0
+          }
+        }
+      ]
+    },
+    "cancel": {},
+    "fairness": [
+      "p0.s1"
+    ]
+  }
+}

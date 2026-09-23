@@ -1,0 +1,154 @@
+{
+  "description": "p0.s1 re-acquires the obligation it already holds; its guard stays true forever but it can never successfully fire, so it is guard-enabled at a dead-end (no-successor) state.",
+  "requirement": "TEST-2-08",
+  "rule": "fairness-not-stuck",
+  "system": {
+    "base": {
+      "conflicts": [],
+      "independent": [],
+      "init": {
+        "pc_p0": 0
+      },
+      "name": "stuck-fair",
+      "obligations": [
+        {
+          "name": "o0",
+          "owner": "p0"
+        }
+      ],
+      "transitions": [
+        {
+          "acquire": [
+            "o0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "obligation:o0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "obligation:o0"
+          ]
+        },
+        {
+          "acquire": [
+            "o0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s1",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "obligation:o0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "obligation:o0"
+          ]
+        },
+        {
+          "discharge": [
+            "o0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 2
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s2",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "obligation:o0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "obligation:o0"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 3,
+            "min": 0
+          }
+        }
+      ]
+    },
+    "cancel": {},
+    "fairness": [
+      "p0.s1"
+    ]
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean.json",
+      "ok": true
+    }
+  ],
+  "generator": {
+    "corpus_sha256": "9bfdefa7dc177724304d363a19fe6cc3797d59e2471cdc7c1c3bafa5455487b8",
+    "function": "generate",
+    "module": "tools/test-policy/sections/s2_cancellation_fairness.py",
+    "seeds": "0..63",
+    "totals": {
+      "interleavings": 9140,
+      "reduced_runs": 64,
+      "states": 1772,
+      "systems": 64,
+      "trace_classes": 64
+    }
+  },
+  "module": "tools/test-policy/sections/s2_cancellation_fairness.py",
+  "requirements": {
+    "TEST-2-07": {
+      "boundaries": [
+        "A process's cancellation state is derived from its declared request/drain/finalize transitions and the obligations it owns; there is no separate effect-protocol state (Idle/Reserved/Committed/Aborted, docs/02 \u00a77) and no finalizer ownership transfer (also not modeled by tsys.py / TEST-2-06, see s2_generated_systems.py)."
+      ],
+      "corpus": {
+        "cancel_processes": 128,
+        "finalize_transitions": 128
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "cancel-declared"
+          ],
+          "fixture": "t07-01-cancel-not-object.json",
+          "ok": true,
+          "requirement": "TEST-2-07",
+          "rule": "cancel-declared"
+        },
+        {
+          "caught": [
+            "cancel-cancelled-clears-obligations",
+            "cancel-finalize-discharges",
+            "cancel-phase-order"
+          ],
+          "fixture": "t07-02-phase-order-broken.json",
+          "ok": true,
+          "requirement": "TEST-2-07",
+          "rule": "cancel-phase-order"
+        },
+        {
+          "caught": [
+            "cancel-finalize-discharges",
+            "obligation-declared"
+          ],
+          "fixture": "t07-03-finalize-no-discharge.json",
+          "ok": true,
+          "requirement": "TEST-2-07",
+          "rule": "cancel-finalize-discharges"
+        },
+        {
+          "caught": [
+            "cancel-cancelled-clears-obligations",
+            "cancel-finalize-discharges"
+          ],
+          "fixture": "t07-04-finalize-window-too-narrow.json",
+          "ok": true,
+          "requirement": "TEST-2-07",
+          "rule": "cancel-cancelled-clears-obligations"
+        }
+      ],
+      "mutants": {
+        "cancel-not-object": {
+          "applied": 64,
+          "detected": 64
+        },
+        "finalize-no-discharge": {
+          "applied": 64,
+          "detected": 64
+        },
+        "finalize-window-too-narrow": {
+          "applied": 64,
+          "detected": 64
+        },
+        "phase-order-broken": {
+          "applied": 64,
+          "detected": 64
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "cancel-cancelled-clears-obligations",
+        "cancel-declared",
+        "cancel-finalize-discharges",
+        "cancel-phase-order"
+      ],
+      "status": "enforced",
+      "summary": "cancellation phases"
+    },
+    "TEST-2-08": {
+      "boundaries": [
+        "Only weak fairness is checked, and only within one finite maximal run: a declared-fair transition must (a) be co-enabled with another transition somewhere reachable, and (b) never be guard-enabled at a state with no successor. Strong fairness is NOT covered: it is a property of infinitely-often-enabled behaviour over an infinite or cyclic run, and this harness's oracle only enumerates interleavings on an acyclic state graph (a cyclic one is a typed Inconclusive, tsys.explore). No fixture or corpus system here can demonstrate a strong-fairness violation."
+      ],
+      "corpus": {
+        "fairness_choice_witnessed": 128,
+        "fairness_transitions": 128
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "fairness-declared"
+          ],
+          "fixture": "t08-01-fairness-undeclared-name.json",
+          "ok": true,
+          "requirement": "TEST-2-08",
+          "rule": "fairness-declared"
+        },
+        {
+          "caught": [
+            "fairness-witnessed-choice"
+          ],
+          "fixture": "t08-02-never-coenabled.json",
+          "ok": true,
+          "requirement": "TEST-2-08",
+          "rule": "fairness-witnessed-choice"
+        },
+        {
+          "caught": [
+            "fairness-not-stuck",
+            "fairness-witnessed-choice",
+            "obligation-leak",
+            "obligation-linear"
+          ],
+          "fixture": "t08-03-stuck.json",
+          "ok": true,
+          "requirement": "TEST-2-08",
+          "rule": "fairness-not-stuck"
+        }
+      ],
+      "mutants": {
+        "fairness-undeclared-name": {
+          "applied": 64,
+          "detected": 64
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "fairness-declared",
+        "fairness-not-stuck",
+        "fairness-witnessed-choice"
+      ],
+      "status": "enforced",
+      "summary": "fairness annotations."
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a72 Generated transition systems"
+}

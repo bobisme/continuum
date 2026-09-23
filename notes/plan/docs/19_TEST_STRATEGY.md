@@ -25,8 +25,8 @@ A small generator creates finite systems with:
 - independent/dependent pairs; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
 - conflicts; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
 - obligations; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
-- cancellation phases;
-- fairness annotations.
+- cancellation phases; (delivered: bn-31iu — tools/test-policy/evidence/s2_cancellation_fairness.json)
+- fairness annotations. (delivered: bn-31iu — tools/test-policy/evidence/s2_cancellation_fairness.json)
 
 For small sizes, enumerate all interleavings and configurations. Compare every optimized engine and reduction against this oracle.
 

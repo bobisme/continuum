@@ -145,3 +145,42 @@ Recorded per ID in the evidence file:
   (docs/02 §7) is not modeled.
 - TEST-2-07 (cancellation phases) and TEST-2-08 (fairness annotations) are not
   claimed by this module.
+
+## Section 2: cancellation phases and fairness annotations (TEST-2-07 … TEST-2-08)
+
+Module `sections/s2_cancellation_fairness.py`, evidence
+[`evidence/s2_cancellation_fairness.json`](evidence/s2_cancellation_fairness.json).
+
+docs/19 §2 also asks the generator to produce "cancellation phases" and
+"fairness annotations", left unclaimed by `s2_generated_systems.py` above.
+This module claims both without editing a line of that module, `tsys.py`, or
+the `Justfile`. Rather than widen `tsys`'s system shape, a payload here is
+`{"base": <tsys system>, "cancel": {...}, "fairness": [...]}`: `base` is
+checked by `tsys.check` unmodified, and the two extension fields are checked
+by functions that reuse `tsys.compile_system`, `tsys.enabled`, `tsys.fire`,
+`tsys.explore`, `tsys.Finding`, and `tsys.SplitMix64`.
+
+`cancel["<process>"]` declares one `request` transition and `drain`/
+`finalize` transition lists (docs/02 §7 "Cancellation calculus":
+`Active -> request -> Cancelling -> drain* -> finalize* -> (obligations == ∅)
+-> Cancelled`). `fairness` names weakly-fair transitions. Corpus, mutation,
+and fixtures layer the same way as the sibling module's methodology:
+
+| ID | Feature | Rules |
+|---|---|---|
+| TEST-2-07 | cancellation phases | `cancel-declared`, `cancel-phase-order`, `cancel-finalize-discharges`, `cancel-cancelled-clears-obligations` |
+| TEST-2-08 | fairness annotations | `fairness-declared`, `fairness-witnessed-choice`, `fairness-not-stuck` |
+
+### Boundaries
+
+- **TEST-2-07.** No separate effect-protocol state (Idle/Reserved/Committed/
+  Aborted, docs/02 §7) and no finalizer ownership transfer.
+- **TEST-2-08.** Only weak fairness, and only within one finite maximal run: a
+  declared-fair transition must be co-enabled with another transition
+  somewhere reachable, and must never be guard-enabled at a state with no
+  successor (the terminating-run analogue of weak fairness under stutter
+  closure). **Strong fairness is not covered.** It needs infinitely-often
+  reasoning over an infinite or cyclic run, and this harness's oracle only
+  enumerates interleavings on an acyclic state graph (a cyclic one is a typed
+  `Inconclusive`, never a pass). No fixture or corpus system here can
+  demonstrate a strong-fairness violation.

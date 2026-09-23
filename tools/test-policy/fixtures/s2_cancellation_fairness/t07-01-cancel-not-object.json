@@ -1,0 +1,559 @@
+{
+  "description": "`cancel` is a string instead of an object keyed by process name.",
+  "requirement": "TEST-2-07",
+  "rule": "cancel-declared",
+  "system": {
+    "base": {
+      "conflicts": [
+        [
+          "p0.s0",
+          "p1.s2"
+        ],
+        [
+          "p0.s0",
+          "p1.s3"
+        ]
+      ],
+      "independent": [
+        [
+          "p0.s0",
+          "p1.s0"
+        ],
+        [
+          "p0.s0",
+          "p1.s1"
+        ],
+        [
+          "p0.s0",
+          "p1.s4"
+        ],
+        [
+          "p0.s1",
+          "p1.s0"
+        ],
+        [
+          "p0.s1",
+          "p1.s1"
+        ],
+        [
+          "p0.s1",
+          "p1.s2"
+        ],
+        [
+          "p0.s1",
+          "p1.s3"
+        ],
+        [
+          "p0.s1",
+          "p1.s4"
+        ],
+        [
+          "p0.s2",
+          "p1.s0"
+        ],
+        [
+          "p0.s2",
+          "p1.s1"
+        ],
+        [
+          "p0.s2",
+          "p1.s2"
+        ],
+        [
+          "p0.s2",
+          "p1.s3"
+        ],
+        [
+          "p0.s2",
+          "p1.s4"
+        ],
+        [
+          "p0.s3",
+          "p1.s0"
+        ],
+        [
+          "p0.s3",
+          "p1.s1"
+        ],
+        [
+          "p0.s3",
+          "p1.s2"
+        ],
+        [
+          "p0.s3",
+          "p1.s3"
+        ],
+        [
+          "p0.s3",
+          "p1.s4"
+        ],
+        [
+          "p0.s4",
+          "p1.s0"
+        ],
+        [
+          "p0.s4",
+          "p1.s1"
+        ],
+        [
+          "p0.s4",
+          "p1.s2"
+        ],
+        [
+          "p0.s4",
+          "p1.s3"
+        ],
+        [
+          "p0.s4",
+          "p1.s4"
+        ]
+      ],
+      "init": {
+        "flag": false,
+        "pc_p0": 0,
+        "pc_p1": 0
+      },
+      "name": "cf-0",
+      "obligations": [
+        {
+          "name": "o_p0",
+          "owner": "p0"
+        },
+        {
+          "name": "o_p1",
+          "owner": "p1"
+        }
+      ],
+      "transitions": [
+        {
+          "acquire": [
+            "o_p0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s0",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "obligation:o_p0",
+            "flag"
+          ],
+          "updates": {
+            "flag": {
+              "const": true
+            },
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "obligation:o_p0",
+            "flag"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s1",
+          "process": "p0",
+          "reads": [
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 2
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s2",
+          "process": "p0",
+          "reads": [
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 3
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s3",
+          "process": "p0",
+          "reads": [
+            "pc_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0"
+          ]
+        },
+        {
+          "discharge": [
+            "o_p0"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 4
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p0.s4",
+          "process": "p0",
+          "reads": [
+            "pc_p0",
+            "obligation:o_p0"
+          ],
+          "updates": {
+            "pc_p0": {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p0",
+            "obligation:o_p0"
+          ]
+        },
+        {
+          "acquire": [
+            "o_p1"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p1"
+              },
+              {
+                "const": 0
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p1.s0",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "obligation:o_p1"
+          ],
+          "updates": {
+            "pc_p1": {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p1",
+            "obligation:o_p1"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p1"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p1.s1",
+          "process": "p1",
+          "reads": [
+            "pc_p1"
+          ],
+          "updates": {
+            "pc_p1": {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p1"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "args": [
+                  {
+                    "var": "pc_p1"
+                  },
+                  {
+                    "const": 2
+                  }
+                ],
+                "op": "eq"
+              },
+              {
+                "args": [
+                  {
+                    "var": "flag"
+                  },
+                  {
+                    "const": true
+                  }
+                ],
+                "op": "eq"
+              }
+            ],
+            "op": "and"
+          },
+          "name": "p1.s2",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "flag"
+          ],
+          "updates": {
+            "pc_p1": {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p1"
+          ]
+        },
+        {
+          "guard": {
+            "args": [
+              {
+                "args": [
+                  {
+                    "var": "pc_p1"
+                  },
+                  {
+                    "const": 3
+                  }
+                ],
+                "op": "eq"
+              },
+              {
+                "args": [
+                  {
+                    "var": "flag"
+                  },
+                  {
+                    "const": true
+                  }
+                ],
+                "op": "eq"
+              }
+            ],
+            "op": "and"
+          },
+          "name": "p1.s3",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "flag"
+          ],
+          "updates": {
+            "pc_p1": {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p1"
+          ]
+        },
+        {
+          "discharge": [
+            "o_p1"
+          ],
+          "guard": {
+            "args": [
+              {
+                "var": "pc_p1"
+              },
+              {
+                "const": 4
+              }
+            ],
+            "op": "eq"
+          },
+          "name": "p1.s4",
+          "process": "p1",
+          "reads": [
+            "pc_p1",
+            "obligation:o_p1"
+          ],
+          "updates": {
+            "pc_p1": {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 1
+                }
+              ],
+              "op": "add"
+            }
+          },
+          "writes": [
+            "pc_p1",
+            "obligation:o_p1"
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "name": "flag",
+          "type": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "pc_p0",
+          "type": {
+            "kind": "int",
+            "max": 5,
+            "min": 0
+          }
+        },
+        {
+          "name": "pc_p1",
+          "type": {
+            "kind": "int",
+            "max": 5,
+            "min": 0
+          }
+        }
+      ]
+    },
+    "cancel": "not-a-mapping",
+    "fairness": [
+      "p0.s4",
+      "p1.s4"
+    ]
+  }
+}
