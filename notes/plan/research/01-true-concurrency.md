@@ -100,12 +100,124 @@ Compare against source-DPOR, optimal DPOR, parsimonious ODPOR, and unfolding pre
 
 Kill the lane unless it yields at least an order-of-magnitude reduction on a non-artificial subset without a serious regression on dependent workloads.
 
-### Ratification note (draft)
+## Ratified exploration-reduction threshold (plan §24.5, FR-02)
 
-The plan §24.5 register proposes "explored maximal-execution classes" as
-the reduction denominator for this criterion. That denominator is fixed
-here at ratification, and the register quotes this note verbatim once it
-is fixed; until then the criterion reads as stated above.
+This note owns the plan §24.5 row *Exploration reduction (§9, INV-013)*.
+The row joins two sources: the kill above (at least an order-of-magnitude
+reduction on a non-artificial subset without a serious regression on
+dependent workloads) and the docs/31 observer-indexed pair (median ≥5× on
+the observer-sensitive class, checker overhead <20%, zero mutation loss).
+The numbers and the denominator are fixed here. Plan §24.5 quotes the
+sentence verbatim under the same `quote-id`.
+
+quote-id=exploration-reduction-lane-gate "Reduced exploration replaces conservative unreduced exploration as the claim-bearing default only if, on a lane corpus whose workload membership is fixed before any measurement and whose unit of reduction is the explored maximal execution — every complete run the explorer executes to a configuration with no enabled transition or to the declared bound, sleep-set-blocked and redundant runs included, counted under identical bounds on both sides — both of the following hold for RFC 0014 tier A finite safety properties: first, against unreduced enumeration of every maximal execution, the median reduction ratio is at least 10 over a non-artificial subset of at least six workloads drawn from at least three of the five non-adversarial research/01 families, where non-artificial means a model of or a program in an existing protocol or runtime and never a parameterized synthetic generator, the median wall time over that subset with dependence-witness checking included is below the unreduced baseline's, and every workload of the research/01 adversarial mostly-dependent family stays within 20 percent of the unreduced baseline in wall time and in peak memory with dependence-witness checking included; second, against source-DPOR with the conservative dependence relation of RFC 0014, observer-indexed reduction reaches a median reduction ratio of at least 5 over an observer-sensitive class that contains at least the four RFC 0014 acceptance workloads, with witness-checking time below 20 percent of the observer-indexed search time on every workload of that class; and on every workload of both parts the reduced run returns the baseline's typed verdict, covers every observer-relevant equivalence class the baseline covers, and detects every mutant of the lane's false-independence mutation corpus that the baseline detects, so that one changed verdict or one missed mutant fails the lane."
+
+**Denominator.** The register proposed "explored maximal-execution
+classes". This note fixes the unit as the explored maximal *execution*,
+and uses the class only as the coverage side condition. The reason is
+arithmetic. Every sound reduction covers the same equivalence classes as
+the unreduced baseline, so a ratio of classes is 1 for every sound
+reducer and 1 for an unsound reducer that misses nothing on the corpus.
+It cannot measure reduction. A ratio of executions measures the work
+that reduction saves. The class count then makes sure that the saved
+work did not lose coverage: the reduced run must cover every
+observer-relevant class that its baseline covers. Sleep-set-blocked and
+redundant runs are counted, because the explorer paid for them. Both
+sides of a ratio use identical bounds, so a bound hit is the same event
+on both sides and is reported as the typed bound result of
+`continuum-engine-reference`, never as a completed run.
+
+**Two baselines, two parts.** The first part is the lane-level bar. Its
+baseline is the register fallback itself, unreduced enumeration, because
+the question is whether reduction pays for leaving the fallback. The
+second part is the docs/31 bar. Its baseline is source-DPOR with
+conservative dependencies, the RFC 0014 product baseline, because docs/31
+states the hypothesis as reduction *beyond conservative resource
+conflicts*. The ratio is the same unit in both parts. The plan §24.5
+cubical row is a third, separate bar (≥3× against optimal DPOR and
+unfoldings), and neither of these parts replaces it.
+
+**Readings chosen, and the conflicts recorded.** Where a source is
+ambiguous or two sources disagree, this note takes the strictest reading.
+
+1. *Serious regression.* research/01 gives no number. docs/07 §7 gives
+   25 percent (the cubical non-regression clause), and docs/31 gives 20
+   percent (checker overhead). This note takes 20 percent, the tighter
+   figure, and applies it to every dependent workload, not to a median.
+2. *Checker overhead.* docs/31 attaches "<20%" to a median ratio and does
+   not say whether the overhead is a median too. This note applies it to
+   every workload of the observer-sensitive class.
+3. *Zero mutation loss.* docs/31 states it for the observer-indexed part.
+   RFC 0014 requires a zero missed-bug mutation score for the certified
+   tier. This note applies it to both parts.
+4. *Conjunction.* The register row carries both sources in one threshold
+   cell. This note reads that cell as one gate: reduced exploration leaves
+   the fallback only when both parts hold. A reading that lets the first
+   part promote alone is weaker. It is a privileged intent revision
+   (INV-001, INV-011), not a ratification choice. Consequence: if the
+   observer-indexed part fails or is killed, the whole lane stays on the
+   fallback. RFC 0004 and RFC 0014 name conservative source-DPOR as
+   Version 0 and as the product baseline. Under this gate, that engine can
+   run, but no claim can rely on its reduction until the gate clears.
+5. *Non-artificial subset.* research/01 says "a non-artificial subset"
+   and does not fix its size. This note requires the subset to be fixed
+   before any measurement, with at least six workloads from at least
+   three families. A subset that is selected after the results can make
+   any reducer pass.
+6. *Scope.* research/13 puts fairness and liveness out of scope and
+   defers them to the liveness-preserving reduction lane. This gate
+   licenses reduction for RFC 0014 tier A only. Tiers B to D keep the
+   fallback until their own lane promotes.
+
+**Rationale for the numbers.** The 10 is research/01's own "order of
+magnitude". The 5 and the 20 percent are docs/31's own numbers. The
+median, not the minimum, is the aggregate for both ratios, because the
+families differ widely in their degree of independence and one
+nearly-dependent real workload must not veto the lane. The per-workload
+floors on dependent workloads, witness checking, verdicts and mutants
+are the cost of that choice: a median can hide a cost regression or a
+soundness defect, so those are graded on every workload. The median wall
+time conjunct stops a win that exists only in execution counts while
+the time per execution grows.
+
+**Scope and dependency.** The lane corpus, the false-independence
+mutation corpus, and the observer-indexed engine do not exist today.
+`continuum-engine-dpor` and `continuum-observer` are PR-1 scaffolds. The
+ratified threshold binds when they land. Nothing is measured against it
+until then.
+
+### Fallback: conservative unreduced exploration
+
+The fallback is stated and reachable today. `continuum-engine-reference`
+(PR 8) is exhaustive breadth-first exploration with no reduction. It
+checks invariants and deadlocks under declared bounds, reports bound
+exhaustion as a typed result, and writes a finite closure certificate
+that `continuum-certificate` checks from its wire form. It is also the
+unreduced differential oracle that `continuum-engine-dpor` is audited
+against (docs/33). Every exploration claim in the product runs on this
+fallback now. The fallback costs scale: unreduced exploration can be
+intractable on large corpora. Plan §24 states the program-level
+consequence for liveness. For safety, a claim on the fallback reports a
+bound hit as `Inconclusive` with its typed reason, never as success
+(INV-008).
+
+### Kill criteria for this row
+
+- **Lane kill (research/01).** The first part fails on the lane corpus:
+  the median is below 10, or a dependent workload regresses by more than
+  20 percent, or a verdict changes, or a mutant is missed. The lane is
+  killed and the fallback stays.
+- **Observer-indexed kill (docs/31, research/13).** Witness cost
+  dominates: with witness checking included, observer-indexed reduction
+  is slower than the conservative source-DPOR baseline at the median of
+  the observer-sensitive class. Or observer and property changes
+  invalidate cached independence so often that reuse never pays for its
+  witness cost: over a recorded sequence of property edits, the witness
+  cost of recomputation is more than the exploration that reuse saved.
+  Observer-indexed reduction is then default-off, and by reading 4 above
+  the lane stays on the fallback.
+- The research/13 kill criteria apply unchanged to the observer-indexed
+  part.
 
 ## Novel proposal: Observer-Sensitive Independence
 

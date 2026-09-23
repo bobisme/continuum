@@ -2741,14 +2741,51 @@ validator checks register↔note quote identity. Until then a row is
     generalization."; kill (research/32): compact packs repeatedly
     induce incorrect repairs despite preservation checks], [plain causal
     slice + expansion],
-    [Exploration reduction (§9, INV-013)], [research/01;
-    docs/31], [research/01 (stated there as a kill): ≥10× reduction in
-    explored classes on a non-artificial corpus subset without a
-    #emph[serious] regression on dependent workloads; observer-indexed
-    (docs/31): median ≥5× on the observer-sensitive class,
-    #emph[checker] overhead \<20% (distinct from the
-    certificate-overhead row), zero mutation loss], [conservative
-    unreduced exploration],
+    [Exploration reduction (§9, INV-013)], [research/01; docs/31],
+    [ratified (research/01) quote-id=exploration-reduction-lane-gate
+    "Reduced exploration replaces conservative unreduced exploration as
+    the claim-bearing default only if, on a lane corpus whose workload
+    membership is fixed before any measurement and whose unit of
+    reduction is the explored maximal execution --- every complete run
+    the explorer executes to a configuration with no enabled transition
+    or to the declared bound, sleep-set-blocked and redundant runs
+    included, counted under identical bounds on both sides --- both of
+    the following hold for RFC 0014 tier A finite safety properties:
+    first, against unreduced enumeration of every maximal execution, the
+    median reduction ratio is at least 10 over a non-artificial subset
+    of at least six workloads drawn from at least three of the five
+    non-adversarial research/01 families, where non-artificial means a
+    model of or a program in an existing protocol or runtime and never a
+    parameterized synthetic generator, the median wall time over that
+    subset with dependence-witness checking included is below the
+    unreduced baseline's, and every workload of the research/01
+    adversarial mostly-dependent family stays within 20 percent of the
+    unreduced baseline in wall time and in peak memory with
+    dependence-witness checking included; second, against source-DPOR
+    with the conservative dependence relation of RFC 0014,
+    observer-indexed reduction reaches a median reduction ratio of at
+    least 5 over an observer-sensitive class that contains at least the
+    four RFC 0014 acceptance workloads, with witness-checking time below
+    20 percent of the observer-indexed search time on every workload of
+    that class; and on every workload of both parts the reduced run
+    returns the baseline's typed verdict, covers every observer-relevant
+    equivalence class the baseline covers, and detects every mutant of
+    the lane's false-independence mutation corpus that the baseline
+    detects, so that one changed verdict or one missed mutant fails the
+    lane."; the unit is the explored maximal execution, not the class,
+    because every sound reduction covers the same classes and a class
+    ratio cannot measure reduction --- class coverage is the side
+    condition instead; research/01 records the strictest reading taken
+    where research/01, docs/31, docs/07 §7 and RFC 0014 differ; the lane
+    corpus, the mutation corpus and the engines do not exist today, so
+    the threshold binds when they land; kill (research/01): the first
+    part fails; kill (docs/31, research/13): witness cost dominates, or
+    observer/property changes invalidate cached independence so often
+    that reuse never pays for its witness cost --- observer-indexed
+    reduction is then default-off and the lane stays on the fallback],
+    [conservative unreduced exploration (reachable today: the
+    continuum-engine-reference exhaustive path; a bound hit is a typed
+    Inconclusive, never success)],
     [Liveness-preserving reduction (§7.2, Phase D)], [research/04,
     research/13 --- lane to be opened], [soundness gate per research/04:
     property-directed reduction is proven fair-cycle-preserving or
