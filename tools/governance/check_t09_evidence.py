@@ -69,7 +69,7 @@ Control -> enforcement point map
         `direct_checks`' `mutation-score-gap` scans for a producer and fails
         the moment one appears, so the gap cannot go stale silently.
 
-    agent cannot modify claim ledger or certificate                 PARTIAL
+    agent cannot modify claim ledger or certificate                     PASS
         Bound at the daemon and certificate grain: no mutation request
         admits a caller-supplied status; the `Promotion` witness cannot be
         built outside the verification service; receipt appending is gated
@@ -83,13 +83,20 @@ Control -> enforcement point map
         checker takes wire-form bytes only and collapses no outcome into a
         bool (`inv004_no_self_certification.rs`), and the no-self-
         certification crate edges hold (`check_crate_boundaries.py`).
-        Recorded absence: the repository claims registry (docs/18 and its
-        `PLAN_REQUIREMENTS.json` mirror) is writable by any committer. The
-        mirror check (`check_claim_governance.py`) makes a one-sided edit
-        fail, and review gates an edit, but nothing in the tree prevents an
-        agent commit that edits both. `claim-registry-write-protection-gap`
-        fails the moment a CODEOWNERS file appears, so the gap is revisited
-        rather than left stale.
+        New in bn-hakt3, closing bn-20co's recorded absence: the repository
+        claims registry (docs/18) is now write-protected in-tree by
+        `tools/governance/claims-baseline.json`, which pins every claim
+        row's state and a digest of its claim and required-evidence wording.
+        Three direct checks bind it: `claims-baseline-shape` (every pin
+        names a claim id, a state, a 64-hex digest, and a named revision),
+        `claims-baseline-matches-registry` (every pin is a real re-
+        derivation of the live docs/18 row, both directions — no stale pin,
+        no unpinned row), and `claims-baseline-revision-delta` (against the
+        merge base, a row whose state or wording moved carries a fresh named
+        revision whose bone carries that claim's own `req:<id>` label,
+        reconstructed from the Bones event log; a new or retired row carries
+        a named revision). The mirror check (`check_claim_governance.py`)
+        still makes a one-sided edit against `PLAN_REQUIREMENTS.json` fail.
 
 Failure monotonicity
 --------------------
@@ -132,6 +139,14 @@ Scope and honesty about limits
   evidence of today and go red on a producer under an anticipated name.
 - The delta rule compares against the merge base only. History behind it is
   out of scope, as for GOV-1-08/09.
+- The claims-registry binding has the same non-authenticating shape as the
+  property baseline, plus one more: `claims-baseline-revision-delta` trusts
+  the Bones event log's own `labels` field for the `req:<id>` check. It
+  proves the named bone is *labeled* as owning that claim's evidence, not
+  that the label was applied honestly or that the work behind it happened.
+  An agent with commit access to both the tree and the Bones store could
+  mislabel a bone; that is outside a file-diff checker's reach, same as the
+  property baseline not authenticating its own reviewer.
 
 Stdlib only. Subprocesses: the delegate checkers, `cargo test` of tests
 `just check` already runs, and `git`. No network.
@@ -148,6 +163,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import re
 import subprocess
@@ -159,6 +175,7 @@ TOOL_DIR = Path(__file__).resolve().parent
 ROOT = TOOL_DIR.parents[1]
 sys.path.insert(0, str(TOOL_DIR))
 
+import check_claim_governance as claimgov  # noqa: E402
 import check_revision_delta as delta_mod  # noqa: E402
 
 EVIDENCE = "tools/governance/evidence/t09.json"
@@ -166,6 +183,8 @@ THREAT_MODEL = "notes/plan/docs/09_THREAT_MODEL.md"
 BASELINE = "tools/governance/t09-property-baseline.json"
 JUSTFILE = "Justfile"
 CLAIMS_MATRIX = "notes/plan/docs/18_CLAIMS_MATRIX.md"
+CLAIMS_BASELINE = "tools/governance/claims-baseline.json"
+BONES_EVENTS_DIR = ".bones/events"
 
 CONTROLS: tuple[str, ...] = (
     "semantic property diff",
@@ -451,15 +470,319 @@ def rule_mutation_score_gap(rust_sources: list[tuple[str, str]], config_paths: l
     return hits
 
 
-CODEOWNERS_PATHS: tuple[str, ...] = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+# ============================================================================
+# The claims-registry baseline (tools/governance/claims-baseline.json)
+#
+# Same named-revision shape as the T09 property baseline, over docs/18's
+# claim rows instead of committed Intent Contracts. A pin names a claim ID,
+# the row's evidence state, and a digest of its claim and required-evidence
+# wording; `claims-baseline-matches-registry` re-derives the digest from the
+# live docs/18 row so a status string is never read back; the delta rule adds
+# one thing the property baseline does not need: the named bone must itself
+# carry the promoted claim's `req:<id>` label, read from the Bones event log,
+# so a promotion cannot be named by a bone that never owned that claim.
+# ============================================================================
+
+CLAIM_ID_RE = re.compile(r"^C\d{3}$")
 
 
-def rule_claim_registry_write_protection_gap(codeowners: list[str], baseline_text: str | None) -> list[str]:
-    """Returns hits (evidence the gap is NOT real). Empty means the gap holds."""
-    hits = [f"{rel} exists: path ownership may now protect the claims registry" for rel in codeowners]
-    if baseline_text is not None and CLAIMS_MATRIX in baseline_text:
-        hits.append(f"{BASELINE} now names {CLAIMS_MATRIX}")
-    return hits
+def claims_digest(claim: str, evidence: str) -> str:
+    """SHA-256 (stdlib) over the normalized claim and required-evidence cells.
+
+    Reuses `check_claim_governance.normalize` (strips backticks, curly
+    quotes, and surrounding whitespace) so the pin is over the same text the
+    registry-mirror cross-check already normalizes. Not the production
+    BLAKE3 identity hasher `t09-property-baseline.json` names: docs/18 rows
+    are prose, not a decoded wire artifact, so there is no Rust decoder to
+    re-run here — this digest is the governance file's own integrity check,
+    computed by this checker.
+    """
+    claim_n = claimgov.normalize(claim)
+    evidence_n = claimgov.normalize(evidence)
+    payload = f"{claim_n}␟{evidence_n}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def parse_claims_baseline(text: str | None) -> tuple[dict | None, list[str]]:
+    if text is None:
+        return None, [f"{CLAIMS_BASELINE} is missing"]
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return None, [f"{CLAIMS_BASELINE} does not parse: {exc}"]
+    if not isinstance(doc, dict) or not isinstance(doc.get("entries"), list) or not isinstance(doc.get("retired", []), list):
+        return None, [f"{CLAIMS_BASELINE} needs an entries list and a retired list"]
+    return doc, []
+
+
+def rule_claims_baseline_shape(text: str | None) -> list[str]:
+    """Every pin names a claim id, a state, a 64-hex digest, and a named revision."""
+    doc, errors = parse_claims_baseline(text)
+    if doc is None:
+        return errors
+    out: list[str] = []
+    if doc.get("schema") != "continuum.governance.claims-baseline/1":
+        out.append(f"{CLAIMS_BASELINE}: unexpected schema {doc.get('schema')!r}")
+    if not doc["entries"]:
+        out.append(f"{CLAIMS_BASELINE}: pins nothing")
+    seen: set[str] = set()
+    for index, entry in enumerate(doc["entries"]):
+        where = f"entries[{index}]"
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not CLAIM_ID_RE.match(entry["id"]):
+            out.append(f"{where}: no valid claim id")
+            continue
+        cid = entry["id"]
+        if cid in seen:
+            out.append(f"{where} ({cid}): duplicate pin for the same claim id")
+        seen.add(cid)
+        if not isinstance(entry.get("state"), str) or not entry["state"]:
+            out.append(f"{where} ({cid}): no state")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("digest", ""))):
+            out.append(f"{where} ({cid}): digest is not a 64-hex digest")
+        out.extend(revision_findings(f"{where} ({cid})", entry.get("revision")))
+    for index, item in enumerate(doc.get("retired", [])):
+        where = f"retired[{index}]"
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            out.append(f"{where}: no claim id")
+            continue
+        out.extend(revision_findings(f"{where} ({item['id']})", item.get("revision")))
+    return out
+
+
+def rule_claims_baseline_matches_registry(baseline_text: str | None, registry_text: str | None) -> list[str]:
+    """Every pin is a real re-derivation of the live docs/18 row, both directions.
+
+    A well-formed but stale baseline — docs/18 edited without moving the pin
+    — is exactly the hole a status string read back would leave open; this
+    recomputes the digest and state from the live registry and compares.
+    """
+    doc, errors = parse_claims_baseline(baseline_text)
+    if doc is None:
+        return errors
+    if registry_text is None:
+        return [f"{CLAIMS_MATRIX} is missing"]
+    registry = claimgov.parse_registry(registry_text)
+    out: list[str] = []
+    pinned: dict[str, dict] = {
+        e["id"]: e for e in doc["entries"] if isinstance(e, dict) and isinstance(e.get("id"), str)
+    }
+    retired_ids = {
+        item["id"] for item in doc.get("retired", []) if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+
+    for cid, row in sorted(registry.rows.items()):
+        entry = pinned.get(cid)
+        if entry is None:
+            out.append(f"{CLAIMS_MATRIX} {cid}: live row has no pin in {CLAIMS_BASELINE}")
+            continue
+        live_digest = claims_digest(row.claim, row.evidence)
+        if entry.get("digest") != live_digest:
+            out.append(
+                f"{CLAIMS_BASELINE} {cid}: pinned digest does not match the live docs/18 wording "
+                "(claim text or required evidence changed without moving the pin)"
+            )
+        if entry.get("state") != row.state:
+            out.append(
+                f"{CLAIMS_BASELINE} {cid}: pinned state {entry.get('state')!r} does not match the live "
+                f"docs/18 state {row.state!r}"
+            )
+    for cid in sorted(set(pinned) - set(registry.rows)):
+        if cid not in retired_ids:
+            out.append(f"{CLAIMS_BASELINE} {cid}: pin has no live docs/18 row and is not in retired")
+    for cid in sorted(retired_ids & set(registry.rows)):
+        out.append(f"{CLAIMS_BASELINE} {cid}: marked retired but a live docs/18 row still exists")
+    return out
+
+
+def bone_labels(root: Path) -> dict[str, set[str]]:
+    """Reconstruct every Bone's current label set from the append-only event log.
+
+    `check_claim_governance.bone_references` already reads `.bones/events`
+    directly rather than shelling to `bn`; this replays it in timestamp
+    order instead of scanning raw text, because a label check needs the
+    *current* set, not merely "this string appeared somewhere for this
+    bone": `item.create` seeds the label set from its `labels` array,
+    `item.update` with `field: "labels"` applies an add/remove action, and
+    `item.delete` clears the bone. A line this cannot parse (too few
+    tab-separated fields, unparseable JSON payload) is skipped, never
+    treated as evidence of anything.
+    """
+    events_dir = root / BONES_EVENTS_DIR
+    if not events_dir.is_dir():
+        return {}
+    events: list[tuple[int, str, str, str]] = []
+    for path in sorted(events_dir.glob("*.events")):
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 7:
+                continue
+            ts_raw, _agent, _itc, _blank, event_type, item_id, payload = fields[:7]
+            try:
+                ts = int(ts_raw)
+            except ValueError:
+                continue
+            events.append((ts, event_type, item_id, payload))
+    events.sort(key=lambda e: e[0])
+    labels: dict[str, set[str]] = {}
+    for _ts, event_type, item_id, payload in events:
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if event_type == "item.create" and isinstance(data, dict):
+            raw_labels = data.get("labels", [])
+            labels[item_id] = {label for label in raw_labels if isinstance(label, str)} if isinstance(raw_labels, list) else set()
+        elif event_type == "item.delete":
+            labels.pop(item_id, None)
+        elif event_type == "item.update" and isinstance(data, dict) and data.get("field") == "labels":
+            value = data.get("value")
+            if isinstance(value, dict):
+                action = value.get("action")
+                label = value.get("label")
+                if isinstance(label, str):
+                    current = labels.setdefault(item_id, set())
+                    if action == "add":
+                        current.add(label)
+                    elif action == "remove":
+                        current.discard(label)
+    return labels
+
+
+def bone_carries_claim_label(labels_index: dict[str, set[str]], bone: str, claim_id: str) -> bool:
+    return f"req:{claim_id.lower()}" in labels_index.get(bone, set())
+
+
+def rule_claims_baseline_revision_delta(
+    base_text: str | None, head_text: str | None, labels_index: dict[str, set[str]]
+) -> list[str]:
+    """A moved, new, or retired claims pin carries a fresh, named revision.
+
+    Same shape as `rule_baseline_revision_delta`, plus one more constraint a
+    property pin does not need: a *moved* pin (state or wording differs from
+    the base) must be named by a bone that itself carries the promoted
+    claim's `req:<id>` label — the bone that promotes C0xx names itself. A
+    *new* or *retired* pin needs only a named revision: entering or leaving
+    the registry is a registry edit, not a claim's own evidence promotion.
+    """
+    head, errors = parse_claims_baseline(head_text)
+    if head is None:
+        return errors
+    base, _ = parse_claims_baseline(base_text)
+    base_entries = {e["id"]: e for e in (base or {}).get("entries", []) if isinstance(e, dict) and "id" in e}
+    head_entries = {e["id"]: e for e in head["entries"] if isinstance(e, dict) and "id" in e}
+    retired = {r["id"]: r for r in head.get("retired", []) if isinstance(r, dict) and "id" in r}
+    out: list[str] = []
+    for cid, entry in sorted(head_entries.items()):
+        before = base_entries.get(cid)
+        if before is None:
+            out.extend(revision_findings(f"new pin {cid}", entry.get("revision")))
+            continue
+        moved = entry.get("state") != before.get("state") or entry.get("digest") != before.get("digest")
+        if not moved:
+            continue
+        where = f"moved pin {cid}"
+        found = revision_findings(where, entry.get("revision"))
+        if not found and entry.get("revision") == before.get("revision"):
+            found = [f"{where}: the revision is the base's; a moved pin needs a new named revision"]
+        if not found:
+            revision = entry.get("revision") or {}
+            bone = revision.get("bone")
+            if not (isinstance(bone, str) and bone_carries_claim_label(labels_index, bone, cid)):
+                found = [
+                    f"{where}: revision.bone {bone!r} does not carry the req:{cid.lower()} label "
+                    f"(the bone that moves {cid} must be the bone that owns its evidence)"
+                ]
+        out.extend(found)
+    for cid in sorted(set(base_entries) - set(head_entries)):
+        item = retired.get(cid)
+        if item is None:
+            out.append(f"pin {cid} disappeared without a retired entry")
+        else:
+            out.extend(revision_findings(f"retired pin {cid}", item.get("revision")))
+    return out
+
+
+def _claims_pin(cid: str, digit: str, bone: str = "bn-base", reason: str = "the pin this fixture starts from") -> dict:
+    return {"id": cid, "state": "TARGET", "digest": digit * 64, "revision": {"bone": bone, "reason": reason}}
+
+
+def _claims_doc(entries: list[dict], retired: list[dict] | None = None) -> str:
+    return json.dumps(
+        {"schema": "continuum.governance.claims-baseline/1", "entries": entries, "retired": retired or []}
+    )
+
+
+def claims_delta_fixture_failures(labels_index: dict[str, set[str]]) -> list[str]:
+    """The claims delta rule's own fixtures, run against the real Bones store.
+
+    `bn-286s` truly carries `req:c006` in the live event log — it is the
+    Bone that promoted C006 — and `bn-2270` truly does not — it carries
+    `req:c023`. The "wrong bone" and "right bone" cases below are not
+    synthetic labels: they ask the real store the real question, the same
+    one `--self-test` re-runs on every invocation, not only under the flag.
+    """
+    base = _claims_doc([_claims_pin("C006", "a"), _claims_pin("C023", "b")])
+    unnamed_promotion = json.loads(base)
+    unnamed_promotion["entries"][0]["state"] = "OBSERVED"
+    unnamed_promotion["entries"][0]["digest"] = "c" * 64
+    del unnamed_promotion["entries"][0]["revision"]
+    wrong_bone = _claims_doc(
+        [
+            {
+                "id": "C006",
+                "state": "OBSERVED",
+                "digest": "c" * 64,
+                "revision": {"bone": "bn-2270", "reason": "a bone that owns a different claim's evidence"},
+            },
+            _claims_pin("C023", "b"),
+        ]
+    )
+    right_bone = _claims_doc(
+        [
+            {
+                "id": "C006",
+                "state": "OBSERVED",
+                "digest": "c" * 64,
+                "revision": {"bone": "bn-286s", "reason": "C006 promoted TARGET to OBSERVED on bfs::explore"},
+            },
+            _claims_pin("C023", "b"),
+        ]
+    )
+    silent_wording_weakening = json.loads(base)
+    silent_wording_weakening["entries"][0]["digest"] = "d" * 64
+    named_wording_weakening = copy.deepcopy(silent_wording_weakening)
+    named_wording_weakening["entries"][0]["revision"] = {
+        "bone": "bn-286s",
+        "reason": "C006 required-evidence wording narrowed by a reviewed revision",
+    }
+    unnamed_new_pin = json.loads(base)
+    unnamed_new_pin["entries"].append({"id": "C001", "state": "TARGET", "digest": "e" * 64})
+    dropped = _claims_doc([_claims_pin("C006", "a")])
+    retired_named = _claims_doc(
+        [_claims_pin("C006", "a")],
+        [{"id": "C023", "revision": {"bone": "bn-2270", "reason": "C023 removed from the registry with its reviewed revision"}}],
+    )
+
+    cases: list[tuple[str, str | None, str, bool]] = [
+        ("unnamed promotion", base, json.dumps(unnamed_promotion), True),
+        ("promotion named by a bone without the claim's req label", base, wrong_bone, True),
+        ("promotion named by the claim's own bone", base, right_bone, False),
+        ("wording-only weakening, revision unmoved", base, json.dumps(silent_wording_weakening), True),
+        ("wording-only weakening, named by the claim's own bone", base, json.dumps(named_wording_weakening), False),
+        ("unnamed new pin", base, json.dumps(unnamed_new_pin), True),
+        ("unretired removal", base, dropped, True),
+        ("named retirement", base, retired_named, False),
+        ("first pin with names", None, base, False),
+        ("no change", base, base, False),
+    ]
+    out: list[str] = []
+    for label, before, after, want_hit in cases:
+        found = rule_claims_baseline_revision_delta(before, after, labels_index)
+        if bool(found) != want_hit:
+            out.append(f"fixture {label}: claims-baseline-revision-delta returned {found!r}")
+    return out
 
 
 def real_rust_sources() -> list[tuple[str, str]]:
@@ -478,13 +801,15 @@ def existing(paths: tuple[str, ...]) -> list[str]:
 
 def direct_checks() -> dict[str, list[str]]:
     baseline_text = read(BASELINE)
+    claims_baseline_text = read(CLAIMS_BASELINE)
     return {
         "t09-control-list": rule_t09_control_list(read(THREAT_MODEL)),
         "baseline-shape": rule_baseline_shape(baseline_text),
         "justfile-runs-t09": rule_justfile_runs_t09(read(JUSTFILE)),
         "mutation-score-gap": rule_mutation_score_gap(real_rust_sources(), existing(MUTATION_TOOL_CONFIGS)),
-        "claim-registry-write-protection-gap": rule_claim_registry_write_protection_gap(
-            existing(CODEOWNERS_PATHS), baseline_text
+        "claims-baseline-shape": rule_claims_baseline_shape(claims_baseline_text),
+        "claims-baseline-matches-registry": rule_claims_baseline_matches_registry(
+            claims_baseline_text, read(CLAIMS_MATRIX)
         ),
     }
 
@@ -506,6 +831,28 @@ def delta_check(explicit_base: str | None, require_base: bool) -> dict[str, obje
         }
     rc, base_text = git("show", f"{resolution.rev}:{BASELINE}")
     findings = rule_baseline_revision_delta(base_text if rc == 0 else None, read(BASELINE))
+    return {
+        "status": "fail" if findings else "pass",
+        "base": str(resolution.rev)[:12],
+        "base_resolution": resolution.how,
+        "findings": findings,
+    }
+
+
+def claims_delta_check(explicit_base: str | None, require_base: bool) -> dict[str, object]:
+    git = delta_mod.Git(ROOT)
+    resolution = delta_mod.resolve_base(git, explicit=explicit_base)
+    if not resolution.resolved:
+        fatal = resolution.fatal or require_base
+        return {
+            "status": "fail" if fatal else "skipped",
+            "reason": resolution.reason,
+            "findings": [],
+        }
+    rc, base_text = git("show", f"{resolution.rev}:{CLAIMS_BASELINE}")
+    findings = rule_claims_baseline_revision_delta(
+        base_text if rc == 0 else None, read(CLAIMS_BASELINE), bone_labels(ROOT)
+    )
     return {
         "status": "fail" if findings else "pass",
         "base": str(resolution.rev)[:12],
@@ -631,14 +978,74 @@ def direct_self_test() -> dict[str, object]:
     ) and expect("mutation-score-gap", rule_mutation_score_gap([], [".cargo/mutants.toml"]), True, "tool config"):
         caught.append("mutation-score-gap")
 
-    # claim-registry-write-protection-gap: a CODEOWNERS file must trip it.
-    if expect(
-        "claim-registry-write-protection-gap",
-        rule_claim_registry_write_protection_gap([".github/CODEOWNERS"], None),
-        True,
-        "CODEOWNERS present",
+    # claims-baseline-shape: a short reason and a non-hex digest must each trip it.
+    claims_bad_reason = _claims_doc([_claims_pin("C001", "a", reason="short")])
+    claims_bad_digest = json.loads(_claims_doc([_claims_pin("C001", "a")]))
+    claims_bad_digest["entries"][0]["digest"] = "not-hex"
+    claims_ok_shape = expect(
+        "claims-baseline-shape", rule_claims_baseline_shape(_claims_doc([_claims_pin("C001", "a")])), False, "well-formed pin"
+    )
+    if (
+        claims_ok_shape
+        and expect("claims-baseline-shape", rule_claims_baseline_shape(claims_bad_reason), True, "short reason")
+        and expect(
+            "claims-baseline-shape", rule_claims_baseline_shape(json.dumps(claims_bad_digest)), True, "non-hex digest"
+        )
+        and expect("claims-baseline-shape", rule_claims_baseline_shape(None), True, "missing baseline")
     ):
-        caught.append("claim-registry-write-protection-gap")
+        caught.append("claims-baseline-shape")
+
+    # claims-baseline-matches-registry: a stale digest, a stale state, and an
+    # unpinned live row must each trip it; a pin that truly matches must not.
+    sample_registry = "| C900 | Sample claim wording | sample required evidence | TARGET |\n"
+    matching_digest = claims_digest("Sample claim wording", "sample required evidence")
+    matching_pin = _claims_doc(
+        [{"id": "C900", "state": "TARGET", "digest": matching_digest, "revision": {"bone": "bn-base", "reason": "the pin this fixture starts from"}}]
+    )
+    stale_digest_pin = _claims_doc(
+        [{"id": "C900", "state": "TARGET", "digest": "f" * 64, "revision": {"bone": "bn-base", "reason": "the pin this fixture starts from"}}]
+    )
+    stale_state_pin = _claims_doc(
+        [{"id": "C900", "state": "OBSERVED", "digest": matching_digest, "revision": {"bone": "bn-base", "reason": "the pin this fixture starts from"}}]
+    )
+    if (
+        expect(
+            "claims-baseline-matches-registry",
+            rule_claims_baseline_matches_registry(matching_pin, sample_registry),
+            False,
+            "matching pin",
+        )
+        and expect(
+            "claims-baseline-matches-registry",
+            rule_claims_baseline_matches_registry(stale_digest_pin, sample_registry),
+            True,
+            "stale digest",
+        )
+        and expect(
+            "claims-baseline-matches-registry",
+            rule_claims_baseline_matches_registry(stale_state_pin, sample_registry),
+            True,
+            "stale state",
+        )
+        and expect(
+            "claims-baseline-matches-registry",
+            rule_claims_baseline_matches_registry(_claims_doc([]), sample_registry),
+            True,
+            "unpinned live row",
+        )
+    ):
+        caught.append("claims-baseline-matches-registry")
+
+    # claims-baseline-revision-delta: see claims_delta_fixture_failures. Run
+    # against the real Bones store, not a stub, so the req:<id> half is
+    # exercised on live labels rather than a fixture that could drift from
+    # what the event log actually records.
+    claims_labels_index = bone_labels(ROOT)
+    claims_delta_failures = claims_delta_fixture_failures(claims_labels_index)
+    if claims_delta_failures:
+        failures.extend(claims_delta_failures)
+    else:
+        caught.append("claims-baseline-revision-delta")
 
     # binding-fails-closed: one failed citation, then one tripped absence-scan,
     # must each turn a control and the overall status to `fail`.
@@ -839,6 +1246,21 @@ def build_controls(direct: dict[str, list[str]], py: dict[str, dict], rust: dict
                 "the docs/18 claims registry and its PLAN_REQUIREMENTS mirror agree row for row, so a one-sided edit fails",
                 p("check_claim_governance"),
             ),
+            Citation(
+                CLAIMS_BASELINE,
+                "every docs/18 claim row's state and a digest of its claim and required-evidence wording is pinned, with a named revision",
+                d("claims-baseline-shape"),
+            ),
+            Citation(
+                "tools/governance/check_t09_evidence.py claims-baseline-matches-registry",
+                "every pin is a real re-derivation of the live docs/18 row, both directions: no stale pin, no unpinned row",
+                d("claims-baseline-matches-registry"),
+            ),
+            Citation(
+                "tools/governance/check_t09_evidence.py claims-baseline-revision-delta",
+                "against the merge base, a row whose state or wording moved carries a fresh named revision whose bone carries that claim's req:<id> label, reconstructed from the Bones event log; a new or retired row carries a named revision; its ten fixtures are re-run here on the real Bones store, and its live verdict fails the run (stdout, exit code)",
+                "fail" if claims_delta_fixture_failures(bone_labels(ROOT)) else "pass",
+            ),
         ],
     }
 
@@ -849,7 +1271,12 @@ def build_controls(direct: dict[str, list[str]], py: dict[str, dict], rust: dict
     ]
 
     controls: dict[str, dict] = {}
-    for name in ("semantic property diff", "review gates", "immutable baseline property digest in CI"):
+    for name in (
+        "semantic property diff",
+        "review gates",
+        "immutable baseline property digest in CI",
+        "agent cannot modify claim ledger or certificate",
+    ):
         cites = bound[name]
         controls[name] = {
             "type": "pass",
@@ -880,29 +1307,6 @@ def build_controls(direct: dict[str, list[str]], py: dict[str, dict], rust: dict
         ),
         "absence_checks": mutation_checks,
         "status": "pass" if all(c["status"] == "pass" for c in mutation_checks) else "fail",
-    }
-
-    ledger = bound["agent cannot modify claim ledger or certificate"]
-    ledger_gap = [
-        {
-            "artifact": "tools/governance/check_t09_evidence.py claim-registry-write-protection-gap",
-            "checks": "no CODEOWNERS file exists and the T09 baseline does not pin docs/18: the repository claims registry has no in-tree write protection",
-            "status": d("claim-registry-write-protection-gap"),
-        },
-    ]
-    controls["agent cannot modify claim ledger or certificate"] = {
-        "type": "partial",
-        "citations": [c.__dict__ for c in ledger],
-        "reason": (
-            "Bound at the daemon and certificate grain. The repository claims registry "
-            "(docs/18 and its PLAN_REQUIREMENTS mirror) is writable by any committer: the "
-            "mirror check fails a one-sided edit and review gates a two-sided one, but "
-            "nothing in the tree refuses an agent commit that edits both."
-        ),
-        "absence_checks": ledger_gap,
-        "status": "pass"
-        if all(c.status == "pass" for c in ledger) and all(c["status"] == "pass" for c in ledger_gap)
-        else "fail",
     }
 
     controls["(failure monotonicity)"] = {
@@ -940,12 +1344,14 @@ def build_evidence(controls: dict[str, dict], direct_st: dict, py_st: dict, rust
             "status": "pass" if direct_st.get("status") == "pass" and py_st.get("status") == "pass" and rust_ok else "fail",
         },
         "boundary": (
-            "Three of five controls are bound to re-run enforcement. 'mutation score' is a typed "
-            "gap with a mechanical absence-scan. 'agent cannot modify claim ledger or "
-            "certificate' is partial: bound at the daemon and certificate grain, with the "
-            "repository claims registry's missing write protection recorded as a checked "
-            "absence. The baseline pin makes a property change visible and named; it does not "
-            "authenticate the approver, which is the review gate's job outside the tree."
+            "Four of five controls are bound to re-run enforcement. 'mutation score' is a typed "
+            "gap with a mechanical absence-scan; nothing else is a checked absence today. "
+            "'agent cannot modify claim ledger or certificate' is bound at the daemon and "
+            "certificate grain, and now also at the repository claims registry: "
+            "claims-baseline.json pins every docs/18 row and its revision delta rule ties a "
+            "promotion to the Bones event log's own req:<id> label. Both baseline pins make a "
+            "change visible and named; neither authenticates the approver, which is the review "
+            "gate's job outside the tree, nor that a req:<id> label was applied honestly."
         ),
         "status": overall(controls),
     }
@@ -982,6 +1388,7 @@ def main(argv: list[str] | None = None) -> int:
     rust = rust_delegate_run()
     controls = build_controls(direct, py, rust)
     delta = delta_check(args.base, args.require_base)
+    claims_delta = claims_delta_check(args.base, args.require_base)
 
     if args.evidence:
         path = Path(args.evidence)
@@ -992,12 +1399,13 @@ def main(argv: list[str] | None = None) -> int:
         st_ok = st_ok and all(v.get("status") == "pass" for v in rust.values())
 
     failing = sorted(k for k, v in controls.items() if v["status"] != "pass")
-    bad = bool(failing) or not st_ok or delta["status"] == "fail"
+    bad = bool(failing) or not st_ok or delta["status"] == "fail" or claims_delta["status"] == "fail"
     report = {
         "controls": {k: v["status"] for k, v in sorted(controls.items())},
         "failing_controls": failing,
         "direct_findings": {k: v for k, v in direct.items() if v},
         "baseline_revision_delta": delta,
+        "claims_baseline_revision_delta": claims_delta,
         "self_test": {"direct": direct_st.get("status"), "py_delegates": py_st.get("status")},
         "evidence": args.evidence,
         "status": "fail" if bad else "pass",

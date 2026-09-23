@@ -1,7 +1,7 @@
 {
   "artifact": "continuum.governance.evidence/t09",
   "authority": "notes/plan/docs/09_THREAT_MODEL.md T09 (Agent weakens property)",
-  "boundary": "Three of five controls are bound to re-run enforcement. 'mutation score' is a typed gap with a mechanical absence-scan. 'agent cannot modify claim ledger or certificate' is partial: bound at the daemon and certificate grain, with the repository claims registry's missing write protection recorded as a checked absence. The baseline pin makes a property change visible and named; it does not authenticate the approver, which is the review gate's job outside the tree.",
+  "boundary": "Four of five controls are bound to re-run enforcement. 'mutation score' is a typed gap with a mechanical absence-scan; nothing else is a checked absence today. 'agent cannot modify claim ledger or certificate' is bound at the daemon and certificate grain, and now also at the repository claims registry: claims-baseline.json pins every docs/18 row and its revision delta rule ties a promotion to the Bones event log's own req:<id> label. Both baseline pins make a change visible and named; neither authenticates the approver, which is the review gate's job outside the tree, nor that a req:<id> label was applied honestly.",
   "controls": {
     "(failure monotonicity)": {
       "citations": [
@@ -25,13 +25,6 @@
       "type": "pass"
     },
     "agent cannot modify claim ledger or certificate": {
-      "absence_checks": [
-        {
-          "artifact": "tools/governance/check_t09_evidence.py claim-registry-write-protection-gap",
-          "checks": "no CODEOWNERS file exists and the T09 baseline does not pin docs/18: the repository claims registry has no in-tree write protection",
-          "status": "pass"
-        }
-      ],
       "citations": [
         {
           "artifact": "crates/continuumd/tests/inv015_agent_least_authority_evidence.rs (five tests)",
@@ -62,11 +55,25 @@
           "artifact": "tools/governance/check_claim_governance.py",
           "enforces": "the docs/18 claims registry and its PLAN_REQUIREMENTS mirror agree row for row, so a one-sided edit fails",
           "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/claims-baseline.json",
+          "enforces": "every docs/18 claim row's state and a digest of its claim and required-evidence wording is pinned, with a named revision",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_t09_evidence.py claims-baseline-matches-registry",
+          "enforces": "every pin is a real re-derivation of the live docs/18 row, both directions: no stale pin, no unpinned row",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_t09_evidence.py claims-baseline-revision-delta",
+          "enforces": "against the merge base, a row whose state or wording moved carries a fresh named revision whose bone carries that claim's req:<id> label, reconstructed from the Bones event log; a new or retired row carries a named revision; its ten fixtures are re-run here on the real Bones store, and its live verdict fails the run (stdout, exit code)",
+          "status": "pass"
         }
       ],
-      "reason": "Bound at the daemon and certificate grain. The repository claims registry (docs/18 and its PLAN_REQUIREMENTS mirror) is writable by any committer: the mirror check fails a one-sided edit and review gates a two-sided one, but nothing in the tree refuses an agent commit that edits both.",
       "status": "pass",
-      "type": "partial"
+      "type": "pass"
     },
     "immutable baseline property digest in CI": {
       "citations": [
@@ -312,7 +319,9 @@
         "baseline-revision-delta",
         "baseline-shape",
         "binding-fails-closed",
-        "claim-registry-write-protection-gap",
+        "claims-baseline-matches-registry",
+        "claims-baseline-revision-delta",
+        "claims-baseline-shape",
         "justfile-runs-t09",
         "mutation-score-gap",
         "t09-control-list"

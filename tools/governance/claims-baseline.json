@@ -1,0 +1,330 @@
+{
+  "authority": "notes/plan/docs/09_THREAT_MODEL.md T09 (Agent weakens property): in-tree write protection for the repository claims registry",
+  "digest": "SHA-256 (stdlib hashlib) over the normalized claim and required-evidence cells of one docs/18 row, joined by a U+241F separator: check_claim_governance.normalize(claim) + U+241F + check_claim_governance.normalize(evidence). normalize() strips backticks, curly quotes, and surrounding whitespace, the same normalization the mirror cross-check already applies. Not the production BLAKE3 identity hasher: this is a governance file's own integrity digest, computed by this checker, over prose text with no Rust decoder to re-run.",
+  "enforced_by": [
+    "tools/governance/check_t09_evidence.py claims-baseline-shape (every pin names a state, a 64-hex digest, and a named revision)",
+    "tools/governance/check_t09_evidence.py claims-baseline-matches-registry (every pin still matches the live docs/18 row, and every live row has a pin: a real re-derivation, not a status string read back)",
+    "tools/governance/check_t09_evidence.py claims-baseline-revision-delta (against the merge base, a row whose state or wording moved carries a fresh named revision whose bone carries that claim's req:<id> label; a new or retired row carries a named revision)"
+  ],
+  "entries": [
+    {
+      "digest": "6e682d23b08cc3ece3609f87e6e7581639176435a54157e76ecf4ca716ae4f68",
+      "id": "C001",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "6376997109293b4235c188ceb6cc25f11124e3897478c18aa6b2d4abd490c6fe",
+      "id": "C002",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "cad9dac11140d0a7f6d680d3d56338328690051cc722ea1290684695d0617d33",
+      "id": "C003",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "fa3946e540e58a7ac4db933135152777ae376f4d6716c86bb6492a8578e10a3c",
+      "id": "C004",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "93f3be088d85d6940691b9d9c43d788a11f3a89b2362bc1d70f0eb6db2544a48",
+      "id": "C005",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "573ea8c6ad7b01ba278a5ff6f2f6c637ce3afef6a89dd75867230ea99c0ca818",
+      "id": "C006",
+      "revision": {
+        "bone": "bn-286s",
+        "reason": "C006 promoted TARGET to OBSERVED on bfs::explore with an exact-equality and collision-injection campaign, tests/bfs_exact_identity.rs"
+      },
+      "state": "OBSERVED"
+    },
+    {
+      "digest": "f18cd2556c5e5d98d819360253f6b3b0458d31178fe8c4ab7b9f4a220b166028",
+      "id": "C007",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "a87ebbbc22bdd69bb1d24b5fe1c8fd89cdaf62db7f3dd03d28b75f5478f037b8",
+      "id": "C008",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "4352096eae24b8e7e1c99ad35b9fe9ae817195a4dda0cd7d3a51ccc65bbfc022",
+      "id": "C009",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "f3c547ec776b2ed4f23ced045c5f8d90d9e1e08a1aaef36854d7b32af543308c",
+      "id": "C010",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "50fd731698f7d7c6a6e9eebe9c6e711e01bff4caa191b3d44072326707112e6a",
+      "id": "C011",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "0cb227c3bfbc057ea218678a291b1b8eee164d36f339d062ab3ada06a1a8d54d",
+      "id": "C012",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "245176facb0315c7e08eb1b5a55a648c81b2c9208dce30ce2bf9af49957fbd17",
+      "id": "C013",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "00a40ad7013a6efa9b3ee9f3b757a1d91d2d434eaa7bdf25dcbc1201176cdf6e",
+      "id": "C014",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "ba846486367499d06e7c5a013f4a12324c305e737c4b881589e82bac547f7ecd",
+      "id": "C015",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "7588a15e0c8505575440694a528588c0c379ec38d9ec522750653512f6936b1f",
+      "id": "C016",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "bc076385c10b636db015832e5f667bd62bc041445f6ddb1f0bc1e58c47399e00",
+      "id": "C017",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "1da4235d8fcc33650acb0b5b48496ad7b5a3e94a15e7b038a60b210b390a7bce",
+      "id": "C018",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "1be268f92e3ac33c7b688cbf3285addc902e30a93d2a3790d510ab5a5decc5c4",
+      "id": "C019",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "477b80d5162ea1c10b57c505ebd43d3847fea6a51a71c8f9ce2fcce0baa02062",
+      "id": "C020",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "9343c16db80b09807b0f2e38c06d1898ff1752f6e8d51d95abe9148c605fa01f",
+      "id": "C021",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "adcbbad6d7c8447845bb9894ff82065ff20bf6ec4632f5645d9fed8024b97ee6",
+      "id": "C022",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "632789eb2a9637d3e18ad8ff1b0116521679cb484104719c7a7c26f6ef8dfe09",
+      "id": "C023",
+      "revision": {
+        "bone": "bn-2270",
+        "reason": "C023 promoted TARGET to OBSERVED via the triptych independence audit over the full dependency graph and arrows A1/A2, 14 circular mutants rejected"
+      },
+      "state": "OBSERVED"
+    },
+    {
+      "digest": "82d8638d8af4b1809fd3eb9c548d8e8c369e38afa4cb38519d73bccea369a15e",
+      "id": "C024",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "15606f5295468ea0abba1d1aae520b595e1a1fe732dd7dd9b8d3f3b0b4c15dcd",
+      "id": "C025",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "OBSERVED-BOUNDED"
+    },
+    {
+      "digest": "6951a1b196ed08f9fd2683a0771d5a6a1a0e4140ef0ef6c3647443211256eb7e",
+      "id": "C026",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "e029bea9f1d7603f94cb718a2f0aaaf80b3ffd751a2720d58771c0e1af9af28e",
+      "id": "C027",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "0e252ae2003bbcbcf9eb420ce7f0569c90194a9df8dad96e146cc85aebe47281",
+      "id": "C028",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "b99e5a36dc2f7174c15f6ab1dfe2ea4713f50b41c4f2f2a882e4d5a79acced95",
+      "id": "C029",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "b8c569b2d12ade37d1f918be8009ad679b0ba8fd29295bf45c0863a263b1bcad",
+      "id": "C030",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "465b294381eb72ee39a4e3d01531daca7db80c3a3dce8ddaab244eeec2bd1238",
+      "id": "C031",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "7153e0b08a69ba2b0235ac8ec04c41685715526b9b814d86f3c137b5cbaaf983",
+      "id": "C032",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "9596f488987985b84bcb265233471fedc1baced5106770d6994da40cd25b3d01",
+      "id": "C033",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "TARGET"
+    },
+    {
+      "digest": "7960a5e4ab43d285a7972a482df02460b2d1bc2602a24c230d9ed6933c98213d",
+      "id": "C034",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "HYPOTHESIS"
+    },
+    {
+      "digest": "b259b8f8ec576a42670d54dacca8aeabbb59748a95cc63679f1193876d8f84d2",
+      "id": "C035",
+      "revision": {
+        "bone": "bn-hakt3",
+        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+      },
+      "state": "BLOCKED"
+    }
+  ],
+  "hasher": "sha256",
+  "registry": "notes/plan/docs/18_CLAIMS_MATRIX.md",
+  "retired": [],
+  "schema": "continuum.governance.claims-baseline/1"
+}
