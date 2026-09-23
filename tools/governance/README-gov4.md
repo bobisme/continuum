@@ -1,8 +1,10 @@
 # GOV §4 onward — the shared obligation harness
 
 `check_obligations.py` is the shared harness for executable policy obligations
-from [`docs/12`](../../notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md) §4 and
-[`docs/19`](../../notes/plan/docs/19_TEST_STRATEGY.md) §2–§10. Each Bone that
+from [`docs/12`](../../notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md) §4. The
+[`docs/19`](../../notes/plan/docs/19_TEST_STRATEGY.md) TEST §2–§10 obligations live in
+the sibling harness [`tools/test-policy`](../test-policy/README-test.md) instead
+(lead decision 2026-09-22, after bn-1fqu). Each Bone that
 makes a slice of those obligations executable adds one **obligation set**. The
 first set is `obligations/gov4_semantic.py`: GOV-4-01 … GOV-4-06, what a
 semantic change must ship with (bn-37b1).
@@ -32,7 +34,7 @@ tools/governance/
 
 ## Extending it: add a set, touch nothing shared
 
-A sibling Bone (GOV §4 07–21, TEST §2–§10) adds these files and edits no
+A sibling Bone (GOV §4 07–21) adds these files and edits no
 existing line:
 
 1. `obligations/<name>.py` defining `SET = ObligationSet(...)`. Import the
