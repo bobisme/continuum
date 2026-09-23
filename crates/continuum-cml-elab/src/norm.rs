@@ -387,7 +387,9 @@ pub enum ExprKind {
     Const(String),
     /// An action parameter.
     Param(String),
-    /// A bound variable; `binder` is its unique binder number within the model.
+    /// A bound variable; `binder` is its binder number. Numbers are unique except where
+    /// the same def is inlined inside its own argument: the inner copy then nests the
+    /// same binder, which shadows the outer one lexically.
     Bound {
         /// The name as written.
         name: String,
@@ -413,7 +415,7 @@ pub enum ExprKind {
     Binary(BinOp, Box<Expr>, Box<Expr>),
     /// `if c then a else b`.
     If(Box<Expr>, Box<Expr>, Box<Expr>),
-    /// A quantifier. Each binder carries its unique number.
+    /// A quantifier. Each binder carries its number (see [`ExprKind::Bound`]).
     Quant(Quant, Vec<(u32, Binder)>, Box<Expr>),
     /// A tuple of two or more components.
     Tuple(Vec<Expr>),

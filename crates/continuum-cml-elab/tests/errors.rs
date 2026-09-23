@@ -197,9 +197,18 @@ fn lowering_refuses_with_typed_reasons() {
         lower_err(&model("action A { next x = x / 2 }")),
         (Unlowerable::DivisionOrModulo, 4)
     );
+    // A quantifier over a static range expands (RFC 0003 correction 4, bn-10j7z); one
+    // over a whole unbounded type is refused, typed, never bounded silently.
+    lower(
+        &elaborate_source(&model(
+            "action A { unchanged x }\ninvariant I { forall y in 0..1: y <= x }",
+        ))
+        .expect("elaborates"),
+    )
+    .expect("a static range expands");
     assert_eq!(
         lower_err(&model(
-            "action A { unchanged x }\ninvariant I { forall y in 0..1: y <= x }"
+            "action A { unchanged x }\ninvariant I { forall y: y + x >= 0 }"
         )),
         (Unlowerable::Quantifier, 5)
     );

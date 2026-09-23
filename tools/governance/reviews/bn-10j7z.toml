@@ -1,0 +1,69 @@
+[change]
+bone = "bn-10j7z"
+author = "continuum-dev"
+summary = "continuum-cml-elab: RFC 0003 correction 4 part B — enumeration-typed state and scalar codes, action schemas (one action per parameter tuple, named A(p=u,…), instances and widest name preflighted in aggregate), membership in set literals and constant sets, and planned quantifier expansion (whole type, static set, state-dependent set guarded by membership over an interval hull) with one plan/build code path that charges each site's output and checks its depth and predicted work before building; new typed refusal cml.lower.guarded_overflow"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/quantifiers.rs::unbounded_types_are_refused_typed_and_never_bounded_silently",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::non_scalar_binders_and_parameters_are_refused_typed",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::a_guarded_body_that_may_overflow_is_refused",
+  "crates/continuum-cml-elab/tests/errors.rs::lowering_refuses_with_typed_reasons",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::quantifier_fan_out_is_planned_and_refused_before_it_is_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::quantifier_work_is_predicted_before_it_is_spent",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::quantifier_expansion_grows_linearly",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::nested_quantifiers_multiply_in_the_plan",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_quantifier_boundary_is_exact",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::action_schemas_are_preflighted_before_any_action_is_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::action_schema_instances_are_charged_before_they_are_built",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::hand_written_quantifiers_agree_with_the_brute_force_oracle",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::generated_quantifiers_agree_with_the_brute_force_oracle",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::a_different_configuration_is_told_apart",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::cr_3aqchd_nested_domains_under_a_guard_are_proved_not_to_overflow",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::cr_3aqchd_guarded_domains_in_actions_are_proved_too",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::cr_3aqchd_empty_membership_keeps_the_evaluation_of_its_operand",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::cr_3aqchd_instance_labels_are_injective",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::cr_3aqchd_a_primed_domain_is_never_folded_away",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::cr_3aqchd_boolean_membership_lowers",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::flat_binder_lists_are_bounded_before_recursion",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_large_shared_set_is_refused_before_it_is_expanded",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_implicit_true_guard_is_charged",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::adversarial_review_regressions",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::repeated_binder_numbers_do_not_evade_the_binder_bound",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::enumeration_lookups_are_charged_by_name_length",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::an_empty_relational_guard_is_charged_per_candidate",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::an_empty_init_is_charged_per_enumerated_state",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::membership_operand_copies_are_charged",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::each_action_schema_instance_is_charged_its_record",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::each_relational_candidate_is_charged_its_record",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::each_predicate_record_is_charged",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::each_variable_record_is_charged",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::each_initial_state_is_charged",
+  "crates/continuum-model-core/tests/identity_golden.rs::the_model_identity_encoding_is_pinned_byte_for_byte",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/quantifiers.rs::alpha_renaming_bound_variables_keeps_the_lowered_model", relation = "alpha-renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/quantifiers.rs::an_action_schema_is_the_programmatic_model", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "action schemas and finite quantifier expansion are what corpus ports with parameterized actions and quantified invariants need before they reach an engine (C021) and part of the expressiveness C022 claims; this change adds evidence toward both (quantified invariants agree with a brute-force oracle, a schema equals its programmatic twin) and promotes neither: both stay TARGET, and collection-valued state and the replicated register (bn-23hzh) still do not lower"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the run configuration is read as bn-15zfa left it; the lowered Model type and continuum-model/1 identity are unchanged"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-model-core is unchanged, and so is every continuum-model/1 identity (tests/identity_golden.rs). continuum-cml-elab: every model that lowered before lowers to the same Model (the plan/build split charges the same output for quantifier-free expressions; plain actions now also charge their names as output, and every appended record (variable, predicate, action instance, relational candidate, initial state) is charged one node with its owned name, update targets' names, and initial-state bindings, so Usage figures rise; under the default output budget an init enumeration past about 2^20 output nodes of bindings is now refused as cml.lower.output_too_large, before the MAX_INIT_BINDINGS bound (cml.lower.too_many_initial_states), which still applies under a larger budget, and a parameterized action is refused in the preflight rather than in the action loop, with the same code and span). Models that were refused as cml.lower.quantifier or cml.lower.parameterized_action, and enumeration-typed state refused as cml.lower.non_integer_state, now lower when their domains are finite; no stored artifact records those refusals. Unlowerable::GuardedOverflow is new surface"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3aqchd"
+verdict = "approved"

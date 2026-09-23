@@ -188,7 +188,21 @@ const _: () = assert!(MAX_INIT_BINDINGS < 22 << 22);
 
 fn assert_wide_init_is_refused() {
     let model = elaborate_source(&wide_init_source()).expect("elaborates");
-    let e = lower(&model).expect_err("too many initial states");
+    // Each accepted state is charged to the output budget before it is copied
+    // (cr-3aqchd), so under the default limits the output budget refuses first.
+    let e = lower(&model).expect_err("over the output budget");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+    // With an output budget past the binding bound, the binding bound refuses.
+    let unbounded_output = Limits {
+        nodes: 64 * MAX_INIT_BINDINGS,
+        ..Limits::default()
+    };
+    let e = lower_with(&model, unbounded_output)
+        .0
+        .expect_err("too many initial states");
     assert_eq!(
         e.kind,
         LowerErrorKind::Unlowerable(Unlowerable::TooManyInitialStates)
@@ -1665,4 +1679,777 @@ fn an_int_bound_at_the_i64_edge_is_exact() {
             .kind,
         ConfigErrorKind::BoundTooLarge
     );
+}
+
+// ---------------------------------------------------------------------------
+// bn-10j7z: quantifier expansion and action schemas (RFC 0003 correction 4)
+// ---------------------------------------------------------------------------
+
+/// `forall i in 0..n: i + x >= 0` over one small variable: a static fan-out of `n + 1`.
+fn quantified(n: u64) -> NormModel {
+    elaborate_source(&format!(
+        "module F\nstate {{ x: Nat where x <= 1 }}\ninit {{ x == 0 }}\naction A {{ unchanged x }}\ninvariant I {{ forall i in 0..{n}: i + x >= 0 }}\n"
+    ))
+    .expect("elaborates")
+}
+
+/// A fan-out past the output budget is refused from the plan, before any instance is
+/// built, within the memory limit: the nodes charged are the few before the plan, and
+/// the work a small fraction of one per candidate. Anti-vacuity: a small fan-out lowers
+/// and is charged per instance.
+#[test]
+fn quantifier_fan_out_is_planned_and_refused_before_it_is_built() {
+    fn body() {
+        let n = 50_000_000;
+        let (result, usage) = lower_with(&quantified(n), Limits::default());
+        assert_eq!(
+            result.expect_err("too wide").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+        );
+        assert!(usage.nodes < 1_000, "nothing was built: {usage:?}");
+        assert!(usage.work < 10_000, "no candidate was visited: {usage:?}");
+        let (result, usage) = lower_with(&quantified(999), Limits::default());
+        result.expect("a small fan-out lowers");
+        assert!(
+            usage.nodes >= 1_000 * 5,
+            "each instance is charged: {usage:?}"
+        );
+    }
+    under_memory_limit(
+        "quantifier_fan_out_is_planned_and_refused_before_it_is_built",
+        body,
+    );
+}
+
+/// The work of a fan-out is predicted from the plan and refused before the first
+/// instance when it does not fit (the build would spend at least one unit per
+/// candidate; the refusal spent far less).
+#[test]
+fn quantifier_work_is_predicted_before_it_is_spent() {
+    let model = quantified(100_000);
+    let tight = Limits {
+        work: 150_000,
+        ..Limits::default()
+    };
+    let (result, usage) = lower_with(&model, tight);
+    assert_eq!(
+        result.expect_err("over the work budget").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+    assert!(
+        usage.work < 10_000,
+        "refused from the prediction: {usage:?}"
+    );
+}
+
+/// Operation counting: the output and work of an expansion grow linearly in its
+/// fan-out.
+#[test]
+fn quantifier_expansion_grows_linearly() {
+    let usage = |n: u64| {
+        let (result, usage) = lower_with(&quantified(n), Limits::default());
+        result.expect("lowers");
+        usage
+    };
+    let (small, large) = (usage(20_000), usage(40_000));
+    assert_linear("fan-out work", small.work, large.work);
+    assert!(
+        large.nodes as f64 / small.nodes as f64 <= LINEAR_RATIO,
+        "fan-out output: {small:?} -> {large:?}"
+    );
+}
+
+/// `k` nested quantifiers over `0..9`: the plan multiplies their fan-outs.
+fn nested_quantifiers(k: usize) -> NormModel {
+    let mut body = String::from("x >= 0");
+    for i in (0..k).rev() {
+        body = format!("forall q{i} in 0..9: (q{i} >= 0 && {body})");
+    }
+    elaborate_source(&format!(
+        "module N\nstate {{ x: Nat where x <= 1 }}\ninit {{ x == 0 }}\naction A {{ unchanged x }}\ninvariant I {{ {body} }}\n"
+    ))
+    .expect("elaborates")
+}
+
+/// Nested quantifiers multiply in the plan: six levels of ten (a million instances)
+/// are refused before any is built; three lower, charged per instance. Nesting deep
+/// enough to pass the model's depth bound is refused from the plan's depth, before
+/// any node is built.
+#[test]
+fn nested_quantifiers_multiply_in_the_plan() {
+    fn body() {
+        let (result, usage) = lower_with(&nested_quantifiers(6), Limits::default());
+        assert_eq!(
+            result.expect_err("a million instances").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+        );
+        assert!(usage.nodes < 1_000, "nothing was built: {usage:?}");
+        let (result, usage) = lower_with(&nested_quantifiers(3), Limits::default());
+        result.expect("a thousand instances lower");
+        assert!(usage.nodes >= 1_000, "{usage:?}");
+        let deep = elaborate_source(
+            "module D\nstate { x: Nat where x <= 1 }\ninit { x == 0 }\naction A { unchanged x }\ninvariant I { forall a in 0..511: forall b in 0..511: forall c in 0..511: forall d in 0..511: a + b + c + d + x >= 0 }\n",
+        )
+        .expect("elaborates");
+        let (result, usage) = lower_with(&deep, Limits::default());
+        assert_eq!(
+            result.expect_err("36 levels").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::ExpressionTooDeep)
+        );
+        assert!(usage.nodes < 1_000, "{usage:?}");
+    }
+    under_memory_limit("nested_quantifiers_multiply_in_the_plan", body);
+}
+
+/// The boundary, from a measured run: at the measured nodes and work a quantified
+/// model lowers; one node or one unit less is refused, typed.
+#[test]
+fn the_quantifier_boundary_is_exact() {
+    let model = nested_quantifiers(2);
+    let (result, used) = lower_with(&model, Limits::default());
+    result.expect("lowers");
+    lower_with(&model, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits");
+    let e = lower_with(&model, used_limits(used.nodes - 1, used.work))
+        .0
+        .expect_err("one node less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+    let e = lower_with(&model, used_limits(used.nodes, used.work - 1))
+        .0
+        .expect_err("one unit less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+}
+
+/// An enumeration of `k` variants, each name padded to `pad` bytes, and an action
+/// with two parameters of it.
+fn enum_schema(k: usize, pad: usize) -> NormModel {
+    let variants: Vec<String> = (0..k).map(|i| format!("V{i:0>pad$}")).collect();
+    elaborate_source(&format!(
+        "module S\nenum E {{ {} }}\nstate {{ x: Nat where x <= 1 }}\ninit {{ x == 0 }}\naction A(p: E, q: E) {{ require p != q\n next x = 1 - x }}\n",
+        variants.join(", ")
+    ))
+    .expect("elaborates")
+}
+
+/// The instance count is preflighted in aggregate against `MAX_ACTIONS`, and the widest
+/// instance name against `MAX_IDENT_BYTES`, before any action is built. At the bound
+/// (64 × 64 = 4096 instances) the schema lowers.
+#[test]
+fn action_schemas_are_preflighted_before_any_action_is_built() {
+    fn body() {
+        let (result, usage) = lower_with(&enum_schema(65, 1), Limits::default());
+        assert_eq!(
+            result.expect_err("4225 instances").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::TooManyActions)
+        );
+        assert!(usage.nodes < 2_000, "no action was built: {usage:?}");
+        let lowered = lower_with(&enum_schema(64, 1), Limits::default())
+            .0
+            .expect("4096 instances lower");
+        assert_eq!(lowered.actions().len(), MAX_ACTIONS);
+        // `A(p=V…,q=V…)`: 8 bytes plus two names of `pad + 1` bytes, so `pad = 59` is
+        // exactly `MAX_IDENT_BYTES` and `pad = 60` is past it.
+        let pad = (MAX_IDENT_BYTES - 8) / 2 - 1;
+        let lowered = lower_with(&enum_schema(2, pad), Limits::default())
+            .0
+            .expect("the widest name fits");
+        let widest = lowered
+            .actions()
+            .iter()
+            .map(|a| a.name().as_str().len())
+            .max();
+        assert_eq!(widest, Some(MAX_IDENT_BYTES));
+        let (result, usage) = lower_with(&enum_schema(2, pad + 1), Limits::default());
+        assert_eq!(
+            result.expect_err("past the name bound").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::NameTooLong)
+        );
+        assert!(usage.nodes < 2_000, "{usage:?}");
+    }
+    under_memory_limit(
+        "action_schemas_are_preflighted_before_any_action_is_built",
+        body,
+    );
+}
+
+/// The instances of a schema are charged before the first is built: under an output
+/// limit below the plan, nothing is built and the usage stays within the limit.
+#[test]
+fn action_schema_instances_are_charged_before_they_are_built() {
+    let model = enum_schema(40, 1);
+    let (result, used) = lower_with(&model, Limits::default());
+    result.expect("lowers");
+    assert!(
+        used.nodes >= 40 * 40 * 3,
+        "each instance is charged: {used:?}"
+    );
+    let limit = used.nodes / 2;
+    let (result, usage) = lower_with(&model, used_limits(limit, MAX_WORK));
+    assert_eq!(
+        result.expect_err("half the output").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+    assert!(usage.nodes <= limit, "{usage:?}");
+}
+
+// ---------------------------------------------------------------------------
+// cr-3aqchd round 4: flat binder lists, shared sets, the implicit `true` guard
+// ---------------------------------------------------------------------------
+
+/// A quantifier with `k` singleton binders (`v0 in {0}, v1 in {0}, …`) placed in init,
+/// an invariant, or an action guard. Built one binder at a time.
+fn flat_singletons(k: usize, site: &str) -> String {
+    let binders: Vec<String> = (0..k).map(|i| format!("v{i} in {{0}}")).collect();
+    let q = format!("(forall {}: x >= 0)", binders.join(", "));
+    let (init, guard, inv) = match site {
+        "init" => (format!("x == 0 && {q}"), "true".to_owned(), String::new()),
+        "guard" => ("x == 0".to_owned(), q, String::new()),
+        _ => (
+            "x == 0".to_owned(),
+            "true".to_owned(),
+            format!("invariant I {{ {q} }}\n"),
+        ),
+    };
+    format!(
+        "module F\nstate {{ x: Nat where x <= 1 }}\ninit {{ {init} }}\naction A {{ require {guard}\n unchanged x }}\n{inv}"
+    )
+}
+
+/// Elaborate `src` under an output budget wide enough for 100,000 binders (the
+/// default refuses them in elaboration), then lower it with the default limits, all in
+/// a [`SMALL_STACK`] thread: the lowering's code, or `None` when it lowers.
+fn lower_wide_in_small_stack(src: String) -> Option<&'static str> {
+    thread::Builder::new()
+        .stack_size(SMALL_STACK)
+        .spawn(move || {
+            let wide = Limits {
+                nodes: 1 << 24,
+                work: MAX_WORK,
+            };
+            let model = elaborate_source_with(&src, wide)
+                .0
+                .expect("a flat binder list elaborates under a wide budget");
+            lower(&model).err().map(|e| e.code())
+        })
+        .expect("spawn")
+        .join()
+        .expect("the lowering does not overflow a quarter of the default stack")
+}
+
+/// One `Quant` node may hold any number of binders, which the source depth does not
+/// bound: the binders in scope are bounded by `MAX_BINDER_NESTING` before the lowering
+/// recurses. 4,000 and 100,000 flat singleton binders are refused, typed, in a small
+/// stack, in init, an invariant, and an action guard; the bound itself lowers.
+#[test]
+fn flat_binder_lists_are_bounded_before_recursion() {
+    fn body() {
+        for site in ["init", "invariant", "guard"] {
+            for k in [4_000, 100_000] {
+                assert_eq!(
+                    lower_wide_in_small_stack(flat_singletons(k, site)),
+                    Some("cml.lower.expression_too_deep"),
+                    "{k} binders in {site}"
+                );
+            }
+        }
+    }
+    under_memory_limit("flat_binder_lists_are_bounded_before_recursion", body);
+    use continuum_cml_elab::lower::MAX_BINDER_NESTING;
+    for site in ["init", "invariant", "guard"] {
+        let (_, lowered) = pipeline(flat_singletons(MAX_BINDER_NESTING, site));
+        assert_eq!(
+            lowered, None,
+            "{MAX_BINDER_NESTING} binders in {site} lower"
+        );
+        let (_, lowered) = pipeline(flat_singletons(MAX_BINDER_NESTING + 1, site));
+        assert_eq!(lowered, Some("cml.lower.expression_too_deep"), "{site}");
+    }
+}
+
+/// A 65,536-member configured set, tested thousands of times in one action: the set is
+/// shared, never copied, and the plan's predicted work is checked as it grows, so a
+/// tight work limit refuses within the first test — the work spent past the bindings is
+/// a small fraction of one pass over the set.
+#[test]
+fn a_large_shared_set_is_refused_before_it_is_expanded() {
+    fn body() {
+        let members: Vec<String> = (0..65_536).map(|i| format!("{{\"int\":{i}}}")).collect();
+        let doc = format!(
+            r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"G","sorts":{{}},"constants":{{"Big":{{"set":[{}]}}}}}}"#,
+            members.join(",")
+        );
+        let config = RunConfig::parse(doc.as_bytes()).expect("reads");
+        let source = |uses: usize| {
+            let mut guard = String::new();
+            for _ in 0..uses {
+                guard.push_str("  require x in Big\n");
+            }
+            elaborate_source(&format!(
+                "module G\nconst Big: Set[Int]\nstate {{ x: Int where x in 0..3 }}\ninit {{ x == 0 }}\naction A {{\n{guard}  unchanged x\n}}\n"
+            ))
+            .expect("elaborates")
+        };
+        // The bindings alone (no use of the set).
+        let (result, base) = lower_configured(&source(0), &config, Limits::default());
+        result.expect("lowers");
+        let tight = Limits {
+            work: base.work + 100_000,
+            ..Limits::default()
+        };
+        let (result, usage) = lower_configured(&source(3_000), &config, tight);
+        assert_eq!(
+            result.expect_err("over the work limit").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+        );
+        assert!(
+            usage.work.saturating_sub(base.work) < 65_536,
+            "refused within the first use of the set: {usage:?} past {base:?}"
+        );
+    }
+    under_memory_limit("a_large_shared_set_is_refused_before_it_is_expanded", body);
+}
+
+/// The implicit `true` guard of every action instance is a charged node: an empty guard
+/// costs what `require true` costs, and the exact limit holds.
+#[test]
+fn the_implicit_true_guard_is_charged() {
+    let src = |guard: &str| {
+        elaborate_source(&format!(
+            "module T\nenum E {{ A0, A1, A2, A3 }}\nstate {{ x: Nat where x <= 1 }}\ninit {{ x == 0 }}\naction A(p: E, q: E) {{ {guard} next x = 1 - x }}\n"
+        ))
+        .expect("elaborates")
+    };
+    let (empty, used) = lower_with(&src(""), Limits::default());
+    let (explicit, used_true) = lower_with(&src("require true\n"), Limits::default());
+    assert_eq!(empty.expect("lowers"), explicit.expect("lowers"));
+    assert_eq!(used.nodes, used_true.nodes, "the implicit true is charged");
+    lower_with(&src(""), used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits");
+    let e = lower_with(&src(""), used_limits(used.nodes - 1, used.work))
+        .0
+        .expect_err("one node less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+}
+
+/// Adversarial pre-review (cr-3aqchd round 4): a hand-built model whose flat binder list
+/// repeats one binder number does not grow the scope table, so the binder bound counts
+/// binders entered, not table entries. 100,000 binders all numbered 0 are refused,
+/// typed, in a small stack.
+#[test]
+fn repeated_binder_numbers_do_not_evade_the_binder_bound() {
+    fn body() {
+        let src = flat_singletons(100_000, "invariant");
+        let out = thread::Builder::new()
+            .stack_size(SMALL_STACK)
+            .spawn(move || {
+                let wide = Limits {
+                    nodes: 1 << 24,
+                    work: MAX_WORK,
+                };
+                let mut model = elaborate_source_with(&src, wide).0.expect("elaborates");
+                let clause = &mut model.invariants[0].clauses[0];
+                if let continuum_cml_elab::norm::ExprKind::Quant(_, bs, _) = &mut clause.kind {
+                    for (id, _) in bs.iter_mut() {
+                        *id = 0;
+                    }
+                } else {
+                    panic!("the invariant is one quantifier");
+                }
+                lower(&model).err().map(|e| e.code())
+            })
+            .expect("spawn")
+            .join()
+            .expect("no stack overflow");
+        assert_eq!(out, Some("cml.lower.expression_too_deep"));
+    }
+    under_memory_limit(
+        "repeated_binder_numbers_do_not_evade_the_binder_bound",
+        body,
+    );
+}
+
+/// Adversarial pre-review (cr-3aqchd round 4): the enumeration lookup of every
+/// enumeration-typed node is charged by the enumeration name's length, so a long name
+/// under a quantifier's fan-out costs work in proportion (operation counting).
+#[test]
+fn enumeration_lookups_are_charged_by_name_length() {
+    let work = |name_len: usize| {
+        let name = format!("E{}", "e".repeat(name_len));
+        let src = format!(
+            "module N\nenum {name} {{ A0, A1 }}\nstate {{ x: {name} }}\ninit {{ x == A0 }}\naction A {{ unchanged x }}\ninvariant I {{ forall b in 0..999: x == x }}\n"
+        );
+        let wide = Limits {
+            nodes: 1 << 22,
+            work: MAX_WORK,
+        };
+        let model = elaborate_source_with(&src, wide).0.expect("elaborates");
+        let (result, usage) = lower_with(&model, Limits::default());
+        result.expect("lowers");
+        usage.work
+    };
+    let (short, long) = (work(8), work(32_000));
+    // 1,000 instances × 2 reads × ⌈32,001 / 32⌉ units each, at least.
+    assert!(long >= short + 2_000 * 1_000, "{short} -> {long}");
+}
+
+// ---------------------------------------------------------------------------
+// cr-3aqchd round 5: the `true` of an empty conjunction is counted; no clone of an
+// operand escapes the meter
+// ---------------------------------------------------------------------------
+
+/// A hand-built relational action with no guard clause and no postcondition (only the
+/// public `lower` API can produce one): each of its 1,000 candidates copies the `true`
+/// guard, and that copy is charged — the output covers the candidates' copies with the
+/// guard counted as one node — and the exact limits hold.
+#[test]
+fn an_empty_relational_guard_is_charged_per_candidate() {
+    let mut model = elaborate_source(
+        "module R\nstate { x: Nat where x <= 999 }\ninit { x == 0 }\naction A { x' >= 0 }\n",
+    )
+    .expect("elaborates");
+    model.actions[0].post.clear();
+    let (result, used) = lower_with(&model, Limits::default());
+    let lowered = result.expect("lowers");
+    assert_eq!(lowered.actions().len(), 1_000);
+    // Per candidate: the `true` guard, the constant update, and the name `A[x=999]`.
+    let floor = successor_work(1_000, 2, "A[x=999]".len());
+    assert!(used.nodes as u64 >= floor, "{used:?} < {floor}");
+    lower_with(&model, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits");
+    for tight in [
+        used_limits(used.nodes - 1, used.work),
+        used_limits(used.nodes, used.work - 1),
+    ] {
+        assert!(lower_with(&model, tight).0.is_err(), "{tight:?}");
+    }
+}
+
+/// `init` with no clause: each enumerated state still evaluates the `true` predicate,
+/// which the enumeration's precharge counts (one node per state). Exact work boundary;
+/// and a work limit under that precharge refuses before enumerating.
+#[test]
+fn an_empty_init_is_charged_per_enumerated_state() {
+    fn body() {
+        let n = 16;
+        let mut src = String::from("module I\nstate {\n");
+        for i in 0..n {
+            src.push_str(&format!("  b{i:02}: Nat where b{i:02} <= 1\n"));
+        }
+        src.push_str("}\ninit { true }\naction A {\n");
+        for i in 0..n {
+            src.push_str(&format!("  unchanged b{i:02}\n"));
+        }
+        src.push_str("}\n");
+        let mut model = elaborate_source(&src).expect("elaborates");
+        if let Some(init) = &mut model.init {
+            init.clauses.clear();
+        }
+        // The 2^16 states hold 2^20 bindings, each charged with its owned name
+        // (cr-3aqchd): past the default output budget, so the output limit is raised.
+        let wide = Limits {
+            nodes: 4 * MAX_NODES,
+            ..Limits::default()
+        };
+        let (result, used) = lower_with(&model, wide);
+        assert_eq!(result.expect("lowers").initial_states().len(), 1 << n);
+        assert!(
+            used.work >= init_work(1 << n, 1, n),
+            "the true predicate is counted per state: {used:?}"
+        );
+        lower_with(&model, used_limits(used.nodes, used.work))
+            .0
+            .expect("at the limits");
+        let e = lower_with(&model, used_limits(used.nodes, used.work - 1))
+            .0
+            .expect_err("one unit less");
+        assert_eq!(
+            e.kind,
+            LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+        );
+        // A limit the enumeration's precharge alone exceeds (the lowering has spent some
+        // work before it): refused at the precharge, before any state.
+        let precharge = init_work(1 << n, 1, n);
+        let (result, spent) = lower_with(&model, used_limits(used.nodes, precharge));
+        assert_eq!(
+            result.expect_err("under the precharge").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+        );
+        assert!(spent.work < 1 << n, "refused before enumerating: {spent:?}");
+    }
+    under_memory_limit("an_empty_init_is_charged_per_enumerated_state", body);
+}
+
+/// A large operand tested against several members under a fan-out: every comparison
+/// but the last takes a charged copy and the last takes the operand itself, so the
+/// work counts the copies (operation counting), grows linearly with the operand, and
+/// its boundary is exact.
+#[test]
+fn membership_operand_copies_are_charged() {
+    // A balanced sum of `terms` (a power of two) copies of `x`: shallow, but large.
+    let src = |terms: usize| {
+        let mut operand = String::from("x");
+        let mut width = 1;
+        while width < terms {
+            operand = format!("({operand} + {operand})");
+            width *= 2;
+        }
+        elaborate_source(&format!(
+            "module M\nstate {{ x: Nat where x <= 1 }}\ninit {{ x == 0 }}\naction A {{ unchanged x }}\ninvariant I {{ forall i in 0..99: ({operand}) + i in {{1, 2, 3, 4}} }}\n"
+        ))
+        .expect("elaborates")
+    };
+    let usage = |terms: usize| {
+        let (result, used) = lower_with(&src(terms), Limits::default());
+        result.expect("lowers");
+        used
+    };
+    let (small, large) = (usage(64), usage(128));
+    // 100 instances × 3 copies × (2·128 − 1 + …) nodes each, at least.
+    assert!(large.work >= 100 * 3 * 255, "{large:?}");
+    assert_linear("membership operand copies", small.work, large.work);
+    let model = src(64);
+    lower_with(&model, used_limits(small.nodes, small.work))
+        .0
+        .expect("at the limits");
+    let e = lower_with(&model, used_limits(small.nodes, small.work - 1))
+        .0
+        .expect_err("one unit less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// cr-3aqchd round 5: every record appended to the output model is charged
+// ---------------------------------------------------------------------------
+
+/// The node cost of `bytes` of owned text, as the lowering counts it.
+fn text_nodes(bytes: usize) -> usize {
+    bytes.div_ceil(continuum_cml_elab::budget::BYTES_PER_NODE)
+}
+
+fn int_nodes(e: &continuum_model_core::IntExpr) -> usize {
+    use continuum_model_core::IntExpr as I;
+    match e {
+        I::Const(_) => 1,
+        I::Var(v) => 1 + text_nodes(v.len()),
+        I::Arith(_, a, b) | I::Min(a, b) | I::Max(a, b) => 1 + int_nodes(a) + int_nodes(b),
+    }
+}
+
+fn bool_nodes(e: &continuum_model_core::BoolExpr) -> usize {
+    use continuum_model_core::BoolExpr as B;
+    match e {
+        B::Const(_) => 1,
+        B::Compare { left, right, .. } => 1 + int_nodes(left) + int_nodes(right),
+        B::Not(a) => 1 + bool_nodes(a),
+        B::And(a, b) | B::Or(a, b) | B::Implies(a, b) => 1 + bool_nodes(a) + bool_nodes(b),
+        B::InRange { expr, .. } => 1 + int_nodes(expr),
+    }
+}
+
+/// The output a lowered model holds, measured from the model alone, independent of the
+/// lowering: per variable, action, and predicate one record node and its owned name;
+/// each expression node, a variable read with its owned name; each update, its
+/// expression and its owned target name; each initial state, a record node and per
+/// variable a binding (a node and its owned copy of the name, as the builder holds it).
+fn output_nodes(model: &continuum_model_core::Model) -> usize {
+    let variables: usize = model
+        .variables()
+        .iter()
+        .map(|v| 1 + text_nodes(v.name().as_str().len()))
+        .sum();
+    let actions: usize = model
+        .actions()
+        .iter()
+        .map(|a| {
+            let updates: usize = a
+                .outcomes()
+                .iter()
+                .flat_map(|o| o.assignments())
+                .map(|u| text_nodes(u.variable().as_str().len()) + int_nodes(u.value()))
+                .sum();
+            1 + text_nodes(a.name().as_str().len()) + bool_nodes(a.guard()) + updates
+        })
+        .sum();
+    let predicates: usize = model
+        .predicates()
+        .iter()
+        .map(|p| 1 + text_nodes(p.name().as_str().len()) + bool_nodes(p.body()))
+        .sum();
+    // One state's bindings: per variable, a node and its name (the same sum as the
+    // variable records, computed on its own).
+    let bindings: usize = model
+        .variables()
+        .iter()
+        .map(|v| 1 + text_nodes(v.name().as_str().len()))
+        .sum();
+    let states = model.initial_states().len() * (1 + bindings);
+    variables + actions + predicates + states
+}
+
+/// Lower `src` under the default limits: the model and the usage.
+fn lowered_with_usage(src: &str) -> (continuum_model_core::Model, continuum_cml_elab::Usage) {
+    let (result, used) = lowering_usage(src);
+    let model = result.unwrap_or_else(|e| panic!("lowers: {e}"));
+    assert!(
+        used.nodes >= output_nodes(&model),
+        "the charge covers the output: {used:?}, {} nodes",
+        output_nodes(&model)
+    );
+    (model, used)
+}
+
+/// The output limit is exact at `used.nodes`: at it the model lowers, one node less is
+/// refused, typed.
+fn assert_output_boundary(src: &str, used: continuum_cml_elab::Usage) {
+    let m = elaborate_source(src).expect("elaborates");
+    lower_with(&m, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits");
+    let e = lower_with(&m, used_limits(used.nodes - 1, used.work))
+        .0
+        .expect_err("one node less");
+    assert_eq!(
+        e.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+}
+
+/// An action schema over `param` (an enumeration of four or eight equal-width
+/// variants, both always declared), with one guard clause and one update.
+fn schema_source(param: &str) -> String {
+    format!(
+        "module S\nenum Four {{ A0, A1, A2, A3 }}\nenum Eight {{ B0, B1, B2, B3, B4, B5, B6, B7 }}\nstate {{ x: Nat where x <= 1 }}\ninit {{ x == 0 }}\naction A(p: {param}) {{ require x <= 1\n next x = 1 - x }}\n"
+    )
+}
+
+/// Each instance of a plain action schema appends one `ActionDecl`, and the plan
+/// charges exactly that record: its node, its name, its guard, and its update with the
+/// target name. With the same declarations and four more instances, the output grows
+/// by exactly the four records the model gained, measured from the model alone. A plan
+/// that dropped the record node (or the target name) would charge less than the output
+/// grew (cr-3aqchd round 5).
+#[test]
+fn each_action_schema_instance_is_charged_its_record() {
+    let (four, small) = lowered_with_usage(&schema_source("Four"));
+    let (eight, large) = lowered_with_usage(&schema_source("Eight"));
+    assert_eq!((four.actions().len(), eight.actions().len()), (4, 8));
+    let grown = output_nodes(&eight) - output_nodes(&four);
+    // One record, the 7-byte name `A(p=B0)`, the guard `x <= 1` (a read of `x` is a
+    // node and its name), and `x := 1 - x` with its target name.
+    assert_eq!(grown, 4 * (1 + 1 + 4 + (1 + 4)), "the measure");
+    assert_eq!(
+        large.nodes - small.nodes,
+        grown,
+        "the plan charges each instance its output, no less and no more"
+    );
+    assert_output_boundary(&schema_source("Eight"), large);
+    assert_output_boundary(&schema_source("Four"), small);
+}
+
+/// A relational action over `r` (`x` in `0..3` or `y` in `0..7`, both declared).
+fn relational_record_source(r: &str, other: &str) -> String {
+    format!(
+        "module R\nstate {{ x: Nat where x <= 3\n y: Nat where y <= 7 }}\ninit {{ x == 0 && y == 0 }}\naction A {{ {r}' >= 0\n unchanged {other} }}\n"
+    )
+}
+
+/// Each relational candidate is one appended record: its node, name, guard, and the
+/// constant update `r := c` with its target name, charged through `successor_work`.
+/// Four more candidates grow the charge by their output plus two nodes per candidate
+/// by which the template is an upper bound: `conjoined_size` counts one more than the
+/// conjoined tree, and the post-state read is planned as a named read (a node and its
+/// name) that the build replaces by a one-node constant.
+#[test]
+fn each_relational_candidate_is_charged_its_record() {
+    let (four, small) = lowered_with_usage(&relational_record_source("x", "y"));
+    let (eight, large) = lowered_with_usage(&relational_record_source("y", "x"));
+    assert_eq!((four.actions().len(), eight.actions().len()), (4, 8));
+    let grown = output_nodes(&eight) - output_nodes(&four);
+    // One record, the name `A[y=0]`, the guard `c >= 0`, and `y := c`.
+    assert_eq!(grown, 4 * (1 + 1 + 3 + (1 + 1)), "the measure");
+    assert_eq!(large.nodes - small.nodes, grown + 4 * 2);
+    assert_output_boundary(&relational_record_source("y", "x"), large);
+}
+
+/// Each invariant appends one predicate record with its owned name: a second
+/// invariant grows the charge by exactly its record, name, and body.
+#[test]
+fn each_predicate_record_is_charged() {
+    let src = |extra: &str| {
+        format!(
+            "module P\nstate {{ x: Nat where x <= 1 }}\ninit {{ x == 0 }}\naction A {{ unchanged x }}\ninvariant I {{ x <= 1 }}\n{extra}"
+        )
+    };
+    let one_src = src("");
+    let two_src = src("invariant J {{ x <= 1 }}\n")
+        .replace("{{", "{")
+        .replace("}}", "}");
+    let (one, small) = lowered_with_usage(&one_src);
+    let (two, large) = lowered_with_usage(&two_src);
+    assert_eq!(two.predicates().len(), 2);
+    let grown = output_nodes(&two) - output_nodes(&one);
+    assert_eq!(grown, 1 + 1 + 4, "the measure");
+    assert_eq!(large.nodes - small.nodes, grown);
+    assert_output_boundary(&two_src, large);
+}
+
+/// Each state variable appends one variable record with its owned name. A second
+/// variable (of one value, so the init and action are unchanged in size) grows the
+/// output by its record and its binding in the one initial state, and the charge by
+/// that plus its entry in the lowering's domain table.
+#[test]
+fn each_variable_record_is_charged() {
+    let one_src =
+        "module V\nstate { x: Nat where x <= 1 }\ninit { x == 0 }\naction A { unchanged x }\n";
+    let two_src = "module V\nstate { x: Nat where x <= 1\n z: Nat where z <= 0 }\ninit { x == 0 }\naction A { unchanged x, z }\n";
+    let (one, small) = lowered_with_usage(one_src);
+    let (two, large) = lowered_with_usage(two_src);
+    assert_eq!(two.variables().len(), 2);
+    let grown = output_nodes(&two) - output_nodes(&one);
+    assert_eq!(grown, (1 + 1) + (1 + 1), "the measure");
+    // The domain table's entry for `z`: one node (the names `x` and `z` share one text
+    // node in its charge).
+    assert_eq!(large.nodes - small.nodes, grown + 1);
+    assert_output_boundary(two_src, large);
+}
+
+/// `x` in `0..7`, and an init that accepts `x <= hi`: the same predicate size for every
+/// `hi`, and `hi + 1` initial states.
+fn init_states_source(hi: u8) -> String {
+    format!(
+        "module I\nstate {{ x: Nat where x <= 7 }}\ninit {{ x <= {hi} }}\naction A {{ unchanged x }}\n"
+    )
+}
+
+/// Each accepted initial state is copied into the builder as a record and a binding
+/// per variable (with its owned name): charged before the copy. Four more states grow
+/// the charge by exactly the four records the model gained (cr-3aqchd).
+#[test]
+fn each_initial_state_is_charged() {
+    let (four, small) = lowered_with_usage(&init_states_source(3));
+    let (eight, large) = lowered_with_usage(&init_states_source(7));
+    assert_eq!(
+        (four.initial_states().len(), eight.initial_states().len()),
+        (4, 8)
+    );
+    let grown = output_nodes(&eight) - output_nodes(&four);
+    // One record, and the binding of `x`: a node and its name.
+    assert_eq!(grown, 4 * (1 + (1 + 1)), "the measure");
+    assert_eq!(large.nodes - small.nodes, grown);
+    assert_output_boundary(&init_states_source(7), large);
 }

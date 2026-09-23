@@ -18,9 +18,15 @@
 //! - every state variable is `Int` or `Nat` with a refinement that fixes a finite
 //!   interval: `v <= c`, `v < c`, `v >= c`, `v > c`, or `v in a..b`, with constant
 //!   bounds (`Nat` supplies the lower bound `0`);
-//! - actions take no parameters, and every guard, update, and invariant uses only
-//!   integer arithmetic (`+ - *`, unary `-`, `min`, `max`), comparisons, `in a..b`, and
-//!   the boolean connectives;
+//! - every state variable of an enumeration ranges over its variant indices;
+//! - every guard, update, and invariant uses only integer arithmetic (`+ - *`, unary
+//!   `-`, `min`, `max`), comparisons, `in a..b`, membership in a set literal or a
+//!   configuration constant set of scalars, the boolean connectives, and `forall` /
+//!   `exists` over a finite scalar domain, expanded (RFC 0003 correction 4, "Quantifier
+//!   expansion");
+//! - an action's parameters have finite scalar types; it lowers to one action per
+//!   parameter tuple, named `A(p=u,…)` (correction 4, "Action schemas");
+//! - every expression is planned before it is built: see [`Mode`] and `begin_site`;
 //! - a relational action (RFC 0003 "Relational actions") has at most
 //!   [`MAX_RELATIONAL_CANDIDATES`] candidate post-states; it lowers to one action per
 //!   candidate, named `A[r=c,…]`, whose guard includes the postconditions at that
@@ -32,8 +38,9 @@
 //!   programmatic model cannot carry.
 //!
 //! Anything else is a typed [`Unlowerable`] reason, never an approximation: an unbounded
-//! `Nat` is not silently bounded, a quantifier is not silently unrolled, and a fairness
-//! assumption is not silently dropped.
+//! `Nat` is not silently bounded, a quantifier is unrolled only over a finite domain it
+//! enumerates exactly (never a truncated one), and a fairness assumption is not silently
+//! dropped.
 //!
 //! # Under a run configuration
 //!
@@ -61,7 +68,9 @@
 //! PO-MOD-003), and is never clamped.
 
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 use std::fmt;
+use std::rc::Rc;
 
 use continuum_cml_syntax::Span;
 use continuum_model_core::domain::{Domain, Variable};
@@ -69,7 +78,8 @@ use continuum_model_core::expr::{Environment, MAX_EXPR_DEPTH};
 use continuum_model_core::ident::MAX_IDENT_BYTES;
 use continuum_model_core::model::{MAX_ACTIONS, MAX_INITIAL_STATES, MAX_VARIABLES};
 use continuum_model_core::{
-    ActionDecl, BoolExpr, CmpOp, EvalError, Ident, IntExpr, Model, ModelBuilder, ModelError,
+    ActionDecl, ArithOp, BoolExpr, CmpOp, EvalError, Ident, IntExpr, Model, ModelBuilder,
+    ModelError,
 };
 
 use crate::budget::{Budget, Fuel, Limits, Usage, lookup_cost, sort_cost};
@@ -98,8 +108,9 @@ pub const MAX_RELATIONAL_CANDIDATES: u128 = MAX_ACTIONS as u128;
 /// list of owned `(name, value)` bindings in [`ModelBuilder`], and the builder refuses a
 /// list that is too long only after it holds all of it. The count is checked before each
 /// state is added, so a model whose init accepts too many states is refused at a bounded
-/// allocation (INV-016: source is untrusted). At the limit the bindings take a few tens
-/// of MiB.
+/// allocation (INV-016: source is untrusted). Each accepted state is also charged to the
+/// output budget (a record, and per binding a node and its name) before it is copied, so
+/// under the default budget that limit is reached first (cr-3aqchd).
 pub const MAX_INIT_BINDINGS: usize = 1 << 20;
 
 // Every accepted initial state holds at least one binding, so the binding bound also
@@ -168,6 +179,13 @@ pub enum Unlowerable {
     /// A post-state read (`x'`) outside an action's postconditions, in a hand-built
     /// model. Elaboration never produces one.
     PrimedOutsidePostcondition,
+    /// A quantifier over a domain that reads state, whose body might overflow at a
+    /// candidate outside the domain (RFC 0003 correction 4). Such an instance is
+    /// guarded, and the model core evaluates the body even where the guard is false, so
+    /// the lowering admits it only when interval arithmetic shows the body cannot fail
+    /// anywhere on the candidates; otherwise it refuses rather than add an error the
+    /// model does not have.
+    GuardedOverflow,
     /// A refinement no integer satisfies, such as `x > c` at `c = i64::MAX` or bounds
     /// that cross. The domain is empty; it is never widened to make it non-empty.
     /// Under a run configuration this includes a refinement that no value of the
@@ -202,6 +220,7 @@ impl Unlowerable {
             Unlowerable::TooManyInitialStates => "cml.lower.too_many_initial_states",
             Unlowerable::EmptyRefinement => "cml.lower.empty_refinement",
             Unlowerable::UnboundedType => "cml.lower.unbounded_type",
+            Unlowerable::GuardedOverflow => "cml.lower.guarded_overflow",
             Unlowerable::RecursiveCall => "cml.lower.recursive_call",
             Unlowerable::SuccessorDomainTooLarge => "cml.lower.successor_domain_too_large",
             Unlowerable::TooManyVariables => "cml.lower.too_many_variables",
@@ -243,6 +262,9 @@ impl fmt::Display for Unlowerable {
             Unlowerable::EmptyRefinement => "the refinement admits no integer value",
             Unlowerable::UnboundedType => {
                 "an unbounded integer type needs a bound from the run configuration"
+            }
+            Unlowerable::GuardedOverflow => {
+                "a quantifier over a state-dependent domain has a body that may overflow"
             }
             Unlowerable::RecursiveCall => "a recursive call must be unfolded before lowering",
             Unlowerable::SuccessorDomainTooLarge => {
@@ -401,17 +423,116 @@ struct Meter {
     slots: std::collections::BTreeMap<String, usize>,
     /// What a run configuration binds; empty for [`lower`].
     bind: Bindings,
+    /// The model's enumerations, by name (built for every lowering).
+    enums: BTreeMap<String, EnumTable>,
+    /// Each lowered state variable's domain, for the intervals of quantifier domains.
+    domains: BTreeMap<String, (i64, i64)>,
+    /// Action parameters and quantifier binders in scope: a point while building, an
+    /// interval while planning (see [`Mode`]).
+    env: Env,
+    /// Output nodes the plan of the site being built has already charged.
+    prepaid: usize,
+    /// Whether a planned site is being built.
+    in_site: bool,
+    /// Whether that build needed more output than its plan (a planning defect).
+    overdrawn: bool,
+    /// The work a plan predicts its build will spend.
+    predicted: u128,
+    /// How many guarded quantifier instances enclose the expression being planned.
+    guarded: usize,
+    /// How many quantifier binders enclose the expression being lowered.
+    binder_depth: usize,
 }
 
-/// The scalar bindings of a run configuration, as the lowering reads them: each
-/// instantiated sort's size (its elements are the integers `0..size`), and each
-/// constant whose value is an integer, a Boolean, or a sort element (its index).
+impl Meter {
+    fn new(limits: Limits, model: &NormModel) -> Self {
+        Self {
+            nodes: Budget::new(limits.nodes),
+            fuel: Fuel::new(limits.work),
+            vars: model.state.len(),
+            post: false,
+            slots: BTreeMap::new(),
+            bind: Bindings::default(),
+            enums: BTreeMap::new(),
+            domains: BTreeMap::new(),
+            env: Env::default(),
+            prepaid: 0,
+            in_site: false,
+            overdrawn: false,
+            predicted: 0,
+            guarded: 0,
+            binder_depth: 0,
+        }
+    }
+}
+
+/// An enumeration's variants: by name to their index (declaration order), and in
+/// order, with the longest name's length (for generated action names).
+#[derive(Debug, Default)]
+struct EnumTable {
+    index: BTreeMap<String, i64>,
+    names: Vec<String>,
+    widest: usize,
+}
+
+/// Action parameters and bound variables in scope, each with an interval (a point
+/// while building). A binder number repeats where the same def is inlined inside its
+/// own argument; the inner binder then shadows the outer one lexically, so entering a
+/// scope saves the entry it shadows and leaving it restores that entry.
+#[derive(Debug, Default)]
+struct Env {
+    params: BTreeMap<String, (i64, i64)>,
+    binders: BTreeMap<u32, (i64, i64)>,
+}
+
+/// The enumeration tables: every variant charged (a node and its text) and the sort of
+/// each table charged before it is built.
+fn enum_tables(model: &NormModel, budget: &mut Meter) -> R<()> {
+    let whole = whole_span(model);
+    for e in &model.enums {
+        let text: usize = e.variants.iter().map(String::len).sum();
+        let cost = e
+            .variants
+            .len()
+            .saturating_mul(2)
+            .saturating_add(crate::budget::text_cost(text).saturating_mul(2))
+            .saturating_add(1 + crate::budget::text_cost(e.name.len()));
+        charge(budget, cost, whole)?;
+        burn(
+            budget,
+            sort_cost(e.variants.len(), text)
+                .saturating_add(lookup_cost(model.enums.len(), e.name.len())),
+            whole,
+        )?;
+        let table = EnumTable {
+            index: e
+                .variants
+                .iter()
+                .enumerate()
+                .map(|(i, v)| (v.clone(), i as i64))
+                .collect(),
+            names: e.variants.clone(),
+            widest: e.variants.iter().map(String::len).max().unwrap_or(0),
+        };
+        budget.enums.insert(e.name.clone(), table);
+    }
+    Ok(())
+}
+
+/// The bindings of a run configuration, as the lowering reads them: each
+/// instantiated sort's size (its elements are the integers `0..size`) and element
+/// names, each constant whose value is an integer, a Boolean, a sort element, or a
+/// variant (its index), and each constant set of such values (its codes, ascending).
 #[derive(Debug, Default)]
 struct Bindings {
     configured: bool,
-    sorts: std::collections::BTreeMap<String, i64>,
-    ints: std::collections::BTreeMap<String, i64>,
-    bools: std::collections::BTreeMap<String, bool>,
+    sorts: BTreeMap<String, i64>,
+    /// Each sort's element names, for generated action names, and the longest's length.
+    sort_names: BTreeMap<String, (Vec<String>, usize)>,
+    ints: BTreeMap<String, i64>,
+    bools: BTreeMap<String, bool>,
+    /// Shared, never copied: a use takes a reference count, not the members.
+    sets: BTreeMap<String, Rc<[i64]>>,
     /// The configuration's explicit `Nat` and `Int` bounds (correction 4).
     bounds: crate::config::Bounds,
 }
@@ -427,15 +548,8 @@ fn burn(meter: &mut Meter, n: u64, span: Span) -> R<()> {
 /// [`lower`] under explicit resource limits, reporting what it spent (whether or not
 /// it succeeds).
 pub fn lower_with(model: &NormModel, limits: Limits) -> (Result<Model, LowerError>, Usage) {
-    let mut meter = Meter {
-        nodes: Budget::new(limits.nodes),
-        fuel: Fuel::new(limits.work),
-        vars: model.state.len(),
-        post: false,
-        slots: std::collections::BTreeMap::new(),
-        bind: Bindings::default(),
-    };
-    let result = lower_metered(model, &mut meter);
+    let mut meter = Meter::new(limits, model);
+    let result = enum_tables(model, &mut meter).and_then(|()| lower_metered(model, &mut meter));
     let usage = Usage {
         nodes: meter.nodes.used(),
         work: meter.fuel.used(),
@@ -502,48 +616,44 @@ pub fn lower_configured(
     config: &RunConfig,
     limits: Limits,
 ) -> (Result<Configured, LowerError>, Usage) {
-    let mut meter = Meter {
-        nodes: Budget::new(limits.nodes),
-        fuel: Fuel::new(limits.work),
-        vars: model.state.len(),
-        post: false,
-        slots: std::collections::BTreeMap::new(),
-        bind: Bindings::default(),
-    };
-    let result = bindings(model, config, &mut meter).and_then(|bind| {
-        meter.bind = bind;
-        let lowered = lower_metered(model, &mut meter)?;
-        // The model identity's buffers are the only new allocations here. Before any is
-        // made: the walks are charged — `identity_alloc_bound` visits the model twice,
-        // and `Model::identity` visits it three times (its two capacity walks and the
-        // encoding) — each visit covering every expression node (every one of which the
-        // lowering charged) and each initial-state value; then the peak allocation
-        // itself (`identity_alloc_bound`: the output buffer, the one reused outcome
-        // scratch buffer, and its range list, each allocated once at that capacity) is
-        // charged as output and as work. Only then is the identity encoded, and its
-        // length never exceeds the bound. The configuration identity is shared, not
-        // copied, and the run identity holds the two by value.
-        let at = whole_span(model);
-        let walk = (meter.nodes.used() as u64)
-            .saturating_add(
-                (lowered.initial_states().len() as u64).saturating_mul(lowered.arity() as u64 + 1),
-            )
-            .saturating_add(lowered.variables().len() as u64)
-            .saturating_add(lowered.actions().len() as u64)
-            .saturating_add(lowered.predicates().len() as u64);
-        burn(&mut meter, walk.saturating_mul(5), at)?;
-        let bound = lowered.identity_alloc_bound();
-        charge(&mut meter, crate::budget::text_cost(bound), at)?;
-        burn(&mut meter, bound as u64, at)?;
-        IDENTITY_ENCODINGS.with(|n| n.set(n.get().saturating_add(1)));
-        let identity = lowered.identity();
-        debug_assert!(identity.as_bytes().len() <= bound);
-        let run = RunIdentity::of(identity, config.shared_identity());
-        Ok(Configured {
-            model: lowered,
-            run,
-        })
-    });
+    let mut meter = Meter::new(limits, model);
+    let result = enum_tables(model, &mut meter)
+        .and_then(|()| bindings(model, config, &mut meter))
+        .and_then(|bind| {
+            meter.bind = bind;
+            let lowered = lower_metered(model, &mut meter)?;
+            // The model identity's buffers are the only new allocations here. Before any is
+            // made: the walks are charged — `identity_alloc_bound` visits the model twice,
+            // and `Model::identity` visits it three times (its two capacity walks and the
+            // encoding) — each visit covering every expression node (every one of which the
+            // lowering charged) and each initial-state value; then the peak allocation
+            // itself (`identity_alloc_bound`: the output buffer, the one reused outcome
+            // scratch buffer, and its range list, each allocated once at that capacity) is
+            // charged as output and as work. Only then is the identity encoded, and its
+            // length never exceeds the bound. The configuration identity is shared, not
+            // copied, and the run identity holds the two by value.
+            let at = whole_span(model);
+            let walk = (meter.nodes.used() as u64)
+                .saturating_add(
+                    (lowered.initial_states().len() as u64)
+                        .saturating_mul(lowered.arity() as u64 + 1),
+                )
+                .saturating_add(lowered.variables().len() as u64)
+                .saturating_add(lowered.actions().len() as u64)
+                .saturating_add(lowered.predicates().len() as u64);
+            burn(&mut meter, walk.saturating_mul(5), at)?;
+            let bound = lowered.identity_alloc_bound();
+            charge(&mut meter, crate::budget::text_cost(bound), at)?;
+            burn(&mut meter, bound as u64, at)?;
+            IDENTITY_ENCODINGS.with(|n| n.set(n.get().saturating_add(1)));
+            let identity = lowered.identity();
+            debug_assert!(identity.as_bytes().len() <= bound);
+            let run = RunIdentity::of(identity, config.shared_identity());
+            Ok(Configured {
+                model: lowered,
+                run,
+            })
+        });
     let usage = Usage {
         nodes: meter.nodes.used(),
         work: meter.fuel.used(),
@@ -685,6 +795,27 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
         charge(budget, 1 + crate::budget::text_cost(sort.len()), whole)?;
         burn(budget, lookup_cost(bind.sorts.len(), sort.len()), whole)?;
         bind.sorts.insert(sort.clone(), names.len() as i64);
+        // The element names, for generated action names (`A(n=a)`): each copied name
+        // charged (a node and its text) before the copy, and one pass for the longest.
+        let text: usize = names.iter().map(String::len).sum();
+        charge(
+            budget,
+            names
+                .len()
+                .saturating_add(crate::budget::text_cost(text))
+                .saturating_add(1 + crate::budget::text_cost(sort.len())),
+            whole,
+        )?;
+        burn(
+            budget,
+            (names.len() as u64)
+                .saturating_add(crate::budget::text_cost(text) as u64)
+                .saturating_add(lookup_cost(bind.sort_names.len(), sort.len())),
+            whole,
+        )?;
+        let widest = names.iter().map(|n| escaped_len(n)).max().unwrap_or(0);
+        bind.sort_names
+            .insert(sort.clone(), (names.clone(), widest));
     }
     for (name, value) in config.constants() {
         let Some(decl) = constants.get(name.as_str()) else {
@@ -713,6 +844,44 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
                 let index = tables.element(sort, e, budget, decl.span)?.unwrap_or(0);
                 Some(Slot::Int(index as i64))
             }
+            ConfigValue::Variant {
+                enumeration,
+                name: v,
+            } => variant_index::<Build>(budget, enumeration, v, decl.span)?.map(Slot::Int),
+            // A set of integer-coded values, Booleans as `0`/`1` (correction 4): its
+            // codes, ascending. The
+            // set was charged by its nodes above; the codes (one each) and their sort are
+            // charged before they are stored.
+            ConfigValue::Set(members) => {
+                let mut codes = Vec::new();
+                charge(budget, members.len(), decl.span)?;
+                burn(budget, sort_cost(members.len(), 0), decl.span)?;
+                for m in members {
+                    let code = match m {
+                        ConfigValue::Int(n) => Some(*n),
+                        ConfigValue::Bool(b) => Some(i64::from(*b)),
+                        ConfigValue::Elem { sort, name: e } => tables
+                            .element(sort, e, budget, decl.span)?
+                            .map(|i| i as i64),
+                        ConfigValue::Variant {
+                            enumeration,
+                            name: v,
+                        } => variant_index::<Build>(budget, enumeration, v, decl.span)?,
+                        _ => None,
+                    };
+                    match code {
+                        Some(c) => codes.push(c),
+                        None => break,
+                    }
+                }
+                if codes.len() == members.len() {
+                    codes.sort_unstable();
+                    codes.dedup();
+                    Some(Slot::Set(codes))
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         if let Some(slot) = slot {
@@ -722,9 +891,11 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
                 lookup_cost(bind.ints.len().max(bind.bools.len()), name.len()),
                 decl.span,
             )?;
+            burn(budget, lookup_cost(bind.sets.len(), name.len()), decl.span)?;
             match slot {
                 Slot::Int(v) => bind.ints.insert(name.clone(), v).map(|_| ()),
                 Slot::Bool(v) => bind.bools.insert(name.clone(), v).map(|_| ()),
+                Slot::Set(v) => bind.sets.insert(name.clone(), Rc::from(v)).map(|_| ()),
             };
         }
     }
@@ -735,6 +906,7 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
 enum Slot {
     Int(i64),
     Bool(bool),
+    Set(Vec<i64>),
 }
 
 /// The name tables the binding check reads: each sort's elements by name, with their
@@ -922,6 +1094,14 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             acc.saturating_add(crate::elab::measure(c).0 as u64)
         });
         burn(budget, visits.saturating_mul(2), v.span)?;
+        // `domain_of` and `constant` recurse over each refinement clause: its depth is
+        // checked first, as `shallow` checks every clause the lowering recurses over (a
+        // hand-built model is not bounded by elaboration).
+        for c in &v.refinement {
+            if crate::elab::measure(c).1 > MAX_EXPR_DEPTH.saturating_add(1) {
+                return no(Unlowerable::ExpressionTooDeep, c.span);
+            }
+        }
         if let Type::Sort(s) = &v.ty {
             burn(
                 budget,
@@ -938,13 +1118,53 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
                 let size = budget.bind.sorts.get(s).copied().unwrap_or(1);
                 (0, size.saturating_sub(1))
             }
+            // An enumeration (correction 4): its variant indices.
+            Type::Enum(e) => {
+                burn(budget, lookup_cost(budget.enums.len(), e.len()), v.span)?;
+                let Some(n) = budget.enums.get(e).map(|t| t.names.len() as i64) else {
+                    return no(Unlowerable::NonIntegerState, v.span);
+                };
+                if let Some(c) = v.refinement.first() {
+                    return no(Unlowerable::NonIntervalRefinement, c.span);
+                }
+                if n == 0 {
+                    return no(Unlowerable::EmptyRefinement, v.span);
+                }
+                (0, n - 1)
+            }
             _ => domain_of(v.name.as_str(), &v.ty, &v.refinement, v.span, &budget.bind)?,
         };
+        // The variable record the builder appends, with its owned name (cr-3aqchd).
+        charge(budget, 1 + crate::budget::text_cost(v.name.len()), v.span)?;
         builder = builder.variable(&v.name, lo, hi);
+        // The lowering's own copy of the name, for enumeration: at most `MAX_VARIABLES`
+        // names of at most `MAX_IDENT_BYTES` bytes (`Ident::new` refuses a longer name
+        // before it copies it), a bound of constants.
         if let (Ok(name), Ok(domain)) = (Ident::new(&v.name), Domain::new(lo, hi)) {
             variables.push(Variable::new(name, domain));
         }
     }
+
+    // Each variable's domain, for the intervals of quantifier domains: an entry (a node
+    // and its name) charged per variable before the table is built.
+    let names: usize = variables.iter().map(|v| v.name().as_str().len()).sum();
+    charge(
+        budget,
+        variables
+            .len()
+            .saturating_add(crate::budget::text_cost(names)),
+        whole,
+    )?;
+    burn(budget, sort_cost(variables.len(), names), whole)?;
+    budget.domains = variables
+        .iter()
+        .map(|v| {
+            (
+                v.name().as_str().to_owned(),
+                (v.domain().lo(), v.domain().hi()),
+            )
+        })
+        .collect();
 
     // Model-core's own limits, preflighted before anything is enumerated or built, so
     // no expansion ever runs past a bound the builder would only report afterwards.
@@ -961,9 +1181,7 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         .iter()
         .map(|c| top_bool(c, &mut *budget))
         .collect::<R<Vec<_>>>()?;
-    let predicate_size = clauses
-        .iter()
-        .fold(clauses.len(), |acc, c| acc.saturating_add(c.1.size));
+    let predicate_size = conjoined_size(&clauses);
     let init_pred = conjoin(clauses, &mut *budget, init.span)?;
     let cardinality = variables.iter().fold(1_u128, |acc, v| {
         acc.saturating_mul(v.domain().cardinality())
@@ -986,6 +1204,14 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
     if variables.len() == model.state.len() {
         let mut values: Vec<i64> = variables.iter().map(|v| v.domain().lo()).collect();
         let mut bindings_held: usize = 0;
+        // Per accepted state: the names' bytes (for the work of the copy), and the output
+        // the builder holds — the state's record, and per variable a binding with its own
+        // copy of the variable's name (cr-3aqchd).
+        let names: usize = variables.iter().map(|v| v.name().as_str().len()).sum();
+        let state_nodes = variables.iter().fold(1_usize, |acc, v| {
+            acc.saturating_add(1)
+                .saturating_add(crate::budget::text_cost(v.name().as_str().len()))
+        });
         loop {
             let env = Environment::new(&variables, &values);
             let holds = init_pred.evaluate(&env).map_err(|e| LowerError {
@@ -998,9 +1224,8 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
                     return no(Unlowerable::TooManyInitialStates, init.span);
                 }
                 // Each accepted state is copied into the builder, then placed and sorted by
-                // `ModelBuilder::build` (a scan of the variables per binding): charged
-                // before the copy.
-                let names: usize = variables.iter().map(|v| v.name().as_str().len()).sum();
+                // `ModelBuilder::build` (a scan of the variables per binding): its work and
+                // its output charged before the copy.
                 let per_state = (variables.len() as u64)
                     .saturating_mul(variables.len() as u64 + 1)
                     .saturating_add(crate::budget::text_cost(names) as u64)
@@ -1008,6 +1233,7 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
                         lookup_cost(bindings_held, 8).saturating_mul(variables.len() as u64),
                     );
                 burn(budget, per_state, init.span)?;
+                charge(budget, state_nodes, init.span)?;
                 let bindings: Vec<(&str, i64)> = variables
                     .iter()
                     .zip(values.iter())
@@ -1021,69 +1247,12 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         }
     }
 
-    // Actions. A relational action becomes one programmatic action per candidate
-    // post-state of its relational variables (RFC 0003 "Relational actions").
-    let mut lowered_actions: Vec<String> = Vec::new();
+    // Actions: one programmatic action per parameter tuple (an action schema), and per
+    // candidate post-state of its relational variables (RFC 0003 "Relational actions"
+    // and correction 4).
+    let mut lowered_actions = Lowered::default();
     for a in &model.actions {
-        if !a.params.is_empty() {
-            return no(Unlowerable::ParameterizedAction, a.span);
-        }
-        let mut clauses = a
-            .guard
-            .iter()
-            .map(|c| top_bool(c, &mut *budget))
-            .collect::<R<Vec<_>>>()?;
-        // Each relational variable's domain and slot: one table lookup each.
-        burn(
-            budget,
-            (a.next.len() as u64).saturating_mul(lookup_cost(variables.len(), 32)),
-            a.span,
-        )?;
-        let relational: Vec<&Variable> = a
-            .next
-            .iter()
-            .filter(|(_, n)| matches!(n, Next::Relational))
-            .filter_map(|(v, _)| by_name.get(v.as_str()).copied())
-            .collect();
-        budget.slots = relational
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (v.name().as_str().to_owned(), i))
-            .collect();
-        budget.post = true;
-        let post = a
-            .post
-            .iter()
-            .map(|c| top_bool(c, &mut *budget))
-            .collect::<R<Vec<_>>>();
-        budget.post = false;
-        clauses.extend(post?);
-        let guard_size = clauses
-            .iter()
-            .fold(clauses.len(), |acc, c| acc.saturating_add(c.1.size));
-        let guard = conjoin(clauses, &mut *budget, a.span)?;
-        let mut updates: Vec<(&str, Sized<IntExpr>)> = Vec::new();
-        for (var, next) in &a.next {
-            if let Next::Set(e) = next {
-                updates.push((var.as_str(), top_int_sized(e, &mut *budget)?));
-            }
-        }
-        if relational.is_empty() {
-            let updates = updates.into_iter().map(|(v, x)| (v, x.0)).collect();
-            builder = builder.action(ActionDecl::deterministic(&a.name, guard, updates));
-            lowered_actions.push(a.name.clone());
-            continue;
-        }
-        builder = relational_action(
-            builder,
-            &a.name,
-            (guard, guard_size),
-            &updates,
-            &relational,
-            budget,
-            a.span,
-            &mut lowered_actions,
-        )?;
+        builder = lower_action(builder, a, &by_name, &mut *budget, &mut lowered_actions)?;
     }
 
     // Invariants become named predicates.
@@ -1094,6 +1263,8 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             .map(|c| top_bool(c, &mut *budget))
             .collect::<R<Vec<_>>>()?;
         let body = conjoin(body, &mut *budget, i.span)?;
+        // The predicate record the builder appends, with its owned name (cr-3aqchd).
+        charge(budget, 1 + crate::budget::text_cost(i.name.len()), i.span)?;
         builder = builder.predicate(&i.name, body);
     }
 
@@ -1104,10 +1275,7 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         model.state.len(),
         bytes(&mut model.state.iter().map(|v| v.name.len())),
     )
-    .saturating_add(sort_cost(
-        lowered_actions.len(),
-        bytes(&mut lowered_actions.iter().map(String::len)),
-    ))
+    .saturating_add(sort_cost(lowered_actions.count, lowered_actions.bytes))
     .saturating_add(sort_cost(
         model.invariants.len(),
         bytes(&mut model.invariants.iter().map(|i| i.name.len())),
@@ -1117,6 +1285,22 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         kind: LowerErrorKind::Model(e),
         span: whole,
     })
+}
+
+/// The actions appended to the builder so far, counted for the cost of the sort
+/// `ModelBuilder::build` runs over their names: a count and a byte total, so no second
+/// copy of any name is held (cr-3aqchd).
+#[derive(Default)]
+struct Lowered {
+    count: usize,
+    bytes: usize,
+}
+
+impl Lowered {
+    fn add(&mut self, name: &str) {
+        self.count = self.count.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(name.len());
+    }
 }
 
 /// The work of enumerating `candidates` states against a predicate of `size` nodes over
@@ -1175,17 +1359,20 @@ fn relational_action(
     relational: &[&Variable],
     budget: &mut Meter,
     span: Span,
-    lowered: &mut Vec<String>,
+    lowered: &mut Lowered,
 ) -> R<ModelBuilder> {
     let candidates = candidate_count(relational);
     if candidates > MAX_RELATIONAL_CANDIDATES {
         return no(Unlowerable::SuccessorDomainTooLarge, span);
     }
-    let name_bytes = widest_label(name, relational);
+    let name_bytes = widest_label(name.len(), relational);
+    let targets = target_names(updates.iter().map(|(v, _)| *v));
+    let constants = candidate_constants(relational);
     let template = updates
         .iter()
         .fold(guard.1, |acc, (_, x)| acc.saturating_add(x.1.size))
-        .saturating_add(relational.len());
+        .saturating_add(targets)
+        .saturating_add(constants);
     // The output is exactly the candidates' copies: charged before the first is built.
     // The work is the same product; it is checked against what the budget has left
     // before the first candidate, then charged as each candidate is built (one unit per
@@ -1217,7 +1404,8 @@ fn relational_action(
             budget,
             steps
                 .saturating_add(copied)
-                .saturating_add(relational.len() as u64)
+                .saturating_add(targets as u64)
+                .saturating_add(constants as u64)
                 .saturating_add(per_name)
                 .saturating_add(1),
             span,
@@ -1226,7 +1414,7 @@ fn relational_action(
             assigns.push((v.name().as_str(), IntExpr::Const(*c)));
         }
         builder = builder.action(ActionDecl::deterministic(&action, guard_c, assigns));
-        lowered.push(action);
+        lowered.add(&action);
         if !advance(&mut values, relational) {
             break;
         }
@@ -1299,9 +1487,35 @@ fn candidate_count(relational: &[&Variable]) -> u128 {
     })
 }
 
+/// The nodes of one candidate's relational updates `r := c`: per relational variable,
+/// the constant and the target name the update owns.
+fn candidate_constants(relational: &[&Variable]) -> usize {
+    relational.iter().fold(relational.len(), |acc, v| {
+        acc.saturating_add(crate::budget::text_cost(v.name().as_str().len()))
+    })
+}
+
+/// The nodes of the target names an action's updates own: each update copies its
+/// variable's name into the action record, charged by its length (cr-3aqchd).
+fn target_names<'a>(names: impl Iterator<Item = &'a str>) -> usize {
+    names.fold(0, |acc, v| {
+        acc.saturating_add(crate::budget::text_cost(v.len()))
+    })
+}
+
+/// The nodes of one appended action record apart from its guard and update
+/// expressions: the record itself, its `name_bytes`-byte name, and its update targets'
+/// names (`targets`, from [`target_names`]). A relational candidate's record is counted
+/// by [`successor_work`] instead (cr-3aqchd).
+fn action_record(name_bytes: usize, targets: usize) -> usize {
+    crate::budget::text_cost(name_bytes)
+        .saturating_add(targets)
+        .saturating_add(1)
+}
+
 /// The byte length of the longest name `A[r1=c1,…,rn=cn]` the candidates of action
 /// `name` generate. Exact: a value's decimal text is longest at an end of its domain.
-fn widest_label(name: &str, relational: &[&Variable]) -> usize {
+fn widest_label(name: usize, relational: &[&Variable]) -> usize {
     let digits = |v: i64| v.to_string().len();
     let parts = relational.iter().fold(0_usize, |acc, v| {
         let widest = digits(v.domain().lo()).max(digits(v.domain().hi()));
@@ -1310,8 +1524,7 @@ fn widest_label(name: &str, relational: &[&Variable]) -> usize {
             .saturating_add(widest)
     });
     let commas = relational.len().saturating_sub(1);
-    name.len()
-        .saturating_add(2)
+    name.saturating_add(2)
         .saturating_add(parts)
         .saturating_add(commas)
 }
@@ -1353,6 +1566,13 @@ fn preflight(
             .filter(|(_, n)| matches!(n, Next::Relational))
             .filter_map(|(v, _)| by_name.get(v.as_str()).copied())
             .collect();
+        // An action schema: one instance per parameter tuple, named `A(p=u,…)`.
+        let space = param_space(a, budget)?;
+        let instances = instance_count(&space);
+        let width = instance_width(a, &space, budget)?;
+        if width > MAX_IDENT_BYTES {
+            return no(Unlowerable::NameTooLong, a.span);
+        }
         let expanded = if relational.is_empty() {
             1
         } else {
@@ -1360,17 +1580,445 @@ fn preflight(
             if candidates > MAX_RELATIONAL_CANDIDATES {
                 return no(Unlowerable::SuccessorDomainTooLarge, a.span);
             }
-            if widest_label(&a.name, &relational) > MAX_IDENT_BYTES {
+            if widest_label(width, &relational) > MAX_IDENT_BYTES {
                 return no(Unlowerable::NameTooLong, a.span);
             }
             candidates
         };
-        total = total.saturating_add(expanded);
+        total = total.saturating_add(instances.saturating_mul(expanded));
         if total > MAX_ACTIONS as u128 {
             return no(Unlowerable::TooManyActions, a.span);
         }
     }
     Ok(())
+}
+
+/// The universe of each parameter of `a`, in declaration order (RFC 0003 correction
+/// 4, "Action schemas"). A parameter of a type with no finite universe is
+/// `cml.lower.unbounded_type` under a configuration and `cml.lower.parameterized_action`
+/// without one; a parameter of a collection or other non-scalar type is
+/// `cml.lower.parameterized_action`.
+fn param_space(a: &crate::norm::Action, budget: &mut Meter) -> R<Vec<(i64, i64)>> {
+    let mut space = Vec::with_capacity(a.params.len());
+    for p in &a.params {
+        match universe::<Build>(&p.ty, budget, a.span)? {
+            Universe::Finite(lo, hi) => space.push((lo, hi)),
+            Universe::Unbounded => {
+                return no(unbounded(budget, Unlowerable::ParameterizedAction), a.span);
+            }
+            Universe::NotScalar => return no(Unlowerable::ParameterizedAction, a.span),
+        }
+    }
+    Ok(space)
+}
+
+/// The number of parameter tuples: the product of the universes. Saturates.
+fn instance_count(space: &[(i64, i64)]) -> u128 {
+    space.iter().fold(1_u128, |acc, (lo, hi)| {
+        acc.saturating_mul(span_count(*lo, *hi))
+    })
+}
+
+/// The byte length of the longest instance name `A(p1=u1,…,pn=un)` of `a`, or of `A`
+/// for an action without parameters. Exact: each value's text is longest at an end of
+/// an integer universe, or is the longest element or variant name. A table lookup per
+/// parameter.
+fn instance_width(a: &crate::norm::Action, space: &[(i64, i64)], budget: &mut Meter) -> R<usize> {
+    if a.params.is_empty() {
+        return Ok(a.name.len());
+    }
+    let mut width = a.name.len().saturating_add(2);
+    for (i, (p, (lo, hi))) in a.params.iter().zip(space).enumerate() {
+        let value = match &p.ty {
+            Type::Bool => 5,
+            Type::Sort(s) => {
+                burn(
+                    budget,
+                    lookup_cost(budget.bind.sort_names.len(), s.len()),
+                    a.span,
+                )?;
+                budget.bind.sort_names.get(s).map_or(0, |(_, w)| *w)
+            }
+            Type::Enum(e) => {
+                burn(budget, lookup_cost(budget.enums.len(), e.len()), a.span)?;
+                budget.enums.get(e).map_or(0, |t| t.widest)
+            }
+            _ => lo.to_string().len().max(hi.to_string().len()),
+        };
+        width = width
+            .saturating_add(p.name.len())
+            .saturating_add(1)
+            .saturating_add(value)
+            .saturating_add(usize::from(i > 0));
+    }
+    Ok(width)
+}
+
+/// The bytes an instance label escapes in an element name: its own delimiters and the
+/// escape itself. A sort element may be any printable ASCII name, so without escaping
+/// `A(p=x,q=y)` could be two tuples (cr-3aqchd).
+const LABEL_SPECIALS: &[u8] = b"\\,=()[]";
+
+/// `name` as it appears in an instance label: each byte of [`LABEL_SPECIALS`] prefixed
+/// with a backslash. Injective, and it keeps the label printable ASCII.
+fn escape_label(name: &str) -> String {
+    let mut out = String::with_capacity(escaped_len(name));
+    for ch in name.chars() {
+        if u8::try_from(ch).is_ok_and(|b| LABEL_SPECIALS.contains(&b)) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// The length of [`escape_label`]`(name)`, without building it.
+fn escaped_len(name: &str) -> usize {
+    name.len()
+        .saturating_add(name.bytes().filter(|b| LABEL_SPECIALS.contains(b)).count())
+}
+
+/// The work one instance spends on parameter `p`: its scope entry (a lookup by its name)
+/// and its value's text (a lookup by its type's name, for a sort or an enumeration).
+fn param_work(p: &crate::norm::Param, params: usize, budget: &Meter) -> u64 {
+    let text = match &p.ty {
+        Type::Sort(s) => lookup_cost(budget.bind.sort_names.len(), s.len()),
+        Type::Enum(e) => lookup_cost(budget.enums.len(), e.len()),
+        _ => 0,
+    };
+    lookup_cost(params, p.name.len()).saturating_add(text)
+}
+
+/// The canonical text of the code `v` of a parameter of type `ty`: `false`/`true`, an
+/// element name escaped by [`escape_label`], a variant name, or a decimal integer. One
+/// table lookup.
+fn value_text(ty: &Type, v: i64, budget: &mut Meter, span: Span) -> R<String> {
+    let index = usize::try_from(v).unwrap_or(usize::MAX);
+    Ok(match ty {
+        Type::Bool => (if v != 0 { "true" } else { "false" }).to_owned(),
+        Type::Sort(s) => {
+            burn(
+                budget,
+                lookup_cost(budget.bind.sort_names.len(), s.len()),
+                span,
+            )?;
+            budget
+                .bind
+                .sort_names
+                .get(s)
+                .and_then(|(names, _)| names.get(index))
+                .map_or_else(String::new, |n| escape_label(n))
+        }
+        Type::Enum(e) => {
+            burn(budget, lookup_cost(budget.enums.len(), e.len()), span)?;
+            budget
+                .enums
+                .get(e)
+                .and_then(|t| t.names.get(index))
+                .cloned()
+                .unwrap_or_default()
+        }
+        _ => v.to_string(),
+    })
+}
+
+/// Lower one action: every instance of its parameter tuples, each relational action's
+/// candidates within it.
+///
+/// The whole action is one planned site. The guard clauses, postconditions, and updates
+/// are planned once with every parameter at its whole universe (so a quantifier whose
+/// domain depends on a parameter is planned at its widest), their measures and
+/// predicted work multiplied by the instance count, and that product charged as output
+/// — and checked against the work left — before the first instance is built. A
+/// relational action's candidates are also checked in aggregate (instances times
+/// [`successor_work`]) before the first instance, and charged per instance by
+/// [`relational_action`] as before.
+fn lower_action(
+    mut builder: ModelBuilder,
+    a: &crate::norm::Action,
+    by_name: &BTreeMap<&str, &Variable>,
+    budget: &mut Meter,
+    lowered: &mut Lowered,
+) -> R<ModelBuilder> {
+    let space = param_space(a, budget)?;
+    let instances = instance_count(&space);
+    let width = instance_width(a, &space, budget)?;
+    // Each relational variable's domain and slot: one table lookup each.
+    burn(
+        budget,
+        (a.next.len() as u64).saturating_mul(lookup_cost(by_name.len(), 32)),
+        a.span,
+    )?;
+    let relational: Vec<&Variable> = a
+        .next
+        .iter()
+        .filter(|(_, n)| matches!(n, Next::Relational))
+        .filter_map(|(v, _)| by_name.get(v.as_str()).copied())
+        .collect();
+    budget.slots = relational
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (v.name().as_str().to_owned(), i))
+        .collect();
+    let updates: Vec<(&str, &Expr)> = a
+        .next
+        .iter()
+        .filter_map(|(v, n)| match n {
+            Next::Set(e) => Some((v.as_str(), e)),
+            _ => None,
+        })
+        .collect();
+    for c in a.guard.iter().chain(&a.post) {
+        shallow(c, budget)?;
+    }
+    for (_, e) in &updates {
+        shallow(e, budget)?;
+    }
+
+    // The parameters in scope: each entry (a node and its name) charged, with its
+    // insertion, before it is made.
+    for (p, (lo, hi)) in a.params.iter().zip(&space) {
+        charge(budget, 1 + crate::budget::text_cost(p.name.len()), a.span)?;
+        burn(budget, lookup_cost(a.params.len(), p.name.len()), a.span)?;
+        budget.env.params.insert(p.name.clone(), (*lo, *hi));
+    }
+    let planned = plan_action(a, &updates, budget);
+    let result = planned.and_then(|plan| {
+        build_action(
+            builder,
+            a,
+            &space,
+            instances,
+            width,
+            plan,
+            &updates,
+            &relational,
+            budget,
+            lowered,
+        )
+    });
+    budget.env.params.clear();
+    budget.post = false;
+    end_site(budget);
+    builder = result?;
+    Ok(builder)
+}
+
+/// The plan of one instance of an action: the measure of its conjoined guard, the
+/// measure of each update, and the predicted work, over the parameters' universes.
+struct ActionPlan {
+    guard: M,
+    updates: Vec<M>,
+    work: u128,
+}
+
+fn plan_action(
+    a: &crate::norm::Action,
+    updates: &[(&str, &Expr)],
+    budget: &mut Meter,
+) -> R<ActionPlan> {
+    budget.predicted = 0;
+    let mut clauses = Vec::with_capacity(a.guard.len() + a.post.len());
+    for c in &a.guard {
+        clauses.push(bool_expr::<Plan>(c, budget)?.1);
+    }
+    budget.post = true;
+    for c in &a.post {
+        clauses.push(bool_expr::<Plan>(c, budget)?.1);
+    }
+    budget.post = false;
+    let n = clauses.len();
+    let guard = if n == 0 {
+        // `conjoin` builds (and charges) one `true` node.
+        work::<Plan>(budget, 1, a.span)?;
+        M { size: 1, depth: 1 }
+    } else {
+        work::<Plan>(budget, n as u64, a.span)?;
+        M {
+            size: clauses
+                .iter()
+                .fold(n - 1, |acc, m| acc.saturating_add(m.size)),
+            depth: clauses
+                .iter()
+                .map(|m| m.depth)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(levels(n as u128)),
+        }
+    };
+    let mut sizes = Vec::with_capacity(updates.len());
+    for (_, e) in updates {
+        sizes.push(int_expr::<Plan>(e, budget)?.1);
+    }
+    Ok(ActionPlan {
+        guard,
+        updates: sizes,
+        work: budget.predicted,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_action(
+    mut builder: ModelBuilder,
+    a: &crate::norm::Action,
+    space: &[(i64, i64)],
+    instances: u128,
+    width: usize,
+    plan: ActionPlan,
+    updates: &[(&str, &Expr)],
+    relational: &[&Variable],
+    budget: &mut Meter,
+    lowered: &mut Lowered,
+) -> R<ModelBuilder> {
+    // Per instance: the guard and updates as planned, the action record with its name
+    // and its update targets' names (plain actions append it; a relational action's
+    // candidates are records charged by `relational_action`), and a scope lookup per
+    // parameter.
+    let targets = target_names(updates.iter().map(|(v, _)| *v));
+    let record = if relational.is_empty() {
+        action_record(width, targets)
+    } else {
+        0
+    };
+    let per_size = plan
+        .updates
+        .iter()
+        .fold(plan.guard.size, |acc, m| acc.saturating_add(m.size))
+        .saturating_add(record);
+    // Per parameter: its scope entry and its value's text lookup, each by the name's
+    // length, exactly as the build spends them.
+    let mut params_work: u128 = 0;
+    for p in &a.params {
+        params_work = params_work.saturating_add(u128::from(param_work(p, space.len(), budget)));
+    }
+    let per_work = plan
+        .work
+        .saturating_add(record as u128)
+        .saturating_add(params_work)
+        .saturating_add(1);
+    let depth = plan
+        .updates
+        .iter()
+        .map(|m| m.depth)
+        .fold(plan.guard.depth, usize::max);
+    let total_size =
+        usize::try_from(instances.saturating_mul(per_size as u128)).unwrap_or(usize::MAX);
+    budget.predicted = instances.saturating_mul(per_work);
+    // The checks in the order the RFC states: depth, then work, then output.
+    if depth > MAX_EXPR_DEPTH {
+        return no(Unlowerable::ExpressionTooDeep, a.span);
+    }
+    if !relational.is_empty() {
+        // The candidates of every instance, checked in aggregate before the first. Each
+        // instance's template is measured as `relational_action` measures it
+        // ([`conjoined_size`]: the clause count plus sizes, one more than the conjoined
+        // tree, or `1` for the `true` of no clause), the updates with their target names, and
+        // per relational variable a constant and its target name.
+        let candidates = candidate_count(relational);
+        let clauses = a.guard.len().saturating_add(a.post.len());
+        let guard = if clauses == 0 {
+            1
+        } else {
+            plan.guard.size.saturating_add(1)
+        };
+        let template = plan
+            .updates
+            .iter()
+            .fold(guard, |acc, m| acc.saturating_add(m.size))
+            .saturating_add(targets)
+            .saturating_add(candidate_constants(relational));
+        let each = successor_work(candidates, template, widest_label(width, relational));
+        let all = instances.saturating_mul(u128::from(each));
+        if all.saturating_add(budget.predicted) > u128::from(budget.fuel.left()) {
+            return no(Unlowerable::WorkLimitExceeded, a.span);
+        }
+        if all.saturating_add(total_size as u128) > budget.nodes.left() as u128 {
+            return no(Unlowerable::OutputTooLarge, a.span);
+        }
+    }
+    begin_site(budget, total_size, depth, a.span)?;
+
+    let mut values: Vec<i64> = space.iter().map(|(lo, _)| *lo).collect();
+    if instances == 0 {
+        return Ok(builder);
+    }
+    loop {
+        // This instance's parameter values, and its name.
+        let mut label = a.name.clone();
+        if !a.params.is_empty() {
+            let mut parts = Vec::with_capacity(a.params.len());
+            for (p, v) in a.params.iter().zip(&values) {
+                burn(budget, lookup_cost(space.len(), p.name.len()), a.span)?;
+                budget.env.params.insert(p.name.clone(), (*v, *v));
+                parts.push(format!(
+                    "{}={}",
+                    p.name,
+                    value_text(&p.ty, *v, budget, a.span)?
+                ));
+            }
+            label = format!("{}({})", a.name, parts.join(","));
+        }
+        let mut clauses = Vec::with_capacity(a.guard.len() + a.post.len());
+        for c in &a.guard {
+            clauses.push(bool_expr::<Build>(c, budget)?);
+        }
+        budget.post = true;
+        for c in &a.post {
+            clauses.push(bool_expr::<Build>(c, budget)?);
+        }
+        budget.post = false;
+        let guard_size = conjoined_size(&clauses);
+        let guard = conjoin(clauses, budget, a.span)?;
+        let mut assigns: Vec<(&str, Sized<IntExpr>)> = Vec::with_capacity(updates.len());
+        for (v, e) in updates {
+            assigns.push((v, int_expr::<Build>(e, budget)?));
+        }
+        if relational.is_empty() {
+            // The record the builder appends: prepaid by the plan (`record`), spent
+            // here with the work of copying its names.
+            let record = action_record(label.len(), targets);
+            burn(budget, record as u64, a.span)?;
+            charge(budget, record, a.span)?;
+            let assigns = assigns.into_iter().map(|(v, x)| (v, x.0)).collect();
+            builder = builder.action(ActionDecl::deterministic(&label, guard, assigns));
+            lowered.add(&label);
+        } else {
+            // The candidates are charged by `relational_action` itself, not from the
+            // plan's prepaid output.
+            let prepaid = std::mem::take(&mut budget.prepaid);
+            let in_site = std::mem::replace(&mut budget.in_site, false);
+            let built = relational_action(
+                builder,
+                &label,
+                (guard, guard_size),
+                &assigns,
+                relational,
+                budget,
+                a.span,
+                lowered,
+            );
+            budget.prepaid = prepaid;
+            budget.in_site = in_site;
+            builder = built?;
+        }
+        if !advance_space(&mut values, space) {
+            break;
+        }
+    }
+    Ok(builder)
+}
+
+/// Step `values` to the next parameter tuple of `space`, last position fastest.
+/// Returns `false` after the last tuple.
+fn advance_space(values: &mut [i64], space: &[(i64, i64)]) -> bool {
+    for (slot, (lo, hi)) in values.iter_mut().zip(space).rev() {
+        if *slot < *hi {
+            *slot = slot.saturating_add(1);
+            return true;
+        }
+        *slot = *lo;
+    }
+    false
 }
 
 /// Step `values` to the next vector of the domain product, last position fastest.
@@ -1511,50 +2159,335 @@ fn constant(e: &Expr) -> Option<i64> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// expressions: one lowering, run twice — to plan, then to build
+// ---------------------------------------------------------------------------
+
+/// What one pass over a normalized expression produces.
+///
+/// The lowering of an expression is written once, generic over its mode. [`Plan`]
+/// builds nothing: it returns the measure ([`M`]) the build will have and adds the work
+/// the build will spend to [`Meter::predicted`], without charging the output budget. A
+/// quantifier is planned once, with its binder's whole interval, and its measure and
+/// work are multiplied by its fan-out. [`Build`] builds the expression and charges as
+/// it goes. Because both run the same code, the plan of an expression without a
+/// quantifier is exactly its build, and with one it is an upper bound (RFC 0003
+/// correction 4, "Resources").
+trait Mode {
+    const BUILD: bool;
+    type I: Clone;
+    type B: Clone;
+    fn i_const(v: i64) -> Self::I;
+    /// A state variable (or a post-state placeholder) whose domain is `lo..=hi`.
+    fn i_var(name: &str, lo: i64, hi: i64) -> Self::I;
+    /// A parameter or bound variable in scope: a point while building, the interval
+    /// `lo..=hi` while planning.
+    fn i_scoped(lo: i64, hi: i64) -> Self::I;
+    /// Whether every value of `i`, and every intermediate result computing it, fits
+    /// `i64`: always while building (the build does not decide it), from the interval
+    /// while planning.
+    fn fits(i: &Self::I) -> bool;
+    fn i_arith(op: ArithOp, a: Self::I, b: Self::I) -> Self::I;
+    fn i_min(a: Self::I, b: Self::I) -> Self::I;
+    fn i_max(a: Self::I, b: Self::I) -> Self::I;
+    fn b_const(v: bool) -> Self::B;
+    fn b_cmp(op: CmpOp, a: Self::I, b: Self::I) -> Self::B;
+    fn b_not(a: Self::B) -> Self::B;
+    fn b_and(a: Self::B, b: Self::B) -> Self::B;
+    fn b_or(a: Self::B, b: Self::B) -> Self::B;
+    fn b_implies(a: Self::B, b: Self::B) -> Self::B;
+    fn b_range(x: Self::I, lo: i64, hi: i64) -> Self::B;
+}
+
+/// Build the expressions.
+enum Build {}
+
+/// Measure them only.
+enum Plan {}
+
+impl Mode for Build {
+    const BUILD: bool = true;
+    type I = IntExpr;
+    type B = BoolExpr;
+    fn i_const(v: i64) -> IntExpr {
+        IntExpr::Const(v)
+    }
+    fn i_var(name: &str, _: i64, _: i64) -> IntExpr {
+        IntExpr::var(name)
+    }
+    fn i_scoped(lo: i64, _: i64) -> IntExpr {
+        IntExpr::Const(lo)
+    }
+    fn fits(_: &IntExpr) -> bool {
+        true
+    }
+    fn i_arith(op: ArithOp, a: IntExpr, b: IntExpr) -> IntExpr {
+        IntExpr::Arith(op, Box::new(a), Box::new(b))
+    }
+    fn i_min(a: IntExpr, b: IntExpr) -> IntExpr {
+        IntExpr::min(a, b)
+    }
+    fn i_max(a: IntExpr, b: IntExpr) -> IntExpr {
+        IntExpr::max(a, b)
+    }
+    fn b_const(v: bool) -> BoolExpr {
+        BoolExpr::Const(v)
+    }
+    fn b_cmp(op: CmpOp, a: IntExpr, b: IntExpr) -> BoolExpr {
+        BoolExpr::compare(op, a, b)
+    }
+    fn b_not(a: BoolExpr) -> BoolExpr {
+        BoolExpr::negate(a)
+    }
+    fn b_and(a: BoolExpr, b: BoolExpr) -> BoolExpr {
+        BoolExpr::and(a, b)
+    }
+    fn b_or(a: BoolExpr, b: BoolExpr) -> BoolExpr {
+        BoolExpr::or(a, b)
+    }
+    fn b_implies(a: BoolExpr, b: BoolExpr) -> BoolExpr {
+        BoolExpr::implies(a, b)
+    }
+    fn b_range(x: IntExpr, lo: i64, hi: i64) -> BoolExpr {
+        BoolExpr::in_range(x, lo, hi)
+    }
+}
+
+/// The plan's integer: the interval of values the built expression takes, computed
+/// node by node; `None` after an `i128` overflow (which does not fit).
+impl Mode for Plan {
+    const BUILD: bool = false;
+    type I = Option<Iv>;
+    type B = ();
+    fn i_const(v: i64) -> Option<Iv> {
+        Some(Iv::point(v))
+    }
+    fn i_var(_: &str, lo: i64, hi: i64) -> Option<Iv> {
+        Some(Iv::range(lo, hi))
+    }
+    fn i_scoped(lo: i64, hi: i64) -> Option<Iv> {
+        Some(Iv::range(lo, hi))
+    }
+    fn fits(i: &Option<Iv>) -> bool {
+        i.is_some_and(|iv| iv.fits)
+    }
+    fn i_arith(op: ArithOp, a: Option<Iv>, b: Option<Iv>) -> Option<Iv> {
+        iv_arith(op, a?, b?)
+    }
+    fn i_min(a: Option<Iv>, b: Option<Iv>) -> Option<Iv> {
+        Some(iv_min_max(true, a?, b?))
+    }
+    fn i_max(a: Option<Iv>, b: Option<Iv>) -> Option<Iv> {
+        Some(iv_min_max(false, a?, b?))
+    }
+    fn b_const(_: bool) {}
+    fn b_cmp(_: CmpOp, _: Option<Iv>, _: Option<Iv>) {}
+    fn b_not((): ()) {}
+    fn b_and((): (), (): ()) {}
+    fn b_or((): (), (): ()) {}
+    fn b_implies((): (), (): ()) {}
+    fn b_range(_: Option<Iv>, _: i64, _: i64) {}
+}
+
+/// Work: spent while building; while planning, added to the prediction, and one unit
+/// of the plan's own effort spent.
+fn work<Md: Mode>(budget: &mut Meter, n: u64, span: Span) -> R<()> {
+    if Md::BUILD {
+        burn(budget, n, span)
+    } else {
+        budget.predicted = budget.predicted.saturating_add(u128::from(n));
+        predicted_fits(budget, span)?;
+        burn(budget, 1, span)
+    }
+}
+
+/// Refuse as soon as a plan's predicted work passes what the work budget has left: a
+/// site's prediction only grows, so the plan stops at the first step that decides the
+/// refusal instead of after the whole site (cr-3aqchd).
+fn predicted_fits(budget: &Meter, span: Span) -> R<()> {
+    if budget.predicted > u128::from(budget.fuel.left()) {
+        return no(Unlowerable::WorkLimitExceeded, span);
+    }
+    Ok(())
+}
+
+/// Work that this pass performs itself, in either mode (a sort of a domain's members):
+/// spent before it is done, and while planning also predicted for the build, which does
+/// it again.
+fn effort<Md: Mode>(budget: &mut Meter, n: u64, span: Span) -> R<()> {
+    if !Md::BUILD {
+        budget.predicted = budget.predicted.saturating_add(u128::from(n));
+        predicted_fits(budget, span)?;
+    }
+    burn(budget, n, span)
+}
+
+/// Output: charged while building (from what the site's plan prepaid, see
+/// [`begin_site`]); nothing while planning.
+fn charge_in<Md: Mode>(budget: &mut Meter, n: usize, span: Span) -> R<()> {
+    if Md::BUILD {
+        charge(budget, n, span)
+    } else {
+        Ok(())
+    }
+}
+
+/// Charge `n` output nodes, or refuse with [`Unlowerable::OutputTooLarge`]. Inside a
+/// planned site the nodes come from what the plan prepaid; a build that needed more
+/// than its plan would be a planning defect, which is still charged (and caught by a
+/// debug assertion).
+fn charge(budget: &mut Meter, n: usize, span: Span) -> R<()> {
+    let from_plan = n.min(budget.prepaid);
+    budget.prepaid -= from_plan;
+    let rest = n - from_plan;
+    if rest > 0 && budget.in_site {
+        budget.overdrawn = true;
+    }
+    budget.nodes.charge(rest).map_err(|_| LowerError {
+        kind: LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge),
+        span,
+    })
+}
+
+/// Open a planned site: refuse a planned depth past [`MAX_EXPR_DEPTH`], refuse
+/// predicted work past what the work budget has left, then charge the planned output
+/// in one step. The build that follows draws its nodes from that charge and spends its
+/// work as it runs.
+fn begin_site(budget: &mut Meter, size: usize, depth: usize, span: Span) -> R<()> {
+    if depth > MAX_EXPR_DEPTH {
+        return no(Unlowerable::ExpressionTooDeep, span);
+    }
+    if budget.predicted > u128::from(budget.fuel.left()) {
+        return no(Unlowerable::WorkLimitExceeded, span);
+    }
+    budget.nodes.charge(size).map_err(|_| LowerError {
+        kind: LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge),
+        span,
+    })?;
+    budget.prepaid = size;
+    budget.in_site = true;
+    Ok(())
+}
+
+/// Close a site. What the plan over-estimated stays charged: the plan is an upper
+/// bound, and output is never refunded.
+fn end_site(budget: &mut Meter) {
+    debug_assert!(
+        !budget.overdrawn,
+        "a build needed more output than its plan"
+    );
+    budget.prepaid = 0;
+    budget.in_site = false;
+    budget.overdrawn = false;
+}
+
+/// Lower one clause (an init, guard, or invariant conjunct) as its own planned site.
+fn top_bool(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
+    shallow(e, budget)?;
+    budget.predicted = 0;
+    let planned = bool_expr::<Plan>(e, budget)?.1;
+    begin_site(budget, planned.size, planned.depth, e.span)?;
+    let built = bool_expr::<Build>(e, budget);
+    end_site(budget);
+    built
+}
+
 /// Conjoin lowered clauses as a *balanced* tree, so `n` clauses add `⌈log₂ n⌉` levels
 /// rather than `n - 1`. The result's depth is computed from the clause measures and
 /// checked against [`MAX_EXPR_DEPTH`], and the `&&` nodes are charged, before any node
 /// is built. Pairing is adjacent and left to right, so the tree is a function of the
 /// clause order alone (and for two or three clauses equals the left fold).
 fn conjoin(clauses: Vec<Sized<BoolExpr>>, budget: &mut Meter, span: Span) -> R<BoolExpr> {
-    let n = clauses.len();
-    if n == 0 {
-        return Ok(BoolExpr::Const(true));
+    if clauses.is_empty() {
+        // The implicit `true` is a node like any other: charged (cr-3aqchd).
+        return Ok(node::<Build, _>(budget, span, &[], || BoolExpr::Const(true))?.0);
     }
-    let deepest = clauses.iter().map(|c| c.1.depth).max().unwrap_or(0);
+    Ok(balanced::<Build>(clauses, true, budget, span)?.0)
+}
+
+/// An upper bound on the nodes of [`conjoin`]`(clauses)`, for the work of evaluating or
+/// copying it: the clause count plus their sizes (one more than the tree's `n − 1`
+/// combining nodes), and `1` for no clause — the `true` node `conjoin` builds, which is
+/// evaluated and copied like any other (cr-3aqchd).
+fn conjoined_size(clauses: &[Sized<BoolExpr>]) -> usize {
+    clauses
+        .iter()
+        .fold(clauses.len(), |acc, c| acc.saturating_add(c.1.size))
+        .max(1)
+}
+
+/// `⌈log₂ n⌉`: the levels a balanced tree over `n` leaves adds.
+fn levels(n: u128) -> usize {
     let mut levels = 0_usize;
     let mut width = n;
     while width > 1 {
         width = width.div_ceil(2);
         levels = levels.saturating_add(1);
     }
-    if deepest.saturating_add(levels) > MAX_EXPR_DEPTH {
+    levels
+}
+
+/// The measure of a balanced tree over `n >= 1` leaves of measure at most `leaf`.
+fn balanced_measure(n: u128, leaf: M) -> M {
+    let n_size = usize::try_from(n).unwrap_or(usize::MAX);
+    M {
+        size: n_size
+            .saturating_mul(leaf.size)
+            .saturating_add(n_size.saturating_sub(1)),
+        depth: leaf.depth.saturating_add(levels(n)),
+    }
+}
+
+/// A balanced `&&` (or `||`) tree over `items` (at least one), adjacent pairs left to
+/// right. Its depth is checked, its `n - 1` nodes charged, and `n` units of work spent,
+/// before any node is built.
+fn balanced<Md: Mode>(
+    items: Vec<Sized<Md::B>>,
+    and: bool,
+    budget: &mut Meter,
+    span: Span,
+) -> R<Sized<Md::B>> {
+    let n = items.len();
+    let deepest = items.iter().map(|c| c.1.depth).max().unwrap_or(0);
+    let size = items
+        .iter()
+        .fold(n.saturating_sub(1), |acc, c| acc.saturating_add(c.1.size));
+    let depth = deepest.saturating_add(levels(n as u128));
+    if depth > MAX_EXPR_DEPTH {
         return no(Unlowerable::ExpressionTooDeep, span);
     }
-    charge(budget, n.saturating_sub(1), span)?;
-    burn(budget, n as u64, span)?;
-    let mut round: Vec<BoolExpr> = clauses.into_iter().map(|c| c.0).collect();
+    charge_in::<Md>(budget, n.saturating_sub(1), span)?;
+    work::<Md>(budget, n as u64, span)?;
+    let mut round: Vec<Md::B> = items.into_iter().map(|c| c.0).collect();
     while round.len() > 1 {
-        let mut next: Vec<BoolExpr> = Vec::with_capacity(round.len().div_ceil(2));
+        let mut next: Vec<Md::B> = Vec::with_capacity(round.len().div_ceil(2));
         let mut items = round.into_iter();
         while let Some(left) = items.next() {
             match items.next() {
-                Some(right) => next.push(BoolExpr::and(left, right)),
+                Some(right) => next.push(if and {
+                    Md::b_and(left, right)
+                } else {
+                    Md::b_or(left, right)
+                }),
                 None => next.push(left),
             }
         }
         round = next;
     }
-    Ok(round.pop().unwrap_or(BoolExpr::Const(true)))
+    match round.pop() {
+        Some(b) => Ok((b, M { size, depth })),
+        None => node::<Md, _>(budget, span, &[], || Md::b_const(and)),
+    }
 }
 
 /// Why a non-integer, non-boolean expression does not lower.
 fn reason(e: &Expr) -> Unlowerable {
     match &e.kind {
         ExprKind::Const(_) => Unlowerable::Constant,
-        ExprKind::Quant(..) | ExprKind::SetComp(..) | ExprKind::MapComp(..) => {
-            Unlowerable::Quantifier
-        }
+        ExprKind::Quant(..)
+        | ExprKind::SetComp(..)
+        | ExprKind::MapComp(..)
+        | ExprKind::Bound { .. } => Unlowerable::Quantifier,
         ExprKind::Param(_) => Unlowerable::ParameterizedAction,
         ExprKind::Binary(BinOp::Div | BinOp::Mod, ..) => Unlowerable::DivisionOrModulo,
         ExprKind::Recur { .. } => Unlowerable::RecursiveCall,
@@ -1565,9 +2498,12 @@ fn reason(e: &Expr) -> Unlowerable {
 
 /// Refuse an expression too deep to lower, before recursing into it.
 ///
-/// A lowered expression is never shallower than its normalized form less one level (an
-/// `in a..b` becomes one range node), so anything deeper than `MAX_EXPR_DEPTH + 1`
-/// would be refused by the builder anyway.
+/// Every pass over a normalized expression — the plan, the build, and the interval of a
+/// quantifier domain — recurses along the source tree, so this bound is their stack
+/// bound. A lowered expression without a quantifier is never shallower than its
+/// normalized form less one level (an `in a..b` becomes one range node), so anything
+/// deeper than `MAX_EXPR_DEPTH + 1` would be refused by the builder anyway; a quantifier
+/// only adds levels, except over an empty domain, whose deep source is refused here too.
 fn shallow(e: &Expr, budget: &mut Meter) -> R<()> {
     let (size, depth) = crate::elab::measure(e);
     burn(budget, size as u64, e.span)?;
@@ -1596,32 +2532,19 @@ impl M {
 /// A lowered expression and its measure.
 type Sized<T> = (T, M);
 
-/// Charge `n` output nodes, or refuse with [`Unlowerable::OutputTooLarge`].
-fn charge(budget: &mut Meter, n: usize, span: Span) -> R<()> {
-    budget.nodes.charge(n).map_err(|_| LowerError {
-        kind: LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge),
-        span,
-    })
-}
-
-fn top_bool(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
-    shallow(e, budget)?;
-    bool_expr(e, budget)
-}
-
-fn top_int_sized(e: &Expr, budget: &mut Meter) -> R<Sized<IntExpr>> {
-    shallow(e, budget)?;
-    int_expr(e, budget)
-}
-
 /// One new node over already-lowered children. Its depth is checked against
 /// [`MAX_EXPR_DEPTH`] and the node is charged *before* `build` runs, so no lowered
 /// expression deeper than the model admits is ever constructed (and none needs a deep
 /// recursive drop).
-fn node<T>(budget: &mut Meter, span: Span, parts: &[M], build: impl FnOnce() -> T) -> R<Sized<T>> {
+fn node<Md: Mode, T>(
+    budget: &mut Meter,
+    span: Span,
+    parts: &[M],
+    build: impl FnOnce() -> T,
+) -> R<Sized<T>> {
     // Building the node, and (for the builder's validation) scanning the declared
     // variables when it names one, is charged as work.
-    burn(budget, 1, span)?;
+    work::<Md>(budget, 1, span)?;
     let depth = parts
         .iter()
         .map(|m| m.depth)
@@ -1631,18 +2554,19 @@ fn node<T>(budget: &mut Meter, span: Span, parts: &[M], build: impl FnOnce() -> 
     if depth > MAX_EXPR_DEPTH {
         return no(Unlowerable::ExpressionTooDeep, span);
     }
-    charge(budget, 1, span)?;
+    charge_in::<Md>(budget, 1, span)?;
     let size = parts
         .iter()
         .fold(1_usize, |acc, m| acc.saturating_add(m.size));
     Ok((build(), M { size, depth }))
 }
 
-/// Whether `ty` lowers to an integer: `Int`, `Nat`, or a sort the configuration
-/// instantiates.
+/// Whether `ty` lowers to an integer: `Int`, `Nat`, a sort the configuration
+/// instantiates, or an enumeration (its variant index).
 fn int_like(ty: &Type, budget: &Meter) -> bool {
     match ty {
         Type::Sort(s) => budget.bind.sorts.contains_key(s),
+        Type::Enum(e) => budget.enums.contains_key(e),
         other => other.is_integer(),
     }
 }
@@ -1656,147 +2580,279 @@ fn reason_in(e: &Expr, budget: &Meter) -> Unlowerable {
     }
 }
 
-fn int_expr(e: &Expr, budget: &mut Meter) -> R<Sized<IntExpr>> {
-    // A sort-typed node costs a lookup in the instantiated sorts, charged first.
-    if let Type::Sort(s) = &e.ty {
-        burn(
-            budget,
-            lookup_cost(budget.bind.sorts.len(), s.len()),
-            e.span,
-        )?;
+/// The value of an action parameter or bound variable in scope: a point while building,
+/// the lowest value of its interval while planning (the plan's measure does not depend
+/// on it). Charged as one ordered-table lookup.
+fn scoped<Md: Mode>(e: &Expr, budget: &mut Meter, span: Span) -> R<Option<(i64, i64)>> {
+    Ok(match &e.kind {
+        ExprKind::Param(p) => {
+            let cost = lookup_cost(budget.env.params.len(), p.len());
+            work::<Md>(budget, cost, span)?;
+            budget.env.params.get(p).copied()
+        }
+        ExprKind::Bound { binder, .. } => {
+            let cost = lookup_cost(budget.env.binders.len(), 8);
+            work::<Md>(budget, cost, span)?;
+            budget.env.binders.get(binder).copied()
+        }
+        _ => None,
+    })
+}
+
+/// Lower an integer expression. While planning inside a guarded quantifier instance
+/// (see [`instance`]), every integer node the build will contain is checked here, as it
+/// is planned: one whose interval may leave `i64` — the node itself or any
+/// intermediate result below it — is [`Unlowerable::GuardedOverflow`]. This covers
+/// everything a guarded instance evaluates, because everything it evaluates is built
+/// by this function: its body, the bounds and members in the guards of nested
+/// quantifiers, the operands of membership tests, and the operands of comparisons.
+fn int_expr<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Sized<Md::I>> {
+    let lowered = int_node::<Md>(e, budget)?;
+    if !Md::BUILD && budget.guarded > 0 && !Md::fits(&lowered.0) {
+        return no(Unlowerable::GuardedOverflow, e.span);
+    }
+    Ok(lowered)
+}
+
+fn int_node<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Sized<Md::I>> {
+    // A sort- or enumeration-typed node costs a lookup in its table (by the name's
+    // length), charged first.
+    match &e.ty {
+        Type::Sort(s) => {
+            let cost = lookup_cost(budget.bind.sorts.len(), s.len());
+            work::<Md>(budget, cost, e.span)?;
+        }
+        Type::Enum(n) => {
+            let cost = lookup_cost(budget.enums.len(), n.len());
+            work::<Md>(budget, cost, e.span)?;
+        }
+        _ => {}
     }
     if !int_like(&e.ty, budget) {
         return no(reason_in(e, budget), e.span);
     }
     let sp = e.span;
     match &e.kind {
-        ExprKind::Int(n) => node(budget, sp, &[], || IntExpr::Const(*n)),
-        // A constant the run configuration binds to an integer or a sort element.
-        ExprKind::Const(c) if budget.bind.ints.contains_key(c) => {
-            burn(budget, lookup_cost(budget.bind.ints.len(), c.len()), sp)?;
-            let v = budget.bind.ints.get(c).copied().unwrap_or(0);
-            node(budget, sp, &[], || IntExpr::Const(v))
+        ExprKind::Int(n) => node::<Md, _>(budget, sp, &[], || Md::i_const(*n)),
+        // A constant the run configuration binds to an integer, a sort element, or a
+        // variant.
+        // The lookup is charged before it is made, bound or not.
+        ExprKind::Const(c) => {
+            let cost = lookup_cost(budget.bind.ints.len(), c.len());
+            work::<Md>(budget, cost, sp)?;
+            match budget.bind.ints.get(c).copied() {
+                Some(v) => node::<Md, _>(budget, sp, &[], || Md::i_const(v)),
+                None => no(reason_in(e, budget), sp),
+            }
         }
+        // A variant: its index in declaration order.
+        ExprKind::Variant {
+            enumeration,
+            variant,
+        } => {
+            let Some(v) = variant_index::<Md>(budget, enumeration, variant, sp)? else {
+                return no(Unlowerable::NonIntegerValue, sp);
+            };
+            node::<Md, _>(budget, sp, &[], || Md::i_const(v))
+        }
+        // An action parameter or a quantifier's bound variable: its value.
+        ExprKind::Param(_) | ExprKind::Bound { .. } => match scoped::<Md>(e, budget, sp)? {
+            Some((lo, hi)) => node::<Md, _>(budget, sp, &[], || Md::i_scoped(lo, hi)),
+            None => no(reason(e), sp),
+        },
         // The name is owned text: its cost travels with the node into every copy.
         ExprKind::State(v) => {
             let text = crate::budget::text_cost(v.len());
-            charge(budget, text, sp)?;
+            charge_in::<Md>(budget, text, sp)?;
             let scan = budget.vars as u64;
-            burn(budget, scan, sp)?;
-            node(budget, sp, &[M::text(text)], || IntExpr::var(v))
+            work::<Md>(budget, scan, sp)?;
+            let (lo, hi) = domain_in::<Md>(budget, v, sp)?;
+            node::<Md, _>(budget, sp, &[M::text(text)], || Md::i_var(v, lo, hi))
         }
         ExprKind::Neg(a) => {
-            let (a, sa) = int_expr(a, budget)?;
-            node(budget, sp, &[sa, M { size: 1, depth: 1 }], || {
-                IntExpr::minus(IntExpr::Const(0), a)
+            let (a, sa) = int_expr::<Md>(a, budget)?;
+            node::<Md, _>(budget, sp, &[sa, M { size: 1, depth: 1 }], || {
+                Md::i_arith(ArithOp::Sub, Md::i_const(0), a)
             })
         }
         ExprKind::Binary(op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), a, b) => {
-            let (a, sa) = int_expr(a, budget)?;
-            let (b, sb) = int_expr(b, budget)?;
-            let built = match op {
-                BinOp::Add => IntExpr::plus(a, b),
-                BinOp::Sub => IntExpr::minus(a, b),
-                _ => IntExpr::times(a, b),
+            let (a, sa) = int_expr::<Md>(a, budget)?;
+            let (b, sb) = int_expr::<Md>(b, budget)?;
+            let op = match op {
+                BinOp::Add => ArithOp::Add,
+                BinOp::Sub => ArithOp::Sub,
+                _ => ArithOp::Mul,
             };
-            node(budget, sp, &[sa, sb], || built)
+            node::<Md, _>(budget, sp, &[sa, sb], || Md::i_arith(op, a, b))
         }
         ExprKind::Builtin(Builtin::Min, args) | ExprKind::Builtin(Builtin::Max, args) => {
             let [a, b] = args.as_slice() else {
                 return no(Unlowerable::NonIntegerValue, e.span);
             };
-            let (a, sa) = int_expr(a, budget)?;
-            let (b, sb) = int_expr(b, budget)?;
-            let built = if matches!(e.kind, ExprKind::Builtin(Builtin::Min, _)) {
-                IntExpr::min(a, b)
-            } else {
-                IntExpr::max(a, b)
-            };
-            node(budget, sp, &[sa, sb], || built)
+            let (a, sa) = int_expr::<Md>(a, budget)?;
+            let (b, sb) = int_expr::<Md>(b, budget)?;
+            let min = matches!(e.kind, ExprKind::Builtin(Builtin::Min, _));
+            node::<Md, _>(budget, sp, &[sa, sb], || {
+                if min {
+                    Md::i_min(a, b)
+                } else {
+                    Md::i_max(a, b)
+                }
+            })
         }
         // A post-state read, inside a postcondition: the placeholder the candidate
         // enumeration replaces by each candidate value.
         ExprKind::Primed(v) if budget.post => {
             let cost = lookup_cost(budget.slots.len(), v.len());
-            burn(budget, cost, sp)?;
+            work::<Md>(budget, cost, sp)?;
             let Some(slot) = budget.slots.get(v).copied() else {
                 return no(Unlowerable::PrimedOutsidePostcondition, sp);
             };
             let name = primed_placeholder(slot);
             let text = crate::budget::text_cost(name.len());
-            charge(budget, text, sp)?;
-            node(budget, sp, &[M::text(text)], || IntExpr::Var(name))
+            charge_in::<Md>(budget, text, sp)?;
+            let (lo, hi) = domain_in::<Md>(budget, v, sp)?;
+            node::<Md, _>(budget, sp, &[M::text(text)], || Md::i_var(&name, lo, hi))
         }
         ExprKind::If(..) => no(Unlowerable::ConditionalValue, e.span),
         _ => no(reason_in(e, budget), e.span),
     }
 }
 
+/// The declared domain of state variable `v`, for the plan's intervals: one lookup,
+/// spent, while planning inside a guarded instance; nothing otherwise. A variable
+/// with no domain (its declaration was refused) has the whole `i64` range.
+fn domain_in<Md: Mode>(budget: &mut Meter, v: &str, span: Span) -> R<(i64, i64)> {
+    // Only the guarded check reads a plan's intervals, so outside a guarded instance the
+    // domain is not looked up (and the unread interval is the whole `i64` range).
+    if Md::BUILD || budget.guarded == 0 {
+        return Ok((i64::MIN, i64::MAX));
+    }
+    // The plan's own effort: the build does not look the domain up, so the lookup is
+    // spent, not predicted.
+    let cost = lookup_cost(budget.domains.len(), v.len());
+    burn(budget, cost, span)?;
+    Ok(budget
+        .domains
+        .get(v)
+        .copied()
+        .unwrap_or((i64::MIN, i64::MAX)))
+}
+
+/// The index of `variant` in `enumeration`, charging the two lookups first.
+fn variant_index<Md: Mode>(
+    budget: &mut Meter,
+    enumeration: &str,
+    variant: &str,
+    span: Span,
+) -> R<Option<i64>> {
+    let cost = lookup_cost(budget.enums.len(), enumeration.len());
+    work::<Md>(budget, cost, span)?;
+    let Some(table) = budget.enums.get(enumeration) else {
+        return Ok(None);
+    };
+    let cost = lookup_cost(table.index.len(), variant.len());
+    work::<Md>(budget, cost, span)?;
+    Ok(budget
+        .enums
+        .get(enumeration)
+        .and_then(|t| t.index.get(variant))
+        .copied())
+}
+
+/// The operand for one use of several: the original, moved, for the `last` use, and a
+/// charged [`copy`] otherwise.
+fn take_or_copy<Md: Mode, T: Clone>(
+    slot: &mut Option<Sized<T>>,
+    last: bool,
+    budget: &mut Meter,
+    span: Span,
+) -> R<Sized<T>> {
+    if last {
+        return match slot.take() {
+            Some(x) => Ok(x),
+            None => no(Unlowerable::NonIntegerValue, span),
+        };
+    }
+    match slot.as_ref() {
+        Some(x) => copy::<Md, _>(budget, span, x),
+        None => no(Unlowerable::NonIntegerValue, span),
+    }
+}
+
 /// Clone a lowered subtree after charging its size: the only way this module copies.
-fn copy<T: Clone>(budget: &mut Meter, span: Span, x: &Sized<T>) -> R<Sized<T>> {
-    charge(budget, x.1.size, span)?;
-    burn(budget, x.1.size as u64, span)?;
+fn copy<Md: Mode, T: Clone>(budget: &mut Meter, span: Span, x: &Sized<T>) -> R<Sized<T>> {
+    charge_in::<Md>(budget, x.1.size, span)?;
+    work::<Md>(budget, x.1.size as u64, span)?;
     Ok((x.0.clone(), x.1))
 }
 
-fn bool_expr(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
+fn bool_expr<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Sized<Md::B>> {
     if e.ty != Type::Bool {
         return no(reason(e), e.span);
     }
     let sp = e.span;
     match &e.kind {
-        ExprKind::Bool(b) => node(budget, sp, &[], || BoolExpr::Const(*b)),
+        ExprKind::Bool(b) => node::<Md, _>(budget, sp, &[], || Md::b_const(*b)),
         // A constant the run configuration binds to a Boolean.
-        ExprKind::Const(c) if budget.bind.bools.contains_key(c) => {
-            burn(budget, lookup_cost(budget.bind.bools.len(), c.len()), sp)?;
-            let v = budget.bind.bools.get(c).copied().unwrap_or(false);
-            node(budget, sp, &[], || BoolExpr::Const(v))
+        ExprKind::Const(c) => {
+            let cost = lookup_cost(budget.bind.bools.len(), c.len());
+            work::<Md>(budget, cost, sp)?;
+            match budget.bind.bools.get(c).copied() {
+                Some(v) => node::<Md, _>(budget, sp, &[], || Md::b_const(v)),
+                None => no(reason_in(e, budget), sp),
+            }
         }
+        // A Boolean parameter or bound variable: `0` is `false`, `1` is `true`.
+        ExprKind::Param(_) | ExprKind::Bound { .. } => match scoped::<Md>(e, budget, sp)? {
+            Some((v, _)) => node::<Md, _>(budget, sp, &[], || Md::b_const(v != 0)),
+            None => no(reason(e), sp),
+        },
+        ExprKind::Quant(q, binders, body) => quantifier::<Md>(*q, binders, body, sp, budget),
         ExprKind::Not(a) => {
-            let (a, sa) = bool_expr(a, budget)?;
-            node(budget, sp, &[sa], || BoolExpr::negate(a))
+            let (a, sa) = bool_expr::<Md>(a, budget)?;
+            node::<Md, _>(budget, sp, &[sa], || Md::b_not(a))
         }
         ExprKind::If(c, a, b) => {
             // `(c && a) || (!c && b)` mentions `c` twice: the second copy is charged.
-            let c = bool_expr(c, budget)?;
-            let (c2, sc2) = copy(budget, sp, &c)?;
-            let (a, sa) = bool_expr(a, budget)?;
-            let (b, sb) = bool_expr(b, budget)?;
-            let (left, sl) = node(budget, sp, &[c.1, sa], || BoolExpr::and(c.0, a))?;
-            let (nc, snc) = node(budget, sp, &[sc2], || BoolExpr::negate(c2))?;
-            let (right, sr) = node(budget, sp, &[snc, sb], || BoolExpr::and(nc, b))?;
-            node(budget, sp, &[sl, sr], || BoolExpr::or(left, right))
+            let c = bool_expr::<Md>(c, budget)?;
+            let (c2, sc2) = copy::<Md, _>(budget, sp, &c)?;
+            let (a, sa) = bool_expr::<Md>(a, budget)?;
+            let (b, sb) = bool_expr::<Md>(b, budget)?;
+            let (left, sl) = node::<Md, _>(budget, sp, &[c.1, sa], || Md::b_and(c.0, a))?;
+            let (nc, snc) = node::<Md, _>(budget, sp, &[sc2], || Md::b_not(c2))?;
+            let (right, sr) = node::<Md, _>(budget, sp, &[snc, sb], || Md::b_and(nc, b))?;
+            node::<Md, _>(budget, sp, &[sl, sr], || Md::b_or(left, right))
         }
         ExprKind::Binary(op, a, b) => {
-            let cmp = |op: CmpOp, budget: &mut Meter| -> R<Sized<BoolExpr>> {
-                let (x, sx) = int_expr(a, budget)?;
-                let (y, sy) = int_expr(b, budget)?;
-                node(budget, sp, &[sx, sy], || BoolExpr::compare(op, x, y))
+            let cmp = |op: CmpOp, budget: &mut Meter| -> R<Sized<Md::B>> {
+                let (x, sx) = int_expr::<Md>(a, budget)?;
+                let (y, sy) = int_expr::<Md>(b, budget)?;
+                node::<Md, _>(budget, sp, &[sx, sy], || Md::b_cmp(op, x, y))
             };
             match op {
                 BinOp::And | BinOp::Or | BinOp::Implies => {
-                    let (x, sx) = bool_expr(a, budget)?;
-                    let (y, sy) = bool_expr(b, budget)?;
-                    let built = match op {
-                        BinOp::And => BoolExpr::and(x, y),
-                        BinOp::Or => BoolExpr::or(x, y),
-                        _ => BoolExpr::implies(x, y),
-                    };
-                    node(budget, sp, &[sx, sy], || built)
+                    let (x, sx) = bool_expr::<Md>(a, budget)?;
+                    let (y, sy) = bool_expr::<Md>(b, budget)?;
+                    node::<Md, _>(budget, sp, &[sx, sy], || match op {
+                        BinOp::And => Md::b_and(x, y),
+                        BinOp::Or => Md::b_or(x, y),
+                        _ => Md::b_implies(x, y),
+                    })
                 }
                 BinOp::Iff => {
-                    let x = bool_expr(a, budget)?;
-                    let y = bool_expr(b, budget)?;
-                    iff(budget, sp, x, y)
+                    let x = bool_expr::<Md>(a, budget)?;
+                    let y = bool_expr::<Md>(b, budget)?;
+                    iff::<Md>(budget, sp, x, y)
                 }
                 BinOp::Eq | BinOp::Ne if a.ty == Type::Bool => {
-                    let x = bool_expr(a, budget)?;
-                    let y = bool_expr(b, budget)?;
-                    let same = iff(budget, sp, x, y)?;
+                    let x = bool_expr::<Md>(a, budget)?;
+                    let y = bool_expr::<Md>(b, budget)?;
+                    let same = iff::<Md>(budget, sp, x, y)?;
                     if *op == BinOp::Eq {
                         Ok(same)
                     } else {
-                        node(budget, sp, &[same.1], || BoolExpr::negate(same.0))
+                        node::<Md, _>(budget, sp, &[same.1], || Md::b_not(same.0))
                     }
                 }
                 BinOp::Eq => cmp(CmpOp::Eq, budget),
@@ -1806,32 +2862,16 @@ fn bool_expr(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
                 BinOp::Gt => cmp(CmpOp::Gt, budget),
                 BinOp::Ge => cmp(CmpOp::Ge, budget),
                 BinOp::In | BinOp::NotIn => {
-                    let ExprKind::Binary(BinOp::Range, lo, hi) = &b.kind else {
-                        return no(reason_in(b, budget), b.span);
-                    };
-                    let x = int_expr(a, budget)?;
-                    let inside = match (constant(lo), constant(hi)) {
-                        (Some(lo), Some(hi)) => {
-                            node(budget, sp, &[x.1], || BoolExpr::in_range(x.0, lo, hi))?
+                    let inside = match &b.kind {
+                        ExprKind::Binary(BinOp::Range, lo, hi) => {
+                            in_range::<Md>(a, lo, hi, sp, budget)?
                         }
-                        _ => {
-                            // `lo <= x && x <= hi` mentions `x` twice: the copy is charged.
-                            let (x2, sx2) = copy(budget, sp, &x)?;
-                            let (l, sl) = int_expr(lo, budget)?;
-                            let (h, sh) = int_expr(hi, budget)?;
-                            let (ge, sge) = node(budget, sp, &[x.1, sl], || {
-                                BoolExpr::compare(CmpOp::Ge, x.0, l)
-                            })?;
-                            let (le, sle) = node(budget, sp, &[sx2, sh], || {
-                                BoolExpr::compare(CmpOp::Le, x2, h)
-                            })?;
-                            node(budget, sp, &[sge, sle], || BoolExpr::and(ge, le))?
-                        }
+                        _ => membership::<Md>(a, b, sp, budget)?,
                     };
                     if *op == BinOp::In {
                         Ok(inside)
                     } else {
-                        node(budget, sp, &[inside.1], || BoolExpr::negate(inside.0))
+                        node::<Md, _>(budget, sp, &[inside.1], || Md::b_not(inside.0))
                     }
                 }
                 _ => no(reason_in(e, budget), e.span),
@@ -1841,22 +2881,780 @@ fn bool_expr(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
     }
 }
 
+/// `x in lo..hi`: one range node for constant bounds, else `lo <= x && x <= hi`.
+fn in_range<Md: Mode>(
+    a: &Expr,
+    lo: &Expr,
+    hi: &Expr,
+    sp: Span,
+    budget: &mut Meter,
+) -> R<Sized<Md::B>> {
+    let x = int_expr::<Md>(a, budget)?;
+    match (constant(lo), constant(hi)) {
+        (Some(lo), Some(hi)) => node::<Md, _>(budget, sp, &[x.1], || Md::b_range(x.0, lo, hi)),
+        _ => {
+            // `lo <= x && x <= hi` mentions `x` twice: the copy is charged.
+            let (x2, sx2) = copy::<Md, _>(budget, sp, &x)?;
+            let (l, sl) = int_expr::<Md>(lo, budget)?;
+            let (h, sh) = int_expr::<Md>(hi, budget)?;
+            let (ge, sge) = node::<Md, _>(budget, sp, &[x.1, sl], || Md::b_cmp(CmpOp::Ge, x.0, l))?;
+            let (le, sle) = node::<Md, _>(budget, sp, &[sx2, sh], || Md::b_cmp(CmpOp::Le, x2, h))?;
+            node::<Md, _>(budget, sp, &[sge, sle], || Md::b_and(ge, le))
+        }
+    }
+}
+
+/// The members of a set `x` is tested against.
+enum Members<'e> {
+    /// A set literal: each member is lowered.
+    Exprs(&'e [Expr]),
+    /// A configuration constant: its codes, shared (never copied).
+    Values(Rc<[i64]>),
+}
+
+/// `x in S` for a set of scalars `S` given as a set literal or as a configuration
+/// constant (RFC 0003 correction 4): the balanced disjunction of `x == s` over the
+/// members — for Booleans `x <=> s`, and against a constant `x` or `!x` — and, for an
+/// empty set, `!(x == x)` (Booleans: `x && !x`), which is false but still evaluates
+/// `x` (cr-3aqchd). `x` is lowered once and each further use is a charged copy.
+fn membership<Md: Mode>(x: &Expr, set: &Expr, sp: Span, budget: &mut Meter) -> R<Sized<Md::B>> {
+    let members = match &set.kind {
+        ExprKind::SetLit(es) => Members::Exprs(es),
+        ExprKind::Const(c) => {
+            let cost = lookup_cost(budget.bind.sets.len(), c.len());
+            work::<Md>(budget, cost, sp)?;
+            match budget.bind.sets.get(c) {
+                Some(values) => Members::Values(Rc::clone(values)),
+                None => return no(reason_in(set, budget), set.span),
+            }
+        }
+        _ => return no(reason_in(set, budget), set.span),
+    };
+    let n = match &members {
+        Members::Exprs(es) => es.len(),
+        Members::Values(vs) => vs.len(),
+    };
+    if x.ty == Type::Bool {
+        return bool_membership::<Md>(x, &members, n, sp, budget);
+    }
+    let first = int_expr::<Md>(x, budget)?;
+    if n == 0 {
+        // No member, so `x in S` is false — but CML still evaluates `x`, which may fail.
+        // `!(x == x)` is false wherever `x` evaluates and fails wherever it fails, so
+        // the evaluation, and its errors, are kept (cr-3aqchd); a charged copy of `x`.
+        let (again, sa) = copy::<Md, _>(budget, sp, &first)?;
+        let (same, ss) = node::<Md, _>(budget, sp, &[first.1, sa], || {
+            Md::b_cmp(CmpOp::Eq, first.0, again)
+        })?;
+        return node::<Md, _>(budget, sp, &[ss], || Md::b_not(same));
+    }
+    let mut items = Vec::with_capacity(n);
+    // Every comparison but the last takes a charged copy of `x`; the last takes `x`
+    // itself, moved, not cloned (cr-3aqchd).
+    let mut first = Some(first);
+    for i in 0..n {
+        let (xi, sxi) = take_or_copy::<Md, _>(&mut first, i + 1 == n, budget, sp)?;
+        let (m, sm) = match &members {
+            Members::Exprs(es) => match es.get(i) {
+                Some(e) => int_expr::<Md>(e, budget)?,
+                None => return no(Unlowerable::NonIntegerValue, sp),
+            },
+            Members::Values(vs) => {
+                let v = vs.get(i).copied().unwrap_or(0);
+                node::<Md, _>(budget, sp, &[], || Md::i_const(v))?
+            }
+        };
+        items.push(node::<Md, _>(budget, sp, &[sxi, sm], || {
+            Md::b_cmp(CmpOp::Eq, xi, m)
+        })?);
+    }
+    balanced::<Md>(items, false, budget, sp)
+}
+
+/// [`membership`] of a Boolean `x`: against a literal member `x <=> m`, against a
+/// constant code `x` (`1`) or `!x` (`0`); the empty set is `x && !x`.
+fn bool_membership<Md: Mode>(
+    x: &Expr,
+    members: &Members<'_>,
+    n: usize,
+    sp: Span,
+    budget: &mut Meter,
+) -> R<Sized<Md::B>> {
+    let first = bool_expr::<Md>(x, budget)?;
+    if n == 0 {
+        let (again, sa) = copy::<Md, _>(budget, sp, &first)?;
+        let (not, sn) = node::<Md, _>(budget, sp, &[sa], || Md::b_not(again))?;
+        return node::<Md, _>(budget, sp, &[first.1, sn], || Md::b_and(first.0, not));
+    }
+    let mut items = Vec::with_capacity(n);
+    let mut first = Some(first);
+    for i in 0..n {
+        let xi = take_or_copy::<Md, _>(&mut first, i + 1 == n, budget, sp)?;
+        let item = match members {
+            Members::Exprs(es) => match es.get(i) {
+                Some(e) => {
+                    let m = bool_expr::<Md>(e, budget)?;
+                    iff::<Md>(budget, sp, xi, m)?
+                }
+                None => return no(Unlowerable::NonIntegerValue, sp),
+            },
+            Members::Values(vs) => {
+                if vs.get(i).copied().unwrap_or(0) != 0 {
+                    xi
+                } else {
+                    node::<Md, _>(budget, sp, &[xi.1], || Md::b_not(xi.0))?
+                }
+            }
+        };
+        items.push(item);
+    }
+    balanced::<Md>(items, false, budget, sp)
+}
+
 /// `a <=> b` as `(a => b) && (b => a)`. The expression language has no equivalence
 /// and no sharing, so each operand appears twice; the second copy of each is charged
 /// to the budget *before* it is made. A nest of `k` equivalences doubles per level, so
 /// it is refused as [`Unlowerable::OutputTooLarge`] as soon as the next copy would not
 /// fit, having allocated at most the budget.
-fn iff(
+fn iff<Md: Mode>(
     budget: &mut Meter,
     span: Span,
-    a: Sized<BoolExpr>,
-    b: Sized<BoolExpr>,
-) -> R<Sized<BoolExpr>> {
-    let a2 = copy(budget, span, &a)?;
-    let b2 = copy(budget, span, &b)?;
-    let (ab, sab) = node(budget, span, &[a.1, b.1], || BoolExpr::implies(a.0, b.0))?;
-    let (ba, sba) = node(budget, span, &[b2.1, a2.1], || {
-        BoolExpr::implies(b2.0, a2.0)
-    })?;
-    node(budget, span, &[sab, sba], || BoolExpr::and(ab, ba))
+    a: Sized<Md::B>,
+    b: Sized<Md::B>,
+) -> R<Sized<Md::B>> {
+    let a2 = copy::<Md, _>(budget, span, &a)?;
+    let b2 = copy::<Md, _>(budget, span, &b)?;
+    let (ab, sab) = node::<Md, _>(budget, span, &[a.1, b.1], || Md::b_implies(a.0, b.0))?;
+    let (ba, sba) = node::<Md, _>(budget, span, &[b2.1, a2.1], || Md::b_implies(b2.0, a2.0))?;
+    node::<Md, _>(budget, span, &[sab, sba], || Md::b_and(ab, ba))
+}
+
+// ---------------------------------------------------------------------------
+// finite domains and quantifier expansion (RFC 0003 correction 4, bn-10j7z)
+// ---------------------------------------------------------------------------
+
+/// The most quantifier binders in scope at once, across nested quantifiers and the
+/// binders of one quantifier: the model's expression depth, which a nest of quantifiers
+/// over two or more values each would reach anyway.
+pub const MAX_BINDER_NESTING: usize = MAX_EXPR_DEPTH;
+
+/// The universe of a scalar type under this lowering, as the inclusive range of its
+/// integer codes (RFC 0003 correction 4, "Finite types").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Universe {
+    /// Codes `lo..=hi`; empty when `hi < lo`.
+    Finite(i64, i64),
+    /// `Int`, `Nat`, or a sort with no bound or instantiation.
+    Unbounded,
+    /// Not a scalar type: a collection, tuple, record, string, or function.
+    NotScalar,
+}
+
+/// The universe of `ty`: `Bool` is `0..=1`; an enumeration its variant indices; a sort
+/// its instantiation; `Nat` and `Int` their configuration bounds. One table lookup.
+fn universe<Md: Mode>(ty: &Type, budget: &mut Meter, span: Span) -> R<Universe> {
+    Ok(match ty {
+        Type::Bool => Universe::Finite(0, 1),
+        Type::Nat => match budget.bind.bounds.nat_max() {
+            Some(max) => Universe::Finite(0, max),
+            None => Universe::Unbounded,
+        },
+        Type::Int => match budget.bind.bounds.int_range() {
+            Some((lo, hi)) => Universe::Finite(lo, hi),
+            None => Universe::Unbounded,
+        },
+        Type::Sort(s) => {
+            let cost = lookup_cost(budget.bind.sorts.len(), s.len());
+            work::<Md>(budget, cost, span)?;
+            match budget.bind.sorts.get(s) {
+                Some(n) => Universe::Finite(0, n.saturating_sub(1)),
+                None => Universe::Unbounded,
+            }
+        }
+        Type::Enum(e) => {
+            let cost = lookup_cost(budget.enums.len(), e.len());
+            work::<Md>(budget, cost, span)?;
+            match budget.enums.get(e) {
+                Some(t) => Universe::Finite(0, t.names.len() as i64 - 1),
+                None => Universe::NotScalar,
+            }
+        }
+        _ => Universe::NotScalar,
+    })
+}
+
+/// The number of codes in `lo..=hi`.
+fn span_count(lo: i64, hi: i64) -> u128 {
+    if hi < lo {
+        0
+    } else {
+        u128::try_from(i128::from(hi) - i128::from(lo) + 1).unwrap_or(0)
+    }
+}
+
+/// A refusal for a type with no finite universe: under a configuration the type can
+/// be bounded (`cml.lower.unbounded_type`); without one the legacy reason stands.
+fn unbounded(budget: &Meter, legacy: Unlowerable) -> Unlowerable {
+    if budget.bind.configured {
+        Unlowerable::UnboundedType
+    } else {
+        legacy
+    }
+}
+
+/// An interval of values an integer expression can take, computed in `i128`; `fits`
+/// is false when some intermediate result may leave `i64`, where the model core's
+/// checked arithmetic would report an overflow instead of a value.
+#[derive(Debug, Clone, Copy)]
+struct Iv {
+    lo: i128,
+    hi: i128,
+    fits: bool,
+}
+
+impl Iv {
+    fn point(v: i64) -> Self {
+        Self {
+            lo: i128::from(v),
+            hi: i128::from(v),
+            fits: true,
+        }
+    }
+
+    fn range(lo: i64, hi: i64) -> Self {
+        Self {
+            lo: i128::from(lo),
+            hi: i128::from(hi),
+            fits: true,
+        }
+    }
+
+    /// The value, when the expression has exactly one and computes it without
+    /// overflow: then it is static and folds to a constant.
+    fn value(self) -> Option<i64> {
+        if self.fits && self.lo == self.hi {
+            i64::try_from(self.lo).ok()
+        } else {
+            None
+        }
+    }
+
+    fn make(lo: i128, hi: i128, fits: bool) -> Self {
+        let inside = lo >= i128::from(i64::MIN) && hi <= i128::from(i64::MAX);
+        Self {
+            lo,
+            hi,
+            fits: fits && inside,
+        }
+    }
+}
+
+/// The interval of an integer-coded expression: literals and bound constants are
+/// points, parameters and bound variables are their value (building) or interval
+/// (planning), and a state variable its declared domain; `+ - *`, negation, `min` and
+/// `max` combine intervals. `None` for anything else, or an `i128` overflow. One unit
+/// of work per node, charged before the node is read; recursion follows the source
+/// tree, whose depth [`shallow`] bounded.
+fn interval<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Option<Iv>> {
+    let sp = e.span;
+    work::<Md>(budget, 1, sp)?;
+    let two = |a: &Expr, b: &Expr, budget: &mut Meter| -> R<Option<(Iv, Iv)>> {
+        Ok(
+            match (interval::<Md>(a, budget)?, interval::<Md>(b, budget)?) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            },
+        )
+    };
+    Ok(match &e.kind {
+        ExprKind::Int(n) => Some(Iv::point(*n)),
+        ExprKind::Const(c) => {
+            let cost = lookup_cost(budget.bind.ints.len(), c.len());
+            work::<Md>(budget, cost, sp)?;
+            budget.bind.ints.get(c).copied().map(Iv::point)
+        }
+        ExprKind::Variant {
+            enumeration,
+            variant,
+        } => variant_index::<Md>(budget, enumeration, variant, sp)?.map(Iv::point),
+        ExprKind::Param(_) | ExprKind::Bound { .. } => {
+            scoped::<Md>(e, budget, sp)?.map(|(lo, hi)| Iv::range(lo, hi))
+        }
+        // A post-state read has an interval only where it lowers: in a postcondition, of a
+        // relational variable. Anywhere else it is left to `int_expr`, which refuses it,
+        // so no fold can erase an invalid read (cr-3aqchd).
+        ExprKind::Primed(v) if !(budget.post && budget.slots.contains_key(v)) => None,
+        ExprKind::State(v) | ExprKind::Primed(v) => {
+            let cost = lookup_cost(budget.domains.len(), v.len());
+            work::<Md>(budget, cost, sp)?;
+            budget
+                .domains
+                .get(v.as_str())
+                .map(|(lo, hi)| Iv::range(*lo, *hi))
+        }
+        ExprKind::Neg(a) => {
+            interval::<Md>(a, budget)?.and_then(|x| iv_arith(ArithOp::Sub, Iv::point(0), x))
+        }
+        ExprKind::Binary(op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), a, b) => {
+            let op = match op {
+                BinOp::Add => ArithOp::Add,
+                BinOp::Sub => ArithOp::Sub,
+                _ => ArithOp::Mul,
+            };
+            two(a, b, budget)?.and_then(|(x, y)| iv_arith(op, x, y))
+        }
+        ExprKind::Builtin(b @ (Builtin::Min | Builtin::Max), args) => match args.as_slice() {
+            [a, c] => two(a, c, budget)?.map(|(x, y)| iv_min_max(*b == Builtin::Min, x, y)),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+/// `x op y` over intervals, in `i128`; `None` on an `i128` overflow. `fits` records
+/// whether both operands and the result stay within `i64`, as the model core's checked
+/// arithmetic requires of every intermediate result.
+fn iv_arith(op: ArithOp, x: Iv, y: Iv) -> Option<Iv> {
+    let fits = x.fits && y.fits;
+    match op {
+        ArithOp::Add => Some(Iv::make(
+            x.lo.checked_add(y.lo)?,
+            x.hi.checked_add(y.hi)?,
+            fits,
+        )),
+        ArithOp::Sub => Some(Iv::make(
+            x.lo.checked_sub(y.hi)?,
+            x.hi.checked_sub(y.lo)?,
+            fits,
+        )),
+        ArithOp::Mul => {
+            let c = [
+                x.lo.checked_mul(y.lo)?,
+                x.lo.checked_mul(y.hi)?,
+                x.hi.checked_mul(y.lo)?,
+                x.hi.checked_mul(y.hi)?,
+            ];
+            Some(Iv::make(
+                c.iter().copied().min()?,
+                c.iter().copied().max()?,
+                fits,
+            ))
+        }
+    }
+}
+
+/// `min` (or `max`) over intervals.
+fn iv_min_max(min: bool, x: Iv, y: Iv) -> Iv {
+    let fits = x.fits && y.fits;
+    if min {
+        Iv::make(x.lo.min(y.lo), x.hi.min(y.hi), fits)
+    } else {
+        Iv::make(x.lo.max(y.lo), x.hi.max(y.hi), fits)
+    }
+}
+
+/// The values a quantifier's binder takes.
+enum Cands<'e> {
+    /// Every code of `lo..=hi`, each instance guarded by membership when `guard` is set.
+    Span {
+        lo: i64,
+        hi: i64,
+        guard: Option<Guard<'e>>,
+        /// While planning, every value a build of this domain may bind: the hull, and
+        /// for a range also the lower bound's whole interval (a range empty at build
+        /// keeps one candidate at its lower bound). The plan's binder takes this
+        /// interval, so it checks every candidate the build can choose (cr-3aqchd).
+        reach: (i64, i64),
+    },
+    /// While planning only: a domain that reads no state and computes without overflow,
+    /// but is not yet a fixed set (its bounds or members read parameters or enclosing
+    /// binders). The build finds it static — unguarded, at most `count` values, each in
+    /// `lo..=hi`.
+    Upto { lo: i64, hi: i64, count: u128 },
+    /// Exactly these codes: distinct, ascending, unguarded. Shared, not copied.
+    List(Rc<[i64]>),
+}
+
+/// The membership test of a state-dependent domain.
+#[derive(Clone, Copy)]
+enum Guard<'e> {
+    /// `a..b`: `a <= u && u <= b`.
+    Range(&'e Expr, &'e Expr),
+    /// `{e1, …}`: `u == e1 || …`.
+    Members(&'e [Expr]),
+}
+
+/// The interval of `e`, or the lowering's own refusal of it when it has none (an
+/// expression the lowering cannot carry), or `OutputTooLarge` for an `i128` overflow.
+fn interval_or_refuse<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Iv> {
+    if let Some(iv) = interval::<Md>(e, budget)? {
+        return Ok(iv);
+    }
+    int_expr::<Plan>(e, budget)?;
+    no(Unlowerable::OutputTooLarge, e.span)
+}
+
+/// A hull clamped to `i64`: values outside it are never values of an expression.
+fn clamp(lo: i128, hi: i128) -> (i64, i64) {
+    let c = |v: i128| i64::try_from(v).unwrap_or(if v < 0 { i64::MIN } else { i64::MAX });
+    (c(lo), c(hi))
+}
+
+/// The candidates of one binder (RFC 0003 correction 4, "Quantifier expansion"):
+///
+/// - no domain: the universe of its type, which must be finite;
+/// - `a..b` with static bounds: exactly `a..=b`; otherwise the interval hull of the
+///   bounds, each instance guarded by `a <= u && u <= b`;
+/// - a set literal of static members: exactly its distinct members; otherwise the hull
+///   of the members, each instance guarded by `u == e1 || …`;
+/// - a configuration constant set: exactly its members.
+///
+/// A `Bool` binder ranges over its type only. Anything else is refused typed.
+fn candidates<'e, Md: Mode>(
+    binder: &'e crate::norm::Binder,
+    span: Span,
+    budget: &mut Meter,
+) -> R<Cands<'e>> {
+    let universe = universe::<Md>(&binder.ty, budget, span)?;
+    if universe == Universe::NotScalar {
+        return no(Unlowerable::Quantifier, span);
+    }
+    let Some(domain) = &binder.domain else {
+        return match universe {
+            Universe::Finite(lo, hi) => Ok(Cands::Span {
+                lo,
+                hi,
+                guard: None,
+                reach: (lo, hi),
+            }),
+            _ => no(unbounded(budget, Unlowerable::Quantifier), span),
+        };
+    };
+    if binder.ty == Type::Bool {
+        return no(Unlowerable::NonIntegerValue, domain.span);
+    }
+    let empty = || Cands::List(Rc::from(Vec::new()));
+    match &domain.kind {
+        ExprKind::Binary(BinOp::Range, a, b) => {
+            let ia = interval_or_refuse::<Md>(a, budget)?;
+            let ib = interval_or_refuse::<Md>(b, budget)?;
+            if let (Some(lo), Some(hi)) = (ia.value(), ib.value()) {
+                return Ok(if hi < lo {
+                    empty()
+                } else {
+                    Cands::Span {
+                        lo,
+                        hi,
+                        guard: None,
+                        reach: (lo, hi),
+                    }
+                });
+            }
+            // Static once parameters and enclosing binders are fixed: planned unguarded.
+            let fixed = ia.fits
+                && ib.fits
+                && !reads_state::<Md>(a, budget)?
+                && !reads_state::<Md>(b, budget)?;
+            if fixed {
+                if ib.hi < ia.lo {
+                    return Ok(empty());
+                }
+                let (lo, hi) = clamp(ia.lo, ib.hi);
+                return Ok(Cands::Upto {
+                    lo,
+                    hi,
+                    count: span_count(lo, hi),
+                });
+            }
+            if ib.hi < ia.lo {
+                // The range is empty in every state. When both bounds compute without
+                // overflow, nothing is evaluated: the constant `true` (`false`). When one
+                // may overflow, the CML domain's evaluation may fail, so it must still be
+                // evaluated: one guarded candidate, whose guard is false wherever it
+                // evaluates, keeps exactly that evaluation (cr-3aqchd).
+                if ia.fits && ib.fits {
+                    return Ok(empty());
+                }
+                let (lo, top) = clamp(ia.lo, ia.hi);
+                return Ok(Cands::Span {
+                    lo,
+                    hi: lo,
+                    guard: Some(Guard::Range(a, b)),
+                    reach: (lo, top),
+                });
+            }
+            let (lo, hi) = clamp(ia.lo, ib.hi);
+            let (_, top) = clamp(ia.lo, ib.hi.max(ia.hi));
+            Ok(Cands::Span {
+                lo,
+                hi,
+                guard: Some(Guard::Range(a, b)),
+                reach: (lo, top),
+            })
+        }
+        ExprKind::SetLit(es) => {
+            let mut ivs = Vec::with_capacity(es.len());
+            for e in es {
+                ivs.push(interval_or_refuse::<Md>(e, budget)?);
+            }
+            let values: Option<Vec<i64>> = ivs.iter().map(|iv| iv.value()).collect();
+            if let Some(mut values) = values {
+                // The sort is done here, in either mode: spent before it runs.
+                effort::<Md>(budget, sort_cost(values.len(), 0), span)?;
+                values.sort_unstable();
+                values.dedup();
+                return Ok(Cands::List(Rc::from(values)));
+            }
+            let lo = ivs.iter().map(|iv| iv.lo).min().unwrap_or(0);
+            let hi = ivs.iter().map(|iv| iv.hi).max().unwrap_or(-1);
+            let (lo, hi) = clamp(lo, hi);
+            let mut fixed = ivs.iter().all(|iv| iv.fits);
+            for e in es {
+                fixed = fixed && !reads_state::<Md>(e, budget)?;
+            }
+            if fixed {
+                // The build sorts the members it then finds fixed: predicted here.
+                work::<Md>(budget, sort_cost(es.len(), 0), span)?;
+                return Ok(Cands::Upto {
+                    lo,
+                    hi,
+                    count: span_count(lo, hi).min(es.len() as u128),
+                });
+            }
+            Ok(Cands::Span {
+                lo,
+                hi,
+                guard: Some(Guard::Members(es)),
+                reach: (lo, hi),
+            })
+        }
+        ExprKind::Const(c) => {
+            let cost = lookup_cost(budget.bind.sets.len(), c.len());
+            work::<Md>(budget, cost, span)?;
+            // A reference count, not a copy of the members.
+            match budget.bind.sets.get(c) {
+                Some(values) => Ok(Cands::List(Rc::clone(values))),
+                None => no(reason_in(domain, budget), domain.span),
+            }
+        }
+        _ => no(reason_in(domain, budget), domain.span),
+    }
+}
+
+/// Whether `e` reads the state (a pre- or post-state variable): syntactic, one unit of
+/// work per node, charged as it is visited; recursion follows the source tree, which
+/// [`shallow`] bounded.
+fn reads_state<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<bool> {
+    work::<Md>(budget, 1, e.span)?;
+    if matches!(e.kind, ExprKind::State(_) | ExprKind::Primed(_)) {
+        return Ok(true);
+    }
+    for child in crate::elab::children(e) {
+        if reads_state::<Md>(child, budget)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// `forall` or `exists` over `binders`, expanded (RFC 0003 correction 4): the balanced
+/// conjunction (disjunction) of the body at each candidate of the first binder, in
+/// ascending order, each instance guarded by membership when its domain reads state;
+/// several binders are the nest of single-binder quantifiers, in binder order, so a
+/// later domain sees the earlier binders. An empty domain is `true` (`false`).
+///
+/// Building, the binder takes each candidate in turn. Planning, it takes its whole
+/// candidate interval once: the item's measure and predicted work are then multiplied
+/// by the fan-out, so nested quantifiers multiply, without building anything.
+fn quantifier<Md: Mode>(
+    q: crate::norm::Quant,
+    binders: &[(u32, crate::norm::Binder)],
+    body: &Expr,
+    sp: Span,
+    budget: &mut Meter,
+) -> R<Sized<Md::B>> {
+    if binders.is_empty() {
+        return bool_expr::<Md>(body, budget);
+    }
+    // Each binder entered is one level of this recursion (a quantifier with several
+    // binders is their nest), and one `Quant` node may hold any number of them, so the
+    // source depth does not bound it. The binders entered are counted here, before
+    // recursing — by depth, not by the scope table, whose size a repeated binder number
+    // does not grow (cr-3aqchd).
+    if budget.binder_depth >= MAX_BINDER_NESTING {
+        return no(Unlowerable::ExpressionTooDeep, sp);
+    }
+    budget.binder_depth = budget.binder_depth.saturating_add(1);
+    let result = quantifier_level::<Md>(q, binders, body, sp, budget);
+    budget.binder_depth = budget.binder_depth.saturating_sub(1);
+    result
+}
+
+/// Enter binder `id` at `value`, returning the entry it shadows (a binder number repeats
+/// where the same def is inlined inside its own argument).
+fn enter(budget: &mut Meter, id: u32, value: (i64, i64)) -> Option<(i64, i64)> {
+    budget.env.binders.insert(id, value)
+}
+
+/// Leave binder `id`, restoring the entry it shadowed.
+fn leave(budget: &mut Meter, id: u32, shadowed: Option<(i64, i64)>) {
+    match shadowed {
+        Some(v) => {
+            budget.env.binders.insert(id, v);
+        }
+        None => {
+            budget.env.binders.remove(&id);
+        }
+    }
+}
+
+/// One binder level of [`quantifier`].
+fn quantifier_level<Md: Mode>(
+    q: crate::norm::Quant,
+    binders: &[(u32, crate::norm::Binder)],
+    body: &Expr,
+    sp: Span,
+    budget: &mut Meter,
+) -> R<Sized<Md::B>> {
+    let Some(((id, binder), rest)) = binders.split_first() else {
+        return bool_expr::<Md>(body, budget);
+    };
+    let forall = q == crate::norm::Quant::Forall;
+    let cands = candidates::<Md>(binder, sp, budget)?;
+    let (count, reach, guard) = match &cands {
+        Cands::Span {
+            lo,
+            hi,
+            guard,
+            reach,
+        } => (span_count(*lo, *hi), *reach, *guard),
+        Cands::Upto { lo, hi, count } => (*count, (*lo, *hi), None),
+        Cands::List(vs) => (
+            vs.len() as u128,
+            (
+                vs.first().copied().unwrap_or(0),
+                vs.last().copied().unwrap_or(-1),
+            ),
+            None,
+        ),
+    };
+    if count == 0 {
+        return node::<Md, _>(budget, sp, &[], || Md::b_const(forall));
+    }
+    // Entering and leaving the binder's scope: two ordered-table steps per candidate.
+    let cost = lookup_cost(budget.env.binders.len().saturating_add(1), 8).saturating_mul(2);
+    if !Md::BUILD {
+        // One instance over every value the build may bind; its predicted work (the
+        // scope entry included) stands for every candidate's.
+        let before = budget.predicted;
+        work::<Md>(budget, cost, sp)?;
+        let shadowed = enter(budget, *id, reach);
+        let item = instance::<Md>(forall, rest, body, guard, reach.0, sp, budget);
+        leave(budget, *id, shadowed);
+        let item = item?.1;
+        let total = balanced_measure(count, item);
+        if total.depth > MAX_EXPR_DEPTH {
+            return no(Unlowerable::ExpressionTooDeep, sp);
+        }
+        let per = budget.predicted.saturating_sub(before);
+        budget.predicted = budget
+            .predicted
+            .saturating_add(per.saturating_mul(count.saturating_sub(1)));
+        predicted_fits(budget, sp)?;
+        work::<Md>(budget, u64::try_from(count).unwrap_or(u64::MAX), sp)?;
+        return Ok((Md::b_const(forall), total));
+    }
+    // Building: the site's plan bounded this fan-out by the output it prepaid (every
+    // instance is at least one node); refuse before looping if it did not.
+    let left = (budget.prepaid as u128).saturating_add(budget.nodes.left() as u128);
+    if count > left {
+        return no(Unlowerable::OutputTooLarge, sp);
+    }
+    let values: Box<dyn Iterator<Item = i64>> = match cands {
+        Cands::Span { lo, hi, .. } => Box::new(lo..=hi),
+        Cands::List(vs) => Box::new((0..vs.len()).filter_map(move |i| vs.get(i).copied())),
+        // Only a plan sees a domain that is not yet fixed.
+        Cands::Upto { .. } => return no(Unlowerable::Quantifier, sp),
+    };
+    let mut items = Vec::new();
+    for v in values {
+        work::<Md>(budget, cost, sp)?;
+        let shadowed = enter(budget, *id, (v, v));
+        let item = instance::<Md>(forall, rest, body, guard, v, sp, budget);
+        leave(budget, *id, shadowed);
+        items.push(item?);
+    }
+    balanced::<Md>(items, forall, budget, sp)
+}
+
+/// One instance of a quantifier at the candidate `v` (the binder is already in scope):
+/// the rest of the binders over the body, and, for a guarded domain, `guard => item`
+/// (`forall`) or `guard && item` (`exists`).
+fn instance<Md: Mode>(
+    forall: bool,
+    rest: &[(u32, crate::norm::Binder)],
+    body: &Expr,
+    guard: Option<Guard<'_>>,
+    v: i64,
+    sp: Span,
+    budget: &mut Meter,
+) -> R<Sized<Md::B>> {
+    // A guarded instance is evaluated at every candidate of the hull, also where its
+    // guard is false: the model core's `=>` and `&&` evaluate both operands. That is
+    // the CML meaning only if nothing under the guard can fail at a candidate outside
+    // the domain, so while planning, everything under it — the rest of the binders
+    // with their domains and guards, and the body — is planned in a guarded context,
+    // where `int_expr` refuses any integer node that may overflow. The guard itself is
+    // not in that context: its bounds and members are evaluated by the CML domain too.
+    let guarded = guard.is_some() && !Md::BUILD;
+    if guarded {
+        budget.guarded = budget.guarded.saturating_add(1);
+    }
+    let item = quantifier::<Md>(
+        if forall {
+            crate::norm::Quant::Forall
+        } else {
+            crate::norm::Quant::Exists
+        },
+        rest,
+        body,
+        sp,
+        budget,
+    );
+    if guarded {
+        budget.guarded = budget.guarded.saturating_sub(1);
+    }
+    let item = item?;
+    let Some(guard) = guard else {
+        return Ok(item);
+    };
+    let (g, sg) = match guard {
+        Guard::Range(a, b) => {
+            let (u1, su1) = node::<Md, _>(budget, sp, &[], || Md::i_const(v))?;
+            let (la, sa) = int_expr::<Md>(a, budget)?;
+            let (ge, sge) = node::<Md, _>(budget, sp, &[su1, sa], || Md::b_cmp(CmpOp::Ge, u1, la))?;
+            let (u2, su2) = node::<Md, _>(budget, sp, &[], || Md::i_const(v))?;
+            let (lb, sb) = int_expr::<Md>(b, budget)?;
+            let (le, sle) = node::<Md, _>(budget, sp, &[su2, sb], || Md::b_cmp(CmpOp::Le, u2, lb))?;
+            node::<Md, _>(budget, sp, &[sge, sle], || Md::b_and(ge, le))?
+        }
+        Guard::Members(es) => {
+            let mut eqs = Vec::with_capacity(es.len());
+            for e in es {
+                let (u, su) = node::<Md, _>(budget, sp, &[], || Md::i_const(v))?;
+                let (m, sm) = int_expr::<Md>(e, budget)?;
+                eqs.push(node::<Md, _>(budget, sp, &[su, sm], || {
+                    Md::b_cmp(CmpOp::Eq, u, m)
+                })?);
+            }
+            balanced::<Md>(eqs, false, budget, sp)?
+        }
+    };
+    node::<Md, _>(budget, sp, &[sg, item.1], || {
+        if forall {
+            Md::b_implies(g, item.0)
+        } else {
+            Md::b_and(g, item.0)
+        }
+    })
 }

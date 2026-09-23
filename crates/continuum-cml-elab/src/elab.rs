@@ -2852,8 +2852,10 @@ pub(crate) fn children(e: &Expr) -> Vec<&Expr> {
 
 /// Replace the bound variables named in `subst` by their values.
 ///
-/// Capture cannot occur: every binder in the model has a unique number, and the
-/// arguments of a call never mention a binder of the def body they are placed into.
+/// Capture cannot occur: the arguments of a call never mention, free, a binder of the
+/// def body they are placed into (their free binders belong to the call site, numbered
+/// apart from the def's). A binder number repeats only when the same def is inlined
+/// inside its own argument, where the inner copy is closed and shadows lexically.
 fn substitute(e: &Expr, subst: &BTreeMap<u32, Expr>) -> Expr {
     let s = |x: &Expr| substitute(x, subst);
     let sb = |x: &Expr| Box::new(substitute(x, subst));
