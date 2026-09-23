@@ -99,7 +99,7 @@ one, and lifting it needs no further license decision.
 
 ### Residual decisions — recorded, and adjustable without superseding this ADR
 
-These are the decision package's D2–D6. Each is recorded at its current setting; changing one
+These are the decision package's D2–D6, plus D7 (added 2026-09-22). Each is recorded at its current setting; changing one
 is an ordinary edit to the artifact named, not a supersession of D0 or D1.
 
 | # | Decision | Current setting | Adjustable by |
@@ -109,6 +109,7 @@ is an ordinary edit to the artifact named, not a supersession of D0 or D1.
 | D4 | crate metadata | `[workspace.package] license` set and inherited by every crate (`license.workspace = true`); `publish = false` retained on every crate | `Cargo.toml`, when publication is wanted |
 | D5 | copyright holder string | "Continuum contributors" — deliberately not a named entity, and expected to change if an entity is formed to hold the copyright | the `LICENSE-*` headers |
 | D6 | trademark and name policy | undecided; out of license scope | a separate note |
+| D7 | development-process exposure to the rider | the licensee (Bob) builds, instruments, tests, and audits asupersync through AI coding agents acting on his behalf. The rider names OpenAI, Anthropic, and anyone acting on their behalf, and its "use" includes testing, analyzing, and use in automated pipelines. The question was put to the licensee on 2026-09-22, and he ruled: "The agents are acting on behalf of me, Bob, not Anthropic. I'm not associated with Anthropic in any way." Agent-recorded audits of the substrate's dependency tree are authorized on the same date. | the licensee, by an edit here |
 
 ## Compatibility
 
