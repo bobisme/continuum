@@ -2817,11 +2817,42 @@ validator checks register↔note quote identity. Until then a row is
     (research/33): hidden variants are too easy to leak or too hard to
     grade independently], [fixed strategy-list neighborhood with
     per-receipt coverage disclosure and no adequacy claim],
-    [Sub-file incremental trust (§9)], [research/27], [clean-mismatch
-    rate at the §9.5 sampled audit rate (rate derives from §8.6's
-    confidence target) --- draft; kill if dependency capture cannot be
-    made trustworthy below file/module granularity], [module-granularity
-    invalidation],
+    [Sub-file incremental trust (§9)], [research/27], [ratified
+    (research/27) quote-id=subfile-incremental-trust-mismatch-rate
+    "Sub-file dependency capture is trusted for a reuse-edge class other
+    than Experimental only if, in the interactive lane of the
+    Incremental Parity Audit on the G5 reference workload, the class
+    shows zero clean mismatches over all of its sampled comparisons that
+    complete with a typed outcome and at least 4,603 of those
+    comparisons are sub-file reuses, meaning reuses that
+    module-granularity invalidation would have recomputed, which bounds
+    the clean-mismatch rate per sub-file reuse below 1 in 1,000 at
+    one-sided 99 percent confidence by the exact zero-failure binomial
+    bound; a clean mismatch is any equality-auditable disagreement, any
+    certificate-level disagreement of a certificate-auditable query, or
+    any budget-sensitive incremental result whose evidence labels are
+    stronger than the clean run's under equal budget; the audit sampling
+    rate is one rate for every query, selected uniformly by query key
+    hash, and is the larger of the 1-in-64 bootstrap default and 4,603
+    divided by the smallest expected count of sub-file reuses of any of
+    the three classes in the evaluation window; promotion-lane
+    comparisons and typed-inconclusive comparisons do not count toward
+    the 4,603; a class that cannot reach 4,603 even at a rate of 1 in 1
+    stays on module-granularity invalidation; and one clean mismatch
+    fails the class, quarantines the implicated RFC 0030 triple, and
+    returns the class to module-granularity invalidation until it again
+    reaches 4,603 sub-file reuses with zero clean mismatches, all
+    counted after the fix."; the metric is the clean-mismatch rate at
+    the §9.5 sampled audit rate, and the rate derives from §8.6's
+    confidence target as research/27 shows; the plan fixes no number for
+    that target, so the zero observed count rests on G5's "continuously
+    match" and §9.5's quarantine rule, and the one-sided 99 percent
+    confidence and the 1-in-1,000 bound are a lead-ratified proposal
+    that G5 review may make stricter, never weaker; the query engine,
+    the G5 reference workload and the interactive audit lane do not
+    exist today, so the threshold binds when they land; kill
+    (research/27): dependency capture cannot be made trustworthy below
+    file/module granularity], [module-granularity invalidation],
     [Forge co-synthesis + QD (§14)], [research/29,
     research/30], [rediscovery suite (named algorithms and count fixed
     at ratification --- draft); kills (research/29): joint space
