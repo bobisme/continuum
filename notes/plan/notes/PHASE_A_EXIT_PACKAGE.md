@@ -1122,3 +1122,51 @@ arrangeable, and false.
   has its own checkpoint; the remaining eighteen §24 criteria are
   untouched. G3–G10 are not Phase A's.
 - **It does not merge, push, or close any bone.**
+
+## 12. Exit decision (2026-09-22)
+
+The user accepted the Phase A exit on 2026-09-22. The lead closed `bn-1grk`
+under that ruling. §11 describes this document as it was written. This
+section records the decision that §10 prepared.
+
+**State at the decision.** All 25 of `bn-1grk`'s dependencies were closed,
+and so were all sixteen gate-criterion acceptance bones. Each G0, G1, and G2
+criterion carries a `(delivered: …)` annotation in docs/52. Most hold at a
+narrower scope, and each annotation states its narrowing. The fourteen fix
+bones that the acceptances raised were closed on 2026-09-22. `just check`
+was green on trunk.
+
+**The two scope readings §10.2 routed to the human:**
+
+- **G2-05.** "Improve agent benchmark effectiveness" is a **Phase B
+  aspiration, not a Phase A gate conjunct**. The Context Pack ablation is
+  Phase B debt, owned by `bn-30bd8`. That bone is blocked by ContinuumBench
+  task-suite construction (`bn-3aqb`).
+- **G2-01.** A hand-written client and a hand transcription, held to the
+  IDL by two independent conformance checkers, **satisfy "generated
+  clients and schemas ship"**. The criterion exists so that no client is
+  written against prose.
+
+**The §10.3 debt, carried by name:**
+
+1. Evidence graph, `PHASE-A-DEL-04`: still debt, carried by `bn-m6qs9`.
+2. No continuation survives a restart: **paid** on 2026-09-22.
+   - `bn-1z09m`: startup task resolution.
+   - `bn-20142`: durable continuation record.
+   - `bn-2g3ei`: durable terminal record.
+
+   The narrowings are stated in the docs/52 G1-08 annotation.
+3. G2 Context Pack ablation: `bn-30bd8`, as above.
+4. The injection corpus meets the narrow condition, not the §24.5
+   promotion gate. Each lane that lands a surface inherits its escape
+   attempt (U2). `bn-1n7hy` tracks the two repair operations.
+5. The DX-10 remainder behind protocol 4.0: `bn-3861i`, the ratified 4.0
+   plan. The protocol stays frozen at 3.6. Per-instance capability scope
+   (`bn-28kv4`) is held for Phase B by the same ruling.
+6. Semantic-diff fields with no affirmative classifier (U4): Phase B
+   PR 20 and PR 22 (`bn-1b69`, `bn-19gw`).
+
+**Delegation.** The user delegated the later phase-exit gates (B–F) to
+the lead. The lead closes a gate only on evidence: a delivered annotation
+on every criterion, and a green `just check`. It never closes one because
+its children are complete.

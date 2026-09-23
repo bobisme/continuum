@@ -2235,7 +2235,7 @@ CLI, and an agent client with identical artifacts; the ACI ablation shows
 the typed surface beats disciplined shell use on success and cost, or the
 protocol is redesigned before freeze (G0-DX-10); the prompt-injection
 corpus cannot trigger privileged operations (G2); continuation resume
-validates epochs and inputs (G1).
+validates epochs and inputs (G1). (delivered: bn-1grk — Phase A exit accepted by the user on 2026-09-22; G0 freeze subset, G1 and G2 closed on the sixteen criterion acceptances; decision and named Phase B debt in PHASE_A_EXIT_PACKAGE.md §12)
 
 ### Phase B — Real-code failure loop
 

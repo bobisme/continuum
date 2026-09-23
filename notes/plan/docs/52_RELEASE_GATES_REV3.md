@@ -13,13 +13,13 @@
 | E | G7 (Forge) |
 | F | G8 (human usability), G9 (corpus parity), G10 (Continuum 1.0) |
 
-## G0 — Falsification
+## G0 — Falsification (delivered: bn-1grk — closed at the Phase A exit, user-accepted 2026-09-22)
 
 All load-bearing experiments in [`../notes/G0_SPIKE_MATRIX.md`](../notes/G0_SPIKE_MATRIX.md) have evidence or an explicit redesign decision, recorded in the matrix itself. A failed or unexecuted freeze-blocking item blocks interface freeze.
 
 Staging rule: G0 closes in Phase A for every item whose required experiment runs against Phase A machinery — the freeze-blocking subset DX-01–03, 10, 12, 13, 14. An unexecuted or failed item in this subset blocks interface freeze. Items whose experiments require later subsystems are re-homed to the gates that own them — DX-04 (causal debugger) → G4, DX-05 (incrementality) → G5, DX-06 (neighborhood/mutation campaign) → G4, DX-07 (Forge non-vacuity) → G7, DX-08 (lens ambiguity) → G6, DX-09 (human diagnosis study) → G8, DX-11 (proof-service isolation) → G6, DX-15 (benchmark leakage) → G9 — with the Phase A spike results for DX-04, 05, 07, and 08 recorded as artifact-shape evidence only, and each re-homing recorded in the matrix as that item's explicit decision. The Phase A benchmark subset used for DX-10 and the G2 Context Pack ablation must itself pass the plan §19.4 family/source-hash separation check before either result is accepted; full leakage validation remains DX-15 at G9. The matrix carries Status, Evidence, and Decision columns; plan §0.3's counts are derived from it, not asserted beside it. (delivered: bn-31yxg — independent mechanical audit, tools/check_g0_matrix.py, 0 errors across all 15 rows, every pointer resolved, §0.3 re-derived; two Evidence-cell count defects corrected under bn-3tp78)
 
-## G1 — Workbench identity and lifecycle
+## G1 — Workbench identity and lifecycle (delivered: bn-1grk — closed at the Phase A exit, user-accepted 2026-09-22)
 
 - snapshots, intent contracts, handles, and artifacts are immutable and content-addressed; (delivered: bn-1k1s8 — spec-derived second BLAKE3 recomputes every address off the wire; narrowing on the bone: in_* and campaign identities are preimage digests, cap_* by design not content-addressed, 16 of plan §4.4's 19 classes have no minting path)
 - explicit handles across native API; (delivered: bn-3j01v — second IDL reader by a different strategy, 75 of 75 operations, all 666 leaves adjudicated, 239 resource-naming leaves all handles or content identities; exact-set narrowing of 6 raw-string leaves tracked bn-ah1k8)
@@ -30,7 +30,7 @@ Staging rule: G0 closes in Phase A for every item whose required experiment runs
 - authorization is checked independently of handle possession; (delivered: bn-cxd2y — 240 admission-ledger decisions paired across resource-holding and resource-empty states all agree, authority-without-possession admitted, confused-deputy handle channel refused, two admission mutants caught; instance-scope bound of 2 of 19 handle classes tracked bn-28kv4)
 - daemon crash recovery leaves no stale index entries or orphan tasks (plan §4.5). (delivered: bn-q80m7 — split verdict: no-stale-index re-derived through the declared identity seam at dropped-value grain; no-orphan-tasks SATISFIED-AT-NARROWER-SCOPE by bn-1z09m's §4.5 startup resolution pass over durable task records, resume branch via bn-20142's continuation record, terminal tasks via bn-2g3ei's terminal record, narrowed at pre-bone Settled stores, a failed resume's budget write and a completed task's older cont_ handles; fsck now audits through the declared seam — bn-k99dt)
 
-## G2 — Agent-computer interface
+## G2 — Agent-computer interface (delivered: bn-1grk — closed at the Phase A exit, user-accepted 2026-09-22)
 
 - generated clients and schemas ship for the native protocol; (delivered: bn-2wypi — shipping inventory plus 11-mutant conformance audit; zero generated artifacts, hand transcription held by checkers one deep at field level; the gate close read checked-hand-written as satisfying ships, since no client is written against prose — user ruling at bn-1grk)
 - no terminal parsing required; (delivered: bn-1slz1 — spec-driven walk of the canonical answer document, 27 of 27 workflow steps typed with zero prose-only carriers, 14 free-text fields adjudicated exhaustively, 15 refusals none prose-bound; bare-String artifact-class mis-scope tracked bn-3ncfp)
