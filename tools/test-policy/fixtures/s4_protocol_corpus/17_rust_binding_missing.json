@@ -1,0 +1,9 @@
+{
+  "description": "the P1 semantic-epoch kill test is not #[test] and now expects EpochUnsupported instead of ContinuationEpochMismatch; every other required test is entirely absent",
+  "requirement": "TEST-4-17",
+  "rule": "restart-timer-rust-binding-missing",
+  "system": {
+    "kind": "rust-binding-4-17",
+    "source": "fn class_p1_semantic_epoch_disagreement() {\n    advanced(&Axis {\n        advance: |epochs| epochs.semantic = Nullable::Value(epoch(\"semantic-2\")),\n        expected: ErrorCode::EpochUnsupported,\n        same_snapshot: true,\n        what: \"a semantic epoch disagreement\",\n    });\n}\n"
+  }
+}

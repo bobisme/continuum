@@ -1,0 +1,8 @@
+{
+  "description": "both durability kill tests exist, are #[test], are not #[ignore]d, and assert the cited tokens",
+  "expect": "clean",
+  "system": {
+    "kind": "rust-binding-4-14",
+    "source": "#[test]\nfn every_abort_reason_at_every_phase_leaves_the_published_namespace_byte_identical() {\n    assert_eq!(outcome.error_code(), Some(ErrorCode::PublicationAborted));\n}\n\n#[test]\nfn the_visible_set_is_a_monotone_prefix_of_the_complete_publication() {\n    assert_eq!(growth_points.len(), records - 1);\n}\n"
+  }
+}

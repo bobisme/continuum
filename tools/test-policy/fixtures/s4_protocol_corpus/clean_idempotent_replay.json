@@ -1,0 +1,60 @@
+{
+  "description": "two replays of the same idempotency key and ReplayKey return the same outcome identity",
+  "expect": "clean",
+  "system": {
+    "attempts": [
+      {
+        "actor": "a1",
+        "idempotency_key": "k1",
+        "outcome_identity": "task_1",
+        "request": {
+          "arguments": {
+            "task": "t1"
+          },
+          "budget": null,
+          "intent": null,
+          "operation": "task.cancel",
+          "output_policy": null,
+          "page": null,
+          "request_id": "r1",
+          "snapshot": "ws_1"
+        }
+      },
+      {
+        "actor": "a1",
+        "idempotency_key": "k1",
+        "outcome_identity": "task_1",
+        "request": {
+          "arguments": {
+            "task": "t1"
+          },
+          "budget": null,
+          "intent": null,
+          "operation": "task.cancel",
+          "output_policy": null,
+          "page": null,
+          "request_id": "r2",
+          "snapshot": "ws_1"
+        }
+      },
+      {
+        "actor": "a1",
+        "idempotency_key": "k2",
+        "outcome_identity": "task_9",
+        "request": {
+          "arguments": {
+            "task": "t2"
+          },
+          "budget": null,
+          "intent": null,
+          "operation": "task.cancel",
+          "output_policy": null,
+          "page": null,
+          "request_id": "r3",
+          "snapshot": "ws_1"
+        }
+      }
+    ],
+    "kind": "idempotent-replay"
+  }
+}

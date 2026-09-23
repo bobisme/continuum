@@ -1,0 +1,8 @@
+{
+  "description": "Publications::artifacts() reads only self.committed, never self.staged",
+  "expect": "clean",
+  "system": {
+    "kind": "committed-only-drift",
+    "source": "    pub fn artifacts(&self, task: &TaskHandle) -> Result<Vec<ArtifactRef>, Fault> {\n        self.committed\n            .iter()\n            .map(|publication| publication.artifact(task))\n            .collect()\n    }\n"
+  }
+}

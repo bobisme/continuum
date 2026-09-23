@@ -1,0 +1,369 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_ack_durability.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_admissible_epochs_drift.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_cancel_drain_race.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_committed_only_drift.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_idempotent_replay.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_recovery_resume.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_replay_key_drift.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_restart_epoch.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_rust_binding_4_13.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_rust_binding_4_14.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_rust_binding_4_17.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_timeout_drop.json",
+      "ok": true
+    }
+  ],
+  "livelock_bound": 6,
+  "module": "tools/test-policy/sections/s4_protocol_corpus.py",
+  "out_of_scope": "TEST-4-07..09 (Semantic engine remainder) and TEST-4-10..12 (Protocol corpus, first three) are bn-3mo3's parallel module",
+  "requirements": {
+    "TEST-4-13": {
+      "boundaries": [
+        "rule idempotency.replay (the IDL) plus crates/continuumd/src/daemon/state.rs's ReplayKey doc comment, which states field-by-field which seven of RequestEnvelope's thirteen fields ('operation', 'snapshot', 'intent', 'arguments', 'budget', 'output_policy', 'page') the byte-identical-request comparison covers, and which six it deliberately excludes ('request_id', 'idempotency_key', 'actor', 'capability', 'protocol_version', 'trace'). The check below is that same seven-field comparison, not a smaller stand-in. Killing a mutant of this Python port does not by itself show the real daemon catches that mutant class, so real_run() also (a) verifies crates/continuumd/tests/gate_g1_03_acceptance.rs's sweep_every_reachable_mutation_is_idempotent_under_one_key and sweep_one_key_with_a_different_request_is_refused_and_changes_nothing exist, are #[test], are not #[ignore]d, and still assert on 'outcome_equal'/'IdempotencyKeyReused' respectively (RUST_BINDING, _check_rust_binding), and (c) re-derives ReplayKey's live field order from state.rs and fails on any divergence from REPLAY_KEY_FIELDS (_check_replay_key_drift)."
+      ],
+      "corpus": {
+        "drift_checks": 1,
+        "multi_attempt_groups": 48,
+        "rust_tests_bound": 2,
+        "systems": 64
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "idempotent-replay-diverged"
+          ],
+          "fixture": "13_non_idempotent_retry.json",
+          "ok": true,
+          "requirement": "TEST-4-13",
+          "rule": "idempotent-replay-diverged"
+        },
+        {
+          "caught": [
+            "idempotent-replay-key-drift"
+          ],
+          "fixture": "13_replay_key_drift.json",
+          "ok": true,
+          "requirement": "TEST-4-13",
+          "rule": "idempotent-replay-key-drift"
+        },
+        {
+          "caught": [
+            "idempotent-replay-rust-binding-missing"
+          ],
+          "fixture": "13_rust_binding_missing.json",
+          "ok": true,
+          "requirement": "TEST-4-13",
+          "rule": "idempotent-replay-rust-binding-missing"
+        }
+      ],
+      "mutant": {
+        "applied": 48,
+        "detected": 48
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "idempotent-replay-diverged",
+        "idempotent-replay-key-drift",
+        "idempotent-replay-rust-binding-missing"
+      ],
+      "rust_binding": {
+        "path": "crates/continuumd/tests/gate_g1_03_acceptance.rs",
+        "tests": {
+          "sweep_every_reachable_mutation_is_idempotent_under_one_key": "outcome_equal",
+          "sweep_one_key_with_a_different_request_is_refused_and_changes_nothing": "IdempotencyKeyReused"
+        }
+      },
+      "status": "enforced",
+      "summary": "non-idempotent retry"
+    },
+    "TEST-4-14": {
+      "boundaries": [
+        "ErrorCode::PublicationAborted's doc comment and INV-017 (the IDL) state the atomicity contract; crates/continuumd/src/daemon/task.rs's reported() states the production invariant in these words: an uncommitted publication cannot reach ResultEnvelope.artifacts, because Publications::artifacts reads only the committed list. cancel()'s own doc comment (bn-20142) records publishing the durable continuation record before the status write moves, for exactly this reason. The check below enforces that same commit-before-ack ordering. Killing a mutant of this Python port does not by itself show the real daemon catches that mutant class, so real_run() also (a) verifies crates/continuumd/tests/gate_g1_06_acceptance.rs's every_abort_reason_at_every_phase_leaves_the_published_namespace_byte_identical and the_visible_set_is_a_monotone_prefix_of_the_complete_publication exist, are #[test], are not #[ignore]d, and still assert on 'PublicationAborted'/'growth_points' respectively (RUST_BINDING, _check_rust_binding), and (c) re-derives Publications::artifacts()'s live body from crates/continuumd/src/daemon/budget.rs and fails if it stops reading only self.committed (_check_committed_only_drift)."
+      ],
+      "corpus": {
+        "artifacts": 123,
+        "drift_checks": 1,
+        "rust_tests_bound": 2,
+        "systems": 64
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "ack-before-durability-detected"
+          ],
+          "fixture": "14_ack_before_durability.json",
+          "ok": true,
+          "requirement": "TEST-4-14",
+          "rule": "ack-before-durability-detected"
+        },
+        {
+          "caught": [
+            "ack-durability-committed-drift"
+          ],
+          "fixture": "14_committed_only_drift.json",
+          "ok": true,
+          "requirement": "TEST-4-14",
+          "rule": "ack-durability-committed-drift"
+        },
+        {
+          "caught": [
+            "ack-durability-rust-binding-missing"
+          ],
+          "fixture": "14_rust_binding_missing.json",
+          "ok": true,
+          "requirement": "TEST-4-14",
+          "rule": "ack-durability-rust-binding-missing"
+        }
+      ],
+      "mutant": {
+        "applied": 64,
+        "detected": 64
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "ack-before-durability-detected",
+        "ack-durability-committed-drift",
+        "ack-durability-rust-binding-missing"
+      ],
+      "rust_binding": {
+        "path": "crates/continuumd/tests/gate_g1_06_acceptance.rs",
+        "tests": {
+          "every_abort_reason_at_every_phase_leaves_the_published_namespace_byte_identical": "PublicationAborted",
+          "the_visible_set_is_a_monotone_prefix_of_the_complete_publication": "growth_points"
+        }
+      },
+      "status": "enforced",
+      "summary": "ack-before-durability"
+    },
+    "TEST-4-15": {
+      "absence": "no live concurrent execution exists at the daemon dispatch grain to race a second cancel trigger against (task.cancel's own doc comment); the race-loser mutation classes in the plan dossier are all draft, pending-ratification research lanes; see BOUNDARIES",
+      "boundaries": [
+        "rule task.cancel_correct (the IDL) and Residual::admit's real per-publication Reserve-then-Commit accounting (crates/continuumd/src/daemon/task.rs) are the single-trigger mechanism this extends. task.cancel's own doc comment states there is no live execution of a task to interrupt at this daemon grain (a dispatch holds &mut DaemonState for its whole extent and the campaign's region is already finalized before task.cancel runs), so a genuine two-trigger race has no live counterpart today. Every plan-dossier 'race loser(s) drain' mention (docs/06 \u00a7E3, docs/07 Suite A, research/09's 'winner returns before loser drains') is an explicitly draft, pending-ratification research-lane mutation class, not production surface. The check below models the invariant a future concurrent grain would have to uphold, extending Residual::admit's real discipline to a second, losing trigger."
+      ],
+      "corpus": {
+        "loser_publications": 153,
+        "systems": 64,
+        "systems_with_a_loser_to_forget": 53
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "cancel-loser-drain-forgotten"
+          ],
+          "fixture": "15_forgotten_loser_drain.json",
+          "ok": true,
+          "requirement": "TEST-4-15",
+          "rule": "cancel-loser-drain-forgotten"
+        }
+      ],
+      "mutant": {
+        "applied": 53,
+        "detected": 53
+      },
+      "registry_status": "active",
+      "rules": [
+        "cancel-loser-drain-forgotten"
+      ],
+      "status": "partial",
+      "summary": "forgotten loser drain"
+    },
+    "TEST-4-16": {
+      "absence": "verification.rs documents that timeout_ms is not wired to any interval yet ('nothing to bound'); no timeout mechanism exists in continuumd for this mutant to be seeded into; see BOUNDARIES",
+      "boundaries": [
+        "INV-008, rule envelope.epochs_named ('An unsupported or empty task still returns a valid machine result \u2026 and carries no success flag'), and rule task.status_monotonic's 'there is no silent failure' are real and general. verification.start's timeout_ms field is declared on the wire, but crates/continuumd/src/daemon/verification.rs's own doc comment on the result/await handler states plainly: 'there is no interval for a timeout to elapse over and timeout_ms has nothing to bound' \u2014 no timeout mechanism is implemented yet for this check's mutant to be seeded into."
+      ],
+      "corpus": {
+        "requests": 166,
+        "systems": 64,
+        "systems_with_a_timed_out_request": 55
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "timeout-silent-drop-detected"
+          ],
+          "fixture": "16_timeout_silent_drop.json",
+          "ok": true,
+          "requirement": "TEST-4-16",
+          "rule": "timeout-silent-drop-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 55,
+        "detected": 55
+      },
+      "registry_status": "active",
+      "rules": [
+        "timeout-silent-drop-detected"
+      ],
+      "status": "partial",
+      "summary": "timeout via silent drop"
+    },
+    "TEST-4-17": {
+      "boundaries": [
+        "ErrorCode::ContinuationEpochMismatch's doc comment is the IDL's own words for this mutant: 'The daemon MUST NOT silently re-run.' The check below is a direct, cited port of crates/continuumd/src/daemon/task.rs::admissible_epochs \u2014 the real, tested two-predicate function (P1: the five PinnedEpochs compatibility kinds 'semantic', 'intent', 'evidence', 'proof', 'corpus'; P2: engine identity) that decides every task.resume's epoch admissibility \u2014 not an analogous model of it. Killing a mutant of this Python port does not by itself show the real daemon catches that mutant class, so real_run() also (a) verifies crates/continuumd/tests/gate_g1_04_acceptance.rs's five class_p1_<kind>_epoch_disagreement tests (one per COMPAT_KINDS member), class_p2_engine_identity_disagreement, and regression_a_continuation_survives_a_restart_with_its_pins \u2014 the literal restart scenario this ID's mutant names \u2014 all exist, are #[test], are not #[ignore]d, and still assert on 'ContinuationEpochMismatch'/'before.pinned' respectively (RUST_BINDING, _check_rust_binding), and (c) re-derives PinnedEpochs::compatibility()'s live field order from task.rs and fails on any divergence from COMPAT_KINDS (_check_admissible_epochs_drift)."
+      ],
+      "corpus": {
+        "drift_checks": 1,
+        "rust_tests_bound": 7,
+        "systems": 64,
+        "systems_forcing_a_mismatch": 58
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "restart-timer-epochs-drift"
+          ],
+          "fixture": "17_admissible_epochs_drift.json",
+          "ok": true,
+          "requirement": "TEST-4-17",
+          "rule": "restart-timer-epochs-drift"
+        },
+        {
+          "caught": [
+            "restart-timer-leak-detected"
+          ],
+          "fixture": "17_restart_timer_leak.json",
+          "ok": true,
+          "requirement": "TEST-4-17",
+          "rule": "restart-timer-leak-detected"
+        },
+        {
+          "caught": [
+            "restart-timer-rust-binding-missing"
+          ],
+          "fixture": "17_rust_binding_missing.json",
+          "ok": true,
+          "requirement": "TEST-4-17",
+          "rule": "restart-timer-rust-binding-missing"
+        }
+      ],
+      "mutant": {
+        "applied": 58,
+        "detected": 58
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "restart-timer-epochs-drift",
+        "restart-timer-leak-detected",
+        "restart-timer-rust-binding-missing"
+      ],
+      "rust_binding": {
+        "path": "crates/continuumd/tests/gate_g1_04_acceptance.rs",
+        "tests": {
+          "class_p1_corpus_epoch_disagreement": "ContinuationEpochMismatch",
+          "class_p1_evidence_epoch_disagreement": "ContinuationEpochMismatch",
+          "class_p1_intent_epoch_disagreement": "ContinuationEpochMismatch",
+          "class_p1_proof_epoch_disagreement": "ContinuationEpochMismatch",
+          "class_p1_semantic_epoch_disagreement": "ContinuationEpochMismatch",
+          "class_p2_engine_identity_disagreement": "ContinuationEpochMismatch",
+          "regression_a_continuation_survives_a_restart_with_its_pins": "before.pinned"
+        }
+      },
+      "status": "enforced",
+      "summary": "restart timer leak"
+    },
+    "TEST-4-18": {
+      "absence": "'crash/recovery livelock' is a draft, not-yet-ratified mutation class of a liveness engine that does not exist; no bounded-retry or progress-ranking mechanism exists in recovery.rs/task.rs; see BOUNDARIES",
+      "boundaries": [
+        "rule task.status_monotonic's 'reported milestones and committed evidence only grow' (the IDL) is real and is what the check below enforces over a bounded resume window. 'Livelock' itself is explicitly a draft mutation class ('crash/recovery livelock') of a not-yet-built liveness engine (notes/plan/research/04-liveness-progress-and-fairness.md, 'Testing the liveness engine', under 'Promotion and kill criteria (draft)'). No bounded-retry cap or progress-ranking mechanism exists in crates/continuumd/src/daemon/{recovery,task}.rs to bind this mutant to."
+      ],
+      "corpus": {
+        "frozen_windows_at_bound": 64,
+        "systems": 64
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "recovery-livelock-detected"
+          ],
+          "fixture": "18_recovery_livelock.json",
+          "ok": true,
+          "requirement": "TEST-4-18",
+          "rule": "recovery-livelock-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 64,
+        "detected": 64
+      },
+      "registry_status": "active",
+      "rules": [
+        "recovery-livelock-detected"
+      ],
+      "status": "partial",
+      "summary": "recovery livelock."
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "seeds": "0..63",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a74 Mutation testing",
+  "unclaimed": []
+}

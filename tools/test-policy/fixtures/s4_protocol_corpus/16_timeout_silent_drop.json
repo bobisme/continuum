@@ -1,0 +1,17 @@
+{
+  "description": "a request whose elapsed_ms exceeded its timeout_ms produced no ResultEnvelope at all",
+  "requirement": "TEST-4-16",
+  "rule": "timeout-silent-drop-detected",
+  "system": {
+    "kind": "timeout-drop",
+    "requests": [
+      {
+        "elapsed_ms": 900,
+        "request_id": "r1",
+        "responded": false,
+        "response_status": null,
+        "timeout_ms": 500
+      }
+    ]
+  }
+}

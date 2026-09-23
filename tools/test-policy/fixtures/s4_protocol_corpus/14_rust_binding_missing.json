@@ -1,0 +1,9 @@
+{
+  "description": "the publication-atomicity kill test is not #[test] and no longer asserts PublicationAborted; the monotone-visibility kill test is entirely absent",
+  "requirement": "TEST-4-14",
+  "rule": "ack-durability-rust-binding-missing",
+  "system": {
+    "kind": "rust-binding-4-14",
+    "source": "fn every_abort_reason_at_every_phase_leaves_the_published_namespace_byte_identical() {\n    assert_eq!(outcome.envelope.status, ResultStatus::Error);\n}\n"
+  }
+}

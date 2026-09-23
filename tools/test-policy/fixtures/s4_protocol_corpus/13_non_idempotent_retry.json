@@ -1,0 +1,44 @@
+{
+  "description": "a retry with a byte-identical ReplayKey (same operation/snapshot/intent/arguments/budget/output_policy/page) returned a different outcome identity than the first attempt",
+  "requirement": "TEST-4-13",
+  "rule": "idempotent-replay-diverged",
+  "system": {
+    "attempts": [
+      {
+        "actor": "a1",
+        "idempotency_key": "k1",
+        "outcome_identity": "task_1",
+        "request": {
+          "arguments": {
+            "task": "t1"
+          },
+          "budget": null,
+          "intent": null,
+          "operation": "task.cancel",
+          "output_policy": null,
+          "page": null,
+          "request_id": "r1",
+          "snapshot": "ws_1"
+        }
+      },
+      {
+        "actor": "a1",
+        "idempotency_key": "k1",
+        "outcome_identity": "task_2",
+        "request": {
+          "arguments": {
+            "task": "t1"
+          },
+          "budget": null,
+          "intent": null,
+          "operation": "task.cancel",
+          "output_policy": null,
+          "page": null,
+          "request_id": "r2",
+          "snapshot": "ws_1"
+        }
+      }
+    ],
+    "kind": "idempotent-replay"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "description": "the race loser committed 3 publications but only 1 was drained before the task's terminal outcome",
+  "requirement": "TEST-4-15",
+  "rule": "cancel-loser-drain-forgotten",
+  "system": {
+    "drained_loser": 1,
+    "drained_winner": 2,
+    "kind": "cancel-drain-race",
+    "publications_loser": 3,
+    "publications_winner": 2
+  }
+}

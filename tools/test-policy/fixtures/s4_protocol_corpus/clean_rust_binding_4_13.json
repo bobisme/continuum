@@ -1,0 +1,8 @@
+{
+  "description": "both idempotency kill tests exist, are #[test], are not #[ignore]d, and assert the cited tokens",
+  "expect": "clean",
+  "system": {
+    "kind": "rust-binding-4-13",
+    "source": "#[test]\nfn sweep_every_reachable_mutation_is_idempotent_under_one_key() {\n    let unequal: Vec<&str> = results.iter().filter(|r| !r.outcome_equal).collect();\n    assert!(unequal.is_empty());\n}\n\n#[test]\nfn sweep_one_key_with_a_different_request_is_refused_and_changes_nothing() {\n    assert_eq!(clash.error_code(), Some(ErrorCode::IdempotencyKeyReused));\n}\n"
+  }
+}

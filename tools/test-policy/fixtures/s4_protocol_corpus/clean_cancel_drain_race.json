@@ -1,0 +1,11 @@
+{
+  "description": "both the race winner and the race loser have every publication drained",
+  "expect": "clean",
+  "system": {
+    "drained_loser": 3,
+    "drained_winner": 2,
+    "kind": "cancel-drain-race",
+    "publications_loser": 3,
+    "publications_winner": 2
+  }
+}

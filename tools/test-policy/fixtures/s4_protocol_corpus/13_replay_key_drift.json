@@ -1,0 +1,9 @@
+{
+  "description": "ReplayKey's field order in the (synthetic) source no longer matches REPLAY_KEY_FIELDS (arguments and budget swapped)",
+  "requirement": "TEST-4-13",
+  "rule": "idempotent-replay-key-drift",
+  "system": {
+    "kind": "replay-key-drift",
+    "source": "pub struct ReplayKey {\n    pub operation: String,\n    pub snapshot: Nullable<WorkspaceHandle>,\n    pub intent: Nullable<IntentHandle>,\n    pub budget: Optional<Budget>,\n    pub arguments: Arguments,\n    pub output_policy: Optional<OutputPolicy>,\n    pub page: Optional<Page>,\n}\n"
+  }
+}

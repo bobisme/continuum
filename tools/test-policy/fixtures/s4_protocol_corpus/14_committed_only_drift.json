@@ -1,0 +1,9 @@
+{
+  "description": "Publications::artifacts() now also reads self.staged, so an uncommitted publication could reach ResultEnvelope.artifacts",
+  "requirement": "TEST-4-14",
+  "rule": "ack-durability-committed-drift",
+  "system": {
+    "kind": "committed-only-drift",
+    "source": "    pub fn artifacts(&self, task: &TaskHandle) -> Result<Vec<ArtifactRef>, Fault> {\n        self.committed\n            .iter()\n            .chain(self.staged.iter())\n            .map(|publication| publication.artifact(task))\n            .collect()\n    }\n"
+  }
+}

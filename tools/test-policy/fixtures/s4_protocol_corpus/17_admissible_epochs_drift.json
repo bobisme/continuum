@@ -1,0 +1,9 @@
+{
+  "description": "PinnedEpochs::compatibility() now returns only 4 kinds (corpus dropped), diverging from COMPAT_KINDS",
+  "requirement": "TEST-4-17",
+  "rule": "restart-timer-epochs-drift",
+  "system": {
+    "kind": "admissible-epochs-drift",
+    "source": "    fn compatibility(&self) -> [&Nullable<EpochIdentity>; 4] {\n        [\n            &self.semantic,\n            &self.intent,\n            &self.evidence,\n            &self.proof,\n        ]\n    }\n"
+  }
+}

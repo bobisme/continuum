@@ -1,0 +1,25 @@
+{
+  "description": "a ResultEnvelope named artifact a1 in `artifacts` before any commit event recorded it durable",
+  "requirement": "TEST-4-14",
+  "rule": "ack-before-durability-detected",
+  "system": {
+    "events": [
+      {
+        "artifact": "a1",
+        "type": "reserve"
+      },
+      {
+        "artifacts": [
+          "a1"
+        ],
+        "status": "ok",
+        "type": "ack"
+      },
+      {
+        "artifact": "a1",
+        "type": "commit"
+      }
+    ],
+    "kind": "ack-durability"
+  }
+}

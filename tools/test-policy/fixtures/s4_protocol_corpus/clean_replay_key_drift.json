@@ -1,0 +1,8 @@
+{
+  "description": "ReplayKey's field order matches REPLAY_KEY_FIELDS exactly",
+  "expect": "clean",
+  "system": {
+    "kind": "replay-key-drift",
+    "source": "pub struct ReplayKey {\n    pub operation: String,\n    pub snapshot: Nullable<WorkspaceHandle>,\n    pub intent: Nullable<IntentHandle>,\n    pub arguments: Arguments,\n    pub budget: Optional<Budget>,\n    pub output_policy: Optional<OutputPolicy>,\n    pub page: Optional<Page>,\n}\n"
+  }
+}

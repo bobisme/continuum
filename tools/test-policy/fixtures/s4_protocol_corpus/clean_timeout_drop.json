@@ -1,0 +1,23 @@
+{
+  "description": "every request, timed out or not, gets a typed response",
+  "expect": "clean",
+  "system": {
+    "kind": "timeout-drop",
+    "requests": [
+      {
+        "elapsed_ms": 900,
+        "request_id": "r1",
+        "responded": true,
+        "response_status": "error",
+        "timeout_ms": 500
+      },
+      {
+        "elapsed_ms": 100,
+        "request_id": "r2",
+        "responded": true,
+        "response_status": "ok",
+        "timeout_ms": 500
+      }
+    ]
+  }
+}

@@ -9274,7 +9274,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "non-idempotent retry"
     },
     {
@@ -9285,7 +9285,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "ack-before-durability"
     },
     {
@@ -9318,7 +9318,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "restart timer leak"
     },
     {

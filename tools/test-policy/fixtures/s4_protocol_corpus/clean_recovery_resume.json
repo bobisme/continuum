@@ -1,0 +1,24 @@
+{
+  "description": "resume attempts make monotonic progress and reach a terminal status",
+  "expect": "clean",
+  "system": {
+    "attempts": [
+      {
+        "evidence": 0,
+        "milestones": 0,
+        "status": "suspended"
+      },
+      {
+        "evidence": 1,
+        "milestones": 1,
+        "status": "suspended"
+      },
+      {
+        "evidence": 1,
+        "milestones": 2,
+        "status": "completed"
+      }
+    ],
+    "kind": "recovery-resume"
+  }
+}

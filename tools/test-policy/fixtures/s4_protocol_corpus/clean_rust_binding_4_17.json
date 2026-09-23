@@ -1,0 +1,8 @@
+{
+  "description": "every required P1/P2/restart-regression test exists, is #[test], is not #[ignore]d, and asserts the cited token",
+  "expect": "clean",
+  "system": {
+    "kind": "rust-binding-4-17",
+    "source": "#[test]\nfn class_p1_semantic_epoch_disagreement() {\n    advanced(&Axis { expected: ErrorCode::ContinuationEpochMismatch, ..Default::default() });\n}\n\n#[test]\nfn class_p1_intent_epoch_disagreement() {\n    advanced(&Axis { expected: ErrorCode::ContinuationEpochMismatch, ..Default::default() });\n}\n\n#[test]\nfn class_p1_evidence_epoch_disagreement() {\n    advanced(&Axis { expected: ErrorCode::ContinuationEpochMismatch, ..Default::default() });\n}\n\n#[test]\nfn class_p1_proof_epoch_disagreement() {\n    advanced(&Axis { expected: ErrorCode::ContinuationEpochMismatch, ..Default::default() });\n}\n\n#[test]\nfn class_p1_corpus_epoch_disagreement() {\n    advanced(&Axis { expected: ErrorCode::ContinuationEpochMismatch, ..Default::default() });\n}\n\n#[test]\nfn class_p2_engine_identity_disagreement() {\n    advanced(&Axis { expected: ErrorCode::ContinuationEpochMismatch, ..Default::default() });\n}\n\n#[test]\nfn regression_a_continuation_survives_a_restart_with_its_pins() {\n    assert_eq!(after.pinned, before.pinned);\n}\n"
+  }
+}

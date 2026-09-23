@@ -1,0 +1,40 @@
+{
+  "description": "6 resume attempts at the bound made no monotonic progress and never reached a terminal status",
+  "requirement": "TEST-4-18",
+  "rule": "recovery-livelock-detected",
+  "system": {
+    "attempts": [
+      {
+        "evidence": 1,
+        "milestones": 2,
+        "status": "suspended"
+      },
+      {
+        "evidence": 1,
+        "milestones": 2,
+        "status": "suspended"
+      },
+      {
+        "evidence": 1,
+        "milestones": 2,
+        "status": "suspended"
+      },
+      {
+        "evidence": 1,
+        "milestones": 2,
+        "status": "suspended"
+      },
+      {
+        "evidence": 1,
+        "milestones": 2,
+        "status": "suspended"
+      },
+      {
+        "evidence": 1,
+        "milestones": 2,
+        "status": "suspended"
+      }
+    ],
+    "kind": "recovery-resume"
+  }
+}

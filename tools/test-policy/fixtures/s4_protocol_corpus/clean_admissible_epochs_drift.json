@@ -1,0 +1,8 @@
+{
+  "description": "PinnedEpochs::compatibility() returns exactly the five COMPAT_KINDS, in order",
+  "expect": "clean",
+  "system": {
+    "kind": "admissible-epochs-drift",
+    "source": "    fn compatibility(&self) -> [&Nullable<EpochIdentity>; 5] {\n        [\n            &self.semantic,\n            &self.intent,\n            &self.evidence,\n            &self.proof,\n            &self.corpus,\n        ]\n    }\n"
+  }
+}

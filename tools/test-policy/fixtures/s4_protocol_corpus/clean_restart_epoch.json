@@ -1,0 +1,24 @@
+{
+  "description": "a mismatched continuation is correctly refused (not executed), and a matching one is admitted",
+  "expect": "clean",
+  "system": {
+    "current": {
+      "corpus": null,
+      "engine": null,
+      "evidence": null,
+      "intent": null,
+      "proof": null,
+      "semantic": "e1"
+    },
+    "executed": true,
+    "kind": "restart-epoch",
+    "pinned": {
+      "corpus": null,
+      "engine": null,
+      "evidence": null,
+      "intent": null,
+      "proof": null,
+      "semantic": "e1"
+    }
+  }
+}

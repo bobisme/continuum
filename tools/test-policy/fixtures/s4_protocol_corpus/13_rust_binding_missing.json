@@ -1,0 +1,9 @@
+{
+  "description": "the idempotency replay kill test is #[ignore]d, not #[test], and no longer asserts outcome_equal; the IdempotencyKeyReused kill test is entirely absent",
+  "requirement": "TEST-4-13",
+  "rule": "idempotent-replay-rust-binding-missing",
+  "system": {
+    "kind": "rust-binding-4-13",
+    "source": "#[ignore]\nfn sweep_every_reachable_mutation_is_idempotent_under_one_key() {\n    assert!(true, \"no longer checks the replayed outcome\");\n}\n"
+  }
+}

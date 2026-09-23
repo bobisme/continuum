@@ -1,0 +1,25 @@
+{
+  "description": "admissible_epochs found ContinuationEpochMismatch but the timer/continuation effect ran anyway",
+  "requirement": "TEST-4-17",
+  "rule": "restart-timer-leak-detected",
+  "system": {
+    "current": {
+      "corpus": null,
+      "engine": null,
+      "evidence": null,
+      "intent": null,
+      "proof": null,
+      "semantic": "e2"
+    },
+    "executed": true,
+    "kind": "restart-epoch",
+    "pinned": {
+      "corpus": null,
+      "engine": null,
+      "evidence": null,
+      "intent": null,
+      "proof": null,
+      "semantic": "e1"
+    }
+  }
+}

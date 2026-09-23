@@ -1,0 +1,33 @@
+{
+  "description": "the ack names only artifacts already committed",
+  "expect": "clean",
+  "system": {
+    "events": [
+      {
+        "artifact": "a1",
+        "type": "reserve"
+      },
+      {
+        "artifact": "a1",
+        "type": "commit"
+      },
+      {
+        "artifact": "a2",
+        "type": "reserve"
+      },
+      {
+        "artifact": "a2",
+        "type": "commit"
+      },
+      {
+        "artifacts": [
+          "a1",
+          "a2"
+        ],
+        "status": "ok",
+        "type": "ack"
+      }
+    ],
+    "kind": "ack-durability"
+  }
+}
