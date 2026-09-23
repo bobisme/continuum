@@ -63,6 +63,9 @@ pub enum Nonconformance {
     /// A cancellation-phase event does not refine the calculus's cancel → drain step
     /// (PR-14-IMPL-03; the reasons are the family's own).
     Cancellation(family::cancellation::CancellationFault),
+    /// A reserve / commit / abort event breaks its reservation's phase machine or the
+    /// calculus's publication steps (PR-14-IMPL-02; the reasons are the family's own).
+    Effect(family::effect::EffectFault),
 }
 
 impl fmt::Display for Nonconformance {
@@ -90,6 +93,7 @@ impl fmt::Display for Nonconformance {
                 "draining r{region} reported cancelled {reported:?} but the model cancelled {model:?}"
             ),
             Self::Cancellation(fault) => write!(f, "cancellation phases: {fault}"),
+            Self::Effect(fault) => write!(f, "reserve/commit/abort: {fault}"),
         }
     }
 }
@@ -116,7 +120,6 @@ pub struct LiftContext {
     pub(crate) tree: RegionTree,
     pub(crate) seq: u64,
     pub(crate) finalizations: Vec<(u64, Finalization)>,
-    #[allow(dead_code)] // filled by PR-14-IMPL-02
     pub(crate) effect: family::effect::LiftState,
     pub(crate) cancellation: family::cancellation::LiftState,
     #[allow(dead_code)] // filled by PR-14-IMPL-04
@@ -184,9 +187,10 @@ impl LiftVerdict {
 
 /// Lift `journal` into a fresh region tree.
 ///
-/// After the last event, the families that make a whole-journal claim check it. Today
-/// that is the cancellation family ([`family::cancellation`]): a violation it finds is
-/// reported at the last event's sequence number.
+/// After the last event, the families that make a whole-journal claim check it, in
+/// family-tag order: the cancellation family ([`family::cancellation`]) and the
+/// reserve/commit/abort family ([`family::effect`]). A violation one finds is reported
+/// at the last event's sequence number.
 #[must_use]
 pub fn lift(journal: &Journal) -> LiftVerdict {
     let mut cx = LiftContext::default();
@@ -209,7 +213,8 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
             }
         }
     }
-    if let Err(stop) = family::cancellation::finish(&cx) {
+    if let Err(stop) = family::effect::finish(&cx).and_then(|()| family::cancellation::finish(&cx))
+    {
         let seq = journal.events().last().map_or(0, |event| event.seq());
         return match stop {
             LiftStop::Violation(reason) => LiftVerdict::Violates { seq, reason },

@@ -447,6 +447,11 @@ impl Account {
                 }
                 self.teardown(ordinal, &causes);
             }
+            SubstrateOp::Reserve { .. }
+            | SubstrateOp::Commit { .. }
+            | SubstrateOp::Abort { .. } => {
+                unreachable!("the cancellation corpus has no effect operations")
+            }
         }
     }
 }

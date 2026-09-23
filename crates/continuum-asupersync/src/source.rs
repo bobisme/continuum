@@ -139,7 +139,7 @@ pub struct RecordContext {
     journal: Journal,
     full: bool,
     pub(crate) lifecycle: family::lifecycle::RecordState,
-    #[allow(dead_code)] // filled by PR-14-IMPL-02
+    #[allow(dead_code)] // empty by design: the effect recorder judges nothing
     pub(crate) effect: family::effect::RecordState,
     #[allow(dead_code)] // empty by design: the cancellation recorder judges nothing
     pub(crate) cancellation: family::cancellation::RecordState,

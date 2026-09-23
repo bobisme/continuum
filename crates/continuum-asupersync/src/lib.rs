@@ -53,9 +53,18 @@
 //! - [`binding`] observes it when [`binding::BindingConfig::families`] names it, from
 //!   the substrate's own trace, in a canonical order the lab seed does not reach.
 //!
+//! # What has landed (PR-14-IMPL-02, bn-gzy1)
+//!
+//! - [`family::effect`] — the reserve / commit / abort family: each reservation's
+//!   `reserved → committed | aborted`, lifted into the region calculus's `Reserve` and
+//!   `Commit` steps and its drain's discard, with every reservation resolved exactly
+//!   once and none leaked at region close;
+//! - [`binding`] observes it from asupersync's own obligation trace, for reservations a
+//!   task makes through its `Cx`.
+//!
 //! # What is not here
 //!
-//! The other four families' bindings: [`binding::substrate_binding`] answers each of
+//! The other three families' bindings: [`binding::substrate_binding`] answers each of
 //! them with the typed absence [`binding::BindingAbsence::FamilyNotBound`].
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 

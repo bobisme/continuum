@@ -20,7 +20,7 @@
 //! | substrate journal ≡ scripted-source journal, every log (differential) | [`the_substrate_agrees_byte_for_byte_with_the_scripted_source`] |
 //! | every substrate journal lifts, and no finalization leaves an orphan | [`every_substrate_journal_conforms_to_the_region_calculus`] |
 //! | a normal close waits for owned work, as the calculus requires | [`a_normal_close_with_live_work_waits_as_the_calculus_requires`] |
-//! | lifecycle and cancellation are bound; the other four are typed absences | [`the_lifecycle_and_cancellation_families_are_bound`] |
+//! | lifecycle, reserve/commit/abort and cancellation are bound; the other three are typed absences | [`the_lifecycle_effect_and_cancellation_families_are_bound`] |
 //! | malformed programs, logs and illegal calls are typed refusals | [`malformed_programs_and_illegal_calls_are_typed_refusals`] |
 //! | no ambient crashpack path is reachable from the binding | [`the_binding_cannot_reach_the_ambient_crashpack_writers`] |
 
@@ -422,6 +422,9 @@ fn reports(program: &Program, index: usize) -> Vec<Report> {
             }
             out
         }
+        SubstrateOp::Reserve { .. } | SubstrateOp::Commit { .. } | SubstrateOp::Abort { .. } => {
+            unreachable!("the lifecycle corpus has no effect operations")
+        }
     }
 }
 
@@ -568,12 +571,16 @@ fn a_normal_close_with_live_work_waits_as_the_calculus_requires() {
 
 /// Regression guard for the binding landing: before it, every family (and the substrate
 /// as a whole) was the typed absence `DependencyNotDeclared`. PR-14-IMPL-03 (bn-bx7i)
-/// bound the cancellation family too; the other four stay typed absences.
+/// bound the cancellation family too, and PR-14-IMPL-02 (bn-gzy1) the reserve/commit/abort
+/// family; the other three stay typed absences.
 #[test]
-fn the_lifecycle_and_cancellation_families_are_bound() {
+fn the_lifecycle_effect_and_cancellation_families_are_bound() {
     for family in Family::ALL {
         let binding = substrate_binding(family);
-        if matches!(family, Family::Lifecycle | Family::Cancellation) {
+        if matches!(
+            family,
+            Family::Lifecycle | Family::Effect | Family::Cancellation
+        ) {
             assert_eq!(binding, SubstrateBinding::Bound);
             assert_eq!(binding.inconclusive_reason(), None);
         } else {

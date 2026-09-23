@@ -3,13 +3,14 @@
 //!
 //! # What is bound, and what is not
 //!
-//! The binding observes two families: [`Family::Lifecycle`] (PR-14-IMPL-01, bn-lf4i)
-//! and [`Family::Cancellation`] (PR-14-IMPL-03, bn-bx7i). A run observes the families
+//! The binding observes three families: [`Family::Lifecycle`] (PR-14-IMPL-01,
+//! bn-lf4i), [`Family::Effect`] (PR-14-IMPL-02, bn-gzy1) and [`Family::Cancellation`]
+//! (PR-14-IMPL-03, bn-bx7i). A run observes the families
 //! [`BindingConfig::families`] names. Lifecycle is always among them, because the
 //! other families name tasks by the ordinals its spawn events allocate. The default is
 //! lifecycle alone, whose journal is the one bn-lf4i pinned, byte for byte.
 //!
-//! The other four families are still uninstrumented (their files under `src/family/`
+//! The other three families are still uninstrumented (their files under `src/family/`
 //! say so), and for them [`substrate_binding`] answers with the typed absence
 //! [`BindingAbsence::FamilyNotBound`], whose INV-008 reading is
 //! [`InconclusiveReason::Unsupported`]. A run that asks for one is refused with
@@ -64,6 +65,32 @@
 //! does not map is a typed refusal ([`BindingRefusal::UninstrumentedEvent`]), never a
 //! dropped event.
 //!
+//! # Reserve / commit / abort
+//!
+//! A bound task's effects are asupersync's own two-phase primitive: a checked
+//! obligation token of kind `Transaction`, reserved through the task's `Cx`
+//! (`Cx::try_register_obligation_checked`) and committed or aborted through the token.
+//! [`SubstrateOp::Reserve`], [`SubstrateOp::Commit`] and [`SubstrateOp::Abort`] are
+//! gate commands; the task itself makes the calls. When [`Family::Effect`] is
+//! observed:
+//!
+//! | substrate trace event | journal event |
+//! |---|---|
+//! | `ObligationReserve` | [`EffectEvent::Reserved`] |
+//! | `ObligationCommit` | [`EffectEvent::Committed`] |
+//! | `ObligationAbort`, reason `Explicit` | [`EffectEvent::Aborted`] `explicit` |
+//! | `ObligationAbort`, reason `Cancel` | [`EffectEvent::Aborted`] `cancel`, placed canonically (below) |
+//! | `ObligationAbort`, reason `Error`, or `ObligationLeak`, of a reservation of this run | [`BindingRefusal::ReservationDropped`] |
+//!
+//! A task that holds a reservation is mid-effect, not parked, so its pending polls
+//! write no `suspend` mark until it resolves everything it holds. The runtime applies a
+//! resolution after the poll that posts it, so the gate yields once, unmarked, before
+//! it may write `suspend`: the mark then follows the resolution in the trace, as the
+//! calculus requires (a worker may not park mid-publication). A task that observes its
+//! cancellation aborts every reservation it holds, for `Cancel`, before it returns.
+//! After each effect operation the binding confirms from the trace that the substrate
+//! took the step it asked for ([`BindingRefusal::EffectUnobserved`] otherwise).
+//!
 //! # The cancellation phases
 //!
 //! When [`Family::Cancellation`] is observed, the task-level phases of a cancellation
@@ -108,7 +135,9 @@
 //!   journaled together, by ascending task ordinal, right after the region cancel
 //!   request;
 //! - each task's acknowledgement and completion are journaled immediately before the
-//!   lifecycle drain that absorbs the task, by ascending task ordinal.
+//!   lifecycle drain that absorbs the task, by ascending task ordinal, with the
+//!   reservations its cancellation aborted between them, by ascending reservation
+//!   ordinal (or, without the cancellation family, alone before the drain).
 //!
 //! Per task, `requested → acknowledged → cancelled` keeps its substrate order, and all
 //! three precede the drain, as they do in the trace. Only the relative order of
@@ -146,17 +175,20 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 
 use asupersync::lab::oracle::TaskStateKind;
+use asupersync::record::{ObligationAbortReason, ObligationKind};
+use asupersync::runtime::obligation_mailbox::ObligationToken;
 use asupersync::runtime::{JoinError, TaskHandle};
 use asupersync::trace::event::{TraceData, TraceEvent, TraceEventKind};
 use asupersync::{
-    Budget, CancelKind, CancelReason, Cx, LabConfig, LabRuntime, RegionId as SubstrateRegion,
-    TaskId as SubstrateTask,
+    Budget, CancelKind, CancelReason, Cx, LabConfig, LabRuntime, ObligationId,
+    RegionId as SubstrateRegion, TaskId as SubstrateTask,
 };
 use continuum_task::region::worker::Resumability;
 use continuum_value::assurance::InconclusiveReason;
 
 use crate::choice::ChoiceLog;
 use crate::family::cancellation::{CancelCause, CancellationEvent};
+use crate::family::effect::{AbortCause, EffectEvent, ReservationLabel, ReservationOrdinal};
 use crate::family::lifecycle::{
     LifecycleEvent, RegionLabel, RegionOrdinal, TaskLabel, TaskOrdinal, TaskSet, TaskStep,
 };
@@ -216,7 +248,7 @@ impl SubstrateBinding {
 #[must_use]
 pub const fn substrate_binding(family: Family) -> SubstrateBinding {
     match family {
-        Family::Lifecycle | Family::Cancellation => SubstrateBinding::Bound,
+        Family::Lifecycle | Family::Effect | Family::Cancellation => SubstrateBinding::Bound,
         other => SubstrateBinding::Absent(BindingAbsence::FamilyNotBound(other)),
     }
 }
@@ -274,6 +306,25 @@ pub enum SubstrateOp {
         /// The region.
         region: RegionLabel,
     },
+    /// Wake `task` with a command to reserve a two-phase effect through its own `Cx`
+    /// (`Cx::try_register_obligation_checked`), bound to `reservation`. The task then
+    /// waits, mid-effect, for the reservation's resolution.
+    Reserve {
+        /// The task.
+        task: TaskLabel,
+        /// The label the new reservation is bound to.
+        reservation: ReservationLabel,
+    },
+    /// Wake the holding task with a command to commit `reservation`.
+    Commit {
+        /// The reservation.
+        reservation: ReservationLabel,
+    },
+    /// Wake the holding task with a command to abort `reservation` on purpose.
+    Abort {
+        /// The reservation.
+        reservation: ReservationLabel,
+    },
 }
 
 impl SubstrateOp {
@@ -286,6 +337,9 @@ impl SubstrateOp {
             Self::Finish { .. } => "finish",
             Self::Close { .. } => "close",
             Self::Cancel { .. } => "cancel",
+            Self::Reserve { .. } => "reserve",
+            Self::Commit { .. } => "commit",
+            Self::Abort { .. } => "abort",
         }
     }
 }
@@ -459,6 +513,25 @@ pub enum BindingRefusal {
         /// The task's journal ordinal.
         task: u32,
     },
+    /// An operation names a reservation label no earlier operation bound.
+    UnboundReservation(u32),
+    /// An operation binds a reservation label that is already bound.
+    ReservationLabelRebound(u32),
+    /// An operation resolves a reservation that already resolved.
+    ReservationResolved(u32),
+    /// An effect operation completed, but the substrate's trace does not show the step
+    /// it asked for.
+    EffectUnobserved {
+        /// The operation.
+        operation: &'static str,
+    },
+    /// A reservation's holder dropped it unresolved (it returned while still holding
+    /// it), and the substrate recorded a leak or aborted it for error. The family has no
+    /// event for that: it is the leak the lift forbids at region close.
+    ReservationDropped {
+        /// The reservation's journal ordinal.
+        reservation: u32,
+    },
 }
 
 impl BindingRefusal {
@@ -474,7 +547,8 @@ impl BindingRefusal {
             Self::UninstrumentedEvent { .. }
             | Self::TaskPanicked { .. }
             | Self::FamilyNotBound(_)
-            | Self::UnmappedCancelReason { .. } => Some(InconclusiveReason::Unsupported),
+            | Self::UnmappedCancelReason { .. }
+            | Self::ReservationDropped { .. } => Some(InconclusiveReason::Unsupported),
             Self::SubstrateProtocolViolation { .. } => Some(InconclusiveReason::EngineError),
             Self::StepLimit => Some(InconclusiveReason::ResourceExhausted),
             Self::TraceOverflow { .. }
@@ -483,9 +557,8 @@ impl BindingRefusal {
             | Self::GateUntraced
             | Self::TaskOutcomeUnobserved { .. }
             | Self::UndrainedCancellation { .. }
-            | Self::CancellationUnfinished { .. } => {
-                Some(InconclusiveReason::InsufficientTelemetry)
-            }
+            | Self::CancellationUnfinished { .. }
+            | Self::EffectUnobserved { .. } => Some(InconclusiveReason::InsufficientTelemetry),
             Self::SubstrateRefused { .. }
             | Self::UnboundRegion(_)
             | Self::UnboundTask(_)
@@ -495,7 +568,10 @@ impl BindingRefusal {
             | Self::ChoiceLogExhausted { .. }
             | Self::ChoiceLogOverrun { .. }
             | Self::JournalFull
-            | Self::LifecycleNotObserved => None,
+            | Self::LifecycleNotObserved
+            | Self::UnboundReservation(_)
+            | Self::ReservationLabelRebound(_)
+            | Self::ReservationResolved(_) => None,
         }
     }
 }
@@ -578,6 +654,23 @@ impl fmt::Display for BindingRefusal {
                 f,
                 "task t{task}'s cancellation began but no drain absorbed its completion"
             ),
+            Self::UnboundReservation(label) => {
+                write!(f, "reservation label {label} is not bound")
+            }
+            Self::ReservationLabelRebound(label) => {
+                write!(f, "reservation label {label} is already bound")
+            }
+            Self::ReservationResolved(label) => {
+                write!(f, "reservation label {label} has already resolved")
+            }
+            Self::EffectUnobserved { operation } => write!(
+                f,
+                "the substrate's trace does not show the step {operation} asked for"
+            ),
+            Self::ReservationDropped { reservation } => write!(
+                f,
+                "e{reservation} was dropped unresolved and the substrate aborted it for error"
+            ),
         }
     }
 }
@@ -603,6 +696,9 @@ enum GatePhase {
 enum Command {
     Park,
     Finish,
+    Reserve(ReservationLabel),
+    Commit(ReservationLabel),
+    Abort(ReservationLabel),
 }
 
 #[derive(Debug)]
@@ -611,6 +707,15 @@ struct GateState {
     commands: VecDeque<Command>,
     waker: Option<Waker>,
     untraced: bool,
+    /// How many reservations the task holds. A task that holds one is mid-effect, not
+    /// parked: its pending polls write no `suspend` mark.
+    held: usize,
+    /// The substrate's refusal of the last effect command, if it refused.
+    refused: Option<String>,
+    /// A resolution was posted in this poll. The runtime applies it after the poll
+    /// returns, so the next pending poll yields once, unmarked, and only the poll after
+    /// that may write `suspend`: the mark then follows the resolution in the trace.
+    settling: bool,
 }
 
 type Gate = Arc<Mutex<GateState>>;
@@ -651,9 +756,13 @@ impl Future for GateWait {
                 marks.push("resume");
             }
             Poll::Ready(Some(command))
+        } else if state.settling {
+            state.settling = false;
+            context.waker().wake_by_ref();
+            Poll::Pending
         } else {
             state.waker = Some(context.waker().clone());
-            if state.phase == GatePhase::Running {
+            if state.phase == GatePhase::Running && state.held == 0 {
                 state.phase = GatePhase::Suspended;
                 marks.push("suspend");
             }
@@ -674,13 +783,65 @@ impl Future for GateWait {
     }
 }
 
+/// The kind every bound reservation takes: a two-phase effect that commits or rolls
+/// back.
+const RESERVATION_KIND: ObligationKind = ObligationKind::Transaction;
+
 async fn gated_body(gate: Gate, slot: usize) {
-    while let Some(Command::Park) = (GateWait {
-        gate: Arc::clone(&gate),
-        slot,
-    })
-    .await
-    {}
+    // The task's own reservations, by program label. Ascending order makes the aborts a
+    // cancellation issues deterministic within the task.
+    let mut held: BTreeMap<ReservationLabel, ObligationToken> = BTreeMap::new();
+    loop {
+        let command = GateWait {
+            gate: Arc::clone(&gate),
+            slot,
+        }
+        .await;
+        let refused = match command {
+            Some(Command::Park) => None,
+            Some(Command::Reserve(label)) => match Cx::current() {
+                Some(cx) => {
+                    match cx.try_register_obligation_checked(RESERVATION_KIND, cx.task_id()) {
+                        Ok(Some(token)) => {
+                            held.insert(label, token);
+                            None
+                        }
+                        Ok(None) => Some("the task's Cx carries no obligation runtime".to_owned()),
+                        Err(error) => Some(error.to_string()),
+                    }
+                }
+                None => {
+                    lock(&gate).untraced = true;
+                    None
+                }
+            },
+            Some(Command::Commit(label)) => match held.remove(&label) {
+                Some(token) => (!token.commit()).then(|| "commit was not accepted".to_owned()),
+                None => Some("no held reservation has this label".to_owned()),
+            },
+            Some(Command::Abort(label)) => match held.remove(&label) {
+                Some(token) => (!token.abort(ObligationAbortReason::Explicit))
+                    .then(|| "abort was not accepted".to_owned()),
+                None => Some("no held reservation has this label".to_owned()),
+            },
+            // Returning with reservations held drops them: the substrate aborts each one
+            // for `Error`, and the binding refuses the run.
+            Some(Command::Finish) => break,
+            // Cancellation observed: the cleanup is to abort every held reservation.
+            None => {
+                for (_, token) in core::mem::take(&mut held) {
+                    token.abort(ObligationAbortReason::Cancel);
+                }
+                break;
+            }
+        };
+        let mut state = lock(&gate);
+        state.settling = matches!(command, Some(Command::Commit(_) | Command::Abort(_)));
+        state.held = held.len();
+        if refused.is_some() {
+            state.refused = refused;
+        }
+    }
 }
 
 // --- the driver --------------------------------------------------------------------
@@ -711,6 +872,20 @@ fn cause_of(kind: CancelKind) -> Result<CancelCause, BindingRefusal> {
     }
 }
 
+/// A program's reservation label: the holding task's slot, and whether it resolved.
+#[derive(Debug, Clone, Copy)]
+struct LabelState {
+    slot: usize,
+    resolved: bool,
+}
+
+/// A substrate obligation the run reserved: its journal ordinal and holding task.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    ordinal: u32,
+    task: TaskOrdinal,
+}
+
 struct Driver {
     lab: LabRuntime,
     config: BindingConfig,
@@ -725,6 +900,13 @@ struct Driver {
     pending_cancelled: Vec<(TaskOrdinal, u32)>,
     pending_requests: Vec<(TaskOrdinal, CancelCause)>,
     pending_closes: Vec<RegionOrdinal>,
+    reservation_labels: BTreeMap<ReservationLabel, LabelState>,
+    reservations: BTreeMap<ObligationId, Held>,
+    reservation_owner_label: BTreeMap<u32, ReservationLabel>,
+    next_reservation: u32,
+    op_reserved: Vec<(u32, usize)>,
+    op_resolved: Vec<u32>,
+    pending_aborts: BTreeMap<u32, BTreeSet<u32>>,
     close_order: Vec<RegionOrdinal>,
     phases: BTreeMap<u32, CancelTrack>,
     next_task: u32,
@@ -763,6 +945,13 @@ impl Driver {
             pending_cancelled: Vec::new(),
             pending_requests: Vec::new(),
             pending_closes: Vec::new(),
+            reservation_labels: BTreeMap::new(),
+            reservations: BTreeMap::new(),
+            reservation_owner_label: BTreeMap::new(),
+            next_reservation: 0,
+            op_reserved: Vec::new(),
+            op_resolved: Vec::new(),
+            pending_aborts: BTreeMap::new(),
             close_order: Vec::new(),
             phases: BTreeMap::new(),
             next_task: 0,
@@ -796,8 +985,33 @@ impl Driver {
     /// Append a lifecycle event. A pending batch of region closes is journaled first,
     /// because every close in it came before this event in the trace.
     fn append(&mut self, event: LifecycleEvent) {
+        self.append_body(EventBody::Lifecycle(event));
+    }
+
+    fn append_body(&mut self, body: EventBody) {
         self.flush_closes();
-        self.record.append(EventBody::Lifecycle(event));
+        self.record.append(body);
+    }
+
+    const fn observes_effect(&self) -> bool {
+        self.config.families.contains(Family::Effect)
+    }
+
+    /// Send an effect command, then confirm from the trace that the substrate took the
+    /// step. The gate's own report of a substrate refusal comes first.
+    fn effect_command(
+        &mut self,
+        slot: usize,
+        command: Command,
+        operation: &'static str,
+    ) -> Result<(), BindingRefusal> {
+        self.op_reserved.clear();
+        self.op_resolved.clear();
+        self.command_slot(slot, command)?;
+        if let Some(detail) = lock(&self.slots[slot].gate).refused.take() {
+            return Err(BindingRefusal::SubstrateRefused { operation, detail });
+        }
+        Ok(())
     }
 
     /// Every region, children before parents and siblings by ascending ordinal: the
@@ -848,9 +1062,7 @@ impl Driver {
                 .partition(|(_, owner)| self.in_subtree(*owner, region));
             self.pending_cancelled = kept;
             let cancelled = TaskSet::new(drained.into_iter().map(|(task, _)| task));
-            if self.observes_cancellation() {
-                self.journal_phases(&cancelled);
-            }
+            self.journal_phases(&cancelled);
             let region = RegionOrdinal(region);
             self.record
                 .append(EventBody::Lifecycle(LifecycleEvent::RegionDrained {
@@ -866,6 +1078,10 @@ impl Driver {
 
     fn command(&mut self, label: TaskLabel, command: Command) -> Result<(), BindingRefusal> {
         let slot = self.slot(label)?;
+        self.command_slot(slot, command)
+    }
+
+    fn command_slot(&mut self, slot: usize, command: Command) -> Result<(), BindingRefusal> {
         let waker = {
             let mut state = lock(&self.slots[slot].gate);
             state.commands.push_back(command);
@@ -911,6 +1127,9 @@ impl Driver {
                     commands: VecDeque::new(),
                     waker: None,
                     untraced: false,
+                    held: 0,
+                    refused: None,
+                    settling: false,
                 }));
                 let (id, handle) = self
                     .lab
@@ -978,6 +1197,70 @@ impl Driver {
                 wakes.dispatch();
                 self.run()
             }
+            SubstrateOp::Reserve { task, reservation } => {
+                let slot = self.slot(*task)?;
+                if self.reservation_labels.contains_key(reservation) {
+                    return Err(BindingRefusal::ReservationLabelRebound(reservation.0));
+                }
+                self.effect_command(slot, Command::Reserve(*reservation), "reserve")?;
+                match self.op_reserved.as_slice() {
+                    [(ordinal, holder)] if *holder == slot => {
+                        self.reservation_owner_label.insert(*ordinal, *reservation);
+                        self.reservation_labels.insert(
+                            *reservation,
+                            LabelState {
+                                slot,
+                                resolved: false,
+                            },
+                        );
+                        Ok(())
+                    }
+                    _ => Err(BindingRefusal::EffectUnobserved {
+                        operation: "reserve",
+                    }),
+                }
+            }
+            SubstrateOp::Commit { reservation } | SubstrateOp::Abort { reservation } => {
+                let state = *self
+                    .reservation_labels
+                    .get(reservation)
+                    .ok_or(BindingRefusal::UnboundReservation(reservation.0))?;
+                if state.resolved {
+                    return Err(BindingRefusal::ReservationResolved(reservation.0));
+                }
+                let (command, operation) = match op {
+                    SubstrateOp::Commit { .. } => (Command::Commit(*reservation), "commit"),
+                    _ => (Command::Abort(*reservation), "abort"),
+                };
+                self.effect_command(state.slot, command, operation)?;
+                let resolved = self
+                    .reservation_labels
+                    .get(reservation)
+                    .is_some_and(|state| state.resolved);
+                if self.op_resolved.len() == 1 && resolved {
+                    Ok(())
+                } else {
+                    Err(BindingRefusal::EffectUnobserved { operation })
+                }
+            }
+        }
+    }
+
+    /// The reservation a traced obligation is, as the run allocated it.
+    fn held(&self, obligation: ObligationId) -> Result<Held, BindingRefusal> {
+        self.reservations
+            .get(&obligation)
+            .copied()
+            .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "obligation" })
+    }
+
+    /// Record that a reservation resolved, for the label bookkeeping.
+    fn resolve(&mut self, ordinal: u32) {
+        self.op_resolved.push(ordinal);
+        if let Some(label) = self.reservation_owner_label.get(&ordinal)
+            && let Some(state) = self.reservation_labels.get_mut(label)
+        {
+            state.resolved = true;
         }
     }
 
@@ -1236,6 +1519,87 @@ impl Driver {
                 }
             }
             (TraceEventKind::RegionCloseBegin, _) => {}
+            // A reservation of this run, dropped unresolved: the substrate recorded a
+            // leak. Any other leak stays an obligations-family event (below).
+            (TraceEventKind::ObligationLeak, TraceData::Obligation { obligation, .. })
+                if self.reservations.contains_key(obligation) =>
+            {
+                return Err(BindingRefusal::ReservationDropped {
+                    reservation: self.held(*obligation)?.ordinal,
+                });
+            }
+            (
+                TraceEventKind::ObligationReserve,
+                TraceData::Obligation {
+                    obligation,
+                    task,
+                    region,
+                    kind,
+                    ..
+                },
+            ) => {
+                if *kind != RESERVATION_KIND {
+                    return Err(BindingRefusal::UnknownSubstrateEntity {
+                        what: "obligation kind",
+                    });
+                }
+                let slot = self.slot_of(*task)?;
+                let task = self.task_ordinal(slot)?;
+                self.ordinal_of(*region)?;
+                let ordinal = self.next_reservation;
+                self.next_reservation = self.next_reservation.saturating_add(1);
+                self.reservations
+                    .insert(*obligation, Held { ordinal, task });
+                self.op_reserved.push((ordinal, slot));
+                if self.observes_effect() {
+                    self.append_body(EventBody::Effect(EffectEvent::Reserved {
+                        reservation: ReservationOrdinal(ordinal),
+                        task,
+                    }));
+                }
+            }
+            (TraceEventKind::ObligationCommit, TraceData::Obligation { obligation, .. }) => {
+                let held = self.held(*obligation)?;
+                self.resolve(held.ordinal);
+                if self.observes_effect() {
+                    self.append_body(EventBody::Effect(EffectEvent::Committed {
+                        reservation: ReservationOrdinal(held.ordinal),
+                    }));
+                }
+            }
+            (
+                TraceEventKind::ObligationAbort,
+                TraceData::Obligation {
+                    obligation,
+                    abort_reason,
+                    ..
+                },
+            ) => {
+                let held = self.held(*obligation)?;
+                self.resolve(held.ordinal);
+                if self.observes_effect() {
+                    match abort_reason {
+                        // Buffered: journaled with the task's drain (journal_phases).
+                        Some(ObligationAbortReason::Cancel) => {
+                            self.pending_aborts
+                                .entry(held.task.0)
+                                .or_default()
+                                .insert(held.ordinal);
+                        }
+                        Some(ObligationAbortReason::Explicit) => {
+                            self.append_body(EventBody::Effect(EffectEvent::Aborted {
+                                reservation: ReservationOrdinal(held.ordinal),
+                                cause: AbortCause::Explicit,
+                            }));
+                        }
+                        Some(ObligationAbortReason::Error) | None => {
+                            return Err(BindingRefusal::ReservationDropped {
+                                reservation: held.ordinal,
+                            });
+                        }
+                    }
+                }
+            }
             (kind, _) => {
                 return Err(BindingRefusal::UninstrumentedEvent {
                     family: family_of(*kind),
@@ -1266,6 +1630,10 @@ impl Driver {
 
     /// Journal the acknowledgement and completion of each task a drain absorbs, by
     /// ascending task ordinal.
+    ///
+    /// With the reserve/commit/abort family observed, the reservations a task's
+    /// cancellation aborted come between its acknowledgement and its completion, by
+    /// ascending reservation ordinal: they are the cleanup of the `Cancelling` phase.
     fn journal_phases(&mut self, drained: &TaskSet) {
         for task in drained.as_slice() {
             let track = self.phases.remove(&task.0).unwrap_or_default();
@@ -1274,6 +1642,12 @@ impl Driver {
                     .append(EventBody::Cancellation(CancellationEvent::Acknowledged {
                         task: *task,
                     }));
+            }
+            for reservation in self.pending_aborts.remove(&task.0).unwrap_or_default() {
+                self.record.append(EventBody::Effect(EffectEvent::Aborted {
+                    reservation: ReservationOrdinal(reservation),
+                    cause: AbortCause::Cancel,
+                }));
             }
             if let Some(cause) = track.completed {
                 self.record
@@ -1294,6 +1668,9 @@ impl Driver {
         if let Some(task) = self.phases.keys().next() {
             return Err(BindingRefusal::CancellationUnfinished { task: *task });
         }
+        if let Some(task) = self.pending_aborts.keys().next() {
+            return Err(BindingRefusal::UndrainedCancellation { task: *task });
+        }
         let journal = self
             .record
             .into_journal()
@@ -1310,8 +1687,8 @@ const fn family_of(kind: TraceEventKind) -> Option<Family> {
     match kind {
         TraceEventKind::ObligationReserve
         | TraceEventKind::ObligationCommit
-        | TraceEventKind::ObligationAbort
-        | TraceEventKind::ObligationLeak => Some(Family::Obligation),
+        | TraceEventKind::ObligationAbort => Some(Family::Effect),
+        TraceEventKind::ObligationLeak => Some(Family::Obligation),
         TraceEventKind::TimeAdvance
         | TraceEventKind::TimerScheduled
         | TraceEventKind::TimerFired
