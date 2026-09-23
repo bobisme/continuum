@@ -2076,8 +2076,8 @@
         "line": 394,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "obligations"
+      "status": "satisfied",
+      "summary": "obligations (delivered: bn-6nm8 \u2014 crates/continuum-asupersync/src/family/obligation.rs and binding.rs: with BindingConfig observing the obligations family, bound tasks acquire asupersync 0.5.0 obligations of every kind through their own Cx and hand them across regions with ObligationToken::trytransfer. binding::run journals the substrate's ledger from its own trace \u2014 opened with kind, holder and region; discharged; transferred, read against the obligation record; leaked; and each region's settled balance after its finalize \u2014 in canonical order, and holds that ledger to the substrate's obligation records and its ObligationLeakOracle. The lift keeps the ledger beside continuumtask::region's own under the same linear rules, so a region that closes with an open or leaked obligation is a violation even where istotal holds. Evidence: tests/pr14impl04obligations.rs \u2014 byte-identical journals over 15,561 logs including sibling regions, a cross-region transfer and a leaking corpus, seed invariance over 7 seeds including 0, 1, 7, 99 and u64::MAX, a byte-equal differential against an independent scripted account, projection identities with all three other bound families, lift conformance, 8 mutation operators rejected, and typed refusals. Narrowing: the calculus's ledger cannot be opened from outside, so the substrate ledger is lifted beside it, not into it \u2014 bn-2318t; and several leaks in one completion are journaled in substrate trace order, which no corpus exercises \u2014 bn-iey9f)"
     },
     {
       "category": "pr-deliverable",
