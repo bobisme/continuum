@@ -35,7 +35,7 @@ REFUTED
 | C017 | Topological coverage improves bug yield | held-out mutant campaign | HYPOTHESIS |
 | C018 | Proof-carrying results materially shrink the TCB | independent checker audit and mutation | TARGET |
 | C019 | Production instrumentation overhead is acceptable | per-tier real workload benchmarks | TARGET |
-| C020 | Agent repairs do not weaken properties/assumptions silently | semantic diff and hidden-mutant evaluation | TARGET |
+| C020 | Agent repairs do not weaken properties/assumptions silently | semantic diff and hidden-mutant evaluation | OBSERVED |
 
 ## Documentation rule
 
@@ -109,3 +109,26 @@ encodings, native checker to Lean reflective checker, and adapter to conformance
 models. On them the refinement rules hold only because the crates are empty. When
 a scaffold side lands, the evidence record goes stale, `just boundaries` fails,
 and C023 needs new evidence for that arrow. This first happened when bn-ybq gave `continuum-model-core` real code. CIR to refinement and CML reference to optimized evaluator keep a scaffold side, and adapter to conformance models now has code on both sides but no cross-path test. That arrow is outside the observed scope until a test checks the adapter journal against a conformance model, and the record `arrows` entry A7 says so.
+
+C020 is observed on the intent classification and policy layer. That layer is
+the diff assembler `continuum_semantic_diff::artifact::assemble` and
+`PolicyTable::verdict` in `continuum-intent`, and it is the whole scope. Every
+repair must pass through it (INV-011). The repair layer itself is absent: RFC 0032
+repair transactions and Forge are not implemented, so no agent repair ran. The
+evidence is `crates/continuum-semantic-diff/tests/c020_hidden_mutant_evaluation.rs`
+(bn-bpz0). A seeded generator, written apart from the classifier, makes
+agent-style weakening edits over the three Intent Contracts that the T09 baseline
+pins. The edits cover the seven plan §5.3 dimensions. The disguises are rename,
+reorder, double negation, a vacuous conjunct, a prose rewrite, a self-unlock
+rider, mixed bound and observer movement, and two-field compounds. Under an
+all-`locked` policy on the agent path, 335 of 339 weakening mutants were flagged
+on their target field and closed to `block`. The other 4 did not decode. There
+were zero silent passes and zero misses. Sixteen held-out seeds with 2990
+weakening mutants gave zero misses. All 44 meaning-preserving controls classified
+`unchanged` and were allowed. The retained ledger is
+`crates/continuum-semantic-diff/tests/golden/c020_hidden_mutant_evidence.txt`. The
+property-diff and review-gate controls are the T09 evidence
+(`tools/governance/check_t09_evidence.py`). Under each contract's own policy, 12
+mutants are allowed by an owner verb: `fairness: unlocked` in Die Hard, and
+`no-downgrade` on an added accepted evidence class. The diff records each of them.
+C033, agent repair of concurrent Rust, stays TARGET.

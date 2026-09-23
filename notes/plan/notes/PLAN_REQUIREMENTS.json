@@ -5820,14 +5820,14 @@
       "coverage": "leaf",
       "id": "C020",
       "metadata": {
-        "initial_state": "TARGET",
+        "initial_state": "OBSERVED",
         "required_evidence": "semantic diff and hidden-mutant evaluation"
       },
       "source": {
         "line": 38,
         "path": "docs/18_CLAIMS_MATRIX.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Agent repairs do not weaken properties/assumptions silently"
     },
     {

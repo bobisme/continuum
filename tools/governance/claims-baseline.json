@@ -182,10 +182,10 @@
       "digest": "477b80d5162ea1c10b57c505ebd43d3847fea6a51a71c8f9ce2fcce0baa02062",
       "id": "C020",
       "revision": {
-        "bone": "bn-hakt3",
-        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+        "bone": "bn-bpz0",
+        "reason": "C020 promoted TARGET to OBSERVED on the intent classification and policy layer (assemble + PolicyTable::verdict) by a seeded hidden-mutant campaign, tests/c020_hidden_mutant_evaluation.rs; repair-transaction layer absent"
       },
-      "state": "TARGET"
+      "state": "OBSERVED"
     },
     {
       "digest": "9343c16db80b09807b0f2e38c06d1898ff1752f6e8d51d95abe9148c605fa01f",
