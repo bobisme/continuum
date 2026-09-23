@@ -1,0 +1,8 @@
+{
+  "description": "both CVNF-1 round-trip law tests exist, are #[test], are not #[ignore]d, and name their own law",
+  "expect": "clean",
+  "system": {
+    "kind": "round-trip-rust-binding",
+    "source": "#[test]\nfn positive_decoding_an_encoding_returns_the_value() {\n    let plan = Plan::new(\"decode(encode(v)) == v\", 0x2021_0221_0000_0001, CASES);\n    let drawn = check(&plan, &Values::small(), decodes_back).expect_held(&plan);\n}\n\n#[test]\nfn positive_re_encoding_a_decoded_value_reproduces_its_bytes() {\n    let plan = Plan::new(\"encode(decode(b)) == b\", 0x2021_0221_0000_0002, CASES);\n    check(&plan, &Values::small(), re_encodes_identically).expect_held(&plan);\n}\n"
+  }
+}

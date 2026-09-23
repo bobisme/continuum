@@ -40,9 +40,9 @@ Expected preservation:
 - splitting a deterministic action into stuttering substeps with a valid view; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
 - joining adjacent internal stutter steps; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
 - symmetry renaming; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
-- independent-event swap;
+- independent-event swap; (delivered: bn-1rt2 — tools/test-policy/evidence/s3_metamorphic_relations_07_10.json)
 - equivalent guard normalization;
-- serialization round trip;
+- serialization round trip; (delivered: bn-1rt2 — tools/test-policy/evidence/s3_metamorphic_relations_07_10.json)
 - snapshot restore versus root replay.
 
 Expected non-preservation tests deliberately alter observations, fairness, or effect phases.

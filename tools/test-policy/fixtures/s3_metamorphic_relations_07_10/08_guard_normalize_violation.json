@@ -1,0 +1,30 @@
+{
+  "description": "the transformed guard is missing one of the two nots normalize_guard wraps it in, so it is the guard's real negation, not an equivalent rewrite; the reachable state sets differ",
+  "requirement": "TEST-3-08",
+  "rule": "guard-normalize-preserved",
+  "system": {
+    "kind": "guard-normalize",
+    "base": {
+      "name": "guard-base",
+      "variables": [{"name": "x", "type": {"kind": "int", "min": 0, "max": 1}}],
+      "init": {"x": 0},
+      "obligations": [],
+      "transitions": [
+        {"name": "step", "process": "p0", "guard": {"op": "eq", "args": [{"var": "x"}, {"const": 0}]}, "updates": {"x": {"const": 1}}, "reads": ["x"], "writes": ["x"]}
+      ],
+      "independent": [],
+      "conflicts": []
+    },
+    "transformed": {
+      "name": "guard-base",
+      "variables": [{"name": "x", "type": {"kind": "int", "min": 0, "max": 1}}],
+      "init": {"x": 0},
+      "obligations": [],
+      "transitions": [
+        {"name": "step", "process": "p0", "guard": {"op": "not", "args": [{"op": "eq", "args": [{"var": "x"}, {"const": 0}]}]}, "updates": {"x": {"const": 1}}, "reads": ["x"], "writes": ["x"]}
+      ],
+      "independent": [],
+      "conflicts": []
+    }
+  }
+}

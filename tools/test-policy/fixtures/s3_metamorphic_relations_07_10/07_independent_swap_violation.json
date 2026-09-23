@@ -1,0 +1,21 @@
+{
+  "description": "a and b race for x under the same guard (eq x 0); firing a first disables b (FirstDisablesSecond) — the swap does not preserve the outcome",
+  "requirement": "TEST-3-07",
+  "rule": "independent-swap-preserved",
+  "system": {
+    "kind": "independent-swap",
+    "system": {
+      "name": "dep-race",
+      "variables": [{"name": "x", "type": {"kind": "int", "min": 0, "max": 2}}],
+      "init": {"x": 0},
+      "obligations": [],
+      "transitions": [
+        {"name": "a", "process": "p0", "guard": {"op": "eq", "args": [{"var": "x"}, {"const": 0}]}, "updates": {"x": {"const": 1}}, "reads": ["x"], "writes": ["x"]},
+        {"name": "b", "process": "p1", "guard": {"op": "eq", "args": [{"var": "x"}, {"const": 0}]}, "updates": {"x": {"const": 2}}, "reads": ["x"], "writes": ["x"]}
+      ],
+      "independent": [],
+      "conflicts": []
+    },
+    "pair": ["a", "b"]
+  }
+}

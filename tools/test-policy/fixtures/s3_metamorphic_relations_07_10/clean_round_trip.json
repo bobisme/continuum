@@ -1,0 +1,18 @@
+{
+  "description": "the system's own canonical encoding decodes back to it and re-encodes byte-identically",
+  "expect": "clean",
+  "system": {
+    "kind": "round-trip",
+    "system": {
+      "name": "guard-base",
+      "variables": [{"name": "x", "type": {"kind": "int", "min": 0, "max": 1}}],
+      "init": {"x": 0},
+      "obligations": [],
+      "transitions": [
+        {"name": "step", "process": "p0", "guard": {"op": "eq", "args": [{"var": "x"}, {"const": 0}]}, "updates": {"x": {"const": 1}}, "reads": ["x"], "writes": ["x"]}
+      ],
+      "independent": [],
+      "conflicts": []
+    }
+  }
+}

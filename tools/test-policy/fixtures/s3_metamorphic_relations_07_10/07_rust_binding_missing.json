@@ -1,0 +1,9 @@
+{
+  "description": "the dependent-pair kill test is #[ignore]d, not #[test], and no longer asserts the class count; the dependence-mutant kill test is entirely absent",
+  "requirement": "TEST-3-07",
+  "rule": "independent-swap-rust-binding-missing",
+  "system": {
+    "kind": "independent-swap-rust-binding",
+    "source": "#[test]\nfn an_independent_pair_has_two_interleavings_and_one_class() {\n    let counts = artifact.interleavings();\n    assert_eq!(\n        (counts.complete, counts.truncated, counts.classes),\n        (2, 0, 1)\n    );\n}\n\n#[ignore]\nfn a_dependent_pair_has_two_interleavings_and_two_classes() {\n    assert!(true, \"no longer checks the class count\");\n}\n"
+  }
+}

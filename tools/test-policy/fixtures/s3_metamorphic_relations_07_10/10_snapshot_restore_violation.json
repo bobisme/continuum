@@ -1,0 +1,23 @@
+{
+  "description": "the snapshot blob claims x=0 instead of the honest x=1 reached after t0; t1's guard (eq x 1) then does not hold on restore, so the suffix cannot continue",
+  "requirement": "TEST-3-10",
+  "rule": "snapshot-restore-matches-replay",
+  "system": {
+    "kind": "snapshot-restore",
+    "system": {
+      "name": "restore-base",
+      "variables": [{"name": "x", "type": {"kind": "int", "min": 0, "max": 2}}],
+      "init": {"x": 0},
+      "obligations": [],
+      "transitions": [
+        {"name": "t0", "process": "p0", "guard": {"op": "eq", "args": [{"var": "x"}, {"const": 0}]}, "updates": {"x": {"const": 1}}, "reads": ["x"], "writes": ["x"]},
+        {"name": "t1", "process": "p0", "guard": {"op": "eq", "args": [{"var": "x"}, {"const": 1}]}, "updates": {"x": {"const": 2}}, "reads": ["x"], "writes": ["x"]}
+      ],
+      "independent": [],
+      "conflicts": []
+    },
+    "trace": ["t0", "t1"],
+    "checkpoint": 1,
+    "blob": "{\"held\":[],\"values\":[0]}"
+  }
+}

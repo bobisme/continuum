@@ -1,0 +1,8 @@
+{
+  "description": "check_independence's (synthetic) source still names all three breach variants",
+  "expect": "clean",
+  "system": {
+    "kind": "independent-swap-drift",
+    "source": "fn check_independence(\n    system: &System,\n    graph: &Graph<'_>,\n    findings: &mut Vec<Finding>,\n) -> Result<BTreeSet<(usize, usize)>, Refusal> {\n    let breach = match (x, y) {\n        (None, _) => Some(Breach::FirstDisablesSecond),\n        (_, None) => Some(Breach::SecondDisablesFirst),\n        (Some(left), Some(right)) if left != right => Some(Breach::DiamondOpen),\n        _ => None,\n    };\n    Ok(dependent)\n}\n"
+  }
+}

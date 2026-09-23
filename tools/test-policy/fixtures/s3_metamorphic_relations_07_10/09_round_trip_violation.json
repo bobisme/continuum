@@ -1,0 +1,20 @@
+{
+  "description": "the blob is the system's canonical encoding with its final byte truncated; it does not decode at all",
+  "requirement": "TEST-3-09",
+  "rule": "serialization-round-trip-tsys",
+  "system": {
+    "kind": "round-trip",
+    "system": {
+      "name": "guard-base",
+      "variables": [{"name": "x", "type": {"kind": "int", "min": 0, "max": 1}}],
+      "init": {"x": 0},
+      "obligations": [],
+      "transitions": [
+        {"name": "step", "process": "p0", "guard": {"op": "eq", "args": [{"var": "x"}, {"const": 0}]}, "updates": {"x": {"const": 1}}, "reads": ["x"], "writes": ["x"]}
+      ],
+      "independent": [],
+      "conflicts": []
+    },
+    "blob": "{\"conflicts\":[],\"independent\":[],\"init\":{\"x\":0},\"name\":\"guard-base\",\"obligations\":[],\"transitions\":[{\"guard\":{\"args\":[{\"var\":\"x\"},{\"const\":0}],\"op\":\"eq\"},\"name\":\"step\",\"process\":\"p0\",\"reads\":[\"x\"],\"updates\":{\"x\":{\"const\":1}},\"writes\":[\"x\"]}],\"variables\":[{\"name\":\"x\",\"type\":{\"kind\":\"int\",\"max\":1,\"min\":0}}]"
+  }
+}

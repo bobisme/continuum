@@ -1,0 +1,8 @@
+{
+  "description": "all three semantic_oracle.rs kill tests exist, are #[test], are not #[ignore]d, and assert the cited tokens",
+  "expect": "clean",
+  "system": {
+    "kind": "independent-swap-rust-binding",
+    "source": "#[test]\nfn an_independent_pair_has_two_interleavings_and_one_class() {\n    let counts = artifact.interleavings();\n    assert_eq!(\n        (counts.complete, counts.truncated, counts.classes),\n        (2, 0, 1)\n    );\n}\n\n#[test]\nfn a_dependent_pair_has_two_interleavings_and_two_classes() {\n    let counts = artifact.interleavings();\n    assert_eq!(\n        (counts.complete, counts.truncated, counts.classes),\n        (2, 0, 2)\n    );\n}\n\n#[test]\nfn a_dependence_mutant_is_caught_by_the_diamond_not_only_the_footprint() {\n    assert!(artifact.findings().iter().any(|f| matches!(\n        f,\n        Finding::IndependenceViolated { first, second, .. } if first == \"p0_w0\" && second == \"p1_w0\"\n    )));\n}\n"
+  }
+}

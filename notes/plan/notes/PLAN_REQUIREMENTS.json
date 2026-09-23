@@ -9098,7 +9098,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "independent-event swap"
     },
     {
@@ -9120,7 +9120,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "serialization round trip"
     },
     {
