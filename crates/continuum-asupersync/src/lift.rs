@@ -69,6 +69,9 @@ pub enum Nonconformance {
     /// An obligation-ledger event breaks the ledger's linear rules, or a region closes
     /// unbalanced (PR-14-IMPL-04; the reasons are the family's own).
     Obligation(family::obligation::LedgerFault),
+    /// A virtual time event breaks the parallel clock and timer model (PR-14-IMPL-05;
+    /// the reasons are the family's own).
+    Time(family::time::TimeFault),
 }
 
 impl fmt::Display for Nonconformance {
@@ -98,6 +101,7 @@ impl fmt::Display for Nonconformance {
             Self::Cancellation(fault) => write!(f, "cancellation phases: {fault}"),
             Self::Effect(fault) => write!(f, "reserve/commit/abort: {fault}"),
             Self::Obligation(fault) => write!(f, "obligation ledger: {fault}"),
+            Self::Time(fault) => write!(f, "virtual time: {fault}"),
         }
     }
 }
@@ -127,7 +131,6 @@ pub struct LiftContext {
     pub(crate) effect: family::effect::LiftState,
     pub(crate) cancellation: family::cancellation::LiftState,
     pub(crate) obligation: family::obligation::LiftState,
-    #[allow(dead_code)] // filled by PR-14-IMPL-05
     pub(crate) time: family::time::LiftState,
     #[allow(dead_code)] // filled by PR-14-IMPL-06
     pub(crate) channel: family::channel::LiftState,
@@ -192,8 +195,8 @@ impl LiftVerdict {
 ///
 /// After the last event, the families that make a whole-journal claim check it, in
 /// family-tag order: the reserve/commit/abort family ([`family::effect`]), the
-/// cancellation family ([`family::cancellation`]) and the obligations family
-/// ([`family::obligation`]). A violation one finds is reported
+/// cancellation family ([`family::cancellation`]), the obligations family
+/// ([`family::obligation`]) and the virtual time family ([`family::time`]). A violation one finds is reported
 /// at the last event's sequence number.
 #[must_use]
 pub fn lift(journal: &Journal) -> LiftVerdict {
@@ -220,6 +223,7 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
     if let Err(stop) = family::effect::finish(&cx)
         .and_then(|()| family::cancellation::finish(&cx))
         .and_then(|()| family::obligation::finish(&cx))
+        .and_then(|()| family::time::finish(&cx))
     {
         let seq = journal.events().last().map_or(0, |event| event.seq());
         return match stop {

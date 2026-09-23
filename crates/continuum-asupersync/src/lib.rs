@@ -72,9 +72,17 @@
 //! - [`binding`] observes it from the substrate's trace and holds it to the substrate's
 //!   own obligation records and obligation-leak oracle.
 //!
+//! # What has landed (PR-14-IMPL-05, bn-3m1d)
+//!
+//! - [`family::time`] — the virtual time family: timers scheduled, fired and cancelled,
+//!   and the virtual clock's advances, from the lab's own clock and trace, lifted into a
+//!   parallel checked clock-and-timer model tied to the region calculus's tasks;
+//! - [`binding`] observes it with tied timers in canonical order, so neither the host
+//!   clock nor the lab seed reaches the journal.
+//!
 //! # What is not here
 //!
-//! The other two families' bindings: [`binding::substrate_binding`] answers each of
+//! The channel family's binding: [`binding::substrate_binding`] answers each of
 //! them with the typed absence [`binding::BindingAbsence::FamilyNotBound`].
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 

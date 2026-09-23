@@ -3,16 +3,15 @@
 //!
 //! # What is bound, and what is not
 //!
-//! The binding observes four families: [`Family::Lifecycle`] (PR-14-IMPL-01, bn-lf4i),
+//! The binding observes five families: [`Family::Lifecycle`] (PR-14-IMPL-01, bn-lf4i),
 //! [`Family::Effect`] (PR-14-IMPL-02, bn-gzy1), [`Family::Cancellation`] (PR-14-IMPL-03,
-//! bn-bx7i) and [`Family::Obligation`] (PR-14-IMPL-04, bn-6nm8). A run observes the
-//! families
+//! bn-bx7i), [`Family::Obligation`] (PR-14-IMPL-04, bn-6nm8) and [`Family::Time`]
+//! (PR-14-IMPL-05, bn-3m1d). A run observes the families
 //! [`BindingConfig::families`] names. Lifecycle is always among them, because the
 //! other families name tasks by the ordinals its spawn events allocate. The default is
 //! lifecycle alone, whose journal is the one bn-lf4i pinned, byte for byte.
 //!
-//! The other two families are still uninstrumented (their files under `src/family/`
-//! say so), and for them [`substrate_binding`] answers with the typed absence
+//! The channel family is still uninstrumented (its file under `src/family/` says so), and for them [`substrate_binding`] answers with the typed absence
 //! [`BindingAbsence::FamilyNotBound`], whose INV-008 reading is
 //! [`InconclusiveReason::Unsupported`]. A run that asks for one is refused with
 //! [`BindingRefusal::FamilyNotBound`]. A caller never gets an empty journal that looks
@@ -92,6 +91,25 @@
 //! After each effect operation the binding confirms from the trace that the substrate
 //! took the step it asked for ([`BindingRefusal::EffectUnobserved`] otherwise).
 //!
+//! # Virtual time
+//!
+//! Time reaches a bound run only as the lab's virtual clock (INV-005).
+//! [`SubstrateOp::Sleep`] makes a task sleep on its `Cx`'s virtual timer driver
+//! (`time::sleep_until`; a `Cx` without that driver is refused, because a `Sleep` would
+//! otherwise fall back to a wall-clock thread). [`SubstrateOp::Advance`] moves the clock
+//! with `LabRuntime::advance_time`, lets every due timer fire, and runs the woken tasks.
+//! When [`Family::Time`] is observed:
+//!
+//! | substrate observation | journal event |
+//! |---|---|
+//! | `TimerScheduled` trace event (written by the `Sleep` future) | [`TimeEvent::Scheduled`] |
+//! | `LabRuntime::now` before and after `advance_time` | [`TimeEvent::Advanced`] |
+//! | `TimerFired` trace event | [`TimeEvent::Fired`] |
+//! | `TimerCancelled` trace event (the sleeping task's cancellation dropped its timer) | [`TimeEvent::Cancelled`], placed canonically after the task's acknowledgement |
+//!
+//! A sleeping task is parked: `suspend` when its timer is armed, `resume` when it fires.
+//! An operation that commands a sleeping task is [`BindingRefusal::TaskAsleep`].
+//!
 //! # The obligation ledger
 //!
 //! [`SubstrateOp::Acquire`] reserves an obligation of any kind the substrate has, and
@@ -145,6 +163,13 @@
 //! controlled, so it must not reach the journal (INV-005). The binding therefore
 //! journals a canonical linearization of the substrate's partial order:
 //!
+//! - an advance's woken tasks are journaled one task at a time, by the deadline of the
+//!   timer that woke each, then its ordinal: each task's fire and steps in their own
+//!   order, the tasks canonically. A tie at one virtual instant is the common case, and
+//!   the substrate's scheduler polls tied tasks in an order its seed picks. Whatever
+//!   else the substrate traces during an advance has no canonical place, and is
+//!   [`BindingRefusal::UnorderedDuringAdvance`]. [`run_witnessed`] returns the
+//!   substrate's raw fire order as evidence;
 //! - consecutive `RegionCloseComplete` events (with the cancelled completions and
 //!   acknowledgements between them, which journal nothing by themselves) form one
 //!   batch, ended by the next event that journals anything or by the operation's end.
@@ -203,6 +228,7 @@ use asupersync::record::{
 };
 use asupersync::runtime::obligation_mailbox::ObligationToken;
 use asupersync::runtime::{JoinError, TaskHandle};
+use asupersync::time::{Sleep, sleep_until};
 use asupersync::trace::event::{TraceData, TraceEvent, TraceEventKind};
 use asupersync::{
     Budget, CancelKind, CancelReason, Cx, LabConfig, LabRuntime, ObligationId,
@@ -220,6 +246,7 @@ use crate::family::lifecycle::{
 use crate::family::obligation::{
     Discharge, ObligationEvent, ObligationKind, ObligationOrdinal, ObligationSet,
 };
+use crate::family::time::{TimeEvent, TimerOrdinal, VirtualInstant};
 use crate::family::{EventBody, Family};
 use crate::journal::Journal;
 use crate::source::RecordContext;
@@ -276,9 +303,11 @@ impl SubstrateBinding {
 #[must_use]
 pub const fn substrate_binding(family: Family) -> SubstrateBinding {
     match family {
-        Family::Lifecycle | Family::Effect | Family::Cancellation | Family::Obligation => {
-            SubstrateBinding::Bound
-        }
+        Family::Lifecycle
+        | Family::Effect
+        | Family::Cancellation
+        | Family::Obligation
+        | Family::Time => SubstrateBinding::Bound,
         other => SubstrateBinding::Absent(BindingAbsence::FamilyNotBound(other)),
     }
 }
@@ -367,6 +396,22 @@ pub enum SubstrateOp {
         /// Its kind.
         kind: ObligationKind,
     },
+    /// Wake `task` with a command to sleep `nanos` nanoseconds on its `Cx`'s virtual
+    /// timer driver (`time::sleep_until`). The task parks until an
+    /// [`SubstrateOp::Advance`] moves the clock past the deadline, or until its
+    /// cancellation drops the timer.
+    Sleep {
+        /// The task.
+        task: TaskLabel,
+        /// How long, in virtual nanoseconds. Zero is refused.
+        nanos: u64,
+    },
+    /// `LabRuntime::advance_time`: move the virtual clock forward `nanos` nanoseconds,
+    /// then let every timer that came due fire and its task run.
+    Advance {
+        /// How far, in virtual nanoseconds. Zero is refused.
+        nanos: u64,
+    },
     /// Wake the holding task with a command to hand `reservation` to `to`
     /// (`ObligationToken::try_transfer`, with `to`'s own `Cx`). A `Transaction` cannot
     /// be transferred: the region calculus has one staged publication per worker.
@@ -393,6 +438,8 @@ impl SubstrateOp {
             Self::Abort { .. } => "abort",
             Self::Acquire { .. } => "acquire",
             Self::Transfer { .. } => "transfer",
+            Self::Sleep { .. } => "sleep",
+            Self::Advance { .. } => "advance",
         }
     }
 }
@@ -593,6 +640,24 @@ pub enum BindingRefusal {
         /// What disagrees.
         detail: String,
     },
+    /// A sleep or an advance of zero nanoseconds: it would not move the clock or park
+    /// the task.
+    ZeroDuration {
+        /// The operation.
+        operation: &'static str,
+    },
+    /// An operation commands a task that is asleep on a timer. The command would wait
+    /// unseen until the timer fires.
+    TaskAsleep {
+        /// The task's journal ordinal.
+        task: u32,
+    },
+    /// During an advance, the substrate traced an event that is not a timer fire or a
+    /// woken task's step, so the batch has no canonical order.
+    UnorderedDuringAdvance {
+        /// The substrate's name for the event kind.
+        kind: String,
+    },
 }
 
 impl BindingRefusal {
@@ -608,6 +673,7 @@ impl BindingRefusal {
             Self::UninstrumentedEvent { .. }
             | Self::TaskPanicked { .. }
             | Self::FamilyNotBound(_)
+            | Self::UnorderedDuringAdvance { .. }
             | Self::UnmappedCancelReason { .. }
             | Self::ReservationDropped { .. } => Some(InconclusiveReason::Unsupported),
             Self::SubstrateProtocolViolation { .. } | Self::SubstrateLedgerDisagrees { .. } => {
@@ -635,7 +701,9 @@ impl BindingRefusal {
             | Self::UnboundReservation(_)
             | Self::ReservationLabelRebound(_)
             | Self::ReservationResolved(_)
-            | Self::EffectNotTransferable(_) => None,
+            | Self::EffectNotTransferable(_)
+            | Self::ZeroDuration { .. }
+            | Self::TaskAsleep { .. } => None,
         }
     }
 }
@@ -742,6 +810,19 @@ impl fmt::Display for BindingRefusal {
             Self::SubstrateLedgerDisagrees { detail } => {
                 write!(f, "the substrate's obligation ledger disagrees: {detail}")
             }
+            Self::ZeroDuration { operation } => {
+                write!(f, "{operation} of zero virtual nanoseconds")
+            }
+            Self::TaskAsleep { task } => {
+                write!(
+                    f,
+                    "task t{task} is asleep on a timer and cannot take a command"
+                )
+            }
+            Self::UnorderedDuringAdvance { kind } => write!(
+                f,
+                "the substrate traced {kind} during an advance, which has no canonical place"
+            ),
         }
     }
 }
@@ -776,6 +857,8 @@ enum Command {
     Abort(ReservationLabel),
     /// Hand the obligation to the task whose `Cx` and gate these are.
     Transfer(ReservationLabel, Box<Cx>, Gate),
+    /// Sleep this many nanoseconds on the `Cx`'s virtual timer driver.
+    Sleep(u64),
 }
 
 #[derive(Debug)]
@@ -890,6 +973,53 @@ const fn journal_kind(kind: SubstrateObligationKind) -> ObligationKind {
     }
 }
 
+/// One sleep on the task's virtual timer. It resolves to `true` when the timer fires,
+/// or to `false` when the substrate has requested cancellation (the ack mark written).
+///
+/// A sleeping task is parked: the first pending poll writes `suspend`, and the poll
+/// that sees the timer fire writes `resume`, after the `Sleep` future has traced the
+/// fire. A task that holds a reservation stays mid-effect and writes neither.
+struct SleepWait {
+    gate: Gate,
+    slot: usize,
+    sleep: Pin<Box<Sleep>>,
+}
+
+impl Future for SleepWait {
+    type Output = bool;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let cx = Cx::current();
+        if let Some(cx) = &cx
+            && cx.checkpoint().is_err()
+        {
+            cx.trace(&format!("{CANCEL_MARK} ack {}", self.slot));
+            return Poll::Ready(false);
+        }
+        let outcome = self.sleep.as_mut().poll(context).map(|()| true);
+        let mut state = lock(&self.gate);
+        let mark = match outcome {
+            Poll::Ready(_) if state.phase == GatePhase::Suspended => {
+                state.phase = GatePhase::Running;
+                Some("resume")
+            }
+            Poll::Pending if state.phase == GatePhase::Running && state.held == 0 => {
+                state.phase = GatePhase::Suspended;
+                Some("suspend")
+            }
+            _ => None,
+        };
+        if let Some(mark) = mark {
+            match &cx {
+                Some(cx) => cx.trace(&format!("{GATE_MARK} {mark} {}", self.slot)),
+                None => state.untraced = true,
+            }
+        }
+        drop(state);
+        outcome
+    }
+}
+
 async fn gated_body(gate: Gate, slot: usize) {
     // The task's own obligations, by program label. Ascending order makes the aborts a
     // cancellation issues deterministic within the task.
@@ -942,6 +1072,31 @@ async fn gated_body(gate: Gate, slot: usize) {
                 },
                 None => Some("no held reservation has this label".to_owned()),
             },
+            Some(Command::Sleep(nanos)) => {
+                match Cx::current().and_then(|cx| cx.timer_driver()) {
+                    // Without the runtime's virtual driver a `Sleep` would fall back to
+                    // a wall-clock thread (INV-005), so the gate refuses to sleep.
+                    None => Some("the task's Cx carries no virtual timer driver".to_owned()),
+                    Some(driver) => {
+                        let deadline = driver.now().saturating_add_nanos(nanos);
+                        let woke = SleepWait {
+                            gate: Arc::clone(&gate),
+                            slot,
+                            sleep: Box::pin(sleep_until(deadline)),
+                        }
+                        .await;
+                        if !woke {
+                            // Cancelled while asleep: the timer is gone, and the cleanup
+                            // is to abort every held obligation.
+                            for (_, token) in core::mem::take(&mut held) {
+                                token.abort(ObligationAbortReason::Cancel);
+                            }
+                            break;
+                        }
+                        None
+                    }
+                }
+            }
             // Returning with obligations held drops them: the substrate records a leak.
             Some(Command::Finish) => break,
             // Cancellation observed: the cleanup is to abort every held obligation.
@@ -1022,6 +1177,24 @@ struct Held {
     standing: Standing,
 }
 
+/// A timer the trace scheduled.
+#[derive(Debug, Clone, Copy)]
+struct TimerTrack {
+    ordinal: u32,
+    slot: usize,
+    task: TaskOrdinal,
+    deadline: u64,
+}
+
+/// What one advance's run produced, per woken task, before it is journaled in canonical
+/// order: by the fired timer's deadline, then its ordinal.
+#[derive(Debug, Default)]
+struct Advance {
+    per_task: BTreeMap<u32, Vec<EventBody>>,
+    keys: BTreeMap<u32, (u64, u32)>,
+    unordered: Option<String>,
+}
+
 struct Driver {
     lab: LabRuntime,
     config: BindingConfig,
@@ -1047,6 +1220,14 @@ struct Driver {
     pending_transfer: Option<(ObligationId, usize)>,
     pending_aborts: BTreeMap<u32, BTreeSet<u32>>,
     pending_discharges: BTreeMap<u32, BTreeSet<u32>>,
+    timers: BTreeMap<u64, TimerTrack>,
+    next_timer: u32,
+    sleeping: BTreeMap<usize, u32>,
+    sleep_slot: Option<usize>,
+    op_scheduled: Vec<(u32, usize)>,
+    advancing: Option<Advance>,
+    pending_timer_cancels: BTreeMap<u32, BTreeSet<(u32, u64)>>,
+    fire_order: Vec<TimerOrdinal>,
     close_order: Vec<RegionOrdinal>,
     phases: BTreeMap<u32, CancelTrack>,
     next_task: u32,
@@ -1096,6 +1277,14 @@ impl Driver {
             pending_transfer: None,
             pending_aborts: BTreeMap::new(),
             pending_discharges: BTreeMap::new(),
+            timers: BTreeMap::new(),
+            next_timer: 0,
+            sleeping: BTreeMap::new(),
+            sleep_slot: None,
+            op_scheduled: Vec::new(),
+            advancing: None,
+            pending_timer_cancels: BTreeMap::new(),
+            fire_order: Vec::new(),
             close_order: Vec::new(),
             phases: BTreeMap::new(),
             next_task: 0,
@@ -1133,6 +1322,13 @@ impl Driver {
     }
 
     fn append_body(&mut self, body: EventBody) {
+        if let Some(batch) = &mut self.advancing {
+            // Nothing but timer fires and woken tasks' steps belongs in an advance.
+            batch
+                .unordered
+                .get_or_insert_with(|| format!("{:?}", body.family()));
+            return;
+        }
         self.flush_closes();
         self.record.append(body);
     }
@@ -1143,6 +1339,62 @@ impl Driver {
 
     const fn observes_obligation(&self) -> bool {
         self.config.families.contains(Family::Obligation)
+    }
+
+    const fn observes_time(&self) -> bool {
+        self.config.families.contains(Family::Time)
+    }
+
+    /// Advance the virtual clock, let the due timers fire, and journal what the woken
+    /// tasks did in canonical order.
+    fn advance(&mut self, nanos: u64) -> Result<(), BindingRefusal> {
+        let from = self.lab.now().as_nanos();
+        self.lab.advance_time(nanos);
+        let to = self.lab.now().as_nanos();
+        if self.observes_time() {
+            self.append_body(EventBody::Time(TimeEvent::Advanced {
+                from: VirtualInstant(from),
+                to: VirtualInstant(to),
+            }));
+        }
+        self.advancing = Some(Advance::default());
+        if let Some(timers) = self.lab.state.timer_driver_handle() {
+            let _woken = timers.process_timers();
+        }
+        let result = self.run();
+        let batch = self.advancing.take().unwrap_or_default();
+        result?;
+        if let Some(kind) = batch.unordered {
+            return Err(BindingRefusal::UnorderedDuringAdvance { kind });
+        }
+        let mut order: Vec<(u64, u32, u32)> = Vec::new();
+        for task in batch.per_task.keys() {
+            let (deadline, timer) =
+                batch
+                    .keys
+                    .get(task)
+                    .copied()
+                    .ok_or(BindingRefusal::UnorderedDuringAdvance {
+                        kind: "a step of a task no timer woke".to_owned(),
+                    })?;
+            order.push((deadline, timer, *task));
+        }
+        order.sort_unstable();
+        let mut per_task = batch.per_task;
+        for (_, _, task) in order {
+            for body in per_task.remove(&task).unwrap_or_default() {
+                self.record.append(body);
+            }
+        }
+        Ok(())
+    }
+
+    /// Journal an event of a woken task: into the advance's batch when one is open.
+    fn append_task_event(&mut self, task: TaskOrdinal, body: EventBody) {
+        match &mut self.advancing {
+            Some(batch) => batch.per_task.entry(task.0).or_default().push(body),
+            None => self.append_body(body),
+        }
     }
 
     /// Send an effect command, then confirm from the trace that the substrate took the
@@ -1235,6 +1487,11 @@ impl Driver {
     }
 
     fn command_slot(&mut self, slot: usize, command: Command) -> Result<(), BindingRefusal> {
+        if self.sleeping.contains_key(&slot) {
+            return Err(BindingRefusal::TaskAsleep {
+                task: self.task_ordinal(slot)?.0,
+            });
+        }
         let waker = {
             let mut state = lock(&self.slots[slot].gate);
             state.commands.push_back(command);
@@ -1375,6 +1632,35 @@ impl Driver {
                 } else {
                     Err(BindingRefusal::EffectUnobserved { operation })
                 }
+            }
+            SubstrateOp::Sleep { task, nanos } => {
+                if *nanos == 0 {
+                    return Err(BindingRefusal::ZeroDuration { operation: "sleep" });
+                }
+                let slot = self.slot(*task)?;
+                self.op_scheduled.clear();
+                self.sleep_slot = Some(slot);
+                let result = self.command_slot(slot, Command::Sleep(*nanos));
+                self.sleep_slot = None;
+                result?;
+                if let Some(detail) = lock(&self.slots[slot].gate).refused.take() {
+                    return Err(BindingRefusal::SubstrateRefused {
+                        operation: "sleep",
+                        detail,
+                    });
+                }
+                match self.op_scheduled.as_slice() {
+                    [(_, holder)] if *holder == slot => Ok(()),
+                    _ => Err(BindingRefusal::EffectUnobserved { operation: "sleep" }),
+                }
+            }
+            SubstrateOp::Advance { nanos } => {
+                if *nanos == 0 {
+                    return Err(BindingRefusal::ZeroDuration {
+                        operation: "advance",
+                    });
+                }
+                self.advance(*nanos)
             }
             SubstrateOp::Transfer { reservation, to } => {
                 let (held, id) = self.bound(*reservation)?;
@@ -1671,7 +1957,10 @@ impl Driver {
                     .filter(|slot| *slot < self.slots.len())
                     .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "gate" })?;
                 let task = self.task_ordinal(slot)?;
-                self.append(LifecycleEvent::TaskStepped { task, step });
+                self.append_task_event(
+                    task,
+                    EventBody::Lifecycle(LifecycleEvent::TaskStepped { task, step }),
+                );
             }
             (TraceEventKind::Complete, TraceData::Task { task, region }) => {
                 let slot = self.slot_of(*task)?;
@@ -1738,6 +2027,72 @@ impl Driver {
                 }
             }
             (TraceEventKind::RegionCloseBegin, _) => {}
+            (
+                TraceEventKind::TimerScheduled,
+                TraceData::Timer {
+                    timer_id,
+                    deadline: Some(deadline),
+                },
+            ) => {
+                let slot = self
+                    .sleep_slot
+                    .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "timer" })?;
+                let task = self.task_ordinal(slot)?;
+                let ordinal = self.next_timer;
+                self.next_timer = self.next_timer.saturating_add(1);
+                self.timers.insert(
+                    *timer_id,
+                    TimerTrack {
+                        ordinal,
+                        slot,
+                        task,
+                        deadline: deadline.as_nanos(),
+                    },
+                );
+                self.sleeping.insert(slot, ordinal);
+                self.op_scheduled.push((ordinal, slot));
+                if self.observes_time() {
+                    self.append_body(EventBody::Time(TimeEvent::Scheduled {
+                        timer: TimerOrdinal(ordinal),
+                        task,
+                        at: VirtualInstant(event.time.as_nanos()),
+                        deadline: VirtualInstant(deadline.as_nanos()),
+                    }));
+                }
+            }
+            (TraceEventKind::TimerFired, TraceData::Timer { timer_id, .. }) => {
+                let track = self.timer(*timer_id)?;
+                self.sleeping.remove(&track.slot);
+                self.fire_order.push(TimerOrdinal(track.ordinal));
+                let Some(batch) = &mut self.advancing else {
+                    return Err(BindingRefusal::UnknownSubstrateEntity {
+                        what: "timer fire outside an advance",
+                    });
+                };
+                batch
+                    .keys
+                    .insert(track.task.0, (track.deadline, track.ordinal));
+                if self.observes_time() {
+                    self.append_task_event(
+                        track.task,
+                        EventBody::Time(TimeEvent::Fired {
+                            timer: TimerOrdinal(track.ordinal),
+                            at: VirtualInstant(event.time.as_nanos()),
+                        }),
+                    );
+                }
+            }
+            (TraceEventKind::TimerCancelled, TraceData::Timer { timer_id, .. }) => {
+                let track = self.timer(*timer_id)?;
+                self.sleeping.remove(&track.slot);
+                if self.observes_time() {
+                    // Buffered: journaled with the task's drain (journal_phases).
+                    self.pending_timer_cancels
+                        .entry(track.task.0)
+                        .or_default()
+                        .insert((track.ordinal, event.time.as_nanos()));
+                }
+            }
             (
                 TraceEventKind::ObligationReserve,
                 TraceData::Obligation {
@@ -1883,6 +2238,14 @@ impl Driver {
             }
         }
         Ok(())
+    }
+
+    /// The timer a traced timer id is, as the run scheduled it.
+    fn timer(&self, id: u64) -> Result<TimerTrack, BindingRefusal> {
+        self.timers
+            .get(&id)
+            .copied()
+            .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "timer" })
     }
 
     /// The runtime's handoff message. Its fields are the runtime's own serialization, so
@@ -2048,6 +2411,16 @@ impl Driver {
                         task: *task,
                     }));
             }
+            for (timer, at) in self
+                .pending_timer_cancels
+                .remove(&task.0)
+                .unwrap_or_default()
+            {
+                self.record.append(EventBody::Time(TimeEvent::Cancelled {
+                    timer: TimerOrdinal(timer),
+                    at: VirtualInstant(at),
+                }));
+            }
             for reservation in self.pending_aborts.remove(&task.0).unwrap_or_default() {
                 self.record.append(EventBody::Effect(EffectEvent::Aborted {
                     reservation: ReservationOrdinal(reservation),
@@ -2084,6 +2457,7 @@ impl Driver {
             .pending_aborts
             .keys()
             .chain(self.pending_discharges.keys())
+            .chain(self.pending_timer_cancels.keys())
             .min()
         {
             return Err(BindingRefusal::UndrainedCancellation { task: *task });
@@ -2098,6 +2472,7 @@ impl Driver {
         Ok(Witnessed {
             journal,
             substrate_close_order: self.close_order,
+            substrate_fire_order: self.fire_order,
         })
     }
 }
@@ -2139,8 +2514,8 @@ pub fn run(
     run_witnessed(programs, log, config).map(|witnessed| witnessed.journal)
 }
 
-/// A journal, with the one substrate order the binding canonicalizes, as the substrate
-/// produced it.
+/// A journal, with the substrate orders the binding canonicalizes, as the substrate
+/// produced them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Witnessed {
     /// The canonical journal, as [`run`] returns it.
@@ -2150,6 +2525,10 @@ pub struct Witnessed {
     /// order does not follow it. It is evidence about the substrate, never journal
     /// content.
     pub substrate_close_order: Vec<RegionOrdinal>,
+    /// The timers in the order the substrate traced `TimerFired` for them. The lab seed
+    /// can change this order for timers that come due in one advance; the journal
+    /// orders them by deadline, then ordinal.
+    pub substrate_fire_order: Vec<TimerOrdinal>,
 }
 
 /// As [`run`], and also return the substrate's own close order.

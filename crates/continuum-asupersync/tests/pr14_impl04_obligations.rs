@@ -556,6 +556,9 @@ impl Account {
                 });
                 self.park(entry.holder);
             }
+            SubstrateOp::Sleep { .. } | SubstrateOp::Advance { .. } => {
+                unreachable!("the ledger corpus does not sleep")
+            }
             SubstrateOp::Transfer { reservation, to } => {
                 let obligation = self.labels[reservation];
                 let source = self.obligations[obligation as usize].holder;
@@ -1197,9 +1200,9 @@ fn refusals_are_typed() {
 
     // A family the binding does not bind is refused before the substrate runs.
     let got = refusal(two().into_iter().map(|op| vec![op]).collect(), &{
-        config(SEED).observing(Family::Time)
+        config(SEED).observing(Family::Channel)
     });
-    assert_eq!(got, BindingRefusal::FamilyNotBound(Family::Time));
+    assert_eq!(got, BindingRefusal::FamilyNotBound(Family::Channel));
 
     // Bytes: an unknown kind tag and an unsorted balance set are refused, not guessed.
     let mut journal = Journal::new();

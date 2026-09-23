@@ -11,7 +11,7 @@
 //! | 2 | [`Family::Effect`] | `reserve-commit-abort` | PR-14-IMPL-02 (bn-gzy1) |
 //! | 3 | [`Family::Cancellation`] | `cancellation` | PR-14-IMPL-03 (bn-bx7i) |
 //! | 4 | [`Family::Obligation`] | `obligation` | PR-14-IMPL-04 (bn-6nm8) |
-//! | 5 | [`Family::Time`] | `virtual-time` | PR-14-IMPL-05 |
+//! | 5 | [`Family::Time`] | `virtual-time` | PR-14-IMPL-05 (bn-3m1d) |
 //! | 6 | [`Family::Channel`] | `channel` | PR-14-IMPL-06 |
 //!
 //! The tags are part of the canonical encoding and never move. A seventh family (for
@@ -164,7 +164,7 @@ pub enum EventBody {
     Cancellation(cancellation::CancellationEvent),
     /// An obligation-ledger event (PR-14-IMPL-04, bn-6nm8).
     Obligation(obligation::ObligationEvent),
-    /// A virtual-time event. Uninhabited until PR-14-IMPL-05.
+    /// A virtual-time event (PR-14-IMPL-05, bn-3m1d).
     Time(time::TimeEvent),
     /// A channel event. Uninhabited until PR-14-IMPL-06.
     Channel(channel::ChannelEvent),
@@ -248,7 +248,7 @@ pub enum Report {
     Cancellation(cancellation::CancellationReport),
     /// An obligation-ledger step (PR-14-IMPL-04, bn-6nm8).
     Obligation(obligation::ObligationReport),
-    /// Uninhabited until PR-14-IMPL-05.
+    /// A virtual-time step (PR-14-IMPL-05, bn-3m1d).
     Time(time::TimeReport),
     /// Uninhabited until PR-14-IMPL-06.
     Channel(channel::ChannelReport),
