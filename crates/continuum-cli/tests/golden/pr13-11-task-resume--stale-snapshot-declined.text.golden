@@ -1,6 +1,6 @@
 operation  task.resume
 depth  refused
-continuation  cont_04bb84561094e761bbfa0fa9b8e5506dc2936cfb836bc7624af7ab75ccf29cf3
+continuation  cont_8db8384b3d65609d4dd2adc6af3165f3ed4a04501d997d80bcf9420bb5c61bf8
 budget_states  64
 error.code  StaleSnapshot
 error.detail  the snapshot the continuation pinned is not the current sealed snapshot

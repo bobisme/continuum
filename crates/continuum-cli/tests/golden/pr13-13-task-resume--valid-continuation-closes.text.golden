@@ -1,9 +1,9 @@
 operation  task.resume
 depth  served
-continuation  cont_f7e97cc9796b7afa9c5baf3926bf6f95f80f86004edd2ed9ba87d15211bfb6ec
+continuation  cont_cf38adbe87150d45f6132916e319c2c8b76feb3fc5baf692b248c36393e1c9b0
 budget_states  64
 record  2
-record.task  task_3a30538b7e46df954e70356ac9c5085d72cfe3c73fcee7a49f96914fd469bebd
+record.task  task_506bfbd84b9d72b824c8f7d4834abe0418aab937d4f960f3169fd339494f8cb2
 record.status  completed
 omissions  1
 omissions[0].reason  unsupported

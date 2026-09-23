@@ -1,0 +1,20 @@
+(model TowerOfHanoi
+  (var towers Seq[Seq[Nat]])
+  (init
+    (eq (state towers) (seq Seq[Seq[Nat]] (seq Seq[Nat] 1 2 3) (seq Seq[Nat]) (seq Seq[Nat])))
+  )
+  (action Move ((from Nat) (to Nat))
+    (require (in (param from) (range 0 2)))
+    (require (in (param to) (range 0 2)))
+    (require (ne (param from) (param to)))
+    (require (ne (index (state towers) (param from)) (seq Seq[Nat])))
+    (require (or (eq (index (state towers) (param to)) (seq Seq[Nat])) (lt (seq.head (index (state towers) (param from))) (seq.head (index (state towers) (param to))))))
+    (next towers (update (update (state towers) (param from) (seq.tail (index (state towers) (param from)))) (param to) (seq.prepend (index (state towers) (param to)) (seq.head (index (state towers) (param from))))))
+  )
+  (invariant NotSolved
+    (ne (index (state towers) 2) (seq Seq[Nat] 1 2 3))
+  )
+  (invariant Sorted
+    (forall ((t Int (range 0 2))) (forall ((i Int (range 0 2))) (implies (lt (add (bound i) 1) (seq.len (index (state towers) (bound t)))) (lt (index (index (state towers) (bound t)) (bound i)) (index (index (state towers) (bound t)) (add (bound i) 1))))))
+  )
+)

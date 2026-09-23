@@ -1,4 +1,4 @@
-// Revision-2 CML design fixture. This syntax is normative intent, not yet parsed.
+// Revision-2 CML fixture. Parsed and elaborated by `continuum-cml-elab` (PR 15a).
 model DieHard {
   state {
     big: Nat where big <= 5

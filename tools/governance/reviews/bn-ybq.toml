@@ -1,0 +1,68 @@
+[change]
+bone = "bn-ybq"
+author = "continuum-dev"
+summary = "continuum-cml-elab: CML name resolution, typing, and elaboration to the normalized semantic AST, lowered to the programmatic Model; the programmatic model moves from continuum-engine-reference into continuum-model-core and gains Model::identity"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+  "crates/continuum-model-core/src/",
+  "crates/continuum-engine-reference/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/fixtures.rs::die_hard_elaborates_and_lowers",
+  "crates/continuum-cml-elab/tests/fixtures.rs::replicated_register_elaborates_and_refuses_to_lower_with_a_reason",
+  "crates/continuum-cml-elab/tests/errors.rs::a_domainless_binder_needs_its_type_determined",
+  "crates/continuum-cml-elab/tests/errors.rs::lowering_refuses_with_typed_reasons",
+  "crates/continuum-model-core/src/identity.rs::outcome_order_is_not_part_of_identity",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_long_def_chain_elaborates_in_a_small_stack",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_long_alias_chain_resolves_in_a_small_stack",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::inlined_depth_is_bounded_near_and_over_the_limit",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_wide_init_is_refused_within_a_memory_limit",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_strict_bound_past_i64_max_is_an_empty_refinement",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_strict_bound_past_i64_min_is_an_empty_refinement",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::wrapper_alias_depth_is_bounded_near_and_over_the_limit",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_long_wrapper_alias_chain_is_refused_within_limits",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::an_inferred_type_chain_is_refused_within_limits",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::def_substitution_is_charged_before_it_is_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::equivalence_lowering_is_charged_before_each_copy",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_deep_equivalence_nest_is_refused_by_depth",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_flat_init_clause_list_lowers_or_refuses_within_limits",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_flat_guard_clause_list_lowers_or_refuses_within_limits",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_flat_invariant_clause_list_lowers_or_refuses_within_limits",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_conjunction_over_the_depth_bound_is_refused_before_it_is_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::binder_name_checks_grow_linearly",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::record_field_checks_grow_linearly",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_hundred_thousand_binders_elaborate_within_limits",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::wide_domain_times_wide_predicate_is_refused_before_enumeration",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_work_boundary_is_exact",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/metamorphic.rs::alpha_renaming_preserves_identity", relation = "alpha-renaming" },
+  { test = "crates/continuum-cml-elab/tests/metamorphic.rs::stable_reordering_of_declarations_preserves_identity", relation = "stable reordering of declarations" },
+  { test = "crates/continuum-cml-elab/tests/metamorphic.rs::set_insertion_order_preserves_identity", relation = "set/map insertion order" },
+  { test = "crates/continuum-cml-elab/tests/metamorphic.rs::set_insertion_order_of_bound_variables_preserves_identity", relation = "set/map insertion order" },
+  { test = "crates/continuum-cml-elab/tests/metamorphic.rs::equivalent_guard_normalization_preserves_identity", relation = "equivalent guard normalization" },
+  { test = "crates/continuum-cml-elab/tests/metamorphic.rs::serialization_round_trip_preserves_identity", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/diehard_differential.rs::the_reference_engine_gives_identical_answers_for_both_front_ends", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/diehard_differential.rs::the_elaborated_and_programmatic_models_have_one_identity", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "CML elaboration is the native front end corpus ports are written in (C021) and the language whose expressiveness C022 claims; this change adds evidence toward both (Die Hard elaborates to the programmatic model) and promotes neither: both stay TARGET, and recursive defs and relational actions are still typed unsupported"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the normalized AST dump and Model::identity are in-process values with no wire schema yet; the moved model modules keep their types, and continuum-engine-reference re-exports them under the same paths"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-engine-reference re-exports continuum-model-core's model, expr, domain, and ident modules under their PR 8 paths, so every caller of continuum_engine_reference::model and its siblings compiles and behaves unchanged; continuum-cml-elab and Model::identity are new surface with no prior artifact to migrate"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-8zf003"
+verdict = "approved"

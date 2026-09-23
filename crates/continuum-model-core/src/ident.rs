@@ -1,5 +1,8 @@
 //! Canonical names for variables, actions, and predicates.
 //!
+//! Decision: RFC 0005 (the certificate wire form, whose token grammar and byte order this
+//! type mirrors) and RFC 0003 (model names).
+//!
 //! # Why a newtype, and why *this* order
 //!
 //! A model's variable positions, its action indices, and the order of its state

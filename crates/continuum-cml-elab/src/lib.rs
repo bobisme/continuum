@@ -10,13 +10,144 @@
 //! and the migration tool (PR 15b) are defined over this crate's output, not over the
 //! token stream.
 //!
+//! # What this crate delivers
+//!
+//! Decision: RFC 0003 (the model language) and ADR-0025 (the Finite fragment).
+//!
+//! - [`elaborate`] resolves names, infers and checks types, and produces a
+//!   [`NormModel`] ([`norm`]) — or exactly one typed, source-located [`ElabError`]. A
+//!   well-formed model that uses semantics outside the Finite core fragment is
+//!   [`ElabErrorKind::Unsupported`], never approximated.
+//! - [`NormModel::identity`] is content-addressed from the normalized AST, not from the
+//!   source text: header style, `=` versus `==`, declaration order, `let` and `def`
+//!   names, bound-variable names, and set-literal order do not change it.
+//! - [`lower()`] turns a normalized model into a [`continuum_model_core::Model`] through
+//!   [`continuum_model_core::ModelBuilder`] — the programmatic API itself. There is one
+//!   model type, so "the same model" is [`continuum_model_core::Model::identity`]
+//!   equality between an elaborated and a hand-built model. What the programmatic model
+//!   cannot carry is a typed [`lower::Unlowerable`] reason.
+//! - Every output is deterministic: a pure function of the parsed tree, with no
+//!   hash-ordered collection (INV-005).
+//!
+//! The decisions the parser left open (binders without a domain, the two header
+//! styles, `=` and `==`, `def`) are recorded in the [`elab`] and [`norm`] module
+//! documentation.
+//!
+//! # Every allocation proportional to input is pre-charged
+//!
+//! Source is untrusted (INV-016). Security reviews cr-35xovl and cr-8zf003 found
+//! allocations checked only after they happened, trees deep enough to overflow the
+//! stack, and loops whose work was quadratic in the input. The rule since then has
+//! three budgets, all in [`budget`], each one per elaboration and again per lowering:
+//!
+//! - **size**: an output budget ([`budget::MAX_NODES`] nodes). Every site that can
+//!   allocate more than a constant times what was already charged first computes the
+//!   exact size of what it will build, *without building it*, charges it, and then
+//!   allocates. A node costs one, plus the text it owns (`budget::text_cost`), plus the
+//!   structural size of its type and its binders' types.
+//! - **depth**: every tree kind is refused *before* it would pass its depth bound, so
+//!   no pass recurses, and no `Drop` recurses, deeper than the bound.
+//! - **work**: a fuel budget ([`budget::MAX_WORK`] units). A unit is one step of a
+//!   lookup, unification, traversal, comparison, or evaluation; a lookup in an ordered
+//!   table charges the logarithm of the table size. Predictable work is charged before
+//!   it starts; other work is charged as it runs and checked at least once per
+//!   operation, and a single operation's work is bounded by the output budget.
+//!
+//! Over a budget is a typed error: [`ElabErrorKind::TooLarge`] and
+//! [`ElabErrorKind::WorkLimitExceeded`] in elaboration; [`Unlowerable::OutputTooLarge`],
+//! [`Unlowerable::ExpressionTooDeep`], and [`Unlowerable::WorkLimitExceeded`] in
+//! lowering. [`elaborate_with`] and [`lower_with`] take explicit [`Limits`] and report
+//! the [`Usage`] spent, which is how `tests/resource_bounds.rs` counts operations
+//! instead of timing them.
+//!
+//! The inventory below lists every loop, recursion, and amplifying allocation in `elab`,
+//! `types`, `lower`, and `norm` whose cost is not a constant per source token.
+//!
+//! | Site | Size | Depth | Work |
+//! |---|---|---|---|
+//! | `elab::expr` and its per-form helpers (one call per syntax node) | each node charged in `node` before construction: one, its text, its type | syntax nesting ≤ the parser's `MAX_NESTING`; node types ≤ [`budget::MAX_TYPE_DEPTH`], checked before storage | constant per node, plus the charged lookups below |
+//! | `Scope` (params, `let`s, binders): push, lookup, freshness | entries are source names | flat | an ordered index, not a scan: `lookup_cost` per lookup and per freshness check (`check_fresh`, `name`) |
+//! | global name table (`declare`, `look`, `state_type`, type names, calls, `step`, choices, fairness) | declarations | flat | `lookup_cost` per lookup |
+//! | record literals and record types: field uniqueness | fields | flat | an ordered set, not a scan; `sort_cost` charged for the check and the field sort |
+//! | copying a `let` value at each use | measured once at the `let` (work: its size); each use charged before the clone | ≤ [`elab::MAX_INLINE_DEPTH`], checked before the clone | the copy's size |
+//! | substituting a `def` call | `measure_with` computes the substituted size (a parameter used `k` times counts its argument `k` times); charged before `substitute` | same computation; ≤ [`elab::MAX_INLINE_DEPTH`], checked before `substitute` | argument measures, plus the body twice with one parameter-table lookup per node (a map, not a scan) |
+//! | alias and def dependency orders (`dependency_order`) | edge lists from the source | explicit stack, no recursion | `order_cost`: one table lookup per edge, charged before the search |
+//! | alias resolution (`alias`, `alias_visiting`) | see the next row | dependencies are resolved first, so `alias_visiting` holds at most the one alias being resolved | constant per alias |
+//! | resolving a type expression, cloning an alias | computed from the syntax and cached alias measures; charged before building; the alias cache's copy charged too | ≤ [`budget::MAX_TYPE_DEPTH`], checked before building | twice the type's size |
+//! | `action`: the post-state list | one entry per state variable per action, charged as output with its text | flat | one table lookup per statement and per state variable |
+//! | clause lists (`require`, init, invariant): `conjuncts` | flat vectors | flat | linear |
+//! | `mentions_prime`, `primed_update`, `expr_calls`, `type_refs` | none | the parser's nesting bound | linear: each syntax node visited once |
+//! | `finish` (one call per node) | inferred types: `Unifier::measure_resolved` (iterative, memoized over the solution DAG) charged before `resolve` | resolved depth ≤ [`budget::MAX_TYPE_DEPTH`], checked before `resolve` | one unit per node, plus the unifier's counted steps |
+//! | set and map literal sort keys (`sort_keys`, `norm::keys_in_scope`) | each element's measure charged before its key text is built | flat | key rendering (its size) plus `sort_cost` for the sort; the binder scope is borrowed with its index (`norm::BinderScope`), never copied or rebuilt |
+//! | the finishing binder scope (`BinderScope`) | binder numbers | flat | `lookup_cost` per binder entered |
+//! | declaration lists sorted by name (state, actions, choices, invariants, fairness, behaviors, …) | none | flat | `sort_cost` before each sort |
+//! | `types::Unifier::unify` | a stored solution's structural size charged before storage | no recursion; solutions ≤ [`budget::MAX_TYPE_DEPTH`] deep | a work list; each pair counts the size of its two heads; union-find merging and path compression (`compress`) settle shared pairs and chains once; steps collected as fuel after every unification and every node |
+//! | `types::Unifier::occurs`, `last_var`, `head` | none | iterative; `occurs` stops at [`budget::MAX_TYPE_DEPTH`] | one step per node or chain link, counted |
+//! | `types::Unifier::describe` (diagnostics) | a few hundred bytes | a few levels | bounded |
+//! | `head_type` (method, index, field typing) | a transient copy of one stored, charged structure | that structure's checked depth | its size |
+//! | `lower`: every lowered node (`node`) | charged before construction, with variable-name text | ≤ `continuum_model_core`'s `MAX_EXPR_DEPTH` (the depth the builder and evaluator admit, counted their way), checked before construction | one unit, plus a scan of the declared variables when the node names one (the builder's check does that scan) |
+//! | `lower`: `<=>`, Boolean `==`/`!=`, Boolean `if`, `in a..b` with non-constant bounds (`copy`) | the second copy of an operand charged before the clone | a copy keeps its checked depth; the node over it is checked | the copy's size |
+//! | `lower`: clause lists (`conjoin`) | the `&&` nodes charged before any is built | a balanced tree, `⌈log₂ n⌉` levels over the deepest clause, checked before any node is built | one unit per clause |
+//! | `lower`: `shallow` (pre-recursion depth check) | none | iterative | the clause's size |
+//! | `lower`: refinements (`domain_of`, `constant`) | none | normalized-tree depth | the refinement's size, twice |
+//! | `lower`: behaviors (`standard_behavior`) | none | flat | the covering choices computed once (linear in the choices); one lookup per behavior |
+//! | `lower`: init enumeration | bindings counted before each state is added ([`crate::lower::MAX_INIT_BINDINGS`]) | flat vectors | `lower::init_work` (candidates × (predicate size × (variables + 1) + 2 × variables + 1)) charged *before* enumerating; candidates ≤ [`crate::lower::MAX_INIT_ENUMERATION`]; per accepted state, its copy, placement, and sort in the builder charged before the copy |
+//! | `lower`: `ModelBuilder::build` | what was charged above | bounded above | `sort_cost` for the variable, action, and predicate sorts; its validation scans charged per variable-naming node |
+//! | `norm`: dump, identity, `scoped_key` | output text proportional to a tree whose every node, text, and type was charged | trees bounded above | linear, with bound-variable depths from `BinderScope`'s index; these are not called during elaboration except through `sort_keys` |
+//!
+//! Everything not listed is a constant amount of work per source token or per charged
+//! node: allocations linear in the source text (declaration tables, names copied once
+//! from the parse tree), bounded by the parser's `MAX_SOURCE_BYTES`. Recursion depths are
+//! in the [`elab`] module documentation. No error path drops a deep structure: every
+//! tree a pass builds is refused *before* it would exceed its depth bound, so derived
+//! `Drop`, `Clone`, and equality recurse only over bounded depth. The bounds apply to
+//! trees this crate builds; a [`NormModel`] assembled by hand is outside them. Parsing
+//! itself belongs to `continuum-cml-syntax`.
+//!
 //! # Dependency-boundary contract
 //!
 //! - Depends on `continuum-cml-syntax` — the one workspace edge PR 15a states outright
-//!   ("parser and elaborator").
+//!   ("parser and elaborator") — and on `continuum-model-core`, the model the
+//!   elaborator lowers to.
 //! - A front end, not an authority: it may not own semantic state, publish evidence, or
-//!   import engines, adapters, or Forge.
+//!   import engines, adapters, or Forge. The reference engine appears only as a
+//!   dev-dependency, for the differential test.
 //!
-//! PR-1 / IMPL-01 scaffold: this crate declares its responsibility and its dependency
-//! boundary. The types and behavior land in the PR named above.
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
+
+#![forbid(unsafe_code)]
+
+pub mod budget;
+pub mod elab;
+pub mod error;
+pub mod lower;
+pub mod norm;
+pub mod types;
+
+pub use budget::{Limits, Usage};
+pub use elab::{elaborate, elaborate_with};
+pub use error::{ElabError, ElabErrorKind, Unsupported};
+pub use lower::{LowerError, LowerErrorKind, Unlowerable, lower, lower_with};
+pub use norm::{NormIdentity, NormModel};
+pub use types::Type;
+
+/// Parse and elaborate a `.ctm` source.
+///
+/// # Errors
+///
+/// A parse error (as [`ElabErrorKind::Parse`]) or an elaboration error.
+pub fn elaborate_source(src: &str) -> Result<NormModel, ElabError> {
+    elaborate_source_with(src, Limits::default()).0
+}
+
+/// [`elaborate_source`] under explicit resource limits, reporting what elaboration
+/// spent. A parse error reports zero usage.
+pub fn elaborate_source_with(src: &str, limits: Limits) -> (Result<NormModel, ElabError>, Usage) {
+    match continuum_cml_syntax::parse(src) {
+        Ok(file) => elaborate_with(&file, limits),
+        Err(e) => (
+            Err(ElabError::new(ElabErrorKind::Parse(e.clone()), e.span)),
+            Usage::default(),
+        ),
+    }
+}

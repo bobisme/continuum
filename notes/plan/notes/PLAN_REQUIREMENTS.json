@@ -2206,8 +2206,8 @@
         "line": 418,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "the Finite fragment only"
+      "status": "satisfied",
+      "summary": "the Finite fragment only (delivered: bn-1sf, bn-ybq \u2014 the parser refuses out-of-fragment syntax and the elaborator refuses out-of-fragment semantics, each as a typed unsupported error)"
     },
     {
       "category": "pr-deliverable",
@@ -2230,8 +2230,8 @@
         "line": 418,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "the programmatic model API remains supported \u2014 CML is a second front end, not a replacement."
+      "status": "satisfied",
+      "summary": "the programmatic model API remains supported \u2014 CML is a second front end, not a replacement (delivered: bn-ybq \u2014 the programmatic model moved into continuum-model-core; the elaborator lowers through ModelBuilder to the same Model type, and the elaborated TV-009 Die Hard model equals the programmatic one, identity included)."
     },
     {
       "category": "pr-exit",

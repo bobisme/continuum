@@ -1,6 +1,9 @@
 //! Declared state domains: a named variable and the inclusive integer range it
 //! ranges over.
 //!
+//! Decision: RFC 0005 (the finite-closure certificate wire form, whose `variable := name lo hi`
+//! this type mirrors) and RFC 0003 (model state domains).
+//!
 //! # Why inclusive `i64` ranges and nothing else
 //!
 //! > `domain       := variable_count:u16 variable*`

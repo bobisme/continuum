@@ -1,6 +1,6 @@
 operation  verification.result
 depth  served
-task  task_8d2e30132cac104d66079aa7db780930e2c1090efaa53ee73b80d49e85691560
+task  task_eb0b39ff2eb500631efa4f06301a5e9dc3bed1220f8e3299b100de9a8eccbcce
 status  ok
 continuation  none
 verdict.kind  semantic
@@ -47,7 +47,7 @@ assurance.unknowns.kind  produced
 assurance.unknowns.engine  continuum-engine-reference
 assurance.unknowns.summary  none
 assurance.unknowns.reason  none
-result.task  task_8d2e30132cac104d66079aa7db780930e2c1090efaa53ee73b80d49e85691560
+result.task  task_eb0b39ff2eb500631efa4f06301a5e9dc3bed1220f8e3299b100de9a8eccbcce
 result.target.kind  all_claims
 result.target.id  DieHard
 result.fragments  1

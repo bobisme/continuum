@@ -1,6 +1,6 @@
 operation  verification.start
 depth  served
-snapshot  ws_3bb5468fea316619b5f223c42bb17e6c32c6e7cd1688d9a889a6750efc1990c2
+snapshot  ws_1765c66f54bb91d058881e34ed7568ea9872e2a609a19754d1371dd38a1606f8
 target_kind  all_claims
 target_id  DieHard
 portfolio  interactive
@@ -8,8 +8,8 @@ priority_class  none
 budget_states  4
 answer_shape  task-shaped
 status  task_suspended
-task  task_578cfc118311a41524a01c2a508fdc036800b70587bcb87af235539cdaf06df3
-continuation  cont_04bb84561094e761bbfa0fa9b8e5506dc2936cfb836bc7624af7ab75ccf29cf3
+task  task_b023798eb109d9a168a9ff852d956ec536f2933b2b9af8c79a6db85b9d91a8ff
+continuation  cont_8db8384b3d65609d4dd2adc6af3165f3ed4a04501d997d80bcf9420bb5c61bf8
 result.task  none
 result.target.kind  none
 result.target.id  none

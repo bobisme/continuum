@@ -3,11 +3,12 @@
 //! # Provenance
 //!
 //! A line-for-line transcription of
-//! `notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm`, whose header records
-//! that its syntax is "normative intent, not yet parsed" (`DieHard.ctm:1`). Until the
-//! CML front end exists, this module *is* the port: the corpus file states the model
-//! and this file states the same model in the only vocabulary that can currently be
-//! evaluated.
+//! `notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm`, written before the CML
+//! front end existed. It is kept as the programmatic peer of that file: PR 15a makes CML
+//! "a second front end, not a replacement", and `continuum-cml-elab` elaborates the corpus
+//! file to a model whose `Model::identity` equals this one's
+//! (`crates/continuum-cml-elab/tests/diehard_differential.rs`, bn-ybq). The two front
+//! ends are held to one model by that test, not by this table.
 //!
 //! | Corpus line | Here |
 //! |---|---|

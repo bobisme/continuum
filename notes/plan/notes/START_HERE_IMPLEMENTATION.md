@@ -419,9 +419,9 @@ Implement only the profiles needed for replicated register:
 
 Implement `continuum-cml-syntax` and `continuum-cml-elab`:
 
-- the Finite fragment only;
+- the Finite fragment only (delivered: bn-1sf, bn-ybq — the parser refuses out-of-fragment syntax and the elaborator refuses out-of-fragment semantics, each as a typed unsupported error);
 - enough surface for the replicated register and the Wave 0 corpus ports;
-- the programmatic model API remains supported — CML is a second front end, not a replacement.
+- the programmatic model API remains supported — CML is a second front end, not a replacement (delivered: bn-ybq — the programmatic model moved into continuum-model-core; the elaborator lowers through ModelBuilder to the same Model type, and the elaborated TV-009 Die Hard model equals the programmatic one, identity included).
 
 **Exit:** the replicated-register model written in CML elaborates to the same semantic model identity as its programmatic equivalent.
 

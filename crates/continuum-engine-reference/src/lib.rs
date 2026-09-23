@@ -15,15 +15,17 @@
 //! - **No `continuum-certificate` or `continuum-kernel-*` crate may depend on this
 //!   crate** — experimental engines cannot enter the kernel dependency closure (docs/01
 //!   §13).
-//! - This crate depends on nothing: no external crate and no workspace crate. Plan §20
-//!   states dependency *rules*, not an allowlist, and the workspace manifest's standing
-//!   instruction is that "a missing edge is cheap to add later; a wrong edge is
-//!   architectural debt" (`Cargo.toml:9-11`). `continuum-value` was the one serious
-//!   candidate and was declined for a specific, recorded reason — see [`ident`]: its
-//!   canonical name order is shortlex, while the certificate wire form this engine must
-//!   satisfy orders names by bytes. An *external* crate would additionally need an entry
-//!   in `tools/governance/dependency-rationale.toml`, the way `continuum-value`'s
-//!   vendored `blake3` hasher is recorded there.
+//! - One workspace dependency, `continuum-model-core`, and no external crate. The
+//!   programmatic model ([`model`], [`ident`], [`domain`], [`expr`]) was written here
+//!   for PR 8 and moved into the model core by bn-ybq (PR 15a), so that the CML
+//!   elaborator can build the *same* model type without importing an engine. This
+//!   crate re-exports the four modules under their old paths, so `crate::model::Model`
+//!   and `continuum_engine_reference::model::Model` name the model core's type.
+//!   Search consumes the model core; the model core imports nothing (plan §20).
+//!   `continuum-value` was the one serious candidate for a further edge and was
+//!   declined for a specific, recorded reason — see [`ident`]: its canonical name
+//!   order is shortlex, while the certificate wire form this engine must satisfy
+//!   orders names by bytes.
 //!
 //! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 //!
@@ -112,12 +114,11 @@ pub mod bfs;
 pub mod certificate;
 pub mod checking;
 pub mod diehard;
-pub mod domain;
-pub mod expr;
-pub mod ident;
-pub mod model;
 pub mod semantic;
 pub mod witness;
+
+// The programmatic model, re-exported from the model core under the paths PR 8 gave it.
+pub use continuum_model_core::{domain, expr, ident, model};
 
 pub use bfs::{
     Bound, Bounds, Discovery, Exploration, ExplorationError, Partial, Reachable, explore,

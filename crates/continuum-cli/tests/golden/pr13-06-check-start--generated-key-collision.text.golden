@@ -1,6 +1,6 @@
 operation  verification.start
 depth  refused
-snapshot  ws_3bb5468fea316619b5f223c42bb17e6c32c6e7cd1688d9a889a6750efc1990c2
+snapshot  ws_1765c66f54bb91d058881e34ed7568ea9872e2a609a19754d1371dd38a1606f8
 target_kind  all_claims
 target_id  DieHard
 portfolio  interactive

@@ -6,12 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
-# One workspace edge, in dev position only, and it is the differential itself:
+# One kernel edge, in dev position only, and it is the differential itself:
 # `tests/certificate_kernel_differential.rs` feeds the certificate this crate emits to
 # `continuum-kernel-core`'s checker and asserts the verdict. The library has no
-# dependency at all — `src/certificate.rs` writes the wire form from the documented
+# kernel dependency — `src/certificate.rs` writes the wire form from the documented
 # grammar, so producer and checker share no codec (docs/03 §8) — and it must not gain
-# one: plan §20 puts a serialization boundary between every engine and the kernel.
+# a kernel edge: plan §20 puts a serialization boundary between every engine and the kernel.
 #
 # `tools/check_crate_boundaries.py` enforces the forbidden direction (the certificate
 # checker may not depend on search) and states this one explicitly: "Normal and build
@@ -20,6 +20,12 @@ publish = false
 # (`tools/check_crate_boundaries.py:37-39`). Every closure walk in
 # `tools/governance/check_code_policy.py` likewise reads only the `("normal", "build")`
 # graph. `tools/governance/dependency-rationale.toml` carries the GOV-1-07 entry.
+# The programmatic model lives in the model core (moved there by bn-ybq, PR 15a) so
+# that the CML elaborator builds the same `Model` type without importing an engine.
+# Search consumes the model core, never the other way round (plan §20).
+[dependencies]
+continuum-model-core = { path = "../continuum-model-core" }
+
 [dev-dependencies]
 continuum-kernel-core = { path = "../continuum-kernel-core" }
 

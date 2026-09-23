@@ -346,6 +346,8 @@ name = "continuum-cml-elab"
 version = "0.0.0"
 dependencies = [
  "continuum-cml-syntax",
+ "continuum-engine-reference",
+ "continuum-model-core",
 ]
 
 [[package]]
@@ -406,6 +408,7 @@ name = "continuum-engine-reference"
 version = "0.0.0"
 dependencies = [
  "continuum-kernel-core",
+ "continuum-model-core",
 ]
 
 [[package]]

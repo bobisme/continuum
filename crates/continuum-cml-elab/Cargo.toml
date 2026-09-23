@@ -8,6 +8,17 @@ publish = false
 
 [dependencies]
 continuum-cml-syntax = { path = "../continuum-cml-syntax" }
+# The programmatic model the elaborator lowers to: the same `Model` type the
+# programmatic API builds (PR 15a). Plan §20: search consumes the model core, and so
+# does a front end.
+continuum-model-core = { path = "../continuum-model-core" }
+
+# The differential: `tests/diehard_differential.rs` checks the elaborated Die Hard
+# model with the reference engine and compares every answer with the programmatic
+# model's. Dev position only — a front end never ships against an engine
+# (`tools/check_crate_boundaries.py:37-39`).
+[dev-dependencies]
+continuum-engine-reference = { path = "../continuum-engine-reference" }
 
 [lints]
 workspace = true
