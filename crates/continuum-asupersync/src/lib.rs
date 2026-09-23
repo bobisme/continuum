@@ -17,23 +17,39 @@
 //!   never linked into the definition of meaning.
 //! - Kernel crates may not depend on this crate either — the kernel is synchronous by
 //!   covenant.
+//! - This crate depends on `continuum-task` (the region calculus it is held to) and on
+//!   `continuum-value` (the ADR-0013 digest seam), and on nothing external.
 //!
-//! # What this crate will be held to
+//! # What has landed (PR-14-IMPL-01, bn-lf4i)
 //!
-//! The region and task-lifecycle semantics this adapter's journal has to agree with are
-//! already written down, in `continuum_task::region` (bn-2gk, PR 6): the one-way region
-//! lifecycle, RFC 0026's request → drain → finalize teardown, the six `TaskStatus`
-//! states, the both-or-neither cancellation outcome, and an obligation ledger carrying
-//! RFC 0001's own named `child-region quiescence` and `cancellation finalization`
-//! resources. That module is a deterministic model with no runtime in it, which is what
-//! ADR-0001's "Continuum remains capable of model-only execution without asupersync"
-//! requires, and plan §21 is what puts it in Phase A while this crate waits for Phase B.
+//! The substrate-independent half of the journal:
 //!
-//! The consequence for this crate is the useful one: when the substrate arrives, whether
-//! its regions behave is a **conformance** question against an existing specification —
-//! lift the journal into those states and check the same properties — rather than a
-//! design question answered by whatever the runtime happens to do.
+//! - [`journal`] — the append-only [`journal::Journal`], its canonical encoding
+//!   ([`encoding`]) with a decoder that refuses every second spelling, and its BLAKE3
+//!   digest;
+//! - [`family`] — the six PR-14 event families with stable tags, and **the extension
+//!   point**: each sibling bullet (IMPL-02…06) lands by editing only its own
+//!   `src/family/<name>.rs`, whose event and report types are uninhabited until then;
+//! - [`family::lifecycle`] — the task/region lifecycle family, whose events are the
+//!   region calculus's operations reported as facts;
+//! - [`choice`] — the controlled choice log, a plain Continuum type;
+//! - [`source`] — a scripted source that records per-actor scripts under a choice log,
+//!   so "identical choice logs give identical events" is testable with no substrate;
+//! - [`lift`] — the journal replayed into `continuum_task::region::RegionTree`, with a
+//!   three-way verdict: conforms, violates at a sequence number, or inconclusive;
+//! - [`binding`] — the substrate binding, as a typed absence.
 //!
-//! PR-1 / IMPL-01 scaffold: this crate declares its responsibility and its dependency
-//! boundary. The types and behavior land in the PR named above.
-//! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
+//! # What is not here
+//!
+//! The binding to the substrate itself. See [`binding`]. The PR-14 exit sentence holds at
+//! the grain of the scripted source; at the grain of real substrate events it is open
+//! until the binding lands. `tools/check_crate_boundaries.py` enforces the forbidden
+//! edges mechanically.
+
+pub mod binding;
+pub mod choice;
+pub mod encoding;
+pub mod family;
+pub mod journal;
+pub mod lift;
+pub mod source;

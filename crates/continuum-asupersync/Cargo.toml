@@ -6,5 +6,19 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# Two workspace edges, and no external one. `continuum-task` holds the region calculus
+# the journal is lifted into (bn-2gk): conformance is checked against that
+# specification, so the adapter depends on it and never the reverse. `continuum-value`
+# holds the ADR-0013 digest seam the journal's identity uses. The substrate itself is
+# not declared: see `src/binding.rs`. Both edges are repeated under
+# [dev-dependencies] because integration tests in `tests/` are separate crates.
+[dependencies]
+continuum-task = { path = "../continuum-task" }
+continuum-value = { path = "../continuum-value" }
+
+[dev-dependencies]
+continuum-task = { path = "../continuum-task" }
+continuum-value = { path = "../continuum-value" }
+
 [lints]
 workspace = true
