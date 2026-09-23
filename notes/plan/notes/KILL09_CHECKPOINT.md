@@ -5,8 +5,11 @@
 **Register row:** none. §24.5 has no lane for intent diff, because intent
 integrity is architecture, not a frontier lane (§1).
 **Instrument:** `crates/continuum-semantic-diff/tests/kill09_intent_diff_indicator.rs`
-**Decision record:** none. This document is the decision **package**. The
-decision is open and belongs to the user or the lead (§5, §9).
+**Decision record:** user decision, 2026-09-23: **CONTINUE, and keep the
+criterion active** (option 1 of this package). The lane continues. KILL-09 is
+not discharged: it stays an active criterion and is measured again once
+`intent.diff` and `intent.propose_revision` call the diff in production
+(bn-1b69). The re-measurement is carried by bone bn-1efg5.
 
 This is the second kill-criterion checkpoint against plan §24. It follows
 the shape [`KILL08_CHECKPOINT.md`](KILL08_CHECKPOINT.md) §8 set, with one
