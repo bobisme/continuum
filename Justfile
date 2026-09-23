@@ -10,7 +10,7 @@ default:
 
 # Full project gate: formatting, lints, tests, crate boundaries, kernel covenant,
 # governance, dossier, Lean.
-check: fmt-check lint test boundaries covenant governance dossier lean
+check: fmt-check lint test boundaries covenant governance dossier lean test-policy
 
 # Reject unformatted Rust.
 fmt-check:
@@ -163,6 +163,17 @@ lean:
         exit 1; \
     }; \
     (cd lean && lake build) && sh lean/scripts/axiom-manifest.sh --check
+
+# Enforce the docs/19 test-policy obligations (TEST-<section>-<nn>). The driver
+# discovers one module per section under tools/test-policy/sections/, so a new
+# section needs no edit here. The self-test runs first: every violating fixture
+# must be caught, so the check cannot pass vacuously. The real run then fails if
+# tools/test-policy/evidence/ does not record this revision's output
+# (regenerate with `python3 tools/test-policy/check_test_policy.py --evidence`).
+# See tools/test-policy/README-test.md.
+test-policy:
+    python3 tools/test-policy/check_test_policy.py --self-test
+    python3 tools/test-policy/check_test_policy.py
 
 # Regenerate the plan/Bones traceability registry and report.
 traceability:

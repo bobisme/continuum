@@ -8944,7 +8944,7 @@
         "line": 18,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "typed state variables"
     },
     {
@@ -8955,7 +8955,7 @@
         "line": 18,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "guarded transitions"
     },
     {
@@ -8966,7 +8966,7 @@
         "line": 18,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "explicit read/write footprints"
     },
     {
@@ -8977,7 +8977,7 @@
         "line": 18,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "independent/dependent pairs"
     },
     {
@@ -8988,7 +8988,7 @@
         "line": 18,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "conflicts"
     },
     {
@@ -8999,7 +8999,7 @@
         "line": 18,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "obligations"
     },
     {

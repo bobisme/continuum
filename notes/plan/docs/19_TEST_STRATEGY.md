@@ -19,12 +19,12 @@ The key principle is to test **semantic equivalence**, not just API outputs.
 
 A small generator creates finite systems with:
 
-- typed state variables;
-- guarded transitions;
-- explicit read/write footprints;
-- independent/dependent pairs;
-- conflicts;
-- obligations;
+- typed state variables; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
+- guarded transitions; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
+- explicit read/write footprints; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
+- independent/dependent pairs; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
+- conflicts; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
+- obligations; (delivered: bn-1fqu — tools/test-policy/evidence/s2_generated_systems.json)
 - cancellation phases;
 - fairness annotations.
 

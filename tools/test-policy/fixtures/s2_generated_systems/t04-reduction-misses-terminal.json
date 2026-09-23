@@ -1,0 +1,296 @@
+{
+  "description": "p0.s1 and p1.s1 both write mode with different values and are claimed independent: the sleep-set reduction explores one order and misses the terminal state of the other.",
+  "requirement": "TEST-2-04",
+  "rule": "reduction-agrees",
+  "system": {
+    "conflicts": [
+      [
+        "p0.s0",
+        "p1.s1"
+      ]
+    ],
+    "independent": [
+      [
+        "p0.s0",
+        "p1.s0"
+      ],
+      [
+        "p0.s1",
+        "p1.s0"
+      ],
+      {
+        "justification": "dynamic",
+        "pair": [
+          "p0.s1",
+          "p1.s1"
+        ]
+      }
+    ],
+    "init": {
+      "flag": false,
+      "mode": "idle",
+      "pc_p0": 0,
+      "pc_p1": 0,
+      "x": 0
+    },
+    "name": "t04-reduction-misses-terminal",
+    "obligations": [
+      {
+        "name": "o0",
+        "owner": "p0"
+      }
+    ],
+    "transitions": [
+      {
+        "acquire": [
+          "o0"
+        ],
+        "guard": {
+          "args": [
+            {
+              "args": [
+                {
+                  "var": "pc_p0"
+                },
+                {
+                  "const": 0
+                }
+              ],
+              "op": "eq"
+            },
+            {
+              "args": [
+                {
+                  "var": "flag"
+                },
+                {
+                  "const": false
+                }
+              ],
+              "op": "eq"
+            }
+          ],
+          "op": "and"
+        },
+        "name": "p0.s0",
+        "process": "p0",
+        "reads": [
+          "flag",
+          "obligation:o0",
+          "pc_p0"
+        ],
+        "updates": {
+          "mode": {
+            "const": "busy"
+          },
+          "pc_p0": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "add"
+          }
+        },
+        "writes": [
+          "mode",
+          "obligation:o0",
+          "pc_p0"
+        ]
+      },
+      {
+        "discharge": [
+          "o0"
+        ],
+        "guard": {
+          "args": [
+            {
+              "var": "pc_p0"
+            },
+            {
+              "const": 1
+            }
+          ],
+          "op": "eq"
+        },
+        "name": "p0.s1",
+        "process": "p0",
+        "reads": [
+          "obligation:o0",
+          "pc_p0"
+        ],
+        "updates": {
+          "mode": {
+            "const": "idle"
+          },
+          "pc_p0": {
+            "args": [
+              {
+                "var": "pc_p0"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "add"
+          }
+        },
+        "writes": [
+          "mode",
+          "obligation:o0",
+          "pc_p0"
+        ]
+      },
+      {
+        "guard": {
+          "args": [
+            {
+              "args": [
+                {
+                  "var": "pc_p1"
+                },
+                {
+                  "const": 0
+                }
+              ],
+              "op": "eq"
+            },
+            {
+              "args": [
+                {
+                  "var": "x"
+                },
+                {
+                  "const": 2
+                }
+              ],
+              "op": "lt"
+            }
+          ],
+          "op": "and"
+        },
+        "name": "p1.s0",
+        "process": "p1",
+        "reads": [
+          "pc_p1",
+          "x"
+        ],
+        "updates": {
+          "pc_p1": {
+            "args": [
+              {
+                "var": "pc_p1"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "add"
+          },
+          "x": {
+            "args": [
+              {
+                "var": "x"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "add"
+          }
+        },
+        "writes": [
+          "pc_p1",
+          "x"
+        ]
+      },
+      {
+        "guard": {
+          "args": [
+            {
+              "var": "pc_p1"
+            },
+            {
+              "const": 1
+            }
+          ],
+          "op": "eq"
+        },
+        "name": "p1.s1",
+        "process": "p1",
+        "reads": [
+          "pc_p1"
+        ],
+        "updates": {
+          "flag": {
+            "const": true
+          },
+          "mode": {
+            "const": "busy"
+          },
+          "pc_p1": {
+            "args": [
+              {
+                "var": "pc_p1"
+              },
+              {
+                "const": 1
+              }
+            ],
+            "op": "add"
+          }
+        },
+        "writes": [
+          "flag",
+          "mode",
+          "pc_p1"
+        ]
+      }
+    ],
+    "variables": [
+      {
+        "name": "x",
+        "type": {
+          "kind": "int",
+          "max": 2,
+          "min": 0
+        }
+      },
+      {
+        "name": "flag",
+        "type": {
+          "kind": "bool"
+        }
+      },
+      {
+        "name": "mode",
+        "type": {
+          "kind": "enum",
+          "values": [
+            "idle",
+            "busy"
+          ]
+        }
+      },
+      {
+        "name": "pc_p0",
+        "type": {
+          "kind": "int",
+          "max": 2,
+          "min": 0
+        }
+      },
+      {
+        "name": "pc_p1",
+        "type": {
+          "kind": "int",
+          "max": 2,
+          "min": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,415 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean.json",
+      "ok": true
+    }
+  ],
+  "generator": {
+    "corpus_sha256": "7dec8c17a7c91b9cc32ddb52a133452c5e109c9bc2891c46d69d9cce6f5f7d54",
+    "function": "generate",
+    "module": "tools/test-policy/tsys.py",
+    "seeds": "0..255",
+    "totals": {
+      "interleavings": 3160,
+      "reduced_runs": 929,
+      "states": 2621,
+      "systems": 256,
+      "trace_classes": 929
+    }
+  },
+  "module": "tools/test-policy/sections/s2_generated_systems.py",
+  "requirements": {
+    "TEST-2-01": {
+      "boundaries": [
+        "Variable types are bool, bounded int, and enum. Records, sets, maps, and sequences are not generated."
+      ],
+      "corpus": {
+        "variables_bool": 167,
+        "variables_enum": 156,
+        "variables_int": 172
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "expr-typed"
+          ],
+          "fixture": "t01-bool-assigned-to-int.json",
+          "ok": true,
+          "requirement": "TEST-2-01",
+          "rule": "expr-typed"
+        },
+        {
+          "caught": [
+            "expr-typed",
+            "footprint-declared",
+            "init-typed",
+            "type-declared"
+          ],
+          "fixture": "t01-empty-int-range.json",
+          "ok": true,
+          "requirement": "TEST-2-01",
+          "rule": "type-declared"
+        },
+        {
+          "caught": [
+            "value-in-type"
+          ],
+          "fixture": "t01-increment-leaves-range.json",
+          "ok": true,
+          "requirement": "TEST-2-01",
+          "rule": "value-in-type"
+        },
+        {
+          "caught": [
+            "init-typed"
+          ],
+          "fixture": "t01-init-outside-enum.json",
+          "ok": true,
+          "requirement": "TEST-2-01",
+          "rule": "init-typed"
+        }
+      ],
+      "mutants": {
+        "init-out-of-type": {
+          "applied": 256,
+          "detected": 256
+        },
+        "unbounded-increment": {
+          "applied": 127,
+          "detected": 24
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "expr-typed",
+        "init-typed",
+        "type-declared",
+        "value-in-type"
+      ],
+      "status": "enforced",
+      "summary": "typed state variables"
+    },
+    "TEST-2-02": {
+      "boundaries": [
+        "A guard is one boolean expression over declared variables. Guards over obligation state are not generated."
+      ],
+      "corpus": {
+        "guards_blocking_a_ready_process": 456,
+        "transitions": 1271
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "transition-wellformed"
+          ],
+          "fixture": "t02-duplicate-transition.json",
+          "ok": true,
+          "requirement": "TEST-2-02",
+          "rule": "transition-wellformed"
+        },
+        {
+          "caught": [
+            "guard-boolean"
+          ],
+          "fixture": "t02-guard-is-int.json",
+          "ok": true,
+          "requirement": "TEST-2-02",
+          "rule": "guard-boolean"
+        },
+        {
+          "caught": [
+            "guard-declared"
+          ],
+          "fixture": "t02-guard-missing.json",
+          "ok": true,
+          "requirement": "TEST-2-02",
+          "rule": "guard-declared"
+        }
+      ],
+      "mutants": {
+        "guard-not-boolean": {
+          "applied": 256,
+          "detected": 256
+        },
+        "guard-removed": {
+          "applied": 256,
+          "detected": 256
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "guard-boolean",
+        "guard-declared",
+        "transition-wellformed"
+      ],
+      "status": "enforced",
+      "summary": "guarded transitions"
+    },
+    "TEST-2-03": {
+      "boundaries": [
+        "Footprint resources are state variables and obligation identities. Pack-typed resources (message, timer, lifecycle; docs/02 \u00a74) are not modeled."
+      ],
+      "corpus": {
+        "footprint_shared_reads": 786,
+        "footprint_shared_writes": 931
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "footprint-covers-reads"
+          ],
+          "fixture": "t03-read-undeclared.json",
+          "ok": true,
+          "requirement": "TEST-2-03",
+          "rule": "footprint-covers-reads"
+        },
+        {
+          "caught": [
+            "footprint-covers-reads",
+            "footprint-declared"
+          ],
+          "fixture": "t03-reads-missing.json",
+          "ok": true,
+          "requirement": "TEST-2-03",
+          "rule": "footprint-declared"
+        },
+        {
+          "caught": [
+            "footprint-covers-writes"
+          ],
+          "fixture": "t03-write-undeclared.json",
+          "ok": true,
+          "requirement": "TEST-2-03",
+          "rule": "footprint-covers-writes"
+        }
+      ],
+      "mutants": {
+        "read-undeclared": {
+          "applied": 1271,
+          "detected": 1271
+        },
+        "write-undeclared": {
+          "applied": 1271,
+          "detected": 1271
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "footprint-covers-reads",
+        "footprint-covers-writes",
+        "footprint-declared"
+      ],
+      "status": "enforced",
+      "summary": "explicit read/write footprints"
+    },
+    "TEST-2-04": {
+      "boundaries": [
+        "Independence is one relation per system. The view/property-indexed relation Indep(e,f | View, PropertyClass) of docs/02 \u00a74 is not modeled.",
+        "The reduction compared against the oracle is this harness's sleep-set exploration. continuum-engine-explicit and continuum-engine-dpor are documented stubs, so no optimized engine is compared yet."
+      ],
+      "corpus": {
+        "coenabled_dependent_pairs": 418,
+        "coenabled_independent_pairs": 411,
+        "interleavings": 3160,
+        "reduced_runs": 929,
+        "trace_classes": 929
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "conflict-complete",
+            "independence-diamond"
+          ],
+          "fixture": "t04-dynamic-independence-fails-diamond.json",
+          "ok": true,
+          "requirement": "TEST-2-04",
+          "rule": "independence-diamond"
+        },
+        {
+          "caught": [
+            "independence-static"
+          ],
+          "fixture": "t04-overlapping-footprints-independent.json",
+          "ok": true,
+          "requirement": "TEST-2-04",
+          "rule": "independence-static"
+        },
+        {
+          "caught": [
+            "independence-diamond",
+            "reduction-agrees"
+          ],
+          "fixture": "t04-reduction-misses-terminal.json",
+          "ok": true,
+          "requirement": "TEST-2-04",
+          "rule": "reduction-agrees"
+        },
+        {
+          "caught": [
+            "independence-wellformed"
+          ],
+          "fixture": "t04-self-independent.json",
+          "ok": true,
+          "requirement": "TEST-2-04",
+          "rule": "independence-wellformed"
+        }
+      ],
+      "mutants": {
+        "dependent-declared-independent": {
+          "applied": 418,
+          "detected": 418
+        },
+        "diamond-on-mutant": {
+          "applied": 418,
+          "detected": 309
+        },
+        "reduction-disagrees-on-mutant": {
+          "applied": 418,
+          "detected": 174
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "independence-diamond",
+        "independence-static",
+        "independence-wellformed",
+        "reduction-agrees"
+      ],
+      "status": "enforced",
+      "summary": "independent/dependent pairs"
+    },
+    "TEST-2-05": {
+      "boundaries": [
+        "A conflict is transition-level disabling in a reachable state. Hereditary event-structure conflict over CIR events (docs/02 \u00a72) is not modeled."
+      ],
+      "corpus": {
+        "declared_conflicts": 928,
+        "witnessed_conflicts": 210
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "conflict-not-independent",
+            "independence-static"
+          ],
+          "fixture": "t05-conflict-declared-independent.json",
+          "ok": true,
+          "requirement": "TEST-2-05",
+          "rule": "conflict-not-independent"
+        },
+        {
+          "caught": [
+            "conflict-complete"
+          ],
+          "fixture": "t05-conflict-undeclared.json",
+          "ok": true,
+          "requirement": "TEST-2-05",
+          "rule": "conflict-complete"
+        },
+        {
+          "caught": [
+            "conflict-wellformed"
+          ],
+          "fixture": "t05-conflict-unknown-transition.json",
+          "ok": true,
+          "requirement": "TEST-2-05",
+          "rule": "conflict-wellformed"
+        }
+      ],
+      "mutants": {
+        "conflict-declared-independent": {
+          "applied": 216,
+          "detected": 216
+        },
+        "conflict-undeclared": {
+          "applied": 210,
+          "detected": 210
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "conflict-complete",
+        "conflict-not-independent",
+        "conflict-wellformed"
+      ],
+      "status": "enforced",
+      "summary": "conflicts"
+    },
+    "TEST-2-06": {
+      "boundaries": [
+        "An obligation has one owner process and is acquired and discharged by it. Ownership transfer to a finalizer (docs/02 \u00a77) is not modeled."
+      ],
+      "corpus": {
+        "obligations": 219,
+        "obligations_acquired_in_some_run": 153
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "obligation-linear"
+          ],
+          "fixture": "t06-double-discharge.json",
+          "ok": true,
+          "requirement": "TEST-2-06",
+          "rule": "obligation-linear"
+        },
+        {
+          "caught": [
+            "obligation-leak"
+          ],
+          "fixture": "t06-leak-on-blocked-owner.json",
+          "ok": true,
+          "requirement": "TEST-2-06",
+          "rule": "obligation-leak"
+        },
+        {
+          "caught": [
+            "obligation-declared"
+          ],
+          "fixture": "t06-obligation-wrong-owner.json",
+          "ok": true,
+          "requirement": "TEST-2-06",
+          "rule": "obligation-declared"
+        }
+      ],
+      "mutants": {
+        "discharge-skipped-leak": {
+          "applied": 219,
+          "detected": 153
+        },
+        "discharge-skipped-static": {
+          "applied": 219,
+          "detected": 219
+        },
+        "double-acquire": {
+          "applied": 219,
+          "detected": 153
+        }
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "obligation-declared",
+        "obligation-leak",
+        "obligation-linear"
+      ],
+      "status": "enforced",
+      "summary": "obligations"
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a72 Generated transition systems",
+  "unclaimed": [
+    "TEST-2-07",
+    "TEST-2-08"
+  ]
+}
