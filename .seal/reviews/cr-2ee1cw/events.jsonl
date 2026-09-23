@@ -5,3 +5,4 @@
 {"ts":"2026-09-23T23:05:13.379777729Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-3r3c74","reason":"Informational risk assessment. No security finding."}}
 {"ts":"2026-09-23T23:05:13.423412773Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-2ee1cw","vote":"lgtm","reason":"Whole persisted range 7ccd10109fe8003c408c6615a6ae8aa1960a46b5..382a06206cee73824caf8b974babcd8974c8f5f2 reviewed. No security blocker found. Risk-critical human approval remains separate.","target_commit":"382a06206cee73824caf8b974babcd8974c8f5f2"}}
 {"ts":"2026-09-23T23:05:13.459546969Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-2ee1cw","target_commit":"382a06206cee73824caf8b974babcd8974c8f5f2"}}
+{"ts":"2026-09-23T23:15:17.458274951Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-2ee1cw","final_commit":"8cfae82"}}
