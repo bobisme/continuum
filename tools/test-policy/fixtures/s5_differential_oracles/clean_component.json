@@ -1,0 +1,8 @@
+{
+  "expect": "clean",
+  "description": "sat-add stays within [0, bound] for every input pair, exhaustively enumerated",
+  "system": {
+    "kind": "component",
+    "component": {"op": "sat-add", "bound": 7}
+  }
+}

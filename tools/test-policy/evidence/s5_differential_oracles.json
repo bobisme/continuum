@@ -1,0 +1,261 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_axioms.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_cnf.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_component.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_evaluator.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_invariant.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_obligation.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_por.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_rust_drift.json",
+      "ok": true
+    }
+  ],
+  "module": "tools/test-policy/sections/s5_differential_oracles.py",
+  "note": "every ID here is 'partial': see each entry's 'absence' for the specific reason, per this bone's instruction not to overclaim absent external oracles.",
+  "requirements": {
+    "TEST-5-01": {
+      "absence": "continuum-engine-explicit ('the optimized explicit-state engine', docs/01 \u00a77.2) is a documented PR-1/IMPL-01 scaffold with no landed behavior (crates/continuum-engine-explicit/src/lib.rs); there is no optimized evaluator in this workspace to compare against continuum-engine-reference (self-described as 'the reference path every optimized path is measured against'). The enforced substance is the existing tsys.py-vs-continuum-engine-reference differential (bn-1kgnz: differential_corpus.py, semantic_differential.rs) \u2014 two independently implemented reference-role evaluators of the same declared model agreeing over a committed golden. A Python re-derivation of that golden is evidence about the Python side only, not about the Rust code, so this module does two more things mechanically rather than asserting them in prose: it reads crates/continuum-engine-reference/tests/semantic_differential.rs (data, not executed \u2014 no cargo, README-test.md) and checks that its differential_corpus_agrees_with_python_oracle test still exists, is not #[ignore]d, and still reads the same committed golden this module verifies (the drift tie between the Python port and its Rust source). The Rust test's own pass/fail still only runs under `just check`'s existing `test` step; this module does not and cannot re-execute it.",
+      "evidence": {
+        "corpus_size": 48,
+        "rust_test_exists": true,
+        "rust_test_fn": "differential_corpus_agrees_with_python_oracle",
+        "rust_test_ignored": false,
+        "rust_test_path": "crates/continuum-engine-reference/tests/semantic_differential.rs",
+        "rust_test_references_golden": true,
+        "systems_with_dependent_pair": 48,
+        "systems_with_states_gt_1": 48
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "evaluator-disagreement-detected"
+          ],
+          "fixture": "01_evaluator_disagreement.json",
+          "ok": true,
+          "requirement": "TEST-5-01",
+          "rule": "evaluator-disagreement-detected"
+        },
+        {
+          "caught": [
+            "rust-differential-test-drift-detected"
+          ],
+          "fixture": "08_rust_test_drift.json",
+          "ok": true,
+          "requirement": "TEST-5-01",
+          "rule": "rust-differential-test-drift-detected"
+        }
+      ],
+      "registry_status": "active",
+      "rules": [
+        "evaluator-disagreement-detected",
+        "rust-differential-test-drift-detected"
+      ],
+      "status": "partial",
+      "summary": "reference model evaluator versus optimized evaluator"
+    },
+    "TEST-5-02": {
+      "absence": "continuum-engine-dpor ('the partial-order reduction engine', docs/01 \u00a77.2) is a documented PR-1/IMPL-01 scaffold with no landed behavior; there is no DPOR implementation in this workspace, and this Python, no-cargo harness cannot invoke continuum-engine-reference's bfs path either. The enforced substance is tsys.py's own exhaustive-enumerator-vs-sleep-set-reduction comparison (already relied on by TEST-2-04's reduction-agrees rule) \u2014 a static-independence partial-order reduction in the same family as DPOR, but not DPOR itself (DPOR computes independence dynamically at runtime; sleep sets here are driven by the system's statically declared independence). Re-derived under a fresh rule for TEST-5-02's own traceability, not a re-claim of TEST-2-04's ID or rule.",
+      "evidence": {
+        "reduced_something": true,
+        "seeds": "0..63"
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "reduction-cross-check-disagreement"
+          ],
+          "fixture": "02_reduction_disagreement.json",
+          "ok": true,
+          "requirement": "TEST-5-02",
+          "rule": "reduction-cross-check-disagreement"
+        }
+      ],
+      "registry_status": "active",
+      "rules": [
+        "reduction-cross-check-disagreement"
+      ],
+      "status": "partial",
+      "summary": "exhaustive enumerator versus DPOR"
+    },
+    "TEST-5-03": {
+      "absence": "tlc, quint, and apalache are absent from PATH in this environment and this harness has no network access to fetch them. The enforced substance is a freestanding, independently written (no tsys import) bounded-state invariant checker over a declared finite model subset \u2014 the same core concept (bounded exhaustive enumeration, an invariant evaluated on every reachable state) an external model checker applies to a model subset \u2014 not a run of TLC, Quint, or Apalache themselves.",
+      "evidence": {
+        "models": [
+          "bounded-counter",
+          "two-flag-mutex"
+        ],
+        "states_enumerated": 7
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "model-subset-invariant-violation-detected"
+          ],
+          "fixture": "03_model_subset_invariant.json",
+          "ok": true,
+          "requirement": "TEST-5-03",
+          "rule": "model-subset-invariant-violation-detected"
+        }
+      ],
+      "registry_status": "active",
+      "rules": [
+        "model-subset-invariant-violation-detected"
+      ],
+      "status": "partial",
+      "summary": "TLC/Quint/Apalache for model subsets"
+    },
+    "TEST-5-04": {
+      "absence": "No asupersync crate is a dependency anywhere in this workspace, and continuum-asupersync's own substrate binding is a typed absence (src/binding.rs, PR-14 exit note: 'open until the binding lands'); no real Lab report exists in this repository. The enforced substance replays a fabricated Lab-report shape (a linear run plus a claimed final open-obligation set) against the Continuum obligation model's own tsys.py replay (compile_system/enabled/fire \u2014 the same substance TEST-2-06's obligation rules run on) for the same declared system. One side of the comparison is real; the Lab report is hand-authored test data, not genuine asupersync output.",
+      "evidence": {
+        "seeds_checked": [
+          0,
+          3,
+          8,
+          9,
+          10,
+          11
+        ]
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "obligation-lab-replay-disagreement"
+          ],
+          "fixture": "04_obligation_lab_replay.json",
+          "ok": true,
+          "requirement": "TEST-5-04",
+          "rule": "obligation-lab-replay-disagreement"
+        }
+      ],
+      "registry_status": "active",
+      "rules": [
+        "obligation-lab-replay-disagreement"
+      ],
+      "status": "partial",
+      "summary": "asupersync Lab reports versus Continuum obligation model"
+    },
+    "TEST-5-05": {
+      "absence": "cargo-kani 0.68.0 is present in this environment, but no gate invokes it: adding one needs a new Justfile recipe, which a section module may not add (README-test.md, 'it never edits the Justfile'), and check_test_policy.py is stdlib-only with no cargo. The enforced substance is a freestanding brute-force verifier that exhaustively enumerates every input of a tiny bounded local component \u2014 the same bound a Kani/Verus harness would prove over by symbolic execution instead of enumeration \u2014 not a run of Kani or Verus. A `just kani` recipe wiring a real #[kani::proof] harness is a follow-up, lead-owned (Justfile edit).",
+      "evidence": {
+        "components": [
+          {
+            "bound": 7,
+            "op": "sat-add"
+          },
+          {
+            "bound": 15,
+            "op": "sat-add"
+          }
+        ],
+        "input_pairs_enumerated": 320
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "bounded-component-property-violation-detected"
+          ],
+          "fixture": "05_bounded_component.json",
+          "ok": true,
+          "requirement": "TEST-5-05",
+          "rule": "bounded-component-property-violation-detected"
+        }
+      ],
+      "registry_status": "active",
+      "rules": [
+        "bounded-component-property-violation-detected"
+      ],
+      "status": "partial",
+      "summary": "Kani/Verus/other Rust tools for local components"
+    },
+    "TEST-5-06": {
+      "absence": "No SAT/SMT solver (z3, cvc5, or similar) is installed and there is no network access to fetch one. The proof-checker half is real: lean/artifacts/axiom-manifest-t0-t1.json is Lean's own kernel-checked, machine-captured axiom output (ADR-0035, gated by `just lean` under `just check`); this module reads that committed artifact read-only and independently re-verifies its axiom-emptiness claim. The SAT/SMT half has no solver to invoke, so its check is a freestanding brute-force satisfiability verifier over tiny CNF instances \u2014 decidable by exhaustive enumeration at this size, the same core a SAT solver performs, not a run of Z3 or cvc5.",
+      "evidence": {
+        "axiom_manifest": {
+          "manifest": "lean/artifacts/axiom-manifest-t0-t1.json",
+          "theorem_count": 68
+        },
+        "cnf": {
+          "instances": 3
+        }
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "axiom-manifest-violation-detected"
+          ],
+          "fixture": "06_axiom_manifest.json",
+          "ok": true,
+          "requirement": "TEST-5-06",
+          "rule": "axiom-manifest-violation-detected"
+        },
+        {
+          "caught": [
+            "cnf-satisfiability-mischeck-detected"
+          ],
+          "fixture": "07_cnf_mischeck.json",
+          "ok": true,
+          "requirement": "TEST-5-06",
+          "rule": "cnf-satisfiability-mischeck-detected"
+        }
+      ],
+      "registry_status": "active",
+      "rules": [
+        "axiom-manifest-violation-detected",
+        "cnf-satisfiability-mischeck-detected"
+      ],
+      "status": "partial",
+      "summary": "SAT/SMT solvers and proof checkers"
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a75 Differential oracles",
+  "unclaimed": [
+    "TEST-5-07"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "(x1) AND (NOT x1) is unsatisfiable, but claimed sat; brute-force enumeration over both assignments finds unsat",
+  "requirement": "TEST-5-06",
+  "rule": "cnf-satisfiability-mischeck-detected",
+  "system": {
+    "kind": "cnf",
+    "num_vars": 1,
+    "clauses": [[1], [-1]],
+    "claim": "sat"
+  }
+}

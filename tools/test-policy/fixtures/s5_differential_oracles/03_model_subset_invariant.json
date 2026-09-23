@@ -1,0 +1,18 @@
+{
+  "description": "bounded-counter: the declared invariant c <= 2 is violated at the reachable state c = 3",
+  "requirement": "TEST-5-03",
+  "rule": "model-subset-invariant-violation-detected",
+  "system": {
+    "kind": "invariant",
+    "model": {
+      "vars": {"c": {"min": 0, "max": 3}},
+      "init": {"c": 0},
+      "transitions": [
+        {"name": "inc0", "guard": [{"var": "c", "eq": 0}], "delta": {"c": 1}},
+        {"name": "inc1", "guard": [{"var": "c", "eq": 1}], "delta": {"c": 1}},
+        {"name": "inc2", "guard": [{"var": "c", "eq": 2}], "delta": {"c": 1}}
+      ]
+    },
+    "invariant": {"var": "c", "op": "le", "val": 2}
+  }
+}

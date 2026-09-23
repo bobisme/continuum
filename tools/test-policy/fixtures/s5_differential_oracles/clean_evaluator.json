@@ -1,0 +1,15 @@
+{
+  "expect": "clean",
+  "description": "diff-0: a correct claim, matching the independently recomputed reference-model-evaluator run exactly",
+  "system": {
+    "kind": "evaluator",
+    "seed": 0,
+    "claim": {
+      "states": 28,
+      "dependent": [["p0.w0", "p1.w0"], ["p0.w1", "p1.w0"]],
+      "interleavings_complete": 70,
+      "trace_classes": 3,
+      "findings": []
+    }
+  }
+}

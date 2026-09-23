@@ -1,0 +1,9 @@
+{
+  "description": "raw-add(7, 7) = 14, outside the declared bound [0, 7] (the bug: no saturation)",
+  "requirement": "TEST-5-05",
+  "rule": "bounded-component-property-violation-detected",
+  "system": {
+    "kind": "component",
+    "component": {"op": "raw-add", "bound": 7}
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "expect": "clean",
+  "description": "seed 0: a correct claim, matching the independently recomputed exhaustive-enumerator-vs-reduction run exactly",
+  "system": {
+    "kind": "por",
+    "seed": 0,
+    "claim": {
+      "interleavings": 4,
+      "trace_classes": 3,
+      "reduced_runs": 3,
+      "reduced_classes": 3,
+      "reduction_disagreement": false
+    }
+  }
+}

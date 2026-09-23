@@ -1,0 +1,9 @@
+{
+  "expect": "clean",
+  "description": "a fabricated Rust source where the differential test exists, is not ignored, and references the shared golden",
+  "system": {
+    "kind": "rust-drift",
+    "path": "crates/continuum-engine-reference/tests/fake_differential.rs",
+    "source": "//! fake test file for the fixture\n#[test]\nfn differential_corpus_agrees_with_python_oracle() {\n    // reads ../../../tools/test-policy/evidence/differential_corpus.json\n}\n"
+  }
+}

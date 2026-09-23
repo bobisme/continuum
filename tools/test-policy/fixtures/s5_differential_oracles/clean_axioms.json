@@ -1,0 +1,16 @@
+{
+  "expect": "clean",
+  "description": "a manifest where every theorem is genuinely axiom-free, matching its own theoremsWithAxioms field",
+  "system": {
+    "kind": "axioms",
+    "manifest": {
+      "schema": "continuum.axiom-manifest/v1",
+      "theoremCount": 2,
+      "theoremsWithAxioms": 0,
+      "theorems": [
+        {"rung": "T0", "theorem": "Continuum.Example.a", "axioms": []},
+        {"rung": "T0", "theorem": "Continuum.Example.b", "axioms": []}
+      ]
+    }
+  }
+}

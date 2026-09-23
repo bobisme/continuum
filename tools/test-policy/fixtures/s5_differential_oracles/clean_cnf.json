@@ -1,0 +1,10 @@
+{
+  "expect": "clean",
+  "description": "(x1 OR x2) is satisfiable and correctly claimed sat",
+  "system": {
+    "kind": "cnf",
+    "num_vars": 2,
+    "clauses": [[1, 2]],
+    "claim": "sat"
+  }
+}

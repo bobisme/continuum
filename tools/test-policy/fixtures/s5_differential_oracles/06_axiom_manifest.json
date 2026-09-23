@@ -1,0 +1,17 @@
+{
+  "description": "a fabricated manifest where one theorem depends on an axiom, contradicting its own theoremsWithAxioms field and ADR-0035's empty-manifest requirement",
+  "requirement": "TEST-5-06",
+  "rule": "axiom-manifest-violation-detected",
+  "system": {
+    "kind": "axioms",
+    "manifest": {
+      "schema": "continuum.axiom-manifest/v1",
+      "theoremCount": 2,
+      "theoremsWithAxioms": 1,
+      "theorems": [
+        {"rung": "T0", "theorem": "Continuum.Example.clean", "axioms": []},
+        {"rung": "T0", "theorem": "Continuum.Example.unsound", "axioms": ["Classical.choice"]}
+      ]
+    }
+  }
+}

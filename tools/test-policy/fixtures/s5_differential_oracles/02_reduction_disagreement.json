@@ -1,0 +1,16 @@
+{
+  "description": "seed 0: the claimed reduced-run count (99) disagrees with the independently recomputed exhaustive-enumerator-vs-reduction run (3)",
+  "requirement": "TEST-5-02",
+  "rule": "reduction-cross-check-disagreement",
+  "system": {
+    "kind": "por",
+    "seed": 0,
+    "claim": {
+      "interleavings": 4,
+      "trace_classes": 3,
+      "reduced_runs": 99,
+      "reduced_classes": 3,
+      "reduction_disagreement": false
+    }
+  }
+}

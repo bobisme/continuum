@@ -1,0 +1,16 @@
+{
+  "description": "diff-0: the claimed reachable-state count (27) disagrees with the independently recomputed reference-model-evaluator run (28)",
+  "requirement": "TEST-5-01",
+  "rule": "evaluator-disagreement-detected",
+  "system": {
+    "kind": "evaluator",
+    "seed": 0,
+    "claim": {
+      "states": 27,
+      "dependent": [["p0.w0", "p1.w0"], ["p0.w1", "p1.w0"]],
+      "interleavings_complete": 70,
+      "trace_classes": 3,
+      "findings": []
+    }
+  }
+}
