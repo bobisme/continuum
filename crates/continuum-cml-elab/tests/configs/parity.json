@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "fixture replicated-register.run-config.json",
-      "document": "{\n  \"schema_id\": \"https://continuum.dev/schema/run-config.json\",\n  \"schema_epoch\": 1,\n  \"model\": \"ReplicatedRegister\",\n  \"sorts\": {\n    \"Node\": {\n      \"elements\": [\n        \"a\",\n        \"b\",\n        \"c\"\n      ]\n    },\n    \"Value\": {\n      \"elements\": [\n        \"v0\",\n        \"v1\"\n      ]\n    }\n  },\n  \"constants\": {\n    \"Nodes\": {\n      \"set\": [\n        {\n          \"elem\": {\n            \"sort\": \"Node\",\n            \"name\": \"a\"\n          }\n        },\n        {\n          \"elem\": {\n            \"sort\": \"Node\",\n            \"name\": \"b\"\n          }\n        },\n        {\n          \"elem\": {\n            \"sort\": \"Node\",\n            \"name\": \"c\"\n          }\n        }\n      ]\n    },\n    \"Quorum\": {\n      \"set\": [\n        {\n          \"set\": [\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"a\"\n              }\n            },\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"b\"\n              }\n            }\n          ]\n        },\n        {\n          \"set\": [\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"a\"\n              }\n            },\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"c\"\n              }\n            }\n          ]\n        },\n        {\n          \"set\": [\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"b\"\n              }\n            },\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"c\"\n              }\n            }\n          ]\n        }\n      ]\n    }\n  }\n}\n",
+      "document": "{\n  \"schema_id\": \"https://continuum.dev/schema/run-config.json\",\n  \"schema_epoch\": 1,\n  \"model\": \"ReplicatedRegister\",\n  \"bounds\": {\n    \"Nat\": {\n      \"max\": 1\n    }\n  },\n  \"sorts\": {\n    \"Node\": {\n      \"elements\": [\n        \"a\",\n        \"b\",\n        \"c\"\n      ]\n    },\n    \"Value\": {\n      \"elements\": [\n        \"v0\",\n        \"v1\"\n      ]\n    }\n  },\n  \"constants\": {\n    \"Nodes\": {\n      \"set\": [\n        {\n          \"elem\": {\n            \"sort\": \"Node\",\n            \"name\": \"a\"\n          }\n        },\n        {\n          \"elem\": {\n            \"sort\": \"Node\",\n            \"name\": \"b\"\n          }\n        },\n        {\n          \"elem\": {\n            \"sort\": \"Node\",\n            \"name\": \"c\"\n          }\n        }\n      ]\n    },\n    \"Quorum\": {\n      \"set\": [\n        {\n          \"set\": [\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"a\"\n              }\n            },\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"b\"\n              }\n            }\n          ]\n        },\n        {\n          \"set\": [\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"a\"\n              }\n            },\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"c\"\n              }\n            }\n          ]\n        },\n        {\n          \"set\": [\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"b\"\n              }\n            },\n            {\n              \"elem\": {\n                \"sort\": \"Node\",\n                \"name\": \"c\"\n              }\n            }\n          ]\n        }\n      ]\n    }\n  }\n}\n",
       "accept": true
     },
     {
@@ -985,6 +985,146 @@
       "name": "whitespace around",
       "document": "  \n{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}}\n  ",
       "accept": true
+    },
+    {
+      "name": "bounds Nat",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": 3}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Nat zero",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": 0}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Nat at the value limit",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": 65535}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Nat over the value limit",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": 65536}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Nat negative",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": -1}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Nat as string",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": \"3\"}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Nat as bool",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": true}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Nat missing max",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Nat extra key",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": 3, \"min\": 0}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Nat not an object",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": 3}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Int",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": -2, \"max\": 2}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Int one value",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": 5, \"max\": 5}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Int crossing",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": 3, \"max\": 2}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Int at the value limit",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": -32768, \"max\": 32767}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Int over the value limit",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": -32768, \"max\": 32768}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Int at the i64 top",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": 9223372036854775806, \"max\": 9223372036854775807}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Int at the i64 bottom",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": -9223372036854775808, \"max\": -9223372036854775807}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds Int whole i64",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": -9223372036854775808, \"max\": 9223372036854775807}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Int over i64",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": 0, \"max\": 9223372036854775808}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Int missing min",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"max\": 2}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds Int extra key",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Int\": {\"min\": 0, \"max\": 2, \"step\": 1}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds both",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": 1}, \"Int\": {\"min\": -1, \"max\": 1}}}",
+      "accept": true
+    },
+    {
+      "name": "bounds empty",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {}}",
+      "accept": false
+    },
+    {
+      "name": "bounds unknown type",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Real\": {\"max\": 1}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds lowercase nat",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"nat\": {\"max\": 1}}}",
+      "accept": false
+    },
+    {
+      "name": "bounds not an object",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": []}",
+      "accept": false
+    },
+    {
+      "name": "bounds null",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": null}",
+      "accept": false
+    },
+    {
+      "name": "bounds Nat 1.0",
+      "document": "{\"schema_id\": \"https://continuum.dev/schema/run-config.json\", \"schema_epoch\": 1, \"model\": \"M\", \"sorts\": {}, \"constants\": {}, \"bounds\": {\"Nat\": {\"max\": 1.0}}}",
+      "accept": false
     }
   ]
 }

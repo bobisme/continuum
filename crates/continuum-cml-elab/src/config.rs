@@ -1,5 +1,6 @@
-//! The run configuration: finite instantiations of a model's sorts and values for its
-//! constants, read from its wire form (RFC 0003 "Configurations and bounds").
+//! The run configuration: finite instantiations of a model's sorts, values for its
+//! constants, and explicit bounds for `Nat` and `Int`, read from its wire form (RFC 0003
+//! "Configurations and bounds", corrections 3 and 4).
 //!
 //! Decision: RFC 0003 "Configurations and bounds" and its correction 3, whose shape is
 //! `notes/plan/schemas/run-config.schema.json` (class
@@ -16,8 +17,11 @@
 //! here is closed (`additionalProperties: false`), every value is exactly one tag of
 //! the value union, a sort's elements are non-empty, duplicate-free printable ASCII
 //! names of at most [`MAX_NAME_BYTES`] bytes, at most [`MAX_SORT_ELEMENTS`] per sort,
-//! and a `set` or a `map`'s keys are duplicate-free. The input is at most
-//! [`MAX_CONFIG_BYTES`] bytes, so reading is linear in a bounded input.
+//! and a `set` or a `map`'s keys are duplicate-free. The optional `bounds` object
+//! (correction 4) holds at most a `Nat` bound (`0 <= max < MAX_BOUND_VALUES`) and an
+//! `Int` bound (`min <= max`, at most [`MAX_BOUND_VALUES`] values); it is never empty.
+//! The input is at most [`MAX_CONFIG_BYTES`] bytes, so reading is linear in a bounded
+//! input.
 //!
 //! # Identity
 //!
@@ -46,6 +50,34 @@ pub const RUN_CONFIG_SCHEMA_EPOCH: i64 = 1;
 
 /// The most elements one sort may be instantiated with.
 pub const MAX_SORT_ELEMENTS: usize = 1 << 16;
+
+/// The most values one `bounds` range may hold: `Nat` is `0..=max` with `max` below
+/// this, and an `Int` range has at most this many values. Equal to
+/// [`MAX_SORT_ELEMENTS`], so a bounded integer is never wider than the widest sort.
+pub const MAX_BOUND_VALUES: u64 = MAX_SORT_ELEMENTS as u64;
+
+/// The explicit bounds a run configuration gives the unbounded integer types
+/// (RFC 0003 correction 4). An absent bound is `None`: there is no default, and a
+/// lowering that needs one refuses (`cml.lower.unbounded_type`), never inventing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Bounds {
+    nat: Option<i64>,
+    int: Option<(i64, i64)>,
+}
+
+impl Bounds {
+    /// `Nat` is instantiated as `0..=max`.
+    #[must_use]
+    pub const fn nat_max(&self) -> Option<i64> {
+        self.nat
+    }
+
+    /// `Int` is instantiated as `min..=max`.
+    #[must_use]
+    pub const fn int_range(&self) -> Option<(i64, i64)> {
+        self.int
+    }
+}
 
 /// The longest element name, in bytes: the model's own name limit.
 pub const MAX_NAME_BYTES: usize = MAX_IDENT_BYTES;
@@ -149,6 +181,7 @@ pub struct RunConfig {
     constants: BTreeMap<String, ConfigValue>,
     /// Each constant's value size, computed once while reading.
     sizes: BTreeMap<String, usize>,
+    bounds: Bounds,
     identity: Arc<ConfigIdentity>,
 }
 
@@ -166,10 +199,11 @@ impl RunConfig {
             kind: ConfigErrorKind::Json(e),
             path: "$".to_owned(),
         })?;
-        let top = object(
+        let top = object_with(
             &json,
             "$",
             &["schema_id", "schema_epoch", "model", "sorts", "constants"],
+            &["bounds"],
         )?;
         match top.get("schema_id").and_then(Json::as_str) {
             Some(RUN_CONFIG_SCHEMA_ID) => {}
@@ -252,7 +286,15 @@ impl RunConfig {
             constants_json.insert(name.clone(), normal);
         }
 
-        let normal = Json::Object(BTreeMap::from([
+        let (bounds, bounds_json) = match top.get("bounds") {
+            Some(b) => {
+                let (bounds, normal) = read_bounds(b)?;
+                (bounds, Some(normal))
+            }
+            None => (Bounds::default(), None),
+        };
+
+        let mut normal = BTreeMap::from([
             (
                 "schema_id".to_owned(),
                 Json::String(RUN_CONFIG_SCHEMA_ID.to_owned()),
@@ -264,7 +306,14 @@ impl RunConfig {
             ("model".to_owned(), Json::String(model.clone())),
             ("sorts".to_owned(), Json::Object(sorts_json)),
             ("constants".to_owned(), Json::Object(constants_json)),
-        ]));
+        ]);
+        // An absent `bounds` is absent from the identity too, so every configuration
+        // written before correction 4 keeps its identity; `bounds` is never empty, so
+        // absent and present cannot mean the same thing.
+        if let Some(b) = bounds_json {
+            normal.insert("bounds".to_owned(), b);
+        }
+        let normal = Json::Object(normal);
         let mut bytes = CONFIG_IDENTITY_TAG.to_vec();
         normal.write_canonical(&mut bytes);
         Ok(Self {
@@ -272,6 +321,7 @@ impl RunConfig {
             sorts,
             constants,
             sizes,
+            bounds,
             identity: Arc::new(ConfigIdentity { bytes }),
         })
     }
@@ -299,6 +349,13 @@ impl RunConfig {
     #[must_use]
     pub fn constant_size(&self, name: &str) -> Option<usize> {
         self.sizes.get(name).copied()
+    }
+
+    /// The explicit `Nat` and `Int` bounds (correction 4); empty when the document has
+    /// no `bounds`.
+    #[must_use]
+    pub const fn bounds(&self) -> &Bounds {
+        &self.bounds
     }
 
     /// The configuration's content identity.
@@ -402,6 +459,7 @@ impl ConfigError {
             ConfigErrorKind::Shape(_) => "cml.config.shape",
             ConfigErrorKind::Duplicate => "cml.config.duplicate",
             ConfigErrorKind::SortTooLarge => "cml.config.sort_too_large",
+            ConfigErrorKind::BoundTooLarge => "cml.config.bound_too_large",
         }
     }
 }
@@ -422,6 +480,9 @@ impl fmt::Display for ConfigError {
             ConfigErrorKind::Duplicate => write!(f, "a duplicate element, set member, or map key"),
             ConfigErrorKind::SortTooLarge => {
                 write!(f, "a sort has more than {MAX_SORT_ELEMENTS} elements")
+            }
+            ConfigErrorKind::BoundTooLarge => {
+                write!(f, "a bound holds more than {MAX_BOUND_VALUES} values")
             }
         }
     }
@@ -444,6 +505,8 @@ pub enum ConfigErrorKind {
     Duplicate,
     /// A sort has more than [`MAX_SORT_ELEMENTS`] elements.
     SortTooLarge,
+    /// A `Nat` or `Int` bound holds more than [`MAX_BOUND_VALUES`] values.
+    BoundTooLarge,
 }
 
 fn shape(path: &str, what: &str) -> ConfigError {
@@ -471,9 +534,19 @@ fn object<'j>(
     path: &str,
     keys: &[&str],
 ) -> Result<&'j BTreeMap<String, Json>, ConfigError> {
+    object_with(json, path, keys, &[])
+}
+
+/// `json` as an object with every key of `keys`, any of `optional`, and no other.
+fn object_with<'j>(
+    json: &'j Json,
+    path: &str,
+    keys: &[&str],
+    optional: &[&str],
+) -> Result<&'j BTreeMap<String, Json>, ConfigError> {
     let map = json.as_object().ok_or_else(|| shape(path, "an object"))?;
     for k in map.keys() {
-        if !keys.contains(&k.as_str()) {
+        if !keys.contains(&k.as_str()) && !optional.contains(&k.as_str()) {
             return Err(shape(&format!("{path}.{k}"), "no such property"));
         }
     }
@@ -483,6 +556,67 @@ fn object<'j>(
         }
     }
     Ok(map)
+}
+
+/// The `bounds` object and its normalized JSON. Constant work: at most two ranges of
+/// two integers each. The schema states `Nat.max` in `0..MAX_BOUND_VALUES` and the
+/// document profile states `Int.min <= Int.max` with at most [`MAX_BOUND_VALUES`]
+/// values (JSON Schema cannot relate two fields); a range past the value count is
+/// [`ConfigErrorKind::BoundTooLarge`], any other defect a shape error.
+fn read_bounds(json: &Json) -> Result<(Bounds, Json), ConfigError> {
+    let path = "$.bounds";
+    let map = object_with(json, path, &[], &["Nat", "Int"])?;
+    if map.is_empty() {
+        return Err(shape(path, "at least one of `Nat` and `Int`"));
+    }
+    let int = |spec: &BTreeMap<String, Json>, key: &str, at: &str| {
+        spec.get(key)
+            .and_then(Json::as_integer)
+            .ok_or_else(|| shape(&format!("{at}.{key}"), "an integer"))
+    };
+    let mut bounds = Bounds::default();
+    let mut normal = BTreeMap::new();
+    if let Some(spec) = map.get("Nat") {
+        let at = "$.bounds.Nat";
+        let spec = object(spec, at, &["max"])?;
+        let max = int(spec, "max", at)?;
+        if max < 0 {
+            return Err(shape(&format!("{at}.max"), "a non-negative integer"));
+        }
+        if max.unsigned_abs() >= MAX_BOUND_VALUES {
+            return Err(ConfigError::new(
+                ConfigErrorKind::BoundTooLarge,
+                &format!("{at}.max"),
+            ));
+        }
+        bounds.nat = Some(max);
+        normal.insert(
+            "Nat".to_owned(),
+            Json::Object(BTreeMap::from([("max".to_owned(), Json::Integer(max))])),
+        );
+    }
+    if let Some(spec) = map.get("Int") {
+        let at = "$.bounds.Int";
+        let spec = object(spec, at, &["min", "max"])?;
+        let (min, max) = (int(spec, "min", at)?, int(spec, "max", at)?);
+        if min > max {
+            return Err(shape(at, "`min` at most `max`"));
+        }
+        // The value count `max - min + 1`, exact in i128.
+        let values = i128::from(max) - i128::from(min) + 1;
+        if values > i128::from(MAX_BOUND_VALUES) {
+            return Err(ConfigError::new(ConfigErrorKind::BoundTooLarge, at));
+        }
+        bounds.int = Some((min, max));
+        normal.insert(
+            "Int".to_owned(),
+            Json::Object(BTreeMap::from([
+                ("max".to_owned(), Json::Integer(max)),
+                ("min".to_owned(), Json::Integer(min)),
+            ])),
+        );
+    }
+    Ok((bounds, Json::Object(normal)))
 }
 
 /// One tagged value, and its normalized JSON (sets and maps in canonical order).

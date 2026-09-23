@@ -1,0 +1,47 @@
+[change]
+bone = "bn-15zfa"
+author = "continuum-dev"
+summary = "continuum-cml-elab: RFC 0003 correction 4 part A — the run configuration's optional `bounds` (Nat max, Int min..max, at most 2^16 values) read strictly with reader/schema parity, typed refusals cml.config.outside_bound, cml.config.bound_too_large, and cml.lower.unbounded_type, and bounded Nat/Int scalar state lowering to the bound intersected with its refinement"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/bounds.rs::bounds_are_read_and_absent_bounds_are_none",
+  "crates/continuum-cml-elab/tests/bounds.rs::the_reader_refuses_bounds_with_typed_errors",
+  "crates/continuum-cml-elab/tests/bounds.rs::a_constant_outside_the_configured_bound_is_refused",
+  "crates/continuum-cml-elab/tests/bounds.rs::an_unbounded_integer_type_is_refused_typed_under_a_configuration",
+  "crates/continuum-cml-elab/tests/bounds.rs::a_configuration_without_bounds_keeps_its_identity",
+  "crates/continuum-cml-elab/tests/configured.rs::the_reader_agrees_with_the_schema_on_every_parity_case",
+  "crates/continuum-cml-elab/tests/configured.rs::the_replicated_register_binds_and_lowers_as_far_as_integer_state_allows",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::bounded_domains_are_preflighted_before_enumeration",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_bounded_enumeration_is_charged_and_grows_linearly",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_bounded_enumeration_boundary_is_exact",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::an_int_bound_at_the_i64_edge_is_exact",
+  "crates/continuum-model-core/tests/identity_golden.rs::the_model_identity_encoding_is_pinned_byte_for_byte",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/bounds.rs::the_bound_is_part_of_the_configuration_and_run_identity", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/bounds.rs::bounded_state_lowers_to_the_programmatic_model", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/bounds.rs::a_different_bound_is_told_apart_by_the_differential", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "an explicit, typed Nat/Int bound is what ADR-0025 requires before an unbounded type reaches an engine, a precondition of corpus ports (C021) and of the expressiveness C022 claims; this change adds evidence toward both (a bounded model lowers and equals its programmatic twin) and promotes neither: both stay TARGET, and collection-valued state, action schemas, and quantifiers (bn-10j7z, bn-23hzh) still do not lower"
+
+[semantic.schemas]
+updated = ["notes/plan/schemas/run-config.schema.json"]
+reason = "optional top-level `bounds`, added in place without an epoch advance as schemas/README permits (every valid instance stays valid and keeps its meaning), approved by the lead on bn-15zfa; the Int min<=max and value-count rule is in the document profile, and notes/plan/tools/run_config_parity.py regenerates tests/configs/parity.json with the new edges; the schema example now carries a Nat bound"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-model-core is unchanged, and so is every continuum-model/1 identity (tests/identity_golden.rs). continuum-cml-elab: lower() is unchanged; a configuration without `bounds` reads, lowers, and identifies exactly as before (its canonical encoding has no `bounds` key, pinned by a_configuration_without_bounds_keeps_its_identity). Under a configuration, an integer state variable with no finite interval was cml.lower.unbounded_domain and is now cml.lower.unbounded_type; no stored artifact records that code. Bounds, Unlowerable::UnboundedType, ConfigRefusalKind::OutsideBound, and ConfigErrorKind::BoundTooLarge are new surface. The schema example's configuration identity changes because it gained a bound, which is a new instance, not a re-derivation"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2dwike"
+verdict = "approved"

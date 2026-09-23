@@ -28,7 +28,9 @@ validates the parsed data model, not the text:
    number (so `1.0` is not `1`), no `NaN`/`Infinity`, no lone surrogate escape;
 2. value-level: no duplicate `set` member and no duplicate `map` key, by value
    (a set's members and a map's entries compared after the same normalization the
-   identity uses).
+   identity uses);
+3. bound-level (RFC 0003 correction 4): an `Int` bound has `min <= max` and holds at
+   most 65536 values (JSON Schema cannot relate two fields).
 
 Two reader caps are resource bounds outside the schema and outside this corpus: the
 16 MiB document size and the JSON nesting depth of 64.
@@ -51,6 +53,8 @@ FIXTURES = (
 )
 
 SCHEMA_ID = "https://continuum.dev/schema/run-config.json"
+MAX_BOUND_VALUES = 1 << 16
+I64_MIN, I64_MAX = -(2**63), 2**63 - 1
 
 
 class Refused(Exception):
@@ -142,6 +146,11 @@ def verdict(text: str) -> bool:
             _normal(value)
     except Refused:
         return False
+    int_bound = doc.get("bounds", {}).get("Int")
+    if int_bound is not None:
+        lo, hi = int_bound["min"], int_bound["max"]
+        if lo > hi or hi - lo + 1 > MAX_BOUND_VALUES:
+            return False
     return True
 
 
@@ -262,6 +271,35 @@ def cases() -> list[tuple[str, str]]:
         ("lone surrogate", _const({"str": "x"}).replace('"x"', '"\\ud800"')),
         ("escaped name", _doc(model="M").replace('"model": "M"', '"model": "\\u0041"')),
         ("whitespace around", "  \n" + _doc() + "\n  "),
+        # bounds (RFC 0003 correction 4)
+        ("bounds Nat", _doc(bounds={"Nat": {"max": 3}})),
+        ("bounds Nat zero", _doc(bounds={"Nat": {"max": 0}})),
+        ("bounds Nat at the value limit", _doc(bounds={"Nat": {"max": 65535}})),
+        ("bounds Nat over the value limit", _doc(bounds={"Nat": {"max": 65536}})),
+        ("bounds Nat negative", _doc(bounds={"Nat": {"max": -1}})),
+        ("bounds Nat as string", _doc(bounds={"Nat": {"max": "3"}})),
+        ("bounds Nat as bool", _doc(bounds={"Nat": {"max": True}})),
+        ("bounds Nat missing max", _doc(bounds={"Nat": {}})),
+        ("bounds Nat extra key", _doc(bounds={"Nat": {"max": 3, "min": 0}})),
+        ("bounds Nat not an object", _doc(bounds={"Nat": 3})),
+        ("bounds Int", _doc(bounds={"Int": {"min": -2, "max": 2}})),
+        ("bounds Int one value", _doc(bounds={"Int": {"min": 5, "max": 5}})),
+        ("bounds Int crossing", _doc(bounds={"Int": {"min": 3, "max": 2}})),
+        ("bounds Int at the value limit", _doc(bounds={"Int": {"min": -32768, "max": 32767}})),
+        ("bounds Int over the value limit", _doc(bounds={"Int": {"min": -32768, "max": 32768}})),
+        ("bounds Int at the i64 top", _doc(bounds={"Int": {"min": I64_MAX - 1, "max": I64_MAX}})),
+        ("bounds Int at the i64 bottom", _doc(bounds={"Int": {"min": I64_MIN, "max": I64_MIN + 1}})),
+        ("bounds Int whole i64", _doc(bounds={"Int": {"min": I64_MIN, "max": I64_MAX}})),
+        ("bounds Int over i64", _doc(bounds={"Int": {"min": 0, "max": I64_MAX + 1}})),
+        ("bounds Int missing min", _doc(bounds={"Int": {"max": 2}})),
+        ("bounds Int extra key", _doc(bounds={"Int": {"min": 0, "max": 2, "step": 1}})),
+        ("bounds both", _doc(bounds={"Nat": {"max": 1}, "Int": {"min": -1, "max": 1}})),
+        ("bounds empty", _doc(bounds={})),
+        ("bounds unknown type", _doc(bounds={"Real": {"max": 1}})),
+        ("bounds lowercase nat", _doc(bounds={"nat": {"max": 1}})),
+        ("bounds not an object", _doc(bounds=[])),
+        ("bounds null", _doc(bounds=None)),
+        ("bounds Nat 1.0", _doc(bounds={"Nat": {"max": 1}}).replace('"max": 1', '"max": 1.0')),
     ]
     out.extend(shapes)
     return out

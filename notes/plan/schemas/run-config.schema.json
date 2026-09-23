@@ -4,7 +4,7 @@
   "schema_epoch": 1,
   "schema_kind": "artifact",
   "title": "Continuum CML Run Configuration",
-  "description": "The finite instantiation of a CML model's sorts and the values of its constants, given to lowering explicitly (RFC 0003 'Configurations and bounds', correction 3). Faults and assumptions from RFC 0003's sketch are deferred to a later schema epoch. Beyond what this schema states, a reader MUST refuse a duplicate object key, a duplicate member of a `set`, and a duplicate key of a `map` (JSON Schema cannot state the last two by structural value). Identity: the canonical ID5 encoding of the document with `set` members and `map` entries sorted by their canonical encoding.",
+  "description": "The finite instantiation of a CML model's sorts and the values of its constants, given to lowering explicitly (RFC 0003 'Configurations and bounds', correction 3). Faults and assumptions from RFC 0003's sketch are deferred to a later schema epoch. The optional `bounds` (RFC 0003 correction 4) was added in place: every instance valid before it stays valid and keeps its meaning. Beyond what this schema states, a reader MUST refuse a duplicate object key, a duplicate member of a `set`, a duplicate key of a `map` (JSON Schema cannot state the last two by structural value), and an `Int` bound whose `min` exceeds its `max` or that holds more than 65536 values (JSON Schema cannot relate two fields). Identity: the canonical ID5 encoding of the document with `set` members and `map` entries sorted by their canonical encoding.",
   "type": "object",
   "required": [
     "schema_id",
@@ -35,6 +35,50 @@
         "$ref": "#/$defs/sort"
       },
       "description": "One finite instantiation per uninterpreted sort the model declares, and no other."
+    },
+    "bounds": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "Nat": {
+          "type": "object",
+          "required": [
+            "max"
+          ],
+          "properties": {
+            "max": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535,
+              "description": "Nat is instantiated as 0..=max: at most 65536 values."
+            }
+          },
+          "additionalProperties": false
+        },
+        "Int": {
+          "type": "object",
+          "required": [
+            "min",
+            "max"
+          ],
+          "properties": {
+            "min": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807
+            },
+            "max": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807
+            }
+          },
+          "additionalProperties": false,
+          "description": "Int is instantiated as min..=max. A reader MUST refuse min > max and a range of more than 65536 values."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Explicit finite bounds for the unbounded integer types (RFC 0003 correction 4). Optional and never empty; a type with no bound has none, and a lowering that needs one refuses rather than inventing it (ADR-0025). Part of the configuration identity when present."
     },
     "constants": {
       "type": "object",

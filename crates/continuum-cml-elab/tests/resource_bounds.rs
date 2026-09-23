@@ -11,7 +11,7 @@ use std::thread;
 
 use continuum_cml_elab::budget::MAX_NODES;
 use continuum_cml_elab::budget::{MAX_TYPE_DEPTH, MAX_WORK};
-use continuum_cml_elab::config::{ConfigErrorKind, MAX_SORT_ELEMENTS, RunConfig};
+use continuum_cml_elab::config::{ConfigErrorKind, MAX_BOUND_VALUES, MAX_SORT_ELEMENTS, RunConfig};
 use continuum_cml_elab::elab::{
     MAX_INLINE_DEPTH, MAX_RECURSION_DEPTH, MAX_TREE_DEPTH, MAX_UNFOLD_NESTING,
 };
@@ -1532,4 +1532,137 @@ fn constant_sizes_are_stored_at_read_time() {
     // B: the set and its three members.
     assert_eq!(config.constant_size("B"), Some(4));
     assert_eq!(config.constant_size("C"), None);
+}
+
+// ---------------------------------------------------------------------------
+// bn-15zfa: explicit `Nat` and `Int` bounds (RFC 0003 correction 4)
+// ---------------------------------------------------------------------------
+
+/// A model of `k` unrefined `Nat` variables with init `init`, and a configuration
+/// that bounds `Nat` to `0..=max`. Built one variable at a time.
+fn bounded_nats(k: usize, max: u64, init: &str) -> (NormModel, RunConfig) {
+    let mut src = String::from("module B\nstate {\n");
+    for i in 0..k {
+        src.push_str(&format!("  n{i}: Nat\n"));
+    }
+    src.push_str(&format!("}}\ninit {{ {init} }}\naction A {{\n"));
+    for i in 0..k {
+        src.push_str(&format!("  unchanged n{i}\n"));
+    }
+    src.push_str("}\n");
+    let model = elaborate_source(&src).expect("elaborates");
+    let doc = format!(
+        r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"B","bounds":{{"Nat":{{"max":{max}}}}},"sorts":{{}},"constants":{{}}}}"#
+    );
+    (model, RunConfig::parse(doc.as_bytes()).expect("reads"))
+}
+
+/// The widest bound times several variables is refused by the domain preflight
+/// before any candidate is enumerated, within the memory limit, having spent little
+/// work. Anti-vacuity: the same model under a small bound lowers.
+#[test]
+fn bounded_domains_are_preflighted_before_enumeration() {
+    fn body() {
+        let widest = MAX_BOUND_VALUES - 1;
+        let (model, config) = bounded_nats(2, widest, "true");
+        let (result, usage) = lower_configured(&model, &config, Limits::default());
+        assert_eq!(
+            result.expect_err("2^32 candidates").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::InitDomainTooLarge)
+        );
+        assert!(usage.work < 10_000, "refused before enumerating: {usage:?}");
+        let (model, config) = bounded_nats(2, 1, "true");
+        let lowered = lower_configured(&model, &config, Limits::default())
+            .0
+            .expect("a small bound lowers");
+        assert_eq!(lowered.model().initial_states().len(), 4);
+    }
+    under_memory_limit("bounded_domains_are_preflighted_before_enumeration", body);
+}
+
+/// A bounded domain feeds the same precharged init enumeration as a refinement: the
+/// work covers one predicate evaluation per candidate (operation counting), and it
+/// grows linearly in the bound.
+#[test]
+fn a_bounded_enumeration_is_charged_and_grows_linearly() {
+    let usage = |max: u64| {
+        let (model, config) = bounded_nats(1, max, "n0 == 0");
+        let (result, usage) = lower_configured(&model, &config, Limits::default());
+        result.expect("lowers");
+        usage
+    };
+    let large = usage(MAX_BOUND_VALUES - 1);
+    assert!(
+        large.work >= init_work(u128::from(MAX_BOUND_VALUES), 1, 1),
+        "every candidate is charged: {large:?}"
+    );
+    let small = usage(MAX_BOUND_VALUES / 2 - 1);
+    assert_linear("bounded enumeration", small.work, large.work);
+}
+
+/// With a work limit under the predicted enumeration, a bounded domain is refused from
+/// the prediction, before any candidate is evaluated; at the measured work it lowers
+/// and one unit less is refused.
+#[test]
+fn the_bounded_enumeration_boundary_is_exact() {
+    let (model, config) = bounded_nats(1, MAX_BOUND_VALUES - 1, "n0 == 0");
+    let (result, used) = lower_configured(&model, &config, Limits::default());
+    result.expect("lowers");
+    let half = Limits {
+        work: init_work(u128::from(MAX_BOUND_VALUES), 1, 1) / 2,
+        ..Limits::default()
+    };
+    let (result, spent) = lower_configured(&model, &config, half);
+    assert_eq!(
+        result.expect_err("under the prediction").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+    assert!(
+        spent.work < MAX_BOUND_VALUES,
+        "less than one unit per candidate: refused before enumerating ({spent:?})"
+    );
+    lower_configured(&model, &config, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the measured limits");
+    let under = Limits {
+        work: used.work - 1,
+        ..Limits::default()
+    };
+    assert_eq!(
+        lower_configured(&model, &config, under)
+            .0
+            .expect_err("one unit less")
+            .kind,
+        LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+    );
+}
+
+/// An `Int` bound at the top of `i64`: the domain and its cardinality are exact, with
+/// no overflow, and the reader's value count does not wrap on the whole range.
+#[test]
+fn an_int_bound_at_the_i64_edge_is_exact() {
+    let model = elaborate_source(&format!(
+        "module E\nstate {{ x: Int }}\ninit {{ x == {} }}\naction A {{ unchanged x }}\n",
+        i64::MAX
+    ))
+    .expect("elaborates");
+    let lo = i64::MAX - (MAX_BOUND_VALUES as i64 - 1);
+    let doc = |lo: i64, hi: i64| {
+        format!(
+            r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"E","bounds":{{"Int":{{"min":{lo},"max":{hi}}}}},"sorts":{{}},"constants":{{}}}}"#
+        )
+    };
+    let config = RunConfig::parse(doc(lo, i64::MAX).as_bytes()).expect("reads");
+    let lowered = lower_configured(&model, &config, Limits::default())
+        .0
+        .expect("lowers");
+    let x = lowered.model().variables().first().expect("x");
+    assert_eq!((x.domain().lo(), x.domain().hi()), (lo, i64::MAX));
+    assert_eq!(lowered.model().initial_states().len(), 1);
+    assert_eq!(
+        RunConfig::parse(doc(i64::MIN, i64::MAX).as_bytes())
+            .expect_err("2^64 values")
+            .kind,
+        ConfigErrorKind::BoundTooLarge
+    );
 }

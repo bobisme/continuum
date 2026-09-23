@@ -45,6 +45,14 @@
 //! identity and one [`RunIdentity`] for the pair; [`Model::identity`] itself is left
 //! the transition system's alone.
 //!
+//! A configuration may also bound `Nat` and `Int` explicitly (RFC 0003 correction 4,
+//! the schema's `bounds`). A `Nat` state variable then ranges over `0..=max` and an
+//! `Int` one over `min..=max`, each intersected with its refinement; an empty
+//! intersection is [`Unlowerable::EmptyRefinement`]. Under a configuration, an integer
+//! state variable with neither a finite refinement nor a bound is
+//! [`Unlowerable::UnboundedType`]; a configuration constant outside the
+//! configuration's own bound is [`ConfigRefusalKind::OutsideBound`].
+//!
 //! # Refinements are domains
 //!
 //! `big: Nat where big <= 5` becomes the declared domain `0..=5`. An update that leaves
@@ -162,7 +170,15 @@ pub enum Unlowerable {
     PrimedOutsidePostcondition,
     /// A refinement no integer satisfies, such as `x > c` at `c = i64::MAX` or bounds
     /// that cross. The domain is empty; it is never widened to make it non-empty.
+    /// Under a run configuration this includes a refinement that no value of the
+    /// configured `Nat` or `Int` bound satisfies.
     EmptyRefinement,
+    /// Under a run configuration, a `Nat` or `Int` that must be finite has neither a
+    /// finite refinement nor a configuration bound (RFC 0003 correction 4). The
+    /// configuration can bound the type; the lowering never bounds it silently
+    /// (ADR-0025). Without a configuration the same state variable is
+    /// [`Unlowerable::UnboundedDomain`].
+    UnboundedType,
 }
 
 impl Unlowerable {
@@ -185,6 +201,7 @@ impl Unlowerable {
             Unlowerable::InitDomainTooLarge => "cml.lower.init_domain_too_large",
             Unlowerable::TooManyInitialStates => "cml.lower.too_many_initial_states",
             Unlowerable::EmptyRefinement => "cml.lower.empty_refinement",
+            Unlowerable::UnboundedType => "cml.lower.unbounded_type",
             Unlowerable::RecursiveCall => "cml.lower.recursive_call",
             Unlowerable::SuccessorDomainTooLarge => "cml.lower.successor_domain_too_large",
             Unlowerable::TooManyVariables => "cml.lower.too_many_variables",
@@ -224,6 +241,9 @@ impl fmt::Display for Unlowerable {
                 "the init predicate accepts too many states to lower"
             }
             Unlowerable::EmptyRefinement => "the refinement admits no integer value",
+            Unlowerable::UnboundedType => {
+                "an unbounded integer type needs a bound from the run configuration"
+            }
             Unlowerable::RecursiveCall => "a recursive call must be unfolded before lowering",
             Unlowerable::SuccessorDomainTooLarge => {
                 "a relational action has too many candidate post-states to enumerate"
@@ -286,6 +306,9 @@ pub enum ConfigRefusalKind {
     IllTyped,
     /// A constant of a function type, which the configuration has no value form for.
     UnbindableType,
+    /// An integer value (of a constant, or inside one) outside the configuration's own
+    /// `Nat` or `Int` bound (RFC 0003 correction 4).
+    OutsideBound,
 }
 
 impl ConfigRefusalKind {
@@ -300,6 +323,7 @@ impl ConfigRefusalKind {
             Self::ExtraConstant => "cml.config.extra_constant",
             Self::IllTyped => "cml.config.ill_typed",
             Self::UnbindableType => "cml.config.unbindable_type",
+            Self::OutsideBound => "cml.config.outside_bound",
         }
     }
 }
@@ -388,6 +412,8 @@ struct Bindings {
     sorts: std::collections::BTreeMap<String, i64>,
     ints: std::collections::BTreeMap<String, i64>,
     bools: std::collections::BTreeMap<String, bool>,
+    /// The configuration's explicit `Nat` and `Int` bounds (correction 4).
+    bounds: crate::config::Bounds,
 }
 
 /// Spend `n` units of work, or refuse with [`Unlowerable::WorkLimitExceeded`].
@@ -587,7 +613,10 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
     // and building each table — a sort of its names, comparing name bytes — is charged
     // before it is built. Each table maps a name to its index, so a lookup is
     // logarithmic in the sort and linear in the name, never a scan of the elements.
-    let mut tables = Tables::default();
+    let mut tables = Tables {
+        bounds: *config.bounds(),
+        ..Tables::default()
+    };
     for (sort, names) in config.sorts() {
         let text: usize = names.iter().map(String::len).sum();
         let cost = names.len().saturating_add(crate::budget::text_cost(text));
@@ -648,6 +677,7 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
 
     let mut bind = Bindings {
         configured: true,
+        bounds: *config.bounds(),
         ..Bindings::default()
     };
     for (sort, names) in config.sorts() {
@@ -713,6 +743,8 @@ enum Slot {
 struct Tables<'c> {
     elements: std::collections::BTreeMap<&'c str, std::collections::BTreeMap<&'c str, usize>>,
     variants: std::collections::BTreeMap<&'c str, std::collections::BTreeSet<&'c str>>,
+    /// The configuration's `Nat` and `Int` bounds, which its own values must respect.
+    bounds: crate::config::Bounds,
 }
 
 impl Tables<'_> {
@@ -757,11 +789,19 @@ fn typecheck(
     let ill = Ok(Err(ConfigRefusalKind::IllTyped));
     Ok(match (value, ty) {
         (_, Type::Function(..)) => Err(ConfigRefusalKind::UnbindableType),
-        (ConfigValue::Int(_), Type::Int)
-        | (ConfigValue::Bool(_), Type::Bool)
+        // An integer inside the configuration's own bound for its type; a type with no
+        // bound admits every value, as before correction 4.
+        (ConfigValue::Int(n), Type::Int) => match tables.bounds.int_range() {
+            Some((lo, hi)) if *n < lo || *n > hi => Err(ConfigRefusalKind::OutsideBound),
+            _ => Ok(()),
+        },
+        (ConfigValue::Int(n), Type::Nat) if *n >= 0 => match tables.bounds.nat_max() {
+            Some(hi) if *n > hi => Err(ConfigRefusalKind::OutsideBound),
+            _ => Ok(()),
+        },
+        (ConfigValue::Bool(_), Type::Bool)
         | (ConfigValue::Str(_), Type::Str)
         | (ConfigValue::None, Type::Option(_)) => Ok(()),
-        (ConfigValue::Int(n), Type::Nat) if *n >= 0 => Ok(()),
         (ConfigValue::Elem { sort, name }, Type::Sort(s)) => {
             burn(budget, crate::budget::text_cost(s.len()) as u64, at)?;
             if sort != s {
@@ -898,7 +938,7 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
                 let size = budget.bind.sorts.get(s).copied().unwrap_or(1);
                 (0, size.saturating_sub(1))
             }
-            _ => domain_of(v.name.as_str(), &v.ty, &v.refinement, v.span)?,
+            _ => domain_of(v.name.as_str(), &v.ty, &v.refinement, v.span, &budget.bind)?,
         };
         builder = builder.variable(&v.name, lo, hi);
         if let (Ok(name), Ok(domain)) = (Ident::new(&v.name), Domain::new(lo, hi)) {
@@ -1379,13 +1419,24 @@ fn standard_behavior(
         || (model.actions.len() == 1 && model.actions.first().is_some_and(|a| &a.name == next))
 }
 
-fn domain_of(name: &str, ty: &Type, refinement: &[Expr], span: Span) -> R<(i64, i64)> {
-    let mut lo: Option<i64> = match ty {
-        Type::Nat => Some(0),
-        Type::Int => None,
+/// The finite domain of an integer state variable: its type's range — `Nat` from `0`,
+/// narrowed to a run configuration's explicit bound when it gives one (correction 4) —
+/// intersected with every interval clause of its refinement. Constant work per clause.
+fn domain_of(
+    name: &str,
+    ty: &Type,
+    refinement: &[Expr],
+    span: Span,
+    bind: &Bindings,
+) -> R<(i64, i64)> {
+    let (mut lo, mut hi): (Option<i64>, Option<i64>) = match ty {
+        Type::Nat => (Some(0), bind.bounds.nat_max()),
+        Type::Int => match bind.bounds.int_range() {
+            Some((a, b)) => (Some(a), Some(b)),
+            None => (None, None),
+        },
         _ => return no(Unlowerable::NonIntegerState, span),
     };
-    let mut hi: Option<i64> = None;
     let raise = |slot: &mut Option<i64>, v: i64| *slot = Some(slot.map_or(v, |x| x.max(v)));
     let lower_to = |slot: &mut Option<i64>, v: i64| *slot = Some(slot.map_or(v, |x| x.min(v)));
     for clause in refinement {
@@ -1442,6 +1493,8 @@ fn domain_of(name: &str, ty: &Type, refinement: &[Expr], span: Span) -> R<(i64, 
     match (lo, hi) {
         (Some(lo), Some(hi)) if lo <= hi => Ok((lo, hi)),
         (Some(_), Some(_)) => no(Unlowerable::EmptyRefinement, span),
+        // A configured lowering could have bounded the type: the refusal names it.
+        _ if bind.configured => no(Unlowerable::UnboundedType, span),
         _ => no(Unlowerable::UnboundedDomain, span),
     }
 }
