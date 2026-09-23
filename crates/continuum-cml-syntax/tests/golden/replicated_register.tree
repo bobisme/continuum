@@ -1,0 +1,60 @@
+(module ReplicatedRegister
+  (sort Node)
+  (sort Value)
+  (const Nodes (Set Node))
+  (const Quorum (Set (Set Node)))
+  (state
+    (var chosen (Map Nat Value))
+    (var stable (Map Node (Map Nat Value)))
+    (var alive (Set Node)))
+  (init
+    (clause (eq chosen (empty-braces)))
+    (clause (eq stable (map-comp n (empty-braces) ((n Nodes)))))
+    (clause (eq alive Nodes)))
+  (action Stabilize
+    (params (n Node) (epoch Nat) (value Value))
+    (block
+      (require (in n alive))
+      (require (in (method (index stable n) get epoch) (set None (call Some value))))
+      (next stable (update stable n (method (index stable n) put epoch value)))
+      (unchanged chosen alive)))
+  (action Choose
+    (params (epoch Nat) (value Value) (q (Set Node)))
+    (block
+      (require (in q Quorum))
+      (require
+        (forall ((n q)) (eq (method (index stable n) get epoch) (call Some value))))
+      (require (in (method chosen get epoch) (set None (call Some value))))
+      (next chosen (method chosen put epoch value))
+      (unchanged stable alive)))
+  (action Crash
+    (params (n Node))
+    (block
+      (require (in n alive))
+      (next alive (diff alive (set n)))
+      (unchanged chosen stable)))
+  (action Recover
+    (params (n Node))
+    (block
+      (require (notin n alive))
+      (next alive (union alive (set n)))
+      (unchanged chosen stable)))
+  (invariant Agreement
+    (clause
+      (forall
+        ((epoch) (v1) (v2))
+        (implies
+          (and
+            (eq (method chosen get epoch) (call Some v1))
+            (eq (method chosen get epoch) (call Some v2)))
+          (eq v1 v2)))))
+  (invariant StableWitness
+    (clause
+      (forall
+        ((epoch) (value))
+        (implies
+          (eq (method chosen get epoch) (call Some value))
+          (exists
+            ((q Quorum))
+            (forall ((n q)) (eq (method (index stable n) get epoch) (call Some value))))))))
+  (fairness weak Recover))

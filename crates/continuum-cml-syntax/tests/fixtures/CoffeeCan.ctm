@@ -1,0 +1,45 @@
+// Grammar fixture in the shape of the Wave 0 Coffee Can port (PORTING_WAVES.md anchor).
+// It exercises bounded integers, arithmetic guards, and relational `next` updates.
+// It is parser acceptance input, not the PR 27a port.
+module CoffeeCan
+
+const MaxBeans: Nat
+
+state {
+  white: Nat
+  black: Nat
+}
+
+init {
+  white in 0..MaxBeans
+  black in 0..MaxBeans
+  white + black >= 1
+}
+
+action PickSameColorWhite {
+  require white >= 2
+  next white = white - 2
+  next black = black + 1
+}
+
+action PickSameColorBlack {
+  require black >= 2
+  next black = black - 1
+  unchanged white
+}
+
+action PickDifferentColor {
+  require white >= 1 && black >= 1
+  next black = black - 1
+  unchanged white
+}
+
+action Next = PickSameColorWhite | PickSameColorBlack | PickDifferentColor
+
+invariant WhiteParity {
+  white % 2 == 0 || white % 2 == 1
+}
+
+invariant NotEmpty {
+  white + black >= 1
+}

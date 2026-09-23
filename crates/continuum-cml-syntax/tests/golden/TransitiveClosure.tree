@@ -1,0 +1,32 @@
+(module TransitiveClosure
+  (sort Node)
+  (const Nodes (Set Node))
+  (const Edges (Set (tuple-type Node Node)))
+  (def compose
+    (params (r (Set (tuple-type Node Node))) (s (Set (tuple-type Node Node))))
+    (Set (tuple-type Node Node))
+    (set-comp
+      (tuple a c)
+      ((a Nodes) (c Nodes))
+      (where (exists ((b Nodes)) (and (in (tuple a b) r) (in (tuple b c) s))))))
+  (def closure
+    (params (r (Set (tuple-type Node Node))) (k Nat))
+    (Set (tuple-type Node Node))
+    (if (eq k 0) r (call closure (union r (call compose r r)) (sub k 1))))
+  (state (var reach (Set (tuple-type Node Node))))
+  (init (clause (eq reach Edges)))
+  (action Step
+    (params)
+    (block
+      (require (ne reach (union reach (call compose reach reach))))
+      (next reach (union reach (call compose reach reach)))))
+  (invariant ContainsEdges (clause (subseteq Edges reach)))
+  (invariant Transitive
+    (clause
+      (forall
+        ((a Nodes) (b Nodes) (c Nodes))
+        (implies
+          (and
+            (and (in (tuple a b) reach) (in (tuple b c) reach))
+            (eq reach (union reach (call compose reach reach))))
+          (in (tuple a c) reach))))))

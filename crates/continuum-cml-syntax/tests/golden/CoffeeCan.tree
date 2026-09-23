@@ -1,0 +1,24 @@
+(module CoffeeCan
+  (const MaxBeans Nat)
+  (state (var white Nat) (var black Nat))
+  (init
+    (clause (in white (range 0 MaxBeans)))
+    (clause (in black (range 0 MaxBeans)))
+    (clause (ge (add white black) 1)))
+  (action PickSameColorWhite
+    (params)
+    (block (require (ge white 2)) (next white (sub white 2)) (next black (add black 1))))
+  (action PickSameColorBlack
+    (params)
+    (block (require (ge black 2)) (next black (sub black 1)) (unchanged white)))
+  (action PickDifferentColor
+    (params)
+    (block
+      (require (and (ge white 1) (ge black 1)))
+      (next black (sub black 1))
+      (unchanged white)))
+  (action Next
+    (params)
+    (choice PickSameColorWhite PickSameColorBlack PickDifferentColor))
+  (invariant WhiteParity (clause (or (eq (mod white 2) 0) (eq (mod white 2) 1))))
+  (invariant NotEmpty (clause (ge (add white black) 1))))

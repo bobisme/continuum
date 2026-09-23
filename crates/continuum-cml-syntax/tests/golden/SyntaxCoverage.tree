@@ -1,0 +1,61 @@
+(model SyntaxCoverage
+  (sort Proc)
+  (type-alias Pair (tuple-type Proc Nat))
+  (type-alias Msg (record-type (src Proc) (dst Proc) (body (Seq Nat))))
+  (type-alias Rel (-> Proc (-> Proc Bool)))
+  (enum Phase (Idle Busy Done))
+  (const Procs (Set Proc))
+  (state
+    (var phase (Map Proc Phase))
+    (var inbox (Map Proc (Seq Msg)))
+    (var log (Seq Pair))
+    (var label (Map Proc Nat) (where (forall ((p Procs)) (lt (index label p) 10)))))
+  (init Start
+    (clause (eq phase (map-comp p Idle ((p Procs)))))
+    (clause (eq inbox (map-comp p (seq) ((p Procs)))))
+    (clause (eq log (seq)))
+    (clause (eq label (map-comp p 0 ((p Procs))))))
+  (action Send
+    (params (p Proc) (q Proc) (n Nat))
+    (block
+      (require (and (eq (index phase p) Idle) (ne p q)))
+      (let m (record (src p) (dst q) (body (seq n (add n 1)))))
+      (next inbox (update inbox q (method (index inbox q) append m)))
+      (next phase (update phase p Busy))
+      (unchanged log label)))
+  (action Receive
+    (params (q Proc))
+    (block
+      (require (ne (index inbox q) (seq)))
+      (let m (method (index inbox q) head))
+      (next inbox (update inbox q (method (index inbox q) tail)))
+      (next log (method log append (tuple (field m src) (method (field m body) len))))
+      (next label
+        (update label q (if (ge (index label q) 9) 0 (add (index label q) 1))))
+      (clause (eq (index (prime phase) (field m src)) Done))))
+  (action Reset
+    (params (p Proc))
+    (block
+      (require (eq (index phase p) Done))
+      (next phase (update phase p Idle))
+      (unchanged inbox log label)))
+  (action Step (params) (choice Send Receive Reset))
+  (invariant LabelsBounded
+    (let limit 9)
+    (clause (forall ((p Procs)) (in (index label p) (range 0 limit)))))
+  (invariant Arithmetic
+    (clause
+      (or
+        (eq (sub (add (neg 1) (mod (div (mul 2 3) 1) 4)) 0) 5)
+        (subseteq (intersect (set 1 2) (set 2)) (set 2)))))
+  (invariant Logic
+    (clause (implies true (implies false (not true))))
+    (clause (iff (ne "busy" "idle\n") (eq (tuple 1 2) (tuple 1 2)))))
+  (invariant Collections
+    (clause (eq (set-comp (mul n 2) ((n (range 0 3))) (where (ne n 1))) (set 0 4 6)))
+    (clause (eq (method (map (1 2) (3 4)) get 1) (call Some 2)))
+    (clause (eq (diff Procs (empty-braces)) Procs))
+    (clause (exists ((p) (q Procs)) (notin p (set q)))))
+  (behavior Live (and (always (eventually (eq phase phase))) (leads_to true false)))
+  (fairness strong Receive Reset)
+  (def double (params (n Nat)) Nat (add n n)))

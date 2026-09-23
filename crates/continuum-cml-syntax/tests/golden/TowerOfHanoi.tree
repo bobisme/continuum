@@ -1,0 +1,30 @@
+(module TowerOfHanoi
+  (type-alias Tower (Seq Nat))
+  (state (var towers (Seq Tower)))
+  (init (clause (eq towers (seq (seq 1 2 3) (seq) (seq)))))
+  (def top (params (t Tower)) Nat (method t head))
+  (action Move
+    (params (from Nat) (to Nat))
+    (block
+      (require (and (in from (range 0 2)) (in to (range 0 2))))
+      (require (ne from to))
+      (require (ne (index towers from) (seq)))
+      (require
+        (or
+          (eq (index towers to) (seq))
+          (lt (call top (index towers from)) (call top (index towers to)))))
+      (next towers
+        (update
+          (update towers from (method (index towers from) tail))
+          to
+          (method (index towers to) prepend (call top (index towers from)))))))
+  (invariant Sorted
+    (clause
+      (forall
+        ((t (range 0 2)))
+        (forall
+          ((i (range 0 2)))
+          (implies
+            (lt (add i 1) (method (index towers t) len))
+            (lt (index (index towers t) i) (index (index towers t) (add i 1))))))))
+  (invariant NotSolved (clause (ne (index towers 2) (seq 1 2 3)))))

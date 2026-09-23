@@ -1,0 +1,33 @@
+(model DieHard
+  (state (var big Nat (where (le big 5))) (var small Nat (where (le small 3))))
+  (init Init (clause (and (eq big 0) (eq small 0))))
+  (action FillSmall
+    (params)
+    (block (clause (and (eq (prime big) big) (eq (prime small) 3)))))
+  (action FillBig
+    (params)
+    (block (clause (and (eq (prime big) 5) (eq (prime small) small)))))
+  (action EmptySmall
+    (params)
+    (block (clause (and (eq (prime big) big) (eq (prime small) 0)))))
+  (action EmptyBig
+    (params)
+    (block (clause (and (eq (prime big) 0) (eq (prime small) small)))))
+  (action SmallToBig
+    (params)
+    (block
+      (let next_big (call min (add big small) 5))
+      (clause (eq (prime big) next_big))
+      (clause (eq (prime small) (sub small (sub next_big big))))))
+  (action BigToSmall
+    (params)
+    (block
+      (let next_small (call min (add big small) 3))
+      (clause (eq (prime small) next_small))
+      (clause (eq (prime big) (sub big (sub next_small small))))))
+  (action Next
+    (params)
+    (choice FillSmall FillBig EmptySmall EmptyBig SmallToBig BigToSmall))
+  (behavior Spec (and Init (always (or (call step Next) (call stutter (whole-state))))))
+  (invariant TypeOK (clause (and (in big (range 0 5)) (in small (range 0 3)))))
+  (invariant NotSolved (clause (ne big 4))))

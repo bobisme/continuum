@@ -1,0 +1,38 @@
+// Grammar fixture in the shape of the Wave 0 Transitive Closure port (PORTING_WAVES.md
+// anchor). It exercises relations as sets of tuples, set comprehensions with filters,
+// and a recursive model function. It is parser acceptance input, not the PR 27a port.
+module TransitiveClosure
+
+type Node
+
+const Nodes: Set[Node]
+const Edges: Set[(Node, Node)]
+
+def compose(r: Set[(Node, Node)], s: Set[(Node, Node)]): Set[(Node, Node)] =
+  {(a, c) | a in Nodes, c in Nodes where exists b in Nodes: (a, b) in r && (b, c) in s}
+
+def closure(r: Set[(Node, Node)], k: Nat): Set[(Node, Node)] =
+  if k == 0 then r else closure(r union compose(r, r), k - 1)
+
+state {
+  reach: Set[(Node, Node)]
+}
+
+init {
+  reach = Edges
+}
+
+action Step {
+  require reach != reach union compose(reach, reach)
+  next reach = reach union compose(reach, reach)
+}
+
+invariant ContainsEdges {
+  Edges subseteq reach
+}
+
+invariant Transitive {
+  forall a in Nodes, b in Nodes, c in Nodes:
+    (a, b) in reach && (b, c) in reach && reach == reach union compose(reach, reach)
+    => (a, c) in reach
+}
