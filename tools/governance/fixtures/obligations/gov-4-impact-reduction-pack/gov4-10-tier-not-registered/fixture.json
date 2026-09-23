@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "property-tier-registered",
+  "description": "`property_analysis.tier` is not one of RFC 0014's property preservation tiers.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-10-tier-not-registered",
+  "requirement": "GOV-4-10",
+  "rule": "property-class-analysis"
+}

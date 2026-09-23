@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "por-review-record-covers-a-por-change",
+  "description": "A POR/reduction review record whose `covers` entry matches no POR/reduction change in the delta.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-por-covers-mismatch",
+  "requirement": "GOV-4-09",
+  "rule": "por-review-record"
+}

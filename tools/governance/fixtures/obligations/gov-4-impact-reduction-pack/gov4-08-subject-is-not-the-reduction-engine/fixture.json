@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "no-reduction-pair-distinct-implementations",
+  "description": "`subject` names an implementation other than the reduction engine.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-08-subject-is-not-the-reduction-engine",
+  "requirement": "GOV-4-08",
+  "rule": "no-reduction-differential"
+}

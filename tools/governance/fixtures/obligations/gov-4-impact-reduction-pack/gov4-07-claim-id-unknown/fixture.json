@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "claim-impact-ids-resolve",
+  "description": "`semantic.claim_impact.claims` names a claim id that resolves to no docs/18 row.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-claim-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-07-claim-id-unknown",
+  "requirement": "GOV-4-07",
+  "rule": "semantic-claim-impact"
+}

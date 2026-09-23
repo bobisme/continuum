@@ -1,0 +1,16 @@
+{
+  "base": {
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture"
+  },
+  "check": "dependence-mutation-test-is-fresh",
+  "description": "The mutation test already existed, unchanged, at the base.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-09-mutation-test-did-not-move",
+  "requirement": "GOV-4-09",
+  "rule": "dependence-mutation"
+}

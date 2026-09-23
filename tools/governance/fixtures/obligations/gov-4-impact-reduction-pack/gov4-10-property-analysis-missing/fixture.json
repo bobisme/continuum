@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "property-analysis-present",
+  "description": "A POR/reduction record with no `[por_reduction.property_analysis]` table.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-10-property-analysis-missing",
+  "requirement": "GOV-4-10",
+  "rule": "property-class-analysis"
+}

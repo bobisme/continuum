@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "dependence-mutation-test-resolves",
+  "description": "`dependence_mutation_tests` names a test function that is not declared at head.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-09-mutation-test-does-not-exist",
+  "requirement": "GOV-4-09",
+  "rule": "dependence-mutation"
+}

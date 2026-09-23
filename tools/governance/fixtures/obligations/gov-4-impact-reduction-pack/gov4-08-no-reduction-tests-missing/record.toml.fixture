@@ -1,0 +1,18 @@
+[change]
+bone = "bn-2tm3"
+author = "fixture-author"
+summary = "fixture: a dpor reduction change with a full por_reduction record"
+
+[por_reduction]
+covers = ["crates/continuum-engine-dpor/src/gov4_fixture.rs"]
+
+dependence_mutation_tests = ["crates/continuum-engine-dpor/tests/gov4_fixture.rs::declares_conflicting_events_independent"]
+
+[por_reduction.property_analysis]
+tier = "Tier A"
+note = "continuum-engine-dpor preserves Tier A finite-state safety after this reduction change"
+
+[por_reduction.performance]
+metric = "reduction ratio by observer"
+note = "continuum-engine-dpor's reduction ratio improved for this change; recorded in the fixture benchmark"
+

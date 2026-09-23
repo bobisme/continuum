@@ -1,0 +1,13 @@
+//! Fixture tests (inert data; never compiled).
+
+/// No-reduction differential campaign, but never names the subject crate.
+#[test]
+fn vs_unreduced_missing_subject() {
+    let _ = continuum_engine_explicit::VERSION;
+}
+
+/// Mutation, but never names a mutation kind.
+#[test]
+fn touches_dependence() {
+    assert_eq!(1, 1);
+}

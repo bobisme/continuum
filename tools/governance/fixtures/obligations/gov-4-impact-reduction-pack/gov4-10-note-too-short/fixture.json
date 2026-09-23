@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "property-analysis-names-the-change",
+  "description": "`property_analysis.note` is too short and names no changed crate.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-10-note-too-short",
+  "requirement": "GOV-4-10",
+  "rule": "property-class-analysis"
+}

@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "pack-fidelity-profile-names-the-change",
+  "description": "`fidelity_profile.note` is too short and names no changed pack crate.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-pack-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-12-fidelity-note-too-short",
+  "requirement": "GOV-4-12",
+  "rule": "pack-fidelity-profile"
+}

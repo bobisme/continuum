@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "performance-report-names-the-change",
+  "description": "`performance.note` is too short and names no changed crate.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-11-note-does-not-name-crate",
+  "requirement": "GOV-4-11",
+  "rule": "performance-report"
+}

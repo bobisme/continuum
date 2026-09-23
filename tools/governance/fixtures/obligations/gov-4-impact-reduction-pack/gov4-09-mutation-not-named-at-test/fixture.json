@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "dependence-mutation-named-at-the-test",
+  "description": "The named mutation test never names one of docs/19 \u00a74's mutation kinds.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-09-mutation-not-named-at-test",
+  "requirement": "GOV-4-09",
+  "rule": "dependence-mutation"
+}

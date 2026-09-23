@@ -1,0 +1,12 @@
+{
+  "base": {},
+  "check": "por-change-has-review-record",
+  "description": "A POR/reduction change (continuum-engine-dpor source) with no review record at all.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture"
+  },
+  "id": "gov4-por-no-record",
+  "requirement": "GOV-4-08",
+  "rule": "por-review-record"
+}

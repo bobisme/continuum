@@ -87,7 +87,7 @@ Require:
 - updated schemas; (delivered: bn-37b1)
 - migration note; (delivered: bn-37b1)
 - security review;
-- claim impact. (delivered: bn-2tm3)
+- claim impact.
 
 The first five of these obligations are enforced by the `gov-4-semantic`
 obligation set, `tools/governance/obligations/gov4_semantic.py`, run by
@@ -98,46 +98,24 @@ review record under `tools/governance/reviews/` that names its tests, schema
 statement, and typed migration verdict, and the check resolves every name
 against the tree and the delta. The security review is enforced at the record
 level only and is not delivered: review state lives outside the repository,
-so no committed artifact lets a checker confirm it. Claim impact extends the
-same `[semantic]` record with `claim_impact`, checked by the
-`gov-4-impact-reduction-pack` obligation set below.
+so no committed artifact lets a checker confirm it.
 
 ### POR/reduction changes
 
 Require:
 
-- no-reduction differential campaign; (delivered: bn-2tm3)
-- mutation of dependence relation; (delivered: bn-2tm3)
-- liveness/property-class analysis; (delivered: bn-2tm3)
-- performance report. (delivered: bn-2tm3)
-
-These four obligations are enforced by the `gov-4-impact-reduction-pack`
-obligation set, `tools/governance/obligations/gov4_impact_reduction_pack.py`,
-run by the same harness (evidence in
-`tools/governance/evidence/gov-4-impact-reduction-pack.json`). A change to
-`continuum-engine-dpor` (docs/01 §7.2, the partial-order reduction engine)
-ships a review record's `[por_reduction]` table: a no-reduction differential
-test pairing the reduction engine against an unreduced oracle, a mutation
-test naming one of docs/19 §4's dependence-relation mutation kinds, a typed
-RFC 0014 property-preservation tier, and a performance report against one of
-RFC 0014's `Evaluation` metrics.
+- no-reduction differential campaign;
+- performance report.
 
 ### Pack changes
 
 Require:
 
-- fidelity profile; (delivered: bn-2tm3)
+- fidelity profile;
 - host/Lab conformance;
 - fault coverage;
 - independence review;
 - version bump.
-
-The first of these obligations is enforced by the same
-`gov-4-impact-reduction-pack` obligation set. A change to a domain pack (a
-`continuum-effects-*` crate, RFC 0002) ships a review record's `[pack]` table
-naming one of RFC 0002's required fidelity profiles. The remaining four
-(host/Lab conformance, fault coverage, independence review, version bump) are
-a later Bone's.
 
 ### Kernel changes
 

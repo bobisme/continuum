@@ -1,0 +1,11 @@
+[change]
+bone = "bn-2tm3"
+author = "fixture-author"
+summary = "fixture: a new reference-engine step function with no claim impact"
+
+[semantic]
+covers = ["crates/continuum-engine-reference/src/gov4_fixture.rs"]
+
+[semantic.claim_impact]
+claims = []
+reason = "the step helper carries no public claim; it is an internal refactor with no observable behavior change"

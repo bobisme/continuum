@@ -1,0 +1,12 @@
+{
+  "base": {},
+  "check": "gov4-07-12-list-registered",
+  "description": "docs/12 \u00a74's POR/reduction changes list no longer names GOV-4-09/10 in order.",
+  "expect": "violation",
+  "head": {
+    "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md": "constitution.md.fixture"
+  },
+  "id": "gov4-por-section-list-drifted",
+  "requirement": "GOV-4-09",
+  "rule": "gov4-07-12-review-list"
+}

@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "no-reduction-test-resolves",
+  "description": "`no_reduction_tests` names a test function that is not declared at head.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-08-no-reduction-test-does-not-exist",
+  "requirement": "GOV-4-08",
+  "rule": "no-reduction-differential"
+}

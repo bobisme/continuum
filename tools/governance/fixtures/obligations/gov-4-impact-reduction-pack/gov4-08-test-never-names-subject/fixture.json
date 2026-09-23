@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "no-reduction-test-uses-both-implementations",
+  "description": "The named test never mentions the subject crate as a Rust path.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-08-test-never-names-subject",
+  "requirement": "GOV-4-08",
+  "rule": "no-reduction-differential"
+}

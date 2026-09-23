@@ -1,0 +1,12 @@
+{
+  "base": {},
+  "check": "pack-change-has-review-record",
+  "description": "A pack change (continuum-effects-network source) with no review record at all.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture.rs": "src.rs.fixture"
+  },
+  "id": "gov4-12-pack-no-record",
+  "requirement": "GOV-4-12",
+  "rule": "pack-review-record"
+}

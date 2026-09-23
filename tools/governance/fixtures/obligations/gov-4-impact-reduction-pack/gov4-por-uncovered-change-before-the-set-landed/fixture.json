@@ -1,0 +1,14 @@
+{
+  "base": {
+    "tools/governance/obligations/gov4_impact_reduction_pack.py": null
+  },
+  "check": "por-change-has-review-record",
+  "description": "The same uncovered POR/reduction change on a base cut before this set existed: reported, not enforced.",
+  "expect": "deferred",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture"
+  },
+  "id": "gov4-por-uncovered-change-before-the-set-landed",
+  "requirement": "GOV-4-08",
+  "rule": "por-review-record"
+}

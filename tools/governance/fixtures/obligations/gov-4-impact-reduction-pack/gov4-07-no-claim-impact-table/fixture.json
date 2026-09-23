@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "claim-impact-declared",
+  "description": "A semantic change's review record covers it but carries no `[semantic.claim_impact]` table.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-claim-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-07-no-claim-impact-table",
+  "requirement": "GOV-4-07",
+  "rule": "semantic-claim-impact"
+}

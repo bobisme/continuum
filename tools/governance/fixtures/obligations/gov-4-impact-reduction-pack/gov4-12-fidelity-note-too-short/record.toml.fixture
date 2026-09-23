@@ -1,0 +1,12 @@
+[change]
+bone = "bn-2tm3"
+author = "fixture-author"
+summary = "fixture: a network pack change with a pack record"
+
+[pack]
+covers = ["crates/continuum-effects-network/src/gov4_fixture.rs"]
+
+[pack.fidelity_profile]
+profile = "adversarial-envelope"
+note = "fine"
+

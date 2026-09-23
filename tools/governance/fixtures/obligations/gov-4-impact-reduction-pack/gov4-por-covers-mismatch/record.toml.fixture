@@ -1,0 +1,7 @@
+[change]
+bone = "bn-2tm3"
+author = "fixture-author"
+summary = "fixture: a por_reduction record that covers the wrong path"
+
+[por_reduction]
+covers = ["crates/continuum-engine-dpor/src/an_unrelated_path.rs"]

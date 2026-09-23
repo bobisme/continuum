@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "por-change-has-review-record",
+  "description": "A dpor reduction change shipping a complete por_reduction record: no-reduction differential campaign, dependence mutation, property-class analysis, and a performance report, all fresh.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-dpor/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-por-complete-record-is-clean",
+  "requirement": "GOV-4-08",
+  "rule": "por-review-record"
+}

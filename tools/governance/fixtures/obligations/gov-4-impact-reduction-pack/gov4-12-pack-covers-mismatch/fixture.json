@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "pack-review-record-covers-a-pack-change",
+  "description": "A pack review record whose `covers` entry matches no pack change in the delta.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-pack-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-12-pack-covers-mismatch",
+  "requirement": "GOV-4-12",
+  "rule": "pack-review-record"
+}

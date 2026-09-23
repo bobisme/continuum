@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "claim-impact-declared",
+  "description": "A semantic change whose record declares no claim impact, with a reason long enough to carry it.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-claim-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-claim-impact-no-claims-with-reason-is-clean",
+  "requirement": "GOV-4-07",
+  "rule": "semantic-claim-impact"
+}

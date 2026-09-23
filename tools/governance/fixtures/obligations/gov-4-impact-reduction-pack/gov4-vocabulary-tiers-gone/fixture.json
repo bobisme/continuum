@@ -1,0 +1,12 @@
+{
+  "base": {},
+  "check": "gov4-07-12-vocabulary-present",
+  "description": "RFC 0014 no longer lists the property preservation tiers GOV-4-10 types against.",
+  "expect": "violation",
+  "head": {
+    "notes/plan/rfcs/0014-observer-indexed-dpor.md": "rfc0014.md.fixture"
+  },
+  "id": "gov4-vocabulary-tiers-gone",
+  "requirement": "GOV-4-10",
+  "rule": "gov4-07-12-review-list"
+}

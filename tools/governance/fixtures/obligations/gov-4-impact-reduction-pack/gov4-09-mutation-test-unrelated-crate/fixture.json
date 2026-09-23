@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "dependence-mutation-test-exercises-the-change",
+  "description": "The named mutation test lives in a crate that does not reach the changed crate.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-value/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-09-mutation-test-unrelated-crate",
+  "requirement": "GOV-4-09",
+  "rule": "dependence-mutation"
+}

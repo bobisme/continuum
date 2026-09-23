@@ -1,0 +1,101 @@
+# RFC 0014: Observer-Indexed DPOR and Causal Reduction
+
+**Status:** Proposed  
+**Target gates:** G2 and G6 (Revision 2 scheme, docs/26 — not citable without translation to the docs/52 Revision 3 gates per plan §22)
+
+## Objective
+
+Explore one representative of every execution class relevant to the active property contract, while emitting enough evidence to justify the omission of other schedules.
+
+## Observation contract
+
+```rust
+struct ObservationContract {
+    view: ViewId,
+    visible_events: EventPredicate,
+    properties: Vec<PropertyId>,
+    fairness: Vec<FairnessMonitor>,
+    lifecycle: LifecycleSensitivity,
+    time: TimeSensitivity,
+    durability: DurabilitySensitivity,
+    security: Vec<HyperObserver>,
+}
+```
+
+The contract is content-addressed and included in exploration/cache keys.
+
+## Dependence layers
+
+1. **Structural:** same task, causal predecessor, region lifecycle.
+2. **Resource:** overlapping read/write/linear resource footprints.
+3. **Effect:** network endpoint, storage object, timer, entropy, fault scope.
+4. **Observer:** visible order or state projection differs.
+5. **Fairness:** swapping changes enabledness/justice/compassion accounting.
+6. **Refinement:** event mapping or stuttering classification differs.
+7. **Hyperproperty:** cross-run relation observes the order or information flow.
+
+Independence requires all active layers to permit commutation.
+
+## Witness
+
+A dynamic witness includes:
+
+```text
+configuration digest
+left/right event schemas and concrete parameters
+enabledness evidence
+resource footprint evidence
+left-right and right-left successor digests
+view equality witness
+visible-event equality
+obligation/fairness delta equality
+semantic rule IDs
+```
+
+The checker can replay the local diamond under reference semantics.
+
+## Baseline algorithm
+
+The product baseline is source-DPOR with conservative dependencies. The next promotion target is parsimonious optimal DPOR because it explores one Mazurkiewicz class with polynomial worst-case space for its supported setting.
+
+Await-aware handling prevents pure polling/wait loops from dominating exploration and preserves livelock diagnostics.
+
+## True-concurrency escalation
+
+When event boundaries and independence are trustworthy, Continuum may build:
+
+- prime event structures;
+- occurrence-net/unfolding prefixes;
+- interval pomsets;
+- higher-dimensional cells for jointly independent events.
+
+These representations are not automatically superior. They compete against the best certified DPOR baseline.
+
+## Former property preservation tiers
+
+- Tier A: finite state safety predicates.
+- Tier B: stutter-invariant LTL without next.
+- Tier C: fairness-aware liveness.
+- Tier D: hyperproperties and quantitative observers.
+
+A reduction theorem/certificate is specific to a tier. Safety soundness cannot be reused as a liveness claim.
+
+## Caching across observers
+
+If observer `fine` refines `coarse`, independence under `fine` is reusable under `coarse`, while the reverse is not. Continuum maintains an observer lattice and can reuse conservative witnesses downward.
+
+## Evaluation
+
+Metrics:
+
+- explored executions/configurations;
+- witness-check cost;
+- wall time and memory;
+- bug depth/time-to-first-counterexample;
+- reduction ratio by observer;
+- certificate size/check time;
+- missed-bug mutation score (must be zero for certified tier).
+
+## Acceptance
+
+Demonstrate property-dependent reductions on Dining Philosophers, an audit-sensitive transaction protocol, a cancellation-heavy service, and one consensus model. The fine/coarse observer monotonicity theorem must be checked in Lean before dynamic observer-based pruning raises assurance.

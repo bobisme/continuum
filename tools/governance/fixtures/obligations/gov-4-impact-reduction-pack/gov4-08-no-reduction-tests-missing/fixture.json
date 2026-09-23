@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "no-reduction-tests-named",
+  "description": "A POR/reduction record with no `no_reduction_tests` entry.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-dpor/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-por-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-08-no-reduction-tests-missing",
+  "requirement": "GOV-4-08",
+  "rule": "no-reduction-differential"
+}

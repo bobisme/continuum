@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "pack-fidelity-profile-registered",
+  "description": "`fidelity_profile.profile` is not one of RFC 0002's required profiles.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture.rs": "src.rs.fixture",
+    "tools/governance/reviews/gov4-pack-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov4-12-fidelity-profile-not-registered",
+  "requirement": "GOV-4-12",
+  "rule": "pack-fidelity-profile"
+}
