@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "differential-test-resolves",
+  "description": "The named differential test does not exist.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-03-differential-test-does-not-exist",
+  "requirement": "GOV-4-03",
+  "rule": "differential-tests"
+}

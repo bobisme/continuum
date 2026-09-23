@@ -1,0 +1,16 @@
+{
+  "base": {
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture"
+  },
+  "check": "differential-test-is-fresh",
+  "description": "The differential test already existed, unchanged, at the base; it cannot pin new behaviour.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-03-differential-test-did-not-move",
+  "requirement": "GOV-4-03",
+  "rule": "differential-tests"
+}

@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "delivery-agrees-with-registry",
+  "description": "GOV-4-06 is declared not delivered, but the registry row reads satisfied.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "notes/plan/notes/PLAN_REQUIREMENTS.json": [
+      {
+        "find": "\"status\": \"active\",\n      \"summary\": \"security review\"",
+        "replace": "\"status\": \"satisfied\",\n      \"summary\": \"security review\""
+      }
+    ]
+  },
+  "id": "harness-undelivered-id-marked-satisfied",
+  "requirement": "",
+  "rule": "delivery-link"
+}

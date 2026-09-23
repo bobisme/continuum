@@ -1,0 +1,13 @@
+{
+  "base": {},
+  "check": "semantic-change-has-review-record",
+  "description": "A new semantic source and no review record.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture"
+  },
+  "id": "gov-4-semantic-change-without-a-record",
+  "requirement": "GOV-4-01",
+  "rule": "semantic-review-record"
+}

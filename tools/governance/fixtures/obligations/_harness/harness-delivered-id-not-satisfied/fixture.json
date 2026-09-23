@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "delivery-agrees-with-registry",
+  "description": "GOV-4-01 is enforced in full, but the registry row reads active: the delivered record is missing.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "notes/plan/notes/PLAN_REQUIREMENTS.json": [
+      {
+        "find": "\"status\": \"satisfied\",\n      \"summary\": \"reference tests\"",
+        "replace": "\"status\": \"active\",\n      \"summary\": \"reference tests\""
+      }
+    ]
+  },
+  "id": "harness-delivered-id-not-satisfied",
+  "requirement": "",
+  "rule": "delivery-link"
+}

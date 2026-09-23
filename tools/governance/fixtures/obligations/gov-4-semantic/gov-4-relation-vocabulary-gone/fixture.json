@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "metamorphic-relation-vocabulary-present",
+  "description": "docs/19 \u00a73 loses the lead line, so GOV-4-02 has no relation vocabulary.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "notes/plan/docs/19_TEST_STRATEGY.md": [
+      {
+        "find": "Expected preservation:",
+        "replace": "Preserved relations follow."
+      }
+    ]
+  },
+  "id": "gov-4-relation-vocabulary-gone",
+  "requirement": "GOV-4-02",
+  "rule": "semantic-review-list"
+}

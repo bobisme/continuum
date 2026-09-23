@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "differential-test-exercises-the-change",
+  "description": "continuum-value against continuum-intent says nothing about continuum-engine-reference.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "crates/continuum-value/tests/gov4_fixture.rs": "value-tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-03-pair-does-not-reach-the-change",
+  "requirement": "GOV-4-03",
+  "rule": "differential-tests"
+}

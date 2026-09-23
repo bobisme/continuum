@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "metamorphic-test-exercises-the-change",
+  "description": "The metamorphic test lives in continuum-value, which does not reach the changed crate.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "crates/continuum-value/tests/gov4_fixture.rs": "value-tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-02-metamorphic-test-in-an-unrelated-crate",
+  "requirement": "GOV-4-02",
+  "rule": "metamorphic-tests"
+}

@@ -1,0 +1,24 @@
+[change]
+bone = "bn-37b1"
+author = "fixture-author"
+summary = "fixture: a new reference-engine step function"
+
+[semantic]
+covers = ["crates/continuum-engine-reference/src/gov4_fixture.rs"]
+reference_tests = ["crates/continuum-engine-reference/tests/gov4_fixture.rs::reference_step"]
+metamorphic_tests = [{ test = "crates/continuum-engine-reference/tests/gov4_fixture.rs::metamorphic_round_trip", relation = "serialization round trip" }]
+differential_tests = [{ test = "crates/continuum-engine-reference/tests/gov4_fixture.rs::differential_reference_vs_explicit", oracle = "continuum-engine-reference", subject = "continuum-engine-explicit" }]
+
+[semantic.schemas]
+updated = []
+reason = "the step function produces no artifact and no schema class names it"
+
+[semantic.migration]
+verdict = "Incompatible"
+note = "continuum-engine-reference step semantics change for every consumer"
+
+[semantic.security_review]
+reviewer = "fixture-security"
+review = "cr-fixture"
+verdict = "approved"
+

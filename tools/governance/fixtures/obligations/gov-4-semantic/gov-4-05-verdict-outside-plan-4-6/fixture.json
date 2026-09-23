@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "migration-verdict-closed",
+  "description": "`Fine` is not a plan \u00a74.6 verdict.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-05-verdict-outside-plan-4-6",
+  "requirement": "GOV-4-05",
+  "rule": "migration-note"
+}

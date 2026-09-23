@@ -108,6 +108,13 @@ covenant:
 # turns that same skip into a failure where a base is genuinely owed:
 #
 #     python3 tools/governance/check_revision_delta.py --base origin/main --require-base
+#
+# `check_obligations.py` is the shared harness for the docs/12 §4 and docs/19
+# policy obligations (bn-37b1 onward). It discovers every obligation set in
+# tools/governance/obligations/, so a sibling Bone adds a set without editing
+# this recipe (tools/governance/README-gov4.md). It runs tree rules on the
+# working tree and delta rules on the same merge-base delta, with the same skip
+# policy and the same CI-strict flags as the revision-delta checker.
 governance:
     python3 tools/governance/check_code_policy.py --self-test
     python3 tools/governance/check_code_policy.py
@@ -125,6 +132,8 @@ governance:
     python3 tools/governance/check_t04_evidence.py
     python3 tools/governance/check_revision_delta.py --self-test
     python3 tools/governance/check_revision_delta.py
+    python3 tools/governance/check_obligations.py --self-test
+    python3 tools/governance/check_obligations.py
 
 # Mechanical validation of the architecture/research dossier. The traceability
 # self-test runs first so the extractor semantics cannot regress vacuously.

@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "declared-schema-update-in-delta",
+  "description": "The record lists context-pack; the delta never touched it.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-04-declared-update-not-in-the-delta",
+  "requirement": "GOV-4-04",
+  "rule": "updated-schemas"
+}

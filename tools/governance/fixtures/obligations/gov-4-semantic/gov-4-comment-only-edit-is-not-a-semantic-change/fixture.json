@@ -1,0 +1,14 @@
+{
+  "base": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "base.rs.fixture"
+  },
+  "check": "semantic-change-has-review-record",
+  "description": "Only a doc comment moved; no record is owed.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture"
+  },
+  "id": "gov-4-comment-only-edit-is-not-a-semantic-change",
+  "requirement": "GOV-4-01",
+  "rule": "semantic-review-record"
+}

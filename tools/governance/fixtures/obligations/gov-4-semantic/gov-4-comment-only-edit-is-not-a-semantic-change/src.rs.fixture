@@ -1,0 +1,5 @@
+//! Fixture semantic module, reworded (inert data under tools/governance/fixtures; never compiled).
+
+pub fn fixture_step(x: u64) -> u64 {
+    x + 1
+}

@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "security-review-approved",
+  "description": "The review has no approval yet.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-06-review-still-pending",
+  "requirement": "GOV-4-06",
+  "rule": "security-review"
+}

@@ -88,3 +88,6 @@ jobs:
 
       - name: GOV-1-08/09 delta check, CI-strict (a base is always owed in CI)
         run: python3 tools/governance/check_revision_delta.py --base origin/main --require-base
+
+      - name: Policy-obligation delta rules, CI-strict (GOV §4 onward; README-gov4.md)
+        run: python3 tools/governance/check_obligations.py --base origin/main --require-base

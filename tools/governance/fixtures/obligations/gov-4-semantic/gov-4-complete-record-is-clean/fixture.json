@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "semantic-change-has-review-record",
+  "description": "A new semantic source shipping a complete record: fresh reference, metamorphic, and differential tests, a reasoned no-schema statement, a Preserved migration note, and an independent approved review.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-complete-record-is-clean",
+  "requirement": "GOV-4-01",
+  "rule": "semantic-review-record"
+}

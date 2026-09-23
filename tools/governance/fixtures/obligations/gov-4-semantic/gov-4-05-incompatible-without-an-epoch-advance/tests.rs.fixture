@@ -1,0 +1,24 @@
+//! Fixture tests (inert data; never compiled).
+
+#[test]
+fn reference_step() {
+    assert_eq!(continuum_engine_reference::gov4_fixture::fixture_step(1), 2);
+}
+
+/// Metamorphic relation: serialization round trip.
+#[test]
+fn metamorphic_round_trip() {
+    let x = 1u64;
+    assert_eq!(x, x);
+}
+
+#[test]
+#[ignore]
+fn ignored_reference_step() {
+    assert_eq!(1, 1);
+}
+
+#[test]
+fn differential_reference_vs_explicit() {
+    let _ = (continuum_engine_reference::VERSION, continuum_engine_explicit::VERSION);
+}

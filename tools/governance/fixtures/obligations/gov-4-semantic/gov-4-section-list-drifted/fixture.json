@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "semantic-review-list-registered",
+  "description": "docs/12 \u00a74 renames an item, so the positional GOV-4 ids no longer bind what they say.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md": [
+      {
+        "find": "- metamorphic tests;",
+        "replace": "- metamorphic checks;"
+      }
+    ]
+  },
+  "id": "gov-4-section-list-drifted",
+  "requirement": "GOV-4-02",
+  "rule": "semantic-review-list"
+}

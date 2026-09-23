@@ -1,0 +1,22 @@
+{
+  "base": {},
+  "check": "schema-change-declared",
+  "description": "context-pack changed in the same delta and the record says no schema changed.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "head_substitute": {
+    "notes/plan/schemas/context-pack.schema.json": [
+      {
+        "find": "\"schema_kind\": \"artifact\",",
+        "replace": "\"schema_kind\": \"artifact\",\n  \"$comment\": \"fixture edit\","
+      }
+    ]
+  },
+  "id": "gov-4-04-schema-changed-but-not-declared",
+  "requirement": "GOV-4-04",
+  "rule": "updated-schemas"
+}

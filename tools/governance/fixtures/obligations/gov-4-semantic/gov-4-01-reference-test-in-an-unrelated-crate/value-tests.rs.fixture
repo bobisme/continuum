@@ -1,0 +1,7 @@
+//! Fixture tests in a crate that does not reach the changed one.
+
+/// Metamorphic relation: serialization round trip.
+#[test]
+fn unrelated() {
+    let _ = (continuum_value::VERSION, continuum_intent::VERSION);
+}

@@ -1,0 +1,819 @@
+{
+  "artifact": "continuum.governance.evidence/gov-4-semantic",
+  "authority": {
+    "requirement_ids": "notes/plan/notes/PLAN_REQUIREMENTS.json",
+    "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements / Semantic changes"
+  },
+  "determinism": "No timestamp, commit id, or absolute path: an unchanged tree reproduces this file byte-for-byte. Delta-rule verdicts are functions of history and are not recorded.",
+  "harness_at_head": {
+    "checks": "review-record envelope over every record at head; delivery link for every discovered set",
+    "result": "pass",
+    "violations": []
+  },
+  "harness_self_test": {
+    "failures": [],
+    "fixtures": 7,
+    "status": "pass",
+    "violating_by_check": {
+      "delivery-agrees-with-registry": [
+        "harness-delivered-id-not-satisfied",
+        "harness-undelivered-id-marked-satisfied"
+      ],
+      "review-record-change-table": [
+        "harness-change-table-malformed"
+      ],
+      "review-record-parses": [
+        "harness-record-does-not-parse"
+      ],
+      "review-record-sections-closed": [
+        "harness-unknown-key",
+        "harness-unknown-section"
+      ]
+    }
+  },
+  "notes": [
+    "GOV-4-07 (claim impact) is the seventh \u00a74 `Semantic changes` item and sibling Bone bn-2tm3's; it extends `[semantic]` from its own obligation file.",
+    "GOV-4-06 is enforced at the record level only; see its rule's boundary."
+  ],
+  "produced_by": "tools/governance/check_obligations.py (tools/governance/obligations/gov4_semantic.py)",
+  "regime": "The delta rules are in force for a delta whose base contains tools/governance/obligations/gov4_semantic.py; for an older base their findings are deferred (printed, reported, not failures).",
+  "reproduce": "python3 tools/governance/check_obligations.py --set gov-4-semantic --evidence",
+  "requirements": {
+    "GOV-4-01": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov-4-01-no-reference-tests",
+        "gov-4-01-reference-test-did-not-move",
+        "gov-4-01-reference-test-does-not-exist",
+        "gov-4-01-reference-test-in-an-unrelated-crate",
+        "gov-4-01-reference-test-is-ignored",
+        "gov-4-semantic-change-without-a-record"
+      ],
+      "rules": [
+        {
+          "boundary": "`Semantic change` inherits GOV-1-08's approximation: comment-stripped code of a semantic-tier `src/` file. A test-only or boundary-crate change is not a semantic change.",
+          "checks": [
+            "semantic-change-has-review-record",
+            "review-record-covers-a-semantic-change"
+          ],
+          "enforces": "Every semantic change in the delta (GOV-1-08's predicate: a semantic-tier source whose code changed or that the delta added) is covered by a review record the delta adds or modifies; every `covers` entry matches a semantic change.",
+          "fixtures_proven_caught": {
+            "review-record-covers-a-semantic-change": [
+              "gov-4-record-covers-an-unchanged-path"
+            ],
+            "semantic-change-has-review-record": [
+              "gov-4-semantic-change-without-a-record"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "semantic-review-record",
+          "shared_with": [
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "semantic-review-list-registered",
+            "metamorphic-relation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74 `Semantic changes / Require:` still lists the seven items in order, the generated registry's GOV-4-01..06 summaries still name items 1..6, and docs/19 \u00a73 still lists the metamorphic relations GOV-4-02 cites.",
+          "fixtures_proven_caught": {
+            "metamorphic-relation-vocabulary-present": [
+              "gov-4-relation-vocabulary-gone"
+            ],
+            "semantic-review-list-registered": [
+              "gov-4-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "semantic-review-list",
+          "shared_with": [
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour.",
+          "checks": [
+            "reference-tests-named",
+            "reference-test-resolves",
+            "reference-test-exercises-the-change",
+            "reference-test-is-fresh"
+          ],
+          "enforces": "`semantic.reference_tests` names at least one `crates/<c>/(tests|src)/<f>.rs::<fn>` for each covered change; each resolves to a non-ignored `#[test]`; one lives in or depends on a changed crate; one is new or changed in the delta.",
+          "fixtures_proven_caught": {
+            "reference-test-exercises-the-change": [
+              "gov-4-01-reference-test-in-an-unrelated-crate"
+            ],
+            "reference-test-is-fresh": [
+              "gov-4-01-reference-test-did-not-move"
+            ],
+            "reference-test-resolves": [
+              "gov-4-01-reference-test-does-not-exist",
+              "gov-4-01-reference-test-is-ignored"
+            ],
+            "reference-tests-named": [
+              "gov-4-01-no-reference-tests"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "reference-tests",
+          "shared_with": []
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements / Semantic changes",
+      "source_bullet": "reference tests"
+    },
+    "GOV-4-02": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov-4-02-metamorphic-test-did-not-move",
+        "gov-4-02-metamorphic-test-does-not-exist",
+        "gov-4-02-metamorphic-test-in-an-unrelated-crate",
+        "gov-4-02-no-metamorphic-tests",
+        "gov-4-02-relation-not-in-docs-19",
+        "gov-4-02-relation-not-stated-at-the-test",
+        "gov-4-record-covers-an-unchanged-path",
+        "gov-4-relation-vocabulary-gone",
+        "gov-4-section-list-drifted"
+      ],
+      "rules": [
+        {
+          "boundary": "`Semantic change` inherits GOV-1-08's approximation: comment-stripped code of a semantic-tier `src/` file. A test-only or boundary-crate change is not a semantic change.",
+          "checks": [
+            "semantic-change-has-review-record",
+            "review-record-covers-a-semantic-change"
+          ],
+          "enforces": "Every semantic change in the delta (GOV-1-08's predicate: a semantic-tier source whose code changed or that the delta added) is covered by a review record the delta adds or modifies; every `covers` entry matches a semantic change.",
+          "fixtures_proven_caught": {
+            "review-record-covers-a-semantic-change": [
+              "gov-4-record-covers-an-unchanged-path"
+            ],
+            "semantic-change-has-review-record": [
+              "gov-4-semantic-change-without-a-record"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "semantic-review-record",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "semantic-review-list-registered",
+            "metamorphic-relation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74 `Semantic changes / Require:` still lists the seven items in order, the generated registry's GOV-4-01..06 summaries still name items 1..6, and docs/19 \u00a73 still lists the metamorphic relations GOV-4-02 cites.",
+          "fixtures_proven_caught": {
+            "metamorphic-relation-vocabulary-present": [
+              "gov-4-relation-vocabulary-gone"
+            ],
+            "semantic-review-list-registered": [
+              "gov-4-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "semantic-review-list",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour. The relation text proves the claimed relation is named at the test, not that the test checks it.",
+          "checks": [
+            "metamorphic-tests-named",
+            "metamorphic-test-resolves",
+            "metamorphic-test-exercises-the-change",
+            "metamorphic-test-is-fresh",
+            "metamorphic-relation-registered",
+            "metamorphic-relation-stated-at-the-test"
+          ],
+          "enforces": "`semantic.metamorphic_tests` names tests with a `relation` from docs/19 \u00a73's list, read live; the relation is stated in the test's doc comment or body; plus the reference-test conditions.",
+          "fixtures_proven_caught": {
+            "metamorphic-relation-registered": [
+              "gov-4-02-relation-not-in-docs-19"
+            ],
+            "metamorphic-relation-stated-at-the-test": [
+              "gov-4-02-relation-not-stated-at-the-test"
+            ],
+            "metamorphic-test-exercises-the-change": [
+              "gov-4-02-metamorphic-test-in-an-unrelated-crate"
+            ],
+            "metamorphic-test-is-fresh": [
+              "gov-4-02-metamorphic-test-did-not-move"
+            ],
+            "metamorphic-test-resolves": [
+              "gov-4-02-metamorphic-test-does-not-exist"
+            ],
+            "metamorphic-tests-named": [
+              "gov-4-02-no-metamorphic-tests"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "metamorphic-tests",
+          "shared_with": []
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements / Semantic changes",
+      "source_bullet": "metamorphic tests"
+    },
+    "GOV-4-03": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov-4-03-differential-test-did-not-move",
+        "gov-4-03-differential-test-does-not-exist",
+        "gov-4-03-no-differential-tests",
+        "gov-4-03-oracle-is-the-subject",
+        "gov-4-03-pair-does-not-reach-the-change",
+        "gov-4-03-test-never-names-the-subject"
+      ],
+      "rules": [
+        {
+          "boundary": "`Semantic change` inherits GOV-1-08's approximation: comment-stripped code of a semantic-tier `src/` file. A test-only or boundary-crate change is not a semantic change.",
+          "checks": [
+            "semantic-change-has-review-record",
+            "review-record-covers-a-semantic-change"
+          ],
+          "enforces": "Every semantic change in the delta (GOV-1-08's predicate: a semantic-tier source whose code changed or that the delta added) is covered by a review record the delta adds or modifies; every `covers` entry matches a semantic change.",
+          "fixtures_proven_caught": {
+            "review-record-covers-a-semantic-change": [
+              "gov-4-record-covers-an-unchanged-path"
+            ],
+            "semantic-change-has-review-record": [
+              "gov-4-semantic-change-without-a-record"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "semantic-review-record",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-04",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "semantic-review-list-registered",
+            "metamorphic-relation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74 `Semantic changes / Require:` still lists the seven items in order, the generated registry's GOV-4-01..06 summaries still name items 1..6, and docs/19 \u00a73 still lists the metamorphic relations GOV-4-02 cites.",
+          "fixtures_proven_caught": {
+            "metamorphic-relation-vocabulary-present": [
+              "gov-4-relation-vocabulary-gone"
+            ],
+            "semantic-review-list-registered": [
+              "gov-4-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "semantic-review-list",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-04",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour. Only in-workspace pairs are recognized; docs/19 \u00a75's external oracles (TLC, Kani, solvers) are out of scope until a harness for them exists.",
+          "checks": [
+            "differential-tests-named",
+            "differential-test-resolves",
+            "differential-test-exercises-the-change",
+            "differential-test-is-fresh",
+            "differential-pair-distinct-implementations",
+            "differential-test-uses-both-implementations"
+          ],
+          "enforces": "`semantic.differential_tests` names tests with an `oracle` and a `subject`, two distinct workspace crates both named as Rust paths in the test file, one of which is or reaches a changed crate; plus the resolve and freshness conditions.",
+          "fixtures_proven_caught": {
+            "differential-pair-distinct-implementations": [
+              "gov-4-03-oracle-is-the-subject"
+            ],
+            "differential-test-exercises-the-change": [
+              "gov-4-03-pair-does-not-reach-the-change"
+            ],
+            "differential-test-is-fresh": [
+              "gov-4-03-differential-test-did-not-move"
+            ],
+            "differential-test-resolves": [
+              "gov-4-03-differential-test-does-not-exist"
+            ],
+            "differential-test-uses-both-implementations": [
+              "gov-4-03-test-never-names-the-subject"
+            ],
+            "differential-tests-named": [
+              "gov-4-03-no-differential-tests"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "differential-tests",
+          "shared_with": []
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements / Semantic changes",
+      "source_bullet": "differential tests"
+    },
+    "GOV-4-04": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov-4-04-declared-update-not-in-the-delta",
+        "gov-4-04-no-schema-change-without-a-reason",
+        "gov-4-04-no-schema-statement",
+        "gov-4-04-schema-bearing-source-not-addressed",
+        "gov-4-04-schema-changed-but-not-declared"
+      ],
+      "rules": [
+        {
+          "boundary": "`Semantic change` inherits GOV-1-08's approximation: comment-stripped code of a semantic-tier `src/` file. A test-only or boundary-crate change is not a semantic change.",
+          "checks": [
+            "semantic-change-has-review-record",
+            "review-record-covers-a-semantic-change"
+          ],
+          "enforces": "Every semantic change in the delta (GOV-1-08's predicate: a semantic-tier source whose code changed or that the delta added) is covered by a review record the delta adds or modifies; every `covers` entry matches a semantic change.",
+          "fixtures_proven_caught": {
+            "review-record-covers-a-semantic-change": [
+              "gov-4-record-covers-an-unchanged-path"
+            ],
+            "semantic-change-has-review-record": [
+              "gov-4-semantic-change-without-a-record"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "semantic-review-record",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "semantic-review-list-registered",
+            "metamorphic-relation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74 `Semantic changes / Require:` still lists the seven items in order, the generated registry's GOV-4-01..06 summaries still name items 1..6, and docs/19 \u00a73 still lists the metamorphic relations GOV-4-02 cites.",
+          "fixtures_proven_caught": {
+            "metamorphic-relation-vocabulary-present": [
+              "gov-4-relation-vocabulary-gone"
+            ],
+            "semantic-review-list-registered": [
+              "gov-4-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "semantic-review-list",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-05",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": "A schema class is recognized only when the source names its URI (`continuum.dev/schema/\u2026json`); a change that alters an artifact's shape through an unnamed type is caught only by review. Epoch discipline for the update is GOV-1-09's delta rule.",
+          "checks": [
+            "schema-impact-declared",
+            "declared-schema-update-in-delta",
+            "schema-change-declared",
+            "schema-bearing-source-addressed"
+          ],
+          "enforces": "`[semantic.schemas]` states `updated` (with a reason when empty); every listed document changed in the delta; every schema document the delta changes is listed; every schema class a changed source names is updated or declared unaffected with a reason.",
+          "fixtures_proven_caught": {
+            "declared-schema-update-in-delta": [
+              "gov-4-04-declared-update-not-in-the-delta"
+            ],
+            "schema-bearing-source-addressed": [
+              "gov-4-04-schema-bearing-source-not-addressed"
+            ],
+            "schema-change-declared": [
+              "gov-4-04-schema-changed-but-not-declared"
+            ],
+            "schema-impact-declared": [
+              "gov-4-04-no-schema-change-without-a-reason",
+              "gov-4-04-no-schema-statement"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "updated-schemas",
+          "shared_with": []
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements / Semantic changes",
+      "source_bullet": "updated schemas"
+    },
+    "GOV-4-05": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov-4-05-incompatible-without-an-epoch-advance",
+        "gov-4-05-no-migration-note",
+        "gov-4-05-note-names-nothing",
+        "gov-4-05-verdict-outside-plan-4-6"
+      ],
+      "rules": [
+        {
+          "boundary": "`Semantic change` inherits GOV-1-08's approximation: comment-stripped code of a semantic-tier `src/` file. A test-only or boundary-crate change is not a semantic change.",
+          "checks": [
+            "semantic-change-has-review-record",
+            "review-record-covers-a-semantic-change"
+          ],
+          "enforces": "Every semantic change in the delta (GOV-1-08's predicate: a semantic-tier source whose code changed or that the delta added) is covered by a review record the delta adds or modifies; every `covers` entry matches a semantic change.",
+          "fixtures_proven_caught": {
+            "review-record-covers-a-semantic-change": [
+              "gov-4-record-covers-an-unchanged-path"
+            ],
+            "semantic-change-has-review-record": [
+              "gov-4-semantic-change-without-a-record"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "semantic-review-record",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "semantic-review-list-registered",
+            "metamorphic-relation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74 `Semantic changes / Require:` still lists the seven items in order, the generated registry's GOV-4-01..06 summaries still name items 1..6, and docs/19 \u00a73 still lists the metamorphic relations GOV-4-02 cites.",
+          "fixtures_proven_caught": {
+            "metamorphic-relation-vocabulary-present": [
+              "gov-4-relation-vocabulary-gone"
+            ],
+            "semantic-review-list-registered": [
+              "gov-4-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "semantic-review-list",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-06"
+          ]
+        },
+        {
+          "boundary": "Proves a typed note exists and is consistent with the epoch; whether the verdict is the correct one is a review judgement.",
+          "checks": [
+            "migration-note-present",
+            "migration-verdict-closed",
+            "migration-note-names-the-change",
+            "incompatible-verdict-advances-an-epoch"
+          ],
+          "enforces": "`[semantic.migration]` carries a typed verdict from plan \u00a74.6 (`Preserved | Revalidate | Incompatible`) and a note naming a changed crate; `Incompatible` requires a schema epoch advance in the same delta.",
+          "fixtures_proven_caught": {
+            "incompatible-verdict-advances-an-epoch": [
+              "gov-4-05-incompatible-without-an-epoch-advance"
+            ],
+            "migration-note-names-the-change": [
+              "gov-4-05-note-names-nothing"
+            ],
+            "migration-note-present": [
+              "gov-4-05-no-migration-note"
+            ],
+            "migration-verdict-closed": [
+              "gov-4-05-verdict-outside-plan-4-6"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "migration-note",
+          "shared_with": []
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements / Semantic changes",
+      "source_bullet": "migration note"
+    },
+    "GOV-4-06": {
+      "delivery": {
+        "reason": "The record names a reviewer, a review id, and a verdict, and the check holds them to independence and approval, but Seal keeps review state outside the repository: no committed artifact lets a checker confirm the review exists, covers this change, and approved it. Until review verdicts are committed (or attested) where a checker can read them, the record is a claim, not evidence.",
+        "status": "not-delivered"
+      },
+      "own_violating_fixtures": [
+        "gov-4-06-author-reviews-own-change",
+        "gov-4-06-no-security-review",
+        "gov-4-06-review-still-pending"
+      ],
+      "rules": [
+        {
+          "boundary": "`Semantic change` inherits GOV-1-08's approximation: comment-stripped code of a semantic-tier `src/` file. A test-only or boundary-crate change is not a semantic change.",
+          "checks": [
+            "semantic-change-has-review-record",
+            "review-record-covers-a-semantic-change"
+          ],
+          "enforces": "Every semantic change in the delta (GOV-1-08's predicate: a semantic-tier source whose code changed or that the delta added) is covered by a review record the delta adds or modifies; every `covers` entry matches a semantic change.",
+          "fixtures_proven_caught": {
+            "review-record-covers-a-semantic-change": [
+              "gov-4-record-covers-an-unchanged-path"
+            ],
+            "semantic-change-has-review-record": [
+              "gov-4-semantic-change-without-a-record"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "semantic-review-record",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-05"
+          ]
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "semantic-review-list-registered",
+            "metamorphic-relation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74 `Semantic changes / Require:` still lists the seven items in order, the generated registry's GOV-4-01..06 summaries still name items 1..6, and docs/19 \u00a73 still lists the metamorphic relations GOV-4-02 cites.",
+          "fixtures_proven_caught": {
+            "metamorphic-relation-vocabulary-present": [
+              "gov-4-relation-vocabulary-gone"
+            ],
+            "semantic-review-list-registered": [
+              "gov-4-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "semantic-review-list",
+          "shared_with": [
+            "GOV-4-01",
+            "GOV-4-02",
+            "GOV-4-03",
+            "GOV-4-04",
+            "GOV-4-05"
+          ]
+        },
+        {
+          "boundary": "The record is a pointer, not the review: Seal keeps review state outside the repository, so no committed artifact lets this check confirm that the named review exists, covers this change, or carries that verdict. GOV-4-06 is therefore NOT delivered by this rule.",
+          "checks": [
+            "security-review-present",
+            "security-review-independent",
+            "security-review-approved"
+          ],
+          "enforces": "`[semantic.security_review]` names a reviewer other than the change author, a review id, and the verdict `approved`.",
+          "fixtures_proven_caught": {
+            "security-review-approved": [
+              "gov-4-06-review-still-pending"
+            ],
+            "security-review-independent": [
+              "gov-4-06-author-reviews-own-change"
+            ],
+            "security-review-present": [
+              "gov-4-06-no-security-review"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "security-review",
+          "shared_with": []
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements / Semantic changes",
+      "source_bullet": "security review"
+    }
+  },
+  "self_test": {
+    "clean": [
+      "gov-4-comment-only-edit-is-not-a-semantic-change",
+      "gov-4-complete-record-is-clean",
+      "gov-4-schema-updated-and-declared-is-clean"
+    ],
+    "deferred": [
+      "gov-4-uncovered-change-before-the-set-landed"
+    ],
+    "failures": [],
+    "fixtures": 37,
+    "status": "pass",
+    "violating_by_check": {
+      "declared-schema-update-in-delta": [
+        "gov-4-04-declared-update-not-in-the-delta"
+      ],
+      "differential-pair-distinct-implementations": [
+        "gov-4-03-oracle-is-the-subject"
+      ],
+      "differential-test-exercises-the-change": [
+        "gov-4-03-pair-does-not-reach-the-change"
+      ],
+      "differential-test-is-fresh": [
+        "gov-4-03-differential-test-did-not-move"
+      ],
+      "differential-test-resolves": [
+        "gov-4-03-differential-test-does-not-exist"
+      ],
+      "differential-test-uses-both-implementations": [
+        "gov-4-03-test-never-names-the-subject"
+      ],
+      "differential-tests-named": [
+        "gov-4-03-no-differential-tests"
+      ],
+      "incompatible-verdict-advances-an-epoch": [
+        "gov-4-05-incompatible-without-an-epoch-advance"
+      ],
+      "metamorphic-relation-registered": [
+        "gov-4-02-relation-not-in-docs-19"
+      ],
+      "metamorphic-relation-stated-at-the-test": [
+        "gov-4-02-relation-not-stated-at-the-test"
+      ],
+      "metamorphic-relation-vocabulary-present": [
+        "gov-4-relation-vocabulary-gone"
+      ],
+      "metamorphic-test-exercises-the-change": [
+        "gov-4-02-metamorphic-test-in-an-unrelated-crate"
+      ],
+      "metamorphic-test-is-fresh": [
+        "gov-4-02-metamorphic-test-did-not-move"
+      ],
+      "metamorphic-test-resolves": [
+        "gov-4-02-metamorphic-test-does-not-exist"
+      ],
+      "metamorphic-tests-named": [
+        "gov-4-02-no-metamorphic-tests"
+      ],
+      "migration-note-names-the-change": [
+        "gov-4-05-note-names-nothing"
+      ],
+      "migration-note-present": [
+        "gov-4-05-no-migration-note"
+      ],
+      "migration-verdict-closed": [
+        "gov-4-05-verdict-outside-plan-4-6"
+      ],
+      "reference-test-exercises-the-change": [
+        "gov-4-01-reference-test-in-an-unrelated-crate"
+      ],
+      "reference-test-is-fresh": [
+        "gov-4-01-reference-test-did-not-move"
+      ],
+      "reference-test-resolves": [
+        "gov-4-01-reference-test-does-not-exist",
+        "gov-4-01-reference-test-is-ignored"
+      ],
+      "reference-tests-named": [
+        "gov-4-01-no-reference-tests"
+      ],
+      "review-record-covers-a-semantic-change": [
+        "gov-4-record-covers-an-unchanged-path"
+      ],
+      "schema-bearing-source-addressed": [
+        "gov-4-04-schema-bearing-source-not-addressed"
+      ],
+      "schema-change-declared": [
+        "gov-4-04-schema-changed-but-not-declared"
+      ],
+      "schema-impact-declared": [
+        "gov-4-04-no-schema-change-without-a-reason",
+        "gov-4-04-no-schema-statement"
+      ],
+      "security-review-approved": [
+        "gov-4-06-review-still-pending"
+      ],
+      "security-review-independent": [
+        "gov-4-06-author-reviews-own-change"
+      ],
+      "security-review-present": [
+        "gov-4-06-no-security-review"
+      ],
+      "semantic-change-has-review-record": [
+        "gov-4-semantic-change-without-a-record"
+      ],
+      "semantic-review-list-registered": [
+        "gov-4-section-list-drifted"
+      ]
+    },
+    "violating_by_requirement": {
+      "GOV-4-01": [
+        "gov-4-01-no-reference-tests",
+        "gov-4-01-reference-test-did-not-move",
+        "gov-4-01-reference-test-does-not-exist",
+        "gov-4-01-reference-test-in-an-unrelated-crate",
+        "gov-4-01-reference-test-is-ignored",
+        "gov-4-semantic-change-without-a-record"
+      ],
+      "GOV-4-02": [
+        "gov-4-02-metamorphic-test-did-not-move",
+        "gov-4-02-metamorphic-test-does-not-exist",
+        "gov-4-02-metamorphic-test-in-an-unrelated-crate",
+        "gov-4-02-no-metamorphic-tests",
+        "gov-4-02-relation-not-in-docs-19",
+        "gov-4-02-relation-not-stated-at-the-test",
+        "gov-4-record-covers-an-unchanged-path",
+        "gov-4-relation-vocabulary-gone",
+        "gov-4-section-list-drifted"
+      ],
+      "GOV-4-03": [
+        "gov-4-03-differential-test-did-not-move",
+        "gov-4-03-differential-test-does-not-exist",
+        "gov-4-03-no-differential-tests",
+        "gov-4-03-oracle-is-the-subject",
+        "gov-4-03-pair-does-not-reach-the-change",
+        "gov-4-03-test-never-names-the-subject"
+      ],
+      "GOV-4-04": [
+        "gov-4-04-declared-update-not-in-the-delta",
+        "gov-4-04-no-schema-change-without-a-reason",
+        "gov-4-04-no-schema-statement",
+        "gov-4-04-schema-bearing-source-not-addressed",
+        "gov-4-04-schema-changed-but-not-declared"
+      ],
+      "GOV-4-05": [
+        "gov-4-05-incompatible-without-an-epoch-advance",
+        "gov-4-05-no-migration-note",
+        "gov-4-05-note-names-nothing",
+        "gov-4-05-verdict-outside-plan-4-6"
+      ],
+      "GOV-4-06": [
+        "gov-4-06-author-reviews-own-change",
+        "gov-4-06-no-security-review",
+        "gov-4-06-review-still-pending"
+      ]
+    }
+  },
+  "status": "pass",
+  "title": "GOV \u00a74 semantic changes \u2014 reference, metamorphic, differential tests, schemas, migration, security"
+}

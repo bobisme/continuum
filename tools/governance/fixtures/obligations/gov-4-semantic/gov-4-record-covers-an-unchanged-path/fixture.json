@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "review-record-covers-a-semantic-change",
+  "description": "`covers` claims a crate the delta did not touch.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-record-covers-an-unchanged-path",
+  "requirement": "GOV-4-02",
+  "rule": "semantic-review-record"
+}

@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "review-record-sections-closed",
+  "description": "A top-level table no obligation set declares.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "harness-unknown-section",
+  "requirement": "",
+  "rule": "review-record"
+}

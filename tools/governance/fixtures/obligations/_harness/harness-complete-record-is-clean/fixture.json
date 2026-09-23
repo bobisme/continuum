@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "review-record-parses",
+  "description": "The complete record trips no envelope check.",
+  "expect": "clean",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "harness-complete-record-is-clean",
+  "requirement": "",
+  "rule": "review-record"
+}

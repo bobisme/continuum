@@ -81,13 +81,24 @@ instances are grandfathered by exact sentence, named in the evidence file.
 
 Require:
 
-- reference tests;
-- metamorphic tests;
-- differential tests;
-- updated schemas;
-- migration note;
+- reference tests; (delivered: bn-37b1)
+- metamorphic tests; (delivered: bn-37b1)
+- differential tests; (delivered: bn-37b1)
+- updated schemas; (delivered: bn-37b1)
+- migration note; (delivered: bn-37b1)
 - security review;
 - claim impact.
+
+The first five of these obligations are enforced by the `gov-4-semantic`
+obligation set, `tools/governance/obligations/gov4_semantic.py`, run by
+`tools/governance/check_obligations.py` (self-testing, 37 fixture pairs plus 7
+for the shared harness; evidence in
+`tools/governance/evidence/gov-4-semantic.json`). A semantic change ships a
+review record under `tools/governance/reviews/` that names its tests, schema
+statement, and typed migration verdict, and the check resolves every name
+against the tree and the delta. The security review is enforced at the record
+level only and is not delivered: review state lives outside the repository,
+so no committed artifact lets a checker confirm it.
 
 ### POR/reduction changes
 

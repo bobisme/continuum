@@ -1,0 +1,7 @@
+//! Fixture semantic module that names a schema class.
+
+pub const CLASS: &str = "https://continuum.dev/schema/context-pack.json";
+
+pub fn fixture_step(x: u64) -> u64 {
+    x + 1
+}

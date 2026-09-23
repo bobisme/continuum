@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "reference-test-exercises-the-change",
+  "description": "The only reference test lives in continuum-value, which does not reach continuum-engine-reference.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-engine-reference/src/gov4_fixture.rs": "src.rs.fixture",
+    "crates/continuum-engine-reference/tests/gov4_fixture.rs": "tests.rs.fixture",
+    "crates/continuum-value/tests/gov4_fixture.rs": "value-tests.rs.fixture",
+    "tools/governance/reviews/gov4-fixture.toml": "record.toml.fixture"
+  },
+  "id": "gov-4-01-reference-test-in-an-unrelated-crate",
+  "requirement": "GOV-4-01",
+  "rule": "reference-tests"
+}
