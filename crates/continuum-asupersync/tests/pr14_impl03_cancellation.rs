@@ -457,7 +457,8 @@ impl Account {
             | SubstrateOp::OpenChannel { .. }
             | SubstrateOp::Send { .. }
             | SubstrateOp::Recv { .. }
-            | SubstrateOp::CloseSenders { .. } => {
+            | SubstrateOp::CloseSenders { .. }
+            | SubstrateOp::SpawnWithDeadline { .. } => {
                 unreachable!("the cancellation corpus has no effect operations")
             }
         }
@@ -708,7 +709,7 @@ fn mutated_phase_journals_are_rejected() {
         {
             *cause = match cause {
                 CancelCause::User => CancelCause::ParentCancelled,
-                CancelCause::ParentCancelled => CancelCause::User,
+                CancelCause::ParentCancelled | CancelCause::Deadline => CancelCause::User,
             };
         }
         assert!(

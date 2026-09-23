@@ -37,11 +37,21 @@
 //! | curated perturbations of real journals are rejected by the model, each for its own fault, and by the lift | [`perturbed_journals_are_rejected_by_the_conformance_model`] |
 //! | every single-event deletion and adjacent swap of a sample: the model and the lift give the same verdict, in both directions | [`deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift`] |
 //! | the model reads bytes: truncations, trailing bytes and unknown family tags are malformed | [`the_model_reads_the_canonical_bytes_and_types_what_it_cannot_judge`] |
+//! | every strict prefix of every corpus journal: mid-protocol ones do not conform, complete ones do, and the model agrees (cr-3pu5cu) | [`truncated_journals_do_not_conform_and_complete_prefixes_do`] |
+//! | a task's own cancellation whose `cancel` is replaced by a region's drain, under all 32 projections and from created, running and suspended: the lift and the model reject it for that rule (cr-3pu5cu) | [`a_region_drain_does_not_end_a_task_s_own_cancellation`] |
+//! | the same with `cancel` replaced by `resume`, `complete` (or `complete` alone), under all 32 projections | [`a_normal_end_does_not_end_a_task_s_own_cancellation`] |
+//! | inside a task's own cancellation, 23 forged events of every family (the task's own work, another task's work, events that name no task) are rejected under every projection that carries their family, at the request, after the acknowledgement and before the task's `cancel`: 974 journals, the lift's `InterruptedOwnCancel` and the model's `OwnCancellationInterrupted`; the base journal, cleanup included, conforms under all 32 (cr-3pu5cu round 6) | [`every_family_is_held_to_a_task_s_own_cancellation`] |
+//! | a region request that reaches a task needs its phases when the journal carries the family: `t0` unphased and ended by `complete` or `fail` (created or running, own or ancestor region) is `UnreportedRequest` in the lift and the model; the same without the family, and `t0` ended before the request, conform (6 violations, 18 controls; cr-3pu5cu round 6) | [`a_region_request_needs_phases_for_every_task_it_reaches`] |
+//! | an own-region cancel after a due deadline (created, running, suspended) is `CancelRaced` in the lift and the model, as the binding refuses it under all 32 projections; the own region before the deadline, an ancestor after it, and every journal without the time family conform (3 violations, 15 controls; cr-3pu5cu round 7) | [`an_own_region_cancel_after_a_due_deadline_is_the_race`] |
+//! | rules that read another family's fact: a leak by a parked holder, a leak whose holder never ends, a channel handed to a task in cancellation (cr-3pu5cu round 7 self-sweep) | [`cross_family_facts_are_read_by_the_lift`] |
+//! | a deadline declared anywhere but right after its task's spawn is `DeadlineNotAtSpawn` in the lift and the model; the adjacent declaration and no deadline conform (cr-3pu5cu round 8) | [`a_deadline_is_declared_right_after_its_spawn`] |
+//! | encoding versions 1 and 2 are two grammars: both readers read both, and refuse a version-2 tag under a version-1 label for each table that grew (cr-3pu5cu round 8) | [`the_two_encoding_versions_are_two_grammars`] |
+//! | 13 hand-built journals from the round-6 pre-review pass (cleanup without the cancellation family then ordinary work, own work past a deadline, a repeated region cancel): the lift reports a violation and the model rejects each | [`round_six_pre_review_journals_are_rejected`] |
 
 #[path = "support/primitive_conformance_model.rs"]
 mod model;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_asupersync::binding::{BindingConfig, Program, SubstrateOp, run};
 use continuum_asupersync::choice::ChoiceLog;
@@ -420,6 +430,61 @@ fn channels_close() -> (Program, Vec<Program>) {
     (setup, actors)
 }
 
+/// Budget deadlines (bn-36wy3). A fixed setup spawns four tasks: `t1` (deadline 50)
+/// in `r2` holding a lease and a reservation, `t2` (deadline 30) in `r3` holding an
+/// io-op and asleep for 40, a root task `t3` with no deadline, and a root task `t4`
+/// (deadline 500) asleep for 20. Then the clock advances to 45 and 65, `t1` is woken
+/// and its region closed, `r3` is cancelled, and `t3` finishes, in every order. So `t2`
+/// ends by its deadline inside an advance (its due timer woke it) or by its region's
+/// cancellation before the clock reaches 30; `t1` ends by its deadline at the wake after
+/// the second advance, or just parks when woken earlier; `t4`'s timer fires before its
+/// deadline.
+fn deadlines() -> (Program, Vec<Program>) {
+    let deadline = |region: RegionLabel, task: TaskLabel, at: u64| SubstrateOp::SpawnWithDeadline {
+        region,
+        task,
+        resumability: Resumability::Resumable,
+        deadline: at,
+    };
+    let setup = vec![
+        open(ROOT, R[1]),
+        open(R[1], R[2]),
+        open(R[1], R[3]),
+        deadline(R[2], T[1], 50),
+        deadline(R[3], T[2], 30),
+        spawn(ROOT, T[3]),
+        deadline(ROOT, T[4], 500),
+        begin(T[1]),
+        begin(T[2]),
+        begin(T[3]),
+        begin(T[4]),
+        acquire(T[1], 1, ObligationKind::Lease),
+        reserve(T[1], 2),
+        acquire(T[2], 3, ObligationKind::IoOp),
+        SubstrateOp::Sleep {
+            task: T[2],
+            nanos: 40,
+        },
+        SubstrateOp::Sleep {
+            task: T[4],
+            nanos: 20,
+        },
+    ];
+    let actors = vec![
+        vec![
+            SubstrateOp::Advance { nanos: 45 },
+            SubstrateOp::Advance { nanos: 20 },
+        ],
+        vec![
+            SubstrateOp::Continue { task: T[1] },
+            SubstrateOp::Close { region: R[2] },
+        ],
+        vec![SubstrateOp::Cancel { region: R[3] }],
+        vec![SubstrateOp::Finish { task: T[3] }],
+    ];
+    (setup, actors)
+}
+
 /// The programs (setup as actor 0) and a sample of logs that run the setup first.
 fn sample_with_setup(
     setup: Program,
@@ -567,6 +632,19 @@ fn corpus() -> Vec<Entry> {
             config: all_families(),
         });
     }
+    // Budget deadlines (bn-36wy3), observed with every family, and without the
+    // cancellation family (so the single-task cancellation shows only as lifecycle
+    // steps around its cleanup). Appended last, so the entries above keep their logs.
+    let deadline_entries: [(&'static str, BindingConfig); 2] = [
+        ("deadlines", all_families()),
+        (
+            "deadlines/without-cancellation",
+            BindingConfig::new(SEED)
+                .observing(Family::Effect)
+                .observing(Family::Obligation)
+                .observing(Family::Time),
+        ),
+    ];
     // The alphabet is a parameter: the same lifecycle programs, observed as lifecycle
     // alone and as lifecycle with cancellation phases.
     for (name, config) in [
@@ -582,6 +660,16 @@ fn corpus() -> Vec<Entry> {
             cascade()
         };
         let logs = sample(&programs, &mut rng);
+        out.push(Entry {
+            name,
+            programs,
+            logs,
+            config,
+        });
+    }
+    for (name, config) in deadline_entries {
+        let (setup, actors) = deadlines();
+        let (programs, logs) = sample_with_setup(setup, actors, &mut rng);
         out.push(Entry {
             name,
             programs,
@@ -639,7 +727,7 @@ fn every_substrate_journal_is_a_trace_the_conformance_model_accepts() {
     eprintln!("{runs} runs, events per family {per_family:?}");
     // The corpus is deterministic (explicit seeds, seed-independent journals), and
     // docs/18's C023 record cites these counts.
-    assert_eq!(runs, 7_513, "docs/18 C023 cites this count");
+    assert_eq!(runs, 7_873, "docs/18 C023 cites this count");
     for family in [
         "lifecycle",
         "reserve-commit-abort",
@@ -713,11 +801,57 @@ fn the_models_enabled_steps_include_what_the_substrate_did() {
         }
     }
     eprintln!("{positions} positions, {exact_checked} generated steps checked by the guard");
-    assert_eq!(positions, 29_761, "docs/18 C023 cites this count");
+    assert_eq!(positions, 31_650, "docs/18 C023 cites this count");
     assert!(exact_checked > positions, "{exact_checked}");
 }
 
 // --- rejection -----------------------------------------------------------------------
+
+/// The deadline entries are not vacuous (bn-36wy3): among their journals, deadline
+/// cancellations end tasks both inside an advance (a due timer woke the task) and at a
+/// gate wake, and a region's cancellation ends the same task in other logs. The model
+/// accepts every one, with and without the cancellation family, and the lift agrees
+/// (both are checked for every journal by the corpus test above).
+#[test]
+fn deadline_cancellations_are_in_the_corpus_and_accepted() {
+    let mut by_deadline = BTreeMap::<&str, usize>::new();
+    let mut by_region = 0_usize;
+    for entry in corpus()
+        .into_iter()
+        .filter(|entry| entry.name.starts_with("deadlines"))
+    {
+        for log in &entry.logs {
+            let journal = journal_of(&entry, log);
+            assert!(judge(&entry.config, &journal).is_accepted());
+            let ended = |task: u32| {
+                bodies(&journal).iter().any(|b| {
+                    matches!(
+                        b,
+                        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                            task: TaskOrdinal(t),
+                            step: TaskStep::Cancel,
+                        }) if *t == task
+                    )
+                })
+            };
+            // t0 (label t1) at a gate wake; t1 (label t2) inside an advance.
+            if ended(0) {
+                *by_deadline.entry("gate wake").or_default() += 1;
+            }
+            if ended(1) {
+                *by_deadline.entry("advance").or_default() += 1;
+            } else {
+                by_region += 1;
+            }
+        }
+    }
+    assert!(
+        by_deadline.get("gate wake").copied().unwrap_or(0) > 20
+            && by_deadline.get("advance").copied().unwrap_or(0) > 20,
+        "{by_deadline:?}"
+    );
+    assert!(by_region > 20, "{by_region}");
+}
 
 #[test]
 fn a_leaking_run_is_rejected_by_the_model_and_by_the_lift() {
@@ -772,8 +906,73 @@ type Mutant = (
     fn(&Fault) -> bool,
 );
 
+/// The task of the journal's first single-task `cancel-requested`, if any.
+fn first_requested_alone(j: &Journal) -> Option<TaskOrdinal> {
+    bodies(j).into_iter().find_map(|b| match b {
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task,
+            step: TaskStep::CancelRequested,
+        }) => Some(task),
+        _ => None,
+    })
+}
+
 fn mutants() -> Vec<Mutant> {
     vec![
+        (
+            "a deadline declared one event after its task's spawn",
+            |j| {
+                let mut b = bodies(j);
+                let at = position(j, |e| {
+                    matches!(e, EventBody::Time(TimeEvent::Deadline { .. }))
+                })?;
+                if at + 1 >= b.len() {
+                    return None;
+                }
+                b.swap(at, at + 1);
+                Some(rebuild(b))
+            },
+            // The event after the declaration now comes first: the declaration is not
+            // right after the spawn (cr-3pu5cu round 8), or that event is refused first.
+            |f| {
+                matches!(
+                    f,
+                    Fault::DeadlineNotAtSpawn(_) | Fault::TaskPhase(_) | Fault::Identity { .. }
+                )
+            },
+        ),
+        (
+            "a deadline cancellation before the clock reached the deadline",
+            |j| {
+                let task = first_requested_alone(j)?;
+                let mut b = bodies(j);
+                let at = position(
+                    j,
+                    |e| matches!(e, EventBody::Time(TimeEvent::Deadline { task: t, .. }) if *t == task),
+                )?;
+                b[at] = EventBody::Time(TimeEvent::Deadline {
+                    task,
+                    at: VirtualInstant(1_000_000),
+                });
+                Some(rebuild(b))
+            },
+            |f| matches!(f, Fault::Deadline(_)),
+        ),
+        (
+            "a deadline's cancellation without the task's own request",
+            |j| {
+                let task = first_requested_alone(j)?;
+                let mut b = bodies(j);
+                b.remove(position(j, |e| {
+                    matches!(e, EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                        task: t,
+                        step: TaskStep::CancelRequested,
+                    }) if *t == task)
+                })?);
+                Some(rebuild(b))
+            },
+            |f| matches!(f, Fault::TaskPhase(_) | Fault::CancelPhase(_)),
+        ),
         (
             "a cancellation completes without its acknowledgement",
             |j| {
@@ -787,24 +986,36 @@ fn mutants() -> Vec<Mutant> {
                 Some(rebuild(b))
             },
             // The next step of the task's cleanup is refused: its completion, or the
-            // effect abort that precedes it.
-            |f| matches!(f, Fault::CancelPhase(_) | Fault::TaskPhase(_)),
+            // effect abort that precedes it. Inside a task's own (deadline)
+            // cancellation, a cleanup step before the acknowledgement is not a step of
+            // that cancellation.
+            |f| {
+                matches!(
+                    f,
+                    Fault::CancelPhase(_)
+                        | Fault::TaskPhase(_)
+                        | Fault::OwnCancellationInterrupted(_)
+                )
+            },
         ),
         (
             "a request carries the other cause",
             |j| {
                 let mut b = bodies(j);
+                // A region's request: user and parent-cancelled are the two causes the
+                // region tree implies (a deadline's request is the task's own).
                 let at = position(j, |e| {
                     matches!(
                         e,
-                        EventBody::Cancellation(CancellationEvent::Requested { .. })
+                        EventBody::Cancellation(CancellationEvent::Requested { cause, .. })
+                            if *cause != CancelCause::Deadline
                     )
                 })?;
                 if let EventBody::Cancellation(CancellationEvent::Requested { task, cause }) = b[at]
                 {
                     let other = match cause {
                         CancelCause::User => CancelCause::ParentCancelled,
-                        CancelCause::ParentCancelled => CancelCause::User,
+                        CancelCause::ParentCancelled | CancelCause::Deadline => CancelCause::User,
                     };
                     b[at] = EventBody::Cancellation(CancellationEvent::Requested {
                         task,
@@ -894,7 +1105,14 @@ fn mutants() -> Vec<Mutant> {
                 b.insert(ack, aborted);
                 Some(rebuild(b))
             },
-            |f| matches!(f, Fault::TaskPhase(_)),
+            // Inside a task's own (deadline) cancellation, a cleanup step before the
+            // acknowledgement is not a step of that cancellation (cr-3pu5cu round 6).
+            |f| {
+                matches!(
+                    f,
+                    Fault::TaskPhase(_) | Fault::OwnCancellationInterrupted(_)
+                )
+            },
         ),
         (
             "a timer fires before the clock reaches its deadline",
@@ -1050,7 +1268,16 @@ fn mutants() -> Vec<Mutant> {
                 }
                 Some(rebuild(b))
             },
-            |f| matches!(f, Fault::TaskPhase(_) | Fault::CancelPhase(_)),
+            // Inside a task's own (deadline) cancellation, only its own `→ Cancelled`
+            // is a lifecycle step (cr-3pu5cu round 6).
+            |f| {
+                matches!(
+                    f,
+                    Fault::TaskPhase(_)
+                        | Fault::CancelPhase(_)
+                        | Fault::OwnCancellationInterrupted(_)
+                )
+            },
         ),
         (
             "work enters a region after its cancellation",
@@ -1238,9 +1465,9 @@ fn perturbed_journals_are_rejected_by_the_conformance_model() {
             run(programs, &log, &config).unwrap()
         })
         .collect();
-    // Channel journals: every tenth sampled log of each channel set.
+    // Channel and deadline journals: every tenth sampled log of each set.
     let mut rng = Splitmix(0xc4a7);
-    for (setup, actors) in [channels_cancel(), channels_close()] {
+    for (setup, actors) in [channels_cancel(), channels_close(), deadlines()] {
         let (programs, logs) = sample_with_setup(setup, actors, &mut rng);
         for log in logs.iter().step_by(10) {
             bases.push(run(&programs, log, &config).unwrap());
@@ -1275,7 +1502,7 @@ fn perturbed_journals_are_rejected_by_the_conformance_model() {
             "{name}: no base journal has the event it perturbs"
         );
     }
-    assert_eq!(mutants().len(), 21, "docs/18 C023 cites this count");
+    assert_eq!(mutants().len(), 24, "docs/18 C023 cites this count");
     assert!(rejected >= mutants().len());
     // Since bn-1i050 the lift rejects every mutant the model rejects.
     assert!(admitted_by_lift.is_empty(), "{admitted_by_lift:?}");
@@ -1317,17 +1544,16 @@ fn class_of(config: &BindingConfig, variant: &Journal, verdict: &Verdict) -> Str
 /// `TimeFault::{OutsideCancelling, NotRunning, WokenBeforeFire, Late, OutlivesTask}`,
 /// `LedgerFault::HolderTerminal`), so the sweep requires agreement in both directions.
 ///
-/// One known divergence remains, in the other direction, and it is pinned here:
-/// RFC 0026 correction 51's "known strictness, owned by bn-36wy3". The calculus decides
+/// One known divergence remained after bn-j1a50, in the other direction, and this pin
+/// held it: RFC 0026 correction 51's "known strictness". The calculus decided
 /// "cancelling" per region, at the cancel request, and the model per task, at the
-/// task's acknowledgement. So an obligation transfer, or a committed discharge, placed
-/// between a cancel request and the holder's acknowledgement is admitted by the model
-/// and refused by the calculus (`SubstrateRegionNotOpen`,
-/// `SubstrateCommitDuringCancellation`). No real journal falls in that window; only
-/// perturbations do. The lift errs toward nonconformance, never toward a false
-/// `is_total`. When bn-36wy3 relaxes the calculus the count drops to zero, and this pin
-/// becomes the regression guard that it stays there.
-const KNOWN_STRICTNESS: usize = 33;
+/// task's acknowledgement, so 33 perturbations (a transfer or a committed discharge
+/// between a cancel request and the holder's acknowledgement) were admitted by the model
+/// and refused by the calculus. RFC 0026 correction 53 (bn-36wy3) gave the calculus the
+/// per-task acknowledgement and relaxed the rule to the model's, and the count is zero.
+/// The pin is now the regression guard that it stays there: a window test
+/// ([`in_strictness_window`]) that matched anything again would fail it.
+const KNOWN_STRICTNESS: usize = 0;
 
 /// Whether the lift's refusal at `seq` is correction 51's known strictness: a
 /// substrate transfer or committed discharge refused because the region is cancelling,
@@ -1457,10 +1683,10 @@ fn deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift() {
     eprintln!(
         "compared {compared}, rejected by both {rejected_by_both}, disagreements {disagreements:?}"
     );
-    assert_eq!(compared, 23_587, "docs/18 C023 cites this count");
+    assert_eq!(compared, 25_277, "docs/18 C023 cites this count");
     assert_eq!(
         known_strictness, KNOWN_STRICTNESS,
-        "RFC 0026 correction 51's known strictness (bn-36wy3); docs/18 C023 cites it"
+        "RFC 0026 correction 51's known strictness, relaxed by correction 53 (bn-36wy3); docs/18 C023 cites it"
     );
     assert!(
         disagreements.is_empty(),
@@ -1529,4 +1755,2131 @@ fn the_model_reads_the_canonical_bytes_and_types_what_it_cannot_judge() {
             ..
         }
     ));
+}
+
+// --- truncation (cr-3pu5cu) ----------------------------------------------------------
+
+// A copy of `support/truncation.rs::mid_protocol`: the rule `a7-model-independent`
+// lets this witness load the model file only. `pr14_deadline_cancellation.rs` checks
+// that the two copies are the same text.
+/// Whether a journal prefix ends inside a protocol the substrate completes within one
+/// operation. This is the test's own definition of a *genuinely complete* prefix, stated
+/// from the event list alone, not from the lift: a prefix is complete when it ends
+/// outside every one of these, and mid-protocol otherwise.
+///
+/// - a task's cancellation phase not yet absorbed by the drain that lists it or by the
+///   task's own lifecycle `cancel`;
+/// - a task's own `cancel-requested` without its `cancel`;
+/// - a region's cancel request whose region has not been drained;
+/// - a drained region not finalized;
+/// - with the obligations family in the prefix, a finalized region not settled;
+/// - a timer whose deadline the clock has passed, neither fired nor cancelled.
+///
+/// A parked task, a held reservation, an open obligation, an armed timer that is not
+/// due, a blocked channel operation, and a normally closing region that waits for owned
+/// work are states a run can end in: prefixes ending there are complete.
+///
+/// Completeness is relative to the families a prefix carries. A journal has no alphabet
+/// header, so a prefix with no event of a family reads as that family's projection,
+/// which is complete without it: before its first obligation event, a finalized region
+/// owes no settle.
+fn mid_protocol(prefix: &[EventBody]) -> Option<&'static str> {
+    let obligations_observed = prefix
+        .iter()
+        .any(|body| matches!(body, EventBody::Obligation(_)));
+    let mut phased = BTreeSet::new();
+    let mut absorbed = BTreeSet::new();
+    let mut alone = BTreeSet::new();
+    let mut ended_alone = BTreeSet::new();
+    let mut cancel_requested = BTreeSet::new();
+    let mut drained = BTreeSet::new();
+    let mut finalized = BTreeSet::new();
+    let mut settled = BTreeSet::new();
+    let mut timers: BTreeMap<u32, u64> = BTreeMap::new();
+    let mut now = 0;
+    for body in prefix {
+        match body {
+            EventBody::Cancellation(event) => {
+                phased.insert(event.task());
+            }
+            EventBody::Lifecycle(LifecycleEvent::TaskStepped { task, step }) => match step {
+                TaskStep::CancelRequested => {
+                    alone.insert(*task);
+                }
+                TaskStep::Cancel => {
+                    ended_alone.insert(*task);
+                    absorbed.insert(*task);
+                }
+                _ => {}
+            },
+            EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { region }) => {
+                cancel_requested.insert(*region);
+            }
+            EventBody::Lifecycle(LifecycleEvent::RegionDrained { region, cancelled }) => {
+                drained.insert(*region);
+                absorbed.extend(cancelled.as_slice().iter().copied());
+            }
+            EventBody::Lifecycle(LifecycleEvent::RegionFinalized { region }) => {
+                finalized.insert(*region);
+            }
+            EventBody::Obligation(ObligationEvent::RegionSettled { region, .. }) => {
+                settled.insert(*region);
+            }
+            EventBody::Time(TimeEvent::Scheduled {
+                timer, deadline, ..
+            }) => {
+                timers.insert(timer.0, deadline.0);
+            }
+            EventBody::Time(
+                TimeEvent::Fired { timer, .. } | TimeEvent::Cancelled { timer, .. },
+            ) => {
+                timers.remove(&timer.0);
+            }
+            EventBody::Time(TimeEvent::Advanced { to, .. }) => now = to.0,
+            _ => {}
+        }
+    }
+    if phased.iter().any(|task| !absorbed.contains(task)) {
+        return Some("a cancellation not absorbed");
+    }
+    if alone.iter().any(|task| !ended_alone.contains(task)) {
+        return Some("a single-task cancellation not ended");
+    }
+    if cancel_requested
+        .iter()
+        .any(|region| !drained.contains(region))
+    {
+        return Some("a region's cancellation not drained");
+    }
+    if drained.iter().any(|region| !finalized.contains(region)) {
+        return Some("a drain not finalized");
+    }
+    if obligations_observed && finalized.iter().any(|region| !settled.contains(region)) {
+        return Some("a finalize not settled");
+    }
+    if timers.values().any(|deadline| *deadline <= now) {
+        return Some("a due timer not fired");
+    }
+    None
+}
+
+/// The model's verdict on `journal` over the families `bodies` carry.
+fn judge_carried(bodies: &[EventBody], journal: &Journal) -> Verdict {
+    let mut config = BindingConfig::new(SEED);
+    for family in [
+        Family::Effect,
+        Family::Cancellation,
+        Family::Obligation,
+        Family::Time,
+        Family::Channel,
+    ] {
+        if bodies.iter().any(|body| body.family() == family) {
+            config = config.observing(family);
+        }
+    }
+    judge(&config, journal)
+}
+
+/// Every strict prefix of every corpus journal: a mid-protocol prefix never lifts as
+/// `Conforms` (a truncated journal is typed, `Inconclusive(InsufficientTelemetry)` or a
+/// violation), and a complete prefix always does. The model, judging each prefix over
+/// the families the prefix carries, agrees with the lift on every one.
+#[test]
+fn truncated_journals_do_not_conform_and_complete_prefixes_do() {
+    let mut mid = BTreeMap::<&str, usize>::new();
+    let mut complete = 0_usize;
+    for entry in corpus() {
+        for log in &entry.logs {
+            let journal = journal_of(&entry, log);
+            let all = bodies(&journal);
+            for cut in 0..all.len() {
+                let prefix = rebuild(all[..cut].iter().cloned());
+                let conforms = lift_accepts(&prefix);
+                match mid_protocol(&all[..cut]) {
+                    Some(what) => {
+                        assert!(
+                            !conforms,
+                            "{} log {log} cut {cut} ({what}) lifts as Conforms\n{}",
+                            entry.name,
+                            prefix.render()
+                        );
+                        *mid.entry(what).or_default() += 1;
+                    }
+                    None => {
+                        assert!(
+                            conforms,
+                            "{} log {log} cut {cut}: a complete prefix does not conform: {:?}\n{}",
+                            entry.name,
+                            lift(&prefix),
+                            prefix.render()
+                        );
+                        complete += 1;
+                    }
+                }
+                assert_eq!(
+                    judge_carried(&all[..cut], &prefix).is_accepted(),
+                    conforms,
+                    "{} log {log} cut {cut}: the model and the lift disagree",
+                    entry.name
+                );
+            }
+        }
+    }
+    eprintln!("mid-protocol prefixes {mid:?}, complete {complete}");
+    // Non-vacuity: each kind of truncation occurs, and so do complete prefixes.
+    for what in [
+        "a cancellation not absorbed",
+        "a single-task cancellation not ended",
+        "a drain not finalized",
+        "a finalize not settled",
+    ] {
+        assert!(mid.get(what).copied().unwrap_or(0) > 0, "{what}: {mid:?}");
+    }
+    assert!(complete > 10_000, "{complete}");
+}
+
+/// Anti-vacuity: the truncation the review found. A deadline journal cut just before
+/// its task's lifecycle `cancel` is `Inconclusive(InsufficientTelemetry)`, and putting
+/// that one event back makes the same journal conform.
+#[test]
+fn a_deadline_journal_cut_before_its_cancel_is_inconclusive() {
+    let entry = corpus()
+        .into_iter()
+        .find(|entry| entry.name == "deadlines")
+        .expect("the deadline entry");
+    let (journal, end) = entry
+        .logs
+        .iter()
+        .find_map(|log| {
+            let journal = journal_of(&entry, log);
+            let end = position(&journal, |b| {
+                matches!(
+                    b,
+                    EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                        step: TaskStep::Cancel,
+                        ..
+                    })
+                )
+            })?;
+            Some((journal, end))
+        })
+        .expect("a deadline cancellation in the corpus");
+    let all = bodies(&journal);
+    let truncated = rebuild(all[..end].iter().cloned());
+    assert!(
+        matches!(
+            lift(&truncated),
+            LiftVerdict::Inconclusive {
+                reason: continuum_value::assurance::InconclusiveReason::InsufficientTelemetry,
+                ..
+            }
+        ),
+        "{:?}",
+        lift(&truncated)
+    );
+    assert!(!judge(&entry.config, &truncated).is_accepted());
+    let restored = rebuild(all[..=end].iter().cloned());
+    assert!(lift_accepts(&restored), "{:?}", lift(&restored));
+}
+
+// --- a task's own cancellation ends by its own `cancel` (cr-3pu5cu, th-1shbkn) -------
+
+/// Every family projection: lifecycle, with each subset of the other five families.
+fn every_projection() -> Vec<BindingConfig> {
+    let others = [
+        Family::Effect,
+        Family::Cancellation,
+        Family::Obligation,
+        Family::Time,
+        Family::Channel,
+    ];
+    (0_u32..32)
+        .map(|mask| {
+            let mut config = BindingConfig::new(SEED);
+            for (bit, family) in others.iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    config = config.observing(*family);
+                }
+            }
+            config
+        })
+        .collect()
+}
+
+/// Runs in which `t0` ends by its own deadline and a region's cancellation then drains
+/// its region: from `Running` with its own region cancelled, from `Created` with an
+/// ancestor region cancelled, and from `Suspended` (a due timer wakes it) with its own
+/// region cancelled.
+fn own_then_region() -> Vec<(&'static str, Program)> {
+    let deadline = |region: RegionLabel, task: TaskLabel| SubstrateOp::SpawnWithDeadline {
+        region,
+        task,
+        resumability: Resumability::Resumable,
+        deadline: 10,
+    };
+    vec![
+        (
+            "running, own region",
+            vec![
+                open(ROOT, R[1]),
+                deadline(R[1], T[1]),
+                begin(T[1]),
+                SubstrateOp::Advance { nanos: 20 },
+                SubstrateOp::Continue { task: T[1] },
+                SubstrateOp::Cancel { region: R[1] },
+            ],
+        ),
+        (
+            "created, ancestor region",
+            vec![
+                open(ROOT, R[1]),
+                open(R[1], R[2]),
+                deadline(R[2], T[1]),
+                SubstrateOp::Advance { nanos: 20 },
+                begin(T[1]),
+                SubstrateOp::Cancel { region: R[1] },
+            ],
+        ),
+        (
+            "suspended, own region",
+            vec![
+                open(ROOT, R[1]),
+                deadline(R[1], T[1]),
+                begin(T[1]),
+                SubstrateOp::Sleep {
+                    task: T[1],
+                    nanos: 40,
+                },
+                SubstrateOp::Advance { nanos: 50 },
+                SubstrateOp::Cancel { region: R[1] },
+            ],
+        ),
+    ]
+}
+
+fn is_own_cancel(body: &EventBody) -> bool {
+    matches!(
+        body,
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task: TaskOrdinal(0),
+            step: TaskStep::Cancel,
+        })
+    )
+}
+
+/// The splice the review found: a task's own `cancel-requested` (and, with the
+/// cancellation family, its `requested`/`acknowledged`/`cancelled` with the `deadline`
+/// cause) whose own lifecycle `cancel` is removed, and a later region cancel, drain and
+/// finalize that list the task. The drain leaves the worker `Cancelled` as the own step
+/// would, so a check that reads the shared terminal state accepts it. RFC 0026
+/// correction 53 items 3 and 6 end a task's own cancellation with its own `cancel`,
+/// within the operation that observed it, so under every family projection the lift
+/// reports `InterruptedOwnCancel` at the region's cancel request and the model
+/// `OwnCancellationInterrupted`. The unspliced journal conforms in both.
+#[test]
+fn a_region_drain_does_not_end_a_task_s_own_cancellation() {
+    let mut spliced = 0_usize;
+    for (name, program) in own_then_region() {
+        let log = ChoiceLog::new(vec![0; program.len()]);
+        let programs = vec![program];
+        for config in every_projection() {
+            let journal = run(&programs, &log, &config)
+                .unwrap_or_else(|refusal| panic!("{name} {:?}: {refusal}", config.families));
+            assert!(
+                lift_accepts(&journal) && judge(&config, &journal).is_accepted(),
+                "{name} {:?}: {:?} / {}\n{}",
+                config.families,
+                lift(&journal),
+                judge(&config, &journal),
+                journal.render()
+            );
+            let mut b = bodies(&journal);
+            let end = b.iter().position(is_own_cancel).expect("t0 ends alone");
+            b.remove(end);
+            let drain = b
+                .iter()
+                .position(|e| {
+                    matches!(
+                        e,
+                        EventBody::Lifecycle(LifecycleEvent::RegionDrained { .. })
+                    )
+                })
+                .expect("the region's drain");
+            let EventBody::Lifecycle(LifecycleEvent::RegionDrained { region, cancelled }) =
+                &b[drain]
+            else {
+                unreachable!()
+            };
+            assert!(cancelled.as_slice().is_empty(), "{name}: {cancelled:?}");
+            b[drain] = EventBody::Lifecycle(LifecycleEvent::RegionDrained {
+                region: *region,
+                cancelled: TaskSet::new([TaskOrdinal(0)]),
+            });
+            let variant = rebuild(b);
+            assert!(
+                matches!(
+                    lift(&variant),
+                    LiftVerdict::Violates {
+                        reason: Nonconformance::Cancellation(
+                            continuum_asupersync::family::cancellation::CancellationFault::InterruptedOwnCancel {
+                                task: 0,
+                                ..
+                            }
+                        ),
+                        ..
+                    }
+                ),
+                "{name} {:?}: {:?}\n{}",
+                config.families,
+                lift(&variant),
+                variant.render()
+            );
+            let verdict = judge(&config, &variant);
+            assert!(
+                matches!(
+                    verdict,
+                    Verdict::Rejected {
+                        fault: Fault::OwnCancellationInterrupted(0),
+                        ..
+                    }
+                ),
+                "{name} {:?}: {verdict}",
+                config.families
+            );
+            spliced += 1;
+        }
+    }
+    assert_eq!(spliced, 3 * 32);
+}
+
+/// The same rule for a normal end: the task's own lifecycle `cancel` replaced by
+/// `resume`, `complete`. Only the task's own `cancel` is a lifecycle step inside its own
+/// cancellation, so under every projection the lift reports `InterruptedOwnCancel` at
+/// the `resume` and the model `OwnCancellationInterrupted` (cr-3pu5cu round 6). With the
+/// `resume` dropped, the `complete` alone is refused the same way.
+#[test]
+fn a_normal_end_does_not_end_a_task_s_own_cancellation() {
+    let (name, program) = own_then_region().remove(0);
+    let log = ChoiceLog::new(vec![0; program.len()]);
+    let programs = vec![program];
+    let mut checked = 0_usize;
+    for config in every_projection() {
+        let journal = run(&programs, &log, &config).unwrap();
+        for with_resume in [true, false] {
+            let mut b = bodies(&journal);
+            let end = b.iter().position(is_own_cancel).expect("t0 ends alone");
+            b[end] = EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                task: TaskOrdinal(0),
+                step: TaskStep::Complete,
+            });
+            if with_resume {
+                b.insert(
+                    end,
+                    EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                        task: TaskOrdinal(0),
+                        step: TaskStep::Resume,
+                    }),
+                );
+            }
+            let variant = rebuild(b);
+            let lifted = lift(&variant);
+            let verdict = judge(&config, &variant);
+            assert!(
+                matches!(
+                    lifted,
+                    LiftVerdict::Violates {
+                        reason: Nonconformance::Cancellation(
+                            continuum_asupersync::family::cancellation::CancellationFault::InterruptedOwnCancel {
+                                task: 0,
+                                ..
+                            }
+                        ),
+                        ..
+                    }
+                ),
+                "{name} {:?} resume={with_resume}: {lifted:?}",
+                config.families
+            );
+            assert!(
+                matches!(
+                    verdict,
+                    Verdict::Rejected {
+                        fault: Fault::OwnCancellationInterrupted(0),
+                        ..
+                    }
+                ),
+                "{name} {:?} resume={with_resume}: {verdict}",
+                config.families
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 2 * 32);
+}
+
+// --- family presence is the journal's, not the first event's (pre-review pass) ------
+
+/// Hand-built journals from the pre-review adversarial pass. Each once lifted as
+/// `Conforms` (or, for the complete-after-phase one, `Inconclusive`), while the model
+/// rejected it: a check that turned on a family's presence was skipped because that
+/// family's first event came later, a `complete` followed a reported phase, a task was
+/// polled past its deadline as if it had none, or a region event came inside a task's
+/// own cancellation. Now the lift reports each as the named violation, and the model,
+/// judging over the families the journal carries, rejects each.
+#[test]
+fn late_family_events_and_interleavings_do_not_hide_a_violation() {
+    use continuum_asupersync::family::cancellation::CancellationFault;
+    use continuum_asupersync::family::channel::ChannelOrdinal;
+    use continuum_asupersync::family::effect::ReservationOrdinal;
+    use continuum_asupersync::family::time::{TimeFault, TimerOrdinal};
+
+    let t = TaskOrdinal;
+    let r = RegionOrdinal;
+    let open = |region: u32, parent: u32| {
+        EventBody::Lifecycle(LifecycleEvent::RegionOpened {
+            region: r(region),
+            parent: r(parent),
+        })
+    };
+    let spawn = |task: u32, region: u32| {
+        EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
+            task: t(task),
+            region: r(region),
+            resumability: Resumability::Resumable,
+        })
+    };
+    let step = |task: u32, step: TaskStep| {
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task: t(task),
+            step,
+        })
+    };
+    let cancel_region = |region: u32| {
+        EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { region: r(region) })
+    };
+    let drained = |region: u32, cancelled: &[u32]| {
+        EventBody::Lifecycle(LifecycleEvent::RegionDrained {
+            region: r(region),
+            cancelled: TaskSet::new(cancelled.iter().map(|c| t(*c))),
+        })
+    };
+    let finalized =
+        |region: u32| EventBody::Lifecycle(LifecycleEvent::RegionFinalized { region: r(region) });
+    let requested = |task: u32, cause: CancelCause| {
+        EventBody::Cancellation(CancellationEvent::Requested {
+            task: t(task),
+            cause,
+        })
+    };
+    let ack =
+        |task: u32| EventBody::Cancellation(CancellationEvent::Acknowledged { task: t(task) });
+    let cancelled = |task: u32, cause: CancelCause| {
+        EventBody::Cancellation(CancellationEvent::Cancelled {
+            task: t(task),
+            cause,
+        })
+    };
+    let deadline = |task: u32, at: u64| {
+        EventBody::Time(TimeEvent::Deadline {
+            task: t(task),
+            at: VirtualInstant(at),
+        })
+    };
+    let advanced = |from: u64, to: u64| {
+        EventBody::Time(TimeEvent::Advanced {
+            from: VirtualInstant(from),
+            to: VirtualInstant(to),
+        })
+    };
+    let reserved = |task: u32| {
+        EventBody::Effect(EffectEvent::Reserved {
+            reservation: ReservationOrdinal(0),
+            task: t(task),
+        })
+    };
+    let cancel_abort = EventBody::Effect(EffectEvent::Aborted {
+        reservation: ReservationOrdinal(0),
+        cause: AbortCause::Cancel,
+    });
+    let own_phases = |task: u32| {
+        vec![
+            requested(task, CancelCause::Deadline),
+            ack(task),
+            cancelled(task, CancelCause::Deadline),
+        ]
+    };
+
+    type Expect = fn(&Nonconformance) -> bool;
+    let mut cases: Vec<(&str, Vec<EventBody>, Expect)> = Vec::new();
+
+    // S7: a region's cancel abort before the task's cancellation phases.
+    cases.push((
+        "region cleanup before phases",
+        vec![
+            open(1, 0),
+            spawn(0, 1),
+            step(0, TaskStep::Begin),
+            reserved(0),
+            cancel_region(1),
+            cancel_abort.clone(),
+            requested(0, CancelCause::User),
+            ack(0),
+            cancelled(0, CancelCause::User),
+            drained(1, &[0]),
+            finalized(1),
+        ],
+        |n| matches!(n, Nonconformance::Effect(_)),
+    ));
+    // S3: a deadline's cancel abort before the task's phases.
+    let mut s3 = vec![
+        spawn(0, 0),
+        deadline(0, 10),
+        step(0, TaskStep::Begin),
+        reserved(0),
+        advanced(0, 20),
+        step(0, TaskStep::CancelRequested),
+        cancel_abort.clone(),
+    ];
+    s3.extend(own_phases(0));
+    s3.push(step(0, TaskStep::Cancel));
+    // Inside the task's own cancellation, a cleanup step before its acknowledgement is
+    // not a step of that cancellation (cr-3pu5cu round 6).
+    cases.push(("deadline cleanup before phases", s3, |n| {
+        matches!(
+            n,
+            Nonconformance::Cancellation(CancellationFault::InterruptedOwnCancel { .. })
+        )
+    }));
+    // S2: a deadline's timer drop before the task's phases.
+    let mut s2 = vec![
+        spawn(0, 0),
+        deadline(0, 10),
+        step(0, TaskStep::Begin),
+        EventBody::Time(TimeEvent::Scheduled {
+            timer: TimerOrdinal(0),
+            task: t(0),
+            at: VirtualInstant(0),
+            deadline: VirtualInstant(40),
+        }),
+        step(0, TaskStep::Suspend),
+        advanced(0, 20),
+        step(0, TaskStep::CancelRequested),
+        EventBody::Time(TimeEvent::Cancelled {
+            timer: TimerOrdinal(0),
+            at: VirtualInstant(20),
+        }),
+    ];
+    s2.extend(own_phases(0));
+    s2.push(step(0, TaskStep::Cancel));
+    cases.push(("deadline timer drop before phases", s2, |n| {
+        matches!(
+            n,
+            Nonconformance::Cancellation(CancellationFault::InterruptedOwnCancel { .. })
+        )
+    }));
+    // S4a: a deadline request, then the clock's first event: no deadline was declared.
+    let mut s4a = vec![
+        spawn(0, 0),
+        step(0, TaskStep::Begin),
+        step(0, TaskStep::CancelRequested),
+    ];
+    s4a.extend(own_phases(0));
+    s4a.push(step(0, TaskStep::Cancel));
+    s4a.push(advanced(0, 10));
+    cases.push(("deadline request before the clock", s4a, |n| {
+        matches!(n, Nonconformance::Time(TimeFault::DeadlineUnknown { .. }))
+    }));
+    // S4b: the deadline declared after the request.
+    let mut s4b = vec![
+        spawn(0, 0),
+        step(0, TaskStep::CancelRequested),
+        deadline(0, 100),
+    ];
+    s4b.extend(own_phases(0));
+    s4b.push(step(0, TaskStep::Cancel));
+    cases.push(("deadline declared after the request", s4b, |n| {
+        matches!(n, Nonconformance::Time(TimeFault::DeadlineUnknown { .. }))
+    }));
+    // S8: a send before the obligation family's first event, with no send permit.
+    cases.push((
+        "send before the ledger's first event",
+        vec![
+            spawn(0, 0),
+            spawn(1, 0),
+            step(0, TaskStep::Begin),
+            step(1, TaskStep::Begin),
+            EventBody::Channel(ChannelEvent::Opened {
+                channel: ChannelOrdinal(0),
+                capacity: 1,
+                receiver: t(0),
+            }),
+            EventBody::Channel(ChannelEvent::Sent {
+                channel: ChannelOrdinal(0),
+                message: MessageOrdinal(0),
+                sender: t(1),
+            }),
+            EventBody::Channel(ChannelEvent::Received {
+                channel: ChannelOrdinal(0),
+                message: MessageOrdinal(0),
+            }),
+            EventBody::Obligation(ObligationEvent::Opened {
+                obligation: ObligationOrdinal(0),
+                kind: ObligationKind::Lease,
+                holder: t(1),
+                region: r(0),
+            }),
+            EventBody::Obligation(ObligationEvent::Discharged {
+                obligation: ObligationOrdinal(0),
+                how: Discharge::Committed,
+            }),
+        ],
+        |n| matches!(n, Nonconformance::Channel(_)),
+    ));
+    // S6: a requested task completes normally.
+    cases.push((
+        "complete after a reported phase",
+        vec![
+            open(1, 0),
+            spawn(0, 1),
+            step(0, TaskStep::Begin),
+            cancel_region(1),
+            requested(0, CancelCause::User),
+            step(0, TaskStep::Complete),
+            drained(1, &[]),
+            finalized(1),
+        ],
+        |n| {
+            matches!(
+                n,
+                Nonconformance::Cancellation(CancellationFault::OutOfOrder { .. })
+            )
+        },
+    ));
+    // S10: a task polled past its deadline as if it had none.
+    cases.push((
+        "resume past the deadline",
+        vec![
+            spawn(0, 0),
+            deadline(0, 50),
+            step(0, TaskStep::Begin),
+            step(0, TaskStep::Suspend),
+            advanced(0, 100),
+            step(0, TaskStep::Resume),
+            step(0, TaskStep::Complete),
+        ],
+        |n| matches!(n, Nonconformance::Time(TimeFault::DeadlineIgnored { .. })),
+    ));
+    // S11: a parent region's cancellation inside a task's own cancellation.
+    let mut s11 = vec![
+        open(1, 0),
+        open(2, 1),
+        spawn(0, 2),
+        deadline(0, 10),
+        step(0, TaskStep::Begin),
+        advanced(0, 20),
+        step(0, TaskStep::CancelRequested),
+        cancel_region(1),
+    ];
+    s11.extend(own_phases(0));
+    s11.extend([step(0, TaskStep::Cancel), drained(1, &[]), finalized(1)]);
+    cases.push(("region cancel inside an own cancellation", s11, |n| {
+        matches!(
+            n,
+            Nonconformance::Cancellation(CancellationFault::InterruptedOwnCancel { .. })
+        )
+    }));
+
+    // S12: a task's own `cancel` with no phase of its own, in a journal that reports
+    // phases (another task's): not a projection without the family, so its missing
+    // `requested` is refused at the `cancel` (cr-3pu5cu round 6).
+    cases.push((
+        "own cancel with no phase in a journal with phases",
+        vec![
+            spawn(0, 0),
+            deadline(0, 10),
+            step(0, TaskStep::Begin),
+            advanced(0, 20),
+            step(0, TaskStep::CancelRequested),
+            step(0, TaskStep::Cancel),
+            open(1, 0),
+            spawn(1, 1),
+            step(1, TaskStep::Begin),
+            cancel_region(1),
+            requested(1, CancelCause::User),
+            ack(1),
+            cancelled(1, CancelCause::User),
+            drained(1, &[1]),
+            finalized(1),
+        ],
+        |n| {
+            matches!(
+                n,
+                Nonconformance::Cancellation(CancellationFault::OutOfOrder {
+                    event: "cancel",
+                    phase: "active",
+                    ..
+                })
+            )
+        },
+    ));
+
+    for (name, events, expected) in cases {
+        let journal = rebuild(events.iter().cloned());
+        match lift(&journal) {
+            LiftVerdict::Violates { reason, .. } => {
+                assert!(
+                    expected(&reason),
+                    "{name}: {reason:?}\n{}",
+                    journal.render()
+                );
+            }
+            other => panic!("{name}: {other:?}\n{}", journal.render()),
+        }
+        let verdict = judge_carried(&events, &journal);
+        assert!(!verdict.is_accepted(), "{name}: the model accepts it");
+    }
+}
+
+// --- every family is held to a task's own cancellation (cr-3pu5cu round 6) -----------
+
+/// A deadline run whose cancelled task `t0` holds a lease `o0` and a reservation `e0`,
+/// next to a root task `t1` that holds a lease, a reservation, and a channel with one
+/// queued message. `t0`'s deadline (50) passes in the advance, and `t0` observes it at
+/// its next poll (`Continue`).
+fn own_cancel_base() -> Vec<Program> {
+    vec![vec![
+        open(ROOT, R[1]),
+        SubstrateOp::SpawnWithDeadline {
+            region: R[1],
+            task: T[1],
+            resumability: Resumability::Resumable,
+            deadline: 50,
+        },
+        spawn(ROOT, T[2]),
+        begin(T[1]),
+        begin(T[2]),
+        acquire(T[1], 1, ObligationKind::Lease),
+        reserve(T[1], 2),
+        acquire(T[2], 3, ObligationKind::Lease),
+        reserve(T[2], 4),
+        SubstrateOp::OpenChannel {
+            channel: ChannelLabel(1),
+            capacity: 2,
+            receiver: T[2],
+        },
+        SubstrateOp::Send {
+            task: T[2],
+            channel: ChannelLabel(1),
+        },
+        SubstrateOp::Advance { nanos: 60 },
+        SubstrateOp::Continue { task: T[1] },
+    ]]
+}
+
+/// One forged event and where it goes: the events it replaces (removed first), and
+/// the event itself.
+struct OwnCancelAttack {
+    name: &'static str,
+    removes: fn(&EventBody) -> bool,
+    event: EventBody,
+}
+
+#[allow(clippy::too_many_lines)]
+fn own_cancel_attacks() -> Vec<OwnCancelAttack> {
+    let t = TaskOrdinal;
+    let r = RegionOrdinal;
+    let e = continuum_asupersync::family::effect::ReservationOrdinal;
+    let o = ObligationOrdinal;
+    let c = continuum_asupersync::family::channel::ChannelOrdinal;
+    let k = continuum_asupersync::family::time::TimerOrdinal;
+    let nothing = |_: &EventBody| false;
+    let abort_e0 = |b: &EventBody| {
+        matches!(
+            b,
+            EventBody::Effect(EffectEvent::Aborted { reservation, .. }) if reservation.0 == 0
+        )
+    };
+    let discharge_o0 = |b: &EventBody| {
+        matches!(
+            b,
+            EventBody::Obligation(ObligationEvent::Discharged { obligation, .. }) if obligation.0 == 0
+        )
+    };
+    let attack = |name, removes: fn(&EventBody) -> bool, event| OwnCancelAttack {
+        name,
+        removes,
+        event,
+    };
+    vec![
+        // The cancelled task's own ordinary work.
+        attack(
+            "t0 commits e0 (its cancel abort removed)",
+            abort_e0,
+            EventBody::Effect(EffectEvent::Committed { reservation: e(0) }),
+        ),
+        attack(
+            "t0 reserves e2",
+            nothing,
+            EventBody::Effect(EffectEvent::Reserved {
+                reservation: e(2),
+                task: t(0),
+            }),
+        ),
+        attack(
+            "t0 aborts e0 explicitly (its cancel abort removed)",
+            abort_e0,
+            EventBody::Effect(EffectEvent::Aborted {
+                reservation: e(0),
+                cause: AbortCause::Explicit,
+            }),
+        ),
+        attack(
+            "t0 discharges o0 committed (its aborted discharge removed)",
+            discharge_o0,
+            EventBody::Obligation(ObligationEvent::Discharged {
+                obligation: o(0),
+                how: Discharge::Committed,
+            }),
+        ),
+        attack(
+            "t0 opens o5",
+            nothing,
+            EventBody::Obligation(ObligationEvent::Opened {
+                obligation: o(5),
+                kind: ObligationKind::Lease,
+                holder: t(0),
+                region: r(1),
+            }),
+        ),
+        attack(
+            "t0 hands o0 to t1 (its aborted discharge removed)",
+            discharge_o0,
+            EventBody::Obligation(ObligationEvent::Transferred {
+                obligation: o(0),
+                holder: t(1),
+                region: r(0),
+            }),
+        ),
+        attack(
+            "t0 schedules a timer",
+            nothing,
+            EventBody::Time(TimeEvent::Scheduled {
+                timer: k(0),
+                task: t(0),
+                at: VirtualInstant(60),
+                deadline: VirtualInstant(70),
+            }),
+        ),
+        attack(
+            "t0 sends on c0",
+            nothing,
+            EventBody::Channel(ChannelEvent::Sent {
+                channel: c(0),
+                message: MessageOrdinal(1),
+                sender: t(0),
+            }),
+        ),
+        attack(
+            "t0 suspends",
+            nothing,
+            EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                task: t(0),
+                step: TaskStep::Suspend,
+            }),
+        ),
+        // Another task's work.
+        attack(
+            "t1 commits e1",
+            nothing,
+            EventBody::Effect(EffectEvent::Committed { reservation: e(1) }),
+        ),
+        attack(
+            "t1 aborts e1 with the cancel cause",
+            nothing,
+            EventBody::Effect(EffectEvent::Aborted {
+                reservation: e(1),
+                cause: AbortCause::Cancel,
+            }),
+        ),
+        attack(
+            "t1 discharges o2 committed",
+            nothing,
+            EventBody::Obligation(ObligationEvent::Discharged {
+                obligation: o(2),
+                how: Discharge::Committed,
+            }),
+        ),
+        attack(
+            "t1 discharges o2 aborted",
+            nothing,
+            EventBody::Obligation(ObligationEvent::Discharged {
+                obligation: o(2),
+                how: Discharge::Aborted,
+            }),
+        ),
+        attack(
+            "t1 opens o5",
+            nothing,
+            EventBody::Obligation(ObligationEvent::Opened {
+                obligation: o(5),
+                kind: ObligationKind::Lease,
+                holder: t(1),
+                region: r(0),
+            }),
+        ),
+        attack(
+            "t1 hands o2 to t0",
+            nothing,
+            EventBody::Obligation(ObligationEvent::Transferred {
+                obligation: o(2),
+                holder: t(0),
+                region: r(1),
+            }),
+        ),
+        attack(
+            "t1 schedules a timer",
+            nothing,
+            EventBody::Time(TimeEvent::Scheduled {
+                timer: k(0),
+                task: t(1),
+                at: VirtualInstant(60),
+                deadline: VirtualInstant(70),
+            }),
+        ),
+        attack(
+            "the clock advances",
+            nothing,
+            EventBody::Time(TimeEvent::Advanced {
+                from: VirtualInstant(60),
+                to: VirtualInstant(70),
+            }),
+        ),
+        attack(
+            "t1 receives m0",
+            nothing,
+            EventBody::Channel(ChannelEvent::Received {
+                channel: c(0),
+                message: MessageOrdinal(0),
+            }),
+        ),
+        attack(
+            "t1 sends on c0",
+            nothing,
+            EventBody::Channel(ChannelEvent::Sent {
+                channel: c(0),
+                message: MessageOrdinal(1),
+                sender: t(1),
+            }),
+        ),
+        attack(
+            "c0's senders close",
+            nothing,
+            EventBody::Channel(ChannelEvent::SendersClosed { channel: c(0) }),
+        ),
+        attack(
+            "t1 suspends",
+            nothing,
+            EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                task: t(1),
+                step: TaskStep::Suspend,
+            }),
+        ),
+        attack(
+            "t2 is spawned",
+            nothing,
+            EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
+                task: t(2),
+                region: r(0),
+                resumability: Resumability::Resumable,
+            }),
+        ),
+        attack(
+            "t1's cancellation is requested",
+            nothing,
+            EventBody::Cancellation(CancellationEvent::Requested {
+                task: t(1),
+                cause: CancelCause::User,
+            }),
+        ),
+    ]
+}
+
+/// Codex cr-3pu5cu round 6: a task's own (deadline) cancellation is one run of that
+/// task's events in every family, not only in the lifecycle family. For every one of
+/// the 32 projections, a real deadline journal conforms and the model accepts it (its
+/// cleanup after the acknowledgement included), and each forged event of the family
+/// set above, placed right after the task's `cancel-requested`, right after its
+/// `acknowledged` (when the projection reports phases) and right before its own
+/// `cancel`, is `InterruptedOwnCancel` in the lift and `OwnCancellationInterrupted` in
+/// the independent model. A forged event of a family the projection does not carry is
+/// not a journal of that projection, so it is not placed. Measured when this test was
+/// written: with the lift's rule turned off for every family but the lifecycle, 412 of
+/// the 974 placed journals lifted as `Conforms` (14 of the 23 attacks, under at least
+/// one projection each), so this rule is what refuses them.
+#[test]
+fn every_family_is_held_to_a_task_s_own_cancellation() {
+    use continuum_asupersync::family::cancellation::CancellationFault;
+    let programs = own_cancel_base();
+    let log = ChoiceLog::new(vec![0; programs[0].len()]);
+    let is_request = |b: &EventBody| {
+        matches!(
+            b,
+            EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                task: TaskOrdinal(0),
+                step: TaskStep::CancelRequested,
+            })
+        )
+    };
+    let is_ack = |b: &EventBody| {
+        matches!(
+            b,
+            EventBody::Cancellation(CancellationEvent::Acknowledged {
+                task: TaskOrdinal(0)
+            })
+        )
+    };
+    let mut placed = 0_usize;
+    let mut families = BTreeSet::new();
+    for config in every_projection() {
+        let journal = run(&programs, &log, &config).unwrap();
+        assert!(
+            lift_accepts(&journal) && judge(&config, &journal).is_accepted(),
+            "{:?}: {:?} / {}\n{}",
+            config.families,
+            lift(&journal),
+            judge(&config, &journal),
+            journal.render()
+        );
+        for attack in own_cancel_attacks() {
+            if !config.families.contains(attack.event.family()) {
+                continue;
+            }
+            let mut base = bodies(&journal);
+            // An attack that replaces a cleanup step goes where that step was, or
+            // earlier: a later place leaves the step missing before it, which is a
+            // fault of its own.
+            let replaced = base.iter().position(|b| (attack.removes)(b));
+            base.retain(|b| !(attack.removes)(b));
+            let request = base.iter().position(is_request).expect("t0's request");
+            let end = base.iter().position(is_own_cancel).expect("t0's cancel");
+            let mut points = match replaced {
+                Some(at) => vec![request + 1, at],
+                None => vec![request + 1, end],
+            };
+            if let Some(ack) = base.iter().position(is_ack) {
+                if replaced.is_none_or(|at| ack < at) {
+                    points.push(ack + 1);
+                }
+            }
+            points.sort_unstable();
+            points.dedup();
+            for at in points {
+                let mut b = base.clone();
+                b.insert(at, attack.event.clone());
+                let variant = rebuild(b);
+                let lifted = lift(&variant);
+                assert!(
+                    matches!(
+                        lifted,
+                        LiftVerdict::Violates {
+                            reason: Nonconformance::Cancellation(
+                                CancellationFault::InterruptedOwnCancel { task: 0, .. }
+                            ),
+                            ..
+                        }
+                    ),
+                    "{} at {at} {:?}: {lifted:?}\n{}",
+                    attack.name,
+                    config.families,
+                    variant.render()
+                );
+                let verdict = judge(&config, &variant);
+                assert!(
+                    matches!(
+                        verdict,
+                        Verdict::Rejected {
+                            fault: Fault::OwnCancellationInterrupted(0),
+                            ..
+                        }
+                    ),
+                    "{} at {at} {:?}: {verdict}",
+                    attack.name,
+                    config.families
+                );
+                families.insert(attack.event.family().to_string());
+                placed += 1;
+            }
+        }
+    }
+    assert_eq!(families.len(), 6, "{families:?}");
+    assert_eq!(placed, 974);
+}
+
+/// Journals from the round-6 pre-review adversarial pass (cr-3pu5cu). Each once lifted
+/// as `Conforms` and the model accepted most of them:
+///
+/// - without the cancellation family, a task's own cleanup step (a cancellation's
+///   abort, a timer's cancellation, an abandoned send or receive) did not stop its
+///   later work (B, B2, C, I, P1, P2, P3). Cleanup now stands for the acknowledgement in
+///   the lift (`cancellation::imply_acknowledgement`) and in the model (`cleaned_up`);
+/// - a task whose deadline the clock had reached still did its own work in other
+///   families, or completed or failed (E, E2, E3). A task's own work in any family now
+///   needs its deadline not reached (`time::check_actor_deadline`, the model's
+///   `actor`);
+/// - a region's cancellation was requested again (R1, R2, R3). The lift refuses the
+///   repeat (`RepeatedCancel`), as the model does, so a forged run of repeats costs
+///   nothing per repeat.
+///
+/// Now the lift reports each as a violation, and the model, judging over the families
+/// the journal carries, rejects each.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn round_six_pre_review_journals_are_rejected() {
+    use continuum_asupersync::family::channel::ChannelOrdinal;
+    use continuum_asupersync::family::effect::ReservationOrdinal;
+    use continuum_asupersync::family::time::TimerOrdinal;
+    use continuum_task::region::worker::FailureReason;
+    let t = TaskOrdinal;
+    let r = RegionOrdinal;
+    let open = |region, parent| {
+        EventBody::Lifecycle(LifecycleEvent::RegionOpened {
+            region: r(region),
+            parent: r(parent),
+        })
+    };
+    let spawn = |task, region| {
+        EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
+            task: t(task),
+            region: r(region),
+            resumability: Resumability::Resumable,
+        })
+    };
+    let step = |task, step| {
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task: t(task),
+            step,
+        })
+    };
+    let cancel_region =
+        |region| EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { region: r(region) });
+    let drained = |region, cancelled: &[u32]| {
+        EventBody::Lifecycle(LifecycleEvent::RegionDrained {
+            region: r(region),
+            cancelled: TaskSet::new(cancelled.iter().map(|x| t(*x))),
+        })
+    };
+    let finalized =
+        |region| EventBody::Lifecycle(LifecycleEvent::RegionFinalized { region: r(region) });
+    let reserved = |e, task| {
+        EventBody::Effect(EffectEvent::Reserved {
+            reservation: ReservationOrdinal(e),
+            task: t(task),
+        })
+    };
+    let committed = |e| {
+        EventBody::Effect(EffectEvent::Committed {
+            reservation: ReservationOrdinal(e),
+        })
+    };
+    let cancel_abort = |e| {
+        EventBody::Effect(EffectEvent::Aborted {
+            reservation: ReservationOrdinal(e),
+            cause: AbortCause::Cancel,
+        })
+    };
+    let ob_open = |o, holder, region| {
+        EventBody::Obligation(ObligationEvent::Opened {
+            obligation: ObligationOrdinal(o),
+            kind: ObligationKind::Lease,
+            holder: t(holder),
+            region: r(region),
+        })
+    };
+    let ob_dis = |o, how| {
+        EventBody::Obligation(ObligationEvent::Discharged {
+            obligation: ObligationOrdinal(o),
+            how,
+        })
+    };
+    let ob_xfer = |o, holder, region| {
+        EventBody::Obligation(ObligationEvent::Transferred {
+            obligation: ObligationOrdinal(o),
+            holder: t(holder),
+            region: r(region),
+        })
+    };
+    let settled = |region| {
+        EventBody::Obligation(ObligationEvent::RegionSettled {
+            region: r(region),
+            open: ObligationSet::new([]),
+            leaked: ObligationSet::new([]),
+        })
+    };
+    let deadline = |task, at| {
+        EventBody::Time(TimeEvent::Deadline {
+            task: t(task),
+            at: VirtualInstant(at),
+        })
+    };
+    let advanced = |from, to| {
+        EventBody::Time(TimeEvent::Advanced {
+            from: VirtualInstant(from),
+            to: VirtualInstant(to),
+        })
+    };
+    let sched = |k, task, at, dl| {
+        EventBody::Time(TimeEvent::Scheduled {
+            timer: TimerOrdinal(k),
+            task: t(task),
+            at: VirtualInstant(at),
+            deadline: VirtualInstant(dl),
+        })
+    };
+    let timer_cancelled = |k, at| {
+        EventBody::Time(TimeEvent::Cancelled {
+            timer: TimerOrdinal(k),
+            at: VirtualInstant(at),
+        })
+    };
+    let fired = |k, at| {
+        EventBody::Time(TimeEvent::Fired {
+            timer: TimerOrdinal(k),
+            at: VirtualInstant(at),
+        })
+    };
+    let c = ChannelOrdinal;
+    let copen = |ch, capacity, receiver| {
+        EventBody::Channel(ChannelEvent::Opened {
+            channel: c(ch),
+            capacity,
+            receiver: t(receiver),
+        })
+    };
+    let sent = |ch, m, sender| {
+        EventBody::Channel(ChannelEvent::Sent {
+            channel: c(ch),
+            message: MessageOrdinal(m),
+            sender: t(sender),
+        })
+    };
+    let send_blocked = |ch, m, sender| {
+        EventBody::Channel(ChannelEvent::SendBlocked {
+            channel: c(ch),
+            message: MessageOrdinal(m),
+            sender: t(sender),
+        })
+    };
+    let send_abandoned = |ch, m, sender| {
+        EventBody::Channel(ChannelEvent::SendAbandoned {
+            channel: c(ch),
+            message: MessageOrdinal(m),
+            sender: t(sender),
+        })
+    };
+    let received = |ch, m| {
+        EventBody::Channel(ChannelEvent::Received {
+            channel: c(ch),
+            message: MessageOrdinal(m),
+        })
+    };
+    let recv_blocked = |ch| EventBody::Channel(ChannelEvent::RecvBlocked { channel: c(ch) });
+    let recv_abandoned = |ch| EventBody::Channel(ChannelEvent::RecvAbandoned { channel: c(ch) });
+    let gone = |ch| {
+        EventBody::Channel(ChannelEvent::ReceiverGone {
+            channel: c(ch),
+            discarded: MessageSet::new([]),
+        })
+    };
+    use TaskStep::{Begin, Complete};
+
+    let cases: Vec<(&str, Vec<EventBody>)> = vec![
+        (
+            "B cancel abort, then commit",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                step(0, Begin),
+                reserved(0, 0),
+                reserved(1, 0),
+                cancel_region(1),
+                cancel_abort(0),
+                committed(1),
+                drained(1, &[0]),
+                finalized(1),
+            ],
+        ),
+        (
+            "B2 cancel abort, then reserve and commit",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                step(0, Begin),
+                reserved(0, 0),
+                cancel_region(1),
+                cancel_abort(0),
+                reserved(1, 0),
+                committed(1),
+                drained(1, &[0]),
+                finalized(1),
+            ],
+        ),
+        (
+            "C send abandoned, then a fresh send",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                spawn(1, 0),
+                step(0, Begin),
+                step(1, Begin),
+                copen(0, 1, 1),
+                sent(0, 0, 0),
+                send_blocked(0, 1, 0),
+                cancel_region(1),
+                send_abandoned(0, 1, 0),
+                received(0, 0),
+                sent(0, 2, 0),
+                drained(1, &[0]),
+                finalized(1),
+            ],
+        ),
+        (
+            "I timer cancelled, then a new timer",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                step(0, Begin),
+                sched(0, 0, 0, 10),
+                cancel_region(1),
+                timer_cancelled(0, 0),
+                sched(1, 0, 0, 5),
+                advanced(0, 5),
+                fired(1, 5),
+                drained(1, &[0]),
+                finalized(1),
+            ],
+        ),
+        (
+            "P1 cancel abort, then a committed discharge",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                step(0, Begin),
+                reserved(0, 0),
+                ob_open(0, 0, 1),
+                cancel_region(1),
+                cancel_abort(0),
+                ob_dis(0, Discharge::Committed),
+                drained(1, &[0]),
+                finalized(1),
+                settled(1),
+            ],
+        ),
+        (
+            "P2 timer cancelled, then a hand-off",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                spawn(1, 0),
+                step(0, Begin),
+                step(1, Begin),
+                ob_open(0, 0, 1),
+                sched(0, 0, 0, 10),
+                cancel_region(1),
+                timer_cancelled(0, 0),
+                ob_xfer(0, 1, 0),
+                drained(1, &[0]),
+                finalized(1),
+                settled(1),
+                ob_dis(0, Discharge::Committed),
+            ],
+        ),
+        (
+            "P3 receive abandoned, then a committed discharge",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                step(0, Begin),
+                ob_open(0, 0, 1),
+                copen(0, 2, 0),
+                recv_blocked(0),
+                cancel_region(1),
+                recv_abandoned(0),
+                ob_dis(0, Discharge::Committed),
+                gone(0),
+                drained(1, &[0]),
+                finalized(1),
+                settled(1),
+            ],
+        ),
+        (
+            "E complete past the deadline",
+            vec![
+                spawn(0, 0),
+                deadline(0, 10),
+                step(0, Begin),
+                advanced(0, 20),
+                step(0, Complete),
+            ],
+        ),
+        (
+            "E2 fail from created past the deadline",
+            vec![
+                spawn(0, 0),
+                deadline(0, 10),
+                advanced(0, 20),
+                step(0, TaskStep::Fail(FailureReason::new("boom").unwrap())),
+            ],
+        ),
+        (
+            "E3 own work in every family past the deadline",
+            vec![
+                spawn(0, 0),
+                deadline(0, 10),
+                spawn(1, 0),
+                step(0, Begin),
+                step(1, Begin),
+                copen(0, 2, 1),
+                advanced(0, 20),
+                reserved(0, 0),
+                committed(0),
+                ob_open(0, 0, 0),
+                ob_dis(0, Discharge::Committed),
+                step(0, Complete),
+            ],
+        ),
+        (
+            "R1 a region cancelled twice",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                step(0, Begin),
+                cancel_region(1),
+                cancel_region(1),
+                drained(1, &[0]),
+                finalized(1),
+            ],
+        ),
+        (
+            "R2 a child cancelled after its parent",
+            vec![
+                open(1, 0),
+                open(2, 1),
+                spawn(0, 2),
+                step(0, Begin),
+                cancel_region(1),
+                cancel_region(2),
+                drained(1, &[0]),
+                finalized(1),
+            ],
+        ),
+        (
+            "R3 a region cancelled after its drain",
+            vec![
+                open(1, 0),
+                spawn(0, 1),
+                step(0, Begin),
+                cancel_region(1),
+                drained(1, &[0]),
+                cancel_region(1),
+                finalized(1),
+            ],
+        ),
+    ];
+    assert_eq!(cases.len(), 13);
+    for (name, events) in cases {
+        let journal = rebuild(events.iter().cloned());
+        assert!(
+            matches!(lift(&journal), LiftVerdict::Violates { .. }),
+            "{name}: {:?}\n{}",
+            lift(&journal),
+            journal.render()
+        );
+        let verdict = judge_carried(&events, &journal);
+        assert!(!verdict.is_accepted(), "{name}: the model accepts it");
+    }
+}
+
+/// Codex cr-3pu5cu round 6 (th-2f07u7): every live task a region's cancellation reaches
+/// has phases when the journal carries the cancellation family. A two-task journal: one
+/// region request reaches `t0` and `t1`; `t1` is fully phased and drained, `t0` has no
+/// phase and ends by `complete` or `fail`, from created or running, under its own
+/// region's request or an ancestor's. Each is `UnreportedRequest` in the lift and in
+/// the model. Controls: the same journals without the cancellation family, and `t0`
+/// ending before the request, conform in both.
+#[test]
+fn a_region_request_needs_phases_for_every_task_it_reaches() {
+    use continuum_asupersync::family::cancellation::CancellationFault;
+    use continuum_task::region::worker::FailureReason;
+    let t = TaskOrdinal;
+    let r = RegionOrdinal;
+    let lc = EventBody::Lifecycle;
+    let open = |region, parent| {
+        lc(LifecycleEvent::RegionOpened {
+            region: r(region),
+            parent: r(parent),
+        })
+    };
+    let spawn = |task, region| {
+        lc(LifecycleEvent::TaskSpawned {
+            task: t(task),
+            region: r(region),
+            resumability: Resumability::Resumable,
+        })
+    };
+    let step = |task, step| {
+        lc(LifecycleEvent::TaskStepped {
+            task: t(task),
+            step,
+        })
+    };
+    let phase = |event| EventBody::Cancellation(event);
+    let fail = || TaskStep::Fail(FailureReason::new("boom").unwrap());
+    let mut violations = 0;
+    let mut controls = 0;
+    // `ancestor`: t0 and t1 live in r2 under r1, and r1 is cancelled; else in r1.
+    for ancestor in [false, true] {
+        for running in [false, true] {
+            for end in [TaskStep::Complete, fail()] {
+                if !running && end == TaskStep::Complete {
+                    continue; // `complete` needs a running task
+                }
+                for before in [false, true] {
+                    let (home, cancelled) = if ancestor { (2, 1) } else { (1, 1) };
+                    let cause = if ancestor {
+                        CancelCause::ParentCancelled
+                    } else {
+                        CancelCause::User
+                    };
+                    let mut b = vec![open(1, 0)];
+                    if ancestor {
+                        b.push(open(2, 1));
+                    }
+                    b.extend([spawn(0, home), spawn(1, home), step(1, TaskStep::Begin)]);
+                    if running {
+                        b.push(step(0, TaskStep::Begin));
+                    }
+                    if before {
+                        b.push(step(0, end.clone()));
+                    }
+                    b.push(lc(LifecycleEvent::RegionCancelRequested {
+                        region: r(cancelled),
+                    }));
+                    if !before {
+                        b.push(step(0, end.clone()));
+                    }
+                    b.extend([
+                        phase(CancellationEvent::Requested { task: t(1), cause }),
+                        phase(CancellationEvent::Acknowledged { task: t(1) }),
+                        phase(CancellationEvent::Cancelled { task: t(1), cause }),
+                        lc(LifecycleEvent::RegionDrained {
+                            region: r(cancelled),
+                            cancelled: TaskSet::new([t(1)]),
+                        }),
+                        lc(LifecycleEvent::RegionFinalized {
+                            region: r(cancelled),
+                        }),
+                    ]);
+                    let without: Vec<EventBody> = b
+                        .iter()
+                        .filter(|e| e.family() != Family::Cancellation)
+                        .cloned()
+                        .collect();
+                    let name = format!(
+                        "ancestor={ancestor} running={running} end={end:?} before={before}"
+                    );
+                    let journal = rebuild(b.iter().cloned());
+                    let control = rebuild(without.iter().cloned());
+                    assert!(
+                        lift_accepts(&control) && judge_carried(&without, &control).is_accepted(),
+                        "{name} without phases: {:?} / {}\n{}",
+                        lift(&control),
+                        judge_carried(&without, &control),
+                        control.render()
+                    );
+                    controls += 1;
+                    if before {
+                        assert!(
+                            lift_accepts(&journal) && judge_carried(&b, &journal).is_accepted(),
+                            "{name}: {:?} / {}\n{}",
+                            lift(&journal),
+                            judge_carried(&b, &journal),
+                            journal.render()
+                        );
+                        controls += 1;
+                        continue;
+                    }
+                    assert!(
+                        matches!(
+                            lift(&journal),
+                            LiftVerdict::Violates {
+                                reason: Nonconformance::Cancellation(
+                                    CancellationFault::UnreportedRequest { task: 0, .. }
+                                ),
+                                ..
+                            }
+                        ),
+                        "{name}: {:?}\n{}",
+                        lift(&journal),
+                        journal.render()
+                    );
+                    assert!(
+                        matches!(
+                            judge_carried(&b, &journal),
+                            Verdict::Rejected {
+                                fault: Fault::UnreportedRequest(0),
+                                ..
+                            }
+                        ),
+                        "{name}: {}",
+                        judge_carried(&b, &journal)
+                    );
+                    violations += 1;
+                }
+            }
+        }
+    }
+    assert_eq!((violations, controls), (6, 18));
+}
+
+/// Codex cr-3pu5cu round 7 (th-18a2iz): a task's own region cancelled after the clock
+/// reached the task's deadline, before the task observed it, is the race the binding
+/// refuses as `CancelRaced` under every projection. A hand-built journal of it, with
+/// the task created, running or suspended, is `TimeFault::CancelRaced` in the lift and
+/// `Fault::CancelRaced` in the model. Controls conform in both: the own region
+/// cancelled before the deadline, a proper ancestor cancelled after it
+/// (`parent-cancelled` outranks the deadline), and every journal with the time family
+/// dropped, which declares no deadline and so cannot show the race.
+#[test]
+fn an_own_region_cancel_after_a_due_deadline_is_the_race() {
+    use continuum_asupersync::family::time::TimeFault;
+    let t = TaskOrdinal;
+    let r = RegionOrdinal;
+    let lc = EventBody::Lifecycle;
+    let step = |step| lc(LifecycleEvent::TaskStepped { task: t(0), step });
+    let mut raced = 0;
+    let mut controls = 0;
+    for start in ["created", "running", "suspended"] {
+        for (ancestor, due) in [(false, true), (false, false), (true, true)] {
+            let home = if ancestor { 2 } else { 1 };
+            let cause = if ancestor {
+                CancelCause::ParentCancelled
+            } else {
+                CancelCause::User
+            };
+            let mut b = vec![lc(LifecycleEvent::RegionOpened {
+                region: r(1),
+                parent: r(0),
+            })];
+            if ancestor {
+                b.push(lc(LifecycleEvent::RegionOpened {
+                    region: r(2),
+                    parent: r(1),
+                }));
+            }
+            b.push(lc(LifecycleEvent::TaskSpawned {
+                task: t(0),
+                region: r(home),
+                resumability: Resumability::Resumable,
+            }));
+            b.push(EventBody::Time(TimeEvent::Deadline {
+                task: t(0),
+                at: VirtualInstant(10),
+            }));
+            match start {
+                "running" => b.push(step(TaskStep::Begin)),
+                "suspended" => b.extend([step(TaskStep::Begin), step(TaskStep::Suspend)]),
+                _ => {}
+            }
+            b.push(EventBody::Time(TimeEvent::Advanced {
+                from: VirtualInstant(0),
+                to: VirtualInstant(if due { 20 } else { 5 }),
+            }));
+            b.extend([
+                lc(LifecycleEvent::RegionCancelRequested { region: r(1) }),
+                EventBody::Cancellation(CancellationEvent::Requested { task: t(0), cause }),
+                EventBody::Cancellation(CancellationEvent::Acknowledged { task: t(0) }),
+                EventBody::Cancellation(CancellationEvent::Cancelled { task: t(0), cause }),
+                lc(LifecycleEvent::RegionDrained {
+                    region: r(1),
+                    cancelled: TaskSet::new([t(0)]),
+                }),
+                lc(LifecycleEvent::RegionFinalized { region: r(1) }),
+            ]);
+            let name = format!("{start} ancestor={ancestor} due={due}");
+            let journal = rebuild(b.iter().cloned());
+            let without: Vec<EventBody> = b
+                .iter()
+                .filter(|e| e.family() != Family::Time)
+                .cloned()
+                .collect();
+            let control = rebuild(without.iter().cloned());
+            assert!(
+                lift_accepts(&control) && judge_carried(&without, &control).is_accepted(),
+                "{name} without time: {:?} / {}\n{}",
+                lift(&control),
+                judge_carried(&without, &control),
+                control.render()
+            );
+            controls += 1;
+            if ancestor || !due {
+                assert!(
+                    lift_accepts(&journal) && judge_carried(&b, &journal).is_accepted(),
+                    "{name}: {:?} / {}\n{}",
+                    lift(&journal),
+                    judge_carried(&b, &journal),
+                    journal.render()
+                );
+                controls += 1;
+                continue;
+            }
+            assert!(
+                matches!(
+                    lift(&journal),
+                    LiftVerdict::Violates {
+                        reason: Nonconformance::Time(TimeFault::CancelRaced {
+                            task: 0,
+                            region: 1,
+                            ..
+                        }),
+                        ..
+                    }
+                ),
+                "{name}: {:?}\n{}",
+                lift(&journal),
+                journal.render()
+            );
+            assert!(
+                matches!(
+                    judge_carried(&b, &journal),
+                    Verdict::Rejected {
+                        fault: Fault::CancelRaced(0),
+                        ..
+                    }
+                ),
+                "{name}: {}",
+                judge_carried(&b, &journal)
+            );
+            raced += 1;
+        }
+    }
+    assert_eq!((raced, controls), (3, 15));
+    // The binding refuses the same execution under every projection, lifecycle alone
+    // included, so no projection returns a journal the lift would have to judge.
+    let programs = vec![vec![
+        open(ROOT, R[1]),
+        SubstrateOp::SpawnWithDeadline {
+            region: R[1],
+            task: T[1],
+            resumability: Resumability::Resumable,
+            deadline: 10,
+        },
+        begin(T[1]),
+        SubstrateOp::Advance { nanos: 20 },
+        SubstrateOp::Cancel { region: R[1] },
+    ]];
+    for config in every_projection() {
+        assert_eq!(
+            run(&programs, &ChoiceLog::new([0; 5]), &config),
+            Err(continuum_asupersync::binding::BindingRefusal::CancelRaced { task: 0 }),
+            "{:?}",
+            config.families
+        );
+    }
+}
+
+/// Self-sweep for cr-3pu5cu round 7: rules whose verdict turns on another family's fact.
+/// A leak is its holder's end (lifecycle), so a leak by a parked holder is a violation
+/// and a leak whose holder never ends is a truncation; a channel's receiver is handed
+/// to a task not in cancellation. Each once lifted as `Conforms` while the model
+/// rejected it. Now neither accepts.
+#[test]
+fn cross_family_facts_are_read_by_the_lift() {
+    use continuum_asupersync::family::channel::ChannelOrdinal;
+    use continuum_asupersync::family::obligation::LedgerFault;
+    let t = TaskOrdinal;
+    let r = RegionOrdinal;
+    let lc = EventBody::Lifecycle;
+    let step = |task, step| {
+        lc(LifecycleEvent::TaskStepped {
+            task: t(task),
+            step,
+        })
+    };
+    let spawn = |task, region| {
+        lc(LifecycleEvent::TaskSpawned {
+            task: t(task),
+            region: r(region),
+            resumability: Resumability::Resumable,
+        })
+    };
+    let opened = EventBody::Obligation(ObligationEvent::Opened {
+        obligation: ObligationOrdinal(0),
+        kind: ObligationKind::Lease,
+        holder: t(0),
+        region: r(0),
+    });
+    let leaked = EventBody::Obligation(ObligationEvent::Leaked {
+        obligation: ObligationOrdinal(0),
+    });
+    // A leak whose holder never ends: a truncation.
+    let unended = vec![
+        spawn(0, 0),
+        step(0, TaskStep::Begin),
+        opened.clone(),
+        leaked.clone(),
+    ];
+    let journal = rebuild(unended.iter().cloned());
+    assert!(
+        matches!(
+            lift(&journal),
+            LiftVerdict::Inconclusive {
+                reason: continuum_value::assurance::InconclusiveReason::InsufficientTelemetry,
+                ..
+            }
+        ),
+        "{:?}",
+        lift(&journal)
+    );
+    assert!(!judge_carried(&unended, &journal).is_accepted());
+    // A leak by a parked holder.
+    let parked = vec![
+        spawn(0, 0),
+        step(0, TaskStep::Begin),
+        opened,
+        step(0, TaskStep::Suspend),
+        leaked.clone(),
+    ];
+    let journal = rebuild(parked.iter().cloned());
+    assert!(
+        matches!(
+            lift(&journal),
+            LiftVerdict::Violates {
+                reason: Nonconformance::Obligation(LedgerFault::LeakByLiveHolder { .. }),
+                ..
+            }
+        ),
+        "{:?}",
+        lift(&journal)
+    );
+    assert!(!judge_carried(&parked, &journal).is_accepted());
+    // A channel whose receiver is a task in cancellation.
+    let in_cancel = vec![
+        lc(LifecycleEvent::RegionOpened {
+            region: r(1),
+            parent: r(0),
+        }),
+        spawn(0, 1),
+        step(0, TaskStep::Begin),
+        lc(LifecycleEvent::RegionCancelRequested { region: r(1) }),
+        EventBody::Cancellation(CancellationEvent::Requested {
+            task: t(0),
+            cause: CancelCause::User,
+        }),
+        EventBody::Cancellation(CancellationEvent::Acknowledged { task: t(0) }),
+        EventBody::Channel(ChannelEvent::Opened {
+            channel: ChannelOrdinal(0),
+            capacity: 1,
+            receiver: t(0),
+        }),
+    ];
+    let journal = rebuild(in_cancel.iter().cloned());
+    assert!(
+        matches!(
+            lift(&journal),
+            LiftVerdict::Violates {
+                reason: Nonconformance::Channel(
+                    continuum_asupersync::family::channel::ChannelFault::NotActing { .. }
+                ),
+                ..
+            }
+        ),
+        "{:?}",
+        lift(&journal)
+    );
+    assert!(!judge_carried(&in_cancel, &journal).is_accepted());
+}
+
+/// Codex cr-3pu5cu round 8 (1): a budget deadline is declared by the event right after
+/// its task's spawn, as the binding writes it. The spawn is lifecycle, which every
+/// projection keeps, and a projection only drops events, so the two stay adjacent in
+/// every projection that carries the time family: the rule is decidable wherever the
+/// declaration is visible, and a projection without time has no declaration to judge.
+/// A declaration after a clock advance, after another task's spawn, or after the
+/// task's own step is `DeadlineNotAtSpawn` in the lift and in the model. The
+/// adjacent declaration and a task with no deadline conform in both.
+#[test]
+fn a_deadline_is_declared_right_after_its_spawn() {
+    use continuum_asupersync::family::time::TimeFault;
+    let t = TaskOrdinal;
+    let lc = EventBody::Lifecycle;
+    let spawn = |task| {
+        lc(LifecycleEvent::TaskSpawned {
+            task: t(task),
+            region: RegionOrdinal(0),
+            resumability: Resumability::Resumable,
+        })
+    };
+    let deadline = EventBody::Time(TimeEvent::Deadline {
+        task: t(0),
+        at: VirtualInstant(10),
+    });
+    let begin = lc(LifecycleEvent::TaskStepped {
+        task: t(0),
+        step: TaskStep::Begin,
+    });
+    let advanced = EventBody::Time(TimeEvent::Advanced {
+        from: VirtualInstant(0),
+        to: VirtualInstant(5),
+    });
+    let late: Vec<(&str, Vec<EventBody>)> = vec![
+        (
+            "after a clock advance",
+            vec![spawn(0), advanced.clone(), deadline.clone(), begin.clone()],
+        ),
+        (
+            "after another task's spawn",
+            vec![spawn(0), spawn(1), deadline.clone(), begin.clone()],
+        ),
+        (
+            "after its own first step",
+            vec![spawn(0), begin.clone(), deadline.clone()],
+        ),
+    ];
+    for (name, events) in late {
+        let journal = rebuild(events.iter().cloned());
+        assert!(
+            matches!(
+                lift(&journal),
+                LiftVerdict::Violates {
+                    reason: Nonconformance::Time(TimeFault::DeadlineNotAtSpawn { task: 0 }),
+                    ..
+                }
+            ),
+            "{name}: {:?}",
+            lift(&journal)
+        );
+        assert!(
+            matches!(
+                judge_carried(&events, &journal),
+                Verdict::Rejected {
+                    fault: Fault::DeadlineNotAtSpawn(0),
+                    ..
+                }
+            ),
+            "{name}: {}",
+            judge_carried(&events, &journal)
+        );
+    }
+    for (name, events) in [
+        (
+            "adjacent",
+            vec![spawn(0), deadline.clone(), begin.clone(), advanced.clone()],
+        ),
+        ("no deadline", vec![spawn(0), advanced, begin]),
+    ] {
+        let journal = rebuild(events.iter().cloned());
+        assert!(
+            lift_accepts(&journal) && judge_carried(&events, &journal).is_accepted(),
+            "{name}: {:?} / {}",
+            lift(&journal),
+            judge_carried(&events, &journal)
+        );
+    }
+}
+
+/// Codex cr-3pu5cu round 8 (2): encoding version 2 adds lifecycle task steps 6-7,
+/// cancel cause 3 and time event 5. Both readers (the crate's decoder and the A7
+/// model's own) read versions 1 and 2. A real deadline journal decodes as version 2,
+/// lifts as conforming and is accepted by the model; the same bytes labelled version 1
+/// are refused by both as a tag outside that version's grammar, one table at a time,
+/// never as an unknown tag. A version-1-grammar journal relabelled version 1 decodes to
+/// the same journal and gets the same verdict from both.
+#[test]
+fn the_two_encoding_versions_are_two_grammars() {
+    use continuum_asupersync::encoding::DecodeError;
+    let header = b"continuum/semantic-journal\n".len();
+    let as_v1 = |bytes: &[u8]| {
+        let mut v1 = bytes.to_vec();
+        assert_eq!(&v1[header..header + 4], &[0, 0, 0, 2]);
+        v1[header + 3] = 1;
+        v1
+    };
+    let programs = own_cancel_base();
+    let log = ChoiceLog::new(vec![0; programs[0].len()]);
+    let config = every_projection().remove(31);
+    let journal = run(&programs, &log, &config).unwrap();
+    let bytes = journal.encode().unwrap();
+    assert_eq!(Journal::decode(&bytes).unwrap(), journal);
+    assert!(lift_accepts(&journal) && judge(&config, &journal).is_accepted());
+    assert!(matches!(
+        Journal::decode(&as_v1(&bytes)),
+        Err(DecodeError::TagNotInVersion { version: 1, .. })
+    ));
+    assert!(matches!(
+        model::read(&as_v1(&bytes)),
+        Err(WireFault::NotInVersion { .. })
+    ));
+    // Each table that grew, alone.
+    let t = TaskOrdinal;
+    let spawn = EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
+        task: t(0),
+        region: RegionOrdinal(0),
+        resumability: Resumability::Resumable,
+    });
+    for (table, event) in [
+        (
+            "lifecycle task step",
+            EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                task: t(0),
+                step: TaskStep::CancelRequested,
+            }),
+        ),
+        (
+            "lifecycle task step",
+            EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                task: t(0),
+                step: TaskStep::Cancel,
+            }),
+        ),
+        (
+            "cancel cause",
+            EventBody::Cancellation(CancellationEvent::Requested {
+                task: t(0),
+                cause: CancelCause::Deadline,
+            }),
+        ),
+        (
+            "time event",
+            EventBody::Time(TimeEvent::Deadline {
+                task: t(0),
+                at: VirtualInstant(10),
+            }),
+        ),
+    ] {
+        let bytes = rebuild([spawn.clone(), event]).encode().unwrap();
+        assert!(Journal::decode(&bytes).is_ok(), "{table}");
+        assert!(
+            matches!(
+                Journal::decode(&as_v1(&bytes)),
+                Err(DecodeError::TagNotInVersion { table: found, version: 1, .. }) if found == table
+            ),
+            "{table}: {:?}",
+            Journal::decode(&as_v1(&bytes))
+        );
+        assert!(
+            matches!(
+                model::read(&as_v1(&bytes)),
+                Err(WireFault::NotInVersion { .. })
+            ),
+            "{table}"
+        );
+    }
+    // A journal of the version-1 grammar reads the same under either label.
+    let programs = effects();
+    let log = ChoiceLog::enumerate(&lengths(&programs)).remove(0);
+    let journal = run(&programs, &log, &config).unwrap();
+    let bytes = journal.encode().unwrap();
+    let old = as_v1(&bytes);
+    assert_eq!(Journal::decode(&old).unwrap(), journal);
+    assert_eq!(model::read(&old).unwrap(), model::read(&bytes).unwrap());
 }

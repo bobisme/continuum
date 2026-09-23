@@ -568,7 +568,8 @@ impl Account {
             | SubstrateOp::OpenChannel { .. }
             | SubstrateOp::Send { .. }
             | SubstrateOp::Recv { .. }
-            | SubstrateOp::CloseSenders { .. } => {
+            | SubstrateOp::CloseSenders { .. }
+            | SubstrateOp::SpawnWithDeadline { .. } => {
                 unreachable!("the ledger corpus does not sleep")
             }
             SubstrateOp::Transfer { reservation, to } => {
@@ -1072,10 +1073,13 @@ fn mutated_ledger_journals_are_rejected() {
             open: ObligationSet::default(),
             leaked: ObligationSet::new([obligation]),
         });
+        // A leak is its holder's end, so a leak by a parked holder is refused first
+        // (cr-3pu5cu round 7); a running holder's leak reaches the unbalanced close.
         assert!(
             matches!(
                 fault_of(events),
                 LedgerFault::UnbalancedAtClose { region: 2, .. }
+                    | LedgerFault::LeakByLiveHolder { .. }
             ),
             "log {log}"
         );
@@ -1088,6 +1092,33 @@ fn mutated_ledger_journals_are_rejected() {
             unreachable!()
         };
         events[at] = EventBody::Obligation(ObligationEvent::Leaked { obligation });
+        assert!(
+            matches!(
+                fault_of(events),
+                LedgerFault::BalanceMismatch { region: 2, .. }
+                    | LedgerFault::LeakByLiveHolder { .. }
+            ),
+            "log {log}"
+        );
+
+        // 3b. The balance alone is misreported: the region's settlement names as leaked
+        //     an obligation its cancellation discharged (the leak-free form of 3, since a
+        //     leak by a parked holder is refused first; cr-3pu5cu round 7).
+        let mut events = original.clone();
+        let at = position(&events, is_cancel_discharge);
+        let EventBody::Obligation(ObligationEvent::Discharged { obligation, .. }) = events[at]
+        else {
+            unreachable!()
+        };
+        let settle = position(
+            &events,
+            |e| matches!(e, ObligationEvent::RegionSettled { region, .. } if region.0 == 2),
+        );
+        events[settle] = EventBody::Obligation(ObligationEvent::RegionSettled {
+            region: RegionOrdinal(2),
+            open: ObligationSet::default(),
+            leaked: ObligationSet::new([obligation]),
+        });
         assert!(
             matches!(
                 fault_of(events),

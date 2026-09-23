@@ -81,6 +81,15 @@ pub enum Nonconformance {
     /// A channel event breaks the parallel channel model (PR-14-IMPL-06; the reasons are
     /// the family's own).
     Channel(family::channel::ChannelFault),
+    /// A region's cancellation was requested again: the region is already draining
+    /// under cancellation (its own request or an ancestor's), or its subtree was already
+    /// drained. The calculus treats a repeat as idempotent, but a run requests a
+    /// region's cancellation once and never after its drain, and each repeat costs the
+    /// lift a walk of the subtree (cr-3pu5cu round 6, pre-review pass).
+    RepeatedCancel {
+        /// The region.
+        region: u32,
+    },
     /// A region finalized while a region of its subtree had no drain report. The
     /// calculus admits `finalize` on any requested region whose workers are terminal;
     /// the journal's teardown is `request → drain → finalize` (research/09 `cancel .
@@ -123,6 +132,10 @@ impl fmt::Display for Nonconformance {
             Self::Obligation(fault) => write!(f, "obligation ledger: {fault}"),
             Self::Time(fault) => write!(f, "virtual time: {fault}"),
             Self::Channel(fault) => write!(f, "channel: {fault}"),
+            Self::RepeatedCancel { region } => write!(
+                f,
+                "r{region}'s cancellation is requested again, after it was cancelled or drained"
+            ),
             Self::FinalizeWithoutDrain { region, undrained } => write!(
                 f,
                 "r{region} finalized but r{undrained} in its subtree has no drain report"
@@ -138,6 +151,11 @@ pub enum LiftStop {
     Violation(Nonconformance),
     /// The event's family has no lift yet.
     Unsupported(Family),
+    /// The journal ends inside a protocol this family completes within one substrate
+    /// operation (a cancellation not yet absorbed by its drain or its task's end, a
+    /// drain not yet finalized): a truncated journal, never a conforming one
+    /// (cr-3pu5cu).
+    Incomplete(Family),
 }
 
 impl From<RegionFault> for LiftStop {
@@ -156,6 +174,9 @@ pub struct LiftContext {
     /// Regions a `RegionDrained` event covered (the drained region's non-finalized
     /// subtree), for the drain-before-finalize check.
     pub(crate) drained: BTreeSet<u32>,
+    /// The task the previous event spawned, when the previous event was a spawn: a
+    /// budget deadline is declared by the event right after its task's spawn.
+    pub(crate) spawned_just_before: Option<u32>,
     pub(crate) effect: family::effect::LiftState,
     pub(crate) cancellation: family::cancellation::LiftState,
     pub(crate) obligation: family::obligation::LiftState,
@@ -202,7 +223,9 @@ pub enum LiftVerdict {
         seq: u64,
         /// Its family.
         family: Family,
-        /// Always [`InconclusiveReason::Unsupported`] today.
+        /// [`InconclusiveReason::Unsupported`] for a family with no lift, or
+        /// [`InconclusiveReason::InsufficientTelemetry`] for a journal that ends inside a
+        /// protocol ([`LiftStop::Incomplete`]).
         reason: InconclusiveReason,
     },
 }
@@ -229,10 +252,30 @@ impl LiftVerdict {
 #[must_use]
 pub fn lift(journal: &Journal) -> LiftVerdict {
     let mut cx = LiftContext::default();
+    // Which families the journal carries is decided before the first event, not when a
+    // family's first event arrives: a check that turns on a family's presence (a
+    // cleanup step before its task's phases, a deadline request with no declared
+    // deadline, a send with no permit) must not be skipped because the family's first
+    // event comes later in the same journal (cr-3pu5cu, pre-review adversarial pass).
+    for event in journal.events() {
+        match event.body().family() {
+            Family::Cancellation => family::cancellation::mark_present(&mut cx),
+            Family::Obligation => family::obligation::mark_present(&mut cx),
+            Family::Time => family::time::mark_present(&mut cx),
+            _ => {}
+        }
+    }
     for event in journal.events() {
         cx.seq = event.seq();
         match event.body().lift(&mut cx) {
-            Ok(()) => {}
+            Ok(()) => {
+                cx.spawned_just_before = match event.body() {
+                    crate::family::EventBody::Lifecycle(
+                        crate::family::lifecycle::LifecycleEvent::TaskSpawned { task, .. },
+                    ) => Some(task.0),
+                    _ => None,
+                };
+            }
             Err(LiftStop::Violation(reason)) => {
                 return LiftVerdict::Violates {
                     seq: event.seq(),
@@ -246,9 +289,17 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
                     reason: InconclusiveReason::Unsupported,
                 };
             }
+            Err(LiftStop::Incomplete(family)) => {
+                return LiftVerdict::Inconclusive {
+                    seq: event.seq(),
+                    family,
+                    reason: InconclusiveReason::InsufficientTelemetry,
+                };
+            }
         }
     }
-    if let Err(stop) = family::effect::finish(&cx)
+    if let Err(stop) = family::lifecycle::finish(&cx)
+        .and_then(|()| family::effect::finish(&cx))
         .and_then(|()| family::cancellation::finish(&cx))
         .and_then(|()| family::obligation::finish(&cx))
         .and_then(|()| family::time::finish(&cx))
@@ -261,6 +312,11 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
                 seq,
                 family,
                 reason: InconclusiveReason::Unsupported,
+            },
+            LiftStop::Incomplete(family) => LiftVerdict::Inconclusive {
+                seq,
+                family,
+                reason: InconclusiveReason::InsufficientTelemetry,
             },
         };
     }

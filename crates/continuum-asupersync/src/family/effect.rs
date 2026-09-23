@@ -64,8 +64,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use continuum_task::region::worker::{PublicationSlot, WorkerId, WorkerStep};
-use continuum_task::region::{DrainCause, RegionState};
+use continuum_task::region::worker::{CancelPhase, PublicationSlot, WorkerId, WorkerStep};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
 use crate::family::EventBody;
@@ -159,7 +158,7 @@ impl EffectEvent {
         }
     }
 
-    const fn token(&self) -> &'static str {
+    pub(crate) const fn token(&self) -> &'static str {
         match self {
             Self::Reserved { .. } => "reserved",
             Self::Committed { .. } => "committed",
@@ -285,8 +284,9 @@ pub enum EffectFault {
         /// The model's status token for the task.
         state: &'static str,
     },
-    /// A cancellation abort, but the holding task's region is not draining under
-    /// cancellation in the model.
+    /// A cancellation abort, but no cancellation reached the holding task in the model:
+    /// its region is not draining under cancellation and it requested none of its own
+    /// (a deadline; bn-36wy3).
     RegionNotCancelled {
         /// The reservation.
         reservation: u32,
@@ -444,7 +444,7 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
             }
             let owner = cx.tree.owner(worker)?;
             let region_state = cx.tree.state(owner)?;
-            if region_state != RegionState::Draining(DrainCause::Cancelled) {
+            if cx.tree.cancel_phase(worker)? == CancelPhase::Active {
                 return Err(fault(EffectFault::RegionNotCancelled {
                     reservation,
                     region: owner.ordinal(),
@@ -461,6 +461,7 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
                     phase,
                 }));
             }
+            crate::family::cancellation::imply_acknowledgement(cx, task)?;
             Phase::Aborted
         }
         // The holder's own abort: `Reserved → Aborted(explicit)`, the calculus's
@@ -484,6 +485,42 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
     };
     cx.effect.reservations.insert(reservation, (task, next));
     Ok(())
+}
+
+/// The task whose own work `event` is: the task a reservation is made for, or the
+/// holder a commit or an explicit abort names. `None` for a cancellation's abort (that
+/// is cleanup) and for a reservation the lift does not know.
+pub(crate) fn actor_of(cx: &LiftContext, event: &EffectEvent) -> Option<u32> {
+    match event {
+        EffectEvent::Reserved { task, .. } => Some(task.0),
+        EffectEvent::Committed { reservation }
+        | EffectEvent::Aborted {
+            reservation,
+            cause: AbortCause::Explicit,
+        } => cx
+            .effect
+            .reservations
+            .get(&reservation.0)
+            .map(|(task, _)| *task),
+        EffectEvent::Aborted { .. } => None,
+    }
+}
+
+/// The task whose cancellation cleanup `event` is: the holder of the reservation an
+/// abort with the `cancel` cause names. `None` for every other event, and for a
+/// reservation the lift does not know (RFC 0026 correction 53 item 6).
+pub(crate) fn cleanup_of(cx: &LiftContext, event: &EffectEvent) -> Option<u32> {
+    match event {
+        EffectEvent::Aborted {
+            reservation,
+            cause: AbortCause::Cancel,
+        } => cx
+            .effect
+            .reservations
+            .get(&reservation.0)
+            .map(|(task, _)| *task),
+        _ => None,
+    }
 }
 
 /// The calculus slot a reservation stages in: its own ordinal.

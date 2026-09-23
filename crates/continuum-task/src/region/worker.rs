@@ -243,6 +243,29 @@ pub enum WorkerStep {
     CommitSlot(PublicationSlot),
     /// Drop the publication staged in this slot, publishing nothing.
     AbortSlot(PublicationSlot),
+    /// Request this one worker's cancellation, outside any region's cancellation: a
+    /// deadline passing, for example (RFC 0026 correction 53).
+    ///
+    /// The step records the request and leaves the worker's state unchanged. It is legal
+    /// for a worker that has not terminated and whose cancellation is not already
+    /// requested, by its own request or by its region's. The worker then acts as before
+    /// until it acknowledges the request.
+    RequestCancel,
+    /// The worker observes its requested cancellation and starts its cleanup: docs/02 §7
+    /// `→ Cancelling`, the substrate's checkpoint that returns the cancellation error.
+    ///
+    /// Legal for a worker that has not terminated and whose cancellation is requested,
+    /// by its own [`Self::RequestCancel`] or by its region's cancellation, and not yet
+    /// acknowledged. The state does not change. After it the worker may only drain:
+    /// abort what it staged, abort its adapter obligations, and complete as cancelled.
+    AcknowledgeCancel,
+    /// The worker finishes its cleanup and completes as cancelled, on its own, before any
+    /// region drain: `Cancelling ─ … → Cancelled` for one worker (RFC 0026 correction 53).
+    ///
+    /// Legal only after [`Self::AcknowledgeCancel`]. It does what a cancelling drain does
+    /// for this one worker: it discards what is still staged, records the
+    /// [`CancelOutcome`], and settles the worker as [`WorkerState::Cancelled`].
+    CompleteCancelled,
 }
 
 impl WorkerStep {
@@ -261,6 +284,9 @@ impl WorkerStep {
             Self::ReserveSlot(_) => "reserve-slot",
             Self::CommitSlot(_) => "commit-slot",
             Self::AbortSlot(_) => "abort-slot",
+            Self::RequestCancel => "request-cancel",
+            Self::AcknowledgeCancel => "acknowledge-cancel",
+            Self::CompleteCancelled => "complete-cancelled",
         }
     }
 
@@ -283,6 +309,41 @@ impl fmt::Display for WorkerStep {
             }
             other => f.write_str(other.token()),
         }
+    }
+}
+
+/// Where one worker is in its own cancellation (RFC 0026 correction 53).
+///
+/// The per-task half of docs/02 §7's lifecycle, `Active ─ request → Cancelling`. A
+/// worker's cancellation is requested by its own [`WorkerStep::RequestCancel`] or by
+/// its region's cancellation. It is acknowledged by the worker's own
+/// [`WorkerStep::AcknowledgeCancel`]. Only acknowledgement changes what the worker may
+/// do: before it, the worker acts as it did before the request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CancelPhase {
+    /// No cancellation is requested.
+    Active,
+    /// A cancellation is requested and the worker has not observed it.
+    Requested,
+    /// The worker observed its cancellation and is cleaning up.
+    Acknowledged,
+}
+
+impl CancelPhase {
+    /// A stable token for canonical rendering.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Requested => "requested",
+            Self::Acknowledged => "acknowledged",
+        }
+    }
+}
+
+impl fmt::Display for CancelPhase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.token())
     }
 }
 

@@ -445,7 +445,8 @@ impl Account {
             | SubstrateOp::OpenChannel { .. }
             | SubstrateOp::Send { .. }
             | SubstrateOp::Recv { .. }
-            | SubstrateOp::CloseSenders { .. } => {
+            | SubstrateOp::CloseSenders { .. }
+            | SubstrateOp::SpawnWithDeadline { .. } => {
                 unreachable!("the effect corpus reserves transactions only")
             }
             SubstrateOp::Close { region } => {

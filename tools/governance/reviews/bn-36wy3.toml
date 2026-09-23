@@ -1,0 +1,51 @@
+[change]
+bone = "bn-36wy3"
+author = "continuum-dev"
+summary = "continuum-task region calculus: per-task cancellation phases (RequestCancel, AcknowledgeCancel, CompleteCancelled over the cancel_worker seam), adapter-obligation rules keyed to the task's own acknowledgement instead of its region's request, and a subtree-scoped Finalization ledger; RFC 0026 correction 53"
+
+[semantic]
+covers = [
+  "crates/continuum-task/src/",
+]
+reference_tests = [
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_worker_is_cancelled_alone_while_its_region_stays_open",
+  "crates/continuum-task/tests/region_task_cancellation.rs::the_single_task_completion_discards_what_is_still_staged",
+  "crates/continuum-task/tests/region_task_cancellation.rs::the_three_steps_are_refused_out_of_order_and_change_nothing",
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_region_cancellation_is_a_request_the_worker_acknowledges_itself",
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_parked_or_unbegun_worker_acknowledges_at_its_next_poll",
+  "crates/continuum-task/tests/region_task_cancellation.rs::mutant_an_acknowledged_worker_takes_an_ordinary_step",
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_requested_worker_still_acts_for_the_substrate_until_it_acknowledges",
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_single_task_cancellation_that_leaks_an_obligation_is_reported",
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_child_finalizes_totally_while_work_elsewhere_still_owes",
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_child_that_owes_an_obligation_is_not_total",
+  "crates/continuum-task/tests/region_task_cancellation.rs::an_obligation_transferred_out_is_the_receivers_subtrees_to_settle",
+  "crates/continuum-task/tests/region_task_cancellation.rs::a_root_finalization_ledger_is_the_whole_tree_ledger",
+  "crates/continuum-task/tests/region_task_cancellation.rs::every_interleaving_of_single_task_cancellations_tears_down_totally",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_transfer_with_a_party_that_acknowledged_cancellation_is_refused",
+  "crates/continuum-task/tests/region_substrate_ledger.rs::mutant_committed_discharge_after_acknowledgement_is_refused",
+  "crates/continuum-task/src/region.rs::the_keyed_subtree_ledger_is_the_filtered_one",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-task/tests/region_task_cancellation.rs::independent_event_swap_of_two_workers_cancellation_steps_preserves_the_render", relation = "independent-event swap" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/region_staging_differential.rs::the_calculus_and_an_independent_reference_model_agree_on_every_staging_transition", oracle = "continuum-engine-reference", subject = "continuum-task" },
+  { test = "crates/continuumd/tests/region_staging_differential.rs::a_mutated_reference_guard_is_told_apart", oracle = "continuum-engine-reference", subject = "continuum-task" },
+]
+
+[semantic.claim_impact]
+claims = ["C004", "C023"]
+reason = "C004 (the asupersync adapter captures all supported nondeterminism) gains budget-deadline cancellation (CancelKind::Deadline), bound and lifted through the new single-task step; C023's A7 arrow loses its one pinned exception, correction 51's known strictness (33 perturbations, now 0), and its model covers deadline cancellation. Neither row changes state or wording: C004 stays TARGET and C023 stays OBSERVED; only C023's prose counts in docs/18 are updated"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the region calculus is in-process typed code with no wire schema, the protocol and IDL do not move, and the PR-14 journal is a crate-internal canonical encoding (no schema document), whose new tags (lifecycle steps 6 and 7, cancel cause 3, time event 5) move its ENCODING_VERSION from 1 to 2 (cr-3pu5cu round 8); unchanged old bytes alone did not make it additive, because a version-1 decoder refuses the new tags"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-task: every existing step keeps its meaning and its refusals except the two that correction 51 marked as known strictness: a transfer or a committed discharge by a worker whose region is cancelling but which has not acknowledged is now admitted, and after its acknowledgement it is refused as SubstrateHolderCancelling or SubstrateCommitDuringCancellation. Finalization::ledger is now the finalized subtree's ledger (tree_ledger keeps the whole tree's; for a root finalization they are equal), so a child's is_total no longer depends on unrelated work. WorkerStep, RegionFault and the new CancelPhase gain variants; in-workspace callers compile, and the PR-14 lift (continuum-asupersync) adopts the new steps in this change. continuum-asupersync: the semantic-journal encoding advances from version 1 to 2 (an encoding contract like schema_epoch, not an ADR-0018 epoch; no semantic epoch moves). Compatibility statement: version-1 journals Preserved. The reader implements versions 1 and 2, a version-1 journal decodes to the same journal and the same lift verdict, a version-2 tag under a version-1 label is refused as TagNotInVersion, and any other version is UnsupportedVersion. The writer emits version 2, so re-encoding gives new bytes and a new digest; nothing is rewritten in place, and the blast radius is empty because no persisted or published artifact carries journal bytes"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3pu5cu"
+verdict = "approved"

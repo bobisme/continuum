@@ -59,7 +59,7 @@ use std::fmt;
 use continuum_task::region::obligation::{
     SubstrateId, SubstrateKind, SubstrateObligation, SubstrateOutcome,
 };
-use continuum_task::region::worker::WorkerId;
+use continuum_task::region::worker::{WorkerId, WorkerState};
 use continuum_task::region::{RegionId, RegionState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
@@ -265,7 +265,7 @@ impl ObligationEvent {
         }
     }
 
-    const fn token(&self) -> &'static str {
+    pub(crate) const fn token(&self) -> &'static str {
         match self {
             Self::Opened { .. } => "opened",
             Self::Discharged { .. } => "discharged",
@@ -460,6 +460,18 @@ struct Entry {
 /// Why an obligation-ledger event does not conform.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerFault {
+    /// A leak reported while its holder is neither running nor ended: the substrate's
+    /// leak oracle reports an obligation its holder ended with, within the operation
+    /// that ended it, so the holder is running then or already terminal. A parked or
+    /// unbegun holder has not ended (cr-3pu5cu round 7, self-sweep).
+    LeakByLiveHolder {
+        /// The obligation.
+        obligation: u32,
+        /// Its holder.
+        holder: u32,
+        /// The holder's lifecycle state token.
+        state: &'static str,
+    },
     /// A new obligation is not named by the next ordinal.
     ObligationIdentity {
         /// The journal's ordinal.
@@ -553,6 +565,14 @@ pub enum LedgerFault {
 impl fmt::Display for LedgerFault {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::LeakByLiveHolder {
+                obligation,
+                holder,
+                state,
+            } => write!(
+                f,
+                "o{obligation} is reported leaked while its holder t{holder} is {state}"
+            ),
             Self::ObligationIdentity { journal, expected } => write!(
                 f,
                 "the journal opened o{journal} but the next obligation is o{expected}"
@@ -625,6 +645,11 @@ pub struct LiftState {
     present: bool,
 }
 
+/// The journal carries this family (set before the first event is lifted).
+pub(crate) fn mark_present(cx: &mut LiftContext) {
+    cx.obligation.present = true;
+}
+
 fn fault(fault: LedgerFault) -> LiftStop {
     LiftStop::Violation(Nonconformance::Obligation(fault))
 }
@@ -642,6 +667,45 @@ pub(crate) fn take_send_permit(cx: &mut LiftContext, task: u32) -> bool {
             true
         }
         _ => false,
+    }
+}
+
+/// The task whose own work `event` is: the holder of an open, of a committed discharge,
+/// or of a transfer (the giving holder). `None` for an aborted discharge (it may be a
+/// cancellation's cleanup), a leak, a settlement, and an obligation the lift does not
+/// know.
+pub(crate) fn actor_of(cx: &LiftContext, event: &ObligationEvent) -> Option<u32> {
+    let holder = |obligation: &ObligationOrdinal| {
+        cx.obligation
+            .entries
+            .get(&obligation.0)
+            .map(|entry| entry.holder)
+    };
+    match event {
+        ObligationEvent::Opened { holder, .. } => Some(holder.0),
+        ObligationEvent::Discharged {
+            obligation,
+            how: Discharge::Committed,
+        }
+        | ObligationEvent::Transferred { obligation, .. } => holder(obligation),
+        _ => None,
+    }
+}
+
+/// The task whose cancellation cleanup `event` is: the holder of the obligation an
+/// aborted discharge names. `None` for every other event, and for an obligation the
+/// lift does not know (RFC 0026 correction 53 item 6).
+pub(crate) fn cleanup_of(cx: &LiftContext, event: &ObligationEvent) -> Option<u32> {
+    match event {
+        ObligationEvent::Discharged {
+            obligation,
+            how: Discharge::Aborted,
+        } => cx
+            .obligation
+            .entries
+            .get(&obligation.0)
+            .map(|entry| entry.holder),
+        _ => None,
     }
 }
 
@@ -772,6 +836,16 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
                     *cx.obligation.permits.entry(entry.holder).or_insert(0) += 1;
                 }
             } else {
+                // A leak is its holder's end (lifecycle family fact): the holder is
+                // running (its end follows in the same operation) or terminal.
+                let state = cx.tree.worker_state(WorkerId::at(entry.holder))?;
+                if !state.is_terminal() && *state != WorkerState::Running {
+                    return Err(fault(LedgerFault::LeakByLiveHolder {
+                        obligation: obligation.0,
+                        holder: entry.holder,
+                        state: state.status_token(),
+                    }));
+                }
                 entry.state = State::Leaked;
             }
             cx.obligation.entries.insert(obligation.0, entry);
@@ -846,6 +920,18 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
 pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
     if !cx.obligation.present {
         return Ok(());
+    }
+    // A leak is reported with its holder's end: a holder still live at the end of the
+    // journal lost that end (a truncation, never a conformance; cr-3pu5cu round 7).
+    for entry in cx.obligation.entries.values() {
+        if entry.state == State::Leaked
+            && !cx
+                .tree
+                .worker_state(WorkerId::at(entry.holder))?
+                .is_terminal()
+        {
+            return Err(LiftStop::Incomplete(crate::family::Family::Obligation));
+        }
     }
     let count = u32::try_from(cx.tree.region_count()).unwrap_or(u32::MAX);
     for region in 0..count {

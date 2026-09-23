@@ -224,7 +224,25 @@ impl EventBody {
         format!("{} {body}", self.family())
     }
 
+    /// The event's own token within its family.
+    pub(crate) const fn token(&self) -> &'static str {
+        match self {
+            Self::Lifecycle(event) => event.token(),
+            Self::Effect(event) => event.token(),
+            Self::Cancellation(event) => event.token(),
+            Self::Obligation(event) => event.token(),
+            Self::Time(event) => event.token(),
+            Self::Channel(event) => event.token(),
+        }
+    }
+
     pub(crate) fn lift(&self, cx: &mut LiftContext) -> Result<(), LiftStop> {
+        // A task's own cancellation is one run of that task's events, whatever family
+        // an event belongs to (RFC 0026 correction 53 item 6; cr-3pu5cu round 6).
+        cancellation::check_own_cancel_admits(self, cx)?;
+        // A task's own work is a poll, which meets a passed deadline first (RFC 0026
+        // correction 53 item 6).
+        time::check_actor_deadline(self, cx)?;
         match self {
             Self::Lifecycle(event) => lifecycle::lift(event, cx),
             Self::Effect(event) => effect::lift(event, cx),

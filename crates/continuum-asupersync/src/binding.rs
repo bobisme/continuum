@@ -172,6 +172,30 @@
 //! | gate trace `ack`: `Cx::checkpoint` returned the cancellation error | [`CancellationEvent::Acknowledged`] |
 //! | `Complete`, join result `Cancelled`, with its reason's kind | [`CancellationEvent::Cancelled`] |
 //!
+//! # Budget deadlines (bn-36wy3)
+//!
+//! [`SubstrateOp::SpawnWithDeadline`] creates a task with a finite `Budget` deadline
+//! on the lab's virtual clock. Once the clock reaches it, the task's next
+//! `Cx::checkpoint` raises `CancelKind::Deadline`: the task observes its own
+//! cancellation, cleans up, and completes as cancelled, and its region stays as it was.
+//! asupersync 0.5.0 traces no `CancelRequest` for it, so the checkpoint is both the
+//! request and the acknowledgement, and the binding journals the whole single-task
+//! cancellation at the task's completion:
+//!
+//! | substrate observation | journal event |
+//! |---|---|
+//! | the `Budget` the binding created the task with | [`TimeEvent::Deadline`], after the task's spawn |
+//! | `Complete`, join result `Cancelled` with reason kind `Deadline` | lifecycle `cancel-requested`; [`CancellationEvent::Requested`] `deadline`; [`CancellationEvent::Acknowledged`]; the cleanup (timer dropped, cancel aborts, aborted discharges); [`CancellationEvent::Cancelled`] `deadline`; lifecycle `cancel` |
+//!
+//! Without the cancellation family the lifecycle steps and the cleanup remain. Each
+//! event goes where the task's other events go: an advance's per-task batch (a task a
+//! due timer woke, whose deadline had also passed, drops the timer instead of firing it,
+//! and is still ordered by that timer's deadline), the woken tasks' batch, or the
+//! journal. A task's own region cancelled after its deadline passed but before its next
+//! poll completes with the more severe `deadline` reason under a region's request:
+//! [`BindingRefusal::CancelRaced`], not a journal. A parent region's cancellation
+//! outranks the deadline and is an ordinary region cancellation.
+//!
 //! asupersync 0.5.0 declares a `CancelAck` trace kind but never pushes it. Its
 //! acknowledgement is the checkpoint: a checkpoint that returns the cancellation error
 //! is what moves the task from `CancelRequested` to `Cancelling`. So the gate writes an
@@ -279,7 +303,7 @@ use asupersync::time::{Sleep, sleep_until};
 use asupersync::trace::event::{TraceData, TraceEvent, TraceEventKind};
 use asupersync::{
     Budget, CancelKind, CancelReason, Cx, LabConfig, LabRuntime, ObligationId,
-    RegionId as SubstrateRegion, TaskId as SubstrateTask,
+    RegionId as SubstrateRegion, TaskId as SubstrateTask, Time,
 };
 use continuum_task::region::worker::Resumability;
 use continuum_value::assurance::InconclusiveReason;
@@ -388,6 +412,23 @@ pub enum SubstrateOp {
         /// Declared resumability. The substrate has no such notion, so the journal
         /// carries the declaration.
         resumability: Resumability,
+    },
+    /// As [`SubstrateOp::Spawn`], with a finite `Budget` deadline at the virtual instant
+    /// `deadline` (`Budget::INFINITE.with_deadline`). Once the lab clock reaches it, the
+    /// task's next `Cx::checkpoint` observes its cancellation (`CancelKind::Deadline`),
+    /// and the task cleans up and completes as cancelled on its own, while its region
+    /// stays as it was (bn-36wy3). A deadline not ahead of the clock is refused, and so
+    /// is a task whose `Cx` carries no virtual timer driver, because its checkpoint would
+    /// then read the host clock (INV-005).
+    SpawnWithDeadline {
+        /// The owning region.
+        region: RegionLabel,
+        /// The label the new task is bound to.
+        task: TaskLabel,
+        /// Declared resumability.
+        resumability: Resumability,
+        /// The deadline, in virtual nanoseconds from the clock's start.
+        deadline: u64,
     },
     /// Schedule `task` for its first poll. Its body parks on its gate.
     Begin {
@@ -508,6 +549,7 @@ impl SubstrateOp {
         match self {
             Self::OpenRegion { .. } => "open-region",
             Self::Spawn { .. } => "spawn",
+            Self::SpawnWithDeadline { .. } => "spawn-with-deadline",
             Self::Begin { .. } => "begin",
             Self::Continue { .. } => "continue",
             Self::Finish { .. } => "finish",
@@ -785,6 +827,20 @@ pub enum BindingRefusal {
         /// The substrate's name for the event kind.
         kind: String,
     },
+    /// A task's deadline is not ahead of the virtual clock when it is spawned.
+    DeadlineNotAhead {
+        /// The deadline.
+        deadline: u64,
+        /// The clock's instant.
+        now: u64,
+    },
+    /// A task's deadline cancellation and a region's cancellation both reached it, so
+    /// its completion's cause and its journaled request disagree. The cancellation
+    /// family journals one cause per task, so the run is not bound (bn-36wy3).
+    CancelRaced {
+        /// The task's journal ordinal.
+        task: u32,
+    },
 }
 
 impl BindingRefusal {
@@ -803,6 +859,7 @@ impl BindingRefusal {
             | Self::UnorderedDuringAdvance { .. }
             | Self::UnorderedWake { .. }
             | Self::UnmappedCancelReason { .. }
+            | Self::CancelRaced { .. }
             | Self::ReservationDropped { .. } => Some(InconclusiveReason::Unsupported),
             Self::SubstrateProtocolViolation { .. }
             | Self::SubstrateLedgerDisagrees { .. }
@@ -839,6 +896,7 @@ impl BindingRefusal {
             | Self::UnboundChannel(_)
             | Self::ChannelLabelRebound(_)
             | Self::ZeroCapacity(_)
+            | Self::DeadlineNotAhead { .. }
             | Self::SendersAlreadyClosed(_) => None,
         }
     }
@@ -989,6 +1047,14 @@ impl fmt::Display for BindingRefusal {
             Self::UnorderedDuringAdvance { kind } => write!(
                 f,
                 "the substrate traced {kind} during an advance, which has no canonical place"
+            ),
+            Self::DeadlineNotAhead { deadline, now } => write!(
+                f,
+                "a deadline of {deadline} is not ahead of the virtual clock at {now}"
+            ),
+            Self::CancelRaced { task } => write!(
+                f,
+                "t{task}'s deadline and a region's cancellation both reached it"
             ),
         }
     }
@@ -1474,6 +1540,8 @@ struct Slot {
     gate: Gate,
     resumability: Resumability,
     ordinal: Option<TaskOrdinal>,
+    /// The task's budget deadline, in virtual nanoseconds, when it has one.
+    deadline: Option<u64>,
 }
 
 /// What the trace has shown of one task's cancellation, before its drain journals it.
@@ -1488,6 +1556,7 @@ fn cause_of(kind: CancelKind) -> Result<CancelCause, BindingRefusal> {
     match kind {
         CancelKind::User => Ok(CancelCause::User),
         CancelKind::ParentCancelled => Ok(CancelCause::ParentCancelled),
+        CancelKind::Deadline => Ok(CancelCause::Deadline),
         other => Err(BindingRefusal::UnmappedCancelReason {
             kind: format!("{other:?}"),
         }),
@@ -1600,6 +1669,10 @@ struct Driver {
     ended: BTreeSet<usize>,
     close_order: Vec<RegionOrdinal>,
     phases: BTreeMap<u32, CancelTrack>,
+    /// Tasks a region's cancellation requested (`CancelRequest` trace events), whatever
+    /// the run observes: substrate state a refusal ([`BindingRefusal::CancelRaced`])
+    /// depends on, so no projection may lose it (cr-3pu5cu).
+    region_requested: BTreeSet<u32>,
     next_task: u32,
     observed: BTreeSet<u64>,
     last_seq: Option<u64>,
@@ -1674,6 +1747,7 @@ impl Driver {
             ended: BTreeSet::new(),
             close_order: Vec::new(),
             phases: BTreeMap::new(),
+            region_requested: BTreeSet::new(),
             next_task: 0,
             observed: BTreeSet::new(),
             last_seq: None,
@@ -1921,6 +1995,18 @@ impl Driver {
         let from = self.lab.now().as_nanos();
         self.lab.advance_time(nanos);
         let to = self.lab.now().as_nanos();
+        // The timers this advance makes due, by task: the key of a task its due timer
+        // woke. A task whose deadline has also passed observes its cancellation at the
+        // checkpoint before its `Sleep` is polled, so no fire is traced for it: the
+        // timer is dropped instead (bn-36wy3). It was still that timer that woke it.
+        let due: BTreeMap<u32, (u64, u32)> = self
+            .timers
+            .values()
+            .filter(|track| {
+                track.deadline <= to && self.sleeping.get(&track.slot) == Some(&track.ordinal)
+            })
+            .map(|track| (track.task.0, (track.deadline, track.ordinal)))
+            .collect();
         if self.observes_time() {
             self.append_body(EventBody::Time(TimeEvent::Advanced {
                 from: VirtualInstant(from),
@@ -1939,14 +2025,14 @@ impl Driver {
         }
         let mut order: Vec<(u64, u32, u32)> = Vec::new();
         for task in batch.per_task.keys() {
-            let (deadline, timer) =
-                batch
-                    .keys
-                    .get(task)
-                    .copied()
-                    .ok_or(BindingRefusal::UnorderedDuringAdvance {
-                        kind: "a step of a task no timer woke".to_owned(),
-                    })?;
+            let (deadline, timer) = batch
+                .keys
+                .get(task)
+                .copied()
+                .or_else(|| due.get(task).copied())
+                .ok_or(BindingRefusal::UnorderedDuringAdvance {
+                    kind: "a step of a task no timer woke".to_owned(),
+                })?;
             order.push((deadline, timer, *task));
         }
         order.sort_unstable();
@@ -2180,42 +2266,21 @@ impl Driver {
                 region,
                 task,
                 resumability,
+            } => self.spawn(*region, *task, resumability, None),
+            SubstrateOp::SpawnWithDeadline {
+                region,
+                task,
+                resumability,
+                deadline,
             } => {
-                let region = self.region(*region)?;
-                if self.task_labels.contains_key(task) {
-                    return Err(BindingRefusal::TaskLabelRebound(task.0));
+                let now = self.lab.now().as_nanos();
+                if *deadline <= now {
+                    return Err(BindingRefusal::DeadlineNotAhead {
+                        deadline: *deadline,
+                        now,
+                    });
                 }
-                let slot = self.slots.len();
-                let gate: Gate = Arc::new(Mutex::new(GateState {
-                    phase: GatePhase::Created,
-                    commands: VecDeque::new(),
-                    waker: None,
-                    untraced: false,
-                    held: 0,
-                    refused: None,
-                    settling: false,
-                    inbox: Vec::new(),
-                    receiver_inbox: Vec::new(),
-                }));
-                let (id, handle) = self
-                    .lab
-                    .state
-                    .create_task(
-                        region,
-                        Budget::INFINITE,
-                        gated_body(Arc::clone(&gate), slot),
-                    )
-                    .map_err(|error| refused(format!("{error:?}")))?;
-                self.slots.push(Slot {
-                    id,
-                    handle,
-                    gate,
-                    resumability: resumability.clone(),
-                    ordinal: None,
-                });
-                self.slot_of.insert(id, slot);
-                self.task_labels.insert(*task, slot);
-                self.sync()
+                self.spawn(*region, *task, resumability, Some(*deadline))
             }
             SubstrateOp::Begin { task } => {
                 let slot = self.slot(*task)?;
@@ -2454,6 +2519,73 @@ impl Driver {
         }
     }
 
+    /// Create a gated task in `region`, bound to `task`, with a finite budget deadline
+    /// when `deadline` names one.
+    fn spawn(
+        &mut self,
+        region: RegionLabel,
+        task: TaskLabel,
+        resumability: &Resumability,
+        deadline: Option<u64>,
+    ) -> Result<(), BindingRefusal> {
+        let operation = if deadline.is_some() {
+            "spawn-with-deadline"
+        } else {
+            "spawn"
+        };
+        let refused = |detail: String| BindingRefusal::SubstrateRefused { operation, detail };
+        let region = self.region(region)?;
+        if self.task_labels.contains_key(&task) {
+            return Err(BindingRefusal::TaskLabelRebound(task.0));
+        }
+        let slot = self.slots.len();
+        let gate: Gate = Arc::new(Mutex::new(GateState {
+            phase: GatePhase::Created,
+            commands: VecDeque::new(),
+            waker: None,
+            untraced: false,
+            held: 0,
+            refused: None,
+            settling: false,
+            inbox: Vec::new(),
+            receiver_inbox: Vec::new(),
+        }));
+        let budget = deadline.map_or(Budget::INFINITE, |at| {
+            Budget::INFINITE.with_deadline(Time::from_nanos(at))
+        });
+        let (id, handle) = self
+            .lab
+            .state
+            .create_task(region, budget, gated_body(Arc::clone(&gate), slot))
+            .map_err(|error| refused(format!("{error:?}")))?;
+        if deadline.is_some() {
+            // A checkpoint reads the task's own timer driver, and falls back to the host
+            // clock without one: a deadline is bound only on the lab's virtual clock.
+            let virtual_clock = self
+                .lab
+                .state
+                .task(id)
+                .and_then(|record| record.cx.clone())
+                .is_some_and(|cx| cx.timer_driver().is_some());
+            if !virtual_clock {
+                return Err(refused(
+                    "the task's Cx carries no virtual timer driver".to_owned(),
+                ));
+            }
+        }
+        self.slots.push(Slot {
+            id,
+            handle,
+            gate,
+            resumability: resumability.clone(),
+            ordinal: None,
+            deadline,
+        });
+        self.slot_of.insert(id, slot);
+        self.task_labels.insert(task, slot);
+        self.sync()
+    }
+
     /// Acquire an obligation of `kind` for `task`, bound to `label`.
     fn acquire(
         &mut self,
@@ -2532,13 +2664,13 @@ impl Driver {
             return Err(BindingRefusal::StepLimit);
         }
         self.sync()?;
-        if self.observes_cancellation() {
-            self.lab
-                .check_cancellation_protocol()
-                .map_err(|violation| BindingRefusal::SubstrateProtocolViolation {
-                    detail: violation.to_string(),
-                })?;
-        }
+        // The substrate's own protocol oracle, whatever the run observes: a projection
+        // must not turn its finding into a journal (cr-3pu5cu).
+        self.lab
+            .check_cancellation_protocol()
+            .map_err(|violation| BindingRefusal::SubstrateProtocolViolation {
+                detail: violation.to_string(),
+            })?;
         Ok(())
     }
 
@@ -2687,6 +2819,14 @@ impl Driver {
                     region,
                     resumability: self.slots[slot].resumability.clone(),
                 });
+                if let Some(deadline) = self.slots[slot].deadline
+                    && self.observes_time()
+                {
+                    self.append_body(EventBody::Time(TimeEvent::Deadline {
+                        task,
+                        at: VirtualInstant(deadline),
+                    }));
+                }
             }
             (TraceEventKind::UserTrace, TraceData::Message(message)) => {
                 // Only the gate writes user traces in a bound run. Any other message is
@@ -2737,20 +2877,17 @@ impl Driver {
                         task: ordinal,
                         step: TaskStep::Complete,
                     }),
+                    Err(JoinError::Cancelled(reason)) if reason.kind == CancelKind::Deadline => {
+                        self.single_cancel(*task, ordinal)?;
+                    }
                     Err(JoinError::Cancelled(reason)) => {
                         self.pending_cancelled.push((ordinal, region.0));
+                        // The cause must map and the substrate's oracle must confirm the
+                        // completion whatever the run observes; only the phase record
+                        // is the cancellation family's (cr-3pu5cu).
+                        let cause = cause_of(reason.kind)?;
+                        self.confirm_cancelled(*task, ordinal)?;
                         if self.observes_cancellation() {
-                            let cause = cause_of(reason.kind)?;
-                            let confirmed =
-                                self.lab.oracles.cancellation_protocol.task_state(*task);
-                            if confirmed != Some(TaskStateKind::CompletedCancelled) {
-                                return Err(BindingRefusal::SubstrateProtocolViolation {
-                                    detail: format!(
-                                        "t{} completed as cancelled but the oracle has {confirmed:?}",
-                                        ordinal.0
-                                    ),
-                                });
-                            }
                             self.phases.entry(ordinal.0).or_default().completed = Some(cause);
                         }
                     }
@@ -2783,11 +2920,14 @@ impl Driver {
                     reason,
                 },
             ) => {
+                // Substrate facts first, whatever the run observes: the request's cause
+                // must map, and the task's region request decides a later refusal.
+                let ordinal = self.task_ordinal(self.slot_of(*task)?)?;
+                let cause = cause_of(reason.kind)?;
+                self.region_requested.insert(ordinal.0);
                 if self.observes_cancellation() {
                     // Requests start a new batch: closes already pending came first.
                     self.flush_closes();
-                    let ordinal = self.task_ordinal(self.slot_of(*task)?)?;
-                    let cause = cause_of(reason.kind)?;
                     self.pending_requests.push((ordinal, cause));
                     self.phases.entry(ordinal.0).or_default();
                 }
@@ -3242,6 +3382,101 @@ impl Driver {
         }
     }
 
+    /// Journal a task that completed as cancelled by its own deadline (bn-36wy3).
+    ///
+    /// No region drain absorbs it: its region stays as it was. So its whole cancellation
+    /// is journaled at its completion, in the order a drain journals a task's phases:
+    /// the lifecycle `cancel-requested` step and the cancellation family's request (the
+    /// substrate traces none: the checkpoint that raised the deadline is both the
+    /// request and the acknowledgement), the acknowledgement, the cleanup (a dropped
+    /// timer, abandoned channel operations, cancel aborts, aborted discharges), the
+    /// completion, and then the lifecycle `cancel` step that ends the task. Each
+    /// event goes where the task's own events go: an advance's batch, the woken tasks'
+    /// batch, or the journal.
+    fn single_cancel(
+        &mut self,
+        id: SubstrateTask,
+        task: TaskOrdinal,
+    ) -> Result<(), BindingRefusal> {
+        let track = self.phases.remove(&task.0).unwrap_or_default();
+        if self.region_requested.contains(&task.0) {
+            return Err(BindingRefusal::CancelRaced { task: task.0 });
+        }
+        self.confirm_cancelled(id, task)?;
+        let mut bodies = vec![EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task,
+            step: TaskStep::CancelRequested,
+        })];
+        if self.observes_cancellation() {
+            bodies.push(EventBody::Cancellation(CancellationEvent::Requested {
+                task,
+                cause: CancelCause::Deadline,
+            }));
+            if track.acknowledged {
+                bodies.push(EventBody::Cancellation(CancellationEvent::Acknowledged {
+                    task,
+                }));
+            }
+        }
+        for (timer, at) in self
+            .pending_timer_cancels
+            .remove(&task.0)
+            .unwrap_or_default()
+        {
+            bodies.push(EventBody::Time(TimeEvent::Cancelled {
+                timer: TimerOrdinal(timer),
+                at: VirtualInstant(at),
+            }));
+        }
+        bodies.extend(self.pending_channel.remove(&task.0).unwrap_or_default());
+        self.acked.remove(&task.0);
+        for reservation in self.pending_aborts.remove(&task.0).unwrap_or_default() {
+            bodies.push(EventBody::Effect(EffectEvent::Aborted {
+                reservation: ReservationOrdinal(reservation),
+                cause: AbortCause::Cancel,
+            }));
+        }
+        for obligation in self.pending_discharges.remove(&task.0).unwrap_or_default() {
+            bodies.push(EventBody::Obligation(ObligationEvent::Discharged {
+                obligation: ObligationOrdinal(obligation),
+                how: Discharge::Aborted,
+            }));
+        }
+        if self.observes_cancellation() {
+            bodies.push(EventBody::Cancellation(CancellationEvent::Cancelled {
+                task,
+                cause: CancelCause::Deadline,
+            }));
+        }
+        bodies.push(EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task,
+            step: TaskStep::Cancel,
+        }));
+        for body in bodies {
+            self.append_task_event(task, body);
+        }
+        Ok(())
+    }
+
+    /// The substrate's cancellation oracle confirms that `id` completed as cancelled.
+    fn confirm_cancelled(
+        &self,
+        id: SubstrateTask,
+        task: TaskOrdinal,
+    ) -> Result<(), BindingRefusal> {
+        let confirmed = self.lab.oracles.cancellation_protocol.task_state(id);
+        if confirmed == Some(TaskStateKind::CompletedCancelled) {
+            Ok(())
+        } else {
+            Err(BindingRefusal::SubstrateProtocolViolation {
+                detail: format!(
+                    "t{} completed as cancelled but the oracle has {confirmed:?}",
+                    task.0
+                ),
+            })
+        }
+    }
+
     fn finish(mut self) -> Result<Witnessed, BindingRefusal> {
         self.sync()?;
         // The smallest ordinal, not the first in trace order, which the seed can move.
@@ -3261,9 +3496,9 @@ impl Driver {
         {
             return Err(BindingRefusal::UndrainedCancellation { task: *task });
         }
-        if self.observes_obligation() {
-            self.cross_check_ledger()?;
-        }
+        // The substrate's own ledger against the run's, whatever the run observes: the
+        // standing it checks is kept for every obligation (cr-3pu5cu).
+        self.cross_check_ledger()?;
         let journal = self
             .record
             .into_journal()

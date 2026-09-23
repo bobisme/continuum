@@ -16,6 +16,7 @@
 //! | [`TimeEvent::Advanced`] | `LabRuntime::advance_time`, read back from the lab's virtual clock |
 //! | [`TimeEvent::Fired`] | `TimerFired` trace event, at the virtual instant it fired |
 //! | [`TimeEvent::Cancelled`] | `TimerCancelled` trace event: the sleeping task's cancellation dropped its timer |
+//! | [`TimeEvent::Deadline`] | the task's `Budget` deadline, as the binding created the task with it (bn-36wy3) |
 //!
 //! Instants are nanoseconds on the lab's virtual clock, which starts at zero. No event
 //! reads the host clock.
@@ -33,14 +34,21 @@
 //!    that sleeps on no other timer, with a deadline after the instant it was
 //!    scheduled (bn-1i050);
 //! 3. it fires or is cancelled exactly once; it fires only at or after its deadline;
-//!    it is cancelled only while its task's region drains under cancellation and the
-//!    task is live, and after the task's acknowledgement when the journal reports its
+//!    it is cancelled only while a cancellation is requested for its task (by its
+//!    region or its own deadline; bn-36wy3) and the task is live, and after the task's acknowledgement when the journal reports its
 //!    cancellation phases (bn-1i050); a sleeping task resumes only after its timer
 //!    fired (bn-1i050);
 //! 4. no timer is late: before the clock advances, before a new timer is scheduled,
 //!    and at the end, no scheduled timer's deadline has passed;
 //! 5. no timer outlives its task: once the model terminates a task, its timers have
-//!    fired or been cancelled.
+//!    fired or been cancelled;
+//! 6. a task's budget deadline is declared once, by the event right after its spawn, ahead of the
+//!    clock; a cancellation with the `deadline` cause needs a declared deadline that
+//!    the clock has reached ([`check_deadline_passed`], bn-36wy3). Once the clock has
+//!    reached it, none of the task's own work, in any family, comes before that
+//!    cancellation ([`check_actor_deadline`], [`TimeFault::DeadlineIgnored`]). A
+//!    journal without this family cannot show the clock, so these checks are not made
+//!    there.
 //!
 //! # Identity
 //!
@@ -50,8 +58,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use continuum_task::region::worker::{WorkerId, WorkerState};
-use continuum_task::region::{DrainCause, RegionState};
+use continuum_task::region::worker::{CancelPhase, WorkerId, WorkerState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
 use crate::family::EventBody;
@@ -105,6 +112,15 @@ pub enum TimeEvent {
         /// When.
         at: VirtualInstant,
     },
+    /// `task` runs under a budget whose deadline is `at`: once the clock reaches it, the
+    /// task's next checkpoint observes its cancellation (asupersync's
+    /// `CancelKind::Deadline`; bn-36wy3). Journaled right after the task's spawn.
+    Deadline {
+        /// The task.
+        task: TaskOrdinal,
+        /// Its deadline.
+        at: VirtualInstant,
+    },
 }
 
 impl TimeEvent {
@@ -114,15 +130,17 @@ impl TimeEvent {
             Self::Advanced { .. } => 2,
             Self::Fired { .. } => 3,
             Self::Cancelled { .. } => 4,
+            Self::Deadline { .. } => 5,
         }
     }
 
-    const fn token(&self) -> &'static str {
+    pub(crate) const fn token(&self) -> &'static str {
         match self {
             Self::Scheduled { .. } => "scheduled",
             Self::Advanced { .. } => "advanced",
             Self::Fired { .. } => "fired",
             Self::Cancelled { .. } => "cancelled",
+            Self::Deadline { .. } => "deadline",
         }
     }
 }
@@ -147,6 +165,10 @@ pub(crate) fn encode(event: &TimeEvent, out: &mut Encoder) -> Result<(), EncodeE
         }
         TimeEvent::Fired { timer, at } | TimeEvent::Cancelled { timer, at } => {
             out.u32(timer.0);
+            out.u64(at.0);
+        }
+        TimeEvent::Deadline { task, at } => {
+            out.u32(task.0);
             out.u64(at.0);
         }
     }
@@ -175,6 +197,13 @@ pub(crate) fn decode(input: &mut Decoder<'_>, _seq: u64) -> Result<TimeEvent, De
             timer: TimerOrdinal(input.u32()?),
             at: VirtualInstant(input.u64()?),
         },
+        5 => {
+            input.require_version(2, "time event", 5, at_offset)?;
+            TimeEvent::Deadline {
+                task: TaskOrdinal(input.u32()?),
+                at: VirtualInstant(input.u64()?),
+            }
+        }
         other => {
             return Err(DecodeError::UnknownTag {
                 table: "time event",
@@ -199,6 +228,7 @@ pub(crate) fn render(event: &TimeEvent) -> String {
         TimeEvent::Advanced { from, to } => format!("advanced {}->{}", from.0, to.0),
         TimeEvent::Fired { timer, at } => format!("fired k{} at={}", timer.0, at.0),
         TimeEvent::Cancelled { timer, at } => format!("cancelled k{} at={}", timer.0, at.0),
+        TimeEvent::Deadline { task, at } => format!("deadline t{} at={}", task.0, at.0),
     }
 }
 
@@ -301,13 +331,79 @@ pub enum TimeFault {
         /// The event's token.
         event: &'static str,
     },
-    /// A timer was cancelled while its task's region is not draining under
-    /// cancellation.
+    /// A timer was cancelled while no cancellation was requested for its task, by its
+    /// region or by its own deadline.
     NotCancelling {
         /// The timer.
         timer: u32,
-        /// The model's token for the region's state.
+        /// The model's token for the task's cancellation phase.
         state: &'static str,
+    },
+    /// A task's budget deadline is not declared by the event right after its task's
+    /// spawn (cr-3pu5cu round 8).
+    DeadlineNotAtSpawn {
+        /// The task.
+        task: u32,
+    },
+    /// A task's budget deadline is declared twice, or after the task began.
+    DeadlineMisplaced {
+        /// The task.
+        task: u32,
+        /// The model's status token for the task, or `declared` for a second one.
+        state: &'static str,
+    },
+    /// A task's budget deadline is not ahead of the clock when it is declared.
+    TaskDeadlineNotAhead {
+        /// The task.
+        task: u32,
+        /// Its deadline.
+        deadline: u64,
+        /// The clock's current instant.
+        now: u64,
+    },
+    /// A cancellation with the `deadline` cause names a task with no declared deadline.
+    DeadlineUnknown {
+        /// The task.
+        task: u32,
+    },
+    /// A cancellation with the `deadline` cause comes before the clock reached the
+    /// task's deadline.
+    DeadlineNotPassed {
+        /// The task.
+        task: u32,
+        /// Its deadline.
+        deadline: u64,
+        /// The clock's current instant.
+        now: u64,
+    },
+    /// A task whose deadline the clock has reached is polled on as if it had none:
+    /// a step of its own work (any family; [`check_actor_deadline`]) comes after the
+    /// deadline. The substrate's poll starts
+    /// with `Cx::checkpoint`, which raises the deadline's cancellation first (RFC 0026
+    /// correction 53), so the task's next poll after its deadline is its cancellation.
+    DeadlineIgnored {
+        /// The task.
+        task: u32,
+        /// Its deadline.
+        deadline: u64,
+        /// The clock's current instant.
+        now: u64,
+    },
+    /// A task's own region was cancelled after the clock reached the task's deadline and
+    /// before the task observed it. The substrate completes such a task with the more
+    /// severe `deadline` reason under the region's request, so the binding refuses the
+    /// run (`BindingRefusal::CancelRaced`); a journal that shows it is not one the
+    /// binding returns (RFC 0026 correction 53 item 6; cr-3pu5cu round 7). A proper
+    /// ancestor's cancellation outranks the deadline and is not this fault.
+    CancelRaced {
+        /// The task.
+        task: u32,
+        /// Its region, the one cancelled.
+        region: u32,
+        /// Its deadline.
+        deadline: u64,
+        /// The clock's current instant.
+        now: u64,
     },
     /// A timer scheduled by a task that is not running, or whose cancellation has
     /// begun, or that already sleeps: a task sleeps by calling `sleep_until` while it
@@ -386,8 +482,56 @@ impl fmt::Display for TimeFault {
                 write!(f, "k{timer}'s task is terminal, so it cannot be {event}")
             }
             Self::NotCancelling { timer, state } => {
-                write!(f, "k{timer} was cancelled but its task's region is {state}")
+                write!(
+                    f,
+                    "k{timer} was cancelled but its task's cancellation is {state}"
+                )
             }
+            Self::DeadlineNotAtSpawn { task } => {
+                write!(
+                    f,
+                    "t{task}'s deadline is not declared right after its spawn"
+                )
+            }
+            Self::DeadlineMisplaced { task, state } => {
+                write!(f, "t{task}'s deadline is declared while it is {state}")
+            }
+            Self::TaskDeadlineNotAhead {
+                task,
+                deadline,
+                now,
+            } => write!(
+                f,
+                "t{task}'s deadline {deadline} is not ahead of the clock at {now}"
+            ),
+            Self::DeadlineUnknown { task } => {
+                write!(f, "t{task} is cancelled by a deadline it never declared")
+            }
+            Self::DeadlineNotPassed {
+                task,
+                deadline,
+                now,
+            } => write!(
+                f,
+                "t{task} is cancelled by its deadline {deadline}, but the clock reads {now}"
+            ),
+            Self::DeadlineIgnored {
+                task,
+                deadline,
+                now,
+            } => write!(
+                f,
+                "t{task} acts at {now}, past its deadline {deadline}, and is not cancelled"
+            ),
+            Self::CancelRaced {
+                task,
+                region,
+                deadline,
+                now,
+            } => write!(
+                f,
+                "r{region} is cancelled at {now}, but its task t{task} passed its deadline {deadline} unobserved"
+            ),
             Self::NotRunning { timer, task, state } => {
                 write!(f, "k{timer} scheduled by t{task}, which is {state}")
             }
@@ -410,6 +554,13 @@ impl fmt::Display for TimeFault {
 pub struct LiftState {
     now: u64,
     timers: BTreeMap<u32, Timer>,
+    /// Each task's declared budget deadline.
+    deadlines: BTreeMap<u32, u64>,
+    /// The tasks with a declared deadline, by the region that owns them, for the race
+    /// check at that region's cancellation ([`check_cancel_not_raced`]).
+    deadlines_by_region: BTreeMap<u32, std::collections::BTreeSet<u32>>,
+    /// Whether the journal carries this family at all.
+    present: bool,
 }
 
 fn fault(fault: TimeFault) -> LiftStop {
@@ -454,8 +605,59 @@ fn live_task(cx: &LiftContext, timer: u32, task: u32, event: &TimeEvent) -> Resu
     Ok(())
 }
 
+/// The journal carries this family (set before the first event is lifted).
+pub(crate) fn mark_present(cx: &mut LiftContext) {
+    cx.time.present = true;
+}
+
 pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftStop> {
+    cx.time.present = true;
     match event {
+        TimeEvent::Deadline { task, at } => {
+            // The binding declares a deadline in the event right after its task's spawn
+            // (RFC 0026 correction 53 item 6). Both are always carried together: the
+            // spawn is lifecycle, which every projection keeps, and dropping a family
+            // only removes events, so the two stay adjacent in every projection that
+            // carries this family (cr-3pu5cu round 8).
+            if cx.spawned_just_before != Some(task.0) {
+                return Err(fault(TimeFault::DeadlineNotAtSpawn { task: task.0 }));
+            }
+            let state = cx.tree.worker_state(WorkerId::at(task.0))?;
+            if *state != WorkerState::Created {
+                return Err(fault(TimeFault::DeadlineMisplaced {
+                    task: task.0,
+                    state: state.status_token(),
+                }));
+            }
+            if cx.time.deadlines.contains_key(&task.0) {
+                return Err(fault(TimeFault::DeadlineMisplaced {
+                    task: task.0,
+                    state: "declared",
+                }));
+            }
+            // A deadline is declared at the spawn, before any cancellation of the task.
+            let phase = cx.tree.cancel_phase(WorkerId::at(task.0))?;
+            if phase != CancelPhase::Active {
+                return Err(fault(TimeFault::DeadlineMisplaced {
+                    task: task.0,
+                    state: phase.token(),
+                }));
+            }
+            if at.0 <= cx.time.now {
+                return Err(fault(TimeFault::TaskDeadlineNotAhead {
+                    task: task.0,
+                    deadline: at.0,
+                    now: cx.time.now,
+                }));
+            }
+            cx.time.deadlines.insert(task.0, at.0);
+            let owner = cx.tree.owner(WorkerId::at(task.0))?.ordinal();
+            cx.time
+                .deadlines_by_region
+                .entry(owner)
+                .or_default()
+                .insert(task.0);
+        }
         TimeEvent::Scheduled {
             timer,
             task,
@@ -481,6 +683,10 @@ pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftSt
             let state = cx.tree.worker_state(WorkerId::at(task.0))?;
             let not_running = if *state == WorkerState::Running {
                 crate::family::cancellation::phase_of(cx, task.0)
+                    .or_else(|| {
+                        crate::family::cancellation::is_cancelling(cx, task.0)
+                            .then_some("acknowledged")
+                    })
                     .or_else(|| armed_for(cx, task.0).map(|_| "asleep"))
             } else {
                 Some(state.status_token())
@@ -535,12 +741,11 @@ pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftSt
                 }
                 entry.state = State::Fired;
             } else {
-                let owner = cx.tree.owner(WorkerId::at(entry.task))?;
-                let state = cx.tree.state(owner)?;
-                if state != RegionState::Draining(DrainCause::Cancelled) {
+                let phase = cx.tree.cancel_phase(WorkerId::at(entry.task))?;
+                if phase == CancelPhase::Active {
                     return Err(fault(TimeFault::NotCancelling {
                         timer: timer.0,
-                        state: state.token(),
+                        state: phase.token(),
                     }));
                 }
                 if let Some(phase) = crate::family::cancellation::outside_cancelling(cx, entry.task)
@@ -550,12 +755,123 @@ pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftSt
                         phase,
                     }));
                 }
+                crate::family::cancellation::imply_acknowledgement(cx, entry.task)?;
                 entry.state = State::Cancelled;
             }
             cx.time.timers.insert(timer.0, entry);
         }
     }
     Ok(())
+}
+
+/// The task whose cancellation cleanup `event` is: the task that armed the timer a
+/// `cancelled` names. `None` for every other event, and for a timer the lift does not
+/// know (RFC 0026 correction 53 item 6).
+pub(crate) fn cleanup_of(cx: &LiftContext, event: &TimeEvent) -> Option<u32> {
+    match event {
+        TimeEvent::Cancelled { timer, .. } => cx.time.timers.get(&timer.0).map(|entry| entry.task),
+        _ => None,
+    }
+}
+
+/// A cancellation with the `deadline` cause is admitted for `task`: when the journal
+/// carries this family, the task declared a deadline and the clock has reached it. A
+/// journal without this family shows no clock, and is not checked (bn-36wy3).
+pub(crate) fn check_deadline_passed(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {
+    if !cx.time.present {
+        return Ok(());
+    }
+    match cx.time.deadlines.get(&task) {
+        None => Err(fault(TimeFault::DeadlineUnknown { task })),
+        Some(deadline) if *deadline > cx.time.now => Err(fault(TimeFault::DeadlineNotPassed {
+            task,
+            deadline: *deadline,
+            now: cx.time.now,
+        })),
+        Some(_) => Ok(()),
+    }
+}
+
+/// A cancellation request for `region` races a deadline: a live task that `region`
+/// itself owns has a declared deadline the clock has reached ([`TimeFault::CancelRaced`]).
+/// Tasks of a proper subregion are not checked: the request reaches them as
+/// `parent-cancelled`, which outranks the deadline. Each region is cancelled at most
+/// once (`RepeatedCancel`), so each task is checked at most once. A journal without
+/// this family declares no deadline, so it is not checked: it cannot show the race, and
+/// the binding refuses the run itself under every projection.
+pub(crate) fn check_cancel_not_raced(cx: &LiftContext, region: u32) -> Result<(), LiftStop> {
+    let Some(tasks) = cx.time.deadlines_by_region.get(&region) else {
+        return Ok(());
+    };
+    for task in tasks {
+        let Some(&deadline) = cx.time.deadlines.get(task) else {
+            continue;
+        };
+        if deadline > cx.time.now || cx.tree.worker_state(WorkerId::at(*task))?.is_terminal() {
+            continue;
+        }
+        return Err(fault(TimeFault::CancelRaced {
+            task: *task,
+            region,
+            deadline,
+            now: cx.time.now,
+        }));
+    }
+    Ok(())
+}
+
+/// An event that is a task's own work, in any family, is part of a poll of that task,
+/// and the substrate's poll starts with `Cx::checkpoint`, which raises a passed
+/// deadline first. So once the clock has reached a task's declared deadline, none of
+/// the task's own work comes before its deadline's cancellation: a `begin`, `resume`,
+/// `suspend`, `complete` or `fail`; a reserve, commit or explicit abort; an obligation
+/// open, committed discharge or hand-off; a send or receive; a timer scheduled
+/// ([`TimeFault::DeadlineIgnored`]; cr-3pu5cu round 6, pre-review pass). Cleanup steps
+/// (a cancellation's abort, an aborted discharge, a cancelled timer, an abandonment)
+/// are the cancellation's own and are not checked here. A journal without this family
+/// shows no clock.
+pub(crate) fn check_actor_deadline(body: &EventBody, cx: &LiftContext) -> Result<(), LiftStop> {
+    use crate::family::lifecycle::{LifecycleEvent, TaskStep};
+    if !cx.time.present || cx.time.deadlines.is_empty() {
+        return Ok(());
+    }
+    let actor = match body {
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task,
+            step:
+                TaskStep::Begin
+                | TaskStep::Resume
+                | TaskStep::Suspend
+                | TaskStep::Complete
+                | TaskStep::Fail(_),
+        }) => Some(task.0),
+        EventBody::Lifecycle(_) | EventBody::Cancellation(_) => None,
+        EventBody::Effect(event) => crate::family::effect::actor_of(cx, event),
+        EventBody::Obligation(event) => crate::family::obligation::actor_of(cx, event),
+        EventBody::Time(TimeEvent::Scheduled { task, .. }) => Some(task.0),
+        EventBody::Time(_) => None,
+        EventBody::Channel(event) => crate::family::channel::actor_of(cx, event),
+    };
+    match actor {
+        Some(task) => check_deadline_not_due(cx, task),
+        None => Ok(()),
+    }
+}
+
+/// A step of `task`'s own work is (part of) a poll that is not its deadline's
+/// cancellation: refused once the clock has reached the task's declared deadline
+/// ([`TimeFault::DeadlineIgnored`]). A journal without this family shows no clock.
+pub(crate) fn check_deadline_not_due(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {
+    match cx.time.deadlines.get(&task) {
+        Some(deadline) if cx.time.present && *deadline <= cx.time.now => {
+            Err(fault(TimeFault::DeadlineIgnored {
+                task,
+                deadline: *deadline,
+                now: cx.time.now,
+            }))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The first timer `task` sleeps on (scheduled, not fired or cancelled), if any.

@@ -11,7 +11,7 @@
 //! |---|---|
 //! | [`LifecycleEvent::RegionOpened`] | `RegionTree::open_child` |
 //! | [`LifecycleEvent::TaskSpawned`] | `RegionTree::spawn` |
-//! | [`LifecycleEvent::TaskStepped`] | `RegionTree::advance` (begin, suspend, resume, complete, fail) |
+//! | [`LifecycleEvent::TaskStepped`] | `RegionTree::advance` (begin, suspend, resume, complete, fail; `cancel` is the calculus's single-task `CompleteCancelled`, bn-36wy3) |
 //! | [`LifecycleEvent::RegionCloseRequested`] | `RegionTree::close` |
 //! | [`LifecycleEvent::RegionCancelRequested`] | `RegionTree::cancel` |
 //! | [`LifecycleEvent::RegionDrained`] | `RegionTree::drain`, with the tasks the drain cancelled |
@@ -36,9 +36,9 @@
 use std::collections::BTreeMap;
 
 use continuum_task::region::worker::{
-    FailureReason, NonResumableReason, Resumability, WorkerId, WorkerStep,
+    CancelPhase, FailureReason, NonResumableReason, Resumability, WorkerId, WorkerStep,
 };
-use continuum_task::region::{RegionId, RegionState};
+use continuum_task::region::{DrainCause, RegionId, RegionState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
 use crate::family::EventBody;
@@ -91,9 +91,32 @@ pub enum TaskStep {
     Complete,
     /// `Created | Running → Failed`, naming why.
     Fail(FailureReason),
+    /// The task ended as cancelled on its own, while its region stayed as it was: a
+    /// deadline cancellation's end (the calculus's `CompleteCancelled`, RFC 0026
+    /// correction 53; bn-36wy3). A region's cancellation ends its tasks in the region's
+    /// drain instead.
+    Cancel,
+    /// The task's own cancellation was requested, outside any region's cancellation: its
+    /// deadline passed (the calculus's `RequestCancel`; bn-36wy3). The single-task
+    /// counterpart of [`LifecycleEvent::RegionCancelRequested`], and like it journaled
+    /// before the cleanup it starts.
+    CancelRequested,
 }
 
 impl TaskStep {
+    /// A stable token, as the rendering spells the step.
+    pub(crate) const fn token(&self) -> &'static str {
+        match self {
+            Self::Begin => "begin",
+            Self::Suspend => "suspend",
+            Self::Resume => "resume",
+            Self::Complete => "complete",
+            Self::Fail(_) => "fail",
+            Self::Cancel => "cancel",
+            Self::CancelRequested => "cancel-requested",
+        }
+    }
+
     const fn tag(&self) -> u8 {
         match self {
             Self::Begin => 1,
@@ -101,6 +124,8 @@ impl TaskStep {
             Self::Resume => 3,
             Self::Complete => 4,
             Self::Fail(_) => 5,
+            Self::Cancel => 6,
+            Self::CancelRequested => 7,
         }
     }
 
@@ -113,6 +138,8 @@ impl TaskStep {
             Self::Resume => WorkerStep::Resume,
             Self::Complete => WorkerStep::Complete,
             Self::Fail(reason) => WorkerStep::Fail(reason.clone()),
+            Self::Cancel => WorkerStep::CompleteCancelled,
+            Self::CancelRequested => WorkerStep::RequestCancel,
         }
     }
 
@@ -123,6 +150,8 @@ impl TaskStep {
             Self::Resume => "resume".to_owned(),
             Self::Complete => "complete".to_owned(),
             Self::Fail(reason) => format!("fail({reason})"),
+            Self::Cancel => "cancel".to_owned(),
+            Self::CancelRequested => "cancel-requested".to_owned(),
         }
     }
 }
@@ -178,6 +207,19 @@ pub enum LifecycleEvent {
 }
 
 impl LifecycleEvent {
+    /// A stable token for the event's kind (a task step is named by its step).
+    pub(crate) const fn token(&self) -> &'static str {
+        match self {
+            Self::RegionOpened { .. } => "region-opened",
+            Self::TaskSpawned { .. } => "task-spawned",
+            Self::TaskStepped { step, .. } => step.token(),
+            Self::RegionCloseRequested { .. } => "region-close-requested",
+            Self::RegionCancelRequested { .. } => "region-cancel-requested",
+            Self::RegionDrained { .. } => "region-drained",
+            Self::RegionFinalized { .. } => "region-finalized",
+        }
+    }
+
     const fn tag(&self) -> u8 {
         match self {
             Self::RegionOpened { .. } => 1,
@@ -285,6 +327,14 @@ pub(crate) fn decode(input: &mut Decoder<'_>, _seq: u64) -> Result<LifecycleEven
                 3 => TaskStep::Resume,
                 4 => TaskStep::Complete,
                 5 => TaskStep::Fail(reason_token(input, FailureReason::new)?),
+                6 => {
+                    input.require_version(2, "lifecycle task step", 6, tag_at)?;
+                    TaskStep::Cancel
+                }
+                7 => {
+                    input.require_version(2, "lifecycle task step", 7, tag_at)?;
+                    TaskStep::CancelRequested
+                }
                 other => {
                     return Err(DecodeError::UnknownTag {
                         table: "lifecycle task step",
@@ -377,6 +427,68 @@ fn ordinal(count: usize) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
 }
 
+/// The whole-journal check, run after the last event: the journal does not end inside a
+/// region's teardown or a single task's cancellation (cr-3pu5cu).
+///
+/// A region's cancellation drains within the operation that requested it, a drain is
+/// finalized in the same batch, and a task's own cancellation ends in its `cancel` step
+/// within the operation that observed it. So a journal that ends with a region still
+/// draining under cancellation, a drained region not finalized, or a task requested
+/// alone and not ended by its own `cancel` is truncated: [`LiftStop::Incomplete`],
+/// never a conformance. A task requested alone that another step ended is a violation,
+/// reported at that step. A
+/// normally closing region that waits for owned work, a parked task, a held
+/// reservation, an open obligation, an armed timer or a blocked channel operation is a
+/// state a run can end in, and is not checked here.
+pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
+    let count = ordinal(cx.tree.region_count());
+    for region in 0..count {
+        let state = cx.tree.state(RegionId::at(region))?;
+        if state == RegionState::Draining(DrainCause::Cancelled)
+            || (cx.drained.contains(&region) && state != RegionState::Finalized)
+        {
+            return Err(LiftStop::Incomplete(crate::family::Family::Lifecycle));
+        }
+    }
+    crate::family::cancellation::finish_alone(cx)
+}
+
+/// A lifecycle `cancel-requested`: one task's own cancellation is requested
+/// (bn-36wy3). The calculus's `RequestCancel`, which refuses a task a region's
+/// cancellation already reached, after the deadline check when the journal shows the
+/// clock.
+fn lift_single_request(cx: &mut LiftContext, task: u32) -> Result<(), LiftStop> {
+    crate::family::time::check_deadline_passed(cx, task)?;
+    cx.tree
+        .advance(WorkerId::at(task), WorkerStep::RequestCancel)?;
+    crate::family::cancellation::note_requested_alone(cx, task);
+    Ok(())
+}
+
+/// A lifecycle `cancel`: one task ends as cancelled on its own (bn-36wy3).
+///
+/// It needs the task's own `cancel-requested` before it. When the journal reports the
+/// task's cancellation phases, they must have ended in `cancelled` with the `deadline`
+/// cause, and the calculus already holds the acknowledgement. When it reports none (a
+/// lifecycle projection), the step stands for the acknowledgement and the cleanup
+/// checks a `cancelled` phase makes, as a drain's cancelled set stands for a region's.
+/// Either way it ends with the calculus's `CompleteCancelled`.
+fn lift_single_cancel(cx: &mut LiftContext, task: u32) -> Result<(), LiftStop> {
+    let worker = WorkerId::at(task);
+    crate::family::cancellation::check_requested_alone(cx, task)?;
+    if !crate::family::cancellation::single_task_end(cx, task)? {
+        if cx.tree.cancel_phase(worker)? != CancelPhase::Acknowledged {
+            cx.tree.advance(worker, WorkerStep::AcknowledgeCancel)?;
+        }
+        crate::family::obligation::check_none_held(cx, task)?;
+        crate::family::time::check_none_armed(cx, task)?;
+        crate::family::channel::check_none_held(cx, task)?;
+    }
+    cx.tree.advance(worker, WorkerStep::CompleteCancelled)?;
+    crate::family::cancellation::note_ended_alone(cx, task);
+    Ok(())
+}
+
 pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), LiftStop> {
     match event {
         LifecycleEvent::RegionOpened { region, parent } => {
@@ -403,9 +515,23 @@ pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), L
                 }));
             }
         }
+        LifecycleEvent::TaskStepped {
+            task,
+            step: TaskStep::Cancel,
+        } => lift_single_cancel(cx, task.0)?,
+        LifecycleEvent::TaskStepped {
+            task,
+            step: TaskStep::CancelRequested,
+        } => lift_single_request(cx, task.0)?,
         LifecycleEvent::TaskStepped { task, step } => {
+            if matches!(step, TaskStep::Complete | TaskStep::Fail(_)) {
+                crate::family::cancellation::check_no_phase(cx, task.0, step.token())?;
+            }
             cx.tree
                 .advance(WorkerId::at(task.0), step.to_worker_step())?;
+            // A `complete` or `fail` may not end a task whose own cancellation was
+            // requested: only its own `cancel` does (cr-3pu5cu).
+            crate::family::cancellation::check_not_absorbed(cx, task.0)?;
             if *step == TaskStep::Resume {
                 // A sleeping task is woken by its timer: it may not resume while the
                 // timer is still scheduled (bn-1i050).
@@ -414,6 +540,16 @@ pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), L
         }
         LifecycleEvent::RegionCloseRequested { region } => cx.tree.close(RegionId::at(region.0))?,
         LifecycleEvent::RegionCancelRequested { region } => {
+            let state = cx.tree.state(RegionId::at(region.0))?;
+            // A finalized region is the calculus's own `CancelFinalizedRegion`.
+            if state == RegionState::Draining(DrainCause::Cancelled)
+                || (state != RegionState::Finalized && cx.drained.contains(&region.0))
+            {
+                return Err(LiftStop::Violation(Nonconformance::RepeatedCancel {
+                    region: region.0,
+                }));
+            }
+            crate::family::time::check_cancel_not_raced(cx, region.0)?;
             cx.tree.cancel(RegionId::at(region.0))?;
         }
         LifecycleEvent::RegionDrained { region, cancelled } => {
@@ -443,6 +579,12 @@ pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), L
                     reported: cancelled.0.iter().map(|t| t.0).collect(),
                     model: model.0.iter().map(|t| t.0).collect(),
                 }));
+            }
+            // A region's drain may not end a task whose own cancellation was requested:
+            // the shared `Cancelled` state does not stand for its missing own `cancel`
+            // (RFC 0026 correction 53 items 3 and 6; cr-3pu5cu).
+            for task in &model.0 {
+                crate::family::cancellation::check_not_absorbed(cx, task.0)?;
             }
         }
         LifecycleEvent::RegionFinalized { region } => {
@@ -654,7 +796,10 @@ pub(crate) fn record(
         }
         LifecycleReport::Step { task, step } => {
             let task = state.task(*task)?;
-            if matches!(step, TaskStep::Complete | TaskStep::Fail(_)) {
+            if matches!(
+                step,
+                TaskStep::Complete | TaskStep::Fail(_) | TaskStep::Cancel
+            ) {
                 state.task_live[task.0 as usize] = false;
             }
             LifecycleEvent::TaskStepped {

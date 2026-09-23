@@ -32,7 +32,7 @@
 //! is neither.
 
 use core::fmt;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::RegionId;
 use super::worker::{PublicationSlot, ReasonError, WorkerId};
@@ -396,6 +396,10 @@ pub struct Ledger {
     open: BTreeSet<Obligation>,
     opened: u64,
     discharged: u64,
+    /// Per obligation, how many times it was opened and discharged. The source of a
+    /// scoped summary ([`Self::summary_where`]): a subtree's counters are the sums over
+    /// its own obligations.
+    history: BTreeMap<Obligation, (u64, u64)>,
 }
 
 impl Ledger {
@@ -406,6 +410,7 @@ impl Ledger {
             open: BTreeSet::new(),
             opened: 0,
             discharged: 0,
+            history: BTreeMap::new(),
         }
     }
 
@@ -418,6 +423,7 @@ impl Ledger {
         let fresh = self.open.insert(obligation);
         if fresh {
             self.opened += 1;
+            self.history.entry(obligation).or_insert((0, 0)).0 += 1;
         }
         fresh
     }
@@ -431,6 +437,7 @@ impl Ledger {
         let held = self.open.remove(&obligation);
         if held {
             self.discharged += 1;
+            self.history.entry(obligation).or_insert((0, 0)).1 += 1;
         }
         held
     }
@@ -477,6 +484,74 @@ impl Ledger {
             opened: self.opened,
             discharged: self.discharged,
             outstanding: self.outstanding(),
+        }
+    }
+
+    /// A snapshot of exactly these obligations: those of them still owed, and the opened
+    /// and discharged counters summed over them. Each is looked up by key, so the cost is
+    /// the number named, not the size of the ledger's history. [`Self::summary_where`]
+    /// is the same summary stated as a filter over the whole history.
+    #[must_use]
+    pub fn summary_of(&self, obligations: impl IntoIterator<Item = Obligation>) -> LedgerSummary {
+        let keys: BTreeSet<Obligation> = obligations.into_iter().collect();
+        let mut opened = 0_u64;
+        let mut discharged = 0_u64;
+        for key in &keys {
+            if let Some((opens, discharges)) = self.history.get(key) {
+                opened = opened.saturating_add(*opens);
+                discharged = discharged.saturating_add(*discharges);
+            }
+        }
+        LedgerSummary {
+            opened,
+            discharged,
+            outstanding: keys
+                .into_iter()
+                .filter(|key| self.open.contains(key))
+                .collect(),
+        }
+    }
+
+    /// Every obligation the ledger ever held about `worker`'s staged publications in a
+    /// non-primary slot, in canonical order: one range of the history.
+    pub(crate) fn publications_of(
+        &self,
+        worker: WorkerId,
+    ) -> impl Iterator<Item = Obligation> + '_ {
+        let low = Obligation::new(
+            ObligationKind::ProvisionalPublication,
+            Subject::Publication(worker, PublicationSlot::at(0)),
+        );
+        let high = Obligation::new(
+            ObligationKind::ProvisionalPublication,
+            Subject::Publication(worker, PublicationSlot::at(u32::MAX)),
+        );
+        self.history
+            .range(low..=high)
+            .map(|(obligation, _)| *obligation)
+    }
+
+    /// A snapshot of the obligations `keep` selects: their outstanding set, and the
+    /// opened and discharged counters summed over them.
+    ///
+    /// The scoped form of [`Self::summary`], for one subtree's
+    /// [`Finalization`](super::Finalization). Both accountings are restricted to the same
+    /// obligations, so a scoped summary is balanced exactly when each selected obligation
+    /// was discharged as often as it was opened and none is owed.
+    #[must_use]
+    pub fn summary_where(&self, keep: impl Fn(&Obligation) -> bool) -> LedgerSummary {
+        let mut opened = 0_u64;
+        let mut discharged = 0_u64;
+        for (obligation, (opens, discharges)) in &self.history {
+            if keep(obligation) {
+                opened = opened.saturating_add(*opens);
+                discharged = discharged.saturating_add(*discharges);
+            }
+        }
+        LedgerSummary {
+            opened,
+            discharged,
+            outstanding: self.open.iter().filter(|o| keep(o)).copied().collect(),
         }
     }
 }

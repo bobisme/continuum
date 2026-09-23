@@ -113,13 +113,50 @@ impl core::error::Error for EncodeError {}
 pub struct Decoder<'a> {
     bytes: &'a [u8],
     at: usize,
+    /// The journal encoding version whose grammar the bytes are read under.
+    version: u32,
 }
 
 impl<'a> Decoder<'a> {
-    /// A cursor at the start of `bytes`.
+    /// A cursor at the start of `bytes`, reading the grammar of the version this crate
+    /// writes ([`crate::journal::ENCODING_VERSION`]).
     #[must_use]
     pub const fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, at: 0 }
+        Self {
+            bytes,
+            at: 0,
+            version: crate::journal::ENCODING_VERSION,
+        }
+    }
+
+    /// A cursor at the start of `bytes`, reading the grammar of `version`.
+    pub(crate) const fn with_version(bytes: &'a [u8], version: u32) -> Self {
+        Self {
+            bytes,
+            at: 0,
+            version,
+        }
+    }
+
+    /// Refuse a `tag` of `table` that the grammar being read does not have: it was added
+    /// in encoding version `since` ([`DecodeError::TagNotInVersion`]).
+    pub(crate) const fn require_version(
+        &self,
+        since: u32,
+        table: &'static str,
+        tag: u8,
+        at: usize,
+    ) -> Result<(), DecodeError> {
+        if self.version < since {
+            Err(DecodeError::TagNotInVersion {
+                table,
+                tag,
+                version: self.version,
+                at,
+            })
+        } else {
+            Ok(())
+        }
     }
 
     /// The offset of the next unread byte.
@@ -229,6 +266,25 @@ pub enum DecodeError {
         /// Offset of the header.
         at: usize,
     },
+    /// The journal names an encoding version this crate does not read.
+    UnsupportedVersion {
+        /// The version read.
+        version: u32,
+        /// Offset of the version field.
+        at: usize,
+    },
+    /// A tag byte is in its table, but only from a later encoding version than the one
+    /// the journal declares: the bytes mix two grammars.
+    TagNotInVersion {
+        /// Which table.
+        table: &'static str,
+        /// The byte read.
+        tag: u8,
+        /// The version the journal declares.
+        version: u32,
+        /// Its offset.
+        at: usize,
+    },
     /// A tag byte is not in its table.
     UnknownTag {
         /// Which table.
@@ -287,6 +343,19 @@ impl fmt::Display for DecodeError {
         match self {
             Self::Truncated { at } => write!(f, "input ends inside the field at byte {at}"),
             Self::BadHeader { at } => write!(f, "no semantic-journal header at byte {at}"),
+            Self::UnsupportedVersion { version, at } => write!(
+                f,
+                "encoding version {version} at byte {at} is not one this reader implements"
+            ),
+            Self::TagNotInVersion {
+                table,
+                tag,
+                version,
+                at,
+            } => write!(
+                f,
+                "{table} tag {tag} at byte {at} is not in encoding version {version}"
+            ),
             Self::UnknownTag { table, tag, at } => {
                 write!(f, "tag {tag} at byte {at} is not a {table}")
             }

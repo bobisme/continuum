@@ -56,8 +56,10 @@ use std::fmt;
 
 /// The fixed header of a canonical journal (`src/journal.rs`, "The encoding").
 const MAGIC: &[u8] = b"continuum/semantic-journal\n";
-/// The encoding version this reader accepts.
-const VERSION: u32 = 1;
+/// The encoding versions this reader accepts: 1, and 2, which adds lifecycle task
+/// steps 6-7, cancel cause 3 and time event 5 (`src/journal.rs`, bn-36wy3). Under
+/// version 1 those tags are [`WireFault::NotInVersion`].
+const VERSIONS: [u32; 2] = [1, 2];
 
 /// The six families the substrate binding observes, with their wire tags
 /// (`src/family.rs`, "The six families").
@@ -117,6 +119,9 @@ pub enum Cause {
     User,
     /// A region above the task's region was cancelled.
     ParentCancelled,
+    /// The task's own budget deadline passed (docs/02 §7 `request(cancel_reason)` for
+    /// one task, raised by docs/02 §5's virtual clock; bn-36wy3).
+    Deadline,
 }
 
 /// Why a reservation was aborted (docs/02 §7 `Aborted(reason)`).
@@ -150,6 +155,10 @@ pub enum Step {
     Complete { task: u32 },
     /// `Created | Running → Failed`.
     Fail { task: u32, reason: String },
+    /// One task's own cancellation requested, outside any region's (its deadline).
+    TaskCancelRequested { task: u32 },
+    /// One task ended as cancelled on its own, its region unchanged.
+    TaskCancelled { task: u32 },
     /// A normal close requested on a region's subtree.
     Close { region: u32 },
     /// Cancellation requested on a region's subtree.
@@ -209,6 +218,8 @@ pub enum Step {
     Fired { timer: u32, at: u64 },
     /// A timer was cancelled.
     TimerCancelled { timer: u32, at: u64 },
+    /// A task runs under a budget deadline at `deadline`.
+    DeadlineSet { task: u32, deadline: u64 },
     /// A bounded channel opened, its receiver held by `receiver`.
     ChannelOpened {
         channel: u32,
@@ -263,6 +274,8 @@ impl Step {
             | Self::Resume { .. }
             | Self::Complete { .. }
             | Self::Fail { .. }
+            | Self::TaskCancelRequested { .. }
+            | Self::TaskCancelled { .. }
             | Self::Close { .. }
             | Self::Cancel { .. }
             | Self::Drain { .. }
@@ -279,7 +292,8 @@ impl Step {
             Self::Scheduled { .. }
             | Self::Advanced { .. }
             | Self::Fired { .. }
-            | Self::TimerCancelled { .. } => FamilyTag::Time,
+            | Self::TimerCancelled { .. }
+            | Self::DeadlineSet { .. } => FamilyTag::Time,
             Self::ChannelOpened { .. }
             | Self::Sent { .. }
             | Self::SendBlocked { .. }
@@ -304,6 +318,12 @@ pub enum WireFault {
     Header,
     /// An event's sequence number is not its position.
     Sequence { expected: u64, found: u64 },
+    /// A tag is in its table only from a later version than the journal declares.
+    NotInVersion {
+        table: &'static str,
+        tag: u8,
+        at: usize,
+    },
     /// A tag is outside its table.
     Tag {
         table: &'static str,
@@ -323,6 +343,7 @@ pub enum WireFault {
 struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
+    version: u32,
 }
 
 impl<'a> Reader<'a> {
@@ -395,10 +416,21 @@ impl<'a> Reader<'a> {
         }
         Ok(tag)
     }
+    /// A tag of a table that grew in version 2: `max` is its version-2 bound, and a
+    /// tag above `v1_max` needs version 2.
+    fn tag_since(&mut self, table: &'static str, v1_max: u8, max: u8) -> Result<u8, WireFault> {
+        let at = self.at;
+        let tag = self.tag(table, max)?;
+        if tag > v1_max && self.version < 2 {
+            return Err(WireFault::NotInVersion { table, tag, at });
+        }
+        Ok(tag)
+    }
     fn cause(&mut self) -> Result<Cause, WireFault> {
-        Ok(match self.tag("cancel cause", 2)? {
+        Ok(match self.tag_since("cancel cause", 2, 3)? {
             1 => Cause::User,
-            _ => Cause::ParentCancelled,
+            2 => Cause::ParentCancelled,
+            _ => Cause::Deadline,
         })
     }
 }
@@ -410,8 +442,16 @@ impl<'a> Reader<'a> {
 ///
 /// The first [`WireFault`].
 pub fn read(bytes: &[u8]) -> Result<Vec<Step>, WireFault> {
-    let mut input = Reader { bytes, at: 0 };
-    if input.take(MAGIC.len())? != MAGIC || input.u32()? != VERSION {
+    let mut input = Reader {
+        bytes,
+        at: 0,
+        version: 0,
+    };
+    if input.take(MAGIC.len())? != MAGIC {
+        return Err(WireFault::Header);
+    }
+    let version = input.u32()?;
+    if !VERSIONS.contains(&version) {
         return Err(WireFault::Header);
     }
     let count = input.u64()?;
@@ -429,6 +469,7 @@ pub fn read(bytes: &[u8]) -> Result<Vec<Step>, WireFault> {
                 let mut inner = Reader {
                     bytes: payload,
                     at: 0,
+                    version,
                 };
                 let step = payload_step(tag, &mut inner)?;
                 if inner.at != payload.len() {
@@ -475,15 +516,17 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
             }
             3 => {
                 let task = r.u32()?;
-                match r.tag("task step", 5)? {
+                match r.tag_since("task step", 5, 7)? {
                     1 => Step::Begin { task },
                     2 => Step::Suspend { task },
                     3 => Step::Resume { task },
                     4 => Step::Complete { task },
-                    _ => Step::Fail {
+                    5 => Step::Fail {
                         task,
                         reason: r.token()?,
                     },
+                    6 => Step::TaskCancelled { task },
+                    _ => Step::TaskCancelRequested { task },
                 }
             }
             4 => Step::Close { region: r.u32()? },
@@ -513,7 +556,7 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                 },
             }
         }
-        // src/family/cancellation.rs: tags 1..=3, causes 1..=2.
+        // src/family/cancellation.rs: tags 1..=3, causes 1..=3.
         FamilyTag::Cancellation => {
             let tag = r.tag("cancellation event", 3)?;
             let task = r.u32()?;
@@ -555,8 +598,8 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                 leaked: r.set()?,
             },
         },
-        // src/family/time.rs: tags 1..=4.
-        FamilyTag::Time => match r.tag("time event", 4)? {
+        // src/family/time.rs: tags 1..=5.
+        FamilyTag::Time => match r.tag_since("time event", 4, 5)? {
             1 => Step::Scheduled {
                 timer: r.u32()?,
                 task: r.u32()?,
@@ -571,9 +614,13 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                 timer: r.u32()?,
                 at: r.u64()?,
             },
-            _ => Step::TimerCancelled {
+            4 => Step::TimerCancelled {
                 timer: r.u32()?,
                 at: r.u64()?,
+            },
+            _ => Step::DeadlineSet {
+                task: r.u32()?,
+                deadline: r.u64()?,
             },
         },
         // src/family/channel.rs: tags 1..=11, each `u8 tag, u32 channel, fields`.
@@ -684,6 +731,20 @@ struct Task {
     region: u32,
     phase: TaskPhase,
     cancel: CancelPhase,
+    /// Its budget deadline, when it runs under one (bn-36wy3).
+    deadline: Option<u64>,
+    /// Its own cancellation was requested, outside any region's (bn-36wy3).
+    requested_alone: bool,
+    /// Its own single-task `→ Cancelled` ([`Step::TaskCancelled`]) was taken. Kept apart
+    /// from `phase`, because a region's drain also ends a task as `Cancelled`
+    /// (cr-3pu5cu).
+    ended_alone: bool,
+    /// It took a cleanup step (a cancel abort, a timer cancelled, a send or receive
+    /// abandoned): it drains, so it has observed its cancellation even when the
+    /// alphabet shows no acknowledgement (docs/02 §7; cr-3pu5cu round 6).
+    cleaned_up: bool,
+    /// A region's cancellation reached it while it was live (cr-3pu5cu round 6).
+    region_requested: bool,
 }
 
 /// docs/02 §7 effect protocol.
@@ -752,6 +813,14 @@ pub enum Fault {
     OutsideAlphabet,
     /// A fresh entity not named by the next ordinal.
     Identity { expected: u32, found: u32 },
+    /// A region's cancellation reached the task, the alphabet observes phases, and the
+    /// task ended (or the trace ended) with no phase of its cancellation.
+    UnreportedRequest(u32),
+    /// A task's own region is cancelled after the clock reached the task's deadline and
+    /// before the task observed it.
+    CancelRaced(u32),
+    /// A budget deadline not declared right after its task's spawn.
+    DeadlineNotAtSpawn(u32),
     /// A step names an entity that does not exist.
     Unknown(&'static str, u32),
     /// Work entering a region that does not accept it.
@@ -764,6 +833,9 @@ pub enum Fault {
     CancelPhase(u32),
     /// A cancellation cause other than the one the region tree implies.
     Cause(u32),
+    /// A deadline cancellation before the clock reached the task's deadline, or of a
+    /// task with none (bn-36wy3).
+    Deadline(u32),
     /// A normal close drained with live owned work.
     DrainBlocked { region: u32, task: u32 },
     /// A drain reported a cancelled set other than the model's.
@@ -800,8 +872,21 @@ pub enum Fault {
     TimerOutlivesSleep { task: u32 },
     /// End of trace: a cancellation requested and not drained.
     UndrainedCancellation(u32),
+    /// A lifecycle step that is not a step of the task comes between a task's own
+    /// `cancel-requested` and its own single-task `→ Cancelled`: RFC 0026 correction 53 item 6 journals a task's own
+    /// cancellation, from its request to its `cancel`, within the one substrate
+    /// operation that observed it, so no region, spawn or other task's lifecycle step
+    /// comes between (cr-3pu5cu).
+    OwnCancellationInterrupted(u32),
+    /// A task whose own cancellation was requested ends some other way than its own
+    /// single-task `→ Cancelled`: a region's drain, a completion or a failure
+    /// (docs/02 §7; RFC 0026 correction 53 items 3 and 6; cr-3pu5cu).
+    OwnCancellationUnended(u32),
     /// End of trace: a finalized region never settled.
     Unsettled(u32),
+    /// End of trace: a region still cancelling and not drained, or drained and not
+    /// finalized (docs/02 §7 `Cancelling ─ drain* ─ finalize*`; cr-3pu5cu).
+    UnfinishedRegion(u32),
     /// End of trace: an obligation leaked by a holder that never ended.
     UnendedLeak(u32),
     /// A channel step its channel's state does not admit; `rule` names the channel
@@ -836,6 +921,8 @@ pub enum Pattern {
     Advanced { from: u64 },
     /// A channel of any positive capacity.
     ChannelOpened { channel: u32, receiver: u32 },
+    /// A budget deadline for a new task, at any instant after `after`.
+    DeadlineSet { task: u32, after: u64 },
 }
 
 impl Pattern {
@@ -874,6 +961,9 @@ impl Pattern {
                 },
             ) => timer == k && task == t && at == a && deadline > a,
             (Self::Advanced { from }, Step::Advanced { from: f, to }) => from == f && to > f,
+            (Self::DeadlineSet { task, after }, Step::DeadlineSet { task: t, deadline }) => {
+                task == t && deadline > after
+            }
             (
                 Self::ChannelOpened { channel, receiver },
                 Step::ChannelOpened {
@@ -923,6 +1013,8 @@ pub struct Model {
     timers: Vec<Timer>,
     now: u64,
     channels: Vec<Channel>,
+    /// The task the previous step spawned, when it was a spawn.
+    last_spawn: Option<u32>,
     /// Blocked sends: message → (channel, sender).
     blocked: std::collections::BTreeMap<u64, (u32, u32)>,
     next_message: u64,
@@ -953,6 +1045,7 @@ impl Model {
             timers: Vec::new(),
             now: 0,
             channels: Vec::new(),
+            last_spawn: None,
             blocked: std::collections::BTreeMap::new(),
             next_message: 0,
             permits: std::collections::BTreeMap::new(),
@@ -1080,10 +1173,11 @@ impl Model {
     /// on its own (docs/02 §7: `Cancelling` only drains and finalizes).
     fn cancelling(&self, t: u32) -> bool {
         self.tasks.get(t as usize).is_some_and(|task| {
-            matches!(
-                task.cancel,
-                CancelPhase::Acknowledged(_) | CancelPhase::Done(_)
-            )
+            task.cleaned_up
+                || matches!(
+                    task.cancel,
+                    CancelPhase::Acknowledged(_) | CancelPhase::Done(_)
+                )
         })
     }
     /// A cancellation-driven step by `t` is admitted: with the cancellation family, the
@@ -1098,10 +1192,120 @@ impl Model {
         if self.alphabet.has(FamilyTag::Cancellation) {
             matches!(task.cancel, CancelPhase::Acknowledged(_))
         } else {
-            self.regions
-                .get(task.region as usize)
-                .is_some_and(|g| g.phase == RegionPhase::Cancelling)
+            task.requested_alone
+                || self
+                    .regions
+                    .get(task.region as usize)
+                    .is_some_and(|g| g.phase == RegionPhase::Cancelling)
         }
+    }
+    /// A single-task cancellation of `t` is due: it has a budget deadline the clock has
+    /// reached, when the run observes the clock (bn-36wy3).
+    /// The task whose own cancellation is open: requested and not yet ended by its own
+    /// `→ Cancelled`.
+    fn open_alone(&self) -> Option<u32> {
+        (0..ord(self.tasks.len())).find(|t| {
+            let task = &self.tasks[*t as usize];
+            task.requested_alone && !task.ended_alone
+        })
+    }
+    /// Whether `step` may come while `t`'s own cancellation is open (RFC 0026 correction
+    /// 53 item 6). The deadline's checkpoint is both its request and its acknowledgement,
+    /// so nothing but that cancellation's own steps comes between `t`'s request and its
+    /// own `→ Cancelled`: `t`'s cancellation phases, `t`'s cleanup once it may clean up
+    /// (a cancel abort of its reservation, an aborted discharge of its obligation, its
+    /// timer cancelled, its blocked send or receive abandoned, its receiver gone), and
+    /// its own `→ Cancelled`. Everything else is refused, whoever's it is.
+    fn inside_own_cancel(&self, t: u32, step: &Step) -> bool {
+        let cleanup = match step {
+            Step::CancelRequested { task, .. }
+            | Step::CancelAcknowledged { task }
+            | Step::CancelCompleted { task, .. }
+            | Step::TaskCancelled { task } => return *task == t,
+            Step::Abort {
+                reservation,
+                reason: AbortReason::Cancel,
+            } => self.reservations.get(*reservation as usize).map(|e| e.task),
+            Step::Discharged {
+                obligation,
+                committed: false,
+            } => self.obligations.get(*obligation as usize).map(|o| o.holder),
+            Step::TimerCancelled { timer, .. } => self.timers.get(*timer as usize).map(|k| k.task),
+            Step::SendAbandoned { sender, .. } => Some(*sender),
+            Step::RecvAbandoned { channel } | Step::ReceiverGone { channel, .. } => {
+                self.channels.get(*channel as usize).map(|c| c.receiver)
+            }
+            _ => None,
+        };
+        cleanup == Some(t) && self.may_clean_up(t)
+    }
+    /// A live task `r` itself owns whose budget deadline the clock has reached: a
+    /// cancellation of `r` now races it, and asupersync would complete it with the more
+    /// severe `deadline` reason under the region's request, which no run journals (RFC
+    /// 0026 correction 53 item 6; cr-3pu5cu round 7). A task of a proper subregion gets
+    /// `parent-cancelled`, which outranks the deadline.
+    fn raced_by_cancel(&self, r: u32) -> Option<u32> {
+        (0..ord(self.tasks.len())).find(|t| {
+            let task = &self.tasks[*t as usize];
+            task.region == r && !task.phase.is_terminal() && self.deadline_reached(*t)
+        })
+    }
+    /// The task whose own work `step` is, if it is any task's: a lifecycle step of a
+    /// poll, a reserve, commit or explicit abort, an obligation open, committed discharge
+    /// or hand-off (by its holder), a timer armed, a send or a receive. Cleanup steps and
+    /// steps that name no acting task are `None`.
+    fn actor(&self, step: &Step) -> Option<u32> {
+        match step {
+            Step::Begin { task }
+            | Step::Resume { task }
+            | Step::Suspend { task }
+            | Step::Complete { task }
+            | Step::Fail { task, .. }
+            | Step::Reserve { task, .. }
+            | Step::Scheduled { task, .. } => Some(*task),
+            Step::Commit { reservation }
+            | Step::Abort {
+                reservation,
+                reason: AbortReason::Explicit,
+            } => self.reservations.get(*reservation as usize).map(|e| e.task),
+            Step::Opened { holder, .. } => Some(*holder),
+            Step::Discharged {
+                obligation,
+                committed: true,
+            }
+            | Step::Transferred { obligation, .. } => {
+                self.obligations.get(*obligation as usize).map(|o| o.holder)
+            }
+            Step::Sent { sender, .. }
+            | Step::SendBlocked { sender, .. }
+            | Step::SendClosed { sender, .. } => Some(*sender),
+            Step::Received { channel, .. }
+            | Step::RecvBlocked { channel }
+            | Step::RecvClosed { channel } => {
+                self.channels.get(*channel as usize).map(|c| c.receiver)
+            }
+            _ => None,
+        }
+    }
+    /// The run observes the clock, and it has reached `t`'s budget deadline: a poll of
+    /// `t` now is its deadline's cancellation, never a `begin` or `resume` (asupersync
+    /// 0.5.0 raises `CancelKind::Deadline` at the poll's `Cx::checkpoint`; RFC 0026
+    /// correction 53 item 6).
+    fn deadline_reached(&self, t: u32) -> bool {
+        self.alphabet.has(FamilyTag::Time)
+            && self
+                .tasks
+                .get(t as usize)
+                .and_then(|task| task.deadline)
+                .is_some_and(|deadline| deadline <= self.now)
+    }
+    fn deadline_due(&self, t: u32) -> bool {
+        !self.alphabet.has(FamilyTag::Time)
+            || self
+                .tasks
+                .get(t as usize)
+                .and_then(|task| task.deadline)
+                .is_some_and(|deadline| deadline <= self.now)
     }
     /// The tasks a drain of `r` cancels, or the task that blocks it.
     fn drain_outcome(&self, r: u32) -> Result<Vec<u32>, Fault> {
@@ -1143,6 +1347,10 @@ impl Model {
         }
         self.guard(step)?;
         self.apply(step);
+        self.last_spawn = match step {
+            Step::Spawn { task, .. } => Some(*task),
+            _ => None,
+        };
         Ok(())
     }
 
@@ -1158,6 +1366,18 @@ impl Model {
                 })
             }
         };
+        if let Some(t) = self.open_alone() {
+            if !self.inside_own_cancel(t, step) {
+                return Err(Fault::OwnCancellationInterrupted(t));
+            }
+        }
+        // A task's own work is part of a poll, and a poll meets a passed deadline at its
+        // first checkpoint (docs/02 §5; cr-3pu5cu round 6).
+        if let Some(t) = self.actor(step) {
+            if self.deadline_reached(t) {
+                return Err(Fault::Deadline(t));
+            }
+        }
         match step {
             // plan §4.1 / docs/02 §7: work enters only an open region.
             Step::OpenRegion { region, parent } => {
@@ -1181,6 +1401,9 @@ impl Model {
                 }
                 if self.cancelling(*task) {
                     return Err(Fault::CancelPhase(*task));
+                }
+                if self.deadline_reached(*task) {
+                    return Err(Fault::Deadline(*task));
                 }
             }
             // A task may not park mid-publication: docs/02 §7 "cancellation does not
@@ -1207,6 +1430,9 @@ impl Model {
                 if self.cancelling(*task) {
                     return Err(Fault::CancelPhase(*task));
                 }
+                if self.deadline_reached(*task) {
+                    return Err(Fault::Deadline(*task));
+                }
                 if self.armed(*task) {
                     return Err(Fault::TimerOutlivesSleep { task: *task });
                 }
@@ -1221,8 +1447,23 @@ impl Model {
                 if !from_ok {
                     return Err(Fault::TaskPhase(*task));
                 }
-                if t.cancel != CancelPhase::None {
+                if t.cancel != CancelPhase::None || t.cleaned_up {
                     return Err(Fault::CancelPhase(*task));
+                }
+                // With phases observed, a cancellation that reached the task is
+                // reported before the task ends (cr-3pu5cu round 6).
+                if self.alphabet.has(FamilyTag::Cancellation) && t.region_requested {
+                    return Err(Fault::UnreportedRequest(*task));
+                }
+                // A poll past the deadline is its cancellation (docs/02 §5).
+                if self.deadline_reached(*task) {
+                    return Err(Fault::Deadline(*task));
+                }
+                // docs/02 §7: `complete` and `panic` leave `Active` only, and a task's
+                // own request has left it. RFC 0026 correction 53 item 6: the journal
+                // of a task's own cancellation ends with its own lifecycle `cancel`.
+                if t.requested_alone {
+                    return Err(Fault::OwnCancellationUnended(*task));
                 }
                 if self.staged(*task) {
                     return Err(Fault::HalfEffect { task: *task });
@@ -1246,6 +1487,9 @@ impl Model {
                 if !matches!(g.phase, RegionPhase::Open | RegionPhase::Closing) || g.drained {
                     return Err(Fault::RegionPhase(*region));
                 }
+                if let Some(t) = self.raced_by_cancel(*region) {
+                    return Err(Fault::CancelRaced(t));
+                }
             }
             // docs/02 §7 lifecycle: `Cancelling ─ drain* ─ finalize* ─ obligations == ∅
             // → Cancelled`. A normal close waits for owned work; a cancelled subtree's
@@ -1264,6 +1508,12 @@ impl Model {
                     });
                 }
                 for t in &model {
+                    // RFC 0026 correction 53 items 3 and 6: a task's own cancellation
+                    // ends with its own single-task `→ Cancelled`, never with a
+                    // region's drain, whatever its phases say.
+                    if self.tasks[*t as usize].requested_alone {
+                        return Err(Fault::OwnCancellationUnended(*t));
+                    }
                     if self.alphabet.has(FamilyTag::Cancellation)
                         && !matches!(self.tasks[*t as usize].cancel, CancelPhase::Done(_))
                     {
@@ -1307,6 +1557,20 @@ impl Model {
             // docs/02 §7 `Active ─ request(cancel_reason) → Cancelling`: requested only
             // for a live task whose region is being cancelled, with the reason the tree
             // implies.
+            // A deadline's request is the task's own: it follows the task's lifecycle
+            // `cancel-requested`, whatever its region's state.
+            Step::CancelRequested {
+                task,
+                cause: Cause::Deadline,
+            } => {
+                let t = self.task(*task)?;
+                if t.phase.is_terminal() || !t.requested_alone {
+                    return Err(Fault::TaskPhase(*task));
+                }
+                if t.cancel != CancelPhase::None {
+                    return Err(Fault::CancelPhase(*task));
+                }
+            }
             Step::CancelRequested { task, cause } => {
                 let t = self.task(*task)?;
                 if t.phase.is_terminal()
@@ -1319,6 +1583,66 @@ impl Model {
                 }
                 if self.implied_cause(*task) != Some(*cause) {
                     return Err(Fault::Cause(*task));
+                }
+            }
+            // docs/02 §7 `Active ─ request(cancel_reason)` for one task: requested once,
+            // while it is live and no region's cancellation reached it, once the clock
+            // reached its deadline (docs/02 §5; bn-36wy3).
+            Step::TaskCancelRequested { task } => {
+                let t = self.task(*task)?;
+                if t.phase.is_terminal()
+                    || self.regions[t.region as usize].phase == RegionPhase::Cancelling
+                {
+                    return Err(Fault::TaskPhase(*task));
+                }
+                if t.requested_alone || t.cancel != CancelPhase::None {
+                    return Err(Fault::CancelPhase(*task));
+                }
+                if !self.deadline_due(*task) {
+                    return Err(Fault::Deadline(*task));
+                }
+            }
+            // The single task's `→ Cancelled`: after its own phases when the run observes
+            // them, otherwise with the cleanup they would show done (bn-36wy3).
+            Step::TaskCancelled { task } => {
+                let t = self.task(*task)?;
+                if t.phase.is_terminal() || !t.requested_alone {
+                    return Err(Fault::TaskPhase(*task));
+                }
+                if self.alphabet.has(FamilyTag::Cancellation) {
+                    match t.cancel {
+                        CancelPhase::Done(Cause::Deadline) => {}
+                        CancelPhase::Done(_) => return Err(Fault::Cause(*task)),
+                        _ => return Err(Fault::CancelPhase(*task)),
+                    }
+                } else {
+                    if self.staged(*task) {
+                        return Err(Fault::HalfEffect { task: *task });
+                    }
+                    if self.holds(*task) {
+                        return Err(Fault::HeldObligation { task: *task });
+                    }
+                    if self.armed(*task) {
+                        return Err(Fault::TimerOutlivesSleep { task: *task });
+                    }
+                    if self.holds_channel(*task) {
+                        return Err(Fault::ChannelOutlivesTask { task: *task });
+                    }
+                }
+            }
+            // docs/02 §5: a budget deadline is declared with the task, ahead of the clock.
+            Step::DeadlineSet { task, deadline } => {
+                let t = self.task(*task)?;
+                // docs/02 §5: the budget is the spawn's, so its deadline is declared by
+                // the step right after the task's spawn (cr-3pu5cu round 8).
+                if self.last_spawn != Some(*task) {
+                    return Err(Fault::DeadlineNotAtSpawn(*task));
+                }
+                if t.phase != TaskPhase::Created || t.deadline.is_some() {
+                    return Err(Fault::TaskPhase(*task));
+                }
+                if *deadline <= self.now {
+                    return Err(Fault::NotAhead);
                 }
             }
             Step::CancelAcknowledged { task } => {
@@ -1510,7 +1834,7 @@ impl Model {
                     return Err(Fault::NotAhead);
                 }
                 let t = self.task(*task)?;
-                if t.phase != TaskPhase::Running || t.cancel != CancelPhase::None {
+                if t.phase != TaskPhase::Running || t.cancel != CancelPhase::None || t.cleaned_up {
                     return Err(Fault::TaskPhase(*task));
                 }
                 if self.armed(*task) {
@@ -1777,7 +2101,22 @@ impl Model {
                 region: *region,
                 phase: TaskPhase::Created,
                 cancel: CancelPhase::None,
+                deadline: None,
+                requested_alone: false,
+                ended_alone: false,
+                cleaned_up: false,
+                region_requested: false,
             }),
+            Step::DeadlineSet { task, deadline } => {
+                self.tasks[*task as usize].deadline = Some(*deadline);
+            }
+            Step::TaskCancelRequested { task } => {
+                self.tasks[*task as usize].requested_alone = true;
+            }
+            Step::TaskCancelled { task } => {
+                self.set_task(*task, TaskPhase::Cancelled);
+                self.tasks[*task as usize].ended_alone = true;
+            }
             Step::Begin { task } | Step::Resume { task } => {
                 self.set_task(*task, TaskPhase::Running)
             }
@@ -1798,6 +2137,11 @@ impl Model {
                     if matches!(g.phase, RegionPhase::Open | RegionPhase::Closing) {
                         g.phase = RegionPhase::Cancelling;
                         g.origin = Some(*region);
+                        for task in &mut self.tasks {
+                            if task.region == r && !task.phase.is_terminal() {
+                                task.region_requested = true;
+                            }
+                        }
                     }
                 }
             }
@@ -1835,8 +2179,16 @@ impl Model {
             Step::Commit { reservation } => {
                 self.reservations[*reservation as usize].phase = EffectPhase::Committed;
             }
-            Step::Abort { reservation, .. } => {
-                self.reservations[*reservation as usize].phase = EffectPhase::Aborted;
+            Step::Abort {
+                reservation,
+                reason,
+            } => {
+                let e = &mut self.reservations[*reservation as usize];
+                e.phase = EffectPhase::Aborted;
+                if *reason == AbortReason::Cancel {
+                    let t = e.task;
+                    self.tasks[t as usize].cleaned_up = true;
+                }
             }
             Step::Opened {
                 kind,
@@ -1880,7 +2232,10 @@ impl Model {
             Step::Advanced { to, .. } => self.now = *to,
             Step::Fired { timer, .. } => self.timers[*timer as usize].phase = TimerPhase::Fired,
             Step::TimerCancelled { timer, .. } => {
-                self.timers[*timer as usize].phase = TimerPhase::Cancelled;
+                let k = &mut self.timers[*timer as usize];
+                k.phase = TimerPhase::Cancelled;
+                let t = k.task;
+                self.tasks[t as usize].cleaned_up = true;
             }
             Step::ChannelOpened {
                 capacity, receiver, ..
@@ -1918,8 +2273,11 @@ impl Model {
                     self.next_message += 1;
                 }
             }
-            Step::SendAbandoned { message, .. } => {
+            Step::SendAbandoned {
+                message, sender, ..
+            } => {
                 self.blocked.remove(message);
+                self.tasks[*sender as usize].cleaned_up = true;
             }
             Step::Received { channel, .. } => {
                 let ch = &mut self.channels[*channel as usize];
@@ -1927,8 +2285,14 @@ impl Model {
                 ch.recv_blocked = false;
             }
             Step::RecvBlocked { channel } => self.channels[*channel as usize].recv_blocked = true,
-            Step::RecvClosed { channel } | Step::RecvAbandoned { channel } => {
+            Step::RecvClosed { channel } => {
                 self.channels[*channel as usize].recv_blocked = false;
+            }
+            Step::RecvAbandoned { channel } => {
+                let ch = &mut self.channels[*channel as usize];
+                ch.recv_blocked = false;
+                let t = ch.receiver;
+                self.tasks[t as usize].cleaned_up = true;
             }
             Step::SendersClosed { channel } => {
                 self.channels[*channel as usize].senders_open = false;
@@ -1953,8 +2317,21 @@ impl Model {
     pub fn finish(&self) -> Result<(), Fault> {
         for t in 0..ord(self.tasks.len()) {
             let task = &self.tasks[t as usize];
-            if !task.phase.is_terminal() && task.cancel != CancelPhase::None {
+            if !task.phase.is_terminal()
+                && (task.cancel != CancelPhase::None || task.requested_alone)
+            {
                 return Err(Fault::UndrainedCancellation(t));
+            }
+            // Provenance, not the shared terminal phase: a task requested alone ended
+            // by its own `→ Cancelled` (cr-3pu5cu).
+            if task.requested_alone && !task.ended_alone {
+                return Err(Fault::OwnCancellationUnended(t));
+            }
+            if self.alphabet.has(FamilyTag::Cancellation)
+                && task.region_requested
+                && task.cancel == CancelPhase::None
+            {
+                return Err(Fault::UnreportedRequest(t));
             }
             if task.phase.is_terminal() && self.staged(t) {
                 return Err(Fault::HalfEffect { task: t });
@@ -1964,6 +2341,16 @@ impl Model {
             }
             if task.phase.is_terminal() && self.holds_channel(t) {
                 return Err(Fault::ChannelOutlivesTask { task: t });
+            }
+        }
+        // A cancellation drains, and a drain finalizes, within the substrate operation
+        // that started it: a trace that stops between them is unfinished.
+        for r in 0..ord(self.regions.len()) {
+            let g = &self.regions[r as usize];
+            if (g.phase == RegionPhase::Cancelling && !g.drained)
+                || (g.drained && g.phase != RegionPhase::Finalized)
+            {
+                return Err(Fault::UnfinishedRegion(r));
             }
         }
         if self.alphabet.has(FamilyTag::Time) {
@@ -2018,14 +2405,18 @@ impl Model {
                 });
                 out.push(Pattern::Exact(Step::Close { region: r }));
             }
-            if matches!(g.phase, RegionPhase::Open | RegionPhase::Closing) && !g.drained {
+            if matches!(g.phase, RegionPhase::Open | RegionPhase::Closing)
+                && !g.drained
+                && self.raced_by_cancel(r).is_none()
+            {
                 out.push(Pattern::Exact(Step::Cancel { region: r }));
             }
             if matches!(g.phase, RegionPhase::Closing | RegionPhase::Cancelling) && !g.drained {
                 if let Ok(cancelled) = self.drain_outcome(r) {
                     let ready = cancelled.iter().all(|t| {
-                        (!has(FamilyTag::Cancellation)
-                            || matches!(self.tasks[*t as usize].cancel, CancelPhase::Done(_)))
+                        !self.tasks[*t as usize].requested_alone
+                            && (!has(FamilyTag::Cancellation)
+                                || matches!(self.tasks[*t as usize].cancel, CancelPhase::Done(_)))
                             && !self.staged(*t)
                             && !self.armed(*t)
                             && !self.holds(*t)
@@ -2057,12 +2448,38 @@ impl Model {
         for t in 0..tasks {
             let task = &self.tasks[t as usize];
             let quiet = !self.staged(t) && !self.armed(t) && !self.holds_channel(t);
+            // One task's own cancellation (bn-36wy3): requested once its deadline is due
+            // and no region's cancellation reached it; ended after its own phases, or
+            // with its cleanup done when the run does not observe them.
+            if !task.phase.is_terminal() {
+                if !task.requested_alone
+                    && task.cancel == CancelPhase::None
+                    && self.regions[task.region as usize].phase != RegionPhase::Cancelling
+                    && self.deadline_due(t)
+                {
+                    out.push(Pattern::Exact(Step::TaskCancelRequested { task: t }));
+                }
+                let ended = if has(FamilyTag::Cancellation) {
+                    task.cancel == CancelPhase::Done(Cause::Deadline)
+                } else {
+                    quiet && !self.holds(t)
+                };
+                if task.requested_alone && ended {
+                    out.push(Pattern::Exact(Step::TaskCancelled { task: t }));
+                }
+            }
             match task.phase {
                 TaskPhase::Created => {
-                    if active(t) {
+                    if active(t) && !self.deadline_reached(t) {
                         out.push(Pattern::Exact(Step::Begin { task: t }));
                     }
-                    if task.cancel == CancelPhase::None && quiet {
+                    if task.cancel == CancelPhase::None
+                        && !task.requested_alone
+                        && !task.cleaned_up
+                        && !(has(FamilyTag::Cancellation) && task.region_requested)
+                        && !self.deadline_reached(t)
+                        && quiet
+                    {
                         out.push(Pattern::Fail { task: t });
                     }
                 }
@@ -2070,12 +2487,20 @@ impl Model {
                     if active(t) && !self.staged(t) {
                         out.push(Pattern::Exact(Step::Suspend { task: t }));
                     }
-                    if task.cancel == CancelPhase::None && quiet {
+                    if task.cancel == CancelPhase::None
+                        && !task.requested_alone
+                        && !task.cleaned_up
+                        && !(has(FamilyTag::Cancellation) && task.region_requested)
+                        && !self.deadline_reached(t)
+                        && quiet
+                    {
                         out.push(Pattern::Exact(Step::Complete { task: t }));
                         out.push(Pattern::Fail { task: t });
                     }
                 }
-                TaskPhase::Suspended if active(t) && !self.armed(t) => {
+                TaskPhase::Suspended
+                    if active(t) && !self.armed(t) && !self.deadline_reached(t) =>
+                {
                     out.push(Pattern::Exact(Step::Resume { task: t }));
                 }
                 _ => {}
@@ -2090,6 +2515,12 @@ impl Model {
                     continue;
                 }
                 match task.cancel {
+                    CancelPhase::None if task.requested_alone => {
+                        out.push(Pattern::Exact(Step::CancelRequested {
+                            task: t,
+                            cause: Cause::Deadline,
+                        }));
+                    }
                     CancelPhase::None => {
                         if let Some(cause) = self.implied_cause(t) {
                             if self.regions[task.region as usize].phase == RegionPhase::Cancelling {
@@ -2222,6 +2653,15 @@ impl Model {
 
         // Time.
         if has(FamilyTag::Time) {
+            if let Some(t) = self.last_spawn {
+                let task = &self.tasks[t as usize];
+                if task.phase == TaskPhase::Created && task.deadline.is_none() {
+                    out.push(Pattern::DeadlineSet {
+                        task: t,
+                        after: self.now,
+                    });
+                }
+            }
             let late = self.late().is_some();
             if !late {
                 out.push(Pattern::Advanced { from: self.now });
@@ -2230,6 +2670,7 @@ impl Model {
                     let task = &self.tasks[t as usize];
                     if task.phase == TaskPhase::Running
                         && task.cancel == CancelPhase::None
+                        && !task.cleaned_up
                         && !self.armed(t)
                     {
                         out.push(Pattern::Scheduled {
@@ -2263,6 +2704,24 @@ impl Model {
         // Channel.
         if has(FamilyTag::Channel) {
             self.enabled_channel(&mut out);
+        }
+        // No task's own work once the clock has reached its deadline.
+        out.retain(|pattern| {
+            let actor = match pattern {
+                Pattern::Exact(step) => self.actor(step),
+                Pattern::Fail { task } | Pattern::Scheduled { task, .. } => Some(*task),
+                Pattern::Opened { holder, .. } => Some(*holder),
+                _ => None,
+            };
+            actor.is_none_or(|t| !self.deadline_reached(t))
+        });
+        // While a task's own cancellation is open, only that cancellation's own steps
+        // are enabled (RFC 0026 correction 53 item 6; cr-3pu5cu). No free pattern is one.
+        if let Some(t) = self.open_alone() {
+            out.retain(|pattern| match pattern {
+                Pattern::Exact(step) => self.inside_own_cancel(t, step),
+                _ => false,
+            });
         }
         out
     }

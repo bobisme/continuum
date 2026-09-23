@@ -32,12 +32,29 @@ use crate::family::{EventBody, Family};
 /// The fixed header every journal encoding starts with.
 pub const MAGIC: &[u8] = b"continuum/semantic-journal\n";
 
-/// The encoding version this crate writes and reads.
+/// The encoding version this crate writes.
 ///
 /// An additive family (a sibling PR-14 bullet filling its own file) does not bump it:
 /// earlier bytes still decode to the same journal. A change to the framing or to an
-/// existing family's payload does, and is an epoch advance under plan §4.6.
-pub const ENCODING_VERSION: u32 = 1;
+/// existing family's payload does. The version is an encoding contract in the sense of
+/// `schemas/README.md`'s `schema_epoch`, not one of ADR-0018's six epochs: it pins no
+/// semantics, but its advance obeys ADR-0018's rules (a compatibility statement, at
+/// most two versions read, an unknown version refused).
+///
+/// Version 2 (bn-36wy3, cr-3pu5cu) adds tags to three existing families: lifecycle
+/// task steps 6 (`cancel`) and 7 (`cancel-requested`), cancel cause 3 (`deadline`),
+/// and virtual time event 5 (`deadline`). Compatibility statement: a version-1 journal
+/// is `Preserved`. It decodes to the same journal and lifts to the same verdict; its
+/// canonical re-encoding is version 2, a new identity. Nothing is rewritten in place:
+/// no persisted or published artifact carries these bytes (the journal is produced
+/// and judged in process).
+pub const ENCODING_VERSION: u32 = 2;
+
+/// Every encoding version this crate reads: the current one and its predecessor
+/// (ADR-0018: at most two held at once). A version-1 journal is read under the
+/// version-1 grammar, so a tag added in version 2 is
+/// [`DecodeError::TagNotInVersion`] there.
+pub const READ_VERSIONS: [u32; 2] = [1, 2];
 
 /// One semantic event: its position and its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,8 +158,12 @@ impl Journal {
         let mut input = Decoder::new(bytes);
         input.expect_raw(MAGIC)?;
         let version_at = input.offset();
-        if input.u32()? != ENCODING_VERSION {
-            return Err(DecodeError::BadHeader { at: version_at });
+        let version = input.u32()?;
+        if !READ_VERSIONS.contains(&version) {
+            return Err(DecodeError::UnsupportedVersion {
+                version,
+                at: version_at,
+            });
         }
         let count = input.u64()?;
         let mut journal = Self::new();
@@ -162,7 +183,7 @@ impl Journal {
                 at: tag_at,
             })?;
             let payload = input.bytes()?;
-            let mut inner = Decoder::new(payload);
+            let mut inner = Decoder::with_version(payload, version);
             let body = EventBody::decode(family, &mut inner, seq)?;
             if !inner.is_exhausted() {
                 return Err(DecodeError::PayloadLength { seq });

@@ -134,6 +134,21 @@
 //!   one left open at finalize makes [`Finalization::is_total`] false: a leak is reported,
 //!   never absorbed.
 //!
+//! RFC 0026 correction 53 (bn-36wy3) adds the per-task half of docs/02 §7's lifecycle,
+//! and keeps the argument too:
+//!
+//! - **single-task cancellation** — [`WorkerStep::RequestCancel`] requests one worker's
+//!   cancellation (a deadline), [`WorkerStep::AcknowledgeCancel`] is the worker observing
+//!   a request (its own or its region's), and [`WorkerStep::CompleteCancelled`] ends one
+//!   acknowledged worker through the same per-worker cancellation a drain uses. It
+//!   discards what is staged, records the cancel outcome, and discharges the termination
+//!   obligation, so the orphan and unresolved-publication conjuncts are unchanged. An
+//!   acknowledged worker only drains;
+//! - **the acknowledgement decides** — the adapter-obligation rules turn at the worker's
+//!   own acknowledgement ([`RegionTree::cancel_phase`]), not at its region's request;
+//! - **a subtree's ledger** — [`Finalization::ledger`] sums only the finalized
+//!   subtree's own obligations, so a child's teardown is judged by what it owes.
+//!
 //! `crates/continuum-task/tests/region_no_orphan.rs` is the instrumented half: it
 //! enumerates schedule spaces, tears each one down, and asserts the post-condition over
 //! every worker the tree ever admitted.
@@ -199,8 +214,8 @@ use obligation::{
     Ledger, LedgerSummary, Obligation, SubstrateId, SubstrateObligation, SubstrateOutcome,
 };
 use worker::{
-    CancelOutcome, Continuation, EvidenceLedger, PublicationSlot, Resumability, WorkerId,
-    WorkerState, WorkerStep,
+    CancelOutcome, CancelPhase, Continuation, EvidenceLedger, PublicationSlot, Resumability,
+    WorkerId, WorkerState, WorkerStep,
 };
 
 /// A region's identity inside one [`RegionTree`].
@@ -456,6 +471,37 @@ pub enum RegionFault {
         /// The worker the call named.
         worker: WorkerId,
     },
+    /// [`WorkerStep::RequestCancel`] named a worker whose cancellation is already
+    /// requested, by its own request or by its region's.
+    CancelAlreadyRequested {
+        /// The worker the call named.
+        worker: WorkerId,
+    },
+    /// [`WorkerStep::AcknowledgeCancel`] named a worker whose cancellation nobody
+    /// requested.
+    CancelNotRequested {
+        /// The worker the call named.
+        worker: WorkerId,
+    },
+    /// [`WorkerStep::AcknowledgeCancel`] named a worker that already acknowledged.
+    CancelAlreadyAcknowledged {
+        /// The worker the call named.
+        worker: WorkerId,
+    },
+    /// [`WorkerStep::CompleteCancelled`] named a worker that has not acknowledged its
+    /// cancellation.
+    CancelNotAcknowledged {
+        /// The worker the call named.
+        worker: WorkerId,
+    },
+    /// The worker acknowledged its cancellation, so it only drains: this step is not an
+    /// abort or its cancelled completion (docs/02 §7, RFC 0026 correction 53).
+    WorkerCancelling {
+        /// The worker the call named.
+        worker: WorkerId,
+        /// The step that was refused.
+        step: WorkerStep,
+    },
     /// A worker declared [`Resumability::NonResumable`] cannot suspend.
     ///
     /// > `TaskRecord.continuation` is REQUIRED when `status = suspended` — a suspended
@@ -516,9 +562,8 @@ pub enum RegionFault {
     },
     /// The region of a worker in an adapter-obligation operation does not admit it. An
     /// open needs an [`RegionState::Open`] region — the rule that bounds what a teardown
-    /// must account for. A transfer needs both parties outside a cancelling region. A
-    /// discharge needs only a region that is not finalized (defence in depth, unreachable
-    /// while the holder is not terminal).
+    /// must account for. A discharge or a transfer needs only a region that is not
+    /// finalized (defence in depth, unreachable while the party is not terminal).
     SubstrateRegionNotOpen {
         /// The worker the call named.
         worker: WorkerId,
@@ -527,9 +572,15 @@ pub enum RegionFault {
         /// What state that region was in.
         state: RegionState,
     },
-    /// A committed discharge in a cancelling region. A task in cancellation only drains
-    /// and finalizes, so a discharge there must be [`SubstrateOutcome::Aborted`] cleanup
-    /// (RFC 0026 correction 51).
+    /// A worker that acknowledged its cancellation may not open, hand on or receive an
+    /// adapter obligation: it no longer acts on its own account (RFC 0026 correction 53).
+    SubstrateHolderCancelling {
+        /// The worker the call named.
+        worker: WorkerId,
+    },
+    /// A committed discharge by a holder that acknowledged its cancellation. A task in
+    /// cancellation only drains and finalizes, so its discharges must be
+    /// [`SubstrateOutcome::Aborted`] cleanup (RFC 0026 corrections 51 and 53).
     SubstrateCommitDuringCancellation {
         /// The obligation the call named.
         obligation: SubstrateObligation,
@@ -638,6 +689,23 @@ impl fmt::Display for RegionFault {
             Self::SuspendNonResumableWorker { worker } => {
                 write!(f, "{worker} was declared non-resumable, so it cannot park")
             }
+            Self::CancelAlreadyRequested { worker } => {
+                write!(f, "{worker}'s cancellation is already requested")
+            }
+            Self::CancelNotRequested { worker } => {
+                write!(f, "nothing requested {worker}'s cancellation")
+            }
+            Self::CancelAlreadyAcknowledged { worker } => {
+                write!(f, "{worker} already acknowledged its cancellation")
+            }
+            Self::CancelNotAcknowledged { worker } => write!(
+                f,
+                "{worker} has not acknowledged its cancellation, so it cannot complete as cancelled"
+            ),
+            Self::WorkerCancelling { worker, step } => write!(
+                f,
+                "{worker} acknowledged its cancellation, so it may only drain, not {step}"
+            ),
             Self::AbortWithoutReserve { worker } => {
                 write!(f, "{worker} has nothing staged to abort")
             }
@@ -672,7 +740,11 @@ impl fmt::Display for RegionFault {
             ),
             Self::SubstrateCommitDuringCancellation { obligation, worker } => write!(
                 f,
-                "{worker} is in a cancelling region, so it may abort {obligation} but not commit it"
+                "{worker} acknowledged its cancellation, so it may abort {obligation} but not commit it"
+            ),
+            Self::SubstrateHolderCancelling { worker } => write!(
+                f,
+                "{worker} acknowledged its cancellation, so it cannot take or hand on an obligation"
             ),
             Self::SubstrateSelfTransfer { obligation, worker } => {
                 write!(f, "{worker} cannot hand {obligation} to itself")
@@ -713,6 +785,14 @@ struct WorkerRecord {
     slots: BTreeSet<PublicationSlot>,
     resumability: Resumability,
     cancel_outcome: Option<CancelOutcome>,
+    /// This worker's own cancellation request ([`WorkerStep::RequestCancel`]).
+    cancel_requested: bool,
+    /// A region's cancellation reached this worker while it was live. Recorded on the
+    /// worker when the region is cancelled, so the phase it reached survives the
+    /// region's finalization (cr-3pu5cu).
+    region_requested: bool,
+    /// The worker acknowledged its cancellation ([`WorkerStep::AcknowledgeCancel`]).
+    cancel_acknowledged: bool,
 }
 
 /// A tree of regions owning workers and child regions — the value the whole calculus is
@@ -735,6 +815,9 @@ pub struct RegionTree {
     /// Every adapter obligation identity ever opened, with its kind and current holder,
     /// and whether it is still open. Kept forever so an identity opens once.
     substrate: BTreeMap<SubstrateId, SubstrateRecord>,
+    /// Each worker's adapter obligations, open or discharged, by their current or last
+    /// holder: the index a subtree's ledger is built from.
+    held_by: BTreeMap<WorkerId, BTreeSet<SubstrateId>>,
 }
 
 /// What the tree knows about one adapter obligation.
@@ -765,6 +848,7 @@ impl RegionTree {
             workers: Vec::new(),
             ledger: Ledger::new(),
             substrate: BTreeMap::new(),
+            held_by: BTreeMap::new(),
         }
     }
 
@@ -814,6 +898,30 @@ impl RegionTree {
     /// [`RegionFault::UnknownWorker`] when no such worker exists.
     pub fn worker_state(&self, worker: WorkerId) -> Result<&WorkerState, RegionFault> {
         self.record(worker).map(|record| &record.state)
+    }
+
+    /// Where `worker` is in its own cancellation (RFC 0026 correction 53).
+    ///
+    /// [`CancelPhase::Acknowledged`] after its [`WorkerStep::AcknowledgeCancel`];
+    /// otherwise [`CancelPhase::Requested`] when it requested its own cancellation or a
+    /// region's cancellation reached it while it was live; otherwise
+    /// [`CancelPhase::Active`]. Both requests are recorded on the worker, so a worker that
+    /// terminated, and a worker whose region finalized, keep the phase they reached: a
+    /// cancelled worker is never `Active`.
+    ///
+    /// # Errors
+    ///
+    /// [`RegionFault::UnknownWorker`] when no such worker exists.
+    pub fn cancel_phase(&self, worker: WorkerId) -> Result<CancelPhase, RegionFault> {
+        let record = self.record(worker)?;
+        if record.cancel_acknowledged {
+            return Ok(CancelPhase::Acknowledged);
+        }
+        Ok(if record.cancel_requested || record.region_requested {
+            CancelPhase::Requested
+        } else {
+            CancelPhase::Active
+        })
     }
 
     /// What `worker` has published and what it still holds provisionally.
@@ -942,6 +1050,9 @@ impl RegionTree {
             slots: BTreeSet::new(),
             resumability,
             cancel_outcome: None,
+            cancel_requested: false,
+            region_requested: false,
+            cancel_acknowledged: false,
         });
         self.node_mut(region)?.workers.push(worker);
         self.ledger.open(Obligation::worker_termination(worker));
@@ -982,7 +1093,59 @@ impl RegionTree {
             return Err(RegionFault::AdvanceInFinalizedRegion { worker, region });
         }
         let from = self.record(worker)?.state.clone();
+        let phase = self.cancel_phase(worker)?;
+        // docs/02 §7: `Cancelling` only drains and finalizes. After its acknowledgement a
+        // worker may abort what it staged and complete as cancelled, and nothing else.
+        if phase == CancelPhase::Acknowledged
+            && !from.is_terminal()
+            && !matches!(
+                step,
+                WorkerStep::Abort
+                    | WorkerStep::AbortSlot(_)
+                    | WorkerStep::RequestCancel
+                    | WorkerStep::AcknowledgeCancel
+                    | WorkerStep::CompleteCancelled
+            )
+        {
+            return Err(RegionFault::WorkerCancelling { worker, step });
+        }
         let landed = match (&from, &step) {
+            (
+                WorkerState::Created | WorkerState::Running | WorkerState::Suspended,
+                WorkerStep::RequestCancel,
+            ) => {
+                if phase != CancelPhase::Active {
+                    return Err(RegionFault::CancelAlreadyRequested { worker });
+                }
+                self.record_mut(worker)?.cancel_requested = true;
+                from.clone()
+            }
+            (
+                WorkerState::Created | WorkerState::Running | WorkerState::Suspended,
+                WorkerStep::AcknowledgeCancel,
+            ) => {
+                match phase {
+                    CancelPhase::Active => return Err(RegionFault::CancelNotRequested { worker }),
+                    CancelPhase::Acknowledged => {
+                        return Err(RegionFault::CancelAlreadyAcknowledged { worker });
+                    }
+                    CancelPhase::Requested => {}
+                }
+                self.record_mut(worker)?.cancel_acknowledged = true;
+                from.clone()
+            }
+            (
+                WorkerState::Created | WorkerState::Running | WorkerState::Suspended,
+                WorkerStep::CompleteCancelled,
+            ) => {
+                if phase != CancelPhase::Acknowledged {
+                    return Err(RegionFault::CancelNotAcknowledged { worker });
+                }
+                // The single-task arm of the cancelling drain, through the one place a
+                // worker is cancelled.
+                self.cancel_worker(worker)?;
+                return Ok(WorkerState::Cancelled);
+            }
             (WorkerState::Created, WorkerStep::Begin) => WorkerState::Running,
             (WorkerState::Running, WorkerStep::Reserve) => {
                 if self.record(worker)?.evidence.is_provisional() {
@@ -1077,8 +1240,8 @@ impl RegionTree {
     /// # Errors
     ///
     /// [`RegionFault::UnknownWorker`], [`RegionFault::SubstrateHolderNotBegun`],
-    /// [`RegionFault::SubstrateHolderNotLive`], [`RegionFault::SubstrateRegionNotOpen`] or
-    /// [`RegionFault::SubstrateIdentityReused`].
+    /// [`RegionFault::SubstrateHolderNotLive`], [`RegionFault::SubstrateHolderCancelling`],
+    /// [`RegionFault::SubstrateRegionNotOpen`] or [`RegionFault::SubstrateIdentityReused`].
     pub fn open_substrate(
         &mut self,
         holder: WorkerId,
@@ -1096,6 +1259,10 @@ impl RegionTree {
                 open: true,
             },
         );
+        self.held_by
+            .entry(holder)
+            .or_default()
+            .insert(obligation.id());
         self.ledger.open(obligation.obligation());
         Ok(())
     }
@@ -1110,14 +1277,13 @@ impl RegionTree {
     /// balance. Once the holder is terminal an open obligation is a leak, and a discharge
     /// after that would launder it.
     ///
-    /// `outcome` says how the obligation ended. In an open or a normally closed region
-    /// both outcomes are admitted. In a cancelling region only
-    /// [`SubstrateOutcome::Aborted`] is: a task in cancellation only drains and
-    /// finalizes (docs/02 §7), so its discharges are cleanup, and a commit there is
-    /// refused as [`RegionFault::SubstrateCommitDuringCancellation`]. This is stricter
-    /// than the A7 conformance model, which admits a commit until the task itself
-    /// acknowledges cancellation. The calculus has no acknowledgement yet (bn-36wy3 adds
-    /// it), so it errs toward nonconformance, never toward false totality.
+    /// `outcome` says how the obligation ended. Until the holder acknowledges a
+    /// cancellation both outcomes are admitted, whatever its region's state. After the
+    /// acknowledgement only [`SubstrateOutcome::Aborted`] is: a task in cancellation only
+    /// drains and finalizes (docs/02 §7), so its discharges are cleanup, and a commit is
+    /// refused as [`RegionFault::SubstrateCommitDuringCancellation`]. The rule is per
+    /// task, at the task's own acknowledgement, as the A7 conformance model has it (RFC
+    /// 0026 correction 53, which relaxes correction 51's region-level rule).
     ///
     /// # Errors
     ///
@@ -1131,9 +1297,9 @@ impl RegionTree {
         obligation: SubstrateObligation,
         outcome: SubstrateOutcome,
     ) -> Result<(), RegionFault> {
-        let state = self.check_holder(holder, obligation)?;
+        self.check_holder(holder, obligation)?;
         if outcome == SubstrateOutcome::Committed
-            && state == RegionState::Draining(DrainCause::Cancelled)
+            && self.cancel_phase(holder)? == CancelPhase::Acknowledged
         {
             return Err(RegionFault::SubstrateCommitDuringCancellation {
                 obligation,
@@ -1153,21 +1319,22 @@ impl RegionTree {
     /// The obligation keeps its identity, so the ledger does not move: a transfer is not a
     /// discharge and an open. `from` must hold the obligation, and both parties must be
     /// *acting*: each [holds substrate](WorkerState::holds_substrate) — running or
-    /// parked — and neither is in a cancelling region. This is the A7 conformance model's
-    /// rule: ownership transfer is a causal act by an acting holder to an acting receiver,
-    /// and a task in cancellation only drains and finalizes. So, unlike a discharge, a
-    /// transfer has no cancellation-cleanup exception. A worker in a normally closed
-    /// region is not cancelling and may take part. `from == to` is refused: a hand-off to
-    /// the holder itself hands nothing.
+    /// parked — and neither has acknowledged a cancellation. This is the A7 conformance
+    /// model's rule: ownership transfer is a causal act by an acting holder to an acting
+    /// receiver, and a task in cancellation only drains and finalizes. So, unlike a
+    /// discharge, a transfer has no cancellation-cleanup exception. A worker whose
+    /// cancellation is requested but not acknowledged still acts, and so does a worker in
+    /// a normally closed region (RFC 0026 correction 53). Neither party's region may be
+    /// finalized. `from == to` is refused: a hand-off to the holder itself hands nothing.
     ///
     /// # Errors
     ///
     /// [`RegionFault::UnknownWorker`], [`RegionFault::SubstrateNotOpen`] or
     /// [`RegionFault::SubstrateHolderMismatch`] for `from`;
     /// [`RegionFault::SubstrateSelfTransfer`]; and, for either party,
-    /// [`RegionFault::SubstrateHolderNotBegun`], [`RegionFault::SubstrateHolderNotLive`] or
-    /// [`RegionFault::SubstrateRegionNotOpen`] (a cancelling region, or a finalized one as
-    /// defence in depth).
+    /// [`RegionFault::SubstrateHolderNotBegun`], [`RegionFault::SubstrateHolderNotLive`],
+    /// [`RegionFault::SubstrateHolderCancelling`] or [`RegionFault::SubstrateRegionNotOpen`]
+    /// (a finalized region, defence in depth).
     pub fn transfer_substrate(
         &mut self,
         from: WorkerId,
@@ -1186,6 +1353,10 @@ impl RegionTree {
         if let Some(record) = self.substrate.get_mut(&obligation.id()) {
             record.holder = to;
         }
+        if let Some(held) = self.held_by.get_mut(&from) {
+            held.remove(&obligation.id());
+        }
+        self.held_by.entry(to).or_default().insert(obligation.id());
         Ok(())
     }
 
@@ -1253,6 +1424,16 @@ impl RegionTree {
         for member in self.subtree(region)? {
             if self.node(member)?.state != RegionState::Finalized {
                 self.node_mut(member)?.state = RegionState::Draining(DrainCause::Cancelled);
+                // The request reaches each live worker, and stays on it: its phase must
+                // not be read back from a region state that finalize later replaces.
+                // Setting a flag already set changes nothing, so a repeated cancel is
+                // idempotent.
+                for worker in self.node(member)?.workers.clone() {
+                    let record = self.record_mut(worker)?;
+                    if !record.state.is_terminal() {
+                        record.region_requested = true;
+                    }
+                }
             }
         }
         self.ledger
@@ -1397,6 +1578,51 @@ impl RegionTree {
 
     // --- internals ---------------------------------------------------------------------
 
+    /// The subtree's own obligations (RFC 0026 correction 53): those about its regions
+    /// and its workers, and the adapter obligations its workers hold now (or held last,
+    /// once discharged). Each is named by key, so a finalization costs the size of its
+    /// subtree, not the size of the ledger's history. The same set, stated as a filter
+    /// over the whole history, is [`Self::in_subtree_obligation`].
+    fn subtree_obligations(&self, members: &[RegionId]) -> Result<Vec<Obligation>, RegionFault> {
+        let mut out = Vec::new();
+        for member in members {
+            out.push(Obligation::child_region_quiescence(*member));
+            out.push(Obligation::cancellation_finalization(*member));
+            for worker in &self.node(*member)?.workers {
+                out.push(Obligation::worker_termination(*worker));
+                out.push(Obligation::provisional_publication(*worker));
+                out.extend(self.ledger.publications_of(*worker));
+                for id in self.held_by.get(worker).into_iter().flatten() {
+                    if let Some(record) = self.substrate.get(id) {
+                        out.push(record.obligation.obligation());
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether `obligation` is one of the subtree's own, as a predicate: the reference
+    /// statement of [`Self::subtree_obligations`].
+    #[cfg(test)]
+    fn in_subtree_obligation(&self, members: &[RegionId], obligation: &Obligation) -> bool {
+        let in_subtree = |region: RegionId| members.contains(&region);
+        let worker_in = |worker: WorkerId| {
+            self.record(worker)
+                .is_ok_and(|record| in_subtree(record.region))
+        };
+        match obligation.subject() {
+            obligation::Subject::Region(region) => in_subtree(region),
+            obligation::Subject::Worker(worker) | obligation::Subject::Publication(worker, _) => {
+                worker_in(worker)
+            }
+            obligation::Subject::Substrate(id) => self
+                .substrate
+                .get(&id)
+                .is_some_and(|record| worker_in(record.holder)),
+        }
+    }
+
     /// `worker` exists and may take part in an adapter-obligation operation: it
     /// [holds substrate](WorkerState::holds_substrate) — it has begun and has not
     /// terminated — and its region is not finalized. Returns that region's state.
@@ -1428,24 +1654,20 @@ impl RegionTree {
         Ok(state)
     }
 
-    /// A substrate party that is *acting*: its region is not cancelling. The rule for
-    /// both parties of a transfer.
-    fn check_acting(&self, worker: WorkerId) -> Result<(), RegionFault> {
+    /// A substrate party that is *acting*: it has not acknowledged a cancellation. The
+    /// rule for both parties of a transfer, and for an opener. Returns its region state.
+    fn check_acting(&self, worker: WorkerId) -> Result<RegionState, RegionFault> {
         let state = self.check_substrate_party(worker)?;
-        if state == RegionState::Draining(DrainCause::Cancelled) {
-            return Err(RegionFault::SubstrateRegionNotOpen {
-                worker,
-                region: self.record(worker)?.region,
-                state,
-            });
+        if self.cancel_phase(worker)? == CancelPhase::Acknowledged {
+            return Err(RegionFault::SubstrateHolderCancelling { worker });
         }
-        Ok(())
+        Ok(state)
     }
 
-    /// The rule for opening an adapter obligation: a substrate party whose region is
-    /// [`RegionState::Open`].
+    /// The rule for opening an adapter obligation: an acting substrate party whose
+    /// region is [`RegionState::Open`].
     fn check_opener(&self, worker: WorkerId) -> Result<(), RegionFault> {
-        let state = self.check_substrate_party(worker)?;
+        let state = self.check_acting(worker)?;
         if !state.accepts_work() {
             return Err(RegionFault::SubstrateRegionNotOpen {
                 worker,
@@ -1586,6 +1808,14 @@ impl RegionTree {
     /// Write a worker's new state, discharging its termination obligation on — and only
     /// on — the transition into a terminal state.
     fn settle(&mut self, worker: WorkerId, landed: WorkerState) -> Result<(), RegionFault> {
+        // A cancelled worker's history includes a request: `Cancelled ⇒ phase ≠ Active`.
+        debug_assert!(
+            landed != WorkerState::Cancelled
+                || self
+                    .cancel_phase(worker)
+                    .is_ok_and(|phase| phase != CancelPhase::Active),
+            "{worker} settles as cancelled with no cancellation requested"
+        );
         let terminal = landed.is_terminal();
         self.record_mut(worker)?.state = landed;
         if terminal {
@@ -1610,11 +1840,13 @@ impl RegionTree {
             }
         }
         workers.sort_by_key(|report| report.worker);
+        let ledger = self.ledger.summary_of(self.subtree_obligations(members)?);
         Ok(Finalization {
             region,
             regions: members.to_vec(),
             workers,
-            ledger: self.ledger.summary(),
+            ledger,
+            tree_ledger: self.ledger.summary(),
         })
     }
 }
@@ -1707,6 +1939,7 @@ pub struct Finalization {
     regions: Vec<RegionId>,
     workers: Vec<WorkerReport>,
     ledger: LedgerSummary,
+    tree_ledger: LedgerSummary,
 }
 
 impl Finalization {
@@ -1728,10 +1961,24 @@ impl Finalization {
         &self.workers
     }
 
-    /// What the obligation ledger held when the subtree finalized.
+    /// What the finalized subtree owed when it finalized: its own obligations only.
+    ///
+    /// Scoped to the subtree (RFC 0026 correction 53): the obligations about its regions
+    /// and its workers, and the adapter obligations its workers held at that moment.
+    /// Work elsewhere in the tree that still owes something does not make this subtree's
+    /// teardown partial, and an obligation this subtree still owes is never hidden by
+    /// balance elsewhere. The counters are summed over the same obligations. The whole
+    /// tree's ledger is [`Self::tree_ledger`].
     #[must_use]
     pub const fn ledger(&self) -> &LedgerSummary {
         &self.ledger
+    }
+
+    /// What the whole tree's obligation ledger held when the subtree finalized. For a
+    /// root finalization it equals [`Self::ledger`].
+    #[must_use]
+    pub const fn tree_ledger(&self) -> &LedgerSummary {
+        &self.tree_ledger
     }
 
     /// The workers left in a non-terminal state — the orphans.
@@ -1777,7 +2024,7 @@ impl Finalization {
     }
 
     /// Whether the teardown was total: no orphan, no unresolved publication, and a
-    /// balanced ledger.
+    /// balanced ledger for the finalized subtree ([`Self::ledger`]).
     ///
     /// This is the property the module exists to make true. It is deliberately a
     /// conjunction of three *independently computed* facts rather than one flag: the
@@ -1838,6 +2085,52 @@ mod tests {
 
     fn failure(token: &str) -> WorkerStep {
         WorkerStep::Fail(FailureReason::new(token).expect("test token is canonical"))
+    }
+
+    /// The keyed subtree ledger equals the same ledger stated as a filter over the whole
+    /// history, for every region of a tree with nested regions, staging slots, and
+    /// adapter obligations opened, transferred across regions, and discharged.
+    #[test]
+    fn the_keyed_subtree_ledger_is_the_filtered_one() {
+        use obligation::{SubstrateKind, SubstrateObligation, SubstrateOutcome};
+        let kind = SubstrateKind::new("lease").expect("canonical");
+        let lease = |id| SubstrateObligation::new(kind, SubstrateId::at(id));
+        let mut tree = RegionTree::new();
+        let root = tree.root();
+        let left = tree.open_child(root).expect("open");
+        let right = tree.open_child(root).expect("open");
+        let deep = tree.open_child(left).expect("open");
+        let mut workers = Vec::new();
+        for region in [root, left, right, deep, deep] {
+            let worker = tree.spawn(region, Resumability::Resumable).expect("open");
+            tree.advance(worker, WorkerStep::Begin).expect("legal");
+            workers.push(worker);
+        }
+        tree.advance(workers[3], WorkerStep::ReserveSlot(PublicationSlot::at(2)))
+            .expect("legal");
+        tree.advance(workers[3], WorkerStep::CommitSlot(PublicationSlot::at(2)))
+            .expect("legal");
+        tree.advance(workers[4], WorkerStep::Reserve)
+            .expect("legal");
+        tree.open_substrate(workers[1], lease(0)).expect("legal");
+        tree.open_substrate(workers[3], lease(1)).expect("legal");
+        tree.transfer_substrate(workers[3], lease(1), workers[2])
+            .expect("legal");
+        tree.open_substrate(workers[2], lease(2)).expect("legal");
+        tree.discharge_substrate(workers[2], lease(2), SubstrateOutcome::Committed)
+            .expect("legal");
+        tree.cancel(left).expect("open");
+        for region in [root, left, right, deep] {
+            let members = tree.subtree(region).expect("known");
+            let keyed = tree
+                .ledger
+                .summary_of(tree.subtree_obligations(&members).expect("known"));
+            let filtered = tree
+                .ledger
+                .summary_where(|o| tree.in_subtree_obligation(&members, o));
+            assert_eq!(keyed, filtered, "{region}");
+        }
+        assert!(!tree.ledger().is_balanced(), "the fixture owes something");
     }
 
     #[test]

@@ -419,45 +419,42 @@ fn mutant_open_in_a_region_that_stopped_accepting_work_is_refused() {
     }
 }
 
-/// Mutant: a hand-off with a party in a cancelling region. The A7 model's transfer
-/// needs both parties acting, and a task in cancellation only drains and finalizes, so
-/// the refusal holds at either end. The discharge cleanup exception does not extend to
-/// transfers. A normally closed region is not cancelling, so a hand-off into one is
-/// admitted.
+/// Mutant: a hand-off with a party that acknowledged its cancellation. The A7 model's
+/// transfer needs both parties acting, and a task that has acknowledged its
+/// cancellation only drains and finalizes, so the refusal holds at either end. Before
+/// the acknowledgement the task still acts, even inside a cancelled region, so a
+/// hand-off then is admitted (RFC 0026 correction 53 relaxes correction 51's
+/// region-level rule). The discharge cleanup exception does not extend to transfers.
 #[test]
-fn mutant_transfer_with_a_party_in_a_cancelling_region_is_refused() {
+fn mutant_transfer_with_a_party_that_acknowledged_cancellation_is_refused() {
     let mut tree = RegionTree::new();
     let root = tree.root();
     let open = tree.open_child(root).expect("open");
     let cancelling = tree.open_child(root).expect("open");
-    let closing = tree.open_child(root).expect("open");
     let giver = spawn_running(&mut tree, open);
     let taker = spawn_running(&mut tree, cancelling);
-    let closed_taker = spawn_running(&mut tree, closing);
     tree.open_substrate(giver, permit(2)).expect("legal");
     tree.open_substrate(taker, permit(3)).expect("legal");
     tree.cancel(cancelling).expect("open");
-    tree.close(closing).expect("open");
-    let cancelled = RegionState::Draining(DrainCause::Cancelled);
 
+    // Requested, not acknowledged: the taker still acts, in both directions.
+    tree.transfer_substrate(giver, permit(2), taker)
+        .expect("into a cancelled region, before the acknowledgement");
+    tree.transfer_substrate(taker, permit(2), giver)
+        .expect("out of a cancelled region, before the acknowledgement");
+
+    tree.advance(taker, WorkerStep::AcknowledgeCancel)
+        .expect("the region's cancellation is requested");
     let before = counters(&tree);
-    // Into a cancelling region.
     assert_eq!(
         tree.transfer_substrate(giver, permit(2), taker),
-        Err(RegionFault::SubstrateRegionNotOpen {
-            worker: taker,
-            region: cancelling,
-            state: cancelled
-        })
+        Err(RegionFault::SubstrateHolderCancelling { worker: taker }),
+        "into a worker that acknowledged"
     );
-    // Out of a cancelling region.
     assert_eq!(
         tree.transfer_substrate(taker, permit(3), giver),
-        Err(RegionFault::SubstrateRegionNotOpen {
-            worker: taker,
-            region: cancelling,
-            state: cancelled
-        })
+        Err(RegionFault::SubstrateHolderCancelling { worker: taker }),
+        "out of a worker that acknowledged"
     );
     assert_eq!(counters(&tree), before, "a refused transfer moves nothing");
     assert_eq!(tree.substrate_holder(SubstrateId::at(2)), Some(giver));
@@ -466,33 +463,31 @@ fn mutant_transfer_with_a_party_in_a_cancelling_region_is_refused() {
     // The cancelling holder may still discharge: that is cleanup.
     tree.discharge_substrate(taker, permit(3), SubstrateOutcome::Aborted)
         .expect("the discharge keeps the cancellation-cleanup exception");
-    // A closed region is not cancelling.
-    tree.transfer_substrate(giver, permit(2), closed_taker)
-        .expect("a hand-off into a normally closed region is admitted");
-    tree.discharge_substrate(closed_taker, permit(2), SubstrateOutcome::Committed)
+    tree.discharge_substrate(giver, permit(2), SubstrateOutcome::Committed)
         .expect("legal");
     let finalization = tree.teardown(root).expect("torn down");
     assert!(finalization.is_total(), "{}", finalization.render());
 }
 
-/// Mutant: a committed discharge inside a cancellation. A task in cancellation only
-/// drains and finalizes, so its discharges are aborts (cleanup). A commit there is
-/// refused with its own typed reason and moves nothing; the abort is admitted and the
-/// teardown balances. A normally closed region is not cancelling, so a commit there is
-/// admitted.
+/// Mutant: a committed discharge after the holder acknowledged its cancellation. A task
+/// in cancellation only drains and finalizes, so its discharges are aborts (cleanup). A
+/// commit then is refused with its own typed reason and moves nothing; the abort is
+/// admitted and the teardown balances. Before the acknowledgement a commit is admitted,
+/// even inside a cancelled region (RFC 0026 correction 53).
 #[test]
-fn mutant_committed_discharge_during_cancellation_is_refused() {
+fn mutant_committed_discharge_after_acknowledgement_is_refused() {
     let mut tree = RegionTree::new();
     let root = tree.root();
     let cancelling = tree.open_child(root).expect("open");
-    let closing = tree.open_child(root).expect("open");
     let cleaner = spawn_running(&mut tree, cancelling);
-    let closer = spawn_running(&mut tree, closing);
     tree.open_substrate(cleaner, permit(10)).expect("legal");
-    tree.open_substrate(closer, permit(11)).expect("legal");
+    tree.open_substrate(cleaner, permit(11)).expect("legal");
     tree.cancel(cancelling).expect("open");
-    tree.close(closing).expect("open");
 
+    tree.discharge_substrate(cleaner, permit(11), SubstrateOutcome::Committed)
+        .expect("requested, not acknowledged: the holder still commits");
+    tree.advance(cleaner, WorkerStep::AcknowledgeCancel)
+        .expect("the region's cancellation is requested");
     let before = counters(&tree);
     assert_eq!(
         tree.discharge_substrate(cleaner, permit(10), SubstrateOutcome::Committed),
@@ -505,9 +500,6 @@ fn mutant_committed_discharge_during_cancellation_is_refused() {
     assert_eq!(tree.substrate_holder(SubstrateId::at(10)), Some(cleaner));
     tree.discharge_substrate(cleaner, permit(10), SubstrateOutcome::Aborted)
         .expect("cleanup inside a cancellation is an abort");
-
-    tree.discharge_substrate(closer, permit(11), SubstrateOutcome::Committed)
-        .expect("a normally closed region is not cancelling");
     let finalization = tree.teardown(root).expect("torn down");
     assert!(finalization.is_total(), "{}", finalization.render());
 }

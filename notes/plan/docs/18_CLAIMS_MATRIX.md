@@ -112,23 +112,24 @@ docs/01 §6 and plan §4.1. It covers region and task lifecycle, cancellation
 phases, reserve/commit/abort, the obligation ledger, virtual time and bounded
 channels. It imports `std` only and reads each journal from its canonical bytes
 with its own reader, so it shares no type, decoder, lift or scripted source with
-the adapter. The audit rule `a7-model-independent` holds that. The corpus is 7513
-real `binding::run` journals over eight program sets and three family alphabets,
+the adapter. The audit rule `a7-model-independent` holds that. The corpus is 7873
+real `binding::run` journals over nine program sets and four family alphabets,
 from a stride through each exhaustive interleaving space and a seeded random
-sample. The model accepts each one, and the lift agrees. At 29761 journal
+sample. Since bn-36wy3 it includes budget-deadline cancellations, which the model
+states from docs/02 §7's per-task `request(cancel_reason)` and docs/02 §5's clock.
+The model accepts each one, and the lift agrees. At 31650 journal
 positions, the model's generated next steps include the step the substrate took,
 and the model's guard admits each generated step. A run that leaks an obligation
-is rejected by the model at its region's close. Twenty-one curated perturbations of
-real journals are rejected by the model, each for its own fault, and by the lift.
-Over 23587 single-event deletions and adjacent swaps, the model and the lift give
-the same verdict in both directions, with one pinned exception. Since bn-j1a50 the
-lift runs the substrate ledger inside the region calculus (RFC 0026 correction 51).
-In 33 perturbations, an obligation transfer lands between a cancel request and the
-holder's acknowledgement. The model admits each one. The calculus refuses each one,
-because it decides "cancelling" per region at the request, not per task at the
-acknowledgement. This is correction 51's known strictness, and bn-36wy3 owns it. The
-lift errs toward nonconformance, never toward a false `is_total`, and no real
-journal falls in that window.
+is rejected by the model at its region's close. Twenty-four curated perturbations
+of real journals are rejected by the model, each for its own fault, and by the lift.
+Over 25277 single-event deletions and adjacent swaps, the model and the lift give
+the same verdict in both directions, with no exception. Since bn-j1a50 the lift runs
+the substrate ledger inside the region calculus (RFC 0026 correction 51). Until
+bn-36wy3, 33 of those perturbations were a pinned exception: an obligation transfer
+between a cancel request and the holder's acknowledgement, which the model admitted
+and the calculus refused, because the calculus decided "cancelling" per region at
+the request. RFC 0026 correction 53 gave the calculus the per-task acknowledgement,
+and the pinned count is now zero; the pin stays as the regression guard.
 
 That agreement is the result of two repairs. When bn-ujpz0 landed, the lift accepted
 666 of 19345 perturbations that the model rejected, in seven classes. Examples are a

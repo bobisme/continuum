@@ -66,8 +66,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
-use continuum_task::region::worker::{WorkerId, WorkerState};
-use continuum_task::region::{DrainCause, RegionState};
+use continuum_task::region::worker::{CancelPhase, WorkerId, WorkerState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
 use crate::family::EventBody;
@@ -213,7 +212,7 @@ impl ChannelEvent {
         }
     }
 
-    const fn token(&self) -> &'static str {
+    pub(crate) const fn token(&self) -> &'static str {
         match self {
             Self::Opened { .. } => "opened",
             Self::Sent { .. } => "sent",
@@ -462,7 +461,8 @@ pub enum ChannelFault {
         /// The event's token.
         event: &'static str,
     },
-    /// An abandonment whose task's region is not draining under cancellation.
+    /// An abandonment by a task no cancellation reached: its region is not draining
+    /// under cancellation and it requested none of its own (a deadline; bn-36wy3).
     NotCancelling {
         /// The channel.
         channel: u32,
@@ -557,7 +557,7 @@ impl fmt::Display for ChannelFault {
             }
             Self::NotCancelling { channel, event } => write!(
                 f,
-                "{event} on c{channel} but its task's region is not draining under cancellation"
+                "{event} on c{channel} but no cancellation reached its task"
             ),
             Self::DropMismatch {
                 channel,
@@ -638,8 +638,7 @@ fn cancelling(
     event: &ChannelEvent,
 ) -> Result<(), LiftStop> {
     live(cx, task, channel, event)?;
-    let owner = cx.tree.owner(WorkerId::at(task))?;
-    if cx.tree.state(owner)? != RegionState::Draining(DrainCause::Cancelled) {
+    if cx.tree.cancel_phase(WorkerId::at(task))? == CancelPhase::Active {
         return Err(fault(ChannelFault::NotCancelling {
             channel,
             event: event.token(),
@@ -688,6 +687,41 @@ fn after_acknowledgement(
     }
 }
 
+/// The task whose own work `event` is: the sender of a send, or the receiver of a
+/// receive. `None` for a channel's open, an abandonment or a receiver's drop (cleanup),
+/// a senders' close, and a channel the lift does not know.
+pub(crate) fn actor_of(cx: &LiftContext, event: &ChannelEvent) -> Option<u32> {
+    match event {
+        ChannelEvent::Sent { sender, .. }
+        | ChannelEvent::SendBlocked { sender, .. }
+        | ChannelEvent::SendClosed { sender, .. } => Some(sender.0),
+        ChannelEvent::Received { channel, .. }
+        | ChannelEvent::RecvBlocked { channel }
+        | ChannelEvent::RecvClosed { channel } => cx
+            .channel
+            .channels
+            .get(&channel.0)
+            .map(|model| model.receiver),
+        _ => None,
+    }
+}
+
+/// The task whose cancellation cleanup `event` is: the sender of an abandoned send, or
+/// the receiver of the channel an abandoned receive or a receiver's drop names. `None`
+/// for every other event, and for a channel the lift does not know (RFC 0026
+/// correction 53 item 6).
+pub(crate) fn cleanup_of(cx: &LiftContext, event: &ChannelEvent) -> Option<u32> {
+    match event {
+        ChannelEvent::SendAbandoned { sender, .. } => Some(sender.0),
+        ChannelEvent::RecvAbandoned { channel } | ChannelEvent::ReceiverGone { channel, .. } => cx
+            .channel
+            .channels
+            .get(&channel.0)
+            .map(|model| model.receiver),
+        _ => None,
+    }
+}
+
 /// A task that completes as cancelled holds no channel's receiver and no blocked
 /// send.
 pub(crate) fn check_none_held(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {
@@ -719,6 +753,10 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
             return Err(fault(ChannelFault::BadOpen { channel }));
         }
         live(cx, receiver.0, channel, event)?;
+        // The receiver is handed to a task that acts on its own account: not one in
+        // cancellation (a cancellation fact; cr-3pu5cu round 7, self-sweep, as the A7
+        // model states it).
+        acting(cx, receiver.0, false, channel, event)?;
         cx.channel.channels.insert(
             channel,
             Model {
@@ -835,6 +873,7 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
             }
             cx.channel.settled.insert(message.0);
             after_acknowledgement(cx, sender.0, channel, event)?;
+            crate::family::cancellation::imply_acknowledgement(cx, sender.0)?;
         }
         ChannelEvent::Received { message, .. } => {
             live(cx, receiver, channel, event)?;
@@ -881,6 +920,7 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
             }
             model.receive_blocked = false;
             after_acknowledgement(cx, receiver, channel, event)?;
+            crate::family::cancellation::imply_acknowledgement(cx, receiver)?;
         }
         ChannelEvent::SendersClosed { .. } => {
             let model = cx.channel.channels.get_mut(&channel).ok_or_else(mismatch)?;

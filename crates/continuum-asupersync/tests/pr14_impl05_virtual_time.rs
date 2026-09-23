@@ -670,7 +670,7 @@ fn every_time_journal_conforms() {
                     TimeEvent::Cancelled { timer, .. } => {
                         assert!(deadlines.remove(&timer.0).is_some());
                     }
-                    TimeEvent::Advanced { .. } => {}
+                    TimeEvent::Advanced { .. } | TimeEvent::Deadline { .. } => {}
                 }
             }
         }
@@ -852,7 +852,9 @@ fn mutated_time_journals_are_rejected() {
             mutants += 3;
         }
 
-        // 7. A timer cancelled before its region's cancellation.
+        // 7. A timer cancelled before its region's cancellation: no cancellation reached
+        //    its task, whose phase is `active` (bn-36wy3 keys the check to the task's
+        //    own cancellation phase, which a region's cancellation or a deadline sets).
         if let Some(cancelled) = position(&original, |e| matches!(e, TimeEvent::Cancelled { .. })) {
             let mut events = original.clone();
             let moved = events.remove(cancelled);
@@ -869,7 +871,10 @@ fn mutated_time_journals_are_rejected() {
             assert!(
                 matches!(
                     fault_of(events),
-                    TimeFault::NotCancelling { state: "open", .. }
+                    TimeFault::NotCancelling {
+                        state: "active",
+                        ..
+                    }
                 ),
                 "log {log}"
             );
