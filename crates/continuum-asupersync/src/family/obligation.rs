@@ -31,10 +31,12 @@
 //!
 //! `continuum_task::region` has a ledger of its own (`obligation::Ledger`), and its
 //! teardown's post-condition `Finalization::is_total` is "no orphan worker, and the
-//! ledger balanced". The calculus's ledger holds only the calculus's own obligation
-//! kinds and cannot be opened from outside, so the lift keeps the substrate's ledger
-//! beside it under the calculus's linear rules and strengthens the post-condition with
-//! it (`lift`, `finish`):
+//! ledger balanced". Since RFC 0026 correction 51 that ledger takes adapter obligations
+//! through one typed entry point, and the lift (bn-j1a50) opens, discharges (with the
+//! outcome, `committed` or `aborted`) and transfers every journaled obligation there, so
+//! `is_total` counts them. A leak is not a discharge, so a leaked obligation stays open
+//! in the calculus's ledger. The lift also keeps its own account per region, for the
+//! settle checks the calculus cannot make (`lift`, `finish`):
 //!
 //! 1. an obligation is opened once, by a live holder, in the region that owns the
 //!    holder, while that region still accepts work;
@@ -43,8 +45,7 @@
 //! 3. a region settles only after the model finalized it, and its reported balance is
 //!    the ledger's own: the obligations still open in it and the ones leaked in it;
 //! 4. a settled region with an open or leaked obligation violates "region close implies
-//!    no obligations": the calculus's `is_total` holds, but the substrate's ledger does
-//!    not balance;
+//!    no obligations", and the calculus's own finalization is not total either;
 //! 5. every region the model finalized has settled.
 //!
 //! # Identity
@@ -55,6 +56,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use continuum_task::region::obligation::{
+    SubstrateId, SubstrateKind, SubstrateObligation, SubstrateOutcome,
+};
 use continuum_task::region::worker::WorkerId;
 use continuum_task::region::{RegionId, RegionState};
 
@@ -698,6 +702,15 @@ fn open_entry(
     Ok(entry)
 }
 
+/// The calculus handle for a journal obligation: its kind's token and its ordinal. A
+/// leak is not a discharge, so a leaked obligation stays open in the calculus's ledger
+/// and its region's `Finalization::is_total` is false.
+fn substrate(kind: ObligationKind, obligation: u32) -> SubstrateObligation {
+    let kind = SubstrateKind::new(kind.token())
+        .unwrap_or_else(|_| unreachable!("every obligation kind token is canonical"));
+    SubstrateObligation::new(kind, SubstrateId::at(u64::from(obligation)))
+}
+
 fn members(set: &ObligationSet) -> Vec<u32> {
     set.0.iter().map(|o| o.0).collect()
 }
@@ -727,6 +740,10 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
                     state: state.token(),
                 }));
             }
+            // The obligation enters the calculus's own ledger, so `is_total` counts it
+            // (RFC 0026 correction 51 item 3).
+            cx.tree
+                .open_substrate(WorkerId::at(holder.0), substrate(*kind, obligation.0))?;
             cx.obligation.entries.insert(
                 obligation.0,
                 Entry {
@@ -741,6 +758,15 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
             let mut entry = open_entry(cx, obligation.0, event)?;
             if let ObligationEvent::Discharged { how, .. } = event {
                 check_holder(cx, obligation.0, entry.holder, entry.region)?;
+                let outcome = match how {
+                    Discharge::Committed => SubstrateOutcome::Committed,
+                    Discharge::Aborted => SubstrateOutcome::Aborted,
+                };
+                cx.tree.discharge_substrate(
+                    WorkerId::at(entry.holder),
+                    substrate(entry.kind, obligation.0),
+                    outcome,
+                )?;
                 entry.state = State::Discharged;
                 if *how == Discharge::Committed && entry.kind == ObligationKind::SendPermit {
                     *cx.obligation.permits.entry(entry.holder).or_insert(0) += 1;
@@ -762,6 +788,11 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
                 }));
             }
             check_holder(cx, obligation.0, holder.0, region.0)?;
+            cx.tree.transfer_substrate(
+                WorkerId::at(entry.holder),
+                substrate(entry.kind, obligation.0),
+                WorkerId::at(holder.0),
+            )?;
             entry.holder = holder.0;
             entry.region = region.0;
             cx.obligation.entries.insert(obligation.0, entry);

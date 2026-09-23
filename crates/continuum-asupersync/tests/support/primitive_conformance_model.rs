@@ -777,8 +777,6 @@ pub enum Fault {
     HalfEffect { task: u32 },
     /// A reservation step from the wrong phase.
     EffectPhase(u32),
-    /// A second reservation while one is staged.
-    SecondReservation(u32),
     /// An obligation step from the wrong phase or by the wrong holder.
     ObligationPhase(u32),
     /// An obligation whose region is not its holder's.
@@ -1351,7 +1349,8 @@ impl Model {
                 }
             }
             // docs/02 §7 effect protocol `Idle → Reserved(token)`, by a running task
-            // that is not cancelling, one staged effect at a time.
+            // that is not cancelling. A task may hold several reserved effects at once,
+            // each resolved exactly once (RFC 0026 correction 51 item 2, bn-j1a50).
             Step::Reserve { reservation, task } => {
                 fresh(self.reservations.len(), *reservation)?;
                 let t = self.task(*task)?;
@@ -1360,9 +1359,6 @@ impl Model {
                 }
                 if t.cancel != CancelPhase::None {
                     return Err(Fault::CancelPhase(*task));
-                }
-                if self.staged(*task) {
-                    return Err(Fault::SecondReservation(*task));
                 }
             }
             // `Reserved → Committed(result)`, by the running holder, before it starts
@@ -2123,10 +2119,7 @@ impl Model {
             let next = ord(self.reservations.len());
             for t in 0..tasks {
                 let task = &self.tasks[t as usize];
-                if task.phase == TaskPhase::Running
-                    && task.cancel == CancelPhase::None
-                    && !self.staged(t)
-                {
+                if task.phase == TaskPhase::Running && task.cancel == CancelPhase::None {
                     out.push(Pattern::Exact(Step::Reserve {
                         reservation: next,
                         task: t,

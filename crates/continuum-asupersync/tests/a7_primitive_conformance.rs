@@ -59,7 +59,8 @@ use continuum_asupersync::family::obligation::{
 use continuum_asupersync::family::time::{TimeEvent, VirtualInstant};
 use continuum_asupersync::family::{EventBody, Family};
 use continuum_asupersync::journal::Journal;
-use continuum_asupersync::lift::{LiftVerdict, lift};
+use continuum_asupersync::lift::{LiftVerdict, Nonconformance, lift};
+use continuum_task::region::RegionFault;
 use continuum_task::region::worker::Resumability;
 
 use model::{Alphabet, FamilyTag, Fault, Model, Verdict, WireFault};
@@ -308,18 +309,21 @@ fn clocked() -> Vec<Program> {
     ]
 }
 
-/// One task that reserves, aborts on purpose, reserves again and commits.
+/// One task that holds two reservations, aborts the first on purpose and commits the
+/// second, then reserves again and commits.
 fn explicit() -> Vec<Program> {
     vec![
         vec![
             spawn(ROOT, T[1]),
             begin(T[1]),
             reserve(T[1], 1),
+            reserve(T[1], 2),
             SubstrateOp::Abort {
                 reservation: ReservationLabel(1),
             },
-            reserve(T[1], 2),
             commit(2),
+            reserve(T[1], 3),
+            commit(3),
         ],
         vec![
             spawn(ROOT, T[2]),
@@ -651,18 +655,20 @@ fn every_substrate_journal_is_a_trace_the_conformance_model_accepts() {
 }
 
 #[test]
-fn an_explicit_abort_is_accepted_by_the_model_where_the_lift_is_inconclusive() {
-    // docs/02 §7 has `Reserved → Aborted(reason)` for any reason; the region calculus
-    // has no step for a worker dropping its staged publication, so the lift reads an
-    // explicit abort as unsupported semantics. The model is the wider of the two here,
-    // and the verdicts are typed apart rather than collapsed.
+fn explicit_aborts_and_several_held_reservations_are_accepted_by_the_model_and_the_lift() {
+    // docs/02 §7 has `Reserved → Aborted(reason)` for any reason, and RFC 0026
+    // correction 51 gives the calculus the holder's own abort (`AbortSlot`) and one
+    // staged publication per slot. Before bn-j1a50 the lift read an explicit abort as
+    // unsupported semantics; now both paths accept it, with two reservations held.
     let programs = explicit();
     for log in ChoiceLog::enumerate(&lengths(&programs)) {
         let journal = run(&programs, &log, &all_families()).unwrap();
         assert!(judge(&all_families(), &journal).is_accepted(), "log {log}");
         assert!(
-            matches!(lift(&journal), LiftVerdict::Inconclusive { .. }),
-            "log {log}"
+            matches!(lift(&journal), LiftVerdict::Conforms(_)),
+            "log {log}: {:?}\n{}",
+            lift(&journal),
+            journal.render()
         );
     }
 }
@@ -1310,8 +1316,76 @@ fn class_of(config: &BindingConfig, variant: &Journal, verdict: &Verdict) -> Str
 /// each (`Nonconformance::FinalizeWithoutDrain`, `EffectFault::OutsideCancelling`,
 /// `TimeFault::{OutsideCancelling, NotRunning, WokenBeforeFire, Late, OutlivesTask}`,
 /// `LedgerFault::HolderTerminal`), so the sweep requires agreement in both directions.
+///
+/// One known divergence remains, in the other direction, and it is pinned here:
+/// RFC 0026 correction 51's "known strictness, owned by bn-36wy3". The calculus decides
+/// "cancelling" per region, at the cancel request, and the model per task, at the
+/// task's acknowledgement. So an obligation transfer, or a committed discharge, placed
+/// between a cancel request and the holder's acknowledgement is admitted by the model
+/// and refused by the calculus (`SubstrateRegionNotOpen`,
+/// `SubstrateCommitDuringCancellation`). No real journal falls in that window; only
+/// perturbations do. The lift errs toward nonconformance, never toward a false
+/// `is_total`. When bn-36wy3 relaxes the calculus the count drops to zero, and this pin
+/// becomes the regression guard that it stays there.
+const KNOWN_STRICTNESS: usize = 33;
+
+/// Whether the lift's refusal at `seq` is correction 51's known strictness: a
+/// substrate transfer or committed discharge refused because the region is cancelling,
+/// at a point where a cancel request precedes it and neither party has acknowledged.
+fn in_strictness_window(variant: &Journal, seq: u64, reason: &Nonconformance) -> bool {
+    if !matches!(
+        reason,
+        Nonconformance::Refused(
+            RegionFault::SubstrateRegionNotOpen { .. }
+                | RegionFault::SubstrateCommitDuringCancellation { .. }
+        )
+    ) {
+        return false;
+    }
+    let at = usize::try_from(seq).unwrap();
+    let prefix = &bodies(variant)[..at];
+    let (obligation, target) = match variant.events()[at].body() {
+        EventBody::Obligation(ObligationEvent::Transferred {
+            obligation, holder, ..
+        }) => (*obligation, Some(*holder)),
+        EventBody::Obligation(ObligationEvent::Discharged {
+            obligation,
+            how: Discharge::Committed,
+        }) => (*obligation, None),
+        _ => return false,
+    };
+    let holder = prefix.iter().rev().find_map(|e| match e {
+        EventBody::Obligation(
+            ObligationEvent::Opened {
+                obligation: o,
+                holder,
+                ..
+            }
+            | ObligationEvent::Transferred {
+                obligation: o,
+                holder,
+                ..
+            },
+        ) if *o == obligation => Some(*holder),
+        _ => None,
+    });
+    let requested = prefix.iter().any(|e| {
+        matches!(
+            e,
+            EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { .. })
+        )
+    });
+    let acknowledged = |task: TaskOrdinal| {
+        prefix.iter().any(|e| {
+            matches!(e, EventBody::Cancellation(CancellationEvent::Acknowledged { task: t }) if *t == task)
+        })
+    };
+    requested && holder.is_some_and(|h| !acknowledged(h)) && target.is_none_or(|t| !acknowledged(t))
+}
+
 #[test]
 fn deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift() {
+    let mut known_strictness = 0_usize;
     let mut compared = 0_usize;
     let mut rejected_by_both = 0_usize;
     let mut disagreements: BTreeMap<String, usize> = BTreeMap::new();
@@ -1351,6 +1425,12 @@ fn deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift() {
                     }
                     // The model admits what the lift refuses: a hole in the model.
                     (true, false) => {
+                        if let LiftVerdict::Violates { seq, reason } = lift(&variant) {
+                            if in_strictness_window(&variant, seq, &reason) {
+                                known_strictness += 1;
+                                continue;
+                            }
+                        }
                         let reason = match lift(&variant) {
                             LiftVerdict::Violates { reason, .. } => format!("{reason:?}"),
                             other => format!("{other:?}"),
@@ -1378,6 +1458,10 @@ fn deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift() {
         "compared {compared}, rejected by both {rejected_by_both}, disagreements {disagreements:?}"
     );
     assert_eq!(compared, 23_587, "docs/18 C023 cites this count");
+    assert_eq!(
+        known_strictness, KNOWN_STRICTNESS,
+        "RFC 0026 correction 51's known strictness (bn-36wy3); docs/18 C023 cites it"
+    );
     assert!(
         disagreements.is_empty(),
         "{disagreements:?}\n{}",

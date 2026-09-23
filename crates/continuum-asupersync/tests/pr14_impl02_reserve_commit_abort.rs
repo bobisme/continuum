@@ -47,8 +47,7 @@ use continuum_asupersync::family::{EventBody, Family, Report};
 use continuum_asupersync::journal::Journal;
 use continuum_asupersync::lift::{LiftVerdict, Nonconformance, lift};
 use continuum_asupersync::source::{Script, record};
-use continuum_task::region::RegionFault;
-use continuum_task::region::worker::Resumability;
+use continuum_task::region::worker::{Resumability, WorkerId};
 use continuum_value::assurance::InconclusiveReason;
 
 const SEED: u64 = 0;
@@ -639,11 +638,13 @@ fn every_effect_journal_conforms_and_resolves_every_reservation_once() {
     }
 }
 
-/// Real runs the calculus must not admit. A task that holds two reservations at once
-/// is a second staged publication, which the calculus refuses. An explicit abort has no
-/// step in the calculus, so the lift is inconclusive there, never a pass.
+/// Real runs the calculus once refused, now admitted (RFC 0026 correction 51, adopted by
+/// bn-j1a50). A task that holds two reservations at once stages one publication per
+/// slot, so it conforms. An explicit abort is the calculus's `AbortSlot`, so it conforms
+/// too, where it used to lift as inconclusive. Regression guard: each must conform,
+/// with every slot resolved: nothing staged, and only the commits published.
 #[test]
-fn the_calculus_judges_real_runs_it_does_not_admit() {
+fn the_calculus_admits_several_held_reservations_and_an_explicit_abort() {
     let a = TaskLabel(1);
     let two_held = vec![vec![
         spawn(RegionLabel::ROOT, a),
@@ -654,14 +655,18 @@ fn the_calculus_judges_real_runs_it_does_not_admit() {
         commit(1),
     ]];
     let journal = run(&two_held, &ChoiceLog::new([0; 6]), &config(SEED)).unwrap();
+    let reserved = journal
+        .events()
+        .iter()
+        .filter(|e| matches!(e.body(), EventBody::Effect(EffectEvent::Reserved { .. })))
+        .count();
+    assert_eq!(reserved, 2, "{}", journal.render());
     match lift(&journal) {
-        LiftVerdict::Violates {
-            seq,
-            reason: Nonconformance::Refused(RegionFault::ReserveOverProvisional { .. }),
-        } => assert!(matches!(
-            journal.events()[usize::try_from(seq).unwrap()].body(),
-            EventBody::Effect(EffectEvent::Reserved { .. })
-        )),
+        LiftVerdict::Conforms(lifted) => {
+            let evidence = lifted.tree().evidence(WorkerId::at(0)).unwrap();
+            assert!(!evidence.is_provisional());
+            assert_eq!(evidence.committed(), 2);
+        }
         other => panic!("{other:?}\n{}", journal.render()),
     }
 
@@ -679,14 +684,14 @@ fn the_calculus_judges_real_runs_it_does_not_admit() {
             reservation: ReservationOrdinal(0),
             cause: AbortCause::Explicit,
         })));
-    assert!(matches!(
-        lift(&journal),
-        LiftVerdict::Inconclusive {
-            family: Family::Effect,
-            reason: InconclusiveReason::Unsupported,
-            ..
+    match lift(&journal) {
+        LiftVerdict::Conforms(lifted) => {
+            let evidence = lifted.tree().evidence(WorkerId::at(0)).unwrap();
+            assert!(!evidence.is_provisional());
+            assert_eq!(evidence.committed(), 0, "an abort publishes nothing");
         }
-    ));
+        other => panic!("{other:?}\n{}", journal.render()),
+    }
 }
 
 /// One run, pinned in full. `t0` in `r1` holds `e0` when `r1` is cancelled: the abort

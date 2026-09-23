@@ -29,17 +29,18 @@
 //!
 //! # How the events relate to the region calculus
 //!
-//! `continuum_task::region` already has the effect phase for a worker's publication:
-//! `WorkerStep::Reserve` stages one, `WorkerStep::Commit` commits it, and a cancelled
-//! region's drain discards whatever is still staged. So the lift (`lift`, `finish`)
-//! replays the events as those steps and holds each reservation to its own machine:
+//! `continuum_task::region` has the effect phase for a worker's publications, one per
+//! `PublicationSlot` (RFC 0026 correction 51): `WorkerStep::ReserveSlot` stages one,
+//! `CommitSlot` commits it, `AbortSlot` drops it, and a cancelled region's drain
+//! discards whatever is still staged. The lift (`lift`, `finish`) gives each reservation
+//! its own slot, named by its ordinal, so a task may hold several (bn-j1a50), and holds
+//! each reservation to its own machine:
 //!
 //! 1. a reservation is `Reserved` once, by the task that then holds it, and the
-//!    calculus must admit the `Reserve` step (the task is running, and it holds no other
-//!    staged publication);
+//!    calculus must admit the `ReserveSlot` step (the task is running);
 //! 2. it resolves exactly once: a second resolution, a commit after an abort or an
 //!    abort after a commit is a fault;
-//! 3. a commit is the calculus's `Commit` step;
+//! 3. a commit is the calculus's `CommitSlot` step;
 //! 4. an abort for `cancel` happens only while the task's region drains under
 //!    cancellation, the task is live, and the model still holds its staged publication,
 //!    all before the drain that discards it; when the journal reports the task's
@@ -48,9 +49,12 @@
 //! 5. no reservation is left unresolved once the model has terminated its task: that is
 //!    a leak at region close.
 //!
-//! An abort for `explicit` has no step in the calculus: a running worker cannot drop a
-//! staged publication there, only fail or be drained. The lift reports it as
-//! inconclusive (unsupported semantics), after it checks the reservation's own phase.
+//! An abort for `explicit` is the holder's own `Reserved → Aborted`, the calculus's
+//! `AbortSlot` (RFC 0026 correction 51 item 1): the task is running and has not entered
+//! its cancellation, and nothing is published. Before bn-j1a50 the calculus had no such
+//! step and the lift read it as inconclusive. A cancellation's abort stays with the
+//! drain's discard, because the aborting task may be parked and `AbortSlot` is a step
+//! of a running task.
 //!
 //! # Identity
 //!
@@ -60,12 +64,12 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use continuum_task::region::worker::{WorkerId, WorkerStep};
+use continuum_task::region::worker::{PublicationSlot, WorkerId, WorkerStep};
 use continuum_task::region::{DrainCause, RegionState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
+use crate::family::EventBody;
 use crate::family::lifecycle::TaskOrdinal;
-use crate::family::{EventBody, Family};
 use crate::lift::{LiftContext, LiftStop, Nonconformance};
 use crate::source::{RecordContext, RecordRefusal};
 
@@ -307,6 +311,15 @@ pub enum EffectFault {
         /// The task's cancellation phase.
         phase: &'static str,
     },
+    /// An explicit abort by a task whose cancellation has reached `Cancelling`: such a
+    /// task no longer acts on its own account, and its aborts are cancellation cleanup
+    /// (bn-j1a50).
+    ExplicitAbortWhileCancelling {
+        /// The reservation.
+        reservation: u32,
+        /// The holding task.
+        task: u32,
+    },
     /// The model terminated the holding task while the reservation was unresolved.
     LeakedAtClose {
         /// The reservation.
@@ -358,6 +371,10 @@ impl fmt::Display for EffectFault {
                 f,
                 "e{reservation} aborts for cancel but t{task}'s cancellation is {phase}"
             ),
+            Self::ExplicitAbortWhileCancelling { reservation, task } => write!(
+                f,
+                "e{reservation} aborts explicitly but t{task} is already cancelling"
+            ),
             Self::LeakedAtClose { reservation, task } => write!(
                 f,
                 "t{task} was terminated with e{reservation} still reserved: a leak at region close"
@@ -386,7 +403,12 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
                 expected,
             }));
         }
-        cx.tree.advance(WorkerId::at(task.0), WorkerStep::Reserve)?;
+        // Each reservation stages its own publication, in the slot its ordinal names
+        // (RFC 0026 correction 51 item 2), so a task may hold several at once.
+        cx.tree.advance(
+            WorkerId::at(task.0),
+            WorkerStep::ReserveSlot(slot(reservation)),
+        )?;
         cx.effect
             .reservations
             .insert(reservation, (task.0, Phase::Reserved));
@@ -405,7 +427,8 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
     let worker = WorkerId::at(task);
     let next = match event {
         EffectEvent::Committed { .. } => {
-            cx.tree.advance(worker, WorkerStep::Commit)?;
+            cx.tree
+                .advance(worker, WorkerStep::CommitSlot(slot(reservation)))?;
             Phase::Committed
         }
         EffectEvent::Aborted {
@@ -440,14 +463,32 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
             }
             Phase::Aborted
         }
+        // The holder's own abort: `Reserved → Aborted(explicit)`, the calculus's
+        // `AbortSlot` (RFC 0026 correction 51 item 1), taken by a running task that has
+        // not entered its cancellation.
         EffectEvent::Aborted {
             cause: AbortCause::Explicit,
             ..
-        } => return Err(LiftStop::Unsupported(Family::Effect)),
+        } => {
+            if crate::family::cancellation::is_cancelling(cx, task) {
+                return Err(fault(EffectFault::ExplicitAbortWhileCancelling {
+                    reservation,
+                    task,
+                }));
+            }
+            cx.tree
+                .advance(worker, WorkerStep::AbortSlot(slot(reservation)))?;
+            Phase::Aborted
+        }
         EffectEvent::Reserved { .. } => unreachable!("handled above"),
     };
     cx.effect.reservations.insert(reservation, (task, next));
     Ok(())
+}
+
+/// The calculus slot a reservation stages in: its own ordinal.
+const fn slot(reservation: u32) -> PublicationSlot {
+    PublicationSlot::at(reservation)
 }
 
 /// The whole-journal check, run after the last event: no reservation is still reserved

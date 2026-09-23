@@ -121,7 +121,14 @@ and the model's guard admits each generated step. A run that leaks an obligation
 is rejected by the model at its region's close. Twenty-one curated perturbations of
 real journals are rejected by the model, each for its own fault, and by the lift.
 Over 23587 single-event deletions and adjacent swaps, the model and the lift give
-the same verdict in both directions.
+the same verdict in both directions, with one pinned exception. Since bn-j1a50 the
+lift runs the substrate ledger inside the region calculus (RFC 0026 correction 51).
+In 33 perturbations, an obligation transfer lands between a cancel request and the
+holder's acknowledgement. The model admits each one. The calculus refuses each one,
+because it decides "cancelling" per region at the request, not per task at the
+acknowledgement. This is correction 51's known strictness, and bn-36wy3 owns it. The
+lift errs toward nonconformance, never toward a false `is_total`, and no real
+journal falls in that window.
 
 That agreement is the result of two repairs. When bn-ujpz0 landed, the lift accepted
 666 of 19345 perturbations that the model rejected, in seven classes. Examples are a
