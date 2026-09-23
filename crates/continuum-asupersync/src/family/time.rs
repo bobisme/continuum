@@ -29,11 +29,14 @@
 //! 1. the clock starts at zero and is monotone: an advance starts at the current
 //!    instant and moves forward, and every scheduled, fired or cancelled event happens
 //!    at the current instant;
-//! 2. a timer is scheduled once, by a live task, with a deadline after the instant it
-//!    was scheduled;
+//! 2. a timer is scheduled once, by a running task whose cancellation has not begun and
+//!    that sleeps on no other timer, with a deadline after the instant it was
+//!    scheduled (bn-1i050);
 //! 3. it fires or is cancelled exactly once; it fires only at or after its deadline;
 //!    it is cancelled only while its task's region drains under cancellation and the
-//!    task is live;
+//!    task is live, and after the task's acknowledgement when the journal reports its
+//!    cancellation phases (bn-1i050); a sleeping task resumes only after its timer
+//!    fired (bn-1i050);
 //! 4. no timer is late: before the clock advances, before a new timer is scheduled,
 //!    and at the end, no scheduled timer's deadline has passed;
 //! 5. no timer outlives its task: once the model terminates a task, its timers have
@@ -47,7 +50,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use continuum_task::region::worker::WorkerId;
+use continuum_task::region::worker::{WorkerId, WorkerState};
 use continuum_task::region::{DrainCause, RegionState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
@@ -306,7 +309,35 @@ pub enum TimeFault {
         /// The model's token for the region's state.
         state: &'static str,
     },
-    /// The model terminated a task whose timer was still scheduled.
+    /// A timer scheduled by a task that is not running, or whose cancellation has
+    /// begun, or that already sleeps: a task sleeps by calling `sleep_until` while it
+    /// runs, one timer at a time (bn-1i050).
+    NotRunning {
+        /// The timer.
+        timer: u32,
+        /// The task.
+        task: u32,
+        /// The model's status token for the task, or its cancellation phase.
+        state: &'static str,
+    },
+    /// A timer was cancelled by a task whose reported cancellation phase is not
+    /// `acknowledged`: dropping it is a `Cancelling ─ finalize(resource)*` step (docs/02
+    /// §7; bn-1i050).
+    OutsideCancelling {
+        /// The timer.
+        timer: u32,
+        /// The task's cancellation phase.
+        phase: &'static str,
+    },
+    /// A sleeping task resumed while its timer was still scheduled (bn-1i050).
+    WokenBeforeFire {
+        /// The task.
+        task: u32,
+        /// Its scheduled timer.
+        timer: u32,
+    },
+    /// A task ended (the model terminated it, or the journal reported it completed as
+    /// cancelled) while its timer was still scheduled.
     OutlivesTask {
         /// The timer.
         timer: u32,
@@ -356,6 +387,16 @@ impl fmt::Display for TimeFault {
             }
             Self::NotCancelling { timer, state } => {
                 write!(f, "k{timer} was cancelled but its task's region is {state}")
+            }
+            Self::NotRunning { timer, task, state } => {
+                write!(f, "k{timer} scheduled by t{task}, which is {state}")
+            }
+            Self::OutsideCancelling { timer, phase } => write!(
+                f,
+                "k{timer} was cancelled but its task's cancellation is {phase}"
+            ),
+            Self::WokenBeforeFire { task, timer } => {
+                write!(f, "t{task} resumed while k{timer} was still scheduled")
             }
             Self::OutlivesTask { timer, task } => {
                 write!(f, "t{task} ended with k{timer} still scheduled")
@@ -437,6 +478,20 @@ pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftSt
                     deadline: deadline.0,
                 }));
             }
+            let state = cx.tree.worker_state(WorkerId::at(task.0))?;
+            let not_running = if *state == WorkerState::Running {
+                crate::family::cancellation::phase_of(cx, task.0)
+                    .or_else(|| armed_for(cx, task.0).map(|_| "asleep"))
+            } else {
+                Some(state.status_token())
+            };
+            if let Some(state) = not_running {
+                return Err(fault(TimeFault::NotRunning {
+                    timer: timer.0,
+                    task: task.0,
+                    state,
+                }));
+            }
             cx.time.timers.insert(
                 timer.0,
                 Timer {
@@ -488,12 +543,55 @@ pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftSt
                         state: state.token(),
                     }));
                 }
+                if let Some(phase) = crate::family::cancellation::outside_cancelling(cx, entry.task)
+                {
+                    return Err(fault(TimeFault::OutsideCancelling {
+                        timer: timer.0,
+                        phase,
+                    }));
+                }
                 entry.state = State::Cancelled;
             }
             cx.time.timers.insert(timer.0, entry);
         }
     }
     Ok(())
+}
+
+/// The first timer `task` sleeps on (scheduled, not fired or cancelled), if any.
+pub(crate) fn armed_for(cx: &LiftContext, task: u32) -> Option<u32> {
+    cx.time
+        .timers
+        .iter()
+        .find(|(_, entry)| entry.task == task && entry.state == State::Scheduled)
+        .map(|(timer, _)| *timer)
+}
+
+/// A task may resume only when no timer it sleeps on is still scheduled. A timer
+/// already due is [`TimeFault::Late`] (it should have fired first); one not yet due is
+/// [`TimeFault::WokenBeforeFire`].
+pub(crate) fn check_not_asleep(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {
+    let Some(timer) = armed_for(cx, task) else {
+        return Ok(());
+    };
+    let deadline = cx.time.timers.get(&timer).map_or(0, |entry| entry.deadline);
+    if deadline <= cx.time.now {
+        return Err(fault(TimeFault::Late {
+            timer,
+            deadline,
+            now: cx.time.now,
+        }));
+    }
+    Err(fault(TimeFault::WokenBeforeFire { task, timer }))
+}
+
+/// A task that completes as cancelled sleeps on no timer; one still scheduled is
+/// [`TimeFault::OutlivesTask`].
+pub(crate) fn check_none_armed(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {
+    match armed_for(cx, task) {
+        Some(timer) => Err(fault(TimeFault::OutlivesTask { timer, task })),
+        None => Ok(()),
+    }
 }
 
 /// The whole-journal check, run after the last event: no timer is late, and no timer

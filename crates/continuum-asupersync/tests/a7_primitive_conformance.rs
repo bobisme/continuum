@@ -17,8 +17,9 @@
 //!   own check is [`lift`], into `continuum_task::region` and the families' parallel
 //!   models.
 //! - **Model side.** `support/primitive_conformance_model.rs`: a transition system of
-//!   regions, tasks, cancellation phases, effects, obligations and virtual time, written
-//!   from docs/02 §7, docs/02 §5, docs/01 §6 and plan §4.1. It imports `std` only and
+//!   regions, tasks, cancellation phases, effects, obligations, virtual time and
+//!   bounded channels (bn-1i050), written from docs/02 §7, docs/02 §5, docs/01 §6 and
+//!   plan §4.1. It imports `std` only and
 //!   reads the journal from its canonical **bytes** with its own reader, so it shares
 //!   neither the adapter's types, its decoder, its lift, nor its scripted source.
 //!   `tools/check_triptych_independence.py` (rule `a7-model-independent`) holds that.
@@ -33,9 +34,9 @@
 //! | every substrate journal in the corpus is a trace the model accepts, and the lift agrees | [`every_substrate_journal_is_a_trace_the_conformance_model_accepts`] |
 //! | converse: at every position of a sample, the model's enabled steps include what the substrate did, and the generator and the guard agree | [`the_models_enabled_steps_include_what_the_substrate_did`] |
 //! | a run that leaks an obligation is rejected by the model at its region's close, and by the lift | [`a_leaking_run_is_rejected_by_the_model_and_by_the_lift`] |
-//! | curated perturbations of real journals are rejected by the model, each for its own fault | [`perturbed_journals_are_rejected_by_the_conformance_model`] |
-//! | every single-event deletion and adjacent swap of a sample: the model and the lift give the same verdict | [`deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift`] |
-//! | the model reads bytes: truncations and bad tags are malformed, the channel family is unsupported | [`the_model_reads_the_canonical_bytes_and_types_what_it_cannot_judge`] |
+//! | curated perturbations of real journals are rejected by the model, each for its own fault, and by the lift | [`perturbed_journals_are_rejected_by_the_conformance_model`] |
+//! | every single-event deletion and adjacent swap of a sample: the model and the lift give the same verdict, in both directions | [`deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift`] |
+//! | the model reads bytes: truncations, trailing bytes and unknown family tags are malformed | [`the_model_reads_the_canonical_bytes_and_types_what_it_cannot_judge`] |
 
 #[path = "support/primitive_conformance_model.rs"]
 mod model;
@@ -45,6 +46,9 @@ use std::collections::BTreeMap;
 use continuum_asupersync::binding::{BindingConfig, Program, SubstrateOp, run};
 use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::family::cancellation::{CancelCause, CancellationEvent};
+use continuum_asupersync::family::channel::{
+    ChannelEvent, ChannelLabel, MessageOrdinal, MessageSet,
+};
 use continuum_asupersync::family::effect::{AbortCause, EffectEvent, ReservationLabel};
 use continuum_asupersync::family::lifecycle::{
     LifecycleEvent, RegionLabel, RegionOrdinal, TaskLabel, TaskOrdinal, TaskSet, TaskStep,
@@ -325,6 +329,113 @@ fn explicit() -> Vec<Program> {
     ]
 }
 
+const fn send(task: TaskLabel, channel: ChannelLabel) -> SubstrateOp {
+    SubstrateOp::Send { task, channel }
+}
+
+const fn recv(channel: ChannelLabel) -> SubstrateOp {
+    SubstrateOp::Recv { channel }
+}
+
+const C1: ChannelLabel = ChannelLabel(1);
+const C2: ChannelLabel = ChannelLabel(2);
+
+/// Channels under cancellation. Two root producers race into `c1` (capacity 1), whose
+/// receiver is in `r1`; a producer in `r1` and one at the root race into `c2`
+/// (capacity 1), whose root receiver receives once. `r1`'s actor sends, receives once,
+/// then cancels `r1`: the cancellation can find its receiver blocked (an abandoned
+/// receive) or holding a message (dropped with the receiver), and its producer blocked
+/// on `c2` (an abandoned send). Setup first, then the actors.
+fn channels_cancel() -> (Program, Vec<Program>) {
+    let mut setup = vec![open(ROOT, R[1])];
+    for (region, task) in [
+        (ROOT, T[1]),
+        (ROOT, T[2]),
+        (R[1], T[3]),
+        (R[1], T[4]),
+        (ROOT, T[5]),
+        (ROOT, T[6]),
+    ] {
+        setup.push(spawn(region, task));
+    }
+    for task in &T[1..=6] {
+        setup.push(begin(*task));
+    }
+    setup.push(SubstrateOp::OpenChannel {
+        channel: C1,
+        capacity: 1,
+        receiver: T[3],
+    });
+    setup.push(SubstrateOp::OpenChannel {
+        channel: C2,
+        capacity: 1,
+        receiver: T[5],
+    });
+    let actors = vec![
+        vec![send(T[1], C1)],
+        vec![send(T[2], C1)],
+        vec![
+            send(T[4], C2),
+            recv(C1),
+            SubstrateOp::Cancel { region: R[1] },
+        ],
+        vec![send(T[6], C2)],
+        vec![recv(C2)],
+    ];
+    (setup, actors)
+}
+
+/// Channels that close. Three root producers race into `c1` (capacity 2), whose
+/// receiver's task finishes without receiving: it goes with what is queued, and a
+/// blocked producer then fails as closed. On `c2` the kept sender is dropped while its
+/// receiver receives once: closed, before or after the receive blocks.
+fn channels_close() -> (Program, Vec<Program>) {
+    let mut setup = Vec::new();
+    for task in &T[1..=5] {
+        setup.push(spawn(ROOT, *task));
+        setup.push(begin(*task));
+    }
+    setup.push(SubstrateOp::OpenChannel {
+        channel: C1,
+        capacity: 2,
+        receiver: T[4],
+    });
+    setup.push(SubstrateOp::OpenChannel {
+        channel: C2,
+        capacity: 1,
+        receiver: T[5],
+    });
+    let actors = vec![
+        vec![send(T[1], C1)],
+        vec![send(T[2], C1)],
+        vec![send(T[3], C1)],
+        vec![SubstrateOp::Finish { task: T[4] }],
+        vec![SubstrateOp::CloseSenders { channel: C2 }],
+        vec![recv(C2)],
+    ];
+    (setup, actors)
+}
+
+/// The programs (setup as actor 0) and a sample of logs that run the setup first.
+fn sample_with_setup(
+    setup: Program,
+    actors: Vec<Program>,
+    rng: &mut Splitmix,
+) -> (Vec<Program>, Vec<ChoiceLog>) {
+    let prefix = setup.len();
+    let logs = sample(&actors, rng)
+        .into_iter()
+        .map(|log| {
+            let mut choices = vec![0; prefix];
+            choices.extend(log.choices().iter().map(|c| c.0));
+            ChoiceLog::new(choices)
+        })
+        .collect();
+    let mut programs = vec![setup];
+    programs.extend(actors);
+    (programs, logs)
+}
+
 fn lengths(programs: &[Program]) -> Vec<usize> {
     programs.iter().map(Vec::len).collect()
 }
@@ -389,6 +500,7 @@ fn all_families() -> BindingConfig {
         .observing(Family::Cancellation)
         .observing(Family::Obligation)
         .observing(Family::Time)
+        .observing(Family::Channel)
 }
 
 /// The model's alphabet for a binding configuration: the same families, named by the
@@ -399,6 +511,7 @@ fn alphabet(config: &BindingConfig) -> Alphabet {
         (Family::Cancellation, FamilyTag::Cancellation),
         (Family::Obligation, FamilyTag::Obligation),
         (Family::Time, FamilyTag::Time),
+        (Family::Channel, FamilyTag::Channel),
     ];
     Alphabet::new(
         pairs
@@ -420,6 +533,19 @@ struct Entry {
 fn corpus() -> Vec<Entry> {
     let mut rng = Splitmix(0xa7a7_a7a7_0c02_3a70);
     let mut out = Vec::new();
+    // The channel sets run a fixed setup first (actor 0), then interleave the rest.
+    for (name, (setup, actors)) in [
+        ("channels-cancel", channels_cancel()),
+        ("channels-close", channels_close()),
+    ] {
+        let (programs, logs) = sample_with_setup(setup, actors, &mut rng);
+        out.push(Entry {
+            name,
+            programs,
+            logs,
+            config: all_families(),
+        });
+    }
     let sets: [(&'static str, Vec<Program>); 6] = [
         ("lifecycle", lifecycle()),
         ("cascade", cascade()),
@@ -472,14 +598,7 @@ fn judge(config: &BindingConfig, journal: &Journal) -> Verdict {
 }
 
 fn steps_of(journal: &Journal) -> Vec<model::Step> {
-    model::read(&journal.encode().unwrap())
-        .unwrap()
-        .into_iter()
-        .map(|decoded| match decoded {
-            model::Decoded::Step(step) => step,
-            model::Decoded::Uncovered { tag } => panic!("uncovered family {tag}"),
-        })
-        .collect()
+    model::read(&journal.encode().unwrap()).unwrap()
 }
 
 // --- acceptance ----------------------------------------------------------------------
@@ -516,7 +635,7 @@ fn every_substrate_journal_is_a_trace_the_conformance_model_accepts() {
     eprintln!("{runs} runs, events per family {per_family:?}");
     // The corpus is deterministic (explicit seeds, seed-independent journals), and
     // docs/18's C023 record cites these counts.
-    assert_eq!(runs, 6_381, "docs/18 C023 cites this count");
+    assert_eq!(runs, 7_513, "docs/18 C023 cites this count");
     for family in [
         "lifecycle",
         "reserve-commit-abort",
@@ -588,7 +707,7 @@ fn the_models_enabled_steps_include_what_the_substrate_did() {
         }
     }
     eprintln!("{positions} positions, {exact_checked} generated steps checked by the guard");
-    assert_eq!(positions, 24_288, "docs/18 C023 cites this count");
+    assert_eq!(positions, 29_761, "docs/18 C023 cites this count");
     assert!(exact_checked > positions, "{exact_checked}");
 }
 
@@ -988,6 +1107,116 @@ fn mutants() -> Vec<Mutant> {
             },
             |f| matches!(f, Fault::NotAhead),
         ),
+        (
+            "a receiver takes a message that is not the oldest queued",
+            |j| {
+                let mut b = bodies(j);
+                let at = position(j, |e| {
+                    matches!(e, EventBody::Channel(ChannelEvent::Received { .. }))
+                })?;
+                if let EventBody::Channel(ChannelEvent::Received { channel, message }) = b[at] {
+                    b[at] = EventBody::Channel(ChannelEvent::Received {
+                        channel,
+                        message: MessageOrdinal(message.0 + 100),
+                    });
+                }
+                Some(rebuild(b))
+            },
+            |f| matches!(f, Fault::Channel { .. }),
+        ),
+        (
+            "a receiver goes declaring one queued message fewer",
+            |j| {
+                let mut b = bodies(j);
+                let at = position(j, |e| {
+                    matches!(e, EventBody::Channel(ChannelEvent::ReceiverGone { discarded, .. })
+                        if !discarded.as_slice().is_empty())
+                })?;
+                if let EventBody::Channel(ChannelEvent::ReceiverGone { channel, discarded }) =
+                    &b[at]
+                {
+                    let fewer = MessageSet::new(discarded.as_slice()[1..].iter().copied());
+                    b[at] = EventBody::Channel(ChannelEvent::ReceiverGone {
+                        channel: *channel,
+                        discarded: fewer,
+                    });
+                }
+                Some(rebuild(b))
+            },
+            |f| matches!(f, Fault::Channel { .. }),
+        ),
+        (
+            "a message is sent without its committed send permit",
+            |j| {
+                let mut b = bodies(j);
+                let sent = position(j, |e| {
+                    matches!(e, EventBody::Channel(ChannelEvent::Sent { .. }))
+                })?;
+                let commit = (0..sent).rev().find(|i| {
+                    matches!(
+                        b[*i],
+                        EventBody::Obligation(ObligationEvent::Discharged {
+                            how: Discharge::Committed,
+                            ..
+                        })
+                    )
+                })?;
+                b.remove(commit);
+                Some(rebuild(b))
+            },
+            |f| matches!(f, Fault::NoSendPermit { .. }),
+        ),
+        (
+            "a blocked send is reported sent into the full channel",
+            |j| {
+                let mut b = bodies(j);
+                let at = position(j, |e| {
+                    matches!(e, EventBody::Channel(ChannelEvent::SendBlocked { .. }))
+                })?;
+                if let EventBody::Channel(ChannelEvent::SendBlocked {
+                    channel,
+                    message,
+                    sender,
+                }) = b[at]
+                {
+                    b[at] = EventBody::Channel(ChannelEvent::Sent {
+                        channel,
+                        message,
+                        sender,
+                    });
+                }
+                Some(rebuild(b))
+            },
+            |f| matches!(f, Fault::Channel { .. } | Fault::NoSendPermit { .. }),
+        ),
+        (
+            "a blocked receive is abandoned before the receiver's acknowledgement",
+            |j| {
+                let mut b = bodies(j);
+                let at = position(j, |e| {
+                    matches!(e, EventBody::Channel(ChannelEvent::RecvAbandoned { .. }))
+                })?;
+                let EventBody::Channel(ChannelEvent::RecvAbandoned { channel }) = b[at] else {
+                    return None;
+                };
+                let receiver = b.iter().find_map(|e| match e {
+                    EventBody::Channel(ChannelEvent::Opened {
+                        channel: c,
+                        receiver,
+                        ..
+                    }) if *c == channel => Some(*receiver),
+                    _ => None,
+                })?;
+                let ack = position(
+                    j,
+                    |e| matches!(e, EventBody::Cancellation(CancellationEvent::Acknowledged { task }) if *task == receiver),
+                )?;
+                let abandoned = b.remove(at);
+                b.insert(ack, abandoned);
+                Some(rebuild(b))
+            },
+            |f| matches!(f, Fault::TaskPhase(_)),
+        ),
     ]
 }
 
@@ -996,13 +1225,21 @@ fn perturbed_journals_are_rejected_by_the_conformance_model() {
     let config = all_families();
     // Real journals with every family in them: one per program set that has the
     // events a mutant perturbs.
-    let bases: Vec<Journal> = [effects(), ledger(), clocked(), cascade()]
+    let mut bases: Vec<Journal> = [effects(), ledger(), clocked(), cascade()]
         .iter()
         .map(|programs| {
             let log = ChoiceLog::enumerate(&lengths(programs)).remove(0);
             run(programs, &log, &config).unwrap()
         })
         .collect();
+    // Channel journals: every tenth sampled log of each channel set.
+    let mut rng = Splitmix(0xc4a7);
+    for (setup, actors) in [channels_cancel(), channels_close()] {
+        let (programs, logs) = sample_with_setup(setup, actors, &mut rng);
+        for log in logs.iter().step_by(10) {
+            bases.push(run(&programs, log, &config).unwrap());
+        }
+    }
     let mut rejected = 0;
     let mut admitted_by_lift = Vec::new();
     for (name, mutate, expected) in mutants() {
@@ -1032,17 +1269,10 @@ fn perturbed_journals_are_rejected_by_the_conformance_model() {
             "{name}: no base journal has the event it perturbs"
         );
     }
-    assert_eq!(mutants().len(), 16, "docs/18 C023 cites this count");
+    assert_eq!(mutants().len(), 21, "docs/18 C023 cites this count");
     assert!(rejected >= mutants().len());
-    // The lift rejects every mutant but one class, which is a gap in its own check
-    // (see `LIFT_GAPS`, `TaskPhase at Abort`). The model rejects that one too.
-    assert!(!admitted_by_lift.is_empty());
-    assert!(
-        admitted_by_lift
-            .iter()
-            .all(|name| *name == "a cancel abort precedes the holder's acknowledgement"),
-        "{admitted_by_lift:?}"
-    );
+    // Since bn-1i050 the lift rejects every mutant the model rejects.
+    assert!(admitted_by_lift.is_empty(), "{admitted_by_lift:?}");
 }
 
 /// The lift's verdict, as the model's two outcomes: conforms, or not.
@@ -1072,43 +1302,20 @@ fn class_of(config: &BindingConfig, variant: &Journal, verdict: &Verdict) -> Str
     format!("{fault} at {step}")
 }
 
-/// Where the two paths part: each class is a perturbation the model refuses and the
-/// lift admits, because the model takes a rule from the normative text that the lift
-/// does not check. They are findings about the adapter's self-check (bn-ujpz0 report),
-/// pinned here so a new kind of disagreement fails this test:
-///
-/// - `RegionPhase at Finalize`: a region's drain report is lost and its finalize still
-///   lifts. The region calculus accepts `finalize` on any requested region whose
-///   workers are terminal (`RegionFault::FinalizeBeforeDrain` only without a request);
-///   research/09 orders the teardown `cancel . drain . finalize`, and the binding always
-///   reports the drain.
-/// - `TaskPhase at Abort` and `TaskPhase at TimerCancelled`: a cancellation's cleanup
-///   (an effect abort, a timer drop) placed before the task acknowledged its
-///   cancellation. docs/02 §7 makes them `Cancelling ─ drain(effect)* ─
-///   finalize(resource)*` steps, and the acknowledgement is the step into `Cancelling`.
-///   The lift checks that the region drains, not the task's phase.
-/// - `HeldObligation at CancelCompleted` and `TimerOutlivesSleep at CancelCompleted`: a
-///   task completes as cancelled before its cleanup ends. docs/02 §7 `obligations == ∅
-///   → Cancelled`. The lift checks at the region's drain, not at the task's completion.
-/// - `TaskPhase at Scheduled`: a parked task arms a timer. The lift requires a live
-///   task only; a task sleeps by calling `sleep_until` while it runs.
-/// - `TimerOutlivesSleep at Resume`: a sleeping task wakes before its timer fires.
-const LIFT_GAPS: &[&str] = &[
-    "RegionPhase at Finalize",
-    "TaskPhase at Abort",
-    "TaskPhase at TimerCancelled",
-    "HeldObligation at CancelCompleted",
-    "TimerOutlivesSleep at CancelCompleted",
-    "TaskPhase at Scheduled",
-    "TimerOutlivesSleep at Resume",
-];
-
+/// Before bn-1i050 the two paths parted on seven classes, each a perturbation the
+/// model refused and the lift admitted: a finalize with no drain report; a
+/// cancellation's effect abort or timer drop before the task's acknowledgement; a task
+/// completing as cancelled while it held an obligation or an armed timer; a parked task
+/// arming a timer; a sleeping task resuming before its timer fired. The lift now refuses
+/// each (`Nonconformance::FinalizeWithoutDrain`, `EffectFault::OutsideCancelling`,
+/// `TimeFault::{OutsideCancelling, NotRunning, WokenBeforeFire, Late, OutlivesTask}`,
+/// `LedgerFault::HolderTerminal`), so the sweep requires agreement in both directions.
 #[test]
 fn deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift() {
     let mut compared = 0_usize;
     let mut rejected_by_both = 0_usize;
-    let mut gaps: BTreeMap<String, usize> = BTreeMap::new();
-    let mut unexplained = Vec::new();
+    let mut disagreements: BTreeMap<String, usize> = BTreeMap::new();
+    let mut examples = Vec::new();
     for entry in corpus() {
         for log in entry.logs.iter().step_by(25) {
             let journal = journal_of(&entry, log);
@@ -1132,47 +1339,53 @@ fn deletions_and_swaps_get_the_same_verdict_from_the_model_and_the_lift() {
                 match (by_model, by_lift) {
                     (false, false) => rejected_by_both += 1,
                     (true, true) => {}
+                    // The lift admits what the model refuses: a gap in the lift.
                     (false, true) => {
                         let class = class_of(&entry.config, &variant, &verdict);
-                        if LIFT_GAPS.contains(&class.as_str()) {
-                            *gaps.entry(class).or_default() += 1;
-                        } else {
-                            unexplained.push(format!("{} log {log} {what}: {class}", entry.name));
+                        if examples.len() < 20 {
+                            examples.push(format!("{} log {log} {what}: {class}", entry.name));
                         }
+                        *disagreements
+                            .entry(format!("lift admits: {class}"))
+                            .or_default() += 1;
                     }
-                    // A perturbation the lift refuses and the model admits would be a
-                    // hole in the model: none is tolerated.
-                    (true, false) => unexplained.push(format!(
-                        "{} log {log} {what}: the model accepts what the lift refuses: {:?}",
-                        entry.name,
-                        lift(&variant)
-                    )),
+                    // The model admits what the lift refuses: a hole in the model.
+                    (true, false) => {
+                        let reason = match lift(&variant) {
+                            LiftVerdict::Violates { reason, .. } => format!("{reason:?}"),
+                            other => format!("{other:?}"),
+                        };
+                        let reason = reason
+                            .split([' ', '{', '('])
+                            .take(2)
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        if examples.len() < 20 {
+                            examples.push(format!(
+                                "{} log {log} {what}: model accepts, lift {reason}",
+                                entry.name
+                            ));
+                        }
+                        *disagreements
+                            .entry(format!("model admits: {reason}"))
+                            .or_default() += 1;
+                    }
                 }
             }
         }
     }
-    eprintln!("compared {compared}, rejected by both {rejected_by_both}, lift gaps {gaps:?}");
-    assert_eq!(compared, 19_345, "docs/18 C023 cites this count");
-    assert_eq!(
-        gaps.values().sum::<usize>(),
-        666,
-        "docs/18 C023 cites this count"
+    eprintln!(
+        "compared {compared}, rejected by both {rejected_by_both}, disagreements {disagreements:?}"
     );
-    for class in LIFT_GAPS {
-        assert!(
-            gaps.contains_key(*class),
-            "{class} is pinned but no perturbation shows it"
-        );
-    }
+    assert_eq!(compared, 23_587, "docs/18 C023 cites this count");
+    assert!(
+        disagreements.is_empty(),
+        "{disagreements:?}\n{}",
+        examples.join("\n")
+    );
     assert!(
         rejected_by_both > compared / 2,
         "{rejected_by_both} of {compared}"
-    );
-    assert!(
-        unexplained.is_empty(),
-        "{} unexplained:\n{}",
-        unexplained.len(),
-        unexplained.join("\n")
     );
 }
 
@@ -1215,12 +1428,13 @@ fn the_model_reads_the_canonical_bytes_and_types_what_it_cannot_judge() {
             ..
         })
     ));
-    let mut channel = bytes.clone();
-    channel[family_at] = 6;
-    assert_eq!(
-        model::judge(&alphabet(&config), &channel),
-        Verdict::Unsupported { at: 0, tag: 6 }
-    );
+    // Tag 7 names no family: malformed, as the adapter's decoder reads it too.
+    let mut seventh = bytes.clone();
+    seventh[family_at] = 7;
+    assert!(matches!(
+        model::judge(&alphabet(&config), &seventh),
+        Verdict::Malformed(WireFault::Tag { tag: 7, .. })
+    ));
     // A journal observed with fewer families than the model is told is a family the
     // alphabet does not observe, not a silent pass.
     let lifecycle_only = Alphabet::new([]);

@@ -109,25 +109,32 @@ The A7 witness is
 `crates/continuum-asupersync/tests/a7_primitive_conformance.rs`. Its model,
 `tests/support/primitive_conformance_model.rs`, is written from docs/02 §5 and §7,
 docs/01 §6 and plan §4.1. It covers region and task lifecycle, cancellation
-phases, reserve/commit/abort, the obligation ledger and virtual time. It imports
-`std` only and reads each journal from its canonical bytes with its own reader, so
-it shares no type, decoder, lift or scripted source with the adapter. The audit
-rule `a7-model-independent` holds that. The corpus is 6381 real `binding::run`
-journals over six program sets and three family alphabets, from a stride through
-each exhaustive interleaving space and a seeded random sample. The model accepts
-each one, and the lift agrees. At 24288 journal positions, the model's generated
-next steps include the step the substrate took, and the model's guard admits each
-generated step. A run that leaks an obligation is rejected by the model at its
-region's close. Sixteen curated perturbations of real journals are rejected by the
-model, each for its own fault. Over 19345 single-event deletions and adjacent swaps,
-the model never accepts a journal the lift rejects. In 666 of them the model rejects
-a journal that the lift accepts. These fall into seven classes, and each is a rule
-that docs/02 §7 or research/09 states and the lift does not check. Examples are a
+phases, reserve/commit/abort, the obligation ledger, virtual time and bounded
+channels. It imports `std` only and reads each journal from its canonical bytes
+with its own reader, so it shares no type, decoder, lift or scripted source with
+the adapter. The audit rule `a7-model-independent` holds that. The corpus is 7513
+real `binding::run` journals over eight program sets and three family alphabets,
+from a stride through each exhaustive interleaving space and a seeded random
+sample. The model accepts each one, and the lift agrees. At 29761 journal
+positions, the model's generated next steps include the step the substrate took,
+and the model's guard admits each generated step. A run that leaks an obligation
+is rejected by the model at its region's close. Twenty-one curated perturbations of
+real journals are rejected by the model, each for its own fault, and by the lift.
+Over 23587 single-event deletions and adjacent swaps, the model and the lift give
+the same verdict in both directions.
+
+That agreement is the result of two repairs. When bn-ujpz0 landed, the lift accepted
+666 of 19345 perturbations that the model rejected, in seven classes. Examples are a
 cancellation's effect abort before the task's acknowledgement, a task that completes
 as cancelled while it holds an obligation or an armed timer, and a finalize with no
-drain report. The evidence record retains one program-side mutant: the binding
-journals effect aborts before the acknowledgement. The A7 witness fails on it, and
-the lift-based conformance test of the same family passes.
+drain report. Each is a rule that docs/02 §7 or research/09 states. When bn-1i050
+extended the model to channels, it found ten more classes in the channel lift, 475
+perturbations. Examples are a send with no committed send permit, a receive by a
+parked receiver, and a message ordinal out of allocation order. bn-1i050 made each
+class a typed nonconformance in the lift, and every earlier PR-14 test still passes
+unchanged. The evidence record retains one program-side mutant: the binding journals
+effect aborts before the acknowledgement. The A7 witness fails on it, and since
+bn-1i050 the lift-based conformance test of the same family fails on it too.
 
 Four of the seven RFC 0013 arrows have a scaffold side today: CIR journal to
 refinement checker, CML reference to optimized evaluator, evaluator to SMT/PDR
@@ -136,9 +143,8 @@ rules hold only because the crates are empty. When a scaffold side lands, the
 evidence record goes stale, `just boundaries` fails, and C023 needs new evidence
 for that arrow. This first happened when bn-ybq gave `continuum-model-core` real
 code, which left A7 with code on both sides and no cross-path test until bn-ujpz0.
-The A7 model is a second account of the primitives, not a proof. The adapter's
-lift is still the only check that `binding::run` runs, and the seven gap classes
-are not closed in it.
+The A7 model is a second account of the primitives, not a proof, and the
+adapter's lift is still the only check that `binding::run` runs.
 
 C020 is observed on the intent classification and policy layer. That layer is
 the diff assembler `continuum_semantic_diff::artifact::assemble` and

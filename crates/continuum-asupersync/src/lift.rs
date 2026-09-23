@@ -5,12 +5,17 @@
 //! The region calculus (bn-2gk) is the specification. The lift replays each event as
 //! the operation it reports, against a fresh `RegionTree`, and stops at the first event
 //! the specification does not admit. It adds exactly three checks the calculus cannot
-//! make by itself, because only a journal carries the facts they compare:
+//! make by itself, because only a journal carries the facts they compare, and a
+//! fourth the calculus leaves open:
 //!
 //! 1. a region the journal says was opened gets the **same ordinal** from the model;
 //! 2. a task the journal says was spawned gets the same ordinal;
 //! 3. the tasks a drain **reports** cancelled are exactly the tasks the model's drain
-//!    moved to a terminal state.
+//!    moved to a terminal state;
+//! 4. a region finalizes only after a drain report covered every region of its
+//!    subtree ([`Nonconformance::FinalizeWithoutDrain`], bn-1i050): the calculus admits
+//!    `finalize` on any requested region whose workers are terminal, and a journal
+//!    that lost its drain report would otherwise lift.
 //!
 //! Everything else — work enters only an open region, cancellation is subtree-wide,
 //! drain is total under cancellation and blocking under close, finalize requires every
@@ -25,6 +30,7 @@
 //! inconclusive (an event of a family with no lift yet: unsupported semantics).
 
 use core::fmt;
+use std::collections::BTreeSet;
 
 use continuum_task::region::{Finalization, RegionFault, RegionTree};
 use continuum_value::assurance::InconclusiveReason;
@@ -75,6 +81,17 @@ pub enum Nonconformance {
     /// A channel event breaks the parallel channel model (PR-14-IMPL-06; the reasons are
     /// the family's own).
     Channel(family::channel::ChannelFault),
+    /// A region finalized while a region of its subtree had no drain report. The
+    /// calculus admits `finalize` on any requested region whose workers are terminal;
+    /// the journal's teardown is `request → drain → finalize` (research/09 `cancel .
+    /// drain . finalize`), and the binding always reports the drain, so a finalize
+    /// without one is a lost observation (bn-1i050).
+    FinalizeWithoutDrain {
+        /// The finalized region.
+        region: u32,
+        /// The first region of its subtree with no drain report.
+        undrained: u32,
+    },
 }
 
 impl fmt::Display for Nonconformance {
@@ -106,6 +123,10 @@ impl fmt::Display for Nonconformance {
             Self::Obligation(fault) => write!(f, "obligation ledger: {fault}"),
             Self::Time(fault) => write!(f, "virtual time: {fault}"),
             Self::Channel(fault) => write!(f, "channel: {fault}"),
+            Self::FinalizeWithoutDrain { region, undrained } => write!(
+                f,
+                "r{region} finalized but r{undrained} in its subtree has no drain report"
+            ),
         }
     }
 }
@@ -132,6 +153,9 @@ pub struct LiftContext {
     pub(crate) tree: RegionTree,
     pub(crate) seq: u64,
     pub(crate) finalizations: Vec<(u64, Finalization)>,
+    /// Regions a `RegionDrained` event covered (the drained region's non-finalized
+    /// subtree), for the drain-before-finalize check.
+    pub(crate) drained: BTreeSet<u32>,
     pub(crate) effect: family::effect::LiftState,
     pub(crate) cancellation: family::cancellation::LiftState,
     pub(crate) obligation: family::obligation::LiftState,

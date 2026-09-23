@@ -93,9 +93,9 @@ the test must pass before the edit and fail after it.
 
 The A7 Rust mutant (also `--evidence` only) edits a copy of the adapter's binding so
 it journals a cancelled task's effect aborts before the task's acknowledgement. The A7
-witness must pass before the edit and fail after it, and the lift-based conformance
-test of the same family must pass both times: the model catches what the adapter's own
-check admits.
+witness must pass before the edit and fail after it. The lift-based conformance test
+of the same family must also pass before and fail after: since bn-1i050 the adapter's
+own check refuses the order too, so both paths catch the mutant.
 
 Usage:
 
@@ -725,9 +725,9 @@ RUST_MUTANT = {
 
 # Arrow A7's program-side mutant (bn-ujpz0): the binding journals a cancelled task's
 # effect aborts before the task's acknowledgement, i.e. cleanup before the task entered
-# `Cancelling` (docs/02 §7). The adapter's own lift admits that order; the A7 model
-# must refuse it. So the A7 witness fails on the mutant while the lift-based
-# conformance test of the same family still passes.
+# `Cancelling` (docs/02 §7). The A7 model refuses it. When bn-ujpz0 landed the adapter's
+# own lift admitted that order; bn-1i050 closed the gap, so both paths now fail on the
+# mutant: the A7 witness and the lift-based conformance test of the same family.
 A7_ACK = """            if track.acknowledged {
                 self.record
                     .append(EventBody::Cancellation(CancellationEvent::Acknowledged {
@@ -785,7 +785,7 @@ def run_a7_rust_mutant() -> tuple[dict, list[str]]:
         "unmutated_model_test_passed": passed(before_model),
         "unmutated_lift_test_passed": passed(before_lift),
         "mutated_model_test_failed": after_model.returncode != 0 and "1 failed" in after_model.stdout,
-        "mutated_lift_test_passed": passed(after_lift),
+        "mutated_lift_test_failed": after_lift.returncode != 0 and "1 failed" in after_lift.stdout,
     }
     failures = []
     if not all(v for k, v in result.items() if k not in ("id", "model_test", "lift_test")):

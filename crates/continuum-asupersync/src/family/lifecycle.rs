@@ -35,10 +35,10 @@
 
 use std::collections::BTreeMap;
 
-use continuum_task::region::RegionId;
 use continuum_task::region::worker::{
     FailureReason, NonResumableReason, Resumability, WorkerId, WorkerStep,
 };
+use continuum_task::region::{RegionId, RegionState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
 use crate::family::EventBody;
@@ -406,6 +406,11 @@ pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), L
         LifecycleEvent::TaskStepped { task, step } => {
             cx.tree
                 .advance(WorkerId::at(task.0), step.to_worker_step())?;
+            if *step == TaskStep::Resume {
+                // A sleeping task is woken by its timer: it may not resume while the
+                // timer is still scheduled (bn-1i050).
+                crate::family::time::check_not_asleep(cx, task.0)?;
+            }
         }
         LifecycleEvent::RegionCloseRequested { region } => cx.tree.close(RegionId::at(region.0))?,
         LifecycleEvent::RegionCancelRequested { region } => {
@@ -420,6 +425,11 @@ pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), L
                 }
             }
             cx.tree.drain(RegionId::at(region.0))?;
+            for member in cx.tree.subtree(RegionId::at(region.0))? {
+                if cx.tree.state(member)? != RegionState::Finalized {
+                    cx.drained.insert(member.ordinal());
+                }
+            }
             let mut model = Vec::new();
             for worker in live {
                 if cx.tree.worker_state(WorkerId::at(worker))?.is_terminal() {
@@ -436,7 +446,25 @@ pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), L
             }
         }
         LifecycleEvent::RegionFinalized { region } => {
+            // Which region of the subtree has no drain report, read before the
+            // calculus's own finalize so that its faults (which name the stronger
+            // violation) are reported first.
+            let mut undrained = None;
+            for member in cx.tree.subtree(RegionId::at(region.0))? {
+                if undrained.is_none()
+                    && !cx.drained.contains(&member.ordinal())
+                    && cx.tree.state(member)? != RegionState::Finalized
+                {
+                    undrained = Some(member.ordinal());
+                }
+            }
             let finalization = cx.tree.finalize(RegionId::at(region.0))?;
+            if let Some(undrained) = undrained {
+                return Err(LiftStop::Violation(Nonconformance::FinalizeWithoutDrain {
+                    region: region.0,
+                    undrained,
+                }));
+            }
             cx.finalizations.push((cx.seq, finalization));
         }
     }

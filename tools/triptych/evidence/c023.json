@@ -67,7 +67,7 @@
       "lift_test": "continuum-asupersync --test pr14_impl02_reserve_commit_abort every_effect_journal_conforms_and_resolves_every_reservation_once",
       "model_test": "continuum-asupersync --test a7_primitive_conformance every_substrate_journal_is_a_trace_the_conformance_model_accepts",
       "mutated_compiled": true,
-      "mutated_lift_test_passed": true,
+      "mutated_lift_test_failed": true,
       "mutated_model_test_failed": true,
       "unmutated_lift_test_passed": true,
       "unmutated_model_test_passed": true

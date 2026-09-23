@@ -42,7 +42,9 @@
 //! 3. a commit is the calculus's `Commit` step;
 //! 4. an abort for `cancel` happens only while the task's region drains under
 //!    cancellation, the task is live, and the model still holds its staged publication,
-//!    all before the drain that discards it;
+//!    all before the drain that discards it; when the journal reports the task's
+//!    cancellation phases, it comes after the task's acknowledgement, the step into
+//!    `Cancelling` (bn-1i050);
 //! 5. no reservation is left unresolved once the model has terminated its task: that is
 //!    a leak at region close.
 //!
@@ -294,6 +296,17 @@ pub enum EffectFault {
         /// The reservation.
         reservation: u32,
     },
+    /// A cancellation abort by a task whose reported cancellation phase is not
+    /// `acknowledged`: the abort is a `Cancelling ─ drain(effect)*` step, and the
+    /// acknowledgement is the step into `Cancelling` (docs/02 §7; bn-1i050).
+    OutsideCancelling {
+        /// The reservation.
+        reservation: u32,
+        /// The holding task.
+        task: u32,
+        /// The task's cancellation phase.
+        phase: &'static str,
+    },
     /// The model terminated the holding task while the reservation was unresolved.
     LeakedAtClose {
         /// The reservation.
@@ -336,6 +349,14 @@ impl fmt::Display for EffectFault {
             Self::NotStaged { reservation } => write!(
                 f,
                 "e{reservation} aborts for cancel but the model holds no staged publication"
+            ),
+            Self::OutsideCancelling {
+                reservation,
+                task,
+                phase,
+            } => write!(
+                f,
+                "e{reservation} aborts for cancel but t{task}'s cancellation is {phase}"
             ),
             Self::LeakedAtClose { reservation, task } => write!(
                 f,
@@ -409,6 +430,13 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
             }
             if !cx.tree.evidence(worker)?.is_provisional() {
                 return Err(fault(EffectFault::NotStaged { reservation }));
+            }
+            if let Some(phase) = crate::family::cancellation::outside_cancelling(cx, task) {
+                return Err(fault(EffectFault::OutsideCancelling {
+                    reservation,
+                    task,
+                    phase,
+                }));
             }
             Phase::Aborted
         }

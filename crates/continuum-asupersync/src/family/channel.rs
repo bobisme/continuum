@@ -49,7 +49,14 @@
 //!    and a receive returns closed only on an empty channel with no sender left;
 //! 4. an abandoned send or receive is one that was blocked, abandoned by a cancellation
 //!    of a live task whose region drains under cancellation;
-//! 5. every channel whose receiving task the model terminated has seen its receiver go.
+//! 5. every channel whose receiving task the model terminated has seen its receiver go;
+//! 6. (bn-1i050) a fresh send is the next dense message ordinal, through a kept
+//!    sender, by a sender with no other send waiting; with the obligation family, each
+//!    send consumes one committed `SendPermit` of its sender; receives and a normal
+//!    receiver drop are by a running receiver whose cancellation has not begun; an
+//!    abandonment, or a receiver drop in cancellation, follows the task's
+//!    acknowledgement; and a task completes as cancelled holding no receiver and no
+//!    blocked send.
 //!
 //! # Identity
 //!
@@ -59,7 +66,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
-use continuum_task::region::worker::WorkerId;
+use continuum_task::region::worker::{WorkerId, WorkerState};
 use continuum_task::region::{DrainCause, RegionState};
 
 use crate::encoding::{DecodeError, Decoder, EncodeError, Encoder};
@@ -471,10 +478,55 @@ pub enum ChannelFault {
         /// The messages still queued in the model.
         queued: Vec<u64>,
     },
-    /// The model terminated a channel's receiving task, and its receiver never went.
+    /// A channel's receiving task ended (the model terminated it, or it completed as
+    /// cancelled), and its receiver never went.
     ReceiverOutlivesTask {
         /// The channel.
         channel: u32,
+    },
+    /// A fresh message is not named by the next message ordinal (the binding allocates
+    /// them densely, one per commanded send), or its sender could not send it: no kept
+    /// sender remains, or the sender already waits on another send (bn-1i050).
+    MessageIdentity {
+        /// The channel.
+        channel: u32,
+        /// The message.
+        message: u64,
+        /// The next message ordinal.
+        expected: u64,
+    },
+    /// A send, receive or receiver drop by a task that is not running its own call: it
+    /// is parked, or its cancellation has begun (bn-1i050).
+    NotActing {
+        /// The channel.
+        channel: u32,
+        /// The event's token.
+        event: &'static str,
+    },
+    /// An abandonment by a task whose reported cancellation phase is not
+    /// `acknowledged`: the drop is a `Cancelling` cleanup step (docs/02 §7; bn-1i050).
+    OutsideCancelling {
+        /// The channel.
+        channel: u32,
+        /// The event's token.
+        event: &'static str,
+        /// The task's cancellation phase.
+        phase: &'static str,
+    },
+    /// A send with no committed `SendPermit` of its sender: the send is the permit's
+    /// commit (docs/02 §7 two-phase effect; bn-1i050).
+    NoSendPermit {
+        /// The channel.
+        channel: u32,
+        /// The message.
+        message: u64,
+    },
+    /// A task ended while one of its sends was still blocked (bn-1i050).
+    SendOutlivesTask {
+        /// The channel.
+        channel: u32,
+        /// The message.
+        message: u64,
     },
 }
 
@@ -521,6 +573,38 @@ impl fmt::Display for ChannelFault {
                     "c{channel}'s receiving task ended but its receiver never went"
                 )
             }
+            Self::MessageIdentity {
+                channel,
+                message,
+                expected,
+            } => write!(
+                f,
+                "m{message} on c{channel} is not a fresh send (the next message is m{expected})"
+            ),
+            Self::NotActing { channel, event } => {
+                write!(
+                    f,
+                    "{event} on c{channel} by a task that is not running its call"
+                )
+            }
+            Self::OutsideCancelling {
+                channel,
+                event,
+                phase,
+            } => write!(
+                f,
+                "{event} on c{channel} but the task's cancellation is {phase}"
+            ),
+            Self::NoSendPermit { channel, message } => write!(
+                f,
+                "m{message} on c{channel} was sent with no committed send permit"
+            ),
+            Self::SendOutlivesTask { channel, message } => {
+                write!(
+                    f,
+                    "a task ended with its send of m{message} on c{channel} blocked"
+                )
+            }
         }
     }
 }
@@ -530,6 +614,7 @@ impl fmt::Display for ChannelFault {
 pub struct LiftState {
     channels: BTreeMap<u32, Model>,
     settled: BTreeSet<u64>,
+    next_message: u64,
 }
 
 fn fault(fault: ChannelFault) -> LiftStop {
@@ -559,6 +644,65 @@ fn cancelling(
             channel,
             event: event.token(),
         }));
+    }
+    Ok(())
+}
+
+/// The task acts on its own account: live, and its reported cancellation has not
+/// reached `Cancelling`. With `running`, it is also running its call (bn-1i050).
+fn acting(
+    cx: &LiftContext,
+    task: u32,
+    running: bool,
+    channel: u32,
+    event: &ChannelEvent,
+) -> Result<(), LiftStop> {
+    let state = cx.tree.worker_state(WorkerId::at(task))?;
+    if state.is_terminal()
+        || (running && *state != WorkerState::Running)
+        || crate::family::cancellation::is_cancelling(cx, task)
+    {
+        return Err(fault(ChannelFault::NotActing {
+            channel,
+            event: event.token(),
+        }));
+    }
+    Ok(())
+}
+
+/// A cancellation cleanup step by `task` comes after its acknowledgement, when the
+/// journal reports its phases (docs/02 §7; bn-1i050).
+fn after_acknowledgement(
+    cx: &LiftContext,
+    task: u32,
+    channel: u32,
+    event: &ChannelEvent,
+) -> Result<(), LiftStop> {
+    match crate::family::cancellation::outside_cancelling(cx, task) {
+        Some(phase) => Err(fault(ChannelFault::OutsideCancelling {
+            channel,
+            event: event.token(),
+            phase,
+        })),
+        None => Ok(()),
+    }
+}
+
+/// A task that completes as cancelled holds no channel's receiver and no blocked
+/// send.
+pub(crate) fn check_none_held(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {
+    for (channel, model) in &cx.channel.channels {
+        if model.receiver_present && model.receiver == task {
+            return Err(fault(ChannelFault::ReceiverOutlivesTask {
+                channel: *channel,
+            }));
+        }
+        if let Some((message, _)) = model.blocked_sends.iter().find(|(_, s)| **s == task) {
+            return Err(fault(ChannelFault::SendOutlivesTask {
+                channel: *channel,
+                message: *message,
+            }));
+        }
     }
     Ok(())
 }
@@ -612,6 +756,12 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
         } => {
             live(cx, sender.0, channel, event)?;
             let was_blocked = model.blocked_sends.get(&message.0) == Some(&sender.0);
+            let senders_closed = model.senders_closed;
+            let sender_busy = cx.channel.channels.values().any(|m| {
+                m.blocked_sends
+                    .iter()
+                    .any(|(k, s)| *s == sender.0 && *k != message.0)
+            });
             if cx.channel.settled.contains(&message.0)
                 || (!was_blocked && model.blocked_sends.contains_key(&message.0))
             {
@@ -651,6 +801,29 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
                     cx.channel.settled.insert(message.0);
                 }
             }
+            // bn-1i050: a fresh send is the next dense message, through a clone of a
+            // kept sender, by a sender with no other send waiting; the sender acts on
+            // its own account; and a send is its permit's commit.
+            if !was_blocked {
+                let expected = cx.channel.next_message;
+                if message.0 != expected || senders_closed || sender_busy {
+                    return Err(fault(ChannelFault::MessageIdentity {
+                        channel,
+                        message: message.0,
+                        expected,
+                    }));
+                }
+                cx.channel.next_message += 1;
+            }
+            acting(cx, sender.0, false, channel, event)?;
+            if matches!(event, ChannelEvent::Sent { .. })
+                && !crate::family::obligation::take_send_permit(cx, sender.0)
+            {
+                return Err(fault(ChannelFault::NoSendPermit {
+                    channel,
+                    message: message.0,
+                }));
+            }
         }
         ChannelEvent::SendAbandoned {
             message, sender, ..
@@ -661,6 +834,7 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
                 return Err(mismatch());
             }
             cx.channel.settled.insert(message.0);
+            after_acknowledgement(cx, sender.0, channel, event)?;
         }
         ChannelEvent::Received { message, .. } => {
             live(cx, receiver, channel, event)?;
@@ -678,6 +852,7 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
             }
             model.queue.pop_front();
             model.receive_blocked = false;
+            acting(cx, receiver, true, channel, event)?;
         }
         ChannelEvent::RecvBlocked { .. } => {
             live(cx, receiver, channel, event)?;
@@ -687,6 +862,7 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
                 return Err(mismatch());
             }
             model.receive_blocked = true;
+            acting(cx, receiver, true, channel, event)?;
         }
         ChannelEvent::RecvClosed { .. } => {
             live(cx, receiver, channel, event)?;
@@ -695,6 +871,7 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
                 return Err(mismatch());
             }
             model.receive_blocked = false;
+            acting(cx, receiver, true, channel, event)?;
         }
         ChannelEvent::RecvAbandoned { .. } => {
             cancelling(cx, receiver, channel, event)?;
@@ -703,6 +880,7 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
                 return Err(mismatch());
             }
             model.receive_blocked = false;
+            after_acknowledgement(cx, receiver, channel, event)?;
         }
         ChannelEvent::SendersClosed { .. } => {
             let model = cx.channel.channels.get_mut(&channel).ok_or_else(mismatch)?;
@@ -729,6 +907,17 @@ pub(crate) fn lift(event: &ChannelEvent, cx: &mut LiftContext) -> Result<(), Lif
             }
             model.queue.clear();
             model.receiver_present = false;
+            // The receiver goes when its task ends: in its own last call (running and
+            // acting), or in its cancellation's cleanup, after the acknowledgement.
+            if acting(cx, receiver, true, channel, event).is_err() {
+                cancelling(cx, receiver, channel, event).map_err(|_| {
+                    fault(ChannelFault::NotActing {
+                        channel,
+                        event: event.token(),
+                    })
+                })?;
+                after_acknowledgement(cx, receiver, channel, event)?;
+            }
         }
     }
     Ok(())
@@ -747,6 +936,14 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
             return Err(fault(ChannelFault::ReceiverOutlivesTask {
                 channel: *channel,
             }));
+        }
+        for (message, sender) in &model.blocked_sends {
+            if cx.tree.worker_state(WorkerId::at(*sender))?.is_terminal() {
+                return Err(fault(ChannelFault::SendOutlivesTask {
+                    channel: *channel,
+                    message: *message,
+                }));
+            }
         }
     }
     Ok(())

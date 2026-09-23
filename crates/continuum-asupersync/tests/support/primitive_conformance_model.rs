@@ -23,7 +23,10 @@
 //! - its rules come from the normative text, cited at each rule: docs/02 §7 (the
 //!   cancellation calculus: lifecycle, effect protocol, core invariants), plan §4.1
 //!   (the task lifecycle), docs/01 §6 (the adapter mapping), and docs/02 §5 (virtual
-//!   time). Where the adapter's family documentation fixes an observation the normative
+//!   time). The channel rules (bn-1i050) are those of a bounded multi-producer,
+//!   single-consumer FIFO channel whose send is a docs/02 §7 two-phase effect (a send
+//!   permit is reserved, then committed as the send), written from that semantics and
+//!   the family's wire table, not from the adapter's channel lift. Where the adapter's family documentation fixes an observation the normative
 //!   text leaves open (which phase of a cancellation the substrate lets a run see), the
 //!   rule says so.
 //!
@@ -56,9 +59,8 @@ const MAGIC: &[u8] = b"continuum/semantic-journal\n";
 /// The encoding version this reader accepts.
 const VERSION: u32 = 1;
 
-/// The five families the substrate binding observes, with their wire tags
-/// (`src/family.rs`, "The six families"). Tag 6 (channel) has no binding and no rules
-/// here, so a journal that carries it is [`Verdict::Unsupported`].
+/// The six families the substrate binding observes, with their wire tags
+/// (`src/family.rs`, "The six families").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FamilyTag {
     /// Tag 1.
@@ -71,6 +73,8 @@ pub enum FamilyTag {
     Obligation,
     /// Tag 5.
     Time,
+    /// Tag 6.
+    Channel,
 }
 
 impl FamilyTag {
@@ -81,6 +85,7 @@ impl FamilyTag {
             3 => Some(Self::Cancellation),
             4 => Some(Self::Obligation),
             5 => Some(Self::Time),
+            6 => Some(Self::Channel),
             _ => None,
         }
     }
@@ -204,6 +209,48 @@ pub enum Step {
     Fired { timer: u32, at: u64 },
     /// A timer was cancelled.
     TimerCancelled { timer: u32, at: u64 },
+    /// A bounded channel opened, its receiver held by `receiver`.
+    ChannelOpened {
+        channel: u32,
+        capacity: u32,
+        receiver: u32,
+    },
+    /// A message was sent (its permit committed) and queued.
+    Sent {
+        channel: u32,
+        message: u64,
+        sender: u32,
+    },
+    /// A send waits for room.
+    SendBlocked {
+        channel: u32,
+        message: u64,
+        sender: u32,
+    },
+    /// A send failed: the receiver is gone.
+    SendClosed {
+        channel: u32,
+        message: u64,
+        sender: u32,
+    },
+    /// A blocked send was dropped by its sender's cancellation.
+    SendAbandoned {
+        channel: u32,
+        message: u64,
+        sender: u32,
+    },
+    /// The receiver took a message.
+    Received { channel: u32, message: u64 },
+    /// A receive waits for a message.
+    RecvBlocked { channel: u32 },
+    /// A receive returned closed.
+    RecvClosed { channel: u32 },
+    /// A blocked receive was dropped by the receiver's cancellation.
+    RecvAbandoned { channel: u32 },
+    /// The last kept sender was dropped.
+    SendersClosed { channel: u32 },
+    /// The receiver went, dropping these queued messages.
+    ReceiverGone { channel: u32, discarded: Vec<u64> },
 }
 
 impl Step {
@@ -233,6 +280,17 @@ impl Step {
             | Self::Advanced { .. }
             | Self::Fired { .. }
             | Self::TimerCancelled { .. } => FamilyTag::Time,
+            Self::ChannelOpened { .. }
+            | Self::Sent { .. }
+            | Self::SendBlocked { .. }
+            | Self::SendClosed { .. }
+            | Self::SendAbandoned { .. }
+            | Self::Received { .. }
+            | Self::RecvBlocked { .. }
+            | Self::RecvClosed { .. }
+            | Self::RecvAbandoned { .. }
+            | Self::SendersClosed { .. }
+            | Self::ReceiverGone { .. } => FamilyTag::Channel,
         }
     }
 }
@@ -260,16 +318,6 @@ pub enum WireFault {
     PayloadLength { event: u64 },
     /// Bytes follow the last event.
     Trailing { at: usize },
-}
-
-/// One decoded event: a step of a covered family, or an event of a family the model
-/// does not cover.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Decoded {
-    /// A step.
-    Step(Step),
-    /// An event of a family with no rules here, by wire tag.
-    Uncovered { tag: u8 },
 }
 
 struct Reader<'a> {
@@ -313,6 +361,19 @@ impl<'a> Reader<'a> {
             _ => Err(WireFault::Token { at }),
         }
     }
+    fn set64(&mut self) -> Result<Vec<u64>, WireFault> {
+        let at = self.at;
+        let count = self.u32()?;
+        let mut out: Vec<u64> = Vec::new();
+        for _ in 0..count {
+            let member = self.u64()?;
+            if out.last().is_some_and(|last| *last >= member) {
+                return Err(WireFault::Unsorted { at });
+            }
+            out.push(member);
+        }
+        Ok(out)
+    }
     fn set(&mut self) -> Result<Vec<u32>, WireFault> {
         let at = self.at;
         let count = self.u32()?;
@@ -348,7 +409,7 @@ impl<'a> Reader<'a> {
 /// # Errors
 ///
 /// The first [`WireFault`].
-pub fn read(bytes: &[u8]) -> Result<Vec<Decoded>, WireFault> {
+pub fn read(bytes: &[u8]) -> Result<Vec<Step>, WireFault> {
     let mut input = Reader { bytes, at: 0 };
     if input.take(MAGIC.len())? != MAGIC || input.u32()? != VERSION {
         return Err(WireFault::Header);
@@ -373,9 +434,8 @@ pub fn read(bytes: &[u8]) -> Result<Vec<Decoded>, WireFault> {
                 if inner.at != payload.len() {
                     return Err(WireFault::PayloadLength { event: expected });
                 }
-                Decoded::Step(step)
+                step
             }
-            None if family == 6 => Decoded::Uncovered { tag: family },
             None => {
                 return Err(WireFault::Tag {
                     table: "family",
@@ -516,6 +576,56 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                 at: r.u64()?,
             },
         },
+        // src/family/channel.rs: tags 1..=11, each `u8 tag, u32 channel, fields`.
+        FamilyTag::Channel => {
+            let tag = r.tag("channel event", 11)?;
+            let channel = r.u32()?;
+            match tag {
+                1 => Step::ChannelOpened {
+                    channel,
+                    capacity: r.u32()?,
+                    receiver: r.u32()?,
+                },
+                2..=5 => {
+                    let message = r.u64()?;
+                    let sender = r.u32()?;
+                    match tag {
+                        2 => Step::Sent {
+                            channel,
+                            message,
+                            sender,
+                        },
+                        3 => Step::SendBlocked {
+                            channel,
+                            message,
+                            sender,
+                        },
+                        4 => Step::SendClosed {
+                            channel,
+                            message,
+                            sender,
+                        },
+                        _ => Step::SendAbandoned {
+                            channel,
+                            message,
+                            sender,
+                        },
+                    }
+                }
+                6 => Step::Received {
+                    channel,
+                    message: r.u64()?,
+                },
+                7 => Step::RecvBlocked { channel },
+                8 => Step::RecvClosed { channel },
+                9 => Step::RecvAbandoned { channel },
+                10 => Step::SendersClosed { channel },
+                _ => Step::ReceiverGone {
+                    channel,
+                    discarded: r.set64()?,
+                },
+            }
+        }
     })
 }
 
@@ -599,9 +709,26 @@ enum ObligationPhase {
 
 #[derive(Debug, Clone)]
 struct Obligation {
+    kind: u8,
     holder: u32,
     region: u32,
     phase: ObligationPhase,
+}
+
+/// The obligation kind a channel send's permit is (`src/family/obligation.rs` wire
+/// table: `send-permit`).
+const SEND_PERMIT: u8 = 1;
+
+/// A bounded channel: its capacity, its receiver and whether it is still there, the
+/// FIFO queue, whether a kept sender remains, and whether a receive is blocked.
+#[derive(Debug, Clone)]
+struct Channel {
+    capacity: u32,
+    receiver: u32,
+    present: bool,
+    queue: std::collections::VecDeque<u64>,
+    senders_open: bool,
+    recv_blocked: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -679,6 +806,15 @@ pub enum Fault {
     Unsettled(u32),
     /// End of trace: an obligation leaked by a holder that never ended.
     UnendedLeak(u32),
+    /// A channel step its channel's state does not admit; `rule` names the channel
+    /// rule it breaks.
+    Channel { channel: u32, rule: &'static str },
+    /// A send with no committed send permit of its sender (docs/02 §7: the send is the
+    /// permit's commit).
+    NoSendPermit { task: u32 },
+    /// A task ends, or is drained, while it still holds a channel's receiver, a blocked
+    /// receive or a blocked send.
+    ChannelOutlivesTask { task: u32 },
 }
 
 /// A step the generator enables, with free coordinates.
@@ -700,6 +836,8 @@ pub enum Pattern {
     Scheduled { timer: u32, task: u32, at: u64 },
     /// An advance to any instant after `from`.
     Advanced { from: u64 },
+    /// A channel of any positive capacity.
+    ChannelOpened { channel: u32, receiver: u32 },
 }
 
 impl Pattern {
@@ -738,6 +876,14 @@ impl Pattern {
                 },
             ) => timer == k && task == t && at == a && deadline > a,
             (Self::Advanced { from }, Step::Advanced { from: f, to }) => from == f && to > f,
+            (
+                Self::ChannelOpened { channel, receiver },
+                Step::ChannelOpened {
+                    channel: c,
+                    capacity,
+                    receiver: r,
+                },
+            ) => channel == c && receiver == r && *capacity > 0,
             _ => false,
         }
     }
@@ -752,8 +898,6 @@ pub enum Verdict {
     Rejected { at: usize, fault: Fault },
     /// The bytes are not a canonical journal.
     Malformed(WireFault),
-    /// The event at `at` belongs to a family this model has no rules for.
-    Unsupported { at: usize, tag: u8 },
 }
 
 impl Verdict {
@@ -780,6 +924,12 @@ pub struct Model {
     obligations: Vec<Obligation>,
     timers: Vec<Timer>,
     now: u64,
+    channels: Vec<Channel>,
+    /// Blocked sends: message → (channel, sender).
+    blocked: std::collections::BTreeMap<u64, (u32, u32)>,
+    next_message: u64,
+    /// Send permits a task committed and has not yet sent with.
+    permits: std::collections::BTreeMap<u32, u32>,
 }
 
 fn ord(len: usize) -> u32 {
@@ -804,6 +954,10 @@ impl Model {
             obligations: Vec::new(),
             timers: Vec::new(),
             now: 0,
+            channels: Vec::new(),
+            blocked: std::collections::BTreeMap::new(),
+            next_message: 0,
+            permits: std::collections::BTreeMap::new(),
         }
     }
 
@@ -860,6 +1014,53 @@ impl Model {
                 .iter()
                 .any(|o| o.holder == t && o.phase == ObligationPhase::Open)
     }
+    fn channel(&self, c: u32) -> Result<&Channel, Fault> {
+        self.channels
+            .get(c as usize)
+            .ok_or(Fault::Unknown("channel", c))
+    }
+    /// Whether `t` still holds a channel's receiver or a blocked send: it may not end
+    /// while it does.
+    fn holds_channel(&self, t: u32) -> bool {
+        self.alphabet.has(FamilyTag::Channel)
+            && (self.channels.iter().any(|c| c.present && c.receiver == t)
+                || self.blocked.values().any(|(_, s)| *s == t))
+    }
+    /// A send needs a committed send permit of its sender (docs/02 §7 two-phase
+    /// effect; the send is the commit) when the ledger is observed.
+    fn permit_ok(&self, t: u32) -> bool {
+        !self.alphabet.has(FamilyTag::Obligation) || self.permits.get(&t).copied().unwrap_or(0) > 0
+    }
+    /// Whether anything can still send on `c`: a kept sender, or a blocked sender.
+    fn can_still_receive(&self, c: u32) -> bool {
+        self.channels
+            .get(c as usize)
+            .is_some_and(|ch| ch.senders_open)
+            || self.blocked.values().any(|(cc, _)| *cc == c)
+    }
+    /// A task with no blocked send of its own.
+    fn sender_free(&self, t: u32) -> bool {
+        !self.blocked.values().any(|(_, s)| *s == t)
+    }
+    /// The receiver runs its own receive: running and acting.
+    fn receiving(&self, t: u32) -> bool {
+        self.acting(t)
+            && self
+                .tasks
+                .get(t as usize)
+                .is_some_and(|x| x.phase == TaskPhase::Running)
+    }
+    /// A fresh send of `m` by `s` on `c`: the next message, while a kept sender remains
+    /// to clone, by a sender with no other send pending.
+    fn fresh_send(&self, c: u32, m: u64, s: u32) -> bool {
+        m == self.next_message
+            && self
+                .channels
+                .get(c as usize)
+                .is_some_and(|ch| ch.senders_open)
+            && self.sender_free(s)
+    }
+
     fn late(&self) -> Option<u32> {
         (0..ord(self.timers.len())).find(|k| {
             let timer = &self.timers[*k as usize];
@@ -1031,6 +1232,9 @@ impl Model {
                 if self.armed(*task) {
                     return Err(Fault::TimerOutlivesSleep { task: *task });
                 }
+                if self.holds_channel(*task) {
+                    return Err(Fault::ChannelOutlivesTask { task: *task });
+                }
             }
             Step::Close { region } => {
                 if self.region(*region)?.phase != RegionPhase::Open {
@@ -1075,6 +1279,9 @@ impl Model {
                     }
                     if self.holds(*t) {
                         return Err(Fault::HeldObligation { task: *t });
+                    }
+                    if self.holds_channel(*t) {
+                        return Err(Fault::ChannelOutlivesTask { task: *t });
                     }
                 }
             }
@@ -1138,6 +1345,9 @@ impl Model {
                 }
                 if self.armed(*task) {
                     return Err(Fault::TimerOutlivesSleep { task: *task });
+                }
+                if self.holds_channel(*task) {
+                    return Err(Fault::ChannelOutlivesTask { task: *task });
                 }
             }
             // docs/02 §7 effect protocol `Idle → Reserved(token)`, by a running task
@@ -1358,6 +1568,182 @@ impl Model {
                     return Err(Fault::TaskPhase(k.task));
                 }
             }
+            _ => self.channel_guard(step)?,
+        }
+        Ok(())
+    }
+
+    /// The channel rules: a bounded multi-producer, single-consumer FIFO channel whose
+    /// send is a two-phase effect (docs/02 §7), owned by tasks (docs/01 §6: a task is
+    /// "task identity and program order", a region the lifecycle resource).
+    #[allow(clippy::too_many_lines)]
+    fn channel_guard(&self, step: &Step) -> Result<(), Fault> {
+        let rule = |channel: u32, rule: &'static str| Err(Fault::Channel { channel, rule });
+        match step {
+            // A channel opens once, with room for at least one message, its receiver
+            // handed to an acting task.
+            Step::ChannelOpened {
+                channel,
+                capacity,
+                receiver,
+            } => {
+                if *channel != ord(self.channels.len()) {
+                    return Err(Fault::Identity {
+                        expected: ord(self.channels.len()),
+                        found: *channel,
+                    });
+                }
+                if *capacity == 0 {
+                    return rule(*channel, "capacity");
+                }
+                self.task(*receiver)?;
+                if !self.acting(*receiver) {
+                    return Err(Fault::TaskPhase(*receiver));
+                }
+            }
+            // FIFO and bounded: a message enters a channel whose receiver is there and
+            // that has room, once. The send is the commit of the sender's permit.
+            Step::Sent {
+                channel,
+                message,
+                sender,
+            } => {
+                let ch = self.channel(*channel)?;
+                self.task(*sender)?;
+                if !ch.present {
+                    return rule(*channel, "send after the receiver went");
+                }
+                if ch.queue.len() >= ch.capacity as usize {
+                    return rule(*channel, "send into a full channel");
+                }
+                let unblocks = self.blocked.get(message) == Some(&(*channel, *sender));
+                if !unblocks && !self.fresh_send(*channel, *message, *sender) {
+                    return rule(*channel, "message identity");
+                }
+                if !self.acting(*sender) {
+                    return Err(Fault::TaskPhase(*sender));
+                }
+                if !self.permit_ok(*sender) {
+                    return Err(Fault::NoSendPermit { task: *sender });
+                }
+            }
+            // Backpressure: a send waits only on a full channel.
+            Step::SendBlocked {
+                channel,
+                message,
+                sender,
+            } => {
+                let ch = self.channel(*channel)?;
+                self.task(*sender)?;
+                if !ch.present || ch.queue.len() < ch.capacity as usize {
+                    return rule(*channel, "send blocked without a full channel");
+                }
+                if !self.fresh_send(*channel, *message, *sender) {
+                    return rule(*channel, "message identity");
+                }
+                if !self.acting(*sender) {
+                    return Err(Fault::TaskPhase(*sender));
+                }
+            }
+            // A send fails as closed only once the receiver is gone.
+            Step::SendClosed {
+                channel,
+                message,
+                sender,
+            } => {
+                let ch = self.channel(*channel)?;
+                self.task(*sender)?;
+                if ch.present {
+                    return rule(*channel, "send closed while the receiver is there");
+                }
+                let unblocks = self.blocked.get(message) == Some(&(*channel, *sender));
+                if !unblocks && !self.fresh_send(*channel, *message, *sender) {
+                    return rule(*channel, "message identity");
+                }
+                if !self.acting(*sender) {
+                    return Err(Fault::TaskPhase(*sender));
+                }
+            }
+            // A blocked send is dropped only by its sender's cancellation cleanup.
+            Step::SendAbandoned {
+                channel,
+                message,
+                sender,
+            } => {
+                self.channel(*channel)?;
+                if self.blocked.get(message) != Some(&(*channel, *sender)) {
+                    return rule(*channel, "abandoned send was not blocked");
+                }
+                if !self.may_clean_up(*sender) {
+                    return Err(Fault::TaskPhase(*sender));
+                }
+            }
+            // FIFO: the receiver takes the oldest queued message.
+            Step::Received { channel, message } => {
+                let ch = self.channel(*channel)?;
+                if !ch.present || ch.queue.front() != Some(message) {
+                    return rule(*channel, "received out of FIFO order");
+                }
+                if !self.receiving(ch.receiver) {
+                    return Err(Fault::TaskPhase(ch.receiver));
+                }
+            }
+            // A receive waits only on an empty channel something can still send on.
+            Step::RecvBlocked { channel } => {
+                let ch = self.channel(*channel)?;
+                if !ch.present
+                    || !ch.queue.is_empty()
+                    || ch.recv_blocked
+                    || !self.can_still_receive(*channel)
+                {
+                    return rule(*channel, "receive blocked on a channel that can deliver");
+                }
+                if !self.receiving(ch.receiver) {
+                    return Err(Fault::TaskPhase(ch.receiver));
+                }
+            }
+            // A receive returns closed only on an empty channel nothing can send on.
+            Step::RecvClosed { channel } => {
+                let ch = self.channel(*channel)?;
+                if !ch.present || !ch.queue.is_empty() || self.can_still_receive(*channel) {
+                    return rule(*channel, "receive closed on a channel that can deliver");
+                }
+                if !self.receiving(ch.receiver) {
+                    return Err(Fault::TaskPhase(ch.receiver));
+                }
+            }
+            // A blocked receive is dropped only by the receiver's cancellation cleanup.
+            Step::RecvAbandoned { channel } => {
+                let ch = self.channel(*channel)?;
+                if !ch.recv_blocked {
+                    return rule(*channel, "abandoned receive was not blocked");
+                }
+                if !self.may_clean_up(ch.receiver) {
+                    return Err(Fault::TaskPhase(ch.receiver));
+                }
+            }
+            Step::SendersClosed { channel } => {
+                if !self.channel(*channel)?.senders_open {
+                    return rule(*channel, "senders closed twice");
+                }
+            }
+            // The receiver goes when its task ends (normally, or in its cancellation's
+            // cleanup), and declares exactly the messages still queued.
+            Step::ReceiverGone { channel, discarded } => {
+                let ch = self.channel(*channel)?;
+                if !ch.present || ch.recv_blocked {
+                    return rule(*channel, "receiver gone twice or while receiving");
+                }
+                let mut queued: Vec<u64> = ch.queue.iter().copied().collect();
+                queued.sort_unstable();
+                if &queued != discarded {
+                    return rule(*channel, "discarded set is not the queue");
+                }
+                if !self.receiving(ch.receiver) && !self.may_clean_up(ch.receiver) {
+                    return Err(Fault::TaskPhase(ch.receiver));
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -1456,13 +1842,26 @@ impl Model {
             Step::Abort { reservation, .. } => {
                 self.reservations[*reservation as usize].phase = EffectPhase::Aborted;
             }
-            Step::Opened { holder, region, .. } => self.obligations.push(Obligation {
+            Step::Opened {
+                kind,
+                holder,
+                region,
+                ..
+            } => self.obligations.push(Obligation {
+                kind: *kind,
                 holder: *holder,
                 region: *region,
                 phase: ObligationPhase::Open,
             }),
-            Step::Discharged { obligation, .. } => {
-                self.obligations[*obligation as usize].phase = ObligationPhase::Discharged;
+            Step::Discharged {
+                obligation,
+                committed,
+            } => {
+                let ob = &mut self.obligations[*obligation as usize];
+                ob.phase = ObligationPhase::Discharged;
+                if *committed && ob.kind == SEND_PERMIT {
+                    *self.permits.entry(ob.holder).or_insert(0) += 1;
+                }
             }
             Step::Transferred {
                 obligation,
@@ -1487,6 +1886,62 @@ impl Model {
             Step::TimerCancelled { timer, .. } => {
                 self.timers[*timer as usize].phase = TimerPhase::Cancelled;
             }
+            Step::ChannelOpened {
+                capacity, receiver, ..
+            } => self.channels.push(Channel {
+                capacity: *capacity,
+                receiver: *receiver,
+                present: true,
+                queue: std::collections::VecDeque::new(),
+                senders_open: true,
+                recv_blocked: false,
+            }),
+            Step::Sent {
+                channel,
+                message,
+                sender,
+            } => {
+                if self.blocked.remove(message).is_none() {
+                    self.next_message += 1;
+                }
+                self.channels[*channel as usize].queue.push_back(*message);
+                if let Some(count) = self.permits.get_mut(sender) {
+                    *count = count.saturating_sub(1);
+                }
+            }
+            Step::SendBlocked {
+                channel,
+                message,
+                sender,
+            } => {
+                self.next_message += 1;
+                self.blocked.insert(*message, (*channel, *sender));
+            }
+            Step::SendClosed { message, .. } => {
+                if self.blocked.remove(message).is_none() {
+                    self.next_message += 1;
+                }
+            }
+            Step::SendAbandoned { message, .. } => {
+                self.blocked.remove(message);
+            }
+            Step::Received { channel, .. } => {
+                let ch = &mut self.channels[*channel as usize];
+                ch.queue.pop_front();
+                ch.recv_blocked = false;
+            }
+            Step::RecvBlocked { channel } => self.channels[*channel as usize].recv_blocked = true,
+            Step::RecvClosed { channel } | Step::RecvAbandoned { channel } => {
+                self.channels[*channel as usize].recv_blocked = false;
+            }
+            Step::SendersClosed { channel } => {
+                self.channels[*channel as usize].senders_open = false;
+            }
+            Step::ReceiverGone { channel, .. } => {
+                let ch = &mut self.channels[*channel as usize];
+                ch.present = false;
+                ch.queue.clear();
+            }
         }
     }
 
@@ -1495,7 +1950,8 @@ impl Model {
     /// # Errors
     ///
     /// The first [`Fault`] among: a requested cancellation that never drained, a
-    /// terminated task with a reserved effect or an armed timer, an overdue timer, a
+    /// terminated task with a reserved effect, an armed timer or a channel it still
+    /// holds, an overdue timer, a
     /// leak whose holder never ended, and a finalized region that never settled its
     /// obligations.
     pub fn finish(&self) -> Result<(), Fault> {
@@ -1509,6 +1965,9 @@ impl Model {
             }
             if task.phase.is_terminal() && self.armed(t) {
                 return Err(Fault::TimerOutlivesSleep { task: t });
+            }
+            if task.phase.is_terminal() && self.holds_channel(t) {
+                return Err(Fault::ChannelOutlivesTask { task: t });
             }
         }
         if self.alphabet.has(FamilyTag::Time) {
@@ -1574,6 +2033,7 @@ impl Model {
                             && !self.staged(*t)
                             && !self.armed(*t)
                             && !self.holds(*t)
+                            && !self.holds_channel(*t)
                     });
                     if ready {
                         out.push(Pattern::Exact(Step::Drain {
@@ -1600,7 +2060,7 @@ impl Model {
         }
         for t in 0..tasks {
             let task = &self.tasks[t as usize];
-            let quiet = !self.staged(t) && !self.armed(t);
+            let quiet = !self.staged(t) && !self.armed(t) && !self.holds_channel(t);
             match task.phase {
                 TaskPhase::Created => {
                     if active(t) {
@@ -1645,7 +2105,11 @@ impl Model {
                         out.push(Pattern::Exact(Step::CancelAcknowledged { task: t }));
                     }
                     CancelPhase::Acknowledged(cause) => {
-                        if !self.staged(t) && !self.holds(t) && !self.armed(t) {
+                        if !self.staged(t)
+                            && !self.holds(t)
+                            && !self.armed(t)
+                            && !self.holds_channel(t)
+                        {
                             out.push(Pattern::Exact(Step::CancelCompleted { task: t, cause }));
                         }
                     }
@@ -1802,7 +2266,121 @@ impl Model {
                 }
             }
         }
+
+        // Channel.
+        if has(FamilyTag::Channel) {
+            self.enabled_channel(&mut out);
+        }
         out
+    }
+
+    fn enabled_channel(&self, out: &mut Vec<Pattern>) {
+        let tasks = ord(self.tasks.len());
+        let next = self.next_message;
+        for t in 0..tasks {
+            if self.acting(t) {
+                out.push(Pattern::ChannelOpened {
+                    channel: ord(self.channels.len()),
+                    receiver: t,
+                });
+            }
+        }
+        for c in 0..ord(self.channels.len()) {
+            let ch = &self.channels[c as usize];
+            let room = ch.queue.len() < ch.capacity as usize;
+            let fresh_senders: Vec<u32> = (0..tasks)
+                .filter(|s| ch.senders_open && self.acting(*s) && self.sender_free(*s))
+                .collect();
+            let blocked: Vec<(u64, u32)> = self
+                .blocked
+                .iter()
+                .filter(|(_, (cc, _))| *cc == c)
+                .map(|(m, (_, s))| (*m, *s))
+                .collect();
+            if ch.present {
+                for s in &fresh_senders {
+                    if room && self.permit_ok(*s) {
+                        out.push(Pattern::Exact(Step::Sent {
+                            channel: c,
+                            message: next,
+                            sender: *s,
+                        }));
+                    }
+                    if !room {
+                        out.push(Pattern::Exact(Step::SendBlocked {
+                            channel: c,
+                            message: next,
+                            sender: *s,
+                        }));
+                    }
+                }
+                for (m, s) in &blocked {
+                    if room && self.acting(*s) && self.permit_ok(*s) {
+                        out.push(Pattern::Exact(Step::Sent {
+                            channel: c,
+                            message: *m,
+                            sender: *s,
+                        }));
+                    }
+                }
+                if self.receiving(ch.receiver) {
+                    if let Some(m) = ch.queue.front() {
+                        out.push(Pattern::Exact(Step::Received {
+                            channel: c,
+                            message: *m,
+                        }));
+                    } else if self.can_still_receive(c) {
+                        if !ch.recv_blocked {
+                            out.push(Pattern::Exact(Step::RecvBlocked { channel: c }));
+                        }
+                    } else {
+                        out.push(Pattern::Exact(Step::RecvClosed { channel: c }));
+                    }
+                }
+                if !ch.recv_blocked
+                    && (self.receiving(ch.receiver) || self.may_clean_up(ch.receiver))
+                {
+                    let mut discarded: Vec<u64> = ch.queue.iter().copied().collect();
+                    discarded.sort_unstable();
+                    out.push(Pattern::Exact(Step::ReceiverGone {
+                        channel: c,
+                        discarded,
+                    }));
+                }
+            } else {
+                for s in &fresh_senders {
+                    out.push(Pattern::Exact(Step::SendClosed {
+                        channel: c,
+                        message: next,
+                        sender: *s,
+                    }));
+                }
+                for (m, s) in &blocked {
+                    if self.acting(*s) {
+                        out.push(Pattern::Exact(Step::SendClosed {
+                            channel: c,
+                            message: *m,
+                            sender: *s,
+                        }));
+                    }
+                }
+            }
+            for (m, s) in &blocked {
+                if self.may_clean_up(*s) {
+                    out.push(Pattern::Exact(Step::SendAbandoned {
+                        channel: c,
+                        message: *m,
+                        sender: *s,
+                    }));
+                }
+            }
+            if ch.recv_blocked && self.may_clean_up(ch.receiver) {
+                out.push(Pattern::Exact(Step::RecvAbandoned { channel: c }));
+            }
+            if ch.senders_open {
+                out.push(Pattern::Exact(Step::SendersClosed { channel: c }));
+            }
+        }
     }
 }
 
@@ -1827,16 +2405,8 @@ pub fn judge_steps(alphabet: &Alphabet, steps: &[Step]) -> Verdict {
 /// Read canonical journal bytes and run the model over them.
 #[must_use]
 pub fn judge(alphabet: &Alphabet, bytes: &[u8]) -> Verdict {
-    let decoded = match read(bytes) {
-        Ok(decoded) => decoded,
-        Err(fault) => return Verdict::Malformed(fault),
-    };
-    let mut steps = Vec::with_capacity(decoded.len());
-    for (at, event) in decoded.into_iter().enumerate() {
-        match event {
-            Decoded::Step(step) => steps.push(step),
-            Decoded::Uncovered { tag } => return Verdict::Unsupported { at, tag },
-        }
+    match read(bytes) {
+        Ok(steps) => judge_steps(alphabet, &steps),
+        Err(fault) => Verdict::Malformed(fault),
     }
-    judge_steps(alphabet, &steps)
 }

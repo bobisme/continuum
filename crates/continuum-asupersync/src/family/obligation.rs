@@ -447,6 +447,7 @@ impl State {
 
 #[derive(Debug, Clone, Copy)]
 struct Entry {
+    kind: ObligationKind,
     holder: u32,
     region: u32,
     state: State,
@@ -476,7 +477,8 @@ pub enum LedgerFault {
         /// Its state.
         state: &'static str,
     },
-    /// The holder is terminal in the model, so it cannot own an obligation.
+    /// The holder is terminal in the model, or completed as cancelled, so it cannot own
+    /// an obligation.
     HolderTerminal {
         /// The obligation.
         obligation: u32,
@@ -613,12 +615,47 @@ impl fmt::Display for LedgerFault {
 #[derive(Debug, Default)]
 pub struct LiftState {
     entries: BTreeMap<u32, Entry>,
+    /// Send permits each task committed and has not yet sent with (bn-1i050).
+    permits: BTreeMap<u32, u32>,
     settled: BTreeMap<u32, bool>,
     present: bool,
 }
 
 fn fault(fault: LedgerFault) -> LiftStop {
     LiftStop::Violation(Nonconformance::Obligation(fault))
+}
+
+/// A channel send is the commit of its sender's `SendPermit` (docs/02 §7 two-phase
+/// effect): when the journal carries this family, consume one committed, unused send
+/// permit of `task`. `false` when there is none.
+pub(crate) fn take_send_permit(cx: &mut LiftContext, task: u32) -> bool {
+    if !cx.obligation.present {
+        return true;
+    }
+    match cx.obligation.permits.get_mut(&task) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A task that completes as cancelled holds no open obligation (docs/02 §7
+/// `obligations == ∅ → Cancelled`); one it holds is [`LedgerFault::HolderTerminal`].
+pub(crate) fn check_none_held(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {
+    match cx
+        .obligation
+        .entries
+        .iter()
+        .find(|(_, entry)| entry.holder == task && entry.state == State::Open)
+    {
+        Some((obligation, _)) => Err(fault(LedgerFault::HolderTerminal {
+            obligation: *obligation,
+            holder: task,
+        })),
+        None => Ok(()),
+    }
 }
 
 /// The holder must be live in the model and owned by `region`.
@@ -670,9 +707,9 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
     match event {
         ObligationEvent::Opened {
             obligation,
+            kind,
             holder,
             region,
-            ..
         } => {
             let expected = u32::try_from(cx.obligation.entries.len()).unwrap_or(u32::MAX);
             if obligation.0 != expected {
@@ -693,6 +730,7 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
             cx.obligation.entries.insert(
                 obligation.0,
                 Entry {
+                    kind: *kind,
                     holder: holder.0,
                     region: region.0,
                     state: State::Open,
@@ -701,9 +739,12 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
         }
         ObligationEvent::Discharged { obligation, .. } | ObligationEvent::Leaked { obligation } => {
             let mut entry = open_entry(cx, obligation.0, event)?;
-            if let ObligationEvent::Discharged { .. } = event {
+            if let ObligationEvent::Discharged { how, .. } = event {
                 check_holder(cx, obligation.0, entry.holder, entry.region)?;
                 entry.state = State::Discharged;
+                if *how == Discharge::Committed && entry.kind == ObligationKind::SendPermit {
+                    *cx.obligation.permits.entry(entry.holder).or_insert(0) += 1;
+                }
             } else {
                 entry.state = State::Leaked;
             }

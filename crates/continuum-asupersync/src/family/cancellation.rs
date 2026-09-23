@@ -41,7 +41,9 @@
 //!    is not terminal, with the cause the region tree implies;
 //! 2. each task walks `requested → acknowledged → cancelled` in that order, exactly
 //!    once, with the same cause at both ends, and all of it before the region drain
-//!    that terminates it in the model;
+//!    that terminates it in the model; it completes holding no open obligation, no
+//!    scheduled timer, no channel receiver and no blocked send (docs/02 §7
+//!    `obligations == ∅ → Cancelled`; each is that family's own fault, bn-1i050);
 //! 3. when a journal carries this family at all, every worker a model drain cancelled
 //!    has completed all three phases.
 //!
@@ -418,12 +420,47 @@ pub(crate) fn lift(event: &CancellationEvent, cx: &mut LiftContext) -> Result<()
                     expected: requested,
                 }));
             }
+            // docs/02 §7: `Cancelling ─ drain(effect)* ─ finalize(resource)* ─
+            // obligations == ∅ → Cancelled`. Completing as cancelled ends the task, so
+            // an obligation or a timer it still holds is that family's own end-of-task
+            // fault, found at the completion rather than at the region's drain
+            // (bn-1i050). A staged reservation needs no check here: the effect lift
+            // already refuses it at the late abort or at `finish` (`LeakedAtClose`).
+            crate::family::obligation::check_none_held(cx, task)?;
+            crate::family::time::check_none_armed(cx, task)?;
+            crate::family::channel::check_none_held(cx, task)?;
             Phase::Cancelled
         }
         _ => return Err(out_of_order()),
     };
     cx.cancellation.phases.insert(task, next);
     Ok(())
+}
+
+/// The task's cancellation phase token when the journal has reported one and it is not
+/// `acknowledged`: a cleanup step (a cancellation's effect abort, timer drop) by this
+/// task is then outside `Cancelling` (docs/02 §7). `None` when the task is
+/// acknowledged, or when the journal reported no phase for it (a journal without this
+/// family; [`finish`] holds a drained task to its phases).
+pub(crate) fn outside_cancelling(cx: &LiftContext, task: u32) -> Option<&'static str> {
+    match cx.cancellation.phases.get(&task) {
+        None | Some(Phase::Acknowledged(_)) => None,
+        Some(phase) => Some(phase.token()),
+    }
+}
+
+/// Whether the task's reported cancellation has reached `Cancelling`: it acknowledged,
+/// or completed as cancelled. Such a task no longer acts on its own account.
+pub(crate) fn is_cancelling(cx: &LiftContext, task: u32) -> bool {
+    matches!(
+        cx.cancellation.phases.get(&task),
+        Some(Phase::Acknowledged(_) | Phase::Cancelled)
+    )
+}
+
+/// The task's cancellation phase token, if the journal has reported any.
+pub(crate) fn phase_of(cx: &LiftContext, task: u32) -> Option<&'static str> {
+    cx.cancellation.phases.get(&task).map(|phase| phase.token())
 }
 
 /// The whole-journal check, run after the last event: when the journal carries this
