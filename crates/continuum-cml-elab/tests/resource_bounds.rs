@@ -9,8 +9,9 @@
 
 use std::thread;
 
+use continuum_cml_elab::budget::MAX_NODES;
 use continuum_cml_elab::budget::{MAX_TYPE_DEPTH, MAX_WORK};
-use continuum_cml_elab::elab::MAX_INLINE_DEPTH;
+use continuum_cml_elab::elab::{MAX_INLINE_DEPTH, MAX_RECURSION_DEPTH, MAX_UNFOLD_NESTING};
 use continuum_cml_elab::lower::MAX_INIT_BINDINGS;
 use continuum_cml_elab::lower::init_work;
 use continuum_cml_elab::{
@@ -111,10 +112,10 @@ fn a_long_def_cycle_is_typed_unsupported_in_a_small_stack() {
     }
     src.push_str(&format!("def f0(n: Nat): Nat = f{}(n)\n", CHAIN - 1));
     let (elaborated, _) = pipeline(src);
-    let e = elaborated.expect_err("the chain is one recursive cycle");
+    let e = elaborated.expect_err("the chain is one mutually recursive cycle");
     assert_eq!(
         e.kind,
-        ElabErrorKind::Unsupported(Unsupported::RecursiveDef)
+        ElabErrorKind::Unsupported(Unsupported::MutualRecursion)
     );
 }
 
@@ -717,4 +718,200 @@ fn satisfiable_bounds_at_the_i64_edges_lower_exactly() {
     .expect("lowers");
     let d = bottom.variables().first().expect("one variable").domain();
     assert_eq!((d.lo(), d.hi()), (i64::MIN, i64::MIN + 1));
+}
+
+// ---------------------------------------------------------------------------
+// bn-36x3b: unfolding recursive defs
+// ---------------------------------------------------------------------------
+
+/// A tail-recursive def called at the constant `k`: `k` unfoldings, one node of output.
+fn tail_recursion(k: u64) -> String {
+    format!(
+        "{HEADER}def f(k: Nat): Bool = if k == 0 then true else f(k - 1)\ninvariant I {{ f({k}) }}\n"
+    )
+}
+
+/// Deep recursion: the chain bound is checked from the constant measure before anything
+/// is planned, so a call one past [`MAX_RECURSION_DEPTH`] and a call at `10^18` are
+/// refused with the same work. Up to the bound, the work grows linearly with the chain.
+#[test]
+fn deep_recursion_is_refused_before_unfolding_and_counted_below_the_bound() {
+    let (elaborated, lowered) = pipeline(tail_recursion(MAX_RECURSION_DEPTH as u64));
+    let model = elaborated.expect("a chain at the bound elaborates in a small stack");
+    assert!(
+        model.dump().contains("(invariant I\n    true\n"),
+        "{}",
+        model.dump()
+    );
+    assert_eq!(lowered, None, "and lowers");
+
+    assert_linear(
+        "tail recursion",
+        elaboration_work(&tail_recursion(16)),
+        elaboration_work(&tail_recursion(32)),
+    );
+
+    let over = elaborate_source_with(
+        &tail_recursion(MAX_RECURSION_DEPTH as u64 + 1),
+        Limits::default(),
+    );
+    let huge = elaborate_source_with(
+        &tail_recursion(1_000_000_000_000_000_000),
+        Limits::default(),
+    );
+    for (result, _) in [&over, &huge] {
+        let e = result.as_ref().expect_err("past the chain bound");
+        assert_eq!(e.kind, ElabErrorKind::TooLarge);
+    }
+    assert_eq!(over.1, huge.1, "refused before any unfolding: {:?}", over.1);
+}
+
+/// `n` measure tests before each recursive call: every one is decided (and so visited)
+/// in every unfolding, so the build's recursion is `(n + 1) * k + 2` deep. At
+/// [`MAX_UNFOLD_NESTING`] the whole pipeline runs in a small stack; one unfolding more
+/// is refused by the plan, before anything is built.
+///
+/// With `deep`, each unfolding also adds one `+ 1` level of output, so the build is
+/// `(n + 2) * k + 2` deep and the output `k + 1`: the deepest build over a deep output.
+fn nested_tests(n: usize, k: usize, deep: bool) -> String {
+    let (ty, base, other, call, check) = if deep {
+        ("Int", "0", "0", "f(k - 1) + 1", ">= 0")
+    } else {
+        ("Bool", "true", "false", "f(k - 1)", "")
+    };
+    let mut body = format!("if k == 0 then {base}");
+    for i in 1..n {
+        body.push_str(&format!(" else if k == {} then {other}", 1000 + i));
+    }
+    body.push_str(&format!(" else {call}"));
+    format!("{HEADER}def f(k: Nat): {ty} = {body}\ninvariant I {{ f({k}) {check} }}\n")
+}
+
+#[test]
+fn unfolding_nesting_is_bounded_near_and_over_the_limit() {
+    const _: () = assert!(10 * 51 + 2 == MAX_UNFOLD_NESTING);
+    for (n, deep) in [(9, false), (8, true)] {
+        let (elaborated, _) = pipeline(nested_tests(n, 51, deep));
+        elaborated.expect("nesting exactly at the bound elaborates in a small stack");
+        let (elaborated, _) = pipeline(nested_tests(n, 52, deep));
+        assert_eq!(
+            elaborated.expect_err("one unfolding more").kind,
+            ElabErrorKind::TooLarge
+        );
+    }
+    let (_, lowered) = pipeline(nested_tests(9, 51, false));
+    assert_eq!(lowered, None, "the shallow output lowers");
+}
+
+/// `f(k) = f(k - 1) + 1` is `k + 1` deep: the output depth is bounded by
+/// [`MAX_INLINE_DEPTH`] exactly as for a non-recursive def.
+#[test]
+fn unfolded_depth_is_bounded_near_and_over_the_limit() {
+    let src = |k: usize| {
+        format!(
+            "{HEADER}def f(k: Nat): Int = if k == 0 then 0 else f(k - 1) + 1\ninvariant I {{ f({k}) >= 0 }}\n"
+        )
+    };
+    let (elaborated, _) = pipeline(src(MAX_INLINE_DEPTH - 1));
+    elaborated.expect("an unfolding exactly at the depth bound elaborates");
+    let (elaborated, _) = pipeline(src(MAX_INLINE_DEPTH));
+    assert_eq!(
+        elaborated.expect_err("one level more").kind,
+        ElabErrorKind::TooLarge
+    );
+}
+
+/// Wide fan-out: two recursive calls per unfolding, so `f(k)` is `2^(k+1) - 1` nodes
+/// (two budget units each, the node and its `Int` type).
+fn fan_out(k: u32) -> String {
+    format!(
+        "{HEADER}def f(k: Nat): Int = if k == 0 then 1 else f(k - 1) + f(k - 1)\ninvariant I {{ f({k}) >= 0 }}\n"
+    )
+}
+
+fn fan_out_nodes(k: u32) -> usize {
+    2 * ((1 << (k + 1)) - 1)
+}
+
+/// The charge covers the output (anti-vacuity: an uncharged unfolding would use fewer
+/// nodes than it builds), the work grows with the output and not faster, and an
+/// unfolding far past the budget is refused before it is built: the refusal spends a
+/// bounded amount of work and allocates nothing.
+#[test]
+fn wide_fan_out_is_charged_and_refused_before_it_is_built() {
+    for k in [8, 10] {
+        let (result, usage) = elaborate_source_with(&fan_out(k), Limits::default());
+        let m = result.expect("elaborates");
+        assert!(usage.nodes >= fan_out_nodes(k), "k = {k}: {usage:?}");
+        lower(&m).expect("lowers");
+    }
+    assert_linear(
+        "fan-out (the output doubles)",
+        elaboration_work(&fan_out(10)),
+        elaboration_work(&fan_out(11)),
+    );
+    fn body() {
+        let (result, usage) = elaborate_source_with(&fan_out(40), Limits::default());
+        assert_eq!(
+            result.expect_err("2^41 nodes").kind,
+            ElabErrorKind::TooLarge
+        );
+        assert!(
+            usage.nodes < 10_000,
+            "nothing of the unfolding is built: {usage:?}"
+        );
+        assert!(usage.work < 8 * MAX_NODES as u64, "{usage:?}");
+    }
+    under_memory_limit(
+        "wide_fan_out_is_charged_and_refused_before_it_is_built",
+        body,
+    );
+}
+
+/// The unfolding's boundaries are exact: at the measured node and work usage it
+/// elaborates, one unit less of either is refused, typed.
+#[test]
+fn the_unfolding_boundary_is_exact() {
+    let src = fan_out(9);
+    let (result, used) = elaborate_source_with(&src, Limits::default());
+    result.expect("elaborates");
+    elaborate_source_with(&src, used_limits(used.nodes, used.work))
+        .0
+        .expect("at the limits it elaborates");
+    let e = elaborate_source_with(&src, used_limits(used.nodes - 1, used.work))
+        .0
+        .expect_err("one node less");
+    assert_eq!(e.kind, ElabErrorKind::TooLarge);
+    let e = elaborate_source_with(&src, used_limits(used.nodes, used.work - 1))
+        .0
+        .expect_err("one unit of work less");
+    assert_eq!(e.kind, ElabErrorKind::WorkLimitExceeded);
+}
+
+fn used_limits(nodes: usize, work: u64) -> Limits {
+    Limits { nodes, work }
+}
+
+/// An argument that doubles at every unfolding is charged when it is built, even where
+/// the body never uses it: `g({1}, 40)` is refused before its arguments are built.
+#[test]
+fn an_unused_growing_argument_is_charged() {
+    let src = |k: u32| {
+        format!(
+            "{HEADER}def g(r: Set[Int], k: Nat): Bool = if k == 0 then true else g(r union r, k - 1)\ninvariant I {{ g({{1}}, {k}) }}\n"
+        )
+    };
+    let (result, small) = elaborate_source_with(&src(10), Limits::default());
+    result.expect("2^10 elaborates");
+    assert!(
+        small.nodes >= 1 << 11,
+        "the arguments are charged: {small:?}"
+    );
+    fn body() {
+        let src = "module T\nstate { x: Nat where x <= 3 }\ninit { x == 0 }\naction A { unchanged x }\ndef g(r: Set[Int], k: Nat): Bool = if k == 0 then true else g(r union r, k - 1)\ninvariant I { g({1}, 40) }\n";
+        let (result, usage) = elaborate_source_with(src, Limits::default());
+        assert_eq!(result.expect_err("2^40").kind, ElabErrorKind::TooLarge);
+        assert!(usage.nodes < 10_000, "{usage:?}");
+    }
+    under_memory_limit("an_unused_growing_argument_is_charged", body);
 }

@@ -112,14 +112,26 @@ fn empty_braces_need_a_set_or_map_type() {
 
 #[test]
 fn unsupported_semantics_are_typed_unsupported() {
+    // A recursive def whose termination the check cannot show (bn-36x3b).
     let e = fails(&model(
         "def f(n: Nat): Nat = f(n)\ninvariant I { f(x) == 0 }",
     ));
     assert_eq!(
         e.kind,
-        ElabErrorKind::Unsupported(Unsupported::RecursiveDef)
+        ElabErrorKind::Unsupported(Unsupported::NoDecreasingMeasure)
     );
-    assert_eq!(e.code(), "cml.elab.unsupported.recursive_def");
+    assert_eq!(e.code(), "cml.elab.unsupported.no_decreasing_measure");
+    assert_eq!(at(&e), (4, 22));
+    assert!(e.is_unsupported());
+
+    let e = fails(&model(
+        "def f(n: Nat): Nat = g(n)\ndef g(n: Nat): Nat = f(n)\ninvariant I { f(x) == 0 }",
+    ));
+    assert_eq!(
+        e.kind,
+        ElabErrorKind::Unsupported(Unsupported::MutualRecursion)
+    );
+    assert_eq!(e.code(), "cml.elab.unsupported.mutual_recursion");
     assert!(e.is_unsupported());
 
     let e = fails(&model("action A { x' > x }"));

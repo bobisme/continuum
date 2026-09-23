@@ -62,9 +62,19 @@ impl std::error::Error for ElabError {}
 /// Semantics outside the Finite core fragment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Unsupported {
-    /// A `def` that calls itself, directly or through other defs. Totality and
-    /// termination of model functions (docs/11 §8) are not checked yet.
-    RecursiveDef,
+    /// Two or more `def`s that call each other in a cycle. The termination check
+    /// (docs/11 §8, see [`crate::elab`] "Recursive defs") admits self-recursion with a
+    /// decreasing integer measure; the surface has no way to state a measure shared by
+    /// several defs, so mutual recursion is never shown to terminate.
+    MutualRecursion,
+    /// A self-recursive `def` with no parameter that the termination check shows to
+    /// decrease at every recursive call (docs/11 §8, "totality/termination for model
+    /// functions").
+    NoDecreasingMeasure,
+    /// A call of a recursive `def` whose measure argument is not a constant. The call
+    /// is unfolded during elaboration, and its depth must be bounded before anything is
+    /// built, so the measure must fold to an integer literal.
+    RecursionBoundNotConstant,
     /// A primed expression that is not `x' == e` for a state variable `x`: a relational
     /// postcondition (docs/11 §4).
     RelationalPostcondition,
@@ -77,7 +87,11 @@ impl Unsupported {
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
-            Unsupported::RecursiveDef => "cml.elab.unsupported.recursive_def",
+            Unsupported::MutualRecursion => "cml.elab.unsupported.mutual_recursion",
+            Unsupported::NoDecreasingMeasure => "cml.elab.unsupported.no_decreasing_measure",
+            Unsupported::RecursionBoundNotConstant => {
+                "cml.elab.unsupported.recursion_bound_not_constant"
+            }
             Unsupported::RelationalPostcondition => "cml.elab.unsupported.relational_postcondition",
             Unsupported::IntegerBeyondI64 => "cml.elab.unsupported.integer_beyond_i64",
         }
@@ -87,8 +101,16 @@ impl Unsupported {
 impl fmt::Display for Unsupported {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Unsupported::RecursiveDef => {
-                "recursive model functions are outside the Finite core fragment"
+            Unsupported::MutualRecursion => {
+                "mutually recursive model functions are not shown to terminate"
+            }
+            Unsupported::NoDecreasingMeasure => {
+                "no parameter of this recursive model function decreases at every \
+                 recursive call under a guard that bounds it below"
+            }
+            Unsupported::RecursionBoundNotConstant => {
+                "the measure argument of a call of a recursive model function must be a \
+                 constant"
             }
             Unsupported::RelationalPostcondition => {
                 "only `x' == e` for a state variable `x` is supported as a post-state clause"
@@ -167,6 +189,15 @@ pub enum ElabErrorKind {
     DuplicateInit,
     /// A name in a choice, `fairness`, or `step` that is not an action or choice.
     NotAnAction(String),
+    /// A call of a recursive `def` whose `Nat` measure argument is negative: the
+    /// argument is outside the parameter's declared type, and the termination argument
+    /// assumes it is not.
+    MeasureOutOfDomain {
+        /// The recursive def.
+        function: String,
+        /// The constant measure argument.
+        value: i64,
+    },
     /// An elaborated model beyond a hard size bound (INV-016: source is untrusted).
     TooLarge,
     /// Elaboration would exceed the work budget ([`crate::budget::MAX_WORK`]).
@@ -198,6 +229,7 @@ impl ElabErrorKind {
             ElabErrorKind::TemporalOutsideBehavior => "cml.elab.temporal_outside_behavior",
             ElabErrorKind::DuplicateInit => "cml.elab.duplicate_init",
             ElabErrorKind::NotAnAction(_) => "cml.elab.not_an_action",
+            ElabErrorKind::MeasureOutOfDomain { .. } => "cml.elab.measure_out_of_domain",
             ElabErrorKind::TooLarge => "cml.limit.elaboration_too_large",
             ElabErrorKind::WorkLimitExceeded => "cml.limit.work_limit_exceeded",
             ElabErrorKind::Unsupported(u) => u.code(),
@@ -251,6 +283,10 @@ impl fmt::Display for ElabErrorKind {
             }
             ElabErrorKind::DuplicateInit => write!(f, "a model has at most one init"),
             ElabErrorKind::NotAnAction(n) => write!(f, "`{n}` is not an action"),
+            ElabErrorKind::MeasureOutOfDomain { function, value } => write!(
+                f,
+                "`{function}` is called with the measure {value}, outside its `Nat` parameter"
+            ),
             ElabErrorKind::TooLarge => write!(f, "the elaborated model exceeds the size bound"),
             ElabErrorKind::WorkLimitExceeded => {
                 write!(f, "elaboration exceeds the work bound")

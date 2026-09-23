@@ -7,7 +7,7 @@
 //! | replicated register | `notes/plan/examples/replicated_register.ctm` | elaborates; golden normalized AST; lowering refused, typed |
 //! | Die Hard (TV-009, Wave 0) | `notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm` | elaborates; golden normalized AST; lowers |
 //! | Coffee Can, Tower of Hanoi | `continuum-cml-syntax/tests/fixtures/` (Wave 0 shapes) | elaborate; golden normalized ASTs |
-//! | Transitive Closure | same | typed unsupported: recursive `def` |
+//! | Transitive Closure | same | elaborates (its recursive `def` passes the termination check, bn-36x3b); golden normalized AST; lowering refused, typed |
 //! | syntax coverage | same | typed unsupported: relational postcondition |
 //!
 //! The dossier and parser fixtures are read in place, so a change to them is a change to
@@ -136,16 +136,18 @@ fn tower_of_hanoi_elaborates_with_its_def_inlined() {
     assert!(!model.dump().contains("top"), "`top` is inlined");
 }
 
+/// `closure(r, k)` recurses on `k: Nat` under the guard `k == 0`, passing `k - 1`: it
+/// passes the termination check, and the fixture elaborates. It does not lower: its
+/// state is a set of pairs, and the programmatic model has only integer variables.
+/// `tests/recursion.rs` checks the unfolded `closure` against an independent closure.
 #[test]
-fn transitive_closure_is_typed_unsupported_at_the_recursive_call() {
-    let err = elaborate_source(&read(&parser_fixture("TransitiveClosure")))
-        .expect_err("`closure` calls itself");
+fn transitive_closure_elaborates_and_refuses_to_lower_with_a_reason() {
+    let model = accept("TransitiveClosure", &parser_fixture("TransitiveClosure"));
+    let err = lower(&model).expect_err("`reach` is a set of pairs");
     assert_eq!(
         err.kind,
-        ElabErrorKind::Unsupported(Unsupported::RecursiveDef)
+        LowerErrorKind::Unlowerable(Unlowerable::NonIntegerState)
     );
-    assert!(err.is_unsupported());
-    assert_eq!((err.span.line, err.span.col), (15, 25));
 }
 
 #[test]

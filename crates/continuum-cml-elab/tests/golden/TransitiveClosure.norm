@@ -1,0 +1,19 @@
+(model TransitiveClosure
+  (sort Node)
+  (const Edges Set[(Node, Node)])
+  (const Nodes Set[Node])
+  (var reach Set[(Node, Node)])
+  (init
+    (eq (state reach) (const Edges))
+  )
+  (action Step ()
+    (require (ne (state reach) (union (state reach) (set-comp ((a Node (const Nodes)) (c Node (const Nodes))) (tuple (bound a) (bound c)) (where (exists ((b Node (const Nodes))) (and (in (tuple (bound a) (bound b)) (state reach)) (in (tuple (bound b) (bound c)) (state reach)))))))))
+    (next reach (union (state reach) (set-comp ((a Node (const Nodes)) (c Node (const Nodes))) (tuple (bound a) (bound c)) (where (exists ((b Node (const Nodes))) (and (in (tuple (bound a) (bound b)) (state reach)) (in (tuple (bound b) (bound c)) (state reach))))))))
+  )
+  (invariant ContainsEdges
+    (subseteq (const Edges) (state reach))
+  )
+  (invariant Transitive
+    (forall ((a Node (const Nodes)) (b Node (const Nodes)) (c Node (const Nodes))) (implies (and (and (in (tuple (bound a) (bound b)) (state reach)) (in (tuple (bound b) (bound c)) (state reach))) (eq (state reach) (union (state reach) (set-comp ((a Node (const Nodes)) (c Node (const Nodes))) (tuple (bound a) (bound c)) (where (exists ((b Node (const Nodes))) (and (in (tuple (bound a) (bound b)) (state reach)) (in (tuple (bound b) (bound c)) (state reach))))))))) (in (tuple (bound a) (bound c)) (state reach))))
+  )
+)

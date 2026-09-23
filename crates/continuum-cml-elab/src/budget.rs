@@ -144,6 +144,11 @@ impl Budget {
         self.limit.saturating_sub(self.left)
     }
 
+    /// Nodes still allowed.
+    pub(crate) const fn left(&self) -> usize {
+        self.left
+    }
+
     /// Reserve `n` nodes, or report that they do not fit and reserve nothing.
     pub(crate) fn charge(&mut self, n: usize) -> Result<(), Exhausted> {
         match self.left.checked_sub(n) {

@@ -111,6 +111,9 @@ pub enum Unlowerable {
     /// The lowered expressions would exceed the output budget
     /// ([`crate::budget::MAX_NODES`] nodes). Charged before each node and each copy.
     OutputTooLarge,
+    /// A recursive call left in a hand-built model. Elaboration unfolds every call of a
+    /// recursive `def`, so an elaborated model never has one.
+    RecursiveCall,
     /// A refinement no integer satisfies, such as `x > c` at `c = i64::MAX` or bounds
     /// that cross. The domain is empty; it is never widened to make it non-empty.
     EmptyRefinement,
@@ -136,6 +139,7 @@ impl Unlowerable {
             Unlowerable::InitDomainTooLarge => "cml.lower.init_domain_too_large",
             Unlowerable::TooManyInitialStates => "cml.lower.too_many_initial_states",
             Unlowerable::EmptyRefinement => "cml.lower.empty_refinement",
+            Unlowerable::RecursiveCall => "cml.lower.recursive_call",
             Unlowerable::OutputTooLarge => "cml.lower.output_too_large",
             Unlowerable::WorkLimitExceeded => "cml.lower.work_limit_exceeded",
             Unlowerable::ExpressionTooDeep => "cml.lower.expression_too_deep",
@@ -169,6 +173,7 @@ impl fmt::Display for Unlowerable {
                 "the init predicate accepts too many states to lower"
             }
             Unlowerable::EmptyRefinement => "the refinement admits no integer value",
+            Unlowerable::RecursiveCall => "a recursive call must be unfolded before lowering",
             Unlowerable::OutputTooLarge => "the lowered model exceeds the output budget",
             Unlowerable::WorkLimitExceeded => "lowering exceeds the work bound",
             Unlowerable::ExpressionTooDeep => "the expression nests deeper than the model accepts",
@@ -633,6 +638,7 @@ fn reason(e: &Expr) -> Unlowerable {
         }
         ExprKind::Param(_) => Unlowerable::ParameterizedAction,
         ExprKind::Binary(BinOp::Div | BinOp::Mod, ..) => Unlowerable::DivisionOrModulo,
+        ExprKind::Recur { .. } => Unlowerable::RecursiveCall,
         _ => Unlowerable::NonIntegerValue,
     }
 }

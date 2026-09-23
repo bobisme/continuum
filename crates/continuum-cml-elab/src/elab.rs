@@ -11,7 +11,8 @@
 //! 2. resolve declared types: aliases (dependencies first), constants, state variables,
 //!    parameters;
 //! 3. elaborate every `def`, callees before callers, so a def may be called before it
-//!    is declared and a cycle is a typed unsupported recursive def;
+//!    is declared; a def that calls itself is checked for termination (see "Recursive
+//!    defs"), and a cycle through two or more defs is typed unsupported;
 //! 4. state refinements, `init`, actions, choices, invariants, fairness, behaviors,
 //!    each in source order.
 //!
@@ -23,10 +24,61 @@
 //!   (`dependency_order`), so a chain spread over many declarations is followed
 //!   iteratively and one alias or def body is resolved at a time;
 //! - expression recursion is bounded by the parser's nesting limit, and inlined `let` and
-//!   `def` values by [`MAX_INLINE_DEPTH`], so every tree is at most their sum deep;
+//!   `def` values (recursive unfoldings included) by [`MAX_INLINE_DEPTH`], so every tree
+//!   is at most their sum deep;
+//! - the unfolding of a recursive call is planned without recursion and built by a
+//!   recursion at most [`MAX_UNFOLD_NESTING`] deep, checked by the plan;
 //! - the recursive methods keep their frames small (per-form helpers, one recursive
 //!   call site in `finish`), and `tests/resource_bounds.rs` runs the deepest accepted
 //!   tree and 5000-link chains through the whole pipeline in a 512 KiB thread.
+//!
+//! # Recursive defs
+//!
+//! Decision: RFC 0003 "Model functions: totality and termination" (and its correction
+//! 1, which completes docs/11 §8 "totality/termination for model functions"). That
+//! section is normative; this is its implementation. The rule is decidable by one pass
+//! over the elaborated body.
+//!
+//! **Termination.** A def that calls itself is admitted when one of its parameters,
+//! `k`, of type `Nat` or `Int`, is a *measure*:
+//!
+//! - every recursive call passes `k - c` in `k`'s position, for a constant `c >= 1`;
+//! - on the path from the body's root to the call, the *measure tests* — the conditions
+//!   of `if`s that compare `k` with a constant (`k == n`, `n < k`, `!(k > n)`, …) —
+//!   bound `k` below by `c`. A `Nat` measure starts from the bound `k >= 0`, so the
+//!   `else` of `if k == 0` bounds it by `1`; an `Int` measure starts unbounded, so there
+//!   `k != 0` bounds nothing and `k <= 0` is needed;
+//! - no recursive call sits inside the arguments of another.
+//!
+//! The first parameter (in declaration order) that satisfies all three is the measure.
+//! Then every chain of recursive calls from a call with measure value `v` is at most
+//! `v / c_min` long, and the measure stays non-negative after the first call. A def
+//! with no such parameter is [`Unsupported::NoDecreasingMeasure`], at its first
+//! recursive call, whether or not it is called. There is no surface syntax for a
+//! measure shared by several defs, so a cycle through two or more defs is
+//! [`Unsupported::MutualRecursion`].
+//!
+//! **Unfolding.** A recursive def is normalized like any other def: a call is replaced
+//! by its meaning, so the normalized model and the lowering never contain recursion.
+//! The measure argument of a call must fold to a constant `v` (literals, `-`, `+`,
+//! `*`, `min`, `max`); otherwise the call is [`Unsupported::RecursionBoundNotConstant`],
+//! because the depth of the unfolding must be known before it is built. A negative
+//! constant for a `Nat` measure is [`crate::ElabErrorKind::MeasureOutOfDomain`]. At
+//! `v`, every measure test in the body is decided, so the `if` becomes the branch it
+//! takes, the measure parameter is the literal `v`, and each recursive call that
+//! remains is unfolded again at `v - c`. Each unfolding gives the body's binders fresh
+//! numbers, so an argument that mentions one of them is never captured. Over the Finite
+//! fragment this is exactly the def's value at the call; an unfolding that the
+//! programmatic model can carry (integers and Booleans) lowers like any other
+//! expression.
+//!
+//! **Resources.** The chain bound `v / c_min <= `[`MAX_RECURSION_DEPTH`] is checked
+//! first, from the constant alone. The unfolding is then planned: its exact size and
+//! depth are computed by an iterative walk that charges its work as it runs and stops as
+//! soon as the size passes what the output budget has left, the depth passes
+//! [`MAX_INLINE_DEPTH`], or the nesting of visits passes [`MAX_UNFOLD_NESTING`]. Each
+//! argument of each recursive call is charged when it is built, whether or not the body
+//! uses it. Only after the plan's size is charged is anything built.
 //!
 //! # Scoping
 //!
@@ -81,6 +133,17 @@ pub use crate::budget::MAX_NODES;
 /// an elaborated tree is at most this plus the parser's `MAX_NESTING` deep. It equals
 /// `MAX_NESTING`, so an inlined value is never deeper than one written out.
 pub const MAX_INLINE_DEPTH: usize = 64;
+
+/// The longest chain of recursive calls one unfolding may follow: a call of a recursive
+/// def whose constant measure `v` and least decrement `step` allow more than
+/// `v / step` nested calls beyond this is refused ([`crate::ElabErrorKind::TooLarge`])
+/// before anything is planned or built.
+pub const MAX_RECURSION_DEPTH: usize = 64;
+
+/// The deepest nesting of visits an unfolding may make: nodes it builds, measure tests
+/// it decides, and recursive calls it follows. It bounds the recursion depth of the
+/// build, and it is checked while the unfolding is planned, before anything is built.
+pub const MAX_UNFOLD_NESTING: usize = 512;
 
 /// Names that the fragment reserves for built-in types and functions.
 const RESERVED: &[&str] = &[
@@ -177,6 +240,31 @@ impl Scope {
 struct DefBody {
     params: Vec<(u32, Type)>,
     body: Expr,
+    /// The termination measure of a recursive def; `None` for a def that does not call
+    /// itself.
+    rec: Option<Recursion>,
+}
+
+/// The termination measure of a recursive def (see "Recursive defs" in the module
+/// documentation).
+#[derive(Debug, Clone, Copy)]
+struct Recursion {
+    /// The measure parameter's position.
+    index: usize,
+    /// Its binder number in the elaborated body.
+    binder: u32,
+    /// Whether it is declared `Nat`: its value at entry is then non-negative.
+    nat: bool,
+    /// The least decrement over every recursive call; at least one.
+    step: i64,
+}
+
+/// The def whose body is being elaborated: a call of it is a [`ExprKind::Recur`].
+#[derive(Debug, Clone)]
+struct Current {
+    name: String,
+    params: Vec<(u32, Type)>,
+    ret: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +295,9 @@ struct Elaborator<'a> {
     resolved_memo: BTreeMap<u32, (usize, usize)>,
     init_name: Option<String>,
     action_names: Vec<String>,
+    /// The def being elaborated, so that its calls of itself become
+    /// [`ExprKind::Recur`] nodes.
+    current: Option<Current>,
 }
 
 /// Elaborate a parsed model.
@@ -242,6 +333,7 @@ pub fn elaborate_with(
         resolved_memo: BTreeMap::new(),
         init_name: None,
         action_names: Vec::new(),
+        current: None,
     };
     let result = e.run().and_then(|m| {
         e.collect_work(file.header.span)?;
@@ -582,8 +674,9 @@ impl<'a> Elaborator<'a> {
 
         // Pass 3: defs, in call-dependency order computed without recursion, so a def
         // body never elaborates inside another def's elaboration: stack depth is one
-        // body's nesting, whatever the length of the call chain. A cycle is a recursive
-        // def, typed unsupported at the call that closes it.
+        // body's nesting, whatever the length of the call chain. A def's calls of itself
+        // are not edges (they are checked for termination instead); a cycle through two
+        // or more defs is mutual recursion, typed unsupported at the call that closes it.
         let mut nodes: Vec<(String, Vec<(String, Span)>)> = Vec::new();
         for decl in &file.decls {
             if let syn::DeclKind::Def { name, body, .. } = &decl.kind {
@@ -593,13 +686,15 @@ impl<'a> Elaborator<'a> {
                     acc.saturating_add(lookup_cost(self.globals.len(), n.len()))
                 });
                 self.burn(cost, name.span)?;
-                calls.retain(|(n, _)| matches!(self.globals.get(n), Some(Global::Def)));
+                calls.retain(|(n, _)| {
+                    n != &name.name && matches!(self.globals.get(n), Some(Global::Def))
+                });
                 nodes.push((name.name.clone(), calls));
             }
         }
         self.burn(order_cost(&nodes), file.header.span)?;
         let order = dependency_order(&nodes).map_err(|at| {
-            ElabError::new(ElabErrorKind::Unsupported(Unsupported::RecursiveDef), at)
+            ElabError::new(ElabErrorKind::Unsupported(Unsupported::MutualRecursion), at)
         })?;
         for (name, span) in order {
             self.def(&name, span)?;
@@ -937,8 +1032,11 @@ impl<'a> Elaborator<'a> {
     fn def(&mut self, name: &str, at: Span) -> R<Rc<DefBody>> {
         let decl = match self.defs.get(name) {
             Some(DefState::Done(body)) => return Ok(Rc::clone(body)),
+            // Calls of the def being elaborated are `Recur` nodes (see `call`), and the
+            // dependency order refuses cycles through several defs first, so this is
+            // reached only by mutual recursion.
             Some(DefState::InProgress) => {
-                return err(ElabErrorKind::Unsupported(Unsupported::RecursiveDef), at);
+                return err(ElabErrorKind::Unsupported(Unsupported::MutualRecursion), at);
             }
             Some(DefState::Pending(decl)) => *decl,
             None => return err(ElabErrorKind::UnknownFunction(name.to_owned()), at),
@@ -970,16 +1068,300 @@ impl<'a> Elaborator<'a> {
             ids.push((id, ty));
         }
         let ret = self.resolve_type(ret)?;
-        let mut e = self.expr(body, &mut scope, Site::State)?;
+        let outer = self.current.replace(Current {
+            name: name.to_owned(),
+            params: ids.clone(),
+            ret: ret.clone(),
+        });
+        let elaborated = self.expr(body, &mut scope, Site::State);
+        self.current = outer;
+        let mut e = elaborated?;
         self.expect(&e, &ret)?;
         self.finish(&mut e)?;
+        let rec = self.termination(&ids, &e, body.span)?;
         let done = Rc::new(DefBody {
             params: ids,
             body: e,
+            rec,
         });
         self.defs
             .insert(name.to_owned(), DefState::Done(Rc::clone(&done)));
         Ok(done)
+    }
+
+    // -----------------------------------------------------------------------
+    // recursive defs
+    // -----------------------------------------------------------------------
+
+    /// A call of the def being elaborated, from inside its own body: a
+    /// [`ExprKind::Recur`] node of the declared return type. It is unfolded later, at
+    /// each call from outside.
+    #[inline(never)]
+    fn recur(
+        &mut self,
+        current: Current,
+        args: &[syn::Expr],
+        scope: &mut Scope,
+        site: Site,
+        span: Span,
+    ) -> R<Expr> {
+        let a = self.args(args, scope, site)?;
+        for ((_, ty), x) in current.params.iter().zip(&a) {
+            self.unify(&x.ty, ty, x.span)?;
+        }
+        self.node(
+            ExprKind::Recur {
+                function: current.name,
+                args: a,
+            },
+            current.ret,
+            span,
+        )
+    }
+
+    /// The termination check of an elaborated def body (see "Recursive defs" in the
+    /// module documentation): `None` when the body does not call its def, the measure
+    /// when one parameter decreases at every recursive call, and
+    /// [`Unsupported::NoDecreasingMeasure`] otherwise.
+    ///
+    /// The work is predictable and charged before each pass: one scan for recursive
+    /// calls, then per candidate parameter one visit of each node plus the constant
+    /// folding of the measure tests and decrements, at most three units per node.
+    fn termination(
+        &mut self,
+        params: &[(u32, Type)],
+        body: &Expr,
+        at: Span,
+    ) -> R<Option<Recursion>> {
+        let size = measure(body).0 as u64;
+        self.burn(size.saturating_mul(2), at)?;
+        let Some(first) = first_recur(body) else {
+            return Ok(None);
+        };
+        for (index, (binder, ty)) in params.iter().enumerate() {
+            let nat = match ty {
+                Type::Nat => true,
+                Type::Int => false,
+                _ => continue,
+            };
+            self.burn(size.saturating_mul(3), at)?;
+            if let Some(step) = decreases(body, index, *binder, nat) {
+                return Ok(Some(Recursion {
+                    index,
+                    binder: *binder,
+                    nat,
+                    step,
+                }));
+            }
+        }
+        err(
+            ElabErrorKind::Unsupported(Unsupported::NoDecreasingMeasure),
+            first,
+        )
+    }
+
+    /// Unfold a call of a recursive def from outside its body.
+    ///
+    /// The measure argument must fold to a constant `v`; the unfolding chain is then at
+    /// most `v / step` calls long, and that bound ([`MAX_RECURSION_DEPTH`]) is checked
+    /// first. The exact size and depth of the unfolding are then computed without
+    /// building it (`plan_tree`, which charges its work as it runs and stops at the
+    /// output budget, at [`MAX_INLINE_DEPTH`], and at [`MAX_UNFOLD_NESTING`]), charged,
+    /// and only then is the tree built.
+    #[inline(never)]
+    fn unfold(
+        &mut self,
+        name: &str,
+        def: &Rc<DefBody>,
+        rec: Recursion,
+        args: Vec<Expr>,
+        span: Span,
+    ) -> R<Expr> {
+        for ((_, ty), x) in def.params.iter().zip(&args) {
+            self.unify(&x.ty, ty, x.span)?;
+        }
+        let Some(measure_arg) = args.get(rec.index) else {
+            return err(ElabErrorKind::UnknownFunction(name.to_owned()), span);
+        };
+        let mut visits = 0_u64;
+        let value = const_int(measure_arg, &mut visits);
+        self.burn(visits, measure_arg.span)?;
+        let Some(v) = value else {
+            return err(
+                ElabErrorKind::Unsupported(Unsupported::RecursionBoundNotConstant),
+                measure_arg.span,
+            );
+        };
+        if rec.nat && v < 0 {
+            return err(
+                ElabErrorKind::MeasureOutOfDomain {
+                    function: name.to_owned(),
+                    value: v,
+                },
+                measure_arg.span,
+            );
+        }
+        // Every recursive call is reached only with the measure at least `step`, and
+        // passes it minus at least `step`: the chain is at most `v / step` long.
+        if v.max(0) / rec.step > MAX_RECURSION_DEPTH as i64 {
+            return err(ElabErrorKind::TooLarge, span);
+        }
+        let lit = literal(v, span);
+        let lit_measure = measure(&lit);
+        let mut measures: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
+        for (i, ((id, _), x)) in def.params.iter().zip(&args).enumerate() {
+            let m = if i == rec.index {
+                lit_measure
+            } else {
+                measure(x)
+            };
+            self.burn(m.0 as u64, x.span)?;
+            measures.insert(*id, m);
+        }
+        let frame = Rc::new(PlanFrame {
+            v,
+            params: measures,
+        });
+        let (size, depth) = self.plan_tree(&def.body, frame, rec, Some(def), 1, span)?;
+        // The literal for the measure is built once, besides the unfolding.
+        self.precharge_copy(size.saturating_add(lit_measure.0), depth, span)?;
+
+        let mut subst: BTreeMap<u32, Expr> = BTreeMap::new();
+        let mut lit = Some(lit);
+        for (i, ((id, _), x)) in def.params.iter().zip(args).enumerate() {
+            let value = if i == rec.index {
+                lit.take().unwrap_or(x)
+            } else {
+                x
+            };
+            subst.insert(*id, value);
+        }
+        let mut unfolder = Unfolder {
+            params: &def.params,
+            body: &def.body,
+            rec,
+            next_binder: self.next_binder,
+        };
+        let mut frame = BuildFrame {
+            v,
+            subst,
+            rename: BTreeMap::new(),
+        };
+        let built = unfolder.build(&def.body, &mut frame);
+        self.next_binder = unfolder.next_binder;
+        Ok(built)
+    }
+
+    /// The exact size and depth [`Unfolder::build`] produces from `root` in `frame`,
+    /// computed without building anything and without recursion.
+    ///
+    /// `def` is the recursive def when `root` is its body; it is `None` for the argument
+    /// of a recursive call, which has no recursive call of its own (the termination
+    /// check refuses one). Work is two units per visited node (the build visits it
+    /// again) and the constant folding of each measure test, charged as it runs.
+    /// Refused, typed, as soon as the size passes what the output budget has left, the
+    /// depth passes [`MAX_INLINE_DEPTH`], or the nesting of visits (which is the build's
+    /// recursion depth) passes [`MAX_UNFOLD_NESTING`].
+    fn plan_tree(
+        &mut self,
+        root: &Expr,
+        frame: Rc<PlanFrame>,
+        rec: Recursion,
+        def: Option<&Rc<DefBody>>,
+        start: usize,
+        at: Span,
+    ) -> R<(usize, usize)> {
+        let left = self.budget.left();
+        let lit_measure = measure(&literal(0, at));
+        let mut size = 0_usize;
+        let mut deepest = 0_usize;
+        let mut stack: Vec<(&Expr, usize, usize, Rc<PlanFrame>)> = vec![(root, 1, start, frame)];
+        while let Some((e, depth, visit, frame)) = stack.pop() {
+            self.burn(2, e.span)?;
+            if visit > MAX_UNFOLD_NESTING {
+                return err(ElabErrorKind::TooLarge, at);
+            }
+            match &e.kind {
+                ExprKind::If(c, a, b) => {
+                    let mut visits = 0_u64;
+                    let test = measure_test(c, rec.binder, &mut visits);
+                    self.burn(visits, c.span)?;
+                    if let Some((op, n)) = test {
+                        let branch = if holds(op, n, frame.v) { a } else { b };
+                        stack.push((branch, depth, visit.saturating_add(1), frame));
+                        continue;
+                    }
+                }
+                ExprKind::Bound { binder, .. } => {
+                    if let Some(&(s, d)) = frame.params.get(binder) {
+                        size = size.saturating_add(s);
+                        deepest = deepest.max(depth.saturating_sub(1).saturating_add(d));
+                        if size > left || deepest > MAX_INLINE_DEPTH {
+                            return err(ElabErrorKind::TooLarge, at);
+                        }
+                        continue;
+                    }
+                }
+                ExprKind::Recur { args, .. } => {
+                    let Some(def) = def else {
+                        return err(
+                            ElabErrorKind::Unsupported(Unsupported::NoDecreasingMeasure),
+                            e.span,
+                        );
+                    };
+                    let mut visits = 0_u64;
+                    let c = args
+                        .get(rec.index)
+                        .and_then(|m| decrement(m, rec.binder, &mut visits));
+                    self.burn(visits, e.span)?;
+                    // The termination check guarantees `step <= c <= frame.v` here.
+                    let next = c
+                        .and_then(|c| frame.v.checked_sub(c))
+                        .filter(|n| (0..frame.v).contains(n));
+                    let Some(next) = next else {
+                        return err(
+                            ElabErrorKind::Unsupported(Unsupported::NoDecreasingMeasure),
+                            e.span,
+                        );
+                    };
+                    let mut params: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
+                    for (i, ((id, _), x)) in def.params.iter().zip(args).enumerate() {
+                        let m = if i == rec.index {
+                            lit_measure
+                        } else {
+                            let inner = visit.saturating_add(1);
+                            self.plan_tree(x, Rc::clone(&frame), rec, None, inner, at)?
+                        };
+                        // Each argument is built once, whether or not the body uses it.
+                        size = size.saturating_add(m.0);
+                        params.insert(*id, m);
+                    }
+                    if size > left {
+                        return err(ElabErrorKind::TooLarge, at);
+                    }
+                    let next = Rc::new(PlanFrame { v: next, params });
+                    stack.push((&def.body, depth, visit.saturating_add(1), next));
+                    continue;
+                }
+                _ => {}
+            }
+            size = size
+                .saturating_add(own_cost(&e.kind))
+                .saturating_add(type_measure(&e.ty).0);
+            deepest = deepest.max(depth);
+            if size > left || deepest > MAX_INLINE_DEPTH {
+                return err(ElabErrorKind::TooLarge, at);
+            }
+            for child in children(e) {
+                stack.push((
+                    child,
+                    depth.saturating_add(1),
+                    visit.saturating_add(1),
+                    Rc::clone(&frame),
+                ));
+            }
+        }
+        Ok((size, deepest))
     }
 
     // -----------------------------------------------------------------------
@@ -1701,9 +2083,18 @@ impl<'a> Elaborator<'a> {
                         None => err(ElabErrorKind::UnknownName(name.to_owned()), f.span),
                     };
                 }
+                if self.current.as_ref().is_some_and(|c| c.name == name)
+                    && let Some(current) = self.current.clone()
+                {
+                    arity(current.params.len())?;
+                    return self.recur(current, args, scope, site, span);
+                }
                 let def = self.def(name, f.span)?;
                 arity(def.params.len())?;
                 let a = self.args(args, scope, site)?;
+                if let Some(rec) = def.rec {
+                    return self.unfold(name, &def, rec, a, span);
+                }
                 let mut subst: BTreeMap<u32, Expr> = BTreeMap::new();
                 let mut measures: BTreeMap<u32, (usize, usize)> = BTreeMap::new();
                 for ((id, ty), x) in def.params.iter().zip(a) {
@@ -2222,6 +2613,7 @@ pub(crate) fn own_cost(kind: &ExprKind) -> usize {
         ExprKind::Quant(_, bs, _)
         | ExprKind::SetComp(_, bs, _)
         | ExprKind::MapComp(_, _, bs, _) => binders(bs),
+        ExprKind::Recur { function, .. } => text(function),
         _ => 0,
     };
     owned.saturating_add(1)
@@ -2264,7 +2656,8 @@ pub(crate) fn children(e: &Expr) -> Vec<&Expr> {
         ExprKind::Tuple(items)
         | ExprKind::SeqLit(items)
         | ExprKind::SetLit(items)
-        | ExprKind::Builtin(_, items) => out.extend(items.iter()),
+        | ExprKind::Builtin(_, items)
+        | ExprKind::Recur { args: items, .. } => out.extend(items.iter()),
         ExprKind::MapLit(entries) => {
             for (k, v) in entries {
                 out.push(k);
@@ -2344,6 +2737,10 @@ fn substitute(e: &Expr, subst: &BTreeMap<u32, Expr>) -> Expr {
         ExprKind::SeqLit(items) => ExprKind::SeqLit(items.iter().map(s).collect()),
         ExprKind::SetLit(items) => ExprKind::SetLit(items.iter().map(s).collect()),
         ExprKind::Builtin(b, items) => ExprKind::Builtin(*b, items.iter().map(s).collect()),
+        ExprKind::Recur { function, args } => ExprKind::Recur {
+            function: function.clone(),
+            args: args.iter().map(s).collect(),
+        },
         ExprKind::MapLit(entries) => {
             ExprKind::MapLit(entries.iter().map(|(k, v)| (s(k), s(v))).collect())
         }
@@ -2359,6 +2756,454 @@ fn substitute(e: &Expr, subst: &BTreeMap<u32, Expr>) -> Expr {
         kind,
         ty: e.ty.clone(),
         span: e.span,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// recursive defs: the termination check and the unfolding
+// ---------------------------------------------------------------------------
+
+/// An integer literal node, as the unfolding writes a measure value.
+fn literal(v: i64, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::Int(v),
+        ty: Type::Int,
+        span,
+    }
+}
+
+/// The value of a constant integer expression: literals, `-`, `+`, `-`, `*`, `min`,
+/// and `max`, with checked arithmetic (an overflow is not a constant). `visits` counts
+/// the nodes looked at, for the caller to charge. Recursion is bounded by the depth of
+/// the elaborated tree.
+fn const_int(e: &Expr, visits: &mut u64) -> Option<i64> {
+    *visits = visits.saturating_add(1);
+    match &e.kind {
+        ExprKind::Int(n) => Some(*n),
+        ExprKind::Neg(a) => const_int(a, visits)?.checked_neg(),
+        ExprKind::Binary(op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), a, b) => {
+            let a = const_int(a, visits)?;
+            let b = const_int(b, visits)?;
+            match op {
+                BinOp::Add => a.checked_add(b),
+                BinOp::Sub => a.checked_sub(b),
+                _ => a.checked_mul(b),
+            }
+        }
+        ExprKind::Builtin(b @ (Builtin::Min | Builtin::Max), args) => {
+            let [a, c] = args.as_slice() else {
+                return None;
+            };
+            let a = const_int(a, visits)?;
+            let c = const_int(c, visits)?;
+            Some(if *b == Builtin::Min {
+                a.min(c)
+            } else {
+                a.max(c)
+            })
+        }
+        _ => None,
+    }
+}
+
+fn is_bound(e: &Expr, binder: u32) -> bool {
+    matches!(&e.kind, ExprKind::Bound { binder: b, .. } if *b == binder)
+}
+
+/// `!op`: the comparison that holds exactly when `op` does not.
+fn negate(op: BinOp) -> BinOp {
+    match op {
+        BinOp::Eq => BinOp::Ne,
+        BinOp::Ne => BinOp::Eq,
+        BinOp::Lt => BinOp::Ge,
+        BinOp::Ge => BinOp::Lt,
+        BinOp::Le => BinOp::Gt,
+        BinOp::Gt => BinOp::Le,
+        other => other,
+    }
+}
+
+/// The comparison with its operands swapped: `n op k` is `k (flip op) n`.
+fn flip(op: BinOp) -> BinOp {
+    match op {
+        BinOp::Lt => BinOp::Gt,
+        BinOp::Gt => BinOp::Lt,
+        BinOp::Le => BinOp::Ge,
+        BinOp::Ge => BinOp::Le,
+        other => other,
+    }
+}
+
+/// A *measure test* on the parameter `binder`: `k op n` or `n op k` for a comparison
+/// `op` and a constant `n`, under any number of `!`. Returned as `k op n`.
+fn measure_test(c: &Expr, binder: u32, visits: &mut u64) -> Option<(BinOp, i64)> {
+    let mut e = c;
+    let mut negated = false;
+    while let ExprKind::Not(inner) = &e.kind {
+        *visits = visits.saturating_add(1);
+        negated = !negated;
+        e = inner;
+    }
+    *visits = visits.saturating_add(1);
+    let ExprKind::Binary(op, l, r) = &e.kind else {
+        return None;
+    };
+    if !matches!(
+        op,
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+    ) {
+        return None;
+    }
+    let (op, n) = if is_bound(l, binder) {
+        (*op, const_int(r, visits)?)
+    } else if is_bound(r, binder) {
+        (flip(*op), const_int(l, visits)?)
+    } else {
+        return None;
+    };
+    Some((if negated { negate(op) } else { op }, n))
+}
+
+/// Whether `v op n`.
+fn holds(op: BinOp, n: i64, v: i64) -> bool {
+    match op {
+        BinOp::Eq => v == n,
+        BinOp::Ne => v != n,
+        BinOp::Lt => v < n,
+        BinOp::Le => v <= n,
+        BinOp::Gt => v > n,
+        _ => v >= n,
+    }
+}
+
+/// `k - c` for the parameter `binder` and a constant `c >= 1`: the decrement `c`.
+fn decrement(arg: &Expr, binder: u32, visits: &mut u64) -> Option<i64> {
+    *visits = visits.saturating_add(1);
+    let ExprKind::Binary(BinOp::Sub, l, r) = &arg.kind else {
+        return None;
+    };
+    if !is_bound(l, binder) {
+        return None;
+    }
+    const_int(r, visits).filter(|c| *c >= 1)
+}
+
+/// An interval of integers, unbounded where `None`.
+type Interval = (Option<i128>, Option<i128>);
+
+/// `iv` narrowed by the fact `k op n`.
+fn refine(iv: Interval, op: BinOp, n: i64) -> Interval {
+    let n = i128::from(n);
+    let (lo, hi) = iv;
+    let raise = |b: i128| Some(lo.map_or(b, |lo| lo.max(b)));
+    let lower = |b: i128| Some(hi.map_or(b, |hi| hi.min(b)));
+    match op {
+        BinOp::Eq => (raise(n), lower(n)),
+        // `k != n` narrows only at an end of the interval.
+        BinOp::Ne => (
+            if lo == Some(n) { Some(n + 1) } else { lo },
+            if hi == Some(n) { Some(n - 1) } else { hi },
+        ),
+        BinOp::Lt => (lo, lower(n - 1)),
+        BinOp::Le => (lo, lower(n)),
+        BinOp::Gt => (raise(n + 1), hi),
+        _ => (raise(n), hi),
+    }
+}
+
+/// The first recursive call in a tree, in visiting order, without recursion.
+fn first_recur(e: &Expr) -> Option<Span> {
+    let mut stack = vec![e];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind, ExprKind::Recur { .. }) {
+            return Some(node.span);
+        }
+        let mut kids = children(node);
+        kids.reverse();
+        stack.extend(kids);
+    }
+    None
+}
+
+/// The termination rule (see "Recursive defs" in the module documentation) for the
+/// parameter at `index`, bound as `binder`: every recursive call passes `k - c` there,
+/// with a constant `c >= 1`, at a position where the measure tests on the path to it
+/// bound `k` below by `c`; no recursive call sits inside another's arguments. Returns
+/// the least `c`. Iterative; each node is visited once.
+fn decreases(body: &Expr, index: usize, binder: u32, nat: bool) -> Option<i64> {
+    let start: Interval = (if nat { Some(0) } else { None }, None);
+    let mut step: Option<i64> = None;
+    let mut visits = 0_u64;
+    let mut stack: Vec<(&Expr, Interval, bool)> = vec![(body, start, false)];
+    while let Some((e, iv, in_args)) = stack.pop() {
+        // A branch no value of `k` reaches is never unfolded.
+        if let (Some(lo), Some(hi)) = iv
+            && lo > hi
+        {
+            continue;
+        }
+        match &e.kind {
+            ExprKind::If(c, a, b) => {
+                if let Some((op, n)) = measure_test(c, binder, &mut visits) {
+                    stack.push((a, refine(iv, op, n), in_args));
+                    stack.push((b, refine(iv, negate(op), n), in_args));
+                    continue;
+                }
+            }
+            ExprKind::Recur { args, .. } => {
+                if in_args {
+                    return None;
+                }
+                let c = decrement(args.get(index)?, binder, &mut visits)?;
+                if iv.0.is_none_or(|lo| lo < i128::from(c)) {
+                    return None;
+                }
+                step = Some(step.map_or(c, |s| s.min(c)));
+                for a in args {
+                    stack.push((a, iv, true));
+                }
+                continue;
+            }
+            _ => {}
+        }
+        for child in children(e) {
+            stack.push((child, iv, in_args));
+        }
+    }
+    step
+}
+
+/// One unfolding plan's frame: the measure value and the `(size, depth)` of the value
+/// each parameter is replaced by.
+#[derive(Debug)]
+struct PlanFrame {
+    v: i64,
+    params: BTreeMap<u32, (usize, usize)>,
+}
+
+/// One unfolding's frame: the measure value, the value each parameter is replaced by,
+/// and the fresh number of each of the body's binders in scope.
+struct BuildFrame {
+    v: i64,
+    subst: BTreeMap<u32, Expr>,
+    rename: BTreeMap<u32, u32>,
+}
+
+/// Builds the unfolding [`Elaborator::plan_tree`] measured and charged. Infallible:
+/// everything it allocates was charged, and its recursion depth is the plan's visit
+/// nesting, at most [`MAX_UNFOLD_NESTING`].
+///
+/// Each unfolding gives the body's binders fresh numbers. The arguments of a recursive
+/// call may mention the body's binders (`exists m in S: f(m, k - 1)`), so reusing the
+/// numbers in the next unfolding would capture them.
+struct Unfolder<'d> {
+    params: &'d [(u32, Type)],
+    body: &'d Expr,
+    rec: Recursion,
+    next_binder: u32,
+}
+
+impl Unfolder<'_> {
+    fn build(&mut self, e: &Expr, f: &mut BuildFrame) -> Expr {
+        match &e.kind {
+            ExprKind::If(c, a, b) => {
+                if let Some((op, n)) = measure_test(c, self.rec.binder, &mut 0) {
+                    let branch = if holds(op, n, f.v) { a } else { b };
+                    return self.build(branch, f);
+                }
+            }
+            ExprKind::Bound { name, binder } => {
+                if let Some(x) = f.subst.get(binder) {
+                    return x.clone();
+                }
+                if let Some(fresh) = f.rename.get(binder) {
+                    return Expr {
+                        kind: ExprKind::Bound {
+                            name: name.clone(),
+                            binder: *fresh,
+                        },
+                        ty: e.ty.clone(),
+                        span: e.span,
+                    };
+                }
+            }
+            ExprKind::Recur { args, .. } => return self.recur(args, e.span, f),
+            _ => {}
+        }
+        self.rebuild(e, f)
+    }
+
+    /// The next unfolding: the arguments built in this frame, the body in a new one.
+    #[inline(never)]
+    fn recur(&mut self, args: &[Expr], span: Span, f: &mut BuildFrame) -> Expr {
+        let c = args
+            .get(self.rec.index)
+            .and_then(|m| decrement(m, self.rec.binder, &mut 0))
+            .unwrap_or(1);
+        let v = f.v.saturating_sub(c);
+        let params = self.params;
+        let mut subst: BTreeMap<u32, Expr> = BTreeMap::new();
+        for (i, ((id, _), x)) in params.iter().zip(args).enumerate() {
+            let value = if i == self.rec.index {
+                literal(v, span)
+            } else {
+                self.build(x, f)
+            };
+            subst.insert(*id, value);
+        }
+        let mut next = BuildFrame {
+            v,
+            subst,
+            rename: BTreeMap::new(),
+        };
+        let body = self.body;
+        self.build(body, &mut next)
+    }
+
+    /// Fresh numbers for `bs`, each binder's domain built before it enters scope. The
+    /// replaced entries are pushed to `saved`, for [`Self::restore`].
+    fn binders(
+        &mut self,
+        bs: &[(u32, Binder)],
+        f: &mut BuildFrame,
+        saved: &mut Vec<(u32, Option<u32>)>,
+    ) -> Vec<(u32, Binder)> {
+        let mut out = Vec::new();
+        for (id, b) in bs {
+            let domain = b.domain.as_ref().map(|d| self.build(d, f));
+            let fresh = self.next_binder;
+            self.next_binder = self.next_binder.saturating_add(1);
+            saved.push((*id, f.rename.insert(*id, fresh)));
+            out.push((
+                fresh,
+                Binder {
+                    name: b.name.clone(),
+                    ty: b.ty.clone(),
+                    domain,
+                },
+            ));
+        }
+        out
+    }
+
+    fn restore(f: &mut BuildFrame, saved: Vec<(u32, Option<u32>)>) {
+        for (id, old) in saved.into_iter().rev() {
+            match old {
+                Some(o) => {
+                    f.rename.insert(id, o);
+                }
+                None => {
+                    f.rename.remove(&id);
+                }
+            }
+        }
+    }
+
+    /// Every other node: the same node over built children. The per-form work is in
+    /// small `#[inline(never)]` helpers, so each level of the build's recursion costs
+    /// small frames (the recursion is up to [`MAX_UNFOLD_NESTING`] deep).
+    #[inline(never)]
+    fn rebuild(&mut self, e: &Expr, f: &mut BuildFrame) -> Expr {
+        let kind = match &e.kind {
+            ExprKind::Quant(..) | ExprKind::SetComp(..) | ExprKind::MapComp(..) => {
+                self.binding(&e.kind, f)
+            }
+            _ => self.plain(&e.kind, f),
+        };
+        Expr {
+            kind,
+            ty: e.ty.clone(),
+            span: e.span,
+        }
+    }
+
+    /// A node that binds no variable.
+    #[inline(never)]
+    fn plain(&mut self, kind: &ExprKind, f: &mut BuildFrame) -> ExprKind {
+        let mut b = |x: &Expr| Box::new(self.build(x, f));
+        match kind {
+            ExprKind::OptionSome(a) => ExprKind::OptionSome(b(a)),
+            ExprKind::Not(a) => ExprKind::Not(b(a)),
+            ExprKind::Neg(a) => ExprKind::Neg(b(a)),
+            ExprKind::Field(a, n) => ExprKind::Field(b(a), n.clone()),
+            ExprKind::Temporal(op, a) => ExprKind::Temporal(*op, b(a)),
+            ExprKind::Binary(op, x, y) => {
+                let x = b(x);
+                ExprKind::Binary(*op, x, b(y))
+            }
+            ExprKind::Index(x, y) => {
+                let x = b(x);
+                ExprKind::Index(x, b(y))
+            }
+            ExprKind::If(x, y, z) => {
+                let x = b(x);
+                let y = b(y);
+                ExprKind::If(x, y, b(z))
+            }
+            ExprKind::Update(x, y, z) => {
+                let x = b(x);
+                let y = b(y);
+                ExprKind::Update(x, y, b(z))
+            }
+            ExprKind::Tuple(items) => ExprKind::Tuple(self.list(items, f)),
+            ExprKind::SeqLit(items) => ExprKind::SeqLit(self.list(items, f)),
+            ExprKind::SetLit(items) => ExprKind::SetLit(self.list(items, f)),
+            ExprKind::Builtin(op, items) => ExprKind::Builtin(*op, self.list(items, f)),
+            ExprKind::Recur { function, args } => ExprKind::Recur {
+                function: function.clone(),
+                args: self.list(args, f),
+            },
+            ExprKind::MapLit(entries) => {
+                let mut out = Vec::new();
+                for (k, v) in entries {
+                    let k = self.build(k, f);
+                    out.push((k, self.build(v, f)));
+                }
+                ExprKind::MapLit(out)
+            }
+            ExprKind::Record(fields) => {
+                let mut out = Vec::new();
+                for (n, v) in fields {
+                    out.push((n.clone(), self.build(v, f)));
+                }
+                ExprKind::Record(out)
+            }
+            // Leaves, and the binding forms `rebuild` sends to `binding`.
+            other => other.clone(),
+        }
+    }
+
+    /// A quantifier or comprehension: its binders get fresh numbers for the extent of
+    /// the node, and the previous numbers are restored after it.
+    #[inline(never)]
+    fn binding(&mut self, kind: &ExprKind, f: &mut BuildFrame) -> ExprKind {
+        let mut saved = Vec::new();
+        let kind = match kind {
+            ExprKind::Quant(q, bs, body) => {
+                let bs = self.binders(bs, f, &mut saved);
+                ExprKind::Quant(*q, bs, Box::new(self.build(body, f)))
+            }
+            ExprKind::SetComp(x, bs, filter) => {
+                let bs = self.binders(bs, f, &mut saved);
+                let x = self.build(x, f);
+                let filter = filter.as_deref().map(|p| Box::new(self.build(p, f)));
+                ExprKind::SetComp(Box::new(x), bs, filter)
+            }
+            ExprKind::MapComp(k, v, bs, filter) => {
+                let bs = self.binders(bs, f, &mut saved);
+                let k = self.build(k, f);
+                let v = self.build(v, f);
+                let filter = filter.as_deref().map(|p| Box::new(self.build(p, f)));
+                ExprKind::MapComp(Box::new(k), Box::new(v), bs, filter)
+            }
+            other => other.clone(),
+        };
+        Self::restore(f, saved);
+        kind
+    }
+
+    fn list(&mut self, items: &[Expr], f: &mut BuildFrame) -> Vec<Expr> {
+        items.iter().map(|x| self.build(x, f)).collect()
     }
 }
 
@@ -2580,7 +3425,8 @@ fn kids_mut(kind: &mut ExprKind) -> Kids<'_> {
         ExprKind::Tuple(items)
         | ExprKind::SeqLit(items)
         | ExprKind::SetLit(items)
-        | ExprKind::Builtin(_, items) => {
+        | ExprKind::Builtin(_, items)
+        | ExprKind::Recur { args: items, .. } => {
             out.extend(items.iter_mut());
             None
         }

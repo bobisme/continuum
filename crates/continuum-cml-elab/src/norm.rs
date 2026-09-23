@@ -17,6 +17,7 @@
 //! | `type A = T` | every use of `A` is `T` |
 //! | `let x = e` | every use of `x` is `e` |
 //! | `def f(x: T): U = e` (not recursive) | every call is the body with the arguments substituted |
+//! | `def f(…, k: Nat, …): U = e` (recursive, see [`crate::elab`] "Recursive defs") | every call is its unfolding at the constant value of `k`, with the measure tests decided |
 //! | `next x = e` or `x' == e` | one [`Next::Set`] |
 //! | `unchanged x`, or `x' == x` | one [`Next::Unchanged`] |
 //! | `require a && b`, or `require a` and `require b` | a list of conjuncts |
@@ -433,6 +434,18 @@ pub enum ExprKind {
     Stutter,
     /// A reference to the init predicate by name (behavior only).
     InitRef(String),
+    /// A call of the recursive `def` `function` from inside its own body.
+    ///
+    /// It exists only in the elaborated body of a recursive def, which is not part of
+    /// the model: every call from outside is unfolded (see [`crate::elab`] "Recursive
+    /// defs"), so an elaborated model never contains one. Lowering a hand-built model
+    /// that does is refused ([`crate::Unlowerable::RecursiveCall`]).
+    Recur {
+        /// The def.
+        function: String,
+        /// The arguments, one per parameter.
+        args: Vec<Expr>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -920,6 +933,10 @@ impl Writer {
             ExprKind::Stutter => self.out.push_str("(stutter)"),
             ExprKind::InitRef(name) => {
                 let _ = write!(self.out, "(init-ref {name})");
+            }
+            ExprKind::Recur { function, args } => {
+                let head = format!("recur {function}");
+                self.list(&head, args);
             }
         }
     }

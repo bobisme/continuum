@@ -1,0 +1,55 @@
+[change]
+bone = "bn-36x3b"
+author = "continuum-dev"
+summary = "continuum-cml-elab: recursive defs with a decidable measure-based termination check; calls are unfolded at a constant measure under pre-charged size, depth, nesting, and work bounds, so recursive defs normalize and lower like any other def"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/fixtures.rs::transitive_closure_elaborates_and_refuses_to_lower_with_a_reason",
+  "crates/continuum-cml-elab/tests/recursion.rs::accepted_termination_shapes_elaborate_and_unfold",
+  "crates/continuum-cml-elab/tests/recursion.rs::each_clause_of_the_rule_is_load_bearing",
+  "crates/continuum-cml-elab/tests/recursion.rs::an_uncalled_non_terminating_def_is_refused_at_its_recursive_call",
+  "crates/continuum-cml-elab/tests/recursion.rs::mutual_recursion_is_refused_with_or_without_a_guard",
+  "crates/continuum-cml-elab/tests/recursion.rs::a_non_constant_measure_is_refused",
+  "crates/continuum-cml-elab/tests/recursion.rs::a_negative_nat_measure_is_refused",
+  "crates/continuum-cml-elab/tests/recursion.rs::the_fixture_closure_unfolds_to_bounded_reachability",
+  "crates/continuum-cml-elab/tests/recursion.rs::a_mutated_closure_is_told_apart",
+  "crates/continuum-cml-elab/tests/recursion.rs::unfolding_does_not_capture_bound_variables",
+  "crates/continuum-cml-elab/tests/errors.rs::unsupported_semantics_are_typed_unsupported",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_long_def_cycle_is_typed_unsupported_in_a_small_stack",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::deep_recursion_is_refused_before_unfolding_and_counted_below_the_bound",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::unfolding_nesting_is_bounded_near_and_over_the_limit",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::unfolded_depth_is_bounded_near_and_over_the_limit",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::wide_fan_out_is_charged_and_refused_before_it_is_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::the_unfolding_boundary_is_exact",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::an_unused_growing_argument_is_charged",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/recursion.rs::alpha_renaming_a_recursive_body_preserves_identity", relation = "alpha-renaming" },
+  { test = "crates/continuum-cml-elab/tests/recursion.rs::equivalent_guard_normalization_of_a_recursive_def_preserves_identity", relation = "equivalent guard normalization" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/recursion.rs::floyd_warshall_lowers_and_agrees_with_warshall_everywhere", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/recursion.rs::factorial_lowers_and_the_engine_agrees", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/recursion.rs::a_flipped_floyd_warshall_expectation_is_refuted", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "recursive definitions are one of the Wave 0 forces (PORTING_WAVES) the CML front end needs for corpus ports (C021) and part of the expressiveness C022 claims; this change adds evidence toward both (the Transitive Closure fixture elaborates, and a recursive def lowers and is checked by the reference engine) and promotes neither: both stay TARGET, and relational actions (bn-2ouro) are still typed unsupported"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the normalized AST dump and identity are in-process values with no wire schema; the new ExprKind::Recur node never appears in an elaborated model, and every other dump is byte-identical"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-cml-elab: every model that elaborated before elaborates to the same normalized AST and identity; the one refusal code cml.elab.unsupported.recursive_def is replaced by the finer cml.elab.unsupported.no_decreasing_measure, mutual_recursion, and recursion_bound_not_constant, and in-repo tests are the only callers of the old variant"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-15xb20"
+verdict = "approved"
