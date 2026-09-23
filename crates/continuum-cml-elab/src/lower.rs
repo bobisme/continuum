@@ -19,13 +19,19 @@
 //!   interval: `v <= c`, `v < c`, `v >= c`, `v > c`, or `v in a..b`, with constant
 //!   bounds (`Nat` supplies the lower bound `0`);
 //! - every state variable of an enumeration ranges over its variant indices;
+//! - under a run configuration, every state variable of a finite composite type
+//!   (`Option`, tuple, `Set`, `Map` over finite types) lowers to the slots of its flat
+//!   layout, named by path (`m[k]`, `s{u}`, `o?`, `o!`, `t.0`), and every expression of
+//!   such a type to the list of its slot expressions, with static keys, and map reads
+//!   recorded as definedness predicates `A#defined` and `I#defined` (RFC 0003
+//!   correction 4, "Layout" to "Definedness"; the `collections` module);
 //! - every guard, update, and invariant uses only integer arithmetic (`+ - *`, unary
 //!   `-`, `min`, `max`), comparisons, `in a..b`, membership in a set literal or a
 //!   configuration constant set of scalars, the boolean connectives, and `forall` /
 //!   `exists` over a finite scalar domain, expanded (RFC 0003 correction 4, "Quantifier
 //!   expansion");
-//! - an action's parameters have finite scalar types; it lowers to one action per
-//!   parameter tuple, named `A(p=u,…)` (correction 4, "Action schemas");
+//! - an action's parameters have finite types; it lowers to one action per parameter
+//!   tuple, named `A(p=u,…)` (correction 4, "Action schemas");
 //! - every expression is planned before it is built: see [`Mode`] and `begin_site`;
 //! - a relational action (RFC 0003 "Relational actions") has at most
 //!   [`MAX_RELATIONAL_CANDIDATES`] candidate post-states; it lowers to one action per
@@ -83,9 +89,14 @@ use continuum_model_core::{
 };
 
 use crate::budget::{Budget, Fuel, Limits, Usage, lookup_cost, sort_cost};
+
+mod collections;
+mod layout;
+
 use crate::config::{ConfigIdentity, ConfigValue, RunConfig, RunIdentity};
 use crate::norm::{BinOp, Builtin, Expr, ExprKind, Next, NormModel, Temporal};
 use crate::types::Type;
+pub use collections::{DEFINED_SUFFIX, definedness_subject};
 
 /// The largest state domain whose init predicate the lowering enumerates.
 ///
@@ -197,6 +208,27 @@ pub enum Unlowerable {
     /// (ADR-0025). Without a configuration the same state variable is
     /// [`Unlowerable::UnboundedDomain`].
     UnboundedType,
+    /// A map key, a set member tested with `in` or written in a literal, or an index
+    /// that reads state (RFC 0003 correction 4, "Static keys", bn-23hzh). A static key
+    /// selects one slot at lowering time; a key that reads state would select one at
+    /// exploration time, which the flat layout cannot express.
+    DynamicKey,
+    /// A static key, member, or payload whose value is outside the instantiated
+    /// universe of its type, or whose evaluation fails (bn-23hzh).
+    ValueOutsideBound,
+    /// A computed value placed in a slot of a collection (an option payload, a map
+    /// value, a tuple component) that the lowering cannot show safe: a Boolean that
+    /// reads state, an integer without an interval that fits `i64`, or an option payload
+    /// that may lie below its universe, whose code would then collide with `None`
+    /// (bn-23hzh). Every slot expression the lowering builds cannot fail, so a slot may
+    /// be selected away without dropping an error the model has.
+    DynamicValue,
+    /// A map literal or map comprehension that gives one key two entries (bn-23hzh).
+    DuplicateKey,
+    /// A read `m[k]` in the init predicate that is undefined (`k` is not a key of `m`)
+    /// at a candidate initial state (bn-23hzh). The programmatic model has no way to
+    /// carry an error in its initial states, so the lowering refuses.
+    UndefinedRead,
 }
 
 impl Unlowerable {
@@ -230,6 +262,11 @@ impl Unlowerable {
             Unlowerable::OutputTooLarge => "cml.lower.output_too_large",
             Unlowerable::WorkLimitExceeded => "cml.lower.work_limit_exceeded",
             Unlowerable::ExpressionTooDeep => "cml.lower.expression_too_deep",
+            Unlowerable::DynamicKey => "cml.lower.dynamic_key",
+            Unlowerable::ValueOutsideBound => "cml.lower.value_outside_bound",
+            Unlowerable::DynamicValue => "cml.lower.dynamic_value",
+            Unlowerable::DuplicateKey => "cml.lower.duplicate_key",
+            Unlowerable::UndefinedRead => "cml.lower.undefined_read",
         }
     }
 }
@@ -281,6 +318,15 @@ impl fmt::Display for Unlowerable {
             Unlowerable::OutputTooLarge => "the lowered model exceeds the output budget",
             Unlowerable::WorkLimitExceeded => "lowering exceeds the work bound",
             Unlowerable::ExpressionTooDeep => "the expression nests deeper than the model accepts",
+            Unlowerable::DynamicKey => "a map key, set member, or index must not read state",
+            Unlowerable::ValueOutsideBound => {
+                "a static value is outside the universe of its type, or fails to evaluate"
+            }
+            Unlowerable::DynamicValue => {
+                "a computed value in a collection slot may fail or collide with `None`"
+            }
+            Unlowerable::DuplicateKey => "a map literal gives one key two entries",
+            Unlowerable::UndefinedRead => "the init predicate reads a key that a map lacks",
         })
     }
 }
@@ -442,6 +488,24 @@ struct Meter {
     guarded: usize,
     /// How many quantifier binders enclose the expression being lowered.
     binder_depth: usize,
+    /// The flat layout of each composite state variable (bn-23hzh), shared so a slot
+    /// name is borrowed, not copied, while the meter is charged.
+    layout: Rc<collections::StateLayout>,
+    /// The definedness conditions of the expression being built (bn-23hzh): one item per
+    /// map read `m[k]`, and one per guarded quantifier instance whose body has any.
+    defs: Vec<Sized<BoolExpr>>,
+    /// Their plan, while planning: an aggregate, multiplied at each fan-out as the
+    /// predicted work is.
+    defs_plan: collections::DAgg,
+    /// While planning: the output nodes the build will charge beyond the measures the
+    /// plan returns — static values lowered to be evaluated, and slots selected away —
+    /// multiplied at each fan-out as the predicted work is (bn-23hzh).
+    scratch: u128,
+    /// The work spent when the site being built opened, so its close can check that the
+    /// build spent no more than its plan predicted (a planning defect otherwise).
+    site_work: u64,
+    /// That prediction.
+    site_predicted: u128,
 }
 
 impl Meter {
@@ -462,6 +526,12 @@ impl Meter {
             predicted: 0,
             guarded: 0,
             binder_depth: 0,
+            layout: Rc::default(),
+            defs: Vec::new(),
+            defs_plan: collections::DAgg::default(),
+            scratch: 0,
+            site_work: 0,
+            site_predicted: 0,
         }
     }
 }
@@ -512,7 +582,7 @@ fn enum_tables(model: &NormModel, budget: &mut Meter) -> R<()> {
                 .map(|(i, v)| (v.clone(), i as i64))
                 .collect(),
             names: e.variants.clone(),
-            widest: e.variants.iter().map(String::len).max().unwrap_or(0),
+            widest: e.variants.iter().map(|v| escaped_len(v)).max().unwrap_or(0),
         };
         budget.enums.insert(e.name.clone(), table);
     }
@@ -535,6 +605,9 @@ struct Bindings {
     sets: BTreeMap<String, Rc<[i64]>>,
     /// The configuration's explicit `Nat` and `Int` bounds (correction 4).
     bounds: crate::config::Bounds,
+    /// Each constant of a finite composite type other than a set whose universe fits
+    /// `i64`: the index of its value (bn-23hzh).
+    atoms: BTreeMap<String, i64>,
 }
 
 /// Spend `n` units of work, or refuse with [`Unlowerable::WorkLimitExceeded`].
@@ -837,52 +910,62 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
             }),
             span: decl.span,
         })?;
-        let slot = match value {
-            ConfigValue::Int(n) => Some(Slot::Int(*n)),
-            ConfigValue::Bool(b) => Some(Slot::Bool(*b)),
-            ConfigValue::Elem { sort, name: e } => {
-                let index = tables.element(sort, e, budget, decl.span)?.unwrap_or(0);
-                Some(Slot::Int(index as i64))
-            }
-            ConfigValue::Variant {
-                enumeration,
-                name: v,
-            } => variant_index::<Build>(budget, enumeration, v, decl.span)?.map(Slot::Int),
-            // A set of integer-coded values, Booleans as `0`/`1` (correction 4): its
-            // codes, ascending. The
-            // set was charged by its nodes above; the codes (one each) and their sort are
-            // charged before they are stored.
-            ConfigValue::Set(members) => {
-                let mut codes = Vec::new();
-                charge(budget, members.len(), decl.span)?;
-                burn(budget, sort_cost(members.len(), 0), decl.span)?;
-                for m in members {
-                    let code = match m {
-                        ConfigValue::Int(n) => Some(*n),
-                        ConfigValue::Bool(b) => Some(i64::from(*b)),
-                        ConfigValue::Elem { sort, name: e } => tables
-                            .element(sort, e, budget, decl.span)?
-                            .map(|i| i as i64),
-                        ConfigValue::Variant {
-                            enumeration,
-                            name: v,
-                        } => variant_index::<Build>(budget, enumeration, v, decl.span)?,
-                        _ => None,
-                    };
-                    match code {
-                        Some(c) => codes.push(c),
-                        None => break,
+        // A constant of a composite type (bn-23hzh): a set of composites by its members'
+        // indices, anything else by its value's index, when the universe fits `i64`.
+        let composite = match &decl.ty {
+            Type::Set(t) => !layout::is_scalar(t),
+            t => !layout::is_scalar(t),
+        };
+        let slot = if composite {
+            composite_binding(value, &decl.ty, &tables, &bind, budget, decl.span)?
+        } else {
+            match value {
+                ConfigValue::Int(n) => Some(Slot::Int(*n)),
+                ConfigValue::Bool(b) => Some(Slot::Bool(*b)),
+                ConfigValue::Elem { sort, name: e } => {
+                    let index = tables.element(sort, e, budget, decl.span)?.unwrap_or(0);
+                    Some(Slot::Int(index as i64))
+                }
+                ConfigValue::Variant {
+                    enumeration,
+                    name: v,
+                } => variant_index::<Build>(budget, enumeration, v, decl.span)?.map(Slot::Int),
+                // A set of integer-coded values, Booleans as `0`/`1` (correction 4): its
+                // codes, ascending. The
+                // set was charged by its nodes above; the codes (one each) and their sort are
+                // charged before they are stored.
+                ConfigValue::Set(members) => {
+                    let mut codes = Vec::new();
+                    charge(budget, members.len(), decl.span)?;
+                    burn(budget, sort_cost(members.len(), 0), decl.span)?;
+                    for m in members {
+                        let code = match m {
+                            ConfigValue::Int(n) => Some(*n),
+                            ConfigValue::Bool(b) => Some(i64::from(*b)),
+                            ConfigValue::Elem { sort, name: e } => tables
+                                .element(sort, e, budget, decl.span)?
+                                .map(|i| i as i64),
+                            ConfigValue::Variant {
+                                enumeration,
+                                name: v,
+                            } => variant_index::<Build>(budget, enumeration, v, decl.span)?,
+                            _ => None,
+                        };
+                        match code {
+                            Some(c) => codes.push(c),
+                            None => break,
+                        }
+                    }
+                    if codes.len() == members.len() {
+                        codes.sort_unstable();
+                        codes.dedup();
+                        Some(Slot::Set(codes))
+                    } else {
+                        None
                     }
                 }
-                if codes.len() == members.len() {
-                    codes.sort_unstable();
-                    codes.dedup();
-                    Some(Slot::Set(codes))
-                } else {
-                    None
-                }
+                _ => None,
             }
-            _ => None,
         };
         if let Some(slot) = slot {
             charge(budget, 1 + crate::budget::text_cost(name.len()), decl.span)?;
@@ -892,21 +975,163 @@ fn bindings(model: &NormModel, config: &RunConfig, budget: &mut Meter) -> R<Bind
                 decl.span,
             )?;
             burn(budget, lookup_cost(bind.sets.len(), name.len()), decl.span)?;
+            burn(budget, lookup_cost(bind.atoms.len(), name.len()), decl.span)?;
             match slot {
                 Slot::Int(v) => bind.ints.insert(name.clone(), v).map(|_| ()),
                 Slot::Bool(v) => bind.bools.insert(name.clone(), v).map(|_| ()),
                 Slot::Set(v) => bind.sets.insert(name.clone(), Rc::from(v)).map(|_| ()),
+                Slot::Atom(v) => bind.atoms.insert(name.clone(), v).map(|_| ()),
             };
         }
     }
     Ok(bind)
 }
 
-/// A scalar binding, before it is stored.
+/// A binding, before it is stored.
 enum Slot {
     Int(i64),
     Bool(bool),
     Set(Vec<i64>),
+    /// The index of a composite value (bn-23hzh).
+    Atom(i64),
+}
+
+/// The binding of a constant of a composite type (bn-23hzh): a set by its members'
+/// indices (ascending, charged one node each, their sort spent first), any other
+/// composite by its value's index. `None` when the universe (of the members, or of the
+/// value) does not fit `i64`: the constant then lowers nowhere, and a use of it is
+/// refused as a non-integer value. Its type was checked by `typecheck`.
+fn composite_binding(
+    value: &ConfigValue,
+    ty: &Type,
+    tables: &Tables<'_>,
+    bind: &Bindings,
+    budget: &mut Meter,
+    at: Span,
+) -> R<Option<Slot>> {
+    collections::type_cost::<Build>(ty, budget, at)?;
+    let fits = |t: &Type, budget: &Meter| {
+        matches!(layout::Ty { bind, enums: &budget.enums }.card(t),
+            layout::Card::Finite(n) if n <= i64::MAX as u128)
+    };
+    match (value, ty) {
+        (ConfigValue::Set(members), Type::Set(t)) => {
+            if !fits(t, budget) {
+                return Ok(None);
+            }
+            charge(budget, members.len(), at)?;
+            burn(budget, sort_cost(members.len(), 0), at)?;
+            let mut atoms = Vec::with_capacity(members.len());
+            for m in members {
+                match atom_of(m, t, tables, bind, budget, at)? {
+                    Some(i) => atoms.push(i64::try_from(i).unwrap_or(i64::MAX)),
+                    None => return Ok(None),
+                }
+            }
+            atoms.sort_unstable();
+            atoms.dedup();
+            Ok(Some(Slot::Set(atoms)))
+        }
+        (_, t) => {
+            if !fits(t, budget) {
+                return Ok(None);
+            }
+            Ok(atom_of(value, t, tables, bind, budget, at)?
+                .and_then(|i| i64::try_from(i).ok())
+                .map(Slot::Atom))
+        }
+    }
+}
+
+/// The index in `U(ty)` of a configuration value of type `ty` (RFC 0003 correction 4,
+/// "Finite types": the canonical order), or `None` when it is not in the universe or
+/// does not fit. One unit of work per value node and each table lookup, spent first.
+/// Recursion follows the value, within the configuration's JSON depth bound.
+fn atom_of(
+    value: &ConfigValue,
+    ty: &Type,
+    tables: &Tables<'_>,
+    bind: &Bindings,
+    budget: &mut Meter,
+    at: Span,
+) -> R<Option<u128>> {
+    burn(budget, 1, at)?;
+    let t = layout::Ty {
+        bind,
+        enums: &budget.enums,
+    };
+    let scalar = |code: i64, t: layout::Ty<'_>| -> Option<u128> {
+        let (lo, hi) = t.range(ty).ok()?;
+        (lo <= code && code <= hi).then(|| (i128::from(code) - i128::from(lo)) as u128)
+    };
+    Ok(match (value, ty) {
+        (ConfigValue::Int(n), Type::Int | Type::Nat) => scalar(*n, t),
+        (ConfigValue::Bool(b), Type::Bool) => Some(u128::from(*b)),
+        (ConfigValue::Elem { sort, name }, Type::Sort(_)) => {
+            tables.element(sort, name, budget, at)?.map(|i| i as u128)
+        }
+        (ConfigValue::Variant { enumeration, name }, Type::Enum(_)) => {
+            variant_index::<Build>(budget, enumeration, name, at)?.map(|i| i as u128)
+        }
+        (ConfigValue::None, Type::Option(_)) => Some(0),
+        (ConfigValue::Some(x), Type::Option(inner)) => {
+            atom_of(x, inner, tables, bind, budget, at)?.and_then(|i| i.checked_add(1))
+        }
+        (ConfigValue::Tuple(xs), Type::Tuple(ts)) if xs.len() == ts.len() => {
+            let mut idx: Option<u128> = Some(0);
+            for (x, c) in xs.iter().zip(ts) {
+                let count = layout::Ty {
+                    bind,
+                    enums: &budget.enums,
+                }
+                .count(c);
+                let part = atom_of(x, c, tables, bind, budget, at)?;
+                idx = match (idx, part) {
+                    (Some(i), Some(p)) => i.checked_mul(count).and_then(|i| i.checked_add(p)),
+                    _ => None,
+                };
+            }
+            idx
+        }
+        (ConfigValue::Set(xs), Type::Set(inner)) => {
+            let n = t.count(inner);
+            let mut idx: u128 = 0;
+            for x in xs {
+                let Some(j) = atom_of(x, inner, tables, bind, budget, at)? else {
+                    return Ok(None);
+                };
+                let shift = n.saturating_sub(1).saturating_sub(j);
+                if shift >= 128 {
+                    return Ok(None);
+                }
+                idx |= 1 << shift;
+            }
+            Some(idx)
+        }
+        (ConfigValue::Map(entries), Type::Map(k, v)) => {
+            let n = t.count(k);
+            let base = t.count(v).saturating_add(1);
+            let mut idx: u128 = 0;
+            for (key, val) in entries {
+                let Some(j) = atom_of(key, k, tables, bind, budget, at)? else {
+                    return Ok(None);
+                };
+                let Some(d) = atom_of(val, v, tables, bind, budget, at)? else {
+                    return Ok(None);
+                };
+                let place = layout::pow_sat(base, n.saturating_sub(1).saturating_sub(j));
+                let Some(add) = d.checked_add(1).and_then(|d| d.checked_mul(place)) else {
+                    return Ok(None);
+                };
+                let Some(sum) = idx.checked_add(add) else {
+                    return Ok(None);
+                };
+                idx = sum;
+            }
+            Some(idx)
+        }
+        _ => None,
+    })
 }
 
 /// The name tables the binding check reads: each sort's elements by name, with their
@@ -1081,13 +1306,33 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         }
     }
 
-    // State variables and their domains. The count is model-core's limit, checked
-    // before the domains are read.
-    if model.state.len() > MAX_VARIABLES {
+    // State variables and their slots (RFC 0003 correction 4, "Layout", bn-23hzh). The
+    // slot count is computed from the types, saturating, and checked against model-core's
+    // limit before any slot is built: a scalar is one slot, a finite composite its
+    // layout's width, and a composite with no finite universe counts one here and is
+    // refused below, in name order, as before.
+    let mut slot_count: u128 = 0;
+    for v in &model.state {
+        let width = if layout::is_scalar(&v.ty) {
+            1
+        } else {
+            collections::type_cost::<Build>(&v.ty, budget, v.span)?;
+            let t = collections::ty(budget);
+            match t.card(&v.ty) {
+                layout::Card::Finite(_) => t.width(&v.ty),
+                _ => 1,
+            }
+        };
+        slot_count = slot_count.saturating_add(width);
+    }
+    if slot_count > MAX_VARIABLES as u128 {
         return no(Unlowerable::TooManyVariables, whole);
     }
+    // A variable reference scans the declared slots in the builder and the evaluator.
+    budget.vars = usize::try_from(slot_count).unwrap_or(usize::MAX);
     let mut builder = ModelBuilder::new();
     let mut variables: Vec<Variable> = Vec::new();
+    let mut laid = collections::StateLayout::default();
     for v in &model.state {
         // Reading the refinement visits each of its nodes a constant number of times.
         let visits = v.refinement.iter().fold(1_u64, |acc, c| {
@@ -1101,6 +1346,19 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             if crate::elab::measure(c).1 > MAX_EXPR_DEPTH.saturating_add(1) {
                 return no(Unlowerable::ExpressionTooDeep, c.span);
             }
+        }
+        if !layout::is_scalar(&v.ty) {
+            let var = laid_var(v, budget)?;
+            for (name, lo, hi) in &var.slots {
+                builder = builder.variable(name, *lo, *hi);
+                if let (Ok(name), Ok(domain)) = (Ident::new(name), Domain::new(*lo, *hi)) {
+                    variables.push(Variable::new(name, domain));
+                }
+            }
+            burn(budget, lookup_cost(laid.vars.len(), v.name.len()), v.span)?;
+            charge(budget, 1 + crate::budget::text_cost(v.name.len()), v.span)?;
+            laid.vars.insert(v.name.clone(), var);
+            continue;
         }
         if let Type::Sort(s) = &v.ty {
             burn(
@@ -1144,9 +1402,10 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             variables.push(Variable::new(name, domain));
         }
     }
+    budget.layout = Rc::new(laid);
 
-    // Each variable's domain, for the intervals of quantifier domains: an entry (a node
-    // and its name) charged per variable before the table is built.
+    // Each slot's domain, for the intervals of quantifier domains: an entry (a node
+    // and its name) charged per slot before the table is built.
     let names: usize = variables.iter().map(|v| v.name().as_str().len()).sum();
     charge(
         budget,
@@ -1172,17 +1431,50 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         variables.iter().map(|v| (v.name().as_str(), v)).collect();
     preflight(model, &by_name, &mut *budget)?;
 
-    // Initial states: every state of the domain the init predicate accepts.
+    // Initial states: every canonical state of the slot domain the init predicate
+    // accepts. A clause's map reads give definedness items (bn-23hzh).
     let Some(init) = &model.init else {
         return no(Unlowerable::NoInit, whole);
     };
-    let clauses: Vec<Sized<BoolExpr>> = init
-        .clauses
-        .iter()
-        .map(|c| top_bool(c, &mut *budget))
-        .collect::<R<Vec<_>>>()?;
+    let mut clauses: Vec<Sized<BoolExpr>> = Vec::with_capacity(init.clauses.len());
+    let mut defined: Vec<Sized<BoolExpr>> = Vec::new();
+    for c in &init.clauses {
+        let (clause, items) = top_bool(c, &mut *budget)?;
+        clauses.push(clause);
+        defined.extend(items);
+    }
     let predicate_size = conjoined_size(&clauses);
     let init_pred = conjoin(clauses, &mut *budget, init.span)?;
+    let defined_size = if defined.is_empty() {
+        0
+    } else {
+        conjoined_size(&defined)
+    };
+    let defined = if defined.is_empty() {
+        None
+    } else {
+        Some(conjoin(defined, &mut *budget, init.span)?)
+    };
+    // The canonicity constraint of every composite variable: only a canonical flat
+    // state is a value of the state's type, so no other is a candidate (RFC 0003
+    // correction 4, "Layout").
+    let layout_now = Rc::clone(&budget.layout);
+    let mut canon: Vec<Sized<BoolExpr>> = Vec::new();
+    for var in layout_now.vars.values() {
+        if let Some(c) = collections::canonicity(var, &mut *budget, init.span)? {
+            canon.push(c);
+        }
+    }
+    let canon_size = if canon.is_empty() {
+        0
+    } else {
+        conjoined_size(&canon)
+    };
+    let canon = if canon.is_empty() {
+        None
+    } else {
+        Some(conjoin(canon, &mut *budget, init.span)?)
+    };
     let cardinality = variables.iter().fold(1_u128, |acc, v| {
         acc.saturating_mul(v.domain().cardinality())
     });
@@ -1190,18 +1482,24 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         return no(Unlowerable::InitDomainTooLarge, init.span);
     }
     // The whole enumeration is charged before it starts: every candidate evaluates the
-    // predicate once (each node visited once; a variable read scans the declared
-    // variables) and steps the value vector. Too much work is refused here, having
-    // enumerated nothing.
+    // canonicity constraint, the definedness condition, and the predicate at most once
+    // each (each node visited once; a variable read scans the declared slots) and steps
+    // the value vector. Too much work is refused here, having enumerated nothing.
     burn(
         budget,
-        init_work(cardinality, predicate_size, variables.len()),
+        init_work(
+            cardinality,
+            predicate_size
+                .saturating_add(defined_size)
+                .saturating_add(canon_size),
+            variables.len(),
+        ),
         init.span,
     )?;
     // A variable whose name or domain the builder refuses is missing from `variables`;
     // `build` below reports it, so the enumeration is skipped rather than run over a
     // partial state.
-    if variables.len() == model.state.len() {
+    if variables.len() as u128 == slot_count {
         let mut values: Vec<i64> = variables.iter().map(|v| v.domain().lo()).collect();
         let mut bindings_held: usize = 0;
         // Per accepted state: the names' bytes (for the work of the copy), and the output
@@ -1212,34 +1510,49 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
             acc.saturating_add(1)
                 .saturating_add(crate::budget::text_cost(v.name().as_str().len()))
         });
+        let failed = |e: EvalError| LowerError {
+            kind: LowerErrorKind::Evaluation(e),
+            span: init.span,
+        };
         loop {
             let env = Environment::new(&variables, &values);
-            let holds = init_pred.evaluate(&env).map_err(|e| LowerError {
-                kind: LowerErrorKind::Evaluation(e),
-                span: init.span,
-            })?;
-            if holds {
-                bindings_held = bindings_held.saturating_add(variables.len().max(1));
-                if bindings_held > MAX_INIT_BINDINGS {
-                    return no(Unlowerable::TooManyInitialStates, init.span);
+            // A flat state that is not canonical is no value: skipped before the
+            // predicate is evaluated, so the predicate adds no error there. At a
+            // canonical state an undefined read in the predicate is an error of the
+            // CML model, which initial states cannot carry: a typed refusal.
+            let canonical = match &canon {
+                Some(c) => c.evaluate(&env).map_err(failed)?,
+                None => true,
+            };
+            if canonical {
+                if let Some(d) = &defined
+                    && !d.evaluate(&env).map_err(failed)?
+                {
+                    return no(Unlowerable::UndefinedRead, init.span);
                 }
-                // Each accepted state is copied into the builder, then placed and sorted by
-                // `ModelBuilder::build` (a scan of the variables per binding): its work and
-                // its output charged before the copy.
-                let per_state = (variables.len() as u64)
-                    .saturating_mul(variables.len() as u64 + 1)
-                    .saturating_add(crate::budget::text_cost(names) as u64)
-                    .saturating_add(
-                        lookup_cost(bindings_held, 8).saturating_mul(variables.len() as u64),
-                    );
-                burn(budget, per_state, init.span)?;
-                charge(budget, state_nodes, init.span)?;
-                let bindings: Vec<(&str, i64)> = variables
-                    .iter()
-                    .zip(values.iter())
-                    .map(|(v, x)| (v.name().as_str(), *x))
-                    .collect();
-                builder = builder.initial_state(&bindings);
+                if init_pred.evaluate(&env).map_err(failed)? {
+                    bindings_held = bindings_held.saturating_add(variables.len().max(1));
+                    if bindings_held > MAX_INIT_BINDINGS {
+                        return no(Unlowerable::TooManyInitialStates, init.span);
+                    }
+                    // Each accepted state is copied into the builder, then placed and
+                    // sorted by `ModelBuilder::build` (a scan of the variables per
+                    // binding): its work and its output charged before the copy.
+                    let per_state = (variables.len() as u64)
+                        .saturating_mul(variables.len() as u64 + 1)
+                        .saturating_add(crate::budget::text_cost(names) as u64)
+                        .saturating_add(
+                            lookup_cost(bindings_held, 8).saturating_mul(variables.len() as u64),
+                        );
+                    burn(budget, per_state, init.span)?;
+                    charge(budget, state_nodes, init.span)?;
+                    let bindings: Vec<(&str, i64)> = variables
+                        .iter()
+                        .zip(values.iter())
+                        .map(|(v, x)| (v.name().as_str(), *x))
+                        .collect();
+                    builder = builder.initial_state(&bindings);
+                }
             }
             if !advance(&mut values, &variables) {
                 break;
@@ -1251,39 +1564,96 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
     // candidate post-state of its relational variables (RFC 0003 "Relational actions"
     // and correction 4).
     let mut lowered_actions = Lowered::default();
+    let mut lowered_predicates = Lowered::default();
     for a in &model.actions {
-        builder = lower_action(builder, a, &by_name, &mut *budget, &mut lowered_actions)?;
+        builder = lower_action(
+            builder,
+            a,
+            &by_name,
+            &mut *budget,
+            &mut lowered_actions,
+            &mut lowered_predicates,
+        )?;
     }
 
-    // Invariants become named predicates.
+    // Invariants become named predicates, and an invariant with map reads also its
+    // definedness predicate `I#defined` (bn-23hzh).
     for i in &model.invariants {
-        let body = i
-            .clauses
-            .iter()
-            .map(|c| top_bool(c, &mut *budget))
-            .collect::<R<Vec<_>>>()?;
-        let body = conjoin(body, &mut *budget, i.span)?;
+        let mut clauses = Vec::with_capacity(i.clauses.len());
+        let mut defined: Vec<Sized<BoolExpr>> = Vec::new();
+        for c in &i.clauses {
+            let (clause, items) = top_bool(c, &mut *budget)?;
+            clauses.push(clause);
+            defined.extend(items);
+        }
+        let body = conjoin(clauses, &mut *budget, i.span)?;
         // The predicate record the builder appends, with its owned name (cr-3aqchd).
         charge(budget, 1 + crate::budget::text_cost(i.name.len()), i.span)?;
         builder = builder.predicate(&i.name, body);
+        lowered_predicates.add(&i.name);
+        if !defined.is_empty() {
+            let name = definedness_name(&i.name, &mut *budget, i.span)?;
+            let body = conjoin(defined, &mut *budget, i.span)?;
+            charge(budget, 1 + crate::budget::text_cost(name.len()), i.span)?;
+            builder = builder.predicate(&name, body);
+            lowered_predicates.add(&name);
+        }
     }
 
     // `ModelBuilder::build` sorts the variables, actions, and predicates by name; the
     // rest of its validation is linear in what was charged above.
-    let bytes = |names: &mut dyn Iterator<Item = usize>| names.sum::<usize>();
-    let sorting = sort_cost(
-        model.state.len(),
-        bytes(&mut model.state.iter().map(|v| v.name.len())),
-    )
-    .saturating_add(sort_cost(lowered_actions.count, lowered_actions.bytes))
-    .saturating_add(sort_cost(
-        model.invariants.len(),
-        bytes(&mut model.invariants.iter().map(|i| i.name.len())),
-    ));
+    let slot_bytes: usize = variables.iter().map(|v| v.name().as_str().len()).sum();
+    let sorting = sort_cost(variables.len(), slot_bytes)
+        .saturating_add(sort_cost(lowered_actions.count, lowered_actions.bytes))
+        .saturating_add(sort_cost(
+            lowered_predicates.count,
+            lowered_predicates.bytes,
+        ));
     burn(budget, sorting, whole)?;
     builder.build().map_err(|e| LowerError {
         kind: LowerErrorKind::Model(e),
         span: whole,
+    })
+}
+
+/// The name of the definedness predicate of `subject`, `subject#defined`: refused past
+/// `MAX_IDENT_BYTES` before it is built, and its bytes spent (bn-23hzh).
+fn definedness_name(subject: &str, budget: &mut Meter, span: Span) -> R<String> {
+    let len = subject.len().saturating_add(DEFINED_SUFFIX.len());
+    if len > MAX_IDENT_BYTES {
+        return no(Unlowerable::NameTooLong, span);
+    }
+    burn(budget, crate::budget::text_cost(len) as u64, span)?;
+    Ok(format!("{subject}{DEFINED_SUFFIX}"))
+}
+
+/// The slot table of a composite state variable (RFC 0003 correction 4, "Layout"): its
+/// type must be finite (else `cml.lower.unbounded_type` under a configuration, and
+/// `cml.lower.non_integer_state` otherwise) and take no refinement. The table's own
+/// copy of the type is charged by its size.
+fn laid_var(v: &crate::norm::StateVar, budget: &mut Meter) -> R<collections::LaidVar> {
+    let card = collections::ty(budget).card(&v.ty);
+    match card {
+        layout::Card::Finite(_) => {}
+        layout::Card::Unbounded if budget.bind.configured => {
+            return no(Unlowerable::UnboundedType, v.span);
+        }
+        _ => return no(Unlowerable::NonIntegerState, v.span),
+    }
+    if let Some(c) = v.refinement.first() {
+        return no(Unlowerable::NonIntervalRefinement, c.span);
+    }
+    let slots = collections::slots_of(&v.name, &v.ty, budget, v.span)?;
+    let widest = slots.iter().map(|(n, _, _)| n.len()).max().unwrap_or(0);
+    let hull = slots.iter().fold((0_i64, 0_i64), |(lo, hi), (_, a, b)| {
+        (lo.min(*a), hi.max(*b))
+    });
+    charge(budget, crate::types::type_measure(&v.ty).0, v.span)?;
+    Ok(collections::LaidVar {
+        ty: v.ty.clone(),
+        slots,
+        text: crate::budget::text_cost(widest),
+        hull,
     })
 }
 
@@ -1560,6 +1930,20 @@ fn preflight(
             (a.next.len() as u64).saturating_mul(lookup_cost(by_name.len(), 32)),
             a.span,
         )?;
+        // A relational variable of a composite type is not in this correction: its
+        // candidates would be values of the type, not slot values (bn-23hzh).
+        for (v, n) in &a.next {
+            if matches!(n, Next::Relational) {
+                burn(
+                    budget,
+                    lookup_cost(budget.layout.vars.len(), v.len()),
+                    a.span,
+                )?;
+                if budget.layout.vars.contains_key(v) {
+                    return no(Unlowerable::NonIntegerState, a.span);
+                }
+            }
+        }
         let relational: Vec<&Variable> = a
             .next
             .iter()
@@ -1607,6 +1991,7 @@ fn param_space(a: &crate::norm::Action, budget: &mut Meter) -> R<Vec<(i64, i64)>
                 return no(unbounded(budget, Unlowerable::ParameterizedAction), a.span);
             }
             Universe::NotScalar => return no(Unlowerable::ParameterizedAction, a.span),
+            Universe::TooLarge => return no(Unlowerable::TooManyActions, a.span),
         }
     }
     Ok(space)
@@ -1643,6 +2028,11 @@ fn instance_width(a: &crate::norm::Action, space: &[(i64, i64)], budget: &mut Me
                 burn(budget, lookup_cost(budget.enums.len(), e.len()), a.span)?;
                 budget.enums.get(e).map_or(0, |t| t.widest)
             }
+            // A composite value's longest canonical text, exact up to the name limit
+            // (bn-23hzh).
+            t if !layout::is_scalar(t) => {
+                collections::widest_text(t, MAX_IDENT_BYTES, budget, a.span)?
+            }
             _ => lo.to_string().len().max(hi.to_string().len()),
         };
         width = width
@@ -1654,10 +2044,12 @@ fn instance_width(a: &crate::norm::Action, space: &[(i64, i64)], budget: &mut Me
     Ok(width)
 }
 
-/// The bytes an instance label escapes in an element name: its own delimiters and the
-/// escape itself. A sort element may be any printable ASCII name, so without escaping
-/// `A(p=x,q=y)` could be two tuples (cr-3aqchd).
-const LABEL_SPECIALS: &[u8] = b"\\,=()[]";
+/// The bytes an instance label or a slot name escapes in an element name: every
+/// delimiter of a value's canonical text (`,` `(` `)` `{` `}` `[` `]` `:`), of a label
+/// (`=`), and the escape itself. A sort element may be any printable ASCII name, so
+/// without escaping `A(p=x,q=y)` could be two tuples (cr-3aqchd), and `s{a,b}` two sets
+/// (bn-23hzh: `{`, `}`, and `:` delimit set and map texts).
+const LABEL_SPECIALS: &[u8] = b"\\,=()[]{}:";
 
 /// `name` as it appears in an instance label: each byte of [`LABEL_SPECIALS`] prefixed
 /// with a backslash. Injective, and it keeps the label printable ASCII.
@@ -1679,21 +2071,32 @@ fn escaped_len(name: &str) -> usize {
 }
 
 /// The work one instance spends on parameter `p`: its scope entry (a lookup by its name)
-/// and its value's text (a lookup by its type's name, for a sort or an enumeration).
-fn param_work(p: &crate::norm::Param, params: usize, budget: &Meter) -> u64 {
+/// and its value's text (a lookup by its type's name, for a sort or an enumeration; for
+/// a composite, its longest text `widest` and one, spent before the text is written).
+fn param_work(p: &crate::norm::Param, params: usize, widest: usize, budget: &Meter) -> u64 {
     let text = match &p.ty {
         Type::Sort(s) => lookup_cost(budget.bind.sort_names.len(), s.len()),
         Type::Enum(e) => lookup_cost(budget.enums.len(), e.len()),
+        t if !layout::is_scalar(t) => widest as u64 + 1,
         _ => 0,
     };
     lookup_cost(params, p.name.len()).saturating_add(text)
 }
 
-/// The canonical text of the code `v` of a parameter of type `ty`: `false`/`true`, an
-/// element name escaped by [`escape_label`], a variant name, or a decimal integer. One
-/// table lookup.
-fn value_text(ty: &Type, v: i64, budget: &mut Meter, span: Span) -> R<String> {
+/// The canonical text of the atom `v` of a parameter of type `ty`: `false`/`true`, an
+/// element name escaped by [`escape_label`], a variant name, a decimal integer, or a
+/// composite's canonical text (bn-23hzh; its longest text `widest` and one spent first).
+/// One table lookup.
+fn value_text(ty: &Type, v: i64, widest: usize, budget: &mut Meter, span: Span) -> R<String> {
     let index = usize::try_from(v).unwrap_or(usize::MAX);
+    if !layout::is_scalar(ty) {
+        burn(budget, widest as u64 + 1, span)?;
+        return Ok(collections::text_of(
+            ty,
+            u128::try_from(v).unwrap_or(0),
+            budget,
+        ));
+    }
     Ok(match ty {
         Type::Bool => (if v != 0 { "true" } else { "false" }).to_owned(),
         Type::Sort(s) => {
@@ -1715,11 +2118,18 @@ fn value_text(ty: &Type, v: i64, budget: &mut Meter, span: Span) -> R<String> {
                 .enums
                 .get(e)
                 .and_then(|t| t.names.get(index))
-                .cloned()
-                .unwrap_or_default()
+                .map_or_else(String::new, |n| escape_label(n))
         }
         _ => v.to_string(),
     })
+}
+
+/// One update of an action: a scalar variable takes an integer, a composite one its
+/// whole layout, slot by slot (RFC 0003 correction 4, "Layout": every lowered write
+/// writes a whole canonical layout).
+enum Upd<'a> {
+    Int(&'a str, &'a Expr),
+    Laid(&'a collections::LaidVar, &'a Expr),
 }
 
 /// Lower one action: every instance of its parameter tuples, each relational action's
@@ -1727,18 +2137,19 @@ fn value_text(ty: &Type, v: i64, budget: &mut Meter, span: Span) -> R<String> {
 ///
 /// The whole action is one planned site. The guard clauses, postconditions, and updates
 /// are planned once with every parameter at its whole universe (so a quantifier whose
-/// domain depends on a parameter is planned at its widest), their measures and
-/// predicted work multiplied by the instance count, and that product charged as output
-/// — and checked against the work left — before the first instance is built. A
-/// relational action's candidates are also checked in aggregate (instances times
-/// [`successor_work`]) before the first instance, and charged per instance by
-/// [`relational_action`] as before.
+/// domain depends on a parameter is planned at its widest), their measures, predicted
+/// work, scratch output, and definedness items multiplied by the instance count, and
+/// that product charged as output — and checked against the work left — before the
+/// first instance is built. A relational action's candidates are also checked in
+/// aggregate (instances times [`successor_work`]) before the first instance, and charged
+/// per instance by [`relational_action`] as before.
 fn lower_action(
     mut builder: ModelBuilder,
     a: &crate::norm::Action,
     by_name: &BTreeMap<&str, &Variable>,
     budget: &mut Meter,
     lowered: &mut Lowered,
+    predicates: &mut Lowered,
 ) -> R<ModelBuilder> {
     let space = param_space(a, budget)?;
     let instances = instance_count(&space);
@@ -1760,18 +2171,22 @@ fn lower_action(
         .enumerate()
         .map(|(i, v)| (v.name().as_str().to_owned(), i))
         .collect();
-    let updates: Vec<(&str, &Expr)> = a
-        .next
-        .iter()
-        .filter_map(|(v, n)| match n {
-            Next::Set(e) => Some((v.as_str(), e)),
-            _ => None,
-        })
-        .collect();
+    let layout = Rc::clone(&budget.layout);
+    let mut updates: Vec<Upd<'_>> = Vec::new();
+    for (v, n) in &a.next {
+        if let Next::Set(e) = n {
+            burn(budget, lookup_cost(layout.vars.len(), v.len()), a.span)?;
+            updates.push(match layout.vars.get(v) {
+                Some(var) => Upd::Laid(var, e),
+                None => Upd::Int(v.as_str(), e),
+            });
+        }
+    }
     for c in a.guard.iter().chain(&a.post) {
         shallow(c, budget)?;
     }
-    for (_, e) in &updates {
+    for u in &updates {
+        let (Upd::Int(_, e) | Upd::Laid(_, e)) = u;
         shallow(e, budget)?;
     }
 
@@ -1795,66 +2210,152 @@ fn lower_action(
             &relational,
             budget,
             lowered,
+            predicates,
         )
     });
     budget.env.params.clear();
     budget.post = false;
+    budget.defs.clear();
     end_site(budget);
     builder = result?;
     Ok(builder)
 }
 
-/// The plan of one instance of an action: the measure of its conjoined guard, the
-/// measure of each update, and the predicted work, over the parameters' universes.
+/// The plan of one instance of an action, over the parameters' universes: the measure
+/// of each guard clause and postcondition, the definedness items of the guard and
+/// postconditions (`dg`) and of the updates (`du`), the measure of each update (a
+/// composite update's slots together), the predicted work, and the scratch output.
 struct ActionPlan {
-    guard: M,
+    guard: Vec<M>,
+    post: Vec<M>,
+    dg: collections::DAgg,
+    du: collections::DAgg,
     updates: Vec<M>,
     work: u128,
+    scratch: u128,
 }
 
-fn plan_action(
-    a: &crate::norm::Action,
-    updates: &[(&str, &Expr)],
-    budget: &mut Meter,
-) -> R<ActionPlan> {
+fn plan_action(a: &crate::norm::Action, updates: &[Upd<'_>], budget: &mut Meter) -> R<ActionPlan> {
     budget.predicted = 0;
-    let mut clauses = Vec::with_capacity(a.guard.len() + a.post.len());
+    budget.scratch = 0;
+    budget.defs_plan = collections::DAgg::default();
+    let mut guard = Vec::with_capacity(a.guard.len());
     for c in &a.guard {
-        clauses.push(bool_expr::<Plan>(c, budget)?.1);
+        guard.push(bool_expr::<Plan>(c, budget)?.1);
     }
     budget.post = true;
+    let mut post = Vec::with_capacity(a.post.len());
     for c in &a.post {
-        clauses.push(bool_expr::<Plan>(c, budget)?.1);
+        post.push(bool_expr::<Plan>(c, budget)?.1);
     }
     budget.post = false;
-    let n = clauses.len();
-    let guard = if n == 0 {
-        // `conjoin` builds (and charges) one `true` node.
-        work::<Plan>(budget, 1, a.span)?;
-        M { size: 1, depth: 1 }
-    } else {
-        work::<Plan>(budget, n as u64, a.span)?;
-        M {
-            size: clauses
-                .iter()
-                .fold(n - 1, |acc, m| acc.saturating_add(m.size)),
-            depth: clauses
-                .iter()
-                .map(|m| m.depth)
-                .max()
-                .unwrap_or(0)
-                .saturating_add(levels(n as u128)),
-        }
-    };
+    let dg = std::mem::take(&mut budget.defs_plan);
     let mut sizes = Vec::with_capacity(updates.len());
-    for (_, e) in updates {
-        sizes.push(int_expr::<Plan>(e, budget)?.1);
+    for u in updates {
+        sizes.push(match u {
+            Upd::Int(_, e) => int_expr::<Plan>(e, budget)?.1,
+            Upd::Laid(var, e) => {
+                let l = collections::lay_at::<Plan>(e, &var.ty, budget)?;
+                if <Plan as collections::LayOps>::l_width(&l) != var.slots.len() {
+                    return no(Unlowerable::NonIntegerValue, e.span);
+                }
+                <Plan as collections::LayOps>::l_measure(&l)
+            }
+        });
     }
+    let du = std::mem::take(&mut budget.defs_plan);
     Ok(ActionPlan {
         guard,
+        post,
+        dg,
+        du,
         updates: sizes,
         work: budget.predicted,
+        scratch: budget.scratch,
     })
+}
+
+/// The per-instance and closing sizes of an action's plan (bn-23hzh), in the order the
+/// build spends them: the guard `clauses ++ dg ++ du` conjoined, and for the definedness
+/// predicate `A#defined` a charged copy of each `dg` item and, when `du` has items, the
+/// item `G => du` over copies of the guard clauses `G` and of `du`.
+struct ActionShape {
+    /// The conjoined guard: its tree measure, its `conjoined_size`, and its work.
+    guard: M,
+    guard_cs: usize,
+    guard_work: u128,
+    /// Per instance: the predicate items, their output, work, and deepest depth.
+    pred_items: u128,
+    pred_size: usize,
+    pred_work: u128,
+    pred_depth: usize,
+}
+
+fn action_shape(plan: &ActionPlan) -> ActionShape {
+    let sum = |ms: &[M]| ms.iter().fold(0_usize, |a, m| a.saturating_add(m.size));
+    let deep = |ms: &[M]| ms.iter().map(|m| m.depth).max().unwrap_or(0);
+    let (dg, du) = (plan.dg, plan.du);
+    let ng = plan.guard.len() as u128;
+    let n = ng
+        .saturating_add(plan.post.len() as u128)
+        .saturating_add(dg.items)
+        .saturating_add(du.items);
+    let n_size = usize::try_from(n).unwrap_or(usize::MAX);
+    let body = sum(&plan.guard)
+        .saturating_add(sum(&plan.post))
+        .saturating_add(dg.size)
+        .saturating_add(du.size);
+    let (guard, guard_cs) = if n == 0 {
+        (M { size: 1, depth: 1 }, 1)
+    } else {
+        (
+            M {
+                size: body.saturating_add(n_size - 1),
+                depth: deep(&plan.guard)
+                    .max(deep(&plan.post))
+                    .max(dg.depth)
+                    .max(du.depth)
+                    .saturating_add(levels(n)),
+            },
+            body.saturating_add(n_size),
+        )
+    };
+    let has_du = du.items > 0;
+    let (g_size, g_depth) = if ng == 0 {
+        (1, 1)
+    } else {
+        (
+            sum(&plan.guard).saturating_add(plan.guard.len() - 1),
+            deep(&plan.guard).saturating_add(levels(ng)),
+        )
+    };
+    let du_fold = collections::fold_measure(du);
+    let (pred_size, pred_work, pred_depth) = if has_du {
+        (
+            dg.size
+                .saturating_add(g_size)
+                .saturating_add(du_fold.size)
+                .saturating_add(1),
+            (dg.size as u128)
+                .saturating_add(sum(&plan.guard) as u128)
+                .saturating_add(ng.max(1))
+                .saturating_add(du.size as u128)
+                .saturating_add(du.items)
+                .saturating_add(1),
+            dg.depth.max(g_depth.max(du_fold.depth).saturating_add(1)),
+        )
+    } else {
+        (dg.size, dg.size as u128, dg.depth)
+    };
+    ActionShape {
+        guard,
+        guard_cs,
+        guard_work: n.max(1),
+        pred_items: dg.items.saturating_add(u128::from(has_du)),
+        pred_size,
+        pred_work,
+        pred_depth,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1865,47 +2366,90 @@ fn build_action(
     instances: u128,
     width: usize,
     plan: ActionPlan,
-    updates: &[(&str, &Expr)],
+    updates: &[Upd<'_>],
     relational: &[&Variable],
     budget: &mut Meter,
     lowered: &mut Lowered,
+    predicates: &mut Lowered,
 ) -> R<ModelBuilder> {
+    let shape = action_shape(&plan);
     // Per instance: the guard and updates as planned, the action record with its name
     // and its update targets' names (plain actions append it; a relational action's
-    // candidates are records charged by `relational_action`), and a scope lookup per
-    // parameter.
-    let targets = target_names(updates.iter().map(|(v, _)| *v));
+    // candidates are records charged by `relational_action`), the definedness
+    // predicate's items, the scratch output, and a scope lookup per parameter.
+    let targets = updates.iter().fold(0_usize, |acc, u| {
+        acc.saturating_add(match u {
+            Upd::Int(v, _) => crate::budget::text_cost(v.len()),
+            Upd::Laid(var, _) => target_names(var.slots.iter().map(|(n, _, _)| n.as_str())),
+        })
+    });
     let record = if relational.is_empty() {
         action_record(width, targets)
     } else {
         0
     };
+    let scratch = usize::try_from(plan.scratch).unwrap_or(usize::MAX);
     let per_size = plan
         .updates
         .iter()
-        .fold(plan.guard.size, |acc, m| acc.saturating_add(m.size))
-        .saturating_add(record);
+        .fold(shape.guard.size, |acc, m| acc.saturating_add(m.size))
+        .saturating_add(record)
+        .saturating_add(shape.pred_size)
+        .saturating_add(scratch);
+    // Each composite parameter's longest text, for its label (bn-23hzh).
+    let mut widest = Vec::with_capacity(a.params.len());
+    for p in &a.params {
+        widest.push(if layout::is_scalar(&p.ty) {
+            0
+        } else {
+            collections::widest_text(&p.ty, MAX_IDENT_BYTES, budget, a.span)?
+        });
+    }
     // Per parameter: its scope entry and its value's text lookup, each by the name's
     // length, exactly as the build spends them.
     let mut params_work: u128 = 0;
-    for p in &a.params {
-        params_work = params_work.saturating_add(u128::from(param_work(p, space.len(), budget)));
+    for (p, w) in a.params.iter().zip(&widest) {
+        params_work =
+            params_work.saturating_add(u128::from(param_work(p, space.len(), *w, budget)));
     }
     let per_work = plan
         .work
+        .saturating_add(shape.guard_work)
         .saturating_add(record as u128)
         .saturating_add(params_work)
+        .saturating_add(shape.pred_work)
         .saturating_add(1);
     let depth = plan
         .updates
         .iter()
         .map(|m| m.depth)
-        .fold(plan.guard.depth, usize::max);
-    let total_size =
-        usize::try_from(instances.saturating_mul(per_size as u128)).unwrap_or(usize::MAX);
-    budget.predicted = instances.saturating_mul(per_work);
+        .fold(shape.guard.depth.max(shape.pred_depth), usize::max);
+    // The definedness predicate over every instance: its items conjoined, its name's
+    // bytes, and its record.
+    let pred_total = instances.saturating_mul(shape.pred_items);
+    let name_len = a.name.len().saturating_add(DEFINED_SUFFIX.len());
+    let (close_size, close_work, close_depth) = if pred_total == 0 {
+        (0, 0, 0)
+    } else {
+        (
+            usize::try_from(pred_total - 1)
+                .unwrap_or(usize::MAX)
+                .saturating_add(1 + crate::budget::text_cost(name_len)),
+            pred_total.saturating_add(crate::budget::text_cost(name_len) as u128),
+            shape.pred_depth.saturating_add(levels(pred_total)),
+        )
+    };
+    let total_size = usize::try_from(
+        instances
+            .saturating_mul(per_size as u128)
+            .saturating_add(close_size as u128),
+    )
+    .unwrap_or(usize::MAX);
+    budget.predicted = instances
+        .saturating_mul(per_work)
+        .saturating_add(close_work);
     // The checks in the order the RFC states: depth, then work, then output.
-    if depth > MAX_EXPR_DEPTH {
+    if depth.max(close_depth) > MAX_EXPR_DEPTH {
         return no(Unlowerable::ExpressionTooDeep, a.span);
     }
     if !relational.is_empty() {
@@ -1915,16 +2459,10 @@ fn build_action(
         // tree, or `1` for the `true` of no clause), the updates with their target names, and
         // per relational variable a constant and its target name.
         let candidates = candidate_count(relational);
-        let clauses = a.guard.len().saturating_add(a.post.len());
-        let guard = if clauses == 0 {
-            1
-        } else {
-            plan.guard.size.saturating_add(1)
-        };
         let template = plan
             .updates
             .iter()
-            .fold(guard, |acc, m| acc.saturating_add(m.size))
+            .fold(shape.guard_cs, |acc, m| acc.saturating_add(m.size))
             .saturating_add(targets)
             .saturating_add(candidate_constants(relational));
         let each = successor_work(candidates, template, widest_label(width, relational));
@@ -1932,6 +2470,8 @@ fn build_action(
         if all.saturating_add(budget.predicted) > u128::from(budget.fuel.left()) {
             return no(Unlowerable::WorkLimitExceeded, a.span);
         }
+        // The candidates' work is spent inside the site: it is part of the prediction.
+        budget.predicted = budget.predicted.saturating_add(all);
         if all.saturating_add(total_size as u128) > budget.nodes.left() as u128 {
             return no(Unlowerable::OutputTooLarge, a.span);
         }
@@ -1942,37 +2482,85 @@ fn build_action(
     if instances == 0 {
         return Ok(builder);
     }
+    let mut defined: Vec<Sized<BoolExpr>> = Vec::new();
     loop {
         // This instance's parameter values, and its name.
         let mut label = a.name.clone();
         if !a.params.is_empty() {
             let mut parts = Vec::with_capacity(a.params.len());
-            for (p, v) in a.params.iter().zip(&values) {
+            for ((p, v), w) in a.params.iter().zip(&values).zip(&widest) {
                 burn(budget, lookup_cost(space.len(), p.name.len()), a.span)?;
                 budget.env.params.insert(p.name.clone(), (*v, *v));
                 parts.push(format!(
                     "{}={}",
                     p.name,
-                    value_text(&p.ty, *v, budget, a.span)?
+                    value_text(&p.ty, *v, *w, budget, a.span)?
                 ));
             }
             label = format!("{}({})", a.name, parts.join(","));
         }
-        let mut clauses = Vec::with_capacity(a.guard.len() + a.post.len());
+        budget.defs.clear();
+        let mut guard_clauses = Vec::with_capacity(a.guard.len());
         for c in &a.guard {
-            clauses.push(bool_expr::<Build>(c, budget)?);
+            guard_clauses.push(bool_expr::<Build>(c, budget)?);
         }
         budget.post = true;
+        let mut posts = Vec::with_capacity(a.post.len());
         for c in &a.post {
-            clauses.push(bool_expr::<Build>(c, budget)?);
+            posts.push(bool_expr::<Build>(c, budget)?);
         }
         budget.post = false;
+        let dg = std::mem::take(&mut budget.defs);
+        let mut assigns: Vec<(&str, Sized<IntExpr>)> = Vec::with_capacity(updates.len());
+        for u in updates {
+            match u {
+                Upd::Int(v, e) => assigns.push((v, int_expr::<Build>(e, budget)?)),
+                Upd::Laid(var, e) => {
+                    let slots = collections::lay_at::<Build>(e, &var.ty, budget)?;
+                    if slots.len() != var.slots.len() {
+                        return no(Unlowerable::NonIntegerValue, e.span);
+                    }
+                    for ((name, _, _), x) in var.slots.iter().zip(slots) {
+                        assigns.push((name.as_str(), x));
+                    }
+                }
+            }
+        }
+        let du = std::mem::take(&mut budget.defs);
+        // The definedness predicate's items: where the guard's reads are defined, and
+        // where the guard clauses hold, the updates' reads are too (RFC 0003 correction 4,
+        // "Definedness"; a relational action's updates are evaluated where its guard
+        // clauses hold, since they read no post-state).
+        for d in &dg {
+            defined.push(copy::<Build, _>(budget, a.span, d)?);
+        }
+        if !du.is_empty() {
+            let mut g = Vec::with_capacity(guard_clauses.len());
+            for c in &guard_clauses {
+                g.push(copy::<Build, _>(budget, a.span, c)?);
+            }
+            let g = if g.is_empty() {
+                node::<Build, _>(budget, a.span, &[], || BoolExpr::Const(true))?
+            } else {
+                balanced::<Build>(g, true, budget, a.span)?
+            };
+            let mut d = Vec::with_capacity(du.len());
+            for x in &du {
+                d.push(copy::<Build, _>(budget, a.span, x)?);
+            }
+            let d = balanced::<Build>(d, true, budget, a.span)?;
+            defined.push(node::<Build, _>(budget, a.span, &[g.1, d.1], || {
+                BoolExpr::implies(g.0, d.0)
+            })?);
+        }
+        // The guard: the clauses, the postconditions, and the definedness conditions,
+        // so no successor is computed from an undefined read.
+        let mut clauses = guard_clauses;
+        clauses.extend(posts);
+        clauses.extend(dg);
+        clauses.extend(du);
         let guard_size = conjoined_size(&clauses);
         let guard = conjoin(clauses, budget, a.span)?;
-        let mut assigns: Vec<(&str, Sized<IntExpr>)> = Vec::with_capacity(updates.len());
-        for (v, e) in updates {
-            assigns.push((v, int_expr::<Build>(e, budget)?));
-        }
         if relational.is_empty() {
             // The record the builder appends: prepaid by the plan (`record`), spent
             // here with the work of copying its names.
@@ -2004,6 +2592,13 @@ fn build_action(
         if !advance_space(&mut values, space) {
             break;
         }
+    }
+    if !defined.is_empty() {
+        let name = definedness_name(&a.name, budget, a.span)?;
+        let body = conjoin(defined, budget, a.span)?;
+        charge(budget, 1 + crate::budget::text_cost(name.len()), a.span)?;
+        builder = builder.predicate(&name, body);
+        predicates.add(&name);
     }
     Ok(builder)
 }
@@ -2173,10 +2768,8 @@ fn constant(e: &Expr) -> Option<i64> {
 /// it goes. Because both run the same code, the plan of an expression without a
 /// quantifier is exactly its build, and with one it is an upper bound (RFC 0003
 /// correction 4, "Resources").
-trait Mode {
+trait Mode: collections::LayOps {
     const BUILD: bool;
-    type I: Clone;
-    type B: Clone;
     fn i_const(v: i64) -> Self::I;
     /// A state variable (or a post-state placeholder) whose domain is `lo..=hi`.
     fn i_var(name: &str, lo: i64, hi: i64) -> Self::I;
@@ -2207,8 +2800,6 @@ enum Plan {}
 
 impl Mode for Build {
     const BUILD: bool = true;
-    type I = IntExpr;
-    type B = BoolExpr;
     fn i_const(v: i64) -> IntExpr {
         IntExpr::Const(v)
     }
@@ -2257,8 +2848,6 @@ impl Mode for Build {
 /// node by node; `None` after an `i128` overflow (which does not fit).
 impl Mode for Plan {
     const BUILD: bool = false;
-    type I = Option<Iv>;
-    type B = ();
     fn i_const(v: i64) -> Option<Iv> {
         Some(Iv::point(v))
     }
@@ -2366,30 +2955,63 @@ fn begin_site(budget: &mut Meter, size: usize, depth: usize, span: Span) -> R<()
     })?;
     budget.prepaid = size;
     budget.in_site = true;
+    budget.site_work = budget.fuel.used();
+    budget.site_predicted = budget.predicted;
     Ok(())
 }
 
 /// Close a site. What the plan over-estimated stays charged: the plan is an upper
-/// bound, and output is never refunded.
+/// bound, and output is never refunded. Work is treated the same way (bn-23hzh): the
+/// part of the prediction the build did not spend is spent here, so a site always
+/// spends exactly its prediction and a lowering replays under the limits it reported
+/// (`begin_site` checked the whole prediction against the work left, so it fits).
 fn end_site(budget: &mut Meter) {
     debug_assert!(
         !budget.overdrawn,
         "a build needed more output than its plan"
     );
+    if budget.in_site {
+        let spent = u128::from(budget.fuel.used().saturating_sub(budget.site_work));
+        debug_assert!(
+            spent <= budget.site_predicted,
+            "a build spent more work than its plan predicted"
+        );
+        let rest = budget.site_predicted.saturating_sub(spent);
+        let rest = u64::try_from(rest)
+            .unwrap_or(u64::MAX)
+            .min(budget.fuel.left());
+        let _ = budget.fuel.burn(rest);
+    }
     budget.prepaid = 0;
     budget.in_site = false;
     budget.overdrawn = false;
 }
 
-/// Lower one clause (an init, guard, or invariant conjunct) as its own planned site.
-fn top_bool(e: &Expr, budget: &mut Meter) -> R<Sized<BoolExpr>> {
+/// Lower one clause (an init or invariant conjunct) as its own planned site, with the
+/// definedness items its map reads record (bn-23hzh). The site's planned output is the
+/// clause's measure, the scratch output its build charges beyond it, and the items.
+fn top_bool(e: &Expr, budget: &mut Meter) -> R<(Sized<BoolExpr>, Vec<Sized<BoolExpr>>)> {
     shallow(e, budget)?;
     budget.predicted = 0;
+    budget.scratch = 0;
+    budget.defs_plan = collections::DAgg::default();
     let planned = bool_expr::<Plan>(e, budget)?.1;
-    begin_site(budget, planned.size, planned.depth, e.span)?;
+    let defs = std::mem::take(&mut budget.defs_plan);
+    let size = (planned.size as u128)
+        .saturating_add(budget.scratch)
+        .saturating_add(defs.size as u128);
+    let depth = planned.depth.max(defs.depth);
+    begin_site(
+        budget,
+        usize::try_from(size).unwrap_or(usize::MAX),
+        depth,
+        e.span,
+    )?;
+    let outer = std::mem::take(&mut budget.defs);
     let built = bool_expr::<Build>(e, budget);
+    let items = std::mem::replace(&mut budget.defs, outer);
     end_site(budget);
-    built
+    Ok((built?, items))
 }
 
 /// Conjoin lowered clauses as a *balanced* tree, so `n` clauses add `⌈log₂ n⌉` levels
@@ -2714,6 +3336,10 @@ fn int_node<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Sized<Md::I>> {
             let (lo, hi) = domain_in::<Md>(budget, v, sp)?;
             node::<Md, _>(budget, sp, &[M::text(text)], || Md::i_var(&name, lo, hi))
         }
+        // `m[k]` of an integer-coded value type (bn-23hzh).
+        ExprKind::Index(m, k) if matches!(m.ty, Type::Map(..)) => {
+            collections::index_int::<Md>(e, m, k, budget)
+        }
         ExprKind::If(..) => no(Unlowerable::ConditionalValue, e.span),
         _ => no(reason_in(e, budget), e.span),
     }
@@ -2809,6 +3435,10 @@ fn bool_expr<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Sized<Md::B>> {
             None => no(reason(e), sp),
         },
         ExprKind::Quant(q, binders, body) => quantifier::<Md>(*q, binders, body, sp, budget),
+        // `m[k]` of a Boolean value type (bn-23hzh).
+        ExprKind::Index(m, k) if matches!(m.ty, Type::Map(..)) => {
+            collections::index_bool::<Md>(e, m, k, budget)
+        }
         ExprKind::Not(a) => {
             let (a, sa) = bool_expr::<Md>(a, budget)?;
             node::<Md, _>(budget, sp, &[sa], || Md::b_not(a))
@@ -2845,6 +3475,15 @@ fn bool_expr<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Sized<Md::B>> {
                     let y = bool_expr::<Md>(b, budget)?;
                     iff::<Md>(budget, sp, x, y)
                 }
+                // Composite values compare slot by slot (bn-23hzh).
+                BinOp::Eq | BinOp::Ne | BinOp::SubsetEq if collections::is_composite(&a.ty) => {
+                    let same = collections::lay_compare::<Md>(a, b, *op, budget, sp)?;
+                    if *op == BinOp::Ne {
+                        node::<Md, _>(budget, sp, &[same.1], || Md::b_not(same.0))
+                    } else {
+                        Ok(same)
+                    }
+                }
                 BinOp::Eq | BinOp::Ne if a.ty == Type::Bool => {
                     let x = bool_expr::<Md>(a, budget)?;
                     let y = bool_expr::<Md>(b, budget)?;
@@ -2866,7 +3505,10 @@ fn bool_expr<Md: Mode>(e: &Expr, budget: &mut Meter) -> R<Sized<Md::B>> {
                         ExprKind::Binary(BinOp::Range, lo, hi) => {
                             in_range::<Md>(a, lo, hi, sp, budget)?
                         }
-                        _ => membership::<Md>(a, b, sp, budget)?,
+                        _ => match collections::membership_of::<Md>(a, b, sp, budget)? {
+                            Some(inside) => inside,
+                            None => membership::<Md>(a, b, sp, budget)?,
+                        },
                     };
                     if *op == BinOp::In {
                         Ok(inside)
@@ -2937,7 +3579,12 @@ fn membership<Md: Mode>(x: &Expr, set: &Expr, sp: Span, budget: &mut Meter) -> R
     if x.ty == Type::Bool {
         return bool_membership::<Md>(x, &members, n, sp, budget);
     }
-    let first = int_expr::<Md>(x, budget)?;
+    // A parameter or binder of a composite type is its index, and a constant set of
+    // composites holds its members' indices (bn-23hzh).
+    let first = match collections::atom_node::<Md>(x, budget)? {
+        Some(atom) => atom,
+        None => int_expr::<Md>(x, budget)?,
+    };
     if n == 0 {
         // No member, so `x in S` is false — but CML still evaluates `x`, which may fail.
         // `!(x == x)` is false wherever `x` evaluates and fails wherever it fails, so
@@ -3046,8 +3693,11 @@ enum Universe {
     Finite(i64, i64),
     /// `Int`, `Nat`, or a sort with no bound or instantiation.
     Unbounded,
-    /// Not a scalar type: a collection, tuple, record, string, or function.
+    /// A type with no finite universe in this correction: a record, string, sequence,
+    /// or function (or a collection over one).
     NotScalar,
+    /// A finite composite type whose universe does not fit `i64` atoms (bn-23hzh).
+    TooLarge,
 }
 
 /// The universe of `ty`: `Bool` is `0..=1`; an enumeration its variant indices; a sort
@@ -3079,7 +3729,13 @@ fn universe<Md: Mode>(ty: &Type, budget: &mut Meter, span: Span) -> R<Universe> 
                 None => Universe::NotScalar,
             }
         }
-        _ => Universe::NotScalar,
+        // A composite type: its values' indices (bn-23hzh).
+        _ => match collections::composite_universe::<Md>(ty, budget, span)? {
+            Ok(Some((lo, hi))) => Universe::Finite(lo, hi),
+            Ok(None) => Universe::TooLarge,
+            Err(layout::Card::Unbounded) => Universe::Unbounded,
+            Err(_) => Universe::NotScalar,
+        },
     })
 }
 
@@ -3282,6 +3938,8 @@ enum Guard<'e> {
     Range(&'e Expr, &'e Expr),
     /// `{e1, …}`: `u == e1 || …`.
     Members(&'e [Expr]),
+    /// A set-valued expression that reads state: its slot for `u` is `1` (bn-23hzh).
+    Slot(&'e Expr),
 }
 
 /// The interval of `e`, or the lowering's own refusal of it when it has none (an
@@ -3319,6 +3977,9 @@ fn candidates<'e, Md: Mode>(
     if universe == Universe::NotScalar {
         return no(Unlowerable::Quantifier, span);
     }
+    if universe == Universe::TooLarge {
+        return no(Unlowerable::OutputTooLarge, span);
+    }
     let Some(domain) = &binder.domain else {
         return match universe {
             Universe::Finite(lo, hi) => Ok(Cands::Span {
@@ -3351,10 +4012,11 @@ fn candidates<'e, Md: Mode>(
                 });
             }
             // Static once parameters and enclosing binders are fixed: planned unguarded.
-            let fixed = ia.fits
-                && ib.fits
-                && !reads_state::<Md>(a, budget)?
-                && !reads_state::<Md>(b, budget)?;
+            // Both reads are scanned whatever the intervals say, so the plan (where an
+            // interval may not fit) predicts the scans the build (where it may) makes.
+            let ra = reads_state::<Md>(a, budget)?;
+            let rb = reads_state::<Md>(b, budget)?;
+            let fixed = ia.fits && ib.fits && !ra && !rb;
             if fixed {
                 if ib.hi < ia.lo {
                     return Ok(empty());
@@ -3392,6 +4054,10 @@ fn candidates<'e, Md: Mode>(
                 reach: (lo, top),
             })
         }
+        // Members of a composite type: static, by index (bn-23hzh).
+        ExprKind::SetLit(es) if !layout::is_scalar(&binder.ty) => {
+            collections::literal_domain::<Md>(binder, es, span, budget)
+        }
         ExprKind::SetLit(es) => {
             let mut ivs = Vec::with_capacity(es.len());
             for e in es {
@@ -3410,7 +4076,9 @@ fn candidates<'e, Md: Mode>(
             let (lo, hi) = clamp(lo, hi);
             let mut fixed = ivs.iter().all(|iv| iv.fits);
             for e in es {
-                fixed = fixed && !reads_state::<Md>(e, budget)?;
+                // Scanned whatever `fixed` is so far, as for a range.
+                let reads = reads_state::<Md>(e, budget)?;
+                fixed = fixed && !reads;
             }
             if fixed {
                 // The build sorts the members it then finds fixed: predicted here.
@@ -3429,6 +4097,13 @@ fn candidates<'e, Md: Mode>(
             })
         }
         ExprKind::Const(c) => {
+            // A composite binder takes the constant's member indices, which are indices
+            // in the constant's element type: the binder must have exactly that type.
+            if !layout::is_scalar(&binder.ty)
+                && !matches!(&domain.ty, Type::Set(t) if **t == binder.ty)
+            {
+                return no(Unlowerable::NonIntegerValue, domain.span);
+            }
             let cost = lookup_cost(budget.bind.sets.len(), c.len());
             work::<Md>(budget, cost, span)?;
             // A reference count, not a copy of the members.
@@ -3436,6 +4111,11 @@ fn candidates<'e, Md: Mode>(
                 Some(values) => Ok(Cands::List(Rc::clone(values))),
                 None => no(reason_in(domain, budget), domain.span),
             }
+        }
+        // Any other set: its members when static, else the universe guarded by the
+        // domain's slot (bn-23hzh).
+        _ if matches!(domain.ty, Type::Set(_)) => {
+            collections::set_domain::<Md>(binder, domain, span, budget)
         }
         _ => no(reason_in(domain, budget), domain.span),
     }
@@ -3546,7 +4226,9 @@ fn quantifier_level<Md: Mode>(
     if !Md::BUILD {
         // One instance over every value the build may bind; its predicted work (the
         // scope entry included) stands for every candidate's.
-        let before = budget.predicted;
+        // Everything the instance predicts — work, scratch output, definedness items —
+        // stands for every candidate's (bn-23hzh: scratch and items too).
+        let before = (budget.predicted, budget.scratch, budget.defs_plan);
         work::<Md>(budget, cost, sp)?;
         let shadowed = enter(budget, *id, reach);
         let item = instance::<Md>(forall, rest, body, guard, reach.0, sp, budget);
@@ -3556,10 +4238,7 @@ fn quantifier_level<Md: Mode>(
         if total.depth > MAX_EXPR_DEPTH {
             return no(Unlowerable::ExpressionTooDeep, sp);
         }
-        let per = budget.predicted.saturating_sub(before);
-        budget.predicted = budget
-            .predicted
-            .saturating_add(per.saturating_mul(count.saturating_sub(1)));
+        collections::scale_since(budget, before, count.saturating_sub(1));
         predicted_fits(budget, sp)?;
         work::<Md>(budget, u64::try_from(count).unwrap_or(u64::MAX), sp)?;
         return Ok((Md::b_const(forall), total));
@@ -3610,6 +4289,10 @@ fn instance<Md: Mode>(
     if guarded {
         budget.guarded = budget.guarded.saturating_add(1);
     }
+    // A guarded instance's body is evaluated by CML only where the guard holds, so its
+    // definedness items are collected in their own frame and become one item,
+    // `guard => items` (bn-23hzh). The guard's own items stay in the enclosing frame.
+    let outer = guard.is_some().then(|| Md::f_take(budget));
     let item = quantifier::<Md>(
         if forall {
             crate::norm::Quant::Forall
@@ -3624,10 +4307,33 @@ fn instance<Md: Mode>(
     if guarded {
         budget.guarded = budget.guarded.saturating_sub(1);
     }
+    let inner = outer.map(|o| {
+        let inner = Md::f_take(budget);
+        Md::f_put(budget, o);
+        inner
+    });
     let item = item?;
-    let Some(guard) = guard else {
-        return Ok(item);
-    };
+    match guard {
+        None => Ok(item),
+        Some(guard) => guarded_item::<Md>(forall, guard, v, item, inner, sp, budget),
+    }
+}
+
+/// A guarded instance, `guard => item` (`forall`) or `guard && item` (`exists`), with
+/// the item's definedness frame `inner` recorded as the one item `guard => inner`
+/// (bn-23hzh). Kept out of [`instance`], which the binder recursion passes through, so
+/// the recursion's frames stay small.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn guarded_item<Md: Mode>(
+    forall: bool,
+    guard: Guard<'_>,
+    v: i64,
+    item: Sized<Md::B>,
+    inner: Option<Md::F>,
+    sp: Span,
+    budget: &mut Meter,
+) -> R<Sized<Md::B>> {
     let (g, sg) = match guard {
         Guard::Range(a, b) => {
             let (u1, su1) = node::<Md, _>(budget, sp, &[], || Md::i_const(v))?;
@@ -3649,6 +4355,21 @@ fn instance<Md: Mode>(
             }
             balanced::<Md>(eqs, false, budget, sp)?
         }
+        Guard::Slot(domain) => collections::slot_guard::<Md>(domain, v, budget, sp)?,
+    };
+    let (g, sg) = match inner {
+        Some(inner) => match Md::f_fold(budget, inner, sp)? {
+            Some(d) => {
+                let guard = (g, sg);
+                let again = copy::<Md, _>(budget, sp, &guard)?;
+                let item =
+                    node::<Md, _>(budget, sp, &[again.1, d.1], || Md::b_implies(again.0, d.0))?;
+                Md::f_push(budget, item);
+                guard
+            }
+            None => (g, sg),
+        },
+        None => (g, sg),
     };
     node::<Md, _>(budget, sp, &[sg, item.1], || {
         if forall {

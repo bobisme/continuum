@@ -1,0 +1,61 @@
+[change]
+bone = "bn-23hzh"
+author = "continuum-dev"
+summary = "continuum-cml-elab: RFC 0003 correction 4 part C — flat bounded-integer layouts for Option, tuple, Set, and Map state (slots named by path, canonical init candidates only, whole-layout writes), static-key selection, collection expressions lowered slot by slot at an explicit type, collection-typed parameters, binders, and quantifier domains, and map reads kept as the definedness predicates A#defined and I#defined (a typed undefined-read outcome, never a default); the replicated register lowers to 14 slots and 50 actions and agrees with an independent simulation; new typed refusals cml.lower.dynamic_key, value_outside_bound, dynamic_value, duplicate_key, and undefined_read; every planned site now spends exactly its prediction"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-elab/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-elab/tests/register.rs::the_register_lowers_to_the_layout_the_rfc_states",
+  "crates/continuum-cml-elab/tests/register.rs::a_wider_bound_is_refused_before_enumeration",
+  "crates/continuum-cml-elab/tests/collections.rs::collection_invariants_agree_with_the_oracle_on_every_canonical_state",
+  "crates/continuum-cml-elab/tests/collections.rs::collection_actions_agree_with_the_oracle_on_every_canonical_state",
+  "crates/continuum-cml-elab/tests/collections.rs::keys_that_read_state_are_dynamic_keys",
+  "crates/continuum-cml-elab/tests/collections.rs::static_values_outside_the_universe_are_refused",
+  "crates/continuum-cml-elab/tests/collections.rs::unsafe_computed_payloads_are_refused",
+  "crates/continuum-cml-elab/tests/collections.rs::a_map_literal_with_a_repeated_key_is_refused",
+  "crates/continuum-cml-elab/tests/collections.rs::an_undefined_read_in_init_is_refused",
+  "crates/continuum-cml-elab/tests/collections.rs::a_composite_relational_variable_is_refused",
+  "crates/continuum-cml-elab/tests/collections.rs::a_guarded_body_over_a_state_set_that_may_overflow_is_refused",
+  "crates/continuum-cml-elab/tests/collections.rs::a_post_state_map_read_in_a_relational_action_is_refused",
+  "crates/continuum-cml-elab/tests/collections.rs::composite_membership_in_an_empty_set_is_planned",
+  "crates/continuum-cml-elab/tests/collections.rs::a_composite_literal_domain_is_planned",
+  "crates/continuum-cml-elab/tests/collections.rs::hand_built_variant_names_are_escaped",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::collection_binders_and_parameters_expand",
+  "crates/continuum-cml-elab/tests/configured.rs::the_replicated_register_binds_and_lowers_except_for_its_fairness",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::collection_models_lower_at_their_measured_limits",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::nested_set_domains_are_bounded_in_a_small_stack",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::wide_layouts_are_refused_before_they_are_built",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::generated_names_past_the_limit_are_refused",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::slot_names_and_labels_are_injective",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::a_low_work_limit_is_refused_before_substitution",
+  "crates/continuum-cml-elab/tests/quantifiers.rs::generated_quantifiers_agree_with_the_brute_force_oracle",
+  "crates/continuum-model-core/tests/identity_golden.rs::the_model_identity_encoding_is_pinned_byte_for_byte",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/collections.rs::equal_meanings_lower_to_one_model", relation = "alpha-renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/register.rs::the_register_agrees_with_the_simulation_and_the_engine_establishes_its_invariants", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/register.rs::a_missing_key_is_a_typed_undefined_read_at_exactly_the_simulations_states", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/register.rs::dropping_the_stability_requirement_breaks_stable_witness_in_both", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "collection-valued state is what the replicated register and other corpus models need before they reach an engine (C021) and part of the expressiveness C022 claims; this change adds evidence toward both (the register lowers, the reference engine explores it, and its reachable states, transitions, invariant verdicts, and undefined reads equal an independent simulation's; collection invariants and actions agree with a brute-force oracle on every canonical state) and promotes neither: both stay TARGET, and fairness (bn-1ln12) still does not lower"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the run configuration is read as bn-15zfa left it; the lowered Model type and continuum-model/1 identity encoding are unchanged (a composite variable becomes ordinary bounded-integer variables)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-model-core is unchanged, and so is the continuum-model/1 encoding (tests/identity_golden.rs). continuum-cml-elab: every model that lowered before lowers to the same Model, except that a sort element whose name holds `{`, `}`, or `:` now has that byte escaped in action labels (bn-10j7z escaped only `\\ , = ( ) [ ]`), and a variant name of a hand-built model is now escaped the same way, which changes those labels and so those identities; no stored artifact records one. Usage figures rise: a site now spends the whole of its predicted work (the rest when it closes), so a lowering replays under its reported limits. Models refused as cml.lower.non_integer_state (collection state), cml.lower.parameterized_action (a collection parameter), or cml.lower.quantifier (a collection binder, a comprehension) under a configuration now lower when their types are finite, or are refused with one of the new typed codes; unconfigured lowering keeps its refusals. The five new Unlowerable variants and lower::definedness_subject / DEFINED_SUFFIX are new public surface"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2ee1cw"
+verdict = "approved"

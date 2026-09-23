@@ -1156,20 +1156,34 @@ fn a_late_primed_read_costs_constant_work_per_occurrence() {
 
 /// With a work limit below the enumeration's prediction, the lowering is refused at
 /// the prediction, before any candidate is substituted or charged as output.
+///
+/// A site spends exactly its prediction (the build's work, then the rest when it
+/// closes, bn-23hzh), so the measured work is the prediction plus the work after the
+/// site — here only the builder's sort of 24 names. One unit less is refused; within
+/// that short tail below the measured work the limit is below the prediction, and the
+/// refusal comes before any candidate.
 #[test]
 fn a_low_work_limit_is_refused_before_substitution() {
     let src = late_reads(24, 2000);
     let m = elaborate_source(&src).expect("elaborates");
     let (result, full) = lower_with(&m, Limits::default());
     result.expect("lowers within the default budget");
-    let (result, usage) = lower_with(&m, used_limits(full.nodes, full.work - 1));
+    let (result, _) = lower_with(&m, used_limits(full.nodes, full.work - 1));
     assert_eq!(
         result.expect_err("one unit less").kind,
         LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
     );
+    let below = (1..=256_u64).find(|k| {
+        let (result, usage) = lower_with(&m, used_limits(full.nodes, full.work - k));
+        assert_eq!(
+            result.expect_err("less than measured").kind,
+            LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)
+        );
+        usage.nodes + 2000 < full.nodes
+    });
     assert!(
-        usage.nodes + 2000 < full.nodes,
-        "no candidate was charged: {usage:?} against {full:?}"
+        below.is_some(),
+        "a limit just below the prediction charges no candidate: {full:?}"
     );
 }
 
@@ -2452,4 +2466,321 @@ fn each_initial_state_is_charged() {
     assert_eq!(grown, 4 * (1 + (1 + 1)), "the measure");
     assert_eq!(large.nodes - small.nodes, grown);
     assert_output_boundary(&init_states_source(7), large);
+}
+
+// ---------------------------------------------------------------------------
+// bn-23hzh: collection layouts
+// ---------------------------------------------------------------------------
+
+fn configured_doc(model: &str, bounds: &str, sorts: &str) -> RunConfig {
+    let text = format!(
+        r#"{{"schema_id":"https://continuum.dev/schema/run-config.json","schema_epoch":1,"model":"{model}","bounds":{bounds},"sorts":{sorts},"constants":{{}}}}"#
+    );
+    RunConfig::parse(text.as_bytes()).unwrap_or_else(|e| panic!("reads: {e}"))
+}
+
+fn dossier_text(rel: &str) -> String {
+    let path = format!("{}/../../notes/plan/{rel}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
+/// A model of every collection form the lowering builds: map reads (definedness
+/// items), writes of whole layouts, a set domain (guarded instances), and composite
+/// parameters.
+const COLLECTION_FRAME: &str = "module C
+state {
+  m: Map[Nat, Nat]
+  s: Set[Nat]
+  o: Option[Nat]
+  p: Option[Set[Bool]]
+  x: Nat where x <= 2
+}
+init { m == {} && s == {} && o == None && p == None && x == 0 }
+action Put(k: Nat, v: Nat) {
+  require k notin s
+  next m = m.put(k, v)
+  next s = s union {k}
+  unchanged o, p, x
+}
+action Read {
+  require o != None
+  next x = m[1]
+  unchanged m, s, o, p
+}
+action Mark(q: Set[Nat]) {
+  require forall k in q: m.get(k) != None
+  next p = Some({true})
+  unchanged m, s, o, x
+}
+invariant I { forall k in s: m[k] >= 1 && m.get(k) != None }
+";
+
+/// Each planned site spends exactly its plan, and every appended record is charged, so
+/// a lowering replays at the limits it reported, and one node or one unit of work less
+/// is refused — for the collection frame and for the replicated register.
+#[test]
+fn collection_models_lower_at_their_measured_limits() {
+    let register =
+        dossier_text("examples/replicated_register.ctm").replace("fairness weak Recover", "");
+    let register_config = RunConfig::parse(
+        dossier_text("schemas/examples/replicated-register.run-config.json").as_bytes(),
+    )
+    .expect("reads");
+    let frame_config = configured_doc("C", r#"{"Nat":{"max":2}}"#, "{}");
+    for (src, config) in [
+        (COLLECTION_FRAME.to_owned(), &frame_config),
+        (register, &register_config),
+    ] {
+        let m = elaborate_source(&src).expect("elaborates");
+        let (result, used) = lower_configured(&m, config, Limits::default());
+        result.expect("lowers");
+        let at = |nodes: usize, work: u64| {
+            lower_configured(&m, config, Limits { nodes, work })
+                .0
+                .map(|_| ())
+                .map_err(|e| e.kind)
+        };
+        assert_eq!(at(used.nodes, used.work), Ok(()), "{}", m.name);
+        assert_eq!(
+            at(used.nodes - 1, used.work),
+            Err(LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)),
+            "{}",
+            m.name
+        );
+        assert_eq!(
+            at(used.nodes, used.work - 1),
+            Err(LowerErrorKind::Unlowerable(Unlowerable::WorkLimitExceeded)),
+            "{}",
+            m.name
+        );
+    }
+}
+
+/// `forall v0 in s, v1 in s, …: m[v0] >= 0` over a state set: every binder is a
+/// guarded instance whose guard reads one slot of `s`, and whose definedness item is
+/// `guard => items`. The plan recurses through every binder before it measures the
+/// tree, so `MAX_BINDER_NESTING` of them reach the deepest recursion the lowering has:
+/// in a quarter of the default stack a short nest lowers, and the deepest nest and one
+/// more are refused typed (the guards add a level each, past the expression depth; one
+/// more binder is refused before it is entered).
+#[test]
+fn nested_set_domains_are_bounded_in_a_small_stack() {
+    use continuum_cml_elab::lower::MAX_BINDER_NESTING;
+    let nest = |k: usize| {
+        let binders: Vec<String> = (0..k).map(|i| format!("v{i} in s")).collect();
+        format!(
+            "module N\nstate {{ s: Set[Nat]\n m: Map[Nat, Nat] }}\ninit {{ s == {{}} && m == {{}} }}\naction A {{ unchanged s, m }}\ninvariant I {{ forall {}: m[v0] >= 0 }}\n",
+            binders.join(", ")
+        )
+    };
+    for (k, want) in [
+        (8, None),
+        (MAX_BINDER_NESTING, Some("cml.lower.expression_too_deep")),
+        (
+            MAX_BINDER_NESTING + 1,
+            Some("cml.lower.expression_too_deep"),
+        ),
+    ] {
+        let src = nest(k);
+        let got = thread::Builder::new()
+            .stack_size(SMALL_STACK)
+            .spawn(move || {
+                let m = elaborate_source(&src).expect("elaborates");
+                let config = configured_doc("N", r#"{"Nat":{"max":0}}"#, "{}");
+                lower_configured(&m, &config, Limits::default())
+                    .0
+                    .err()
+                    .map(|e| e.code())
+            })
+            .expect("spawn")
+            .join()
+            .expect("the lowering fits a quarter of the default stack");
+        assert_eq!(got, want, "{k} binders");
+    }
+    // The deepest layout recursion inside the deepest binder recursion: a chain of set
+    // operations as deep as the source admits, under a long nest. Typed either way.
+    let deep = |k: usize, chain: usize| {
+        let binders: Vec<String> = (0..k).map(|i| format!("v{i} in s")).collect();
+        let mut e = String::from("s");
+        for _ in 0..chain {
+            e = format!("({e} union s)");
+        }
+        format!(
+            "module N\nstate {{ s: Set[Nat] }}\ninit {{ s == {{}} }}\naction A {{ unchanged s }}\ninvariant I {{ forall {}: {e} != {{}} }}\n",
+            binders.join(", ")
+        )
+    };
+    // A comprehension's binders are bounded the same way.
+    for (k, want) in [
+        (MAX_BINDER_NESTING, None),
+        (
+            MAX_BINDER_NESTING + 1,
+            Some("cml.lower.expression_too_deep"),
+        ),
+    ] {
+        let binders: Vec<String> = (0..k).map(|i| format!("v{i} in 0..0")).collect();
+        let src = format!(
+            "module N\nstate {{ x: Nat where x <= 0 }}\ninit {{ x == 0 }}\naction A {{ unchanged x }}\ninvariant I {{ {{v0 | {}}} == {{0}} }}\n",
+            binders.join(", ")
+        );
+        let got = thread::Builder::new()
+            .stack_size(SMALL_STACK)
+            .spawn(move || {
+                let m = elaborate_source(&src).expect("elaborates");
+                let config =
+                    configured_doc("N", r#"{"Nat":{"max":0},"Int":{"min":0,"max":0}}"#, "{}");
+                lower_configured(&m, &config, Limits::default())
+                    .0
+                    .err()
+                    .map(|e| e.code())
+            })
+            .expect("spawn")
+            .join()
+            .expect("the lowering fits a quarter of the default stack");
+        assert_eq!(got, want, "a comprehension over {k} binders");
+    }
+    for (k, chain) in [(MAX_BINDER_NESTING, 29), (MAX_BINDER_NESTING, 31), (4, 29)] {
+        let src = deep(k, chain);
+        let got = thread::Builder::new()
+            .stack_size(SMALL_STACK)
+            .spawn(move || {
+                let m = elaborate_source(&src).expect("elaborates");
+                let config = configured_doc("N", r#"{"Nat":{"max":0}}"#, "{}");
+                lower_configured(&m, &config, Limits::default())
+                    .0
+                    .err()
+                    .map(|e| e.code())
+            })
+            .expect("spawn")
+            .join()
+            .expect("the lowering fits a quarter of the default stack");
+        assert!(
+            got.is_none() || got == Some("cml.lower.expression_too_deep"),
+            "{k} binders over a {chain}-deep chain: {got:?}"
+        );
+    }
+}
+
+/// A layout is at least one node per slot, so one wider than the output left is
+/// refused before a vector of its width exists, and a state layout wider than
+/// `MAX_VARIABLES` before any slot is built.
+#[test]
+fn wide_layouts_are_refused_before_they_are_built() {
+    let config = configured_doc("W", r#"{"Int":{"min":0,"max":65535}}"#, "{}");
+    let src = "module W\nstate { x: Nat where x <= 1 }\ninit { x == 0 }\naction A { unchanged x }\ninvariant I { {1} != {2} }\n";
+    let m = elaborate_source(src).expect("elaborates");
+    let limit = 50_000;
+    let (result, used) = lower_configured(
+        &m,
+        &config,
+        Limits {
+            nodes: limit,
+            ..Limits::default()
+        },
+    );
+    assert_eq!(
+        result.expect_err("65,536 slots per literal").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::OutputTooLarge)
+    );
+    assert!(used.nodes <= limit);
+    lower_configured(&m, &config, Limits::default())
+        .0
+        .expect("fits the default budget");
+
+    let state = "module W\nstate { s: Set[Int] }\ninit { s == {} }\naction A { unchanged s }\n";
+    let m = elaborate_source(state).expect("elaborates");
+    let (result, used) = lower_configured(&m, &config, Limits::default());
+    assert_eq!(
+        result.expect_err("65,536 slots").kind,
+        LowerErrorKind::Unlowerable(Unlowerable::TooManyVariables)
+    );
+    assert!(used.nodes < 1_000, "no slot was built: {used:?}");
+}
+
+/// Slot names, instance labels, and definedness predicate names are refused past
+/// `MAX_IDENT_BYTES`, before they are built.
+#[test]
+fn generated_names_past_the_limit_are_refused() {
+    let long = "e".repeat(126);
+    let sorts = format!(r#"{{"Node":{{"elements":["{long}"]}}}}"#);
+    let config = configured_doc("L", r#"{"Nat":{"max":0}}"#, &sorts);
+    // `s{` + 126 bytes + `}` is 129 bytes.
+    let slot =
+        "module L\ntype Node\nstate { s: Set[Node] }\ninit { s == {} }\naction A { unchanged s }\n";
+    let m = elaborate_source(slot).expect("elaborates");
+    assert_eq!(
+        lower_configured(&m, &config, Limits::default())
+            .0
+            .expect_err("129 bytes")
+            .kind,
+        LowerErrorKind::Unlowerable(Unlowerable::NameTooLong)
+    );
+    // `A(q={…})` over three 40-byte elements.
+    let e = |c: char| c.to_string().repeat(40);
+    let sorts = format!(
+        r#"{{"Node":{{"elements":["{}","{}","{}"]}}}}"#,
+        e('a'),
+        e('b'),
+        e('c')
+    );
+    let config = configured_doc("L", r#"{"Nat":{"max":0}}"#, &sorts);
+    let label = "module L\ntype Node\nstate { x: Nat where x <= 0 }\ninit { x == 0 }\naction A(q: Set[Node]) { unchanged x }\n";
+    let m = elaborate_source(label).expect("elaborates");
+    assert_eq!(
+        lower_configured(&m, &config, Limits::default())
+            .0
+            .expect_err("a wide label")
+            .kind,
+        LowerErrorKind::Unlowerable(Unlowerable::NameTooLong)
+    );
+    // `A#defined` for a 121-byte action name.
+    let name = "A".repeat(121);
+    let config = configured_doc("L", r#"{"Nat":{"max":0}}"#, "{}");
+    let defined = format!(
+        "module L\nstate {{ m: Map[Nat, Nat] }}\ninit {{ m == {{}} }}\naction {name} {{ require m[0] == 0\n unchanged m }}\n"
+    );
+    let m = elaborate_source(&defined).expect("elaborates");
+    assert_eq!(
+        lower_configured(&m, &config, Limits::default())
+            .0
+            .expect_err("129 bytes")
+            .kind,
+        LowerErrorKind::Unlowerable(Unlowerable::NameTooLong)
+    );
+}
+
+/// A sort element may be any printable ASCII name, so every delimiter of a value's
+/// canonical text is escaped in slot names and labels: elements that would otherwise
+/// spell another set give distinct slots, and every subset a distinct label.
+#[test]
+fn slot_names_and_labels_are_injective() {
+    let elements = ["a", "a}", "{a", "a,b", "b", "a:b", "(a)"];
+    let list: Vec<String> = elements.iter().map(|e| format!("\"{e}\"")).collect();
+    let sorts = format!(r#"{{"Node":{{"elements":[{}]}}}}"#, list.join(","));
+    let config = configured_doc("J", r#"{"Nat":{"max":0}}"#, &sorts);
+    let src = "module J\ntype Node\nstate { s: Set[Node] }\ninit { s == {} }\naction A(q: Set[Node]) { next s = q }\n";
+    let m = elaborate_source(src).expect("elaborates");
+    let lowered = lower_configured(&m, &config, Limits::default())
+        .0
+        .expect("lowers");
+    let model = lowered.model();
+    let slots: std::collections::BTreeSet<&str> = model
+        .variables()
+        .iter()
+        .map(|v| v.name().as_str())
+        .collect();
+    assert_eq!(slots.len(), elements.len(), "{slots:?}");
+    assert!(
+        slots.contains("s{a\\}}") && slots.contains("s{\\{a}"),
+        "{slots:?}"
+    );
+    assert_eq!(
+        model.actions().len(),
+        1 << elements.len(),
+        "one label per subset"
+    );
+    assert!(
+        model.action_index("A(q={a,a\\,b})").is_some()
+            && model.action_index("A(q={a\\,b})").is_some()
+    );
 }

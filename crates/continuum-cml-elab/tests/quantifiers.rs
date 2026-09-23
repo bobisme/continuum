@@ -679,15 +679,29 @@ fn unbounded_types_are_refused_typed_and_never_bounded_silently() {
     lowered(&elaborate_source(param).expect("elaborates"), &bounded).expect("lowers");
 }
 
+/// Collection-typed parameters and binders expand over their universes (bn-23hzh): a
+/// `Set[Nat]` parameter is one action per subset, a binder over a constant set of sets
+/// takes each member, and a static comprehension lowers. A state-reading member tested
+/// against a set that is neither a literal nor a constant is a dynamic key; a Boolean
+/// binder with a domain keeps its refusal.
 #[test]
-fn non_scalar_binders_and_parameters_are_refused_typed() {
+fn collection_binders_and_parameters_expand() {
     let set_param = "module P\nstate { x: Nat where x <= 3 }\ninit { x == 0 }\naction A(s: Set[Nat]) { require 1 in s\n unchanged x }\n";
     let bounded = config("P", r#"{"Nat":{"max":3}}"#, "{}", "{}");
-    assert_eq!(
-        unlowerable(set_param, Some(&bounded)),
-        Unlowerable::ParameterizedAction
-    );
-    let set_binder = "module P\nconst Q: Set[Set[Nat]]\nstate { x: Nat where x <= 3 }\ninit { x == 0 }\naction A { unchanged x }\ninvariant I { exists q in Q: x in q }\n";
+    let model = lowered(&elaborate_source(set_param).expect("elaborates"), &bounded)
+        .expect("a set parameter expands");
+    assert_eq!(model.actions().len(), 16, "one action per subset of 0..=3");
+    let enabled = |name: &str| {
+        let i = model.action_index(name).unwrap_or_else(|| panic!("{name}"));
+        model
+            .is_enabled(i, &model.initial_states()[0])
+            .expect("evaluates")
+    };
+    assert!(enabled("A(s={1,3})"));
+    assert!(!enabled("A(s={0,2})"));
+    assert!(!enabled("A(s={})"));
+
+    let set_binder = "module P\nconst Q: Set[Set[Nat]]\nstate { x: Nat where x <= 3 }\ninit { x == 0 }\naction A { unchanged x }\ninvariant I { exists q in Q: 1 in q }\ninvariant J { exists q in Q: x in q }\n";
     let with_q = config(
         "P",
         r#"{"Nat":{"max":3}}"#,
@@ -696,18 +710,50 @@ fn non_scalar_binders_and_parameters_are_refused_typed() {
     );
     assert_eq!(
         unlowerable(set_binder, Some(&with_q)),
-        Unlowerable::Quantifier
+        Unlowerable::DynamicKey,
+        "`x in q` tests a state-reading member against a bound set"
     );
+    let only_i = set_binder.replace("invariant J { exists q in Q: x in q }\n", "");
+    let model = lowered(&elaborate_source(&only_i).expect("elaborates"), &with_q)
+        .expect("a binder over a constant set of sets expands");
+    let i = model.predicate_index("I").expect("declared");
+    assert_eq!(
+        model.evaluate_predicate(i, &model.initial_states()[0]),
+        Ok(true)
+    );
+
     let bool_domain = plain("invariant I { forall b in {true}: b || x >= 0 }");
     assert_eq!(
         unlowerable(&bool_domain, Some(&bounded)),
         Unlowerable::NonIntegerValue
     );
-    // Comprehensions are collections (bn-23hzh): still the legacy refusal.
+    // A static comprehension is a set value (bn-23hzh).
     let comprehension = plain("invariant I { {i | i in 0..2} == {0, 1, 2} }");
     assert_eq!(
         unlowerable(&comprehension, Some(&bounded)),
-        Unlowerable::Quantifier
+        Unlowerable::UnboundedType,
+        "a `Set[Int]` needs an `Int` bound"
+    );
+    let with_int = config(
+        "P",
+        r#"{"Nat":{"max":3},"Int":{"min":0,"max":3}}"#,
+        "{}",
+        "{}",
+    );
+    let model = lowered(
+        &elaborate_source(&comprehension).expect("elaborates"),
+        &with_int,
+    )
+    .expect("a static comprehension lowers");
+    let i = model.predicate_index("I").expect("declared");
+    assert_eq!(
+        model.evaluate_predicate(i, &model.initial_states()[0]),
+        Ok(true)
+    );
+    // Without a configuration nothing is finite but the scalars it had.
+    assert_eq!(
+        unlowerable(set_param, None),
+        Unlowerable::ParameterizedAction
     );
 }
 

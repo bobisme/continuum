@@ -93,11 +93,11 @@ fn the_schema_example_reads_and_names_its_schema() {
     assert!(text.contains(r#""schema_id": "https://continuum.dev/schema/run-config.json""#));
 }
 
-/// The register's sorts and constants bind (no configuration refusal), and lowering
-/// stops at the first construct the integer model cannot carry: its fairness line,
-/// then its map-valued state.
+/// The register's sorts and constants bind (no configuration refusal). Lowering stops
+/// at its fairness line (bn-1ln12); without it the register lowers under the flat
+/// layout (bn-23hzh; `tests/register.rs` checks the result against a simulation).
 #[test]
-fn the_replicated_register_binds_and_lowers_as_far_as_integer_state_allows() {
+fn the_replicated_register_binds_and_lowers_except_for_its_fairness() {
     let src = read(&dossier("examples/replicated_register.ctm"));
     let text = read(&dossier(
         "schemas/examples/replicated-register.run-config.json",
@@ -107,11 +107,9 @@ fn the_replicated_register_binds_and_lowers_as_far_as_integer_state_allows() {
     assert_eq!(err.kind, LowerErrorKind::Unlowerable(Unlowerable::Fairness));
 
     let without = elaborate_source(&src.replace("fairness weak Recover", "")).expect("elaborates");
-    let err = configured(&without, &text).expect_err("map-valued state");
-    assert_eq!(
-        err.kind,
-        LowerErrorKind::Unlowerable(Unlowerable::NonIntegerState)
-    );
+    let lowered = configured(&without, &text).expect("map-valued state lowers (bn-23hzh)");
+    assert_eq!(lowered.model().variables().len(), 14);
+    assert_eq!(lowered.model().actions().len(), 50);
 
     // The bindings are checked before anything else: dropping `Quorum` from the
     // configuration is refused ahead of the fairness line.
