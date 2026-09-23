@@ -180,9 +180,18 @@ lean:
 # tools/test-policy/evidence/ does not record this revision's output
 # (regenerate with `python3 tools/test-policy/check_test_policy.py --evidence`).
 # See tools/test-policy/README-test.md.
+#
+# Then verify the differential-corpus golden (bn-1kgnz): tools/test-policy's own
+# oracle emits its facts for the shared seeded corpus into
+# tools/test-policy/evidence/differential_corpus.json, and
+# crates/continuum-engine-reference/tests/semantic_differential.rs (run by `just
+# test`) compares the Rust oracle against that committed file. A stale golden
+# fails here, before the Rust side ever gets a chance to compare against it.
+# Regenerate with `python3 tools/test-policy/differential_corpus.py --write`.
 test-policy:
     python3 tools/test-policy/check_test_policy.py --self-test
     python3 tools/test-policy/check_test_policy.py
+    python3 tools/test-policy/differential_corpus.py
 
 # Regenerate the plan/Bones traceability registry and report.
 traceability:
