@@ -404,7 +404,7 @@ fn hash_indexed_exact_resolution_is_collision_immune() {
 // ---------------------------------------------------------------------------
 
 const BFS_SRC: &str = include_str!("../src/bfs.rs");
-const MODEL_SRC: &str = include_str!("../src/model.rs");
+const MODEL_SRC: &str = include_str!("../../continuum-model-core/src/model.rs");
 
 /// Source lines that are code: comments and derive attributes removed.
 fn code_lines(src: &str) -> impl Iterator<Item = (usize, &str)> {
