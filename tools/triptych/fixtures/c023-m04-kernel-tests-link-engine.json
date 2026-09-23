@@ -1,0 +1,17 @@
+{
+  "id": "c023-m04-kernel-tests-link-engine",
+  "description": "The kernel's test suite links the engine (dev). With the engine's own dev edge to the kernel this closes a dev cycle: each side tests against the other.",
+  "add_edges": [
+    [
+      "continuum-kernel-core",
+      "continuum-engine-reference",
+      "dev"
+    ]
+  ],
+  "expect_audit": [
+    "acyclic",
+    "checker-dev-closed"
+  ],
+  "expect_gate": [],
+  "gate_note": "check_crate_boundaries.py reports dev edges and does not enforce them, by design: a differential test may link an engine it never ships against. The audit enforces the checker side only."
+}

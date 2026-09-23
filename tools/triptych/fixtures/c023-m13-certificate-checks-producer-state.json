@@ -1,0 +1,12 @@
+{
+  "id": "c023-m13-certificate-checks-producer-state",
+  "description": "The certificate router gains an entry that takes the engine's in-memory exploration.",
+  "source_overlay": {
+    "crates/continuum-certificate/src/check.rs": "\npub fn check_exploration(exploration: &continuum_engine_reference::bfs::Exploration) -> Outcome {\n    let _ = exploration;\n    check_certificate(&[])\n}\n"
+  },
+  "expect_audit": [
+    "wire-form-only"
+  ],
+  "expect_gate": [],
+  "gate_note": "source-level mutant; the gate reads the graph only. Compiling it would also need the engine edge, which m01/m02 show the gate rejects."
+}

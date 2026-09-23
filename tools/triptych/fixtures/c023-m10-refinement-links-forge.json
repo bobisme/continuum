@@ -1,0 +1,17 @@
+{
+  "id": "c023-m10-refinement-links-forge",
+  "description": "The refinement checker links Forge.",
+  "add_edges": [
+    [
+      "continuum-refinement",
+      "continuum-forge",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "refinement-independent"
+  ],
+  "expect_gate": [
+    "forge-not-imported-by-verifier"
+  ]
+}

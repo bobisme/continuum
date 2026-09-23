@@ -1,0 +1,16 @@
+{
+  "id": "c023-m07-reference-evaluator-links-adapter",
+  "description": "The reference evaluator (RFC 0013 model plane) links the asupersync adapter.",
+  "add_edges": [
+    [
+      "continuum-engine-reference",
+      "continuum-asupersync",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "model-not-derived-from-program"
+  ],
+  "expect_gate": [],
+  "gate_note": "the gate's model-core-not-asupersync rule names continuum-model-core only; plan §20 does not name the reference evaluator."
+}

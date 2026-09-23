@@ -11,7 +11,8 @@ Source of truth:
 The four boundary rules stated in START_HERE, and how each is checked here:
 
 1. "The certificate checker may not depend on search."
-   -> RULE certificate-checker-not-search (transitive, exact).
+   -> RULE certificate-checker-not-search (transitive, exact). Search here is
+      the engines, Forge, and the asupersync adapter (plan §20, INV-004).
 2. "The model core may not depend on asupersync."
    -> RULE model-core-not-asupersync (transitive, exact).
 3. "Adapters may not own semantic state."
@@ -235,7 +236,14 @@ def evaluate(enforced: dict[str, set[str]], members: set[str]) -> list[Violation
     closures = {name: closure(enforced, name, members) for name in sorted(members)}
 
     # RULE certificate-checker-not-search
-    search = set(ENGINES) | {"continuum-forge"}
+    #
+    # Plan §20 (AGENTS.md, INV-004): the checking base may not depend on
+    # `continuum-engine-*`, `continuum-forge`, or `continuum-asupersync`. The
+    # asupersync prong was missing for `continuum-certificate` until bn-2270's
+    # C023 audit (`tools/check_triptych_independence.py`, rule gate-coverage)
+    # found that an edge `continuum-certificate -> continuum-asupersync` passed
+    # this gate: `kernel-is-synchronous` covers the four kernel crates only.
+    search = set(ENGINES) | {"continuum-forge", "continuum-asupersync"}
     for src in CHECKER:
         for target, path in sorted(closures.get(src, {}).items()):
             if target in search:
@@ -317,6 +325,7 @@ SELF_TEST_CASES: tuple[tuple[str, str, str, str], ...] = (
     ("certificate-checker-not-search", "continuum-certificate", "continuum-engine-explicit", "direct"),
     ("certificate-checker-not-search", "continuum-kernel-core", "continuum-engine-dpor", "direct"),
     ("certificate-checker-not-search", "continuum-kernel-smt", "continuum-forge", "direct"),
+    ("certificate-checker-not-search", "continuum-certificate", "continuum-asupersync", "direct"),
     ("model-core-not-asupersync", "continuum-model-core", "continuum-asupersync", "direct"),
     ("kernel-is-synchronous", "continuum-kernel-temporal", "continuum-asupersync", "direct"),
     ("kernel-is-synchronous", "continuum-kernel-core", "tokio", "external"),

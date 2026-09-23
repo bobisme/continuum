@@ -1,0 +1,16 @@
+{
+  "id": "c023-m11-model-core-links-refinement",
+  "description": "The model core links the refinement checker it is validated by.",
+  "add_edges": [
+    [
+      "continuum-model-core",
+      "continuum-refinement",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "validator-not-upstream"
+  ],
+  "expect_gate": [],
+  "gate_note": "the gate has no rule for continuum-refinement."
+}

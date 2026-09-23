@@ -1,0 +1,24 @@
+{
+  "id": "c023-m06-model-core-links-adapter",
+  "description": "The model core links the asupersync adapter: the model is derived from the program it validates.",
+  "add_edges": [
+    [
+      "continuum-model-core",
+      "continuum-asupersync",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "model-not-derived-from-program"
+  ],
+  "expect_gate": [
+    "model-core-not-asupersync"
+  ],
+  "e2e": {
+    "manifest": "crates/continuum-model-core/Cargo.toml",
+    "append": "\n[dependencies.continuum-asupersync]\npath = \"../continuum-asupersync\"\n",
+    "expect_audit": [
+      "model-not-derived-from-program"
+    ]
+  }
+}

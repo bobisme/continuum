@@ -1,0 +1,26 @@
+{
+  "id": "c023-m01-kernel-links-engine",
+  "description": "The kernel checker links the reference engine: the checker could re-run search instead of checking the certificate. With the engine's existing dev edge to the kernel it also closes a dev-inclusive cycle, which Cargo accepts.",
+  "add_edges": [
+    [
+      "continuum-kernel-core",
+      "continuum-engine-reference",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "acyclic",
+    "checker-closed"
+  ],
+  "expect_gate": [
+    "certificate-checker-not-search"
+  ],
+  "e2e": {
+    "manifest": "crates/continuum-kernel-core/Cargo.toml",
+    "append": "\n[dependencies.continuum-engine-reference]\npath = \"../continuum-engine-reference\"\n",
+    "expect_audit": [
+      "acyclic",
+      "checker-closed"
+    ]
+  }
+}

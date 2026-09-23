@@ -1,7 +1,7 @@
 {
   "check": "tools/governance/check_claim_governance.py",
   "claim_registry": {
-    "active_claims": 33,
+    "active_claims": 31,
     "declared_states": [
       "HYPOTHESIS",
       "TARGET",
@@ -26,7 +26,6 @@
       "C003",
       "C004",
       "C005",
-      "C006",
       "C007",
       "C008",
       "C009",
@@ -42,7 +41,6 @@
       "C020",
       "C021",
       "C022",
-      "C023",
       "C024",
       "C026",
       "C027",
@@ -142,6 +140,7 @@
       "boundary": "Proxy. Only assertive uses (copula or perfect + `observed` in predicate position) are seen; an observation reported as a noun phrase or a bare table cell is not.",
       "fixtures_caught": [
         "claim-c006-prohibited-wording.md",
+        "claim-c023-prohibited-wording.md",
         "claim-observed-tested-no-scope.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -172,6 +171,7 @@
       "boundary": "Proxy. Only assertive uses are seen, and the corpus requirement is satisfied by any scope preposition \u2014 the check cannot tell a named corpus from a vague one.",
       "fixtures_caught": [
         "claim-c006-prohibited-wording.md",
+        "claim-c023-prohibited-wording.md",
         "claim-observed-tested-no-scope.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -203,6 +203,7 @@
       "fixtures_caught": [
         "claim-bounded-no-bound.md",
         "claim-c006-prohibited-wording.md",
+        "claim-c023-prohibited-wording.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
       ],
@@ -233,6 +234,7 @@
       "fixtures_caught": [
         "claim-bounded-no-bound.md",
         "claim-c006-prohibited-wording.md",
+        "claim-c023-prohibited-wording.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
       ],
@@ -262,6 +264,7 @@
       "boundary": "Proxy. The check verifies that assumptions are *named* after `under`; it cannot verify they are the assumptions the proof actually needs.",
       "fixtures_caught": [
         "claim-c006-prohibited-wording.md",
+        "claim-c023-prohibited-wording.md",
         "claim-proved-under-no-assumptions.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -292,6 +295,7 @@
       "boundary": "Proxy. The check verifies an artifact or checker is named in the sentence; it does not re-check the certificate.",
       "fixtures_caught": [
         "claim-c006-prohibited-wording.md",
+        "claim-c023-prohibited-wording.md",
         "claim-certificate-checked-no-artifact.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -322,6 +326,7 @@
       "boundary": "Proxy. The check rejects a hypothesis stated alongside a stronger claim word; it cannot judge whether a statement should have been a hypothesis.",
       "fixtures_caught": [
         "claim-c006-prohibited-wording.md",
+        "claim-c023-prohibited-wording.md",
         "claim-hypothesized-with-strength.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -434,7 +439,7 @@
   },
   "self_test": {
     "failures": [],
-    "fixtures": 15,
+    "fixtures": 17,
     "status": "pass"
   },
   "status": "pass"

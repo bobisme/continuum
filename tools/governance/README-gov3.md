@@ -111,7 +111,7 @@ matches nothing, so a stale one cannot sit here unnoticed.
 
 ## Fixtures
 
-Fifteen, under `fixtures/claims/`. Each declares in an HTML comment the rule it
+Seventeen, under `fixtures/claims/`. Each declares in an HTML comment the rule it
 must trigger; a fixture that is not caught fails `--self-test`, so the check
 cannot pass by detecting nothing. `claim-clean.md` is the negative control: all
 seven verbs used correctly, and it must produce no finding at all.

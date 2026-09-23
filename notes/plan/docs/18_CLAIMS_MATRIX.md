@@ -59,7 +59,7 @@ CI should reject bare “verified,” “sound,” “complete,” “determinis
 |---|---|---|---|
 | C021 | All 80 validated TLA+ example families have native equivalents | corpus dashboard, port manifests, oracle/proof evidence | TARGET |
 | C022 | CML is expressive enough to replace ordinary TLA+ usage in target projects | corpus completion plus real-project modeling studies | TARGET |
-| C023 | The semantic triptych avoids circular self-validation | independent path audit and mutation tests | TARGET |
+| C023 | The semantic triptych avoids circular self-validation | independent path audit and mutation tests | OBSERVED |
 | C024 | Lean receipts faithfully justify Continuum claims | verified encoding/checker, axiom manifest, independent replay | TARGET |
 | C025 | Cyclic symmetry preserves the dining model | exhaustive spike over 573 states | OBSERVED-BOUNDED |
 | C026 | Observer-indexed independence is monotone under observer coarsening | Lean theorem plus engine differential tests | TARGET |
@@ -86,3 +86,26 @@ pigeonhole on a 4-bit fingerprint) the explorer returns the exact reachable coun
 A fingerprint-only deduplication mutant loses states, and the same exactness check
 rejects it. The optimized engine `continuum-engine-explicit` is a scaffold today. When
 it lands, C006 needs new evidence for it under ADR-0013.
+
+C023 is observed on the workspace dependency graph and on two cross-path arrows:
+the reference engine's certificate that the kernel checks from wire bytes, and the
+Rust reference oracle against the Python oracle. That is the whole scope. The
+evidence is `tools/check_triptych_independence.py` with its retained record
+`tools/triptych/evidence/c023.json` (bn-2270). The audit reads the full resolved
+graph, dev edges included, and derives the roles from the members. Over it, the
+checking base links only itself, no producer links the checking base, the model
+plane and the program plane do not link each other, and the graph has no cycle.
+Every public verdict entry of the checking base takes wire bytes only. A kernel
+entry that takes a decoded certificate makes the real Rust test
+`checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes` fail. Fourteen
+circular mutants are rejected by the audit. The boundary gate owns five of them,
+and it rejects each. For the other nine, the fixture states why the gate has no
+rule. Three manifest mutants are applied to
+a real copy of the workspace, and both tools reject them. The audit found one gap:
+the gate accepted `continuum-certificate -> continuum-asupersync`. bn-2270 closed
+it. Five of the seven RFC 0013 arrows have a scaffold side today: CIR journal to
+refinement checker, CML reference to optimized evaluator, evaluator to SMT/PDR
+encodings, native checker to Lean reflective checker, and adapter to conformance
+models. On them the refinement rules hold only because the crates are empty. When
+a scaffold side lands, the evidence record goes stale, `just boundaries` fails,
+and C023 needs new evidence for that arrow.

@@ -1,0 +1,15 @@
+{
+  "id": "c023-m14-differential-ignored",
+  "description": "The engine-to-kernel differential is switched off with #[ignore].",
+  "source_replace": {
+    "crates/continuum-engine-reference/tests/certificate_kernel_differential.rs": [
+      "fn the_engines_die_hard_certificate_is_verified_by_the_independent_checker(",
+      "#[ignore]\nfn the_engines_die_hard_certificate_is_verified_by_the_independent_checker("
+    ]
+  },
+  "expect_audit": [
+    "cross-path-tests-live"
+  ],
+  "expect_gate": [],
+  "gate_note": "test-liveness mutant; the gate reads the graph only."
+}

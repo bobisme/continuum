@@ -1,0 +1,16 @@
+{
+  "id": "c023-m08-adapter-links-model-core",
+  "description": "The asupersync adapter links the model core: the program side shares the model's decision logic.",
+  "add_edges": [
+    [
+      "continuum-asupersync",
+      "continuum-model-core",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "program-not-derived-from-model"
+  ],
+  "expect_gate": [],
+  "gate_note": "plan §20 forbids model->asupersync only; the reverse direction is an RFC 0013 separation the gate does not state."
+}

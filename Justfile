@@ -65,9 +65,19 @@ fuzz:
 
 # Enforce the plan §20 crate list and the forbidden dependency edges.
 # The self-test runs first so the check cannot pass vacuously.
+#
+# Then the C023 independent path audit (bn-2270): the triptych's separations
+# over the full resolved graph, dev edges included. Its self-test is the
+# mutation campaign — every circular-edge fixture in tools/triptych/fixtures/
+# must be rejected, and the manifest-level ones are applied to a copy of the
+# workspace under $TMPDIR and rejected by both this gate and the audit. The
+# real run fails when tools/triptych/evidence/c023.json is stale (regenerate
+# with `python3 tools/check_triptych_independence.py --evidence`).
 boundaries:
     python3 tools/check_crate_boundaries.py --self-test
     python3 tools/check_crate_boundaries.py
+    python3 tools/check_triptych_independence.py --self-test
+    python3 tools/check_triptych_independence.py
 
 # Enforce the docs/03 §5 / plan §20 kernel covenant over the four
 # `continuum-kernel-*` crates: the <15,000 non-test-line budget (with the counting

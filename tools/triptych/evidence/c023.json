@@ -1,0 +1,442 @@
+{
+  "arrows": [
+    {
+      "arrow": "reference engine certificate -> independent kernel checker (wire form)",
+      "id": "A1",
+      "scaffold_crates": [],
+      "status": "present",
+      "witness": "crates/continuum-engine-reference/tests/certificate_kernel_differential.rs"
+    },
+    {
+      "arrow": "Rust reference oracle <-> independent Python oracle (TEST §2)",
+      "id": "A2",
+      "scaffold_crates": [],
+      "status": "present",
+      "witness": "crates/continuum-engine-reference/tests/semantic_differential.rs"
+    },
+    {
+      "arrow": "CIR journal <-> model/refinement checker",
+      "id": "A3",
+      "scaffold_crates": [
+        "continuum-cir",
+        "continuum-model-core",
+        "continuum-refinement"
+      ],
+      "status": "scaffold",
+      "witness": null
+    },
+    {
+      "arrow": "CML reference <-> optimized Rust evaluator",
+      "id": "A4",
+      "scaffold_crates": [
+        "continuum-cml-elab",
+        "continuum-engine-explicit"
+      ],
+      "status": "scaffold",
+      "witness": null
+    },
+    {
+      "arrow": "Rust evaluator <-> SMT/PDR encodings",
+      "id": "A5",
+      "scaffold_crates": [
+        "continuum-engine-symbolic"
+      ],
+      "status": "scaffold",
+      "witness": null
+    },
+    {
+      "arrow": "native certificate checker <-> Lean reflective checker",
+      "id": "A6",
+      "scaffold_crates": [
+        "continuum-proof-client"
+      ],
+      "status": "scaffold",
+      "witness": null
+    },
+    {
+      "arrow": "asupersync adapter <-> executable primitive conformance models",
+      "id": "A7",
+      "scaffold_crates": [
+        "continuum-model-core"
+      ],
+      "status": "scaffold",
+      "witness": null
+    }
+  ],
+  "bone": "bn-2270",
+  "campaign": {
+    "e2e": [
+      {
+        "audit_exit": 0,
+        "audit_rules": [],
+        "gate_exit": 0,
+        "gate_rules": [],
+        "id": "control"
+      },
+      {
+        "audit_exit": 1,
+        "audit_rules": [
+          "acyclic",
+          "checker-closed"
+        ],
+        "gate_exit": 1,
+        "gate_rules": [
+          "certificate-checker-not-search"
+        ],
+        "id": "c023-m01-kernel-links-engine"
+      },
+      {
+        "audit_exit": 1,
+        "audit_rules": [
+          "checker-closed"
+        ],
+        "gate_exit": 1,
+        "gate_rules": [
+          "certificate-checker-not-search"
+        ],
+        "id": "c023-m02-certificate-links-adapter"
+      },
+      {
+        "audit_exit": 1,
+        "audit_rules": [
+          "model-not-derived-from-program"
+        ],
+        "gate_exit": 1,
+        "gate_rules": [
+          "model-core-not-asupersync"
+        ],
+        "id": "c023-m06-model-core-links-adapter"
+      }
+    ],
+    "mutants": [
+      {
+        "audit": [
+          "acyclic",
+          "checker-closed"
+        ],
+        "gate": [
+          "certificate-checker-not-search"
+        ],
+        "id": "c023-m01-kernel-links-engine"
+      },
+      {
+        "audit": [
+          "checker-closed"
+        ],
+        "gate": [
+          "certificate-checker-not-search"
+        ],
+        "id": "c023-m02-certificate-links-adapter"
+      },
+      {
+        "audit": [
+          "checker-closed"
+        ],
+        "gate": [
+          "certificate-checker-not-search",
+          "forge-not-imported-by-verifier"
+        ],
+        "id": "c023-m03-kernel-reaches-forge-through-a-hop"
+      },
+      {
+        "audit": [
+          "acyclic",
+          "checker-dev-closed"
+        ],
+        "gate": [],
+        "id": "c023-m04-kernel-tests-link-engine"
+      },
+      {
+        "audit": [
+          "producer-does-not-link-checker"
+        ],
+        "gate": [],
+        "id": "c023-m05-engine-links-checker"
+      },
+      {
+        "audit": [
+          "model-not-derived-from-program"
+        ],
+        "gate": [
+          "model-core-not-asupersync"
+        ],
+        "id": "c023-m06-model-core-links-adapter"
+      },
+      {
+        "audit": [
+          "model-not-derived-from-program"
+        ],
+        "gate": [],
+        "id": "c023-m07-reference-evaluator-links-adapter"
+      },
+      {
+        "audit": [
+          "program-not-derived-from-model"
+        ],
+        "gate": [],
+        "id": "c023-m08-adapter-links-model-core"
+      },
+      {
+        "audit": [
+          "refinement-independent"
+        ],
+        "gate": [],
+        "id": "c023-m09-refinement-links-engine"
+      },
+      {
+        "audit": [
+          "refinement-independent"
+        ],
+        "gate": [
+          "forge-not-imported-by-verifier"
+        ],
+        "id": "c023-m10-refinement-links-forge"
+      },
+      {
+        "audit": [
+          "validator-not-upstream"
+        ],
+        "gate": [],
+        "id": "c023-m11-model-core-links-refinement"
+      },
+      {
+        "audit": [
+          "wire-form-only"
+        ],
+        "gate": [],
+        "id": "c023-m12-kernel-checks-in-memory-certificate"
+      },
+      {
+        "audit": [
+          "wire-form-only"
+        ],
+        "gate": [],
+        "id": "c023-m13-certificate-checks-producer-state"
+      },
+      {
+        "audit": [
+          "cross-path-tests-live"
+        ],
+        "gate": [],
+        "id": "c023-m14-differential-ignored"
+      }
+    ],
+    "rust_mutant": {
+      "id": "c023-rust-kernel-core-in-memory-entry",
+      "mutated_compiled": true,
+      "mutated_exit": 101,
+      "mutated_ran_one_failing_test": true,
+      "test": "continuum-kernel-core --test pr9_exit_evidence checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+      "unmutated_exit": 0,
+      "unmutated_ran_one_passing_test": true
+    }
+  },
+  "claim": "C023",
+  "graph_source": "cargo metadata --format-version 1 --locked --offline (resolve, dev edges included)",
+  "mutants": [
+    {
+      "e2e": true,
+      "expect_audit": [
+        "acyclic",
+        "checker-closed"
+      ],
+      "expect_gate": [
+        "certificate-checker-not-search"
+      ],
+      "gate_note": null,
+      "id": "c023-m01-kernel-links-engine"
+    },
+    {
+      "e2e": true,
+      "expect_audit": [
+        "checker-closed"
+      ],
+      "expect_gate": [
+        "certificate-checker-not-search"
+      ],
+      "gate_note": null,
+      "id": "c023-m02-certificate-links-adapter"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "checker-closed"
+      ],
+      "expect_gate": [
+        "certificate-checker-not-search",
+        "forge-not-imported-by-verifier"
+      ],
+      "gate_note": null,
+      "id": "c023-m03-kernel-reaches-forge-through-a-hop"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "acyclic",
+        "checker-dev-closed"
+      ],
+      "expect_gate": [],
+      "gate_note": "check_crate_boundaries.py reports dev edges and does not enforce them, by design: a differential test may link an engine it never ships against. The audit enforces the checker side only.",
+      "id": "c023-m04-kernel-tests-link-engine"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "producer-does-not-link-checker"
+      ],
+      "expect_gate": [],
+      "gate_note": "plan §20 states the checker->search direction only. A producer that links the checker is a composition, which the gate admits (continuumd does it); the audit forbids it for producers.",
+      "id": "c023-m05-engine-links-checker"
+    },
+    {
+      "e2e": true,
+      "expect_audit": [
+        "model-not-derived-from-program"
+      ],
+      "expect_gate": [
+        "model-core-not-asupersync"
+      ],
+      "gate_note": null,
+      "id": "c023-m06-model-core-links-adapter"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "model-not-derived-from-program"
+      ],
+      "expect_gate": [],
+      "gate_note": "the gate's model-core-not-asupersync rule names continuum-model-core only; plan §20 does not name the reference evaluator.",
+      "id": "c023-m07-reference-evaluator-links-adapter"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "program-not-derived-from-model"
+      ],
+      "expect_gate": [],
+      "gate_note": "plan §20 forbids model->asupersync only; the reverse direction is an RFC 0013 separation the gate does not state.",
+      "id": "c023-m08-adapter-links-model-core"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "refinement-independent"
+      ],
+      "expect_gate": [],
+      "gate_note": "the gate has no rule for continuum-refinement; the scaffold's own doc comment states the boundary (No engine, adapter, or Forge dependency).",
+      "id": "c023-m09-refinement-links-engine"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "refinement-independent"
+      ],
+      "expect_gate": [
+        "forge-not-imported-by-verifier"
+      ],
+      "gate_note": null,
+      "id": "c023-m10-refinement-links-forge"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "validator-not-upstream"
+      ],
+      "expect_gate": [],
+      "gate_note": "the gate has no rule for continuum-refinement.",
+      "id": "c023-m11-model-core-links-refinement"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "wire-form-only"
+      ],
+      "expect_gate": [],
+      "gate_note": "source-level mutant; the gate reads the graph only. The real Rust owner, pr9_exit_evidence::checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes, is run against the same mutant by --evidence (campaign.rust_mutant).",
+      "id": "c023-m12-kernel-checks-in-memory-certificate"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "wire-form-only"
+      ],
+      "expect_gate": [],
+      "gate_note": "source-level mutant; the gate reads the graph only. Compiling it would also need the engine edge, which m01/m02 show the gate rejects.",
+      "id": "c023-m13-certificate-checks-producer-state"
+    },
+    {
+      "e2e": false,
+      "expect_audit": [
+        "cross-path-tests-live"
+      ],
+      "expect_gate": [],
+      "gate_note": "test-liveness mutant; the gate reads the graph only.",
+      "id": "c023-m14-differential-ignored"
+    }
+  ],
+  "required_tests": [
+    "crates/continuum-kernel-core/tests/pr9_exit_evidence.rs::checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+    "crates/continuum-kernel-core/tests/pr9_exit_evidence.rs::certificate_has_no_public_constructor_no_public_field_and_no_manual_trait_impl",
+    "crates/continuum-kernel-sat/tests/pr9_exit_evidence.rs::checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+    "crates/continuum-kernel-sat/tests/pr9_exit_evidence.rs::certificate_has_no_public_constructor_no_public_field_and_no_manual_trait_impl",
+    "crates/continuum-kernel-smt/tests/pr9_exit_evidence.rs::checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+    "crates/continuum-kernel-smt/tests/pr9_exit_evidence.rs::certificate_has_no_public_constructor_no_public_field_and_no_manual_trait_impl",
+    "crates/continuum-kernel-temporal/tests/pr9_exit_evidence.rs::checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+    "crates/continuum-kernel-temporal/tests/pr9_exit_evidence.rs::certificate_has_no_public_constructor_no_public_field_and_no_manual_trait_impl",
+    "crates/continuum-certificate/tests/inv004_no_self_certification.rs::checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes",
+    "crates/continuum-certificate/tests/inv004_no_self_certification.rs::no_source_in_this_crate_names_a_decoded_kernel_structure",
+    "crates/continuum-certificate/tests/inv004_no_self_certification.rs::the_manifest_names_no_forbidden_dependency_even_if_a_table_is_ever_added",
+    "crates/continuum-engine-reference/tests/certificate_kernel_differential.rs::the_engines_die_hard_certificate_is_verified_by_the_independent_checker",
+    "crates/continuum-engine-reference/tests/certificate_kernel_differential.rs::every_single_byte_mutation_of_the_state_table_is_rejected",
+    "crates/continuum-engine-reference/tests/semantic_differential.rs::differential_corpus_agrees_with_python_oracle"
+  ],
+  "roles": {
+    "checker": [
+      "continuum-certificate",
+      "continuum-kernel-core",
+      "continuum-kernel-sat",
+      "continuum-kernel-smt",
+      "continuum-kernel-temporal"
+    ],
+    "model": [
+      "continuum-cml-elab",
+      "continuum-cml-syntax",
+      "continuum-engine-reference",
+      "continuum-model-core"
+    ],
+    "producers": [
+      "continuum-asupersync",
+      "continuum-engine-dpor",
+      "continuum-engine-explicit",
+      "continuum-engine-liveness",
+      "continuum-engine-reference",
+      "continuum-engine-symbolic",
+      "continuum-forge"
+    ],
+    "program": [
+      "asupersync",
+      "continuum-asupersync",
+      "continuum-effects-network",
+      "continuum-effects-process",
+      "continuum-effects-storage",
+      "continuum-effects-time"
+    ],
+    "refinement": [
+      "continuum-refinement"
+    ]
+  },
+  "rules": {
+    "acyclic": "the workspace graph with normal, build and dev edges is acyclic",
+    "checker-closed": "the checking base links only checking-base crates, never the runtime",
+    "checker-dev-closed": "no checking-base dev-dependency reaches a producer",
+    "cross-path-tests-live": "the Rust tests pinning the wire boundary and the differential are live",
+    "gate-coverage": "the boundary gate's lists match the roles and catch every checker->producer edge",
+    "model-not-derived-from-program": "the model plane does not link the program plane",
+    "producer-does-not-link-checker": "no producer links the checking base in normal/build position",
+    "program-not-derived-from-model": "the program plane does not link the model plane",
+    "refinement-independent": "the refinement checker links no producer and no program-plane crate",
+    "validator-not-upstream": "no validated-side crate links the refinement checker",
+    "wire-form-only": "every public verdict-returning checker function takes exactly `bytes: &[u8]`"
+  },
+  "tool": "tools/check_triptych_independence.py"
+}

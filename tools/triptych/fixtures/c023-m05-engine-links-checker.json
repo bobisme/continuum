@@ -1,0 +1,16 @@
+{
+  "id": "c023-m05-engine-links-checker",
+  "description": "The reference engine links the kernel in normal position and can ship a verdict on its own output.",
+  "add_edges": [
+    [
+      "continuum-engine-reference",
+      "continuum-kernel-core",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "producer-does-not-link-checker"
+  ],
+  "expect_gate": [],
+  "gate_note": "plan §20 states the checker->search direction only. A producer that links the checker is a composition, which the gate admits (continuumd does it); the audit forbids it for producers."
+}

@@ -1,0 +1,23 @@
+{
+  "id": "c023-m03-kernel-reaches-forge-through-a-hop",
+  "description": "A kernel crate reaches Forge through an innocent workspace crate.",
+  "add_edges": [
+    [
+      "continuum-kernel-temporal",
+      "continuum-workspace",
+      "normal"
+    ],
+    [
+      "continuum-workspace",
+      "continuum-forge",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "checker-closed"
+  ],
+  "expect_gate": [
+    "certificate-checker-not-search",
+    "forge-not-imported-by-verifier"
+  ]
+}

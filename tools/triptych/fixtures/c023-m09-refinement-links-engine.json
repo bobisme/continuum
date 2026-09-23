@@ -1,0 +1,16 @@
+{
+  "id": "c023-m09-refinement-links-engine",
+  "description": "The refinement checker links an engine: correspondence is checked by the thing that produced the model verdict.",
+  "add_edges": [
+    [
+      "continuum-refinement",
+      "continuum-engine-explicit",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "refinement-independent"
+  ],
+  "expect_gate": [],
+  "gate_note": "the gate has no rule for continuum-refinement; the scaffold's own doc comment states the boundary (No engine, adapter, or Forge dependency)."
+}

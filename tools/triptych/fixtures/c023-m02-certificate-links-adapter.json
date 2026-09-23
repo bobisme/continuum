@@ -1,0 +1,24 @@
+{
+  "id": "c023-m02-certificate-links-adapter",
+  "description": "The certificate router links the asupersync adapter and, through it, the runtime it checks claims about.",
+  "add_edges": [
+    [
+      "continuum-certificate",
+      "continuum-asupersync",
+      "normal"
+    ]
+  ],
+  "expect_audit": [
+    "checker-closed"
+  ],
+  "expect_gate": [
+    "certificate-checker-not-search"
+  ],
+  "e2e": {
+    "manifest": "crates/continuum-certificate/Cargo.toml",
+    "append": "\n[dependencies.continuum-asupersync]\npath = \"../continuum-asupersync\"\n",
+    "expect_audit": [
+      "checker-closed"
+    ]
+  }
+}

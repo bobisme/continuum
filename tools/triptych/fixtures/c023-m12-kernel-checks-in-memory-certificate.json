@@ -1,0 +1,12 @@
+{
+  "id": "c023-m12-kernel-checks-in-memory-certificate",
+  "description": "The kernel gains a public verdict entry that takes a decoded, in-memory certificate instead of wire bytes.",
+  "source_overlay": {
+    "crates/continuum-kernel-core/src/check.rs": "\npub fn check_decoded(certificate: &crate::wire::Certificate) -> Verdict {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+  },
+  "expect_audit": [
+    "wire-form-only"
+  ],
+  "expect_gate": [],
+  "gate_note": "source-level mutant; the gate reads the graph only. The real Rust owner, pr9_exit_evidence::checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes, is run against the same mutant by --evidence (campaign.rust_mutant)."
+}
