@@ -1,0 +1,10 @@
+{
+  "description": "the buggy policy claims a Submitted entry durable, but volatile-suffix-loss loses it",
+  "requirement": "TEST-4-06",
+  "rule": "submitted-mapped-to-stable-detected",
+  "system": {
+    "kind": "submitted-stable",
+    "phase": "Submitted",
+    "policy": "buggy"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "description": "gen-3: 7 exact states forced into 4 hash buckets",
+  "requirement": "TEST-4-04",
+  "rule": "hash-identity-collision-detected",
+  "system": {
+    "buckets": 4,
+    "kind": "hash-identity",
+    "states": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        "o_p1"
+      ],
+      [
+        0,
+        1,
+        1,
+        0,
+        "o_p1"
+      ],
+      [
+        0,
+        2,
+        0,
+        1
+      ],
+      [
+        0,
+        2,
+        1,
+        0
+      ],
+      [
+        0,
+        2,
+        1,
+        1
+      ]
+    ]
+  }
+}

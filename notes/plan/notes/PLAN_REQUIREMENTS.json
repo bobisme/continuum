@@ -9142,7 +9142,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "drop causal edge"
     },
     {
@@ -9153,7 +9153,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "declare conflicting events independent"
     },
     {
@@ -9164,7 +9164,7 @@
         "line": 50,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "skip obligation discharge"
     },
     {

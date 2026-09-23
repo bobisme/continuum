@@ -1,0 +1,224 @@
+{
+  "checker": "tools/test-policy/check_test_policy.py",
+  "controls": [
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_causal_edge.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_conflict_independent.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
+      "fixture": "clean_obligation_discharge.json",
+      "ok": true
+    }
+  ],
+  "entries": "0..31",
+  "module": "tools/test-policy/sections/s4_mutation_testing.py",
+  "out_of_scope": "TEST-4-10..18 (Protocol corpus subsection) is a later module's job",
+  "requirements": {
+    "TEST-4-01": {
+      "boundaries": [
+        "continuum-cir, where a real CIR causal order would eventually live, is still a documented scaffold (crates/continuum-cir/src/lib.rs); no engine exists yet to compare against. This harness's own tsys.trace_class dependence/causal-order computation (already relied on by TEST-2-04's reduction-agrees rule) is the substance enforced here, the same bar TEST-2-04 met."
+      ],
+      "corpus": {
+        "systems": 128,
+        "words_with_causal_edges": 86
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "causal-edge-drop-detected"
+          ],
+          "fixture": "01_causal_edge_drop.json",
+          "ok": true,
+          "requirement": "TEST-4-01",
+          "rule": "causal-edge-drop-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 86,
+        "detected": 86
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "causal-edge-drop-detected"
+      ],
+      "status": "enforced",
+      "summary": "drop causal edge"
+    },
+    "TEST-4-02": {
+      "boundaries": [
+        "continuum-engine-reference's semantic::defect module independently seeds this exact mutant (DefectClass::Dependence, 'declare conflicting events independent') into the reference engine's own model (crates/continuum-engine-reference/src/semantic/defect.rs). This Python, no-cargo harness (README-test.md) does not execute that crate; it is cited as corroborating production surface, not run. Enforcement here is tsys.check_static's own conflict-not-independent rule."
+      ],
+      "corpus": {
+        "systems": 128,
+        "systems_with_conflicts": 105
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "conflict-declared-independent-detected"
+          ],
+          "fixture": "02_conflict_declared_independent.json",
+          "ok": true,
+          "requirement": "TEST-4-02",
+          "rule": "conflict-declared-independent-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 105,
+        "detected": 105
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "conflict-declared-independent-detected"
+      ],
+      "status": "enforced",
+      "summary": "declare conflicting events independent"
+    },
+    "TEST-4-03": {
+      "boundaries": [
+        "continuum-engine-reference's semantic::defect module independently seeds this exact mutant (DefectClass::Obligation, 'skip obligation discharge') into the reference engine's own model (crates/continuum-engine-reference/src/semantic/defect.rs). This Python, no-cargo harness does not execute that crate; it is cited as corroborating production surface, not run. Enforcement here is tsys.explore's own obligation-leak rule, on a generator-guaranteed-clean system whose sole discharge site is made permanently unreachable."
+      ],
+      "corpus": {
+        "systems": 128,
+        "systems_with_a_last_step_discharge_site": 50
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "obligation-discharge-skip-detected"
+          ],
+          "fixture": "03_obligation_discharge_skip.json",
+          "ok": true,
+          "requirement": "TEST-4-03",
+          "rule": "obligation-discharge-skip-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 50,
+        "detected": 50
+      },
+      "registry_status": "satisfied",
+      "rules": [
+        "obligation-discharge-skip-detected"
+      ],
+      "status": "enforced",
+      "summary": "skip obligation discharge"
+    },
+    "TEST-4-04": {
+      "absence": "no mutable state-identity policy exists in tsys or defect.rs to enforce against; see BOUNDARIES",
+      "boundaries": [
+        "Neither tsys nor continuum-engine-reference's semantic::defect exposes a mutable state-identity policy for this module to flip and re-run \u2014 tsys.explore is already exact-identity by construction (a plain Python set of exact state tuples), never mutated here. The check below is a freestanding, mathematically forced demonstration over tsys's own real reachable-state sets: a deliberately narrow (4-bucket) SHA-256 reduction, which the pigeonhole principle guarantees collides whenever a system's exact state count exceeds 4 (true of nearly every corpus system). It is not a mutation of any running harness or engine logic, which is why the ID is claimed `partial`, not `enforced` for delivery purposes (README-test.md step 5), despite the check itself passing with zero failures. ADR-0013 ('Use exact canonical state identity in exhaustive and certified modes') is the production decision this stands in for."
+      ],
+      "corpus": {
+        "exact_reachable_states": 1403,
+        "systems": 128,
+        "systems_forcing_a_pigeonhole_collision": 74
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "hash-identity-collision-detected"
+          ],
+          "fixture": "04_hash_identity_collision.json",
+          "ok": true,
+          "requirement": "TEST-4-04",
+          "rule": "hash-identity-collision-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 74,
+        "detected": 74
+      },
+      "registry_status": "active",
+      "rules": [
+        "hash-identity-collision-detected"
+      ],
+      "status": "partial",
+      "summary": "use hash equality only"
+    },
+    "TEST-4-05": {
+      "absence": "no epoch field/mutant exists in tsys or defect.rs, and the real epoch.rs cannot be called from this Python harness; see BOUNDARIES",
+      "boundaries": [
+        "crates/continuum-value/src/epoch.rs is real, tested production surface (six independently versioned epoch newtypes, ADR-0018, 'MUST NOT be conflated' enforced by the type system), but tsys systems carry no epoch field, continuum-engine-reference's semantic::defect seeds no epoch mutant, and this Python harness cannot call the Rust epoch types (no cargo). The check below models only the single hazard common to every non-ordered epoch: a content-only comparison that silently drops the epoch component and reports two artifacts from different epochs equal. It is a standalone model, not a test of epoch.rs, hence `partial` rather than `enforced` for delivery."
+      ],
+      "corpus": {
+        "systems": 128
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "epoch-ignored-detected"
+          ],
+          "fixture": "05_epoch_ignored.json",
+          "ok": true,
+          "requirement": "TEST-4-05",
+          "rule": "epoch-ignored-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 128,
+        "detected": 128
+      },
+      "registry_status": "active",
+      "rules": [
+        "epoch-ignored-detected"
+      ],
+      "status": "partial",
+      "summary": "ignore epoch"
+    },
+    "TEST-4-06": {
+      "absence": "continuum-pack-storage (the adapter the manifest names) does not exist under crates/; see BOUNDARIES",
+      "boundaries": [
+        "notes/plan/schemas/examples/storage-pack.manifest.json declares the Requested/Reserved/Submitted/Stable/Acknowledged/Aborted effect-phase lifecycle and the storage/append-log-v0 profile's 'sync promotes a prefix to stable' assumption plus its volatile-suffix-loss fault, but the crate that manifest names as the adapter (continuum-pack-storage) does not exist anywhere under crates/ \u2014 not even as a stub. The check below models the declared phase lifecycle and durability predicate in isolation; there is no engine, stub or otherwise, to enforce it against, hence `partial` rather than `enforced`."
+      ],
+      "corpus": {
+        "entries": 32
+      },
+      "failures": [],
+      "fixtures": [
+        {
+          "caught": [
+            "submitted-mapped-to-stable-detected"
+          ],
+          "fixture": "06_submitted_mapped_to_stable.json",
+          "ok": true,
+          "requirement": "TEST-4-06",
+          "rule": "submitted-mapped-to-stable-detected"
+        }
+      ],
+      "mutant": {
+        "applied": 32,
+        "detected": 32
+      },
+      "registry_status": "active",
+      "rules": [
+        "submitted-mapped-to-stable-detected"
+      ],
+      "status": "partial",
+      "summary": "map submitted to stable"
+    }
+  },
+  "schema": "continuum.test-policy.evidence/1",
+  "seeds": "0..127",
+  "source": "notes/plan/docs/19_TEST_STRATEGY.md \u00a74 Mutation testing",
+  "unclaimed": [
+    "TEST-4-07",
+    "TEST-4-08",
+    "TEST-4-09"
+  ]
+}

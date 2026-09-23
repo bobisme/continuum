@@ -51,9 +51,9 @@ Expected non-preservation tests deliberately alter observations, fairness, or ef
 
 ### Semantic engine
 
-- drop causal edge;
-- declare conflicting events independent;
-- skip obligation discharge;
+- drop causal edge; (delivered: bn-1ccq — tools/test-policy/evidence/s4_mutation_testing.json)
+- declare conflicting events independent; (delivered: bn-1ccq — tools/test-policy/evidence/s4_mutation_testing.json)
+- skip obligation discharge; (delivered: bn-1ccq — tools/test-policy/evidence/s4_mutation_testing.json)
 - use hash equality only;
 - ignore epoch;
 - map submitted to stable;
