@@ -2052,8 +2052,8 @@
         "line": 394,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "reserve/commit/abort"
+      "status": "satisfied",
+      "summary": "reserve/commit/abort (delivered: bn-gzy1 \u2014 crates/continuum-asupersync/src/family/effect.rs and binding.rs: with BindingConfig observing the reserve/commit/abort family, bound tasks reserve asupersync 0.5.0's checked obligation tokens through their own Cx and commit or abort them, and binding::run journals each reservation's reserved \u2192 committed | aborted from the substrate's own ObligationReserve/Commit/Abort trace. Cancellation aborts are placed canonically inside the holder's cancellation phases, before the drain that absorbs it, so the lab seed does not reach the journal. The lift replays reserve and commit as continuumtask::region's Reserve and Commit steps and checks that every reservation resolves exactly once, that no commit follows an abort, and that nothing leaks at region close. Evidence: tests/pr14impl02reservecommitabort.rs \u2014 byte-identical journals over 18,894 logs including sibling regions under a cancelled region, seed invariance over 7 seeds including 0, 1, 7, 99 and u64::MAX, a byte-equal differential against an independent scripted account, projection identities with the lifecycle and cancellation journals, lift conformance, 5 mutation operators rejected, and typed refusals. Narrowing: an explicit abort has no step in the region calculus, so it lifts as inconclusive, and the calculus admits one staged reservation per task \u2014 bn-2318t owns both)"
     },
     {
       "category": "pr-deliverable",
