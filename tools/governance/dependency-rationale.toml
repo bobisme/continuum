@@ -29,12 +29,13 @@
 #       Only ever a `[build-dependencies]` entry. In the build graph, not the
 #       runtime graph.
 #
-# The workspace declares exactly one external dependency: `blake3`, entered in
-# `bn-30eym` to fill the ADR-0013 hash seam. Every other entry below is a
-# workspace-internal path edge. The bar for a second one is the same as the bar
-# for the first: an honest class, a stated cost, and a tree small enough to read.
+# The workspace declares two external dependencies: `blake3`, entered in
+# `bn-30eym` to fill the ADR-0013 hash seam, and `asupersync`, entered in
+# `bn-lf4i` as the Phase B substrate (ADR-0001, ADR-0053 D0). Every other entry
+# below is a workspace-internal path edge. The bar for each one is the same: an
+# honest class, a stated cost, and a tree someone has read.
 #
-# --- blake3, the one external edge ------------------------------------------
+# --- blake3, the first external edge -----------------------------------------
 #
 # Version and features are pinned once, in the root `[workspace.dependencies]`:
 #
@@ -80,13 +81,58 @@ kinds = ["normal"]
 used_by = ["continuum-value"]
 rationale = "The cryptographic hash behind continuum-value's ContentHasher seam (identity::Blake3Hasher): ADR-0013's \"artifact digests use cryptographic hashes\" and docs/09 T02's control 3, \"cryptographic digests for artifact identity\". Vendored rather than hand-rolled because a hand-rolled primitive would look like a release hash and not be one (identity.rs, \"The hash seam\"); BLAKE3 specifically because it is specified, has published test vectors this crate pins as literals, is pure Rust under the `pure` feature so no C toolchain enters a trust-base crate's build, and needs no seed, clock, or interior state — the seam requires a function of its input alone (docs/19 §7). Classed trusted-checking-base because it is linked in normal position by continuum-value, which is itself trusted-checking-base and inside docs/33's smallest trust base; a dependency of the trust base is in the trust base whatever the consuming call site does with it, and the class must not be a self-assessment that a caller's discipline pays for. What that discipline actually buys is stated for the reviewer rather than used to discount the class: under ADR-0013 a certified identity IS the canonical Value::encode byte string and every digest collision is resolved by exact comparison, so no defect in this crate — collision, truncation, or a wrong digest outright — can make two distinct values one certified identity or hide one from an IdentityIndex; identity.rs's collision-injection suite asserts exactly that while hashers that collide by construction are installed, and mentions BLAKE3 nowhere. The blast radius a defect does have is real and is why the class is not lower: artifact-handle tokens and store paths are digests (plan §4.4), a HashIdentity in a labeled non-certified lane IS its digest by construction (ADR-0013's rejected alternative 2), and T02 control 3 is a defense-in-depth control that a broken hash silently removes."
 
+# --- asupersync, the substrate edge -------------------------------------------
+#
+# Pinned once, in the root `[workspace.dependencies]`:
+#
+#     asupersync = { version = "=0.5.0", default-features = false,
+#                    features = ["deterministic-mode"] }
+#
+# `=0.5.0` is exact, not a caret range: 0.5.0 is the latest published version
+# (`cargo search`, 2026-09-22), the license rider travels with every binary that
+# links it (ADR-0053 D0), and the audit gate binds each package to one checksum.
+#
+# Features, each for a stated reason:
+#
+#   default-features = false
+#       Drops `proc-macros` and `nightly-outcome-try`. `proc-macros` pulls
+#       `asupersync-macros` (a proc-macro executes inside the compiler) plus its
+#       syn/quote tree; the adapter writes no attribute macros. The other is a
+#       nightly-only `Try` impl, and the pinned toolchain is stable.
+#   deterministic-mode
+#       A dependency-free cfg flag. Without it the four lab oracles
+#       (cancellation_protocol, channel_atomicity, region_leak, waker_dedup) stamp
+#       violations with `SystemTime::now()`. With it they stamp a fixed epoch, so
+#       an oracle's output is a function of the schedule alone (INV-005, ADR-0003).
+#
+# The lab (deterministic) runtime is not feature-gated upstream, so no other
+# feature is needed. The cost that remains is large and is stated, not
+# discounted: the crate declares 31 non-optional dependencies plus seven more on
+# every non-wasm target (crypto: sha1/sha2/hmac/aes-gcm/chacha20poly1305/nkeys;
+# codecs: serde_json/rmp-serde/bincode-next/prost; OS: libc/nix/socket2/polling/
+# signal-hook/sysinfo/tempfile), so the resolved tree grows from ten external
+# packages to 184. Its build.rs runs `git` from its manifest directory for a
+# revision stamp, unless ASUPERSYNC_GIT_COMMIT is set; in the registry copy
+# that directory is not a git work tree. Every one of those packages needs a
+# `dependency-audits.toml` entry before the gate passes; bn-lf4i recorded them.
+# `.cargo/config.toml` sets ASUPERSYNC_GIT_COMMIT so that build.rs runs no `git`,
+# and ASUPERSYNC_AUTO_ARTIFACTS=0 so the lab harness writes no crashpacks.
+
+[[dependency]]
+name = "asupersync"
+origin = "external"
+tcb_class = "engine"
+kinds = ["normal"]
+used_by = ["continuum-asupersync"]
+rationale = "The Phase B substrate itself (ADR-0001, plan §21): continuum-asupersync (PR-14-IMPL-01, src/binding.rs) drives asupersync's lab runtime under a Continuum ChoiceLog and observes the lifecycle journal from the substrate's own trace, so the region calculus in continuum-task is checked against runs of real asupersync code rather than against a scripted source alone. The licensee accepts the rider for linking (ADR-0053 D0) and has ruled on agent development-process exposure to it (ADR-0053 D7). Classed engine, not trusted-checking-base: continuum-asupersync is linked by no certificate checker and by no continuum-kernel-* crate (plan §20, INV-004, enforced by tools/check_crate_boundaries.py), and a journal it produces is lifted into continuum_task::region and checked there, so a substrate defect yields a wrong or rejected journal, never a certified claim. What the class does not discount: the substrate is the Program half of Model/Program/Proof, so a defect that reorders events consistently can make a conformance result wrong in a way only a differential run against the reference schedule detects; the journal's lift-vs-Schedule differential test exists for that reason. Declared with default-features = false and only `deterministic-mode`, whose sole effect is to remove SystemTime::now() from the lab oracles' violation stamps (INV-005); the root Cargo.toml and the section comment above give each choice."
+
 [[dependency]]
 name = "continuum-value"
 origin = "workspace"
 tcb_class = "trusted-checking-base"
 kinds = ["dev", "normal"]
 used_by = ["continuum-asupersync", "continuum-benchmark", "continuum-cli", "continuum-context", "continuum-evidence", "continuum-intent", "continuum-mcp", "continuum-task", "continuumd"]
-rationale = "Canonical value encoding, content identity, epochs, and the assurance envelope (ADR-0013); a machine result cannot name its epochs or its envelope without them. continuum-asupersync (PR-14-IMPL-01) digests the semantic journal through the same Blake3Hasher seam and returns the typed INV-008 Unsupported reason for an uninstrumented primitive and for the absent substrate binding. continuum-intent reuses the ContentHasher/Digest256 identity seam for RFC 0037's canonical property bytes rather than opening a second one. continuumd's native protocol takes ProtocolEpoch and EpochIdentity as-is because RFC 0026 requires the daemon and that module to agree on negotiation and the N/N-1 window, and two spellings of one identity is what ADR-0013 forbids. continuum-benchmark and continuum-mcp take the same ProtocolWindow to negotiate a real handshake rather than assert one: PR 10's benchmark rig and the typed client's own evidence each open a connection against a daemon, and a second window constant on the client side would be a second spelling of the rule RFC 0026 fixes. continuum-evidence takes three vocabularies rather than restating them: ADR-0013 content identity, because an evidence node or edge that had to be *named* would otherwise get a second answer to \"are these the same artifact\"; ValidationBasis and the typed INV-008 InconclusiveReason, which plan §11.4 attaches to the validated and inconclusive statuses and which claim_status.rs has recorded as this crate's missing half since PR-1 / IMPL-06; and EpochSet, because plan §4.6 makes evidence epoch-scoped and a provenance record that cannot name the epochs a write happened under cannot support that sentence. continuum-context (PR-11 / IMPL-03) takes the `Name` canonical-identifier grammar for a `selected[]` item's `id` and a model action's name, so a Context Pack reference is typed rather than a bare string with no shared vocabulary behind it."
+rationale = "Canonical value encoding, content identity, epochs, and the assurance envelope (ADR-0013); a machine result cannot name its epochs or its envelope without them. continuum-asupersync (PR-14-IMPL-01) digests the semantic journal through the same Blake3Hasher seam and returns the typed INV-008 reasons for an uninstrumented primitive, for a family the substrate binding does not drive, and for a substrate run it cannot observe completely. continuum-intent reuses the ContentHasher/Digest256 identity seam for RFC 0037's canonical property bytes rather than opening a second one. continuumd's native protocol takes ProtocolEpoch and EpochIdentity as-is because RFC 0026 requires the daemon and that module to agree on negotiation and the N/N-1 window, and two spellings of one identity is what ADR-0013 forbids. continuum-benchmark and continuum-mcp take the same ProtocolWindow to negotiate a real handshake rather than assert one: PR 10's benchmark rig and the typed client's own evidence each open a connection against a daemon, and a second window constant on the client side would be a second spelling of the rule RFC 0026 fixes. continuum-evidence takes three vocabularies rather than restating them: ADR-0013 content identity, because an evidence node or edge that had to be *named* would otherwise get a second answer to \"are these the same artifact\"; ValidationBasis and the typed INV-008 InconclusiveReason, which plan §11.4 attaches to the validated and inconclusive statuses and which claim_status.rs has recorded as this crate's missing half since PR-1 / IMPL-06; and EpochSet, because plan §4.6 makes evidence epoch-scoped and a provenance record that cannot name the epochs a write happened under cannot support that sentence. continuum-context (PR-11 / IMPL-03) takes the `Name` canonical-identifier grammar for a `selected[]` item's `id` and a model action's name, so a Context Pack reference is typed rather than a bare string with no shared vocabulary behind it."
 
 [[dependency]]
 name = "continuum-workspace"

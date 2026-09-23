@@ -1,0 +1,31 @@
+# Cargo configuration committed with the workspace. Keep it small: every entry
+# here changes how every crate builds, for every developer and every gate.
+
+[env]
+# Hermetic build for asupersync 0.5.0 (bn-lf4i; audit entry in
+# tools/governance/dependency-audits.toml).
+#
+# asupersync's build.rs reads ASUPERSYNC_GIT_COMMIT. When the variable is absent,
+# it runs `git rev-parse` and `git status` in its manifest directory to find a
+# revision stamp. That makes the build a function of the host's git and of an
+# ambient GIT_DIR, and `git status` can refresh the index of whatever repository
+# GIT_DIR names (INV-005, INV-014). When the variable is present, build.rs runs
+# no subprocess. It accepts the value only if it is 40 or 64 hex characters, so
+# this fixed non-hex marker also emits no ASUPERSYNC_BUILD_GIT_COMMIT stamp.
+# Upstream reads that stamp only for lab crashpack metadata. The marker names
+# the registry release, and it is the same on every host.
+#
+# `force` is left at its default (false), so an explicit environment value wins.
+# A release build that wants the upstream commit can set the 40-hex value from
+# the crate's .cargo_vcs_info.json.
+ASUPERSYNC_GIT_COMMIT = "crates.io-0.5.0"
+
+# No ambient crashpack writes from asupersync's lab harness (bn-lf4i).
+#
+# asupersync 0.5.0's lab-test helpers write a crashpack under
+# ./target/test-artifacts when a lab run fails, unless ASUPERSYNC_AUTO_ARTIFACTS
+# is "0" (src/lab/runtime.rs:5667-5686). The continuum-asupersync binding never
+# calls those helpers, and a test pins that. This entry is the second barrier: it
+# turns the writes off for every process cargo runs here, so no filesystem
+# output can reach a deterministic run (INV-005).
+ASUPERSYNC_AUTO_ARTIFACTS = "0"

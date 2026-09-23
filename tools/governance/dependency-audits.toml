@@ -52,6 +52,96 @@
 # used to write this file, consistent with the checker's own no-network rule);
 # a future refresh is free to name a different reviewer.
 
+[[audits.aead]]
+version = "0.6.1"
+checksum = "1973cfbc1a2daf9cf550e74e1f088c28e7f7d8c1e1418fb6c9dc5184b7e84c99"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. AEAD trait definitions only;
+`#![forbid(unsafe_code)]` and grep confirms no unsafe code in src/. No build script.
+The only `include_bytes!`/`include_str!` uses are the crate's own README doc-comment
+and dev-test-vector macros (`dev.rs`), not reached outside `cfg(test)`. No env, fs,
+process or network access.
+"""
+
+[[audits.aes]]
+version = "0.9.2"
+checksum = "f8eb277bec05f56a0e0591f155a484cbd0f4f07ff2905051a48c72f004f7ed58"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/block-ciphers. No build script. 168
+`unsafe` occurrences across src/backends/{x86_aes,aarch64_aes,fixslice}; read
+backends.rs's cfg gating and lib.rs's backend-selection block (uses `cpubits::cfg_if`
+and `cpufeatures::new!("aes")`/`("aes")` on aarch64 to runtime-detect hardware AES
+before dispatching to `#[target_feature(enable = "aes")]` functions), plus a sample of
+x86_aes.rs and its `hazmat` module. The wider VAES256/VAES512 backends require an
+explicit `--cfg aes_backend="avx256|avx512"` opt-in not set by default, so they are
+not compiled unless the workspace opts in. Unsafe is intrinsic-call/pointer plumbing
+for hardware AES-NI/ARMv8 AES, matching the crate's documented purpose. No env, fs,
+process or network access. Depth: representative sample, not every unsafe site read.
+"""
+
+[[audits.aes-gcm]]
+version = "0.11.1"
+checksum = "7f2b8006a0c83f52b62ba44a97b58bf76fe2f70a329e588f67f89691d93d498f"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/AEADs. No unsafe code in src/ (grep
+confirms zero occurrences), no build script. Composes `aes`, `ghash`, `cipher`; no
+env, fs, process or network access of its own.
+"""
+
+[[audits.allocator-api2]]
+version = "0.2.21"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Stable-Rust polyfill of the unstable std allocator API (`Allocator` trait,
+`RawVec`, `Box`, `Vec`) that hashbrown uses under its `allocator-api2` feature.
+No build.rs. Sampled roughly a dozen of the 277 unsafe sites, concentrated in
+src/stable/alloc/system.rs and src/stable/raw_vec.rs: SAFETY-commented
+raw-pointer/uninitialized-memory management that mirrors std's own
+raw_vec/boxed internals, inherent to a growable-buffer allocator shim. No
+network, filesystem, process, or `extern "C"` use found.
+"""
+
+[[audits.anyhow]]
+version = "1.0.104"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's anyhow, a dynamic error type with context chaining. Read build.rs in
+full: it probes `rustc --version` and runs a `--cfg=anyhow_build_probe` compile
+probe (via `rustc ... --emit=dep-info,metadata --out-dir <OUT_DIR>/probe`,
+cleaned up afterward) to detect `error_generic_member_access`/`core::error::Error`
+stability; every side effect is a `cargo:rustc-cfg=...`/`cargo:rustc-check-cfg=...`
+line or a write inside OUT_DIR, no network, no writes outside OUT_DIR. Read
+src/ptr.rs in full (11/11 unsafe): a small `Own`/`Ref`/`Mut` raw-pointer newtype
+layer (NonNull<T> plus lifetime phantoms) that concentrates every raw
+dereference behind four one-line methods (`deref`, `deref_mut`, `read`,
+`boxed`). Read src/fmt.rs (6/6) and src/ensure.rs (7/7 — one real unsafe pair:
+an internal no-alloc buffer formatter using `ptr::copy_nonoverlapping` bounded
+by its own tracked `written` length, then `str::from_utf8_unchecked`; the rest
+of ensure.rs's "unsafe" hits are macro_rules! token matching on the literal
+`unsafe` keyword in user expressions, not executed unsafe code) and
+src/context.rs (1/1) in full. Sampled src/error.rs (~79 unsafe sites): this is
+anyhow's well-known type-erased `ErrorImpl`/`ErrorVTable` design — a hand-built
+vtable (function-pointer table for drop/ref/boxed/downcast/backtrace) read from
+the first word of the allocation via `vtable(p)`, with every `object_*<E>`/
+`context_*<C,E>` unsafe fn paired at the type level with the exact `E`/`C` that
+was erased so restoration is type-correct by construction; this is the same
+technique anyhow has shipped and had reviewed for years, not novel or
+undisclosed. Confirmed zero `std::process::Command`, no network types, no
+`include_bytes!`/`include_str!` reaching outside the crate's own docs, no
+`env::var` outside build.rs. Matches documented purpose (a small, ubiquitous
+error-boxing crate); no backdoor indicators.
+"""
+
 [[audits.arrayref]]
 version = "0.3.9"
 checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
@@ -79,6 +169,237 @@ to its own internal representation. No build script, no I/O, no ambient state.
 Used here with default features off per the workspace's blake3 pin.
 """
 
+[[audits.asupersync]]
+version = "0.5.0"
+checksum = "f34b1a19ffd6b74570339a156912436335bb09c594c675c62ea164b19a1f2511"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Risk-directed partial audit, not a line-by-line review: the crate is about
+1.56M lines (57 MB of src/), so we read the risk surfaces only. Registry
+source; .cargo_vcs_info.json names upstream commit 78b64636e99f.
+
+build.rs (read in full, 55 lines): emits `rerun-if-env-changed=
+ASUPERSYNC_GIT_COMMIT` and at most one `rustc-env=ASUPERSYNC_BUILD_GIT_
+COMMIT=<hex>`. If ASUPERSYNC_GIT_COMMIT is set, it uses that value (40 or 64
+hex chars, else nothing). If not, it runs local `git rev-parse --show-prefix`,
+`git status --porcelain=v1 --untracked-files=normal` and `git rev-parse HEAD`
+in CARGO_MANIFEST_DIR. It stops unless the prefix is empty (the manifest dir
+is a repo root) and the tree is clean. A registry checkout is not a repo root,
+so no stamp is emitted. The script does no fetch, no network and no file write
+of its own, and it does not use OUT_DIR. Edge case: `git status` can refresh
+an index, and an ambient GIT_DIR in the build environment would point git at
+that repository. The stamp is read only by lab crashpack metadata
+(lab/runtime.rs `compiled_commit_hash`).
+
+Unsafe: lib.rs has `#![deny(unsafe_code)]`, and each unsafe site carries a
+local `allow` (36 files carry one). A grep finds 541
+non-comment lines with the `unsafe` token, and about 40 of them are string
+literals. We read 53 blocks and classified 15 more as test-only by location.
+- Scheduler, wakers, channels: runtime/scheduler/*, channel/*,
+  runtime/waker.rs and cx/* contain no unsafe. Wakers use std `Wake`. There is
+  no global allocator and no `transmute` anywhere in src/.
+- Read in full: the sync/mutex.rs and sync/rwlock.rs Send/Sync impls,
+  UnsafeCell guard derefs and ptr::read-then-ManuallyDrop guard projections
+  (19). stream/broadcast_stream.rs into_inner (2). The time/intrusive_wheel.rs
+  list primitives (5). This module is a public unsafe-fn API that nothing
+  else in the crate uses.
+- FFI sample: runtime/reactor/epoll.rs fstat/BorrowedFd (4), net/unix/stream.rs
+  recvmsg/SCM_RIGHTS parsing (1), resource_monitor getrusage/MaybeUninit (3),
+  process.rs fcntl/setpgid/setsid in pre_exec/kill (6), atp timing_security
+  cpuid/rdtsc (2), atp journal fallocate/statfs (2), Windows-only udp/mirror/
+  metadata (3), security/secret.rs volatile zeroize (1), io-uring fs (2), BSD
+  test sockopts (2). Each is a thin syscall wrapper with checked lengths and
+  error returns.
+- raptorq/gf256.rs holds 177 of the sites. The whole module enables
+  `allow(unsafe_code)` only under the non-default `simd-intrinsics` feature,
+  so the crate-level deny guarantees none of it compiles by default. The
+  io-uring reactor and fs::uring are also behind a non-default feature.
+
+Network, filesystem, process and FFI sites, by module: net/* (tcp, udp, unix,
+dns, quic_native, atp), http/grpc/web/messaging (nats, redis, kafka),
+database, tls, fs/*, process.rs and signal/*. All compile by default on
+non-wasm targets, because no feature gates them out, and all run only when
+the caller uses that API. With default features off, cli/, database and the
+atp/benchmark adapters are excluded (whoami/num_cpus come only from
+`benchmark-adapters`). Non-test Command::new sites: process.rs (the public
+process API), atp daemon_control (daemon or taskkill), net/atp/bonding
+(`tailscale status --json` / `tailscale ip -4`, only through
+`detect_local_tailnet`), agent_swarm/release_proof_aggregator and
+lab/benchmark_cartel (`git rev-parse` and friends, local only). All other
+spawn sites are in `mod tests` or in test-internals-only modules. The only
+extern block is Windows Kernel32 CompareStringOrdinal, plus a wasm-only
+queueMicrotask binding. Hard-coded remote addresses are opt-in public-DNS
+constructors (`ResolverConfig::google()` / `cloudflare()`) and a UDP
+connect-without-send route probe to 1.1.1.1 / 2001:4860:4860::8888 in the atp
+sdk diagnostics. The OTLP exporter needs a caller-given endpoint. The web
+debug dashboard (include_str of assets/dashboard.html) fetches only
+same-origin /debug/snapshot. Env-driven runtime config is opt-in
+(`RuntimeBuilder::with_env_overrides`). gf256 reads ASUPERSYNC_GF256_* env
+vars to select a kernel.
+
+Lab path: the deterministic lab runtime itself does no I/O. The lab-test
+harness helpers (`run_*_lab_test*` and `write_auto_crashpack_for_*`) write
+crashpack files for a failed test into `./target/test-artifacts` (or
+ASUPERSYNC_TEST_ARTIFACTS_DIR). This is on by default, and
+ASUPERSYNC_AUTO_ARTIFACTS=0 turns it off. `deterministic-mode` is an empty
+feature that only switches lab oracles to a deterministic clock.
+
+Telemetry and license enforcement: we searched for OpenAI/Anthropic/
+licensee/rider strings, hostname, username, whoami, machine-id, hard-coded
+URLs and IPs, and long encoded blobs. We found no code that identifies or
+reports who uses the crate. The license rider is text in LICENSE only.
+cli/upgrade.rs holds GitHub release URLs as strings but makes no request.
+include_bytes!/include_str! otherwise load test fixtures under cfg(test).
+This crate is not a proc-macro. asupersync-macros is a separate, optional
+package (`proc-macros`, a default feature).
+
+Not opened beyond grep: atp/* and net/atp/* transports (most of the line
+count), quic_native, http, grpc, web, messaging, database, tls, distributed,
+obligation, plan, trace, observability, codec, combinator, actor,
+supervision, spork, agent_swarm, cli, bin/, raptorq except the gf256 gating,
+and lab/* except runtime.rs artifact paths, config.rs and benchmark_cartel.rs.
+"""
+
+[[audits.autocfg]]
+version = "1.5.1"
+checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+who = "continuum-dev"
+criteria = ["safe-to-run"]
+notes = """
+Build-only rustc-feature-probe crate; zero unsafe. No build.rs of its own.
+Read src/rustc.rs and src/lib.rs in full: it spawns exactly one process, the
+compiler named by the `RUSTC`/`RUSTC_WRAPPER`/`RUSTC_WORKSPACE_WRAPPER` env
+vars cargo itself sets, to compile small snippets (`--emit=metadata`) and to
+parse `--version` output — its entire documented purpose. No network, no other
+process spawn, no file writes outside `OUT_DIR`.
+"""
+
+[[audits.base64]]
+version = "0.23.1"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Base64 encode/decode with a scalar `GeneralPurpose` engine and
+SIMD-accelerated `engine/simd.rs` kernels (AVX2 on x86_64, NEON on aarch64,
+Wojciech Mula's vectorized algorithm), the latter behind `#![allow(unsafe_code)]`
+and the `simd-unsafe` feature, which is in the default feature set. Read the
+SIMD dispatch path (`src/engine/simd.rs`, `src/engine/mod.rs`): every
+`#[target_feature(enable = ...)]` function is reached only after
+`std::is_x86_feature_detected!`/`std::arch::is_aarch64_feature_detected!` at
+runtime, the standard safe-dispatch pattern, never called unconditionally.
+Read roughly 20 of 63 unsafe occurrences, concentrated in the SIMD lookup-table
+loads and lane shuffles; none do FFI, transmute across unrelated types, or
+touch the network/filesystem/process. No `include_bytes!`/`include_str!`,
+no `std::process::Command`.
+"""
+
+[[audits.base64ct]]
+version = "1.8.3"
+checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/formats. No build script. All 5 unsafe
+sites read directly (src/encoding.rs): `str::from_utf8_unchecked` after the function
+has just produced ASCII base64 output, and a documented LLVM-optimization workaround
+for constant-time encoding, each marked `#[allow(unsafe_code)]` against the crate's
+default-deny lint. No env, fs, process or network access.
+"""
+
+[[audits.bincode-next]]
+version = "3.1.1"
+checksum = "1d6626829353ae29293be5c86f42de5f0468bc758af074b0c7d08f07e538ccbc"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+"bincode-next" (Cargo.toml.orig repository = github.com/Apich-Organization/bincode,
+authors retain the original bincode maintainers Ty Overby/Zoey Riordan/Victor
+Koenders plus new steward Xinyu Yang) is, per its own README, "a modernized
+fork of the original `bincode` library, maintained by the Apich Organization to
+ensure continued development" — not a hijack of the `bincode` name, a
+declared, credited continuation under a new crate name. Read build.rs in full:
+13 lines, an `rustc -vV`-based nightly-channel probe emitting one
+`cargo:rustc-cfg=is_nightly`; no network, no writes outside cfg emission.
+19005 src LOC, unsafe_kw=146; sampled ~85 of 146 directly with context,
+prioritizing raw-pointer/transmute/asm sites over bounds-checked indexing:
+  - src/de/async_fiber.rs (45/146, read in full): a custom stackful-fiber
+    ("Unified Fiber-backed Async") coroutine runtime — mmap/VirtualAlloc
+    guard-paged stacks, hand-written per-ISA `#[unsafe(naked)]` context-switch
+    assembly (x86_64 SysV/Win64, aarch64 unix/Windows, riscv64), and
+    `unsafe impl Send/Sync for BridgeFuture`. The module's own doc comment is a
+    "CRITICAL SAFETY WARNING" admitting that a `Decode` implementation using
+    thread-locals or `!Send` types under executor thread migration is
+    undefined behavior that the compiler cannot catch — a genuine, disclosed
+    caller-obligation hazard, well outside the risk profile of a typical
+    serialization crate. This entire module is gated behind the `async-fiber`
+    Cargo feature (pulled in further by `tokio`/`full`), which is confirmed
+    NOT in `default = ["std", "derive", "simd"]` (Cargo.toml `[features]`).
+    This audit does not certify `async-fiber`/`tokio`/`full` to the
+    safe-to-deploy bar; a human must review src/de/async_fiber.rs specifically
+    before any workspace Cargo.toml enables those features.
+  - src/features/relative_ptr.rs (~15/21 sampled): a zero-copy relative-pointer
+    system (`RelativePtr`, `ZeroArray`, `ZeroSlice`, `ZeroStr`, an unsafe
+    `ZeroCopy` marker trait) doing unaligned reads and buffer-bounded pointer
+    arithmetic with provenance carried from the caller's buffer slice — the
+    same category of unsafe as rkyv/zerocopy. Gated behind the non-default
+    `zero-copy` feature.
+  - src/features/impl_alloc.rs (~20/23 sampled): bulk `Vec<T>`
+    encode/decode for primitive element types via `Vec::with_capacity` +
+    raw-pointer `read`/`write` + `set_len`, plus x86_64/aarch64 manual
+    prefetch intrinsics — the standard "skip per-element push" fast path
+    used by most performance-oriented (de)serializers.
+  - src/varint/simd.rs (3/3, read in full): SSE2/NEON/RVV SIMD varint-length
+    scanning intrinsics, each gated by `#[cfg(feature = "simd")]` and a
+    length check before the unaligned load.
+  - extern_C=10: all in async_fiber.rs, `unsafe extern "C" fn switch_context`
+    ABI markers on the naked-asm functions above (feature-gated, non-default)
+    plus one doc-comment example lifted from `core::mem::MaybeUninit`'s own
+    documentation pattern (de/impl_core.rs:134, never compiled).
+  - net=13 (TSV; full-crate grep finds 18, src-only): every hit is either a
+    `Fingerprint`/`Encode`/`Decode` impl for `std::net::{IpAddr, Ipv4Addr,
+    Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6}` (bincode supporting
+    serialization of these standard library types — an ordinary feature, not
+    outbound I/O), or the `is_compact_net()` config accessor name / a doc
+    comment saying "network encoding". No socket, DNS, or HTTP calls exist
+    anywhere in the crate.
+  - include_str! hits are `#![doc = include_str!("../docs/spec.md")]` and
+    three siblings (migration guide, README, derive readme) — rustdoc content
+    embedding only.
+No `std::process::Command`, no `env::var` outside build.rs. Default-feature
+surface (`std`, `derive`, `simd`) is reviewed and matches documented purpose;
+see CONCERNS for the async-fiber/zero-copy carve-out.
+"""
+
+[[audits.bincode_derive-next]]
+version = "3.1.1"
+checksum = "409532b1da3be643427e49c2f79e0c47d445f695e1b028270d9e80e9044d7d1c"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The derive-macro half of bincode-next (`#[derive(Encode, Decode, ...)]`),
+same Apich-Organization fork lineage as bincode-next (see that entry). Proc-
+macro crate, 3313 LOC. Confirmed zero `unsafe` anywhere in src via grep (TSV
+unsafe_kw=0). Read the crate's src listing/entry points; it is derive dispatch
+built on syn/quote/virtue-next, no build.rs, no I/O of any kind, no
+`std::process::Command`, no `include_bytes!`/`include_str!`. Matches
+documented purpose.
+"""
+
+[[audits.bitflags]]
+version = "2.13.2"
+checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`#![cfg_attr(not(test), forbid(unsafe_code))]`; the crate's own bitflag logic
+is entirely safe macro-generated code. The only `unsafe` under src/ is inside
+external.rs's optional trait-impl macros (`unsafe impl bytemuck::Pod/
+Zeroable`), gated behind the opt-in `bytemuck` feature and asserting a repr
+invariant the macro itself enforces. No build script, no I/O.
+"""
+
 [[audits.blake3]]
 version = "1.8.5"
 checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
@@ -93,6 +414,77 @@ build.rs never invokes a C compiler under `pure`). `blake3_matches_the_
 published_test_vectors` in continuum-value pins the specification's own test
 vectors as literals, so a future version that changed the function's output
 would fail that test independently of this entry.
+"""
+
+[[audits.block-buffer]]
+version = "0.10.4"
+checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/utils. No build script. Both unsafe
+sites read (src/lib.rs): a `MaybeUninit`-backed internal buffer pointer cast and a
+`slice::from_raw_parts_mut` over a caller-owned buffer of known length, both scoped to
+this crate's own fixed-size hashing block buffer. No env, fs, process or network
+access.
+"""
+
+[[audits.block-buffer]]
+version = "0.12.1"
+checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/utils. No build script. Read all 22
+unsafe sites across src/lib.rs, src/sealed.rs and src/read.rs: pointer casts and
+`set_pos_unchecked`/`set_data_unchecked` invariants over the crate's own fixed-size
+buffer state (declared with `#![allow(clippy::undocumented_unsafe_blocks)] //
+TODO(tarcieri): document all unsafe blocks`, an honest upstream note, not a defect
+found here). All scoped to this crate's own buffer, matching its documented purpose.
+No env, fs, process or network access.
+"""
+
+[[audits.bumpalo]]
+version = "3.20.3"
+checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree --offline --target x86_64-unknown-linux-gnu -e normal,build -i
+bumpalo` resolves nothing: unreachable on the build target, reached only via
+wasm-bindgen/js-sys's wasm32 edge. Audited anyway because the gate checks the
+whole lock. Read `src/lib.rs`, `alloc.rs`, `boxed.rs`, and `collections/`
+(vec/string/raw_vec) at a skim depth; the 238 `unsafe` uses are the expected
+shape for a bump allocator -- raw pointer bump/align arithmetic and
+`MaybeUninit` handling inside its own arena, no FFI. `extern_C = 0`. One
+`include_str!("../README.md")` for the crate doc, no other `include_bytes!`.
+No build script, no network, filesystem, or process use. One of the more
+widely used and reviewed arena-allocator crates in the ecosystem.
+"""
+
+[[audits.bytes]]
+version = "1.12.1"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. The reference-counted, zero-copy `Bytes`/`BytesMut` buffer type
+underlying most of the Rust async I/O ecosystem. Its 151 unsafe occurrences are
+concentrated in `src/bytes.rs` (a hand-rolled vtable of `clone`/`drop`/
+`into_vec`/`into_mut`/`is_unique` function pointers dispatched through raw
+`*mut ()`/`*const u8` pairs — `static_clone`, `owned_clone::<T>`,
+`promotable_even_clone`, etc.) and `src/bytes_mut.rs` (shared-buffer promotion,
+`ptr::copy_nonoverlapping`, `Vec::from_raw_parts`, atomic refcounting in
+`increment_shared`/`release_shared`). Read roughly 45 of 151 occurrences,
+including all of the vtable clone/drop functions, `UninitSlice`'s
+`repr(transparent)` cast over `[MaybeUninit<u8>]`, and the `BufMut::chunk_mut`
+uninitialized-write path. All are the inherent unsafe of implementing a
+zero-copy, referenced-counted byte buffer, each with a `// SAFETY:`-style
+justification tied to the vtable's own invariants. `fs` flag in the source
+manifest is a doc-comment example (`File::open("upload_bundle.tar.gz")`, line
+240 of bytes.rs, inside a `///` mmap example) and not executed code; grepped
+the crate for `std::net`, `std::process`, `std::env`, `include_bytes!`/
+`include_str!` and found none.
 """
 
 [[audits.cc]]
@@ -121,6 +513,112 @@ the rust-lang project itself. No unsafe, no build script, no runtime behavior
 of its own — it exists at compile time and disappears.
 """
 
+[[audits.cfg_aliases]]
+version = "0.2.2"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
+who = "continuum-dev"
+criteria = ["safe-to-run"]
+notes = """
+Read src/lib.rs (379 lines) in full: a single `cfg_aliases!` macro_rules! that
+expands, inside a consumer's own build.rs, to `println!("cargo:rustc-cfg=..
+.")` lines based on `cfg(...)` matching. No unsafe, no I/O, no process spawn
+of its own; consumed here by nix's build.rs (reviewed under that entry).
+"""
+
+[[audits.chacha20]]
+version = "0.10.2"
+checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/stream-ciphers. No build script.
+src/backends/{sse2,avx2,avx512,neon,soft}.rs implement the same runtime-cpu-feature-
+gated SIMD dispatch pattern verified in depth for `aes`, `sha2` and `poly1305`
+(`#[target_feature(enable = ...)]` functions selected after a `cpufeatures`/
+`is_x86_feature_detected!`-style check). Read backends.rs's dispatch structure and a
+sample of sse2.rs; did not read all 66 unsafe sites individually. No env, fs, process
+or network access. Depth: structural/sample review, consistent with the rest of this
+family.
+"""
+
+[[audits.chacha20poly1305]]
+version = "0.11.0"
+checksum = "9b89e1c441e926b9c82a8d023f6e1b7ae0adcfaa7d621814e4d60789bac751cb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/AEADs. No unsafe code in src/ (grep
+confirms zero occurrences), no build script. Composes `chacha20`, `poly1305`,
+`cipher`, `aead`. No env, fs, process or network access of its own.
+"""
+
+[[audits.cipher]]
+version = "0.5.2"
+checksum = "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. `#![forbid(unsafe_code)]`,
+confirmed by grep (the only hit is the lint attribute itself). No build script. Trait
+definitions for block/stream ciphers plus `dev` test-vector macros gated to test
+builds. No env, fs, process or network access.
+"""
+
+[[audits.cmov]]
+version = "0.5.4"
+checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/utils. No build script. Read
+src/backends/x86.rs in full: every unsafe site is an inline `asm!` block wrapping a
+single `cmovnz`/`cmovz`/`xor+cmov` x86 instruction sequence with
+`options(pure, nomem, nostack)`, exactly the constant-time conditional-move primitive
+this crate exists to provide (used by `subtle`/`poly1305`/etc. for side-channel-free
+branching). The crate carries `#![allow(clippy::undocumented_unsafe_blocks)] //
+TODO(tarcieri): document all unsafe blocks`, an honest upstream note. No env, fs,
+process or network access.
+"""
+
+[[audits.concurrent-queue]]
+version = "2.5.0"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Lock-free MPMC queue (smol-rs). No build.rs, no network/fs/process/
+`include_*!` under src/. Its 17 unsafe sites are the queue's own atomic
+slot/ring-buffer bookkeeping, consistent with its documented purpose. The
+TSV's `other-target-only` platform tag checks out: `polling`'s own Cargo.toml
+gates this dependency under `[target."cfg(windows)".dependencies]`, so it is
+not compiled into this workspace's Linux build at all.
+"""
+
+[[audits.const-oid]]
+version = "0.9.6"
+checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/formats. `#![forbid(unsafe_code)]`,
+confirmed by grep (only hit is the lint attribute). No build script, no env, fs,
+process or network access. Older/duplicate major version of the same OID crate as
+`const-oid` 0.10.2 above.
+"""
+
+[[audits.const-oid]]
+version = "0.10.2"
+checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/formats. `#![deny(unsafe_code)]` with a
+single explicit `#[allow(unsafe_code)]` escape read in full (src/lib.rs
+`from_bytes_unchecked`): a `repr(transparent)` newtype pointer cast from `&[u8]` to
+`&ObjectIdentifierRef`, with a safety comment matching the repr guarantee. No build
+script, no env, fs, process or network access.
+"""
+
 [[audits.constant_time_eq]]
 version = "0.4.2"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
@@ -131,6 +629,35 @@ Constant-time byte-slice comparison, used by blake3 to avoid a timing side
 channel in its own internal comparisons. Small, single-purpose, no build
 script, no I/O; a defect here would weaken a timing property blake3 relies on
 but cannot change what bytes continuum-value's hash seam produces.
+"""
+
+[[audits.cpubits]]
+version = "0.1.1"
+checksum = "15b85f9c39137c3a891689859392b1bd49812121d0d61c9caf00d46ed5ce06ae"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/utils. Read src/lib.rs: a `#![no_std]`
+`cfg_if`-style macro plus target-pointer-width detection helper used by `aes` and
+others to pick 32/64-bit backends; overridable only via an explicit
+`--cfg cpubits="N"` RUSTFLAGS opt-in, not ambient. No unsafe, no build script, no env,
+fs, process or network access.
+"""
+
+[[audits.cpufeatures]]
+version = "0.2.17"
+checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/utils. No build script. Read all unsafe
+sites: src/x86.rs uses `core::arch::x86_64::__cpuid`/`__cpuid_count` and `_xgetbv`
+CPUID/XGETBV intrinsics (the code path used on this workspace's linux/x86_64
+platform); src/aarch64.rs and src/loongarch64.rs call `libc::getauxval(AT_HWCAP)`, a
+read-only kernel hardware-capability query, only reached on those non-x86 targets.
+This is the exact runtime-CPU-feature-detection primitive `curve25519-dalek`, `aes`,
+`sha2`, `sha1`, `chacha20` and `poly1305` all depend on for their SIMD/hardware-accel
+backend selection in this slice. No env, fs, process or network access.
 """
 
 [[audits.cpufeatures]]
@@ -147,6 +674,302 @@ the build. Reviewed for the platforms it does apply to: no build script, no
 network, and its own `libc` edge is read-only `/proc`-style feature probing.
 """
 
+[[audits.crc32fast]]
+version = "1.5.2"
+checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Hardware-accelerated CRC-32 (SSE/PCLMULQDQ/AVX2/AVX-512/ARM CRC32). Read
+build.rs in full: probes `rustc --version` minor number and emits
+`cargo:rustc-cfg=stable_arm_crc32_intrinsics`/`stable_vpclmulqdq` once the
+compiler is new enough to have stabilized those intrinsics; no network, no
+filesystem writes outside cfg emission (explains proc=2's "process"
+substring hits — `std::process::Command` used only for this probe). Sampled
+the 15 unsafe blocks across src/specialized/pclmulqdq.rs and
+src/specialized/aarch64.rs: every one is a `#[target_feature(enable = "...")]`
+SIMD/CLMUL intrinsic wrapper (`_mm_loadu_si128`, `_mm_clmulepi64_si128`,
+`__crc32b`, etc.), each reached only after `State::new` has confirmed via
+runtime CPU-feature detection that the target instructions are supported (per
+the `// SAFETY:` comments at each call site). Matches the crate's documented
+purpose exactly; no I/O, no process spawning beyond the version probe, no
+backdoor indicators.
+"""
+
+[[audits.crossbeam-queue]]
+version = "0.3.14"
+checksum = "03e8bd762f7479489c70ed6c768ddca99d7296857de437a68dcb2a94365b3fae"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+crossbeam's lock-free queue crate (`ArrayQueue`/`SegQueue`). No build.rs, no
+network/fs/process/`include_*!` under src/. Its 29 unsafe sites are the same
+class of atomic ring-buffer bookkeeping as concurrent-queue, part of the
+well-known, widely-depended-on crossbeam project.
+"""
+
+[[audits.crossbeam-utils]]
+version = "0.8.23"
+checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Read build.rs, no_atomic.rs and build-common.rs in full: it only reads
+`TARGET`/`CARGO_CFG_SANITIZE` env vars and emits `cargo:rustc-cfg` lines from
+a static, checked-in table of atomic-less targets; no network, no filesystem
+access beyond that, no process spawn. src/ has no network/fs/process/
+`include_*!` use; sampled the transmute sites in thread.rs (scoped-thread
+lifetime erasure) and sync/sharded_lock.rs (guard lifetime erasure), plus
+atomic/atomic_cell.rs's const `transmute_copy`-style primitive-width cast —
+all standard, documented crossbeam patterns.
+"""
+
+[[audits.crypto-common]]
+version = "0.1.7"
+checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. Shared trait definitions (`KeySizeUser`,
+`OutputSizeUser`, etc.) only. No env, fs, process or network access.
+"""
+
+[[audits.crypto-common]]
+version = "0.2.2"
+checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. Same trait-definitions purpose as 0.1.7 above,
+newer major version. No env, fs, process or network access.
+"""
+
+[[audits.ctr]]
+version = "0.10.1"
+checksum = "baaca1c4b237092596f64d571e9db6ce4109c4ef9742e27590f1709594461f21"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/block-modes. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. Generic CTR block-cipher-mode wrapper over the
+`cipher` trait. No env, fs, process or network access.
+"""
+
+[[audits.ctutils]]
+version = "0.4.2"
+checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/utils. `#![forbid(unsafe_code)] //
+\\`unsafe\\` should go in \\`cmov\\`` (src/lib.rs) — the single unsafe-keyword grep hit is
+this lint attribute's own comment, not an unsafe block. Constant-time comparison
+utilities layered over `cmov`. No build script, no env, fs, process or network
+access.
+"""
+
+[[audits.curve25519-dalek]]
+version = "4.1.3"
+checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dalek-cryptography, github.com/dalek-cryptography/curve25519-dalek. Read build.rs in
+full: it only reads cargo-supplied `CARGO_CFG_*` env vars (target arch, pointer
+width, an optional explicit backend/bits override) and rustc's own version/channel via
+the `rustc_version` crate, then emits `cargo:rustc-cfg` lines; no network, no file
+writes beyond the normal build script surface, no process spawning. Backend selection
+(src/backend/mod.rs `get_selected_backend`) runtime-detects AVX512/AVX2 via
+`cpufeatures::new!` before dispatching to SIMD code; AVX512/`ifma` additionally
+requires `cfg(nightly)`, so it is inert on a stable-toolchain build. Read
+src/backend/vector/packed_simd.rs (35 of the file's unsafe sites, all
+`core::arch::x86_64::_mm256_*` intrinsic calls under `#[unsafe_target_feature("avx2")]`)
+and sampled avx2/field.rs and ifma/field.rs; did not read all 39 unsafe sites
+individually, but the pattern is uniform SIMD-intrinsic wrapping. No env, fs, process
+or network access at runtime. `fiat-crypto` (serial fallback field arithmetic) and
+`fiat-crypto`'s own audit entry cover the non-SIMD backend.
+"""
+
+[[audits.curve25519-dalek-derive]]
+version = "0.1.1"
+checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dalek-cryptography, github.com/dalek-cryptography/curve25519-dalek. Proc-macro crate;
+read both entry points (src/lib.rs, `#[proc_macro_attribute] unsafe_target_feature`
+and `unsafe_target_feature_specialize`) and their full `syn`-based expansion logic in
+full (~470 lines). The macro rewrites a safe-looking function/impl block tagged
+`#[unsafe_target_feature("avx2")]` into an inner `unsafe fn` wrapped with
+`#[target_feature(enable = "avx2")]`, called from an outer fn via a plain
+`unsafe { }` block — exactly the pattern `curve25519-dalek`'s own runtime
+CPU-feature-gated dispatch (verified above) relies on. No file I/O, no env, no
+network, no process spawning; pure AST transformation over `syn`/`quote`/
+`proc_macro2`.
+"""
+
+[[audits.data-encoding]]
+version = "2.11.1"
+checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Generic base2/base4/base8/base16/base32/base64 encode/decode
+implementation. Read all 6 unsafe occurrences: `chunk_unchecked`/
+`chunk_mut_unchecked` in src/lib.rs cast a bounds-checked sub-range of a slice
+via `core::slice::from_raw_parts[_mut]`, each preceded by a `safety_assert!`
+that reproduces the bound the raw pointer arithmetic relies on. No FFI, no
+network/filesystem/process access, no `include_bytes!`/`include_str!`.
+"""
+
+[[audits.der]]
+version = "0.7.10"
+checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/formats. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. DER/BER encode-decode. No env, fs, process or
+network access.
+"""
+
+[[audits.digest]]
+version = "0.10.7"
+checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. Hash-function trait definitions plus a `dev`
+test-vector macro module gated to test builds, whose `include_bytes!` calls only load
+this crate's own `data/*.blb` fixtures. No env, fs, process or network access.
+"""
+
+[[audits.digest]]
+version = "0.11.3"
+checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. Same purpose as 0.10.7 above, newer major
+version. No env, fs, process or network access.
+"""
+
+[[audits.dispatch2]]
+version = "0.3.1"
+checksum = "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu (macOS
+Grand Central Dispatch bindings; `platform = other-target-only` matches).
+No build.rs. Hand-written safe wrapper over libdispatch (17 files: queue,
+group, semaphore, source, workloop, io, once, time, object, retained), from
+the same `objc2` org as the objc2-* crates in this slice -- only one file
+carries the `header-translator` marker, the rest is manually maintained
+Rust-idiomatic API surface, not raw generated declarations. `extern_C = 127`
+matches its purpose (calling into libdispatch's C ABI). Skimmed
+`queue.rs`/`object.rs`/`retained.rs` for the FFI call shape; did not read all
+243 unsafe sites individually. No network, filesystem, or process spawn.
+"""
+
+[[audits.ed25519]]
+version = "2.2.3"
+checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/signatures. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. Ed25519 signature type definitions (wire format,
+error types) with no cryptographic implementation of its own. No env, fs, process or
+network access.
+"""
+
+[[audits.ed25519-dalek]]
+version = "2.2.0"
+checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dalek-cryptography, github.com/dalek-cryptography/curve25519-dalek (ed25519-dalek
+subdirectory). `#![cfg_attr(not(test), forbid(unsafe_code))]`; grep's 5 hits are all
+doc-comment/code-comment references to the external "ed25519-unsafe-libs" advisory
+(double public-key oracle attack) and a deprecated-method comment, not unsafe blocks —
+confirmed no actual `unsafe` code in non-test builds. src/hazmat.rs exposes low-level
+operations behind a documented `hazmat` feature flag with explicit misuse warnings; it
+introduces no unsafe code, only a wider misuse surface for callers who opt in. No
+build script, no env, fs, process or network access.
+"""
+
+[[audits.either]]
+version = "1.18.0"
+checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. The `Either<L, R>` sum type and its trait impls (`Iterator`,
+`Future`, `Read`/`Write` forwarding). Read both unsafe occurrences: a
+`Pin::get_unchecked_mut` / `Pin::new_unchecked` pin-projection pair in the
+`Future` impl (src/lib.rs:394-399), the standard safe pattern for projecting a
+pin through an enum without moving the pointee. No I/O, no build script, no
+ambient state.
+"""
+
+[[audits.equivalent]]
+version = "1.0.2"
+checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs, no unsafe code (0 occurrences), 113 lines total. A single trait
+(`Equivalent<K>`) used by hashbrown-family maps to compare a borrowed lookup
+key against an owned stored key. Read in full: no I/O, no macros expanding to
+generated code, nothing beyond the trait and its blanket impl.
+"""
+
+[[audits.errno]]
+version = "0.3.14"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Thin cross-platform `errno` accessor. No build.rs. Read unix.rs in full (the
+Linux-relevant backend): unsafe is limited to `errno_location()` FFI reads and
+a documented `str::from_utf8_unchecked` applied only to a prefix already
+validated by `Utf8Error::valid_up_to`. No network/fs/process.
+"""
+
+[[audits.fastrand]]
+version = "2.5.0"
+checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`#![forbid(unsafe_code)]`, confirmed: the only "unsafe" grep hit is the
+attribute itself, zero unsafe blocks. No build.rs, no network/fs/process/
+`include_*!`. Small, well-known non-cryptographic PRNG.
+"""
+
+[[audits.fiat-crypto]]
+version = "0.2.9"
+checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Fiat Crypto library authors (jgross@mit.edu), github.com/mit-plv/fiat-crypto. All 29
+source files carry an `//! Autogenerated: 'src/ExtractionOCaml/...'` header naming the
+exact Coq/Fiat extraction command that produced them (verified on curve25519_64.rs and
+spot-checked others); this is the formally-verified bignum field-arithmetic backend
+`curve25519-dalek` uses on non-SIMD targets. Confirmed zero `unsafe`, no
+`std::env`/`std::fs`/`Command::new`, no build script, across all 83k lines by grep.
+Only plain arithmetic over fixed-size integer arrays; `other-target-only` platform in
+this slice's own metadata (not built on this workspace's linux/x86_64 target, where
+the `simd`/`serial` backends are selected instead).
+"""
+
 [[audits.find-msvc-tools]]
 version = "0.1.9"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
@@ -157,6 +980,362 @@ Windows-only MSVC toolchain path discovery, spun out of `cc`'s own internals
 and reached only through `cc`'s build-time closure. `safe-to-run`, matching
 `cc`: it never ships in an artifact of this workspace and this workspace does
 not target MSVC today, so it contributes nothing to a non-Windows build.
+"""
+
+[[audits.foldhash]]
+version = "0.2.0"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Non-cryptographic hasher (hashbrown's recommended default). No build.rs, no
+network/fs/process/`include_*!`. Read lib.rs's unsafe `load`/`hash_bytes_long`
+helpers (unaligned pointer reads feeding its mixing function) and seed.rs's
+`unsafe impl Sync for GlobalSeedStorage` (a lazily-initialized global seed
+behind an `UnsafeCell`) — both are the crate's documented hashing-algorithm
+and global-seed-cache mechanics, not I/O.
+"""
+
+[[audits.franken-decision]]
+version = "0.5.0"
+checksum = "b01c92bbc04816e42bc68dbf697777e83d87fc00e9ad5cec70a5c86331d834b3"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Pure decision-contract library: loss matrices, posteriors, a fallback policy,
+`evaluate`, and audit-entry records. The crate is one 2,300-line src/lib.rs,
+and tests start at line 978. `#![forbid(unsafe_code)]`, `build = false`, and
+the only dependencies are franken-evidence, franken-kernel and serde. A grep
+finds no std::fs/net/process/env use, no SystemTime/Instant, no include_*, no
+extern block and no macro definitions. The one thread::spawn is in the test
+module. We listed the non-test public items and did not read every line. We diffed it
+against the 0.3.10 copy in the local registry: the only change is one test
+assertion.
+"""
+
+[[audits.franken-evidence]]
+version = "0.5.0"
+checksum = "ccdd9e8e38746aa524dd8b22a35aa7c1485379156d3a145d077521e80ce429de"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Evidence-ledger record type plus builder and validation (lib.rs), an HTML/
+text renderer (render.rs), and a JSONL exporter (export.rs), about 2,900
+lines of src. `#![forbid(unsafe_code)]`, `build = false`, and the
+dependencies are serde and serde_json only. The single filesystem surface is
+export.rs `JsonlExporter`. It opens a caller-given path for create+append,
+renames it on size rotation (the rotated filename comes from a pluggable
+`RotationClock`, wall clock by default) and reads JSONL back. We read the module
+header and every fs call site. It touches no other path and does no network,
+process or env access. render.rs builds self-contained markup with no
+external resources and escapes user strings (a test asserts `<script>` is
+escaped). We diffed it against the local 0.3.10 copy: the new code only
+rejects non-finite `top_features` weights in validation.
+"""
+
+[[audits.franken-kernel]]
+version = "0.5.0"
+checksum = "dbe470e8d7f35572ff1571ac02cb14486a77bc8a98ac6830eb8756ba4a869c0a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`#![no_std]` + `alloc` type substrate: 128-bit TraceId, DecisionId and
+PolicyId, SchemaVersion, a Budget type, a CapabilitySet trait and a `Cx`
+context. The crate is one 1,800-line src/lib.rs. `#![forbid(unsafe_code)]`,
+`build = false`, and serde is the only dependency. `extern crate std` appears
+only inside the test modules. A grep finds no I/O, env, time, entropy,
+include_* or FFI of any kind. That is expected, because the crate has no std
+in non-test builds. We listed the public type definitions and read the
+module header. We diffed it against the local 0.3.10 copy: the only change
+is one test assertion.
+"""
+
+[[audits.futures-core]]
+version = "0.3.34"
+checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Core `Future`/`Stream`/`FusedFuture` traits from the futures-rs
+project plus the `AtomicWaker` synchronization primitive. Read all unsafe
+occurrences: `src/task/__internal/atomic_waker.rs` (`unsafe impl Send/Sync`
+justified by its own internal `AtomicUsize` state machine gating access to an
+`UnsafeCell<Option<Waker>>`, the same lock-free register-a-waker pattern used
+throughout the async ecosystem) and one `Pin::map_unchecked_mut` in a blanket
+`Stream` impl for `&mut S` (src/stream.rs:232), a standard pin-projection. No
+FFI, no network/filesystem/process, no build script.
+"""
+
+[[audits.futures-io]]
+version = "0.3.34"
+checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs, no real unsafe code (the one grep hit is a commented-out lint
+attribute, not a live unsafe block). `AsyncRead`/`AsyncWrite`/`AsyncSeek`/
+`AsyncBufRead` trait definitions only, mirroring std's `io` traits for async
+contexts. Read the crate in full (561 lines): no I/O of its own, no build
+script.
+"""
+
+[[audits.futures-lite]]
+version = "2.6.1"
+checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. A from-scratch, deliberately minimal-unsafe rewrite of a futures
+subset (its own doc comment: "removes almost all unsafe code"). Read the one
+real unsafe occurrence, in the `pin!` macro (src/lib.rs:142): a stack-pinning
+cast standard to that macro's expansion, matching the pattern in
+`std::pin::pin!`. No network/filesystem/process access, no build script.
+"""
+
+[[audits.futures-task]]
+version = "0.3.34"
+checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree --target x86_64-unknown-linux-gnu` resolves nothing for this
+package; `cargo tree --target all -i futures-task` shows the only path is
+futures-util -> js-sys, i.e. it is dragged in by asupersync's wasm32 edge and
+never builds on this workspace's actual target. It is an ordinary
+cross-platform rust-lang `futures` crate that happens to land in this
+"other-target-only" slice only because of that one path, not because it is
+itself Windows/wasm/objc-specific. Read all of `src/` (820 lines, 5 files);
+the 65 unsafe uses are the canonical `Arc`-backed `RawWaker`/`ArcWake` vtable
+pattern (`waker.rs`) -- a well-known, widely audited construction. No build
+script, no I/O, no `extern "C"`.
+"""
+
+[[audits.futures-util]]
+version = "0.3.34"
+checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Same reachability story as futures-task: unreachable on
+x86_64-unknown-linux-gnu per `cargo tree`; on other targets it is pulled in
+only because it is js-sys's direct dependent (js-sys -> asupersync's wasm32
+build), not because it is itself platform-specific code. 26,108 lines is too
+large to read in full at this reachability tier; sampled `stream/`,
+`future/`, `task/`, and `lock/` modules and grepped the whole tree for
+`transmute`, `Command::new`, `std::net`, `include_bytes!` -- none found.
+138 unsafe uses are consistent with its documented purpose: combinator state
+machines (`Pin`/`Unpin` projections), the `BiLock`/`Mutex` primitives in
+`lock/`, and stream/sink vtables. This is the official rust-lang `futures`
+crate, one of the most widely used and reviewed async crates in the
+ecosystem. No build script, no network, filesystem, or process use.
+"""
+
+[[audits.generic-array]]
+version = "0.14.7"
+checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+fizyk20 (generic-array maintainer), github.com/fizyk20/generic-array. Read build.rs
+in full: it calls `version_check::is_min_version` (a pure rustc-version string
+comparison, no I/O) and emits one `cargo:rustc-cfg` line; no env beyond what
+`version_check` itself reads internally, no network, no process spawning, no file
+writes. Sampled the 78 unsafe sites concentrated in src/lib.rs, src/sequence.rs and
+src/iter.rs: pre-const-generics fixed-length-array plumbing — `slice::from_raw_parts[_mut]`
+casts between `GenericArray<T, N>` and `[T]`, `unsafe impl Send/Sync`, and an
+`ArrayBuilder`/`ArrayConsumer` pair that tracks a partial-init count during
+`from_fn`/map-style construction so a panic mid-build drops only the initialized
+prefix. This is the predecessor design to `hybrid-array` (also in this slice) and
+uses the same class of pointer-cast unsafety for the same documented purpose. No env,
+fs, process or network access at runtime.
+"""
+
+[[audits.getrandom]]
+version = "0.2.17"
+checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The Rand Project Developers, github.com/rust-random/getrandom. No build script. Read
+the linux/android entropy backends in full: src/linux_android.rs calls the raw
+`getrandom(2)` syscall via `libc::syscall(SYS_getrandom, ...)` (this is the
+`extern_C`-flagged FFI surface the TSV notes); src/use_file.rs is the `/dev/urandom`
+fallback (opened once, fd cached, with a `poll()` wait on `/dev/random` first on
+linux/android to avoid reading before the kernel CSPRNG is seeded) used when the
+`getrandom` syscall is unavailable, per src/lib.rs's `cfg_if!` backend-selection table
+(linux_android_with_fallback.rs). Both are exactly the OS-entropy sources this crate
+exists to wrap, matching its documented behavior; the `/dev/urandom` open is read-only
+and is this crate's sole purpose-fit filesystem access. No network, no process
+spawning, no environment-variable reads beyond what `libc`/the syscall ABI require.
+"""
+
+[[audits.getrandom]]
+version = "0.4.3"
+checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The Rand Project Developers, github.com/rust-random/getrandom. Read build.rs in full:
+it reads the cargo-supplied `CARGO_CFG_SANITIZE` env var and emits one
+`cargo:rustc-cfg` line for memory-sanitizer support detection; no network, no file
+writes, no process spawning. Read src/backends.rs's cfg-based backend-selection table
+and src/backends/linux_raw.rs in full: on this workspace's linux/x86_64 target
+(`target_env = ""` selects `linux_raw`, the raw-`asm!`-syscall backend; standard
+glibc/musl builds instead route through `linux_android_with_fallback.rs`, structurally
+identical to 0.2.17's backend reviewed above) it issues the `getrandom(2)` syscall
+directly via inline `asm!` per architecture (13 `extern_C`-adjacent asm/FFI sites
+total per the TSV), matching this crate's documented purpose of sourcing OS entropy.
+No filesystem access on this path (the `/dev/urandom` fallback lives in
+backends/use_file.rs, reached only on platforms without a `getrandom` syscall). No
+network, no ambient process spawning.
+"""
+
+[[audits.ghash]]
+version = "0.6.0"
+checksum = "2eecf2d5dc9b66b732b97707a0210906b1d30523eb773193ab777c0c84b3e8d5"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/universal-hashes. No unsafe code in
+src/ (grep confirms zero occurrences), no build script. Thin GHASH wrapper over
+`polyval`. No env, fs, process or network access.
+"""
+
+[[audits.hashbrown]]
+version = "0.17.1"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The SwissTable implementation behind std's own HashMap. No build.rs. Only
+`include_str!` hit is `#[doc = include_str!("../README.md")]` in lib.rs (doc
+text, not data). One `transmute` (util.rs, a strict-provenance `usize -> *mut
+T` polyfill, read in full). Sampled raw.rs (4630 lines, ~89 `SAFETY:` comments
+across its unsafe fns, e.g. read/write/erase/remove/resize) — dense but
+consistently safety-commented raw-table pointer arithmetic matching its
+documented purpose. No network/fs/process. Given the file's size this is a
+representative sample of raw.rs, not a full line-by-line read of all 495
+unsafe sites.
+"""
+
+[[audits.hermit-abi]]
+version = "0.5.3"
+checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+ABI/errno constant declarations for the Hermit unikernel target only
+(`other-target-only` in the TSV — this workspace targets Linux, so this crate
+contributes no code to the build). No build.rs, no network/fs/process/
+`include_*!` under src/.
+"""
+
+[[audits.hex]]
+version = "0.4.3"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs, no unsafe code (0 occurrences), 686 lines. Hex encode/decode
+to/from `String`/`Vec<u8>` and fixed-size arrays, all safe-Rust arithmetic
+over nibbles. No I/O, no macros generating code from external input.
+"""
+
+[[audits.hmac]]
+version = "0.13.0"
+checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/MACs. No unsafe code in src/ (grep
+confirms zero occurrences), no build script. Generic HMAC construction over the
+`digest` trait. No env, fs, process or network access.
+"""
+
+[[audits.hybrid-array]]
+version = "0.4.15"
+checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/hybrid-array. No build script. Read the
+majority of the 43 unsafe sites in src/lib.rs and src/flatten.rs: pointer casts
+(`slice::from_raw_parts[_mut]`, `ptr::read`, `as_ptr().cast()`) bridging const-generic
+`[T; N]` arrays and `typenum`-generic `Array<T, N>`, each with an inline `// SAFETY:`
+comment (e.g. "We wrote to every element of `c`" for the `assume_init` in `concat`).
+This is the const-generics-based successor to `generic-array` (also in this slice)
+serving the same documented purpose with the same class of pointer-cast unsafety. No
+env, fs, process or network access.
+"""
+
+[[audits.inout]]
+version = "0.2.2"
+checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/utils. No build script. Read the 30
+unsafe sites in src/inout.rs and src/inout_buf.rs: raw-pointer wrapping for the
+`InOut`/`InOutBuf` in-place-or-separate-buffer abstraction cipher implementations use
+to process a block without requiring input and output to be the same buffer
+(`&*self.in_ptr`, `slice::from_raw_parts[_mut]`, pointer `.add()` for buffer
+splitting), matching the crate's documented purpose. No env, fs, process or network
+access.
+"""
+
+[[audits.itertools]]
+version = "0.14.0"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Large (14.5k line) iterator-adapter crate; scaled review depth to
+its 10 unsafe occurrences rather than its line count. Read all 10: concentrated
+in src/next_array.rs (a `[MaybeUninit<T>; N]`-backed array builder for
+`next_array`/`collect_array`, including `slice_assume_init_mut`'s
+`&mut [MaybeUninit<T>]` -> `&mut [T]` cast, justified by `MaybeUninit<T>` and
+`T` sharing size/align/ABI, matching the pattern std uses for the same
+purpose) plus a couple of `get_unchecked` index accesses in windowed iterators
+bounds-checked by the surrounding loop condition. No FFI, no network/
+filesystem/process, no `include_bytes!`/`include_str!`.
+"""
+
+[[audits.itoa]]
+version = "1.0.18"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's itoa, zero-allocation integer-to-string formatting. No build.rs
+(confirmed). Read all 13 unsafe sites in src/lib.rs: writes into a
+stack-allocated `MaybeUninit<u8>` buffer via `.write()`, `get_unchecked`
+indexing into a static `DECIMAL_PAIRS` two-digit lookup table with statically
+bounded indices (0..100), one `hint::unreachable_unchecked()` after an
+exhaustive length check, and a final `str::from_utf8_unchecked` over bytes the
+function itself just wrote as ASCII digits. This is the standard fast-integer-
+formatting idiom (same shape as the analogous code in Rust's own std
+formatting internals); every unsafe block carries a `// SAFETY:` comment and
+is inherent to the crate's stated zero-allocation purpose. No I/O, no process,
+no network, no `include_bytes!`/`include_str!`.
+"""
+
+[[audits.js-sys]]
+version = "0.3.105"
+checksum = "ce57d20d1ea864ce2ac172ab472d409214f4fd359f0b2a2775abdf522e2af99e"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree --target x86_64-unknown-linux-gnu` resolves nothing; only reached
+through asupersync's wasm32 target (`getrandom`, `crypto-common`, etc. pull
+it in on that target per `cargo tree --target all -i js-sys`). Part of the
+wasm-bindgen project: hand-written thin `#[wasm_bindgen]` `extern "C"`
+declarations for JS global/builtin objects (`Array`, `Promise`, `Reflect`,
+etc.), not machine-generated from an external spec the way web-sys is.
+`extern_C = 139` and 34 `unsafe` uses match that shape -- every function is a
+one-line call into a JS import, no logic of its own. No build script, no
+network/filesystem/process access, no `include_bytes!`/`include_str!`. Read
+`src/lib.rs` structure and spot-checked several binding modules for the same
+mechanical extern-declaration pattern throughout.
 """
 
 [[audits.libc]]
@@ -171,6 +1350,971 @@ almost entirely `extern "C"` type and constant declarations with no logic of
 its own to review; the unsafety lives at each crate's call sites, not here.
 """
 
+[[audits.linux-raw-sys]]
+version = "0.12.1"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Generated-bindings crate; confirmed generated. README.md states "bindgen-
+generated bindings for Linux's userspace API" with explicit regeneration
+instructions (`cargo update && cd gen && cargo run --release`). 460 of the 462
+files under src/ carry the literal header `/* automatically generated by
+rust-bindgen 0.72.1 */` (sampled src/x86_64/general.rs, which is pure
+`pub type`/const declarations). The 2 non-marked files are lib.rs
+(hand-written module/ctypes glue, no logic — read in full) and elf.rs (a
+small, hand-written, doc-commented type-width-generic ELF header supplement
+that its own doc comment describes as narrower than the bindgened
+`elf_uapi` module — read in full, plain consts/type aliases only). The crate
+is pure type/const/extern-fn-pointer-type declarations with no executable
+logic; its 93 `extern "C"` hits are all function-pointer *type* aliases (e.g.
+`__kernel_sighandler_t`), not calls. No build.rs, no network/fs/process
+anywhere in the crate.
+"""
+
+[[audits.lock_api]]
+version = "0.4.14"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Generic lock-guard wrapper crate underlying parking_lot. No build.rs, no
+network/fs/process/`include_*!`. Sampled mutex.rs's unsafe surface: `unsafe
+impl Send/Sync` auto-trait assertions on guard types and `unsafe fn`s
+(`force_unlock`, `make_guard_unchecked`) whose unsafety is "caller must
+currently hold the lock" — the crate's own documented contract, not FFI or
+memory-unsafety.
+"""
+
+[[audits.log]]
+version = "0.4.34"
+checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. The canonical rust-lang/log facade. Focus of review: the global
+logger state (src/lib.rs) — `static mut LOGGER: &dyn Log`, gated by a `STATE`
+`AtomicUsize` running through Uninitialized/Initializing/Initialized with
+Acquire/Release ordering in `set_logger_inner`, and a losing-thread spin-loop
+on `STATE.load(Ordering::Relaxed) == INITIALIZING`. This is the standard
+compare_exchange-gated once-init pattern (the same shape std's own `Once`
+uses); the write to `LOGGER` only happens in the branch that won the CAS, and
+`logger()` reads it only after observing `STATE == INITIALIZED` via an Acquire
+load. `set_logger_racy`/`set_max_level_racy` are explicit `unsafe fn` with
+doc-stated caller obligations (no concurrent init), not silently unsound. Read
+all 8 unsafe occurrences plus the CAS logic around them. The `net = 22`
+signal in the source manifest is `std::net::{IpAddr, Ipv4Addr, ...}` used only
+as enum variants of the `kv`-feature `Value` type (structured-logging value
+representation) in src/kv/value.rs — declarations and doc-tests, no socket I/O.
+No build script, no filesystem/process access.
+"""
+
+[[audits.memchr]]
+version = "2.8.3"
+checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+BurntSushi's SIMD byte/substring-search crate. No build.rs, no network/fs/
+process/`include_*!`. Unsafe is confined to architecture-gated SIMD intrinsics
+under src/arch/{x86_64,aarch64,wasm32}, consistent with its documented
+purpose; confirmed the file layout is exactly the arch-dispatch structure the
+crate documents, with no files outside that pattern. Did not read all 340
+unsafe sites individually — representative-depth review of a well-known,
+heavily-used crate.
+"""
+
+[[audits.memoffset]]
+version = "0.9.1"
+checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Read build.rs in full: it only calls `autocfg::probe_rustc_version` seven
+times to emit `cargo:rustc-cfg` lines gating which offset-of implementation to
+use on old rustc; no I/O of its own beyond autocfg's own compiler probing
+(see the `autocfg` entry, reviewed separately). raw_field.rs's unsafe is the
+classic uninitialized-struct-pointer `offset_of!` pattern standard for this
+crate. No network/fs/process under src/.
+"""
+
+[[audits.nix]]
+version = "0.31.3"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Read build.rs in full: only `cfg_aliases!` target-os alias definitions plus
+`cargo:rustc-check-cfg` declarations, no I/O. Large (49k loc) *nix libc-
+binding crate; checked `SAFETY:`-comment presence in unistd.rs, sys/socket/
+mod.rs and fcntl.rs, and read spawn.rs (posix_spawn* wrappers) in full —
+direct, doc-linked (POSIX man page) libc FFI wrappers. The `execv`/`execve`/
+`execvp` family and spawn.rs's `posix_spawn` bindings are nix's documented
+process-exec API surface (nix never decides what to exec; the caller does),
+not a hidden command-execution path. No network/fs/process beyond that
+documented FFI surface. Given the crate's size, this is a representative
+sample, not a line-by-line review of all 1056 unsafe sites.
+"""
+
+[[audits.nkeys]]
+version = "0.4.5"
+checksum = "879011babc47a1c7fdf5a935ae3cfe94f34645ca0cac1c7f6424b36fc743d1bf"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+wasmCloud Team, github.com/wasmcloud/nkeys — the only non-RustCrypto/non-dalek
+publisher in this slice, given closer attention. Read src/lib.rs, src/xkeys.rs,
+src/crc.rs and src/error.rs (1,241 lines total, library target only): zero unsafe, no
+env/fs/process/network access, no `include_bytes!`/`include_str!`. It is a thin
+Ed25519/X25519 key-encoding layer (base32 + CRC16 "nkey" seed/public-key strings) over
+`ed25519-dalek`, `signature` and `rand`. The crate also ships an `nk` CLI binary
+(src/bin/nk/main.rs) gated behind `required-features = ["cli"]`, which pulls in
+`quicli`/`structopt`/`env_logger`/etc.; that binary target is not built unless the
+`cli` feature is explicitly enabled, and it is not enabled by this workspace's use of
+the library, so it was not reviewed. If any workspace crate later enables nkeys's
+`cli` feature, that binary target needs its own review before this entry can be
+treated as covering it.
+"""
+
+[[audits.ntapi]]
+version = "0.4.3"
+checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. The crate's own
+`src/lib.rs` line 9 gates the entire body with
+`#![cfg(all(windows, any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]`,
+so on a non-Windows target it compiles to an empty crate regardless of what
+the dependency graph resolves -- confirmed at the source level, not just via
+`cargo tree`. Read `build.rs` in full (15 lines): only emits
+`cargo:rustc-link-lib=ntdll`/`winapi_ntdll` under a Windows-GNU target check,
+no download, no arbitrary command execution. 36 files of hand-maintained NT
+API struct/constant/function declarations (undocumented Windows kernel ABI),
+same style as winapi; `extern_C = 6`, 41 unsafe uses are the expected
+`#[repr(C)]` union/struct field access this kind of crate does. No network,
+filesystem, or process use outside the build script's link directive.
+"""
+
+[[audits.num-traits]]
+version = "0.2.19"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Numeric trait abstractions (Zero, One, NumCast, Float, ...). Read build.rs in
+full: 7 lines, uses the `autocfg` helper to probe whether `f64::total_cmp` is
+available (stabilized 1.62) and emit `cargo:rustc-cfg=has_total_cmp`; no
+network, no filesystem writes outside the autocfg probe mechanism (which
+itself only compiles small probe snippets under OUT_DIR). unsafe_kw=1 in
+7822 LOC (sparse, as expected for a mostly-trait-definitions crate): the sole
+site is in src/cast.rs's macro-generated float-to-int cast path,
+`unsafe { $float.to_int_unchecked::<$int>() }`, reached only after the
+surrounding safe code has already checked the float is finite and in-range
+for the target integer type — matches num-traits's documented `cast` module
+purpose. No process, network, or filesystem access in src.
+"""
+
+[[audits.objc2]]
+version = "0.6.4"
+checksum = "3a12a8ed07aefc768292f076dc3ac8c48f3781c8f2d5851dd3d98950e8c5a89f"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu (macOS/iOS
+Objective-C runtime crate; `platform = other-target-only` matches). Read
+`build.rs` in full (39 lines): sets `cfg`s for `target_abi_macabi`/
+`target_simulator` from `TARGET`/`CARGO_CFG_TARGET_ABI` env vars only, no
+download, no arbitrary command execution, no filesystem writes outside
+`OUT_DIR` cfg plumbing. This is the hand-written core of the `objc2` project
+(runtime message-send dispatch, exception handling, encoding) that the
+generated `objc2-*` binding crates sit on top of; not itself
+machine-generated. Read `exception.rs` (434 lines) and
+`runtime/method_implementation.rs` (115 lines) in full -- the safety-critical
+FFI entry points for ObjC message dispatch and exception unwinding -- and
+skimmed the rest of `src/` (26,679 lines, 1205 unsafe uses total; did not
+read all of them). `Command::new("sw_vers")` at
+`src/__macro_helpers/os_version/apple.rs:551` is inside `#[cfg(test)]`, only
+runs under `cargo test` on macOS, never in a shipped build; confirmed by
+reading the surrounding `#[cfg(test)] mod tests` block. `extern_C = 44` and
+the `unsafe` density are inherent to bridging Rust to the ObjC runtime. No
+network use; `fs = 1` is that same test module reading nothing beyond
+process output. One of the most widely used and actively maintained
+Objective-C interop crates in the Rust ecosystem.
+"""
+
+[[audits.objc2-core-foundation]]
+version = "0.3.2"
+checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+46 of its 69 `.rs` files carry the literal header "This file has been
+automatically generated by `objc2`'s `header-translator`. DO NOT EDIT" --
+confirmed by grep and by reading one generated file in full
+(`extern "C"` statics/functions plus `extern_class!`/`extern_conformance!`
+macro invocations mirroring Apple's CoreFoundation headers 1:1, all URLs
+pointing at developer.apple.com). Sampled several more generated files;
+all follow the same mechanical shape, no injected logic. The remaining ~23
+hand-written files are small support/macro-helper modules
+(`__cf_macro_helpers`, `cf_type.rs`, `base.rs`) that were skimmed rather than
+read in full given the low marginal risk (no build script, no I/O, no
+platform reachability). 3111 unsafe uses and `extern_C = 380` are consistent
+with a from-headers FFI binding crate. No network, filesystem, or process
+use found.
+"""
+
+[[audits.objc2-encode]]
+version = "4.1.0"
+checksum = "ef25abbcd74fb2609453eb695bd2f860d389e457f67dc17cafc8b8cbc89d0c33"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Small crate
+(2437 lines) implementing the Objective-C type-encoding string format used by
+the rest of the objc2 family; no build.rs, no `extern "C"`. Read both of its
+2 `unsafe` uses in full: `encoding.rs:372` and `static_str.rs:224`, both
+`core::str::from_utf8_unchecked` over a `const`-evaluated byte array the
+crate builds itself at compile time from ASCII encoding-string literals --
+not attacker- or runtime-controlled data. `src/parse.rs` itself carries
+`#![deny(unsafe_code)]`. No network, filesystem, or process use.
+"""
+
+[[audits.objc2-foundation]]
+version = "0.3.2"
+checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+171 of 231 `.rs` files carry the same `header-translator`
+"automatically generated ... DO NOT EDIT" marker as objc2-core-foundation,
+confirmed the same way (grep plus reading `generated/NSAppleScript.rs` in
+full). Of the ~60 non-generated files, roughly half are the crate's own
+`tests/` module (test-only, never shipped) and the rest are hand-written
+ergonomic wrappers (`string.rs`, `array.rs`, `dictionary.rs`, `value.rs`,
+`uuid.rs`, `exception.rs`, etc.) over the generated `NSFoundation` bindings;
+skimmed these rather than reading all 14,375 unsafe uses -- at this scale and
+reachability tier a full line-by-line pass was not performed. `extern_C = 844`
+and `fs = 1`/`include_str! = 1` (a doc test fixture in `tests/string.rs`
+including its own source) match a from-headers Foundation binding crate; no
+network or process use found.
+"""
+
+[[audits.objc2-io-kit]]
+version = "0.3.2"
+checksum = "33fafba39597d6dc1fb709123dfa8289d39406734be322956a69f0931c73bb15"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+14 of its 17 `.rs` files carry the same `header-translator` generated-file
+marker as the other objc2-* binding crates (confirmed by grep); the remaining
+3 are small hand-written glue. Not read line-by-line given the 5356 unsafe
+count is dominated by the generated IOKit `extern "C"` surface (`extern_C =
+3`, low relative to size because IOKit's C API is mostly opaque-handle-based
+rather than direct ObjC message sends) -- spot-checked structure only,
+consistent with the same generation pipeline already verified in depth for
+objc2-core-foundation and objc2-foundation. No network, filesystem, or
+process use found.
+"""
+
+[[audits.objc2-open-directory]]
+version = "0.3.2"
+checksum = "bb82bed227edf5201dfedf072bba4015a33d3d4a98519837295a90f0a23f676d"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+17 of its 18 `.rs` files carry the same `header-translator` generated-file
+marker verified in depth for objc2-core-foundation/objc2-foundation (grep
+confirmed). macOS Open Directory framework bindings; `extern_C = 398` and 906
+unsafe uses are the expected generated `extern_class!`/`extern "C"` surface.
+Spot-checked file shape only, not line-by-line, given zero build-target
+reachability and the already-verified generation pipeline. No network,
+filesystem, or process use found.
+"""
+
+[[audits.once_cell]]
+version = "1.21.4"
+checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. The canonical once_cell crate (basis for std's later
+`OnceLock`/`LazyLock`), providing `OnceCell`/`Lazy` over three backends
+(`imp_std.rs` on `std::sync::Once`-style atomics, `imp_pl.rs` for
+`parking_lot`-flavored locking, `imp_cs.rs` for `critical-section` no_std
+targets) plus a `race.rs` lock-free variant. Read a representative ~20 of 51
+unsafe occurrences: each backend's `get_unchecked` (documented precondition:
+only called after the cell is known-initialized), and `imp_std.rs`'s
+`mod strict` pointer-to-integer `transmute` (src/imp_std.rs:255), a
+well-known "strict provenance" polyfill matching the `sptr` crate's own
+implementation, used elsewhere in the ecosystem (e.g. hashbrown) the same way.
+`fs`/`env`/`include_bytes!` hits in the source manifest are all inside a
+doc-comment example (src/lib.rs:173-198, "Runtime `include_bytes!`" — showing
+how a *caller* might use `Lazy` to memoize a file read) and not executed
+crate code. No build script.
+"""
+
+[[audits.parking]]
+version = "2.2.1"
+checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`#![forbid(unsafe_code)]`, confirmed: the only "unsafe" grep hit is the
+attribute itself. No build.rs, no network/fs/process/`include_*!`. Small
+thread-parking primitive (smol-rs).
+"""
+
+[[audits.parking_lot]]
+version = "0.12.5"
+checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs, no network/fs/process/`include_*!` under src/. This is the
+public `Mutex`/`RwLock`/etc. API layer built on `lock_api` and
+`parking_lot_core` (both reviewed separately in this file); its own unsafe is
+the same lock_api-style guard-trait plumbing.
+"""
+
+[[audits.parking_lot_core]]
+version = "0.9.12"
+checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Read build.rs in full: only reads `CARGO_CFG_SANITIZE` to emit a
+`tsan_enabled` cfg, no I/O. Read src/thread_parker/linux.rs in full: the
+Linux thread-parker is a futex wrapper (`libc::sigaction`-adjacent `errno`
+helper plus futex-style `AtomicI32` park/unpark via libc), exactly its
+documented purpose (parking_lot's OS-level thread-parking backend). No
+network/fs/process beyond that futex FFI.
+"""
+
+[[audits.pastey]]
+version = "0.2.3"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Cargo.toml.orig lists authors as Aditya Kumar and David Tolnay (dtolnay);
+description "Macros for all your token pasting needs. Successor of paste." —
+this is the maintained continuation of the widely used but now-dormant
+`paste` crate, with the original `paste` author's peer (dtolnay, author of
+syn/quote/anyhow/thiserror/serde_json/zmij elsewhere in this slice) credited
+as co-author, not an unrelated rename. Proc-macro crate (`paste!`-style
+token-pasting), 1958 LOC across src/lib.rs, error.rs, attr.rs, segment.rs,
+test_helpers.rs — read the src listing and confirmed via grep across all
+files: zero `unsafe` anywhere, and the only `include_str!` is
+`#![doc = include_str!("../README.md")]` in lib.rs (doc embedding only). No
+`std::process::Command`, no network, no filesystem access. Pure token-stream
+manipulation, matches documented purpose.
+"""
+
+[[audits.pem-rfc7468]]
+version = "0.7.0"
+checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/formats. `#![deny(unsafe_code)]` with a
+single explicit `#[allow(unsafe_code)]` escape read in full (src/encoder.rs):
+`str::from_utf8_unchecked` on output this same function has just written as valid
+base64 ASCII. No build script, no env, fs, process or network access.
+"""
+
+[[audits.pin-project]]
+version = "1.1.13"
+checksum = "2466b2336ed02bcdca6b294417127b90ec92038d1d5c4fbeac971a922e0e0924"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Safe pin-projection via an attribute macro (this crate is the runtime support
+library; pin-project-internal below is the macro). No build.rs, single source
+file src/lib.rs. Of the 13 `unsafe` keyword hits, only 2 are real
+`unsafe { }` blocks (the rest are the `unsafe trait UnsafeUnpin`/`unsafe impl`
+declarations and doc prose describing them): `UnsafeDropInPlaceGuard::drop`
+(`ptr::drop_in_place`) and `UnsafeOverwriteGuard::drop` (`ptr::write`/
+`ptr::read`), both `#[doc(hidden)]` helpers in the `__private` module that the
+`#[pin_project]`-generated code invokes at struct-drop time; each carries a
+`// SAFETY:` comment stating the caller (the macro-generated code) must
+guarantee the raw pointer is valid for drop/write at guard-destruction time.
+This is executed, linked code (not proc-macro expansion-time logic) and is
+exactly pin-project's documented purpose — the safe encapsulation of pin-
+projection's inherently-unsafe pointer manipulation. No I/O, no network, no
+process spawning.
+"""
+
+[[audits.pin-project-internal]]
+version = "1.1.13"
+checksum = "c96395f0a926bc13b1c17622aaddda1ecb55d49c8f1bf9777e4d877800a43f8b"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The `#[pin_project]` attribute-macro implementation. Read entry points
+(src/lib.rs, src/pin_project/mod.rs, src/pinned_drop.rs). Notably,
+src/lib.rs:14 declares `#![forbid(unsafe_code)]` — this proc-macro crate
+cannot contain a real `unsafe` block or it fails to compile. All 25
+unsafe_kw hits were read and are one of: (a) `syn`-style AST field accesses/
+parses on `item.unsafety`/`sig.unsafety` (checking whether user-written code
+used the `unsafe` keyword, e.g. rejecting `unsafe fn drop` in a `PinnedDrop`
+impl at pinned_drop.rs:71-146), (b) token construction that emits the
+`unsafe` keyword into the macro's *generated output* (e.g.
+`method.sig.unsafety = Some(<Token![unsafe]>::default())` at
+pinned_drop.rs:215, and the literal `unsafe fn drop(...)  {}` string at
+pinned_drop.rs:44 inside a `quote!`-style template), or (c) doc comments. None
+of this executes unsafe logic at macro-expansion time; the only unsafe code
+that ever runs is the two blocks reviewed under the `pin-project` entry,
+which this macro's generated code calls into. Matches documented purpose; no
+I/O, no network, no process spawning.
+"""
+
+[[audits.pin-project-lite]]
+version = "0.2.17"
+checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+A `macro_rules!`-only reimplementation of pin-project's structural pinning,
+for callers who cannot take a proc-macro dependency. Confirmed via Cargo.toml:
+`build = false` (no build script) and no `[dependencies]` section at all
+(only dev-dependencies for its own test suite) — no syn/proc-macro2/quote,
+consistent with a pure declarative-macro implementation; `macro_rules!`
+expansion can only substitute tokens, it cannot execute arbitrary code at
+compile time the way a proc-macro can. Of the unsafe_kw=13 hits, 7 are real
+`unsafe { }` blocks inside the `macro_rules!` templates (src/lib.rs:1057,
+1093, 1141, 1187, 1371, 1742, 1765) that get copied verbatim into the
+*invoking* crate's own compiled output when the macro is used — the same
+drop-guard/`Pin::new_unchecked` pattern already reviewed under the
+`pin-project` entry, just distributed via token substitution instead of a
+shared runtime crate. The rest are doc prose and the `#![warn(...)]` lint
+list mentioning "unsafe". Matches documented purpose; no I/O, network, or
+process access.
+"""
+
+[[audits.pkcs8]]
+version = "0.10.2"
+checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/formats. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. PKCS#8 private-key-info DER encode/decode over
+`der`/`spki`. No env, fs, process or network access.
+"""
+
+[[audits.polling]]
+version = "3.11.0"
+checksum = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. epoll/kqueue/IOCP event-polling crate (smol-rs). All `std::net`
+hits are doc examples (`TcpListener` used as an example event source), not
+live network use; the one `std::process::abort()` is in the Windows IOCP path
+(iocp/mod.rs), not compiled for this workspace's Linux target. `rustix::
+process::Pid` appears only in the macOS kqueue backend (waitpid-style process
+events). epoll.rs's unsafe is direct epoll syscalls via rustix, consistent
+with documented purpose.
+"""
+
+[[audits.poly1305]]
+version = "0.9.1"
+checksum = "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/universal-hashes. No build script. Read
+src/backend/avx2.rs and src/backend/autodetect.rs: the same runtime-cpu-feature-gated
+dispatch pattern verified in depth for `curve25519-dalek`/`aes`/`sha2`
+(`cpufeatures::new!("avx2")` gates entry into `#[target_feature]`-annotated `unsafe fn`
+compute/finalize functions); did not read every one of the 50 unsafe sites
+individually. The `include_bytes!` hits are confined to src/fuzz.rs
+(`avx2_fuzzer_test_case`), a fuzz-harness-only module, not reachable from normal
+builds. No env, fs, process or network access.
+"""
+
+[[audits.polyval]]
+version = "0.7.3"
+checksum = "f0fa31d631f2b2cb2a544d0aa321ce847a94764d701ca2becc411138b93d49cd"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/universal-hashes. No build script. Read
+src/backend/intrinsics/x86.rs's structure: `cpufeatures::new!("avx", "pclmulqdq")`
+gates entry into `#[target_feature(enable = "avx", enable = "pclmulqdq")]` functions,
+the same runtime-detection pattern as the other SIMD-backed crates in this slice; did
+not read every one of the 24 unsafe sites individually. No env, fs, process or network
+access.
+"""
+
+[[audits.ppv-lite86]]
+version = "0.2.21"
+checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Cross-platform SIMD abstraction used by rand's ChaCha backend.
+Its unsafe (168-180 occurrences depending on count method) is concentrated in
+src/x86_64/sse2.rs (SSE2/AVX2 intrinsics from `core::arch::x86_64`) and
+src/generic.rs/src/types.rs (union-style reinterpretation between
+`vec128_storage`'s `sse2`/`avx`/`generic` fields). Read src/x86_64/sse2.rs's
+opening macros (`impl_binop!`, `def_vec!`) and src/x86_64/mod.rs's dispatch
+logic in full: every `#[target_feature(enable = ...)]` function
+(`avx2`/`avx`/`sse4.1`/`ssse3`/`sse2`) is selected only after
+`is_x86_feature_detected!` at runtime under the `std` feature (default-on), or
+`cfg!(target_feature = ...)` at compile time otherwise — never called
+unconditionally on hardware that may not support it. `transmute` calls
+(src/x86_64/sse2.rs) go through `zerocopy::transmute!`, a compile-time
+size/alignment-checked macro, not raw `mem::transmute`, and only between
+`repr(transparent)` newtypes over `__m128i`. No FFI beyond the compiler's own
+`core::arch` intrinsics, no network/filesystem/process, no build script.
+"""
+
+[[audits.proc-macro2]]
+version = "1.0.107"
+checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's proc-macro2, the compiler-independent token-stream wrapper nearly
+every proc-macro crate in the ecosystem depends on (used elsewhere in this
+slice by syn/quote/pin-project-internal/thiserror-impl/serde_derive/prost-
+derive/bincode_derive-next/rustversion). Read build.rs in full (267 lines):
+it shells out to `rustc --version`/feature-probes the compiler (nightly-only
+APIs like `proc_macro::Span::def_site`, `proc_macro::SourceFile`, etc.) via
+small `--emit=metadata` compiles under OUT_DIR, and emits only
+`cargo:rustc-cfg=...` lines; no network, no writes outside OUT_DIR (the fs=2
+grep hits are this OUT_DIR-only probe pattern). Read all 6 unsafe blocks: one
+public `Literal::from_str_unchecked` (an internal fast constructor for quote's
+numeric-literal macros where the token format is already known valid), a
+`ManuallyDrop` + `ptr::read` "take ownership without running the container's
+drop" pattern in the fallback (non-compiler) token-tree implementation, and
+the dual dispatch between the real `proc_macro`-crate-backed implementation
+and proc-macro2's own fallback lexer (used e.g. under Miri or outside a
+proc-macro context) — exactly proc-macro2's documented "compiler or fallback"
+architecture. No process spawning beyond the build-time rustc probe, no
+network, no `include_bytes!`/`include_str!`.
+"""
+
+[[audits.prost]]
+version = "0.14.4"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Protocol Buffers runtime encode/decode. No build.rs (confirmed). Read all 13
+unsafe sites in src/encoding.rs and src/encoding/varint.rs: a drop-guarded
+`String::as_mut_vec` used instead of a safe string-swap for a documented ~10%
+decode speedup (comment explains the invalid-UTF-8-must-never-leak invariant
+and the drop guard that clears the buffer on panic), one
+`NonZeroU64::new_unchecked(value | 1)` where non-zero-ness is guaranteed by
+the `| 1`, and a fully unrolled 10-byte LEB128 varint decode using
+`get_unchecked(0..=9)`, bounds-guaranteed by the `assert!(bytes.len() > 10 ||
+...)` immediately above it and directly mirroring the cited
+protobuf-go `ConsumeVarint` reference implementation. Matches prost's
+documented purpose (a fast protobuf codec); no I/O, network, or process
+access.
+"""
+
+[[audits.prost-derive]]
+version = "0.14.4"
+checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The `#[derive(Message, Enumeration, ...)]` proc-macro half of prost. Confirmed
+zero `unsafe` anywhere via grep (TSV unsafe_kw=0). No build.rs. Pure token-
+stream derive dispatch on syn/quote; no I/O, network, or process access.
+"""
+
+[[audits.quote]]
+version = "1.0.47"
+checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's quote, the `quote!{}` token-stream-quoting macro used by nearly
+every proc-macro crate in this slice. Read build.rs in full (32 lines): the
+same rustc-version-probe pattern as proc-macro2/serde (emits
+`cargo:rustc-cfg=...` only, e.g. for `proc_macro::Span::source_text`
+availability); no network, no writes outside cfg emission. Confirmed zero
+`unsafe` anywhere in src via grep across all 7 source files (TSV
+unsafe_kw=0). Read entry points (src/lib.rs, src/runtime.rs, src/to_tokens.rs)
+— pure `ToTokens`/token-stream-building logic, no I/O, network, or process
+access.
+"""
+
+[[audits.r-efi]]
+version = "6.0.0"
+checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. UEFI Reference
+Specification constant/protocol-struct crate; its own `src/lib.rs` doc states
+the purpose exactly: "provide protocol constants and definitions ... as
+C-ABI compatible imports to rust. Safe rust abstractions ... are out of
+scope." No build.rs. Read `src/lib.rs` header and skimmed several of its 55
+files (`efi/`, `protocols/`); the 331 unsafe uses are `#[repr(C)]` struct/
+union definitions and raw function-pointer type declarations transcribed from
+the UEFI spec, no logic. `extern_C = 2`. No network, filesystem, or process
+use; this crate is also used by the Rust standard library's own UEFI target
+support, so it is independently widely relied on.
+"""
+
+[[audits.rand]]
+version = "0.8.8"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The Rand Project Developers et al., github.com/rust-random/rand. No build script.
+Read all 14 unsafe sites: `UnsafeCell`-backed thread-local RNG accessors
+(rngs/thread.rs), `MaybeUninit`/`transmute_copy` array-building helpers and
+`from_u32_unchecked`/`get_unchecked` in distributions (bounds already established by
+surrounding logic), and one `libc::pthread_atfork` FFI registration
+(rngs/adapter/reseeding.rs) — read that call site in full: it registers a fork handler
+that only increments an atomic counter, used to detect a `fork()` and force the
+reseeding RNG to reseed rather than reuse post-fork state, a documented CSPRNG
+fork-safety mitigation (accounts for this crate's `extern_C`=1 flag). No env, fs,
+process spawning, or network access beyond that one atfork registration.
+"""
+
+[[audits.rand_chacha]]
+version = "0.3.1"
+checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The Rand Project Developers / Rust Project Developers / CryptoCorrosion Contributors,
+github.com/rust-random/rand. No build script. The single unsafe site
+(src/chacha.rs `generate`) read in full: reinterprets a `[u32; 64]` result buffer as
+`[u8; 256]` to let the `ppv-lite86` SIMD backend fill it byte-wise, then fixes
+endianness word-by-word afterward; sizes match (64*4 == 256), matching the crate's
+documented purpose. No env, fs, process or network access.
+"""
+
+[[audits.rand_core]]
+version = "0.6.4"
+checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The Rand Project Developers et al., github.com/rust-random/rand. Both unsafe sites
+read in full (src/impls.rs): `slice::from_raw_parts` reinterpreting a `&[u32]`/`&[u64]`
+buffer as `&[u8]` for byte-oriented RNG output filling, a standard, purpose-fit
+reinterpret-cast. No build script, no env, fs, process or network access.
+"""
+
+[[audits.rand_core]]
+version = "0.10.1"
+checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The Rand Project Developers, github.com/rust-random/rand_core. No unsafe code in
+src/ (grep confirms zero occurrences), no build script. `RngCore`/`SeedableRng` trait
+definitions only. No env, fs, process or network access.
+"""
+
+[[audits.rapidhash]]
+version = "4.5.1"
+checksum = "5da7e78a036ce858e8d55b7e7dc8ba3a88b78350fd2155d3591bbd966b58589e"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Has a `[[bin]]` target (src/main.rs, a CLI that opens
+caller-named files) which is not built for a library dependency edge; the
+library's own file-hashing functions (src/v1/rapid_file.rs,
+src/v2/rapid_file.rs — `rapidhash_v1_file`/`rapidhash_v2_2_file` etc., all
+`#[deprecated]` in favor of v3) take a caller-supplied `&mut std::fs::File`
+and never open a path themselves, so the `fs` flag in the source manifest is
+not ambient filesystem access. Read src/util/read.rs, src/inner/read_np.rs
+(unaligned `read_unaligned` loads, each behind an `unsafe_assert!` that
+compiles to a real `assert!` unless the crate's own non-default `unsafe`
+feature is enabled — this workspace's `flags = "-"` means default features
+only, so the safer `assert!` path applies) and src/inner/seeding.rs's global
+`SecretStorage` (an `UnsafeCell`-backed once-init gated by a hand-rolled
+`AtomicUsize` state machine with a spin-loop on the losing side, explicitly
+documented in the source as inspired by foldhash's own seed.rs). Entropy
+comes from `getrandom` (optional, not default-on), `std`'s `RandomState`
+hasher, or ASLR-derived stack/static/function pointers as a last resort — no
+network access. Read roughly 20 of 33 unsafe occurrences overall, including
+all of the global-state ones. `include_str!` hit is `#[doc = include_str!(
+"../README.md")]` behind `cfg(docsrs)`, not shipped code.
+"""
+
+[[audits.redox_syscall]]
+version = "0.5.18"
+checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Redox OS syscall-ABI crate, `other-target-only` per the TSV — it only applies
+to `target_os = "redox"` and contributes no code to this workspace's Linux
+build. No build.rs, no network/fs/process/`include_*!` under src/.
+"""
+
+[[audits.rmp]]
+version = "0.8.15"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Low-level MessagePack encode/decode primitives. No build.rs (confirmed). The
+single unsafe block, src/encode/buffer.rs:55-59, re-slices a `&mut [u8]`
+buffer via `core::slice::from_raw_parts_mut` after a length check
+(`to_write <= remaining`), worked around this way because the borrow checker
+cannot express the equivalent safe `split_at_mut`/re-borrow here (per the
+inline comment). Matches the crate's documented purpose (a byte-buffer
+writer); no I/O, network, or process access.
+"""
+
+[[audits.rmp-serde]]
+version = "1.3.1"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Serde integration for MessagePack (rmp). No build.rs (confirmed). src/lib.rs:2
+declares `#![forbid(unsafe_code)]` — confirmed zero unsafe anywhere via grep,
+consistent with the TSV's unsafe_kw=0. Read entry points across src/lib.rs,
+encode.rs, decode.rs, config.rs, bytes.rs — ordinary serde Serializer/
+Deserializer trait implementations built on rmp; no I/O, network, or process
+access beyond what a `Read`/`Write`-generic serde backend inherently takes as
+input.
+"""
+
+[[audits.rustc_version]]
+version = "0.4.1"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
+who = "continuum-dev"
+criteria = ["safe-to-run"]
+notes = """
+Build-only rustc-version query crate; no build.rs of its own. Read src/lib.rs
+in full: it spawns only the compiler (`RUSTC` env var, or a given wrapper)
+with `--version`, falling back across `RUSTC_WRAPPER`/
+`RUSTC_WORKSPACE_WRAPPER` combinations but never a different program, and
+parses stdout. No network, no filesystem writes.
+"""
+
+[[audits.rustix]]
+version = "1.1.5"
+checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Read build.rs in full: it reads `CARGO_CFG_*` target env vars, checks for an
+inline-asm source file's existence (`std::fs::metadata`), and — via its own
+`can_compile()` probe — spawns the compiler named by `RUSTC`/`RUSTC_WRAPPER`
+to test-compile small snippets, mirroring the autocfg/rustc_version pattern;
+it also removes its own probe artifact file afterward. All standard build-
+time feature detection, no other I/O. `std::net` hits in src/ are type
+re-exports/doc examples/a unit-test constant (net/socket_addr_any.rs's
+`Ipv6Addr::LOCALHOST`), not network I/O. Read src/backend/linux_raw/arch/
+x86_64.rs in full: canonical `syscall`-instruction inline-asm wrappers
+matching the x86-64 Linux syscall ABI (rax=nr, rdi/rsi/rdx/r10/r8/r9=args,
+rcx/r11 clobbered per the kernel's syscall convention), consistent with the
+well-known upstream rustix project (syscall backend for cap-std/wasmtime).
+Given the crate's size (72k loc, 1655 unsafe), this is a representative
+sample of the syscall-ABI core, not every call site.
+"""
+
+[[audits.rustversion]]
+version = "1.0.23"
+checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's rustversion, `#[rustversion::since(...)]`-style compiler-version
+gating. Its build script lives at the non-standard path `build/build.rs`
+(Cargo.toml `build = "build/build.rs"`), read in full along with
+build/rustc.rs: it runs `<RUSTC> [--rustc] --version` (retrying with
+`--rustc` if the first attempt reports itself as clippy-driver, or dropping
+any `RUSTC_WRAPPER` if the wrapper looks like `mirai`), sets `RUSTVERSION=1`
+in the child's environment so wrapper scripts can recognize the probe, parses
+the textual version/channel/date out of stdout, and writes the parsed value
+to `<OUT_DIR>/version.expr` plus a `cargo:rustc-cfg=host_os="windows"` if the
+host triple says so. This is the entirety of what the crate does at build
+time: one subprocess invocation of the ambient `rustc`/`RUSTC` binary with
+fixed arguments, parsing only its own stdout; no network, no file writes
+outside OUT_DIR, no arbitrary command construction from untrusted input. At
+macro-expansion time (src/*.rs) the crate only compares the parsed version
+against the attribute's target version — no further process or I/O. Read all
+3 real unsafe-adjacent hits (none are actual `unsafe` blocks; syn-style
+`Token![unsafe]` field handling, same pattern as syn/pin-project-internal
+elsewhere in this slice). Note: the TSV flags net=1 for this package, but an
+exhaustive case-insensitive recursive grep across all 40 files in the vendored
+source tree (including Cargo.toml/README/tests) found zero occurrences of the
+substring "net" anywhere; this looks like a stale/spurious flag in the slice
+metadata rather than anything present in the crate — flagged here for the
+record, not treated as a failure since nothing net-related exists to review.
+"""
+
+[[audits.scopeguard]]
+version = "1.2.0"
+checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs, no network/fs/process/`include_*!`. Small, widely-used RAII
+drop-guard crate; its handful of unsafe sites are `ManuallyDrop`/
+`MaybeUninit` plumbing inherent to running a closure on drop.
+"""
+
+[[audits.semver]]
+version = "1.0.28"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. The canonical dtolnay/semver crate (used by Cargo itself). Its
+unsafe is concentrated in src/identifier.rs's tagged-pointer small-string
+optimization for pre-release/build identifiers: short (<=8 byte ASCII, no
+NUL) strings are packed inline into a pointer-sized `Identifier` via
+`ptr::copy_nonoverlapping` then `mem::transmute::<[u8; N], Identifier>`
+(src/identifier.rs:116), longer strings go through a heap-allocated
+varint-length-prefixed buffer accessed via `slice::from_raw_parts[_add]`
+(lines 343, 401). Every unsafe block carries a `// SAFETY:` comment tying it
+to the length/niche invariants established at construction (e.g. the pointer
+field is guaranteed non-zero because the source string was non-empty ASCII).
+Read 15 of 49 occurrences, all in identifier.rs's construction/accessor pair.
+No FFI, no network/filesystem/process, no build script.
+"""
+
+[[audits.serde]]
+version = "1.0.229"
+checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay/serde-rs's serde, the facade crate re-exporting serde_core plus (when
+available) serde_derive. Read build.rs in full (69 lines): probes
+`rustc --version`, writes a small generated `<OUT_DIR>/private.rs` module
+(only a `pub use crate::private::*` re-export shim, patch-version-templated)
+and emits `cargo:rustc-cfg=no_serde_derive`/`no_diagnostic_namespace` below
+version thresholds; no network, no writes outside OUT_DIR. The TSV's net=1
+and proc=2 flags are grep false positives: net=1 is the substring "net"
+inside the emitted `cargo:rustc-check-cfg=cfg(no_core_net)` string (about
+`core::net` stabilization, not networking), and proc=2 is "procedural"/
+"processed" appearing in doc comments (build.rs:4's `use std::process::
+Command` for the version probe, and two doc-comment mentions of serde_derive
+being a "procedural macro"). fs=1 is the single `fs::write` to
+`OUT_DIR/private.rs`. unsafe_kw=2 confirmed as `Token![unsafe]`-style AST
+field handling only (no real unsafe block), same pattern as syn. No
+`include_bytes!`/`include_str!`, no arbitrary filesystem or network access.
+"""
+
+[[audits.serde_core]]
+version = "1.0.229"
+checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The split-out core of serde (Serialize/Deserialize traits and the Serializer/
+Deserializer contract), re-exported by the `serde` facade crate above. Read
+build.rs in full (113 lines) — a superset of serde's own build.rs: same
+`private.rs` OUT_DIR-write and rustc-version probing, plus additional
+`cargo:rustc-cfg=...` emission for `no_std_atomic[64]`/`no_core_cstr`/
+`no_core_num_saturating`/`no_core_net`/`no_diagnostic_namespace`/
+`no_core_error` gated on the detected minor version; every side effect is
+either a cfg line or the one `fs::write` into OUT_DIR. Net=1, proc=2 are the
+same grep false positives as the `serde` entry (the `no_core_net` cfg string;
+"procedural macro" doc-comment mentions). unsafe_kw=2 confirmed as
+`Token![unsafe]` AST field handling only, no real unsafe block. No network,
+no filesystem access outside OUT_DIR, no `include_bytes!`/`include_str!`.
+"""
+
+[[audits.serde_derive]]
+version = "1.0.229"
+checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The `#[derive(Serialize, Deserialize)]` proc-macro, one of the most widely
+used derive macros in the Rust ecosystem. Read entry points (src/lib.rs,
+src/de.rs, src/ser.rs, src/dummy.rs, src/pretend.rs — the latter two are
+compile-time fallback stubs used when serde_derive is invoked without a
+matching serde_core version). Confirmed zero `unsafe` anywhere via grep (TSV
+unsafe_kw=0). No build.rs. Pure token-stream derive dispatch built on syn/
+quote/proc-macro2; no I/O, network, or process access at expansion time.
+"""
+
+[[audits.serde_json]]
+version = "1.0.151"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay/serde-rs's serde_json. Read build.rs in full (30 lines): picks a
+32-bit or 64-bit arithmetic limb width for the float/string parser based on
+`CARGO_CFG_TARGET_ARCH`/`CARGO_CFG_TARGET_POINTER_WIDTH` and emits one
+`cargo:rustc-cfg=fast_arithmetic="32"|"64"`; no network, no filesystem
+access. Read all 16 unsafe sites (src/ser.rs, src/raw.rs, src/read.rs,
+src/value/mod.rs): `str::from_utf8_unchecked`/`String::from_utf8_unchecked`
+after the crate's own escaping/serialization logic has already guaranteed
+valid UTF-8 output, `hint::unreachable_unchecked()` after an exhaustive match
+on the crate's own escape table, `mem::transmute` implementing the documented
+`#[repr(transparent)]` `RawValue` newtype around `str`/`Box<str>`, a
+`ptr::offset_from` computing a byte index within the same slice (bounds-safe
+per the adjacent SAFETY comment), and raw-pointer UTF-8-encoding writes into a
+pre-reserved scratch buffer for `\\u`-escape decoding. All standard, inherent
+to a high-performance JSON codec. The TSV's net=5/fs=5 flags are entirely
+rustdoc example code inside doc comments (`de.rs:2549` shows opening a
+`std::fs::File`, `de.rs:2586`/`tests/test.rs:1636` show a
+`std::net::TcpStream` example) illustrating that `from_reader` accepts any
+`io::Read` — never executed as part of the library itself, and matches the
+documented "works with any Read source" design. No `std::process::Command`,
+no `env::var`, no `include_bytes!`/`include_str!` in src.
+"""
+
+[[audits.sha1]]
+version = "0.11.0"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/hashes. No build script. Read all 7
+unsafe sites (src/compress.rs): each is a call into a `#[target_feature]`-annotated
+hardware-SHA1 compress function (x86 SHA extensions / aarch64 SHA2 extensions) gated
+by the same `cpufeatures`-based runtime detection pattern verified in depth for
+`sha2`. No env, fs, process or network access.
+"""
+
+[[audits.sha2]]
+version = "0.10.9"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/hashes. No build script. Confirmed
+src/sha256/x86.rs and src/sha512/{x86,aarch64}.rs use `cpufeatures::new!` (`sha`/
+`avx2`/`sha3` feature sets) to gate hardware-accelerated compress functions, same
+pattern as `sha2` 0.11.0 (verified in depth) and `sha1`; did not individually read all
+29 unsafe sites. No env, fs, process or network access.
+"""
+
+[[audits.sha2]]
+version = "0.11.0"
+checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/hashes. No build script. Read
+src/sha256/x86_sha.rs and src/sha256.rs's dispatch code in full: `cpufeatures::new!
+("sha", "sse2", "ssse3", "sse4.1")` (x86) / `("sha2")` (aarch64) gates a runtime
+`shani_cpuid::get()`/`sha2_hwcap::get()` check before calling
+`#[target_feature(enable = "sha,sse2,ssse3,sse4.1")]` compress functions; sampled the
+remaining backend files (avx2, aarch64_sha3, riscv_zknh, loongarch64_asm,
+wasm32_simd128) which follow the identical structure. Did not read all 53 unsafe
+sites individually. No env, fs, process or network access.
+"""
+
 [[audits.shlex]]
 version = "2.0.1"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
@@ -180,4 +2324,905 @@ notes = """
 Shell-token quoting/splitting used by `cc` to parse compiler flag environment
 variables at build time. `safe-to-run`, matching `cc`: build-time only, no
 network, no unsafe, never linked into a shipped artifact of this workspace.
+"""
+
+[[audits.signal-hook]]
+version = "0.4.4"
+checksum = "b2a0c28ca5908dbdbcd52e6fdaa00358ab88637f8ab33e1f188dd510eb44b53d"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Read build.rs in full: it only compiles src/low_level/extract.c via
+`cc::Build`, and only when the `extended-siginfo-raw` Cargo feature is
+enabled — confirmed from the crate's own Cargo.toml that this feature is not
+in `default = ["channel", "iterator"]`. Also read extract.c in full: a small,
+unobfuscated siginfo_t field-extraction helper (signal-cause lookup table
+plus pid/uid accessors), matching its documented purpose of working around
+libc's limited siginfo_t exposure. No network/fs/process beyond that
+conditional C compile.
+"""
+
+[[audits.signal-hook-registry]]
+version = "1.4.8"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Read lib.rs's registration path in full: `sigaction`/`signal`
+libc FFI to install async-signal-safe handlers, and `mem::transmute::<*mut
+(), extern "C" fn(...)>` to recover the stored handler function pointer — the
+documented, standard technique this crate exists to provide (used by tokio/
+ctrlc). No network/fs; the one `libc::write(2, ...)`/`libc::abort()` path is
+the crate's own SIGSEGV-recursion guard, async-signal-safe by design.
+"""
+
+[[audits.signatory]]
+version = "0.27.1"
+checksum = "c1e303f8205714074f6068773f0e29527e0453937fe837c9717d066635b65f31"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Tony Arcieri (tony@iqlusio.io), github.com/iqlusioninc/crates (signatory
+subdirectory) — not a RustCrypto-org repo, but the same maintainer as several
+RustCrypto crates. `#![forbid(unsafe_code)]`, confirmed by grep (zero actual unsafe
+sites; only hit is the lint attribute itself). No build script. Thin signer/verifier
+trait glue over `ed25519`/`signature`. No env, fs, process or network access.
+"""
+
+[[audits.signature]]
+version = "2.2.0"
+checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. `Signer`/`Verifier` trait definitions only. No
+env, fs, process or network access.
+"""
+
+[[audits.slab]]
+version = "0.4.12"
+checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. A `Vec`-backed slot map keyed by `usize` (used throughout tokio,
+mio). Read all 9 unsafe occurrences: `get_unchecked`/`get_unchecked_mut`
+(src/lib.rs:880-913, `pub unsafe fn` with a documented caller obligation that
+`key` is a valid, occupied slot — same shape as `<[T]>::get_unchecked`) and a
+`MaybeUninit<[&mut T; N]>` array builder for a batched-get helper. No FFI, no
+network/filesystem/process, no build script.
+"""
+
+[[audits.smallvec]]
+version = "1.16.1"
+checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. The "small vector" inline/heap hybrid used across servo, rustc,
+and much of the ecosystem. Read a representative ~25 of 75 unsafe occurrences:
+`deallocate<T>` (src/lib.rs:346, `alloc::alloc::dealloc` via a `Layout`
+recomputed identically to the one used at allocation time), `Drain::next`
+(`ptr::read` off a live reference, mirroring std `Vec::drain`), and the
+`SmallVecData` union representation plus its `unsafe impl Send/Sync` bound to
+`A::Item: Send/Sync`. All inherent to implementing a growable, spill-to-heap
+vector inline in a fixed-size union; no FFI, no transmute across unrelated
+types, no network/filesystem/process, no build script.
+"""
+
+[[audits.socket2]]
+version = "0.6.5"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs, no `process::Command`/`include_bytes!`. Its own doc states the
+goal is direct, unopinionated access to socket syscalls beyond what std
+exposes ("If you don't know how to create a socket using libc/system calls
+then this crate is not for you"); its net/socket usage (49 hits) is exactly
+that documented low-level socket API, not ambient network activity of its
+own — it creates a socket only when the caller asks for one.
+"""
+
+[[audits.spki]]
+version = "0.7.3"
+checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/formats. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. SubjectPublicKeyInfo DER encode/decode over
+`der`. No env, fs, process or network access.
+"""
+
+[[audits.subtle]]
+version = "2.6.1"
+checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dalek-cryptography, github.com/dalek-cryptography/subtle. No build script. Both
+unsafe sites read in full (src/lib.rs): a `ptr::read_volatile` optimization barrier
+(`black_box`, used only when the `core_hint_black_box` feature is off, with an
+explained stable-Rust rationale) and a `repr(i8)`-to-`cmp::Ordering` pointer cast in
+`ConditionallySelectable for Ordering`, both with inline `// SAFETY:` comments
+matching their purpose. This is the constant-time comparison primitive the rest of
+this slice's AEAD/signature crates rely on for side-channel resistance. No env, fs,
+process or network access.
+"""
+
+[[audits.syn]]
+version = "2.0.119"
+checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's syn 2.x, the Rust-syntax parser nearly every proc-macro crate in
+this slice depends on. No build.rs, no I/O of any kind (confirmed: zero
+`process::Command`/`include_bytes!`/`include_str!`/network hits anywhere in
+src). 50120 LOC, unsafe_kw=78 (src-only). Both syn 2.0.119 and syn 3.0.6
+(next entry) are resolved simultaneously in this slice — normal for a large
+tree where different proc-macro crates pin different syn majors, noted here
+since it is unusual to see both at once. Read src/thread.rs in full: a small,
+carefully-reasoned `ThreadBound<T>` Send/Sync wrapper (used to hold
+non-thread-safe compiler handles across a build) whose safety argument for
+`unsafe impl<T: Copy> Send` is spelled out in the source comments (Copy
+implies no interior mutability via UnsafeCell, so cross-thread byte-copying
+cannot race). Read src/item.rs's unsafe hits (18/18): every one is a
+`Token![unsafe]` AST field (`pub unsafety: Option<Token![unsafe]>`) or a
+parser call recognizing the `unsafe` keyword in `unsafe fn`/`unsafe impl`/
+`unsafe extern` syntax — syn's job is to represent this syntax, not execute
+it; zero real unsafe code here. Read src/buffer.rs's module doc, which states
+directly: "This module is heavily commented as it contains most of the unsafe
+code in Syn, and caution should be used when editing it. The public-facing
+interface is 100% safe but the implementation is fragile internally." — a
+flattened-array `TokenBuffer`/`Cursor` design requiring raw pointers into a
+boxed slice for efficient multi-pass traversal (avoiding a deep-copying
+recursive `TokenTree` walk); this is syn's well-known, long-reviewed core
+unsafe (syn is one of the single most-used and most-audited proc-macro-
+support crates in the ecosystem). Did not read all 30 buffer.rs blocks
+individually line-by-line given time budget, but confirmed the module's
+self-description and file structure match the documented design. All
+`extern "C"` hits (4) are doc comments describing the `extern "C" { ... }`
+AST node syn represents, not real FFI declarations.
+"""
+
+[[audits.syn]]
+version = "3.0.6"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+syn 3.0.6, same author/repository as syn 2.0.119 above (src/lib.rs's doc
+header links github.com/dtolnay/syn, the identical upstream repo — this is a
+new major version release from the same maintainer, not a fork or rename).
+No CHANGELOG.md was bundled in the published crate tarball to describe what
+changed from 2.x, so the exact 2→3 delta was not independently verified
+against release notes; the file layout and unsafe patterns are structurally
+identical to syn 2.0.119 (same src/buffer.rs module-doc warning about
+containing "most of the unsafe code in Syn", same src/thread.rs
+`ThreadBound<T>`, same `Token![unsafe]`-AST-field pattern in item.rs). No
+build.rs, no I/O of any kind (confirmed: zero `process::Command`/
+`include_bytes!`/`include_str!`/network hits in src). 51763 LOC, unsafe_kw=97
+(src-only); sampled the same set of files as syn 2.0.119 (thread.rs in full,
+item.rs's 34 unsafe hits confirmed as AST field declarations/doc comments
+only, buffer.rs's module doc and structure) and found no structural
+divergence in how unsafe is used. All 7 `extern "C"` hits are doc comments
+describing AST nodes, not real FFI. Given the early major-version number and
+lack of a bundled changelog, a human may want to independently confirm via
+the upstream repository what functional changes motivate depending on 3.x
+here rather than the long-stable 2.x line (a due-diligence note, not a vet
+failure — nothing found in the source itself indicates a problem).
+"""
+
+[[audits.sysinfo]]
+version = "0.39.6"
+checksum = "d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Confirmed the two `process::Command` hits are macOS (`sysctl`,
+unix/apple/cpu.rs) and Windows (`taskkill.exe`, windows/process.rs) only —
+neither compiles for this workspace's Linux target. On Linux, all reads are
+from `/proc/*` and `/sys/*` pseudo-files (cpu.rs, cgroup.rs, product.rs,
+network.rs), matching its documented purpose (process/CPU/memory/network/
+hardware inventory). Every `fs::write`/`fs::create_dir_all` hit in the Linux
+backend is inside `#[cfg(test)]` unit tests building fake `/sys`-shaped
+fixtures under a `tempfile::tempdir()` — none of it runs in production code.
+`libc::kill` in process.rs backs the crate's documented `Process::kill` API.
+"""
+
+[[audits.tempfile]]
+version = "3.27.0"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. The only `std::process::Command` hit is a doc-comment example in
+lib.rs, not code. All 4 `unsafe` hits are in file/imp/windows.rs, not compiled
+for this workspace's Linux target. Heavy filesystem use (50 fs hits) is the
+crate's entire documented purpose — secure temp file/dir creation and
+cleanup.
+"""
+
+[[audits.thiserror]]
+version = "2.0.20"
+checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's thiserror, the `#[derive(Error)]` runtime-support crate (paired
+with thiserror-impl below). Read build.rs in full (195 lines): the same
+`compile_probe`/rustc-minor-version-probe pattern reviewed in anyhow's
+build.rs (detects `error_generic_member_access`/`core::error::Error`
+stability via a small `--emit=dep-info,metadata` compile under
+`OUT_DIR/probe`, cleaned up afterward); no network, no writes outside
+OUT_DIR. The fs=1 hit is this build.rs's `fs::create_dir`/`fs::remove_dir_all`
+management of that probe directory. Confirmed zero `unsafe` anywhere in src
+via grep (TSV unsafe_kw=0). No `include_bytes!`/`include_str!`, no
+`process::Command` outside build.rs.
+"""
+
+[[audits.thiserror-impl]]
+version = "2.0.20"
+checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The `#[derive(Error)]` proc-macro implementation. Read src/scan_expr.rs:46,
+the sole unsafe_kw hit — it is the string literal `(Keyword("unsafe"),
+SetState(&BLOCK))` inside a keyword-transition table this macro uses to
+scan user-written `#[error("...")]` format expressions for syntax like
+`unsafe { }` blocks (so it can correctly locate interpolated field
+references); this is syn-adjacent lexical scanning of the *user's* source
+text, not an executed `unsafe` block in thiserror-impl's own logic. Confirmed
+via grep that no real `unsafe { }`/`unsafe fn` exists anywhere in the crate.
+No build.rs, no I/O, no network, no process access.
+"""
+
+[[audits.tinyvec]]
+version = "1.13.3"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. A `#![forbid(unsafe_code)]` crate at its default feature set;
+its 6 grep hits for "unsafe" are all in doc comments/README text describing
+why the crate avoids unsafe (contrasting itself with smallvec/arrayvec), not
+live unsafe blocks or an opt-in unsafe feature gate that changes that.
+Confirmed no `unsafe` block, `unsafe fn`, or `unsafe impl` appears in
+src/**/*.rs. No I/O, no build script.
+"""
+
+[[audits.typenum]]
+version = "1.20.1"
+checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+paholg, github.com/paholg/typenum. No unsafe, no env/fs/`Command::new` anywhere in
+src/ (grep across all 13 files including src/gen/*.rs confirms zero, aside from one
+unrelated hit in lib.rs's own doc comment). No build script; src/gen/consts.rs and
+src/gen/op.rs are pre-generated (`// THIS IS GENERATED CODE`, "generated by typenum's
+build script") and checked into the published crate rather than regenerated at build
+time. Type-level Peano/binary-integer arithmetic used throughout this slice
+(`hybrid-array`, `generic-array`, `aead`, etc.) for compile-time array lengths. No
+network or process access.
+"""
+
+[[audits.unicode-ident]]
+version = "1.0.26"
+checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+dtolnay's unicode-ident, implementing Unicode Standard Annex #31
+(XID_Start/XID_Continue identifier classification) as a faster, smaller
+reimplementation of `unicode-xid`. No build.rs. Read both unsafe blocks in
+full: `LEAF.0.get_unchecked(offset)` in `is_xid_start`/`is_xid_continue`,
+where `offset` is computed by modular arithmetic (`% CHUNK`) that statically
+bounds it within the compact bit-trie table — the same trie-lookup technique
+used in rustc's own identifier-classification internals. The generator
+tooling that produces the trie tables from Unicode data is not bundled in the
+published crate (normal for this ecosystem; codegen scripts typically live
+outside the packaged tarball), so the tables' correctness against the current
+Unicode Character Database was not independently re-derived here — noted as
+a scope limit, not a finding, since verifying it would require fetching
+Unicode data (out of scope per the no-network instruction) and the crate is
+from the same trusted, widely-depended-on maintainer as several other
+entries in this slice. No I/O, network, or process access.
+"""
+
+[[audits.unicode-normalization]]
+version = "0.1.25"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs. Unicode NFC/NFD/NFKC/NFKD normalization (unicode-rs project).
+The crate is `#![deny(unsafe_code)]` at the top with narrow, explicit
+`#[allow(unsafe_code)]` overrides in src/normalize.rs: `decompose_hangul`
+(algorithmic Hangul syllable decomposition, all emitted code points are
+provably in the valid `char` range by the Unicode Hangul formula) and two
+`char::from_u32_unchecked` calls (lines 201, 208) converting values already
+derived from that same provably-valid arithmetic. Read all 9 occurrences.
+The large rs_loc (24402) is mostly generated Unicode property tables
+(src/tables.rs-style data), not logic; no build script regenerates them at
+build time (no build.rs present) so they ship as static data. No I/O, no
+`include_bytes!`/`include_str!`, no process/network access.
+"""
+
+[[audits.universal-hash]]
+version = "0.6.1"
+checksum = "f4987bdc12753382e0bec4a65c50738ffaabc998b9cdd1f952fb5f39b0048a96"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+RustCrypto Developers, github.com/RustCrypto/traits. `#![forbid(unsafe_code)]`,
+confirmed by grep. No build script. `UniversalHash` trait definition only. No env,
+fs, process or network access.
+"""
+
+[[audits.unty-next]]
+version = "0.1.2"
+checksum = "16062d030850f35054e37746427b9febb74a2f24c9c6dd6fa2d0c13c5f53221e"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Cargo.toml.orig: repository github.com/Apich-Organization/unty, authors
+"Xinyu Yang" and "The bincode-next & bincode developers" — this is the same
+Apich-Organization fork lineage as bincode-next (see that entry), a
+type-equality-checked transmute helper ("Explicitly types your generics")
+used internally by bincode-next's derive machinery. Read all 6 unsafe
+sites in src/lib.rs: two are doc-comment examples of the public API
+(including one that explicitly warns, in the crate's own words, that misusing
+it for lifetime extension will make "the compiler... light your PC on fire"
+— an unusually candid safety warning), one is the `pub unsafe fn unty`
+definition itself (`mem::transmute_copy` gated by a runtime
+`type_equal::<Src, Target>()` TypeId comparison — the caller must still
+guarantee `Src`/`Target` are truly the same type via other means, since
+lifetimes are erased by TypeId; the function is `pub unsafe fn`, so this is
+an explicit, opt-in caller obligation, not a hidden one), one is a
+`mem::transmute::<&dyn NonStaticAny, &(dyn NonStaticAny + 'static)>` lifetime
+erasure to obtain a `'static` TypeId (the same technique `core::any::Any`'s
+own downcast machinery relies on conceptually), and one is a test usage. No
+build.rs, no I/O, no network, no process access. The unsafety is exactly what
+the crate exists to provide (an explicit, checked transmute primitive); it is
+the caller's responsibility to use the runtime type-equality check correctly,
+which is standard for this category of crate.
+"""
+
+[[audits.version_check]]
+version = "0.9.5"
+checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+who = "continuum-dev"
+criteria = ["safe-to-run"]
+notes = """
+Build-only, no build.rs of its own. Read src/lib.rs in full: spawns exactly
+the compiler named by the `RUSTC` env var with `--verbose --version` and
+parses the output; no other process, no network, no filesystem writes.
+"""
+
+[[audits.virtue-next]]
+version = "0.1.3"
+checksum = "8d5208a9710a6ca1c2da0d64289a5dcca13deb05afdedf651f4e11bcd9fc53eb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Cargo.toml.orig: repository github.com/Apich-Organization/virtue, description
+"A sinless derive macro helper" — same Apich-Organization fork lineage as
+bincode-next/unty-next (see those entries); a token-stream-building helper
+library used by derive-macro authors (bincode_derive-next depends on it).
+Read all 4 unsafe_kw hits: none are real unsafe code — `is_unsafe: bool`
+struct field, a `make_unsafe()` builder method, and
+`builder.ident_str("unsafe")` (emitting the `unsafe` keyword token into
+*generated* code the macro author is building, e.g. `unsafe impl Foo for
+Bar {}`), confirmed via grep that zero real `unsafe { }`/`unsafe fn` exists
+anywhere in the crate. Investigated the fs=3 flag: src/generate/generator.rs's
+`export_to_file` (lines ~193-211) does call `std::fs::create_dir_all` and
+`std::fs::File::create`, but this is a documented, explicitly-named debug
+helper ("Export the current stream to a file, making it very easy to debug
+the output of a derive macro") that a downstream derive-macro implementor
+must deliberately call from their own macro body; nothing in virtue-next
+itself invokes it automatically. It walks up from `CARGO_MANIFEST_DIR`
+looking for an existing `target` directory and writes only a `.rs` file
+under `target/generated/<crate_name>/`, confined to the invoking workspace's
+own build output tree — matches its stated debugging purpose, not a hidden
+side effect. No network, no process access, no `include_bytes!`/
+`include_str!`.
+"""
+
+[[audits.wasi]]
+version = "0.11.1+wasi-snapshot-preview1"
+checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+The crate's own doc comment in `src/lib.rs` states it is "entirely
+procedurally generated from the `*.witx` files that describe the WASI API";
+the bulk of the code lives in `src/lib_generated.rs`, confirmed by file name
+and content (raw `extern "C"` syscall signatures and result-struct
+definitions matching the WASI preview1 ABI 1:1). `extern_C = 1`, 62 unsafe
+uses are raw syscall FFI wrappers, read a sample of `lib_generated.rs` and
+found nothing beyond mechanical signature declarations. No network,
+filesystem, or process use (the crate exposes those as raw syscalls, it does
+not itself call them).
+"""
+
+[[audits.wasm-bindgen]]
+version = "0.2.128"
+checksum = "aecb87a33d3b0c5e3b7aa46336eaf486cffafbd281b195e4c8b80d50df2351bf"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Read
+`build.rs` in full (49 lines): only emits `cfg`s from `TARGET`/
+`CARGO_CFG_TARGET_ARCH`/`CARGO_CFG_TARGET_OS`/`CARGO_CFG_TARGET_FEATURE` env
+vars and one `rustc-link-arg` for the emscripten target; no download, no
+process spawn, no file writes outside cargo's own `cargo:` directives. This
+is the wasm<->JS interop core; 114 unsafe uses in `src/` (8215 lines) are
+wasm-linear-memory pointer/externref manipulation inherent to its documented
+purpose. The two `std::process::abort()` calls (`externref.rs:110`,
+`rt/mod.rs:746`) are wasm trap/abort-on-invariant-violation paths, not
+process spawning. No network or filesystem use, no `include_bytes!`/
+`include_str!` in the crate itself.
+"""
+
+[[audits.wasm-bindgen-futures]]
+version = "0.4.78"
+checksum = "6ef4c5d3d2cdf5c54f4231181768f5510842e350db025faf1f7163b1030ed928"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Trivially
+small (24 lines total per the TSV's `rs_loc`) -- this version is essentially
+a re-export/compat shim. Read the full source: no unsafe, no build script, no
+`extern "C"`, no I/O of any kind.
+"""
+
+[[audits.wasm-bindgen-macro]]
+version = "0.2.128"
+checksum = "a690d511e3c1a8b3a55e33511e3c2c00c78415cd23650f32b808627f5696b9ed"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Proc-macro
+crate; read `src/lib.rs` in full (75 lines, its entire source) -- a thin
+dispatcher that hands `TokenStream`s to `wasm_bindgen_macro_support::expand`
+(and three sibling entry points: `link_to`, the internal class/struct
+markers) and turns `Err` into a `compile_error!`-style diagnostic token
+stream. No file, network, or process access; no unsafe.
+"""
+
+[[audits.wasm-bindgen-macro-support]]
+version = "0.2.128"
+checksum = "411e4887f0071ef2d2164a9d5fdf2d20efbef78fccd3a78b0c10a1dc5295e48a"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Not itself
+marked `proc-macro` in the TSV but is the macro-expansion logic
+`wasm-bindgen-macro`'s proc-macro entry points call into; read its role as
+part of reviewing that crate's entry points per the brief. 12,606 lines;
+skimmed `codegen.rs` and `parser.rs` rather than reading in full. The one
+`include_str!` use (`codegen.rs:209`) is inside a `quote! { include_str!(#file) }`
+-- code the macro *emits* into the caller's crate purely to give Cargo a
+`rerun-if-changed` dependency edge on a JS module path the caller named with
+`#[wasm_bindgen(module = "...")]`; it does not itself read that file at macro
+-expansion time (the file's contents were already consumed earlier in the
+same function to build a custom section, per the surrounding comment). 58
+unsafe uses, `fs = 1`, `env = 3`: matches a macro crate resolving
+`CARGO_MANIFEST_DIR`-relative paths for the same module-linking feature. No
+network or process use.
+"""
+
+[[audits.wasm-bindgen-shared]]
+version = "0.2.128"
+checksum = "81941cd78d0c92026c33e5e01312845a4cb1e9af3407f9134b100dd03144103e"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Read
+`build.rs` in full (65 lines): runs `git rev-parse HEAD` (best-effort, output
+discarded on failure via `.ok()`) to stamp a `WBG_VERSION` build-time env var,
+and reads two of its own source files (`src/lib.rs`, `src/tys.rs`) to hash
+them into `SCHEMA_FILE_HASH`, used elsewhere in the crate to force a schema
+-version bump when the macro/CLI wire contract changes -- a documented
+self-consistency check, not arbitrary file access. No download, no writes,
+no network. `links = wasm_bindgen` in Cargo.toml is a linkage-key
+declaration, not a native library link. Rest of the crate (685 lines) is
+plain shared struct/enum definitions with no unsafe.
+"""
+
+[[audits.web-sys]]
+version = "0.3.105"
+checksum = "9fbddc4a036f00ec4f18c83445bd3115cb306a91da554919a099d9222fe4a7f8"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+The crate's own `src/lib.rs` doc states it is "a procedurally generated crate
+from browser WebIDL"; confirmed by file naming (`src/features/gen_*.rs`, one
+file per Web API type/interface) and by reading a sample
+(`gen_MediaKeySystemStatus.rs`) in full -- a mechanical `#[wasm_bindgen]`
+enum/extern declaration with no logic. Despite 227,231 total lines, only 19
+`unsafe` uses appear directly in this crate because the actual FFI unsafety
+is delegated into wasm-bindgen's macro expansion, not written here.
+`extern_C = 1475` matches one-per-binding JS extern declarations. Sampled
+several more `gen_*` files across different feature areas (media, DOM,
+fetch); all followed the same generated shape. No network, filesystem, or
+process use, no `include_bytes!`/`include_str!`.
+"""
+
+[[audits.winapi]]
+version = "0.3.9"
+checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Read
+`build.rs` in full (527 lines): a static header-dependency-graph table
+(`DATA`, header name -> header deps -> `rustc-link-lib` names) plus a small
+`Graph` type that walks it to emit `cargo:rustc-cfg=feature="..."` and
+`cargo:rustc-link-lib=...` directives based on which features are enabled and
+the `TARGET`/`WINAPI_NO_BUNDLED_LIBRARIES`/`WINAPI_STATIC_NOBUNDLE` env vars.
+No download, no arbitrary command execution, no file writes outside cargo's
+own directive protocol, and the whole thing is a no-op unless the third
+`-`-separated `TARGET` component is `"windows"`. 180,148 lines of hand
+-transcribed Win32 header declarations (long predates windows-rs's
+header-translator-generated approach); 104 unsafe uses are `#[repr(C)]`
+struct/union/const declarations, no logic. No network, filesystem, or
+process use.
+"""
+
+[[audits.winapi-i686-pc-windows-gnu]]
+version = "0.4.0"
+checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Read
+`build.rs` in full (18 lines): adds a `cargo:rustc-link-search=native=...`
+pointing at the crate's own bundled `lib/` directory, only when `TARGET ==
+i686-pc-windows-gnu` and `WINAPI_NO_BUNDLED_LIBRARIES` is unset. No download,
+no process spawn. Whole crate is 25 lines total (per TSV `rs_loc`) --
+essentially an empty placeholder crate whose only content is prebuilt `.a`
+import libraries shipped as binary data alongside the source, referenced by
+winapi's own build.rs link directives. No unsafe Rust code, no network use.
+"""
+
+[[audits.winapi-x86_64-pc-windows-gnu]]
+version = "0.4.0"
+checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Same crate
+family and same-shaped `build.rs` as winapi-i686-pc-windows-gnu (18 lines,
+read in full), just for the x86_64-pc-windows-gnu target and without the
+`rustc-link-search` step (winapi's own build.rs handles the link-search for
+this target). 25 lines of Rust source total, no unsafe, no network or
+process use.
+"""
+
+[[audits.windows]]
+version = "0.62.2"
+checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Microsoft's official `windows-rs` facade crate: 1,834,672 lines is far beyond
+what can be read in full. Verified it is generated rather than hand-written
+by module structure (feature-gated `pub mod` re-exports mirroring the
+Win32/WinRT metadata namespace tree, e.g.
+`src/Windows/ApplicationModel/mod.rs`) and by sampling several leaf files
+under `src/extensions/` and the WinSock namespace: mechanical `#[repr(C)]`
+struct definitions and `windows_link::link!` extern declarations, one per
+Win32 API, matching the same generator shape confirmed in depth for
+windows-sys below (this crate wraps windows-sys/windows-core rather than
+declaring its own raw bindings for most surface area). The 5 `std::net::`
+hits are `From<std::net::SocketAddr*>` conversions for `SOCKADDR_INET` in
+`src/extensions/Win32/Networking/WinSock/*.rs` -- interop type conversions,
+not networking calls. 326,383 unsafe uses were not reviewed individually;
+this is a generated-bindings crate at a scale where the audit relies on
+generator-shape verification plus the upstream project's own scale and
+maintenance profile (Microsoft-maintained, generated from win32metadata)
+rather than manual line review.
+"""
+
+[[audits.windows-collections]]
+version = "0.3.2"
+checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Small (2372 lines) hand-written WinRT collection-interface (`IVector`,
+`IMap`, etc.) adapter crate, part of the windows-rs project. One
+`include_str!("../readme.md")` for the crate doc only. Read `src/lib.rs`
+structure and skimmed the vector/map wrapper modules; 147 unsafe uses are
+COM vtable calls consistent with its documented purpose. No network,
+filesystem, or process use.
+"""
+
+[[audits.windows-core]]
+version = "0.62.2"
+checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Hand-written COM/WinRT core primitives (`HRESULT`, `GUID`, `Interface`,
+`BSTR`, etc.) that the rest of the windows-rs family builds on -- not itself
+generated bindings. One `include_str!("../readme.md")` for the crate doc.
+Skimmed `src/` (4115 lines); 228 unsafe uses are the expected COM vtable/
+reference-counting primitives (`AddRef`/`Release`, interface casts). No
+network, filesystem, or process use found.
+"""
+
+[[audits.windows-future]]
+version = "0.3.2"
+checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Hand-written `IAsyncOperation`/`IAsyncAction` WinRT future-adapter crate
+(3234 lines), part of windows-rs. One `include_str!("../readme.md")` for the
+crate doc. Skimmed the async-adapter modules; 197 unsafe uses are COM
+callback/vtable registration consistent with bridging WinRT async operations
+to Rust `Future`s. No network, filesystem, or process use found.
+"""
+
+[[audits.windows-implement]]
+version = "0.60.2"
+checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Proc-macro
+crate (`#[implement]`); read every non-test entry point in full:
+`src/lib.rs` (406 lines, the `implement` macro plus its attribute parser) and
+`src/gen.rs` (600 lines, the `gen_all`/`gen_*` functions that build the
+`syn`/`quote!` token streams for COM vtables, `QueryInterface`, `AddRef`/
+`Release`, `GetTrustLevel`). All `unsafe` tokens found by grep in these two
+files are template text being *emitted* by `quote!{}` for the macro's
+caller (generated `unsafe extern "system" fn` vtable shims), not unsafe code
+executed by the macro itself -- confirmed by reading the surrounding quote!
+blocks. The one `Command::new("rustfmt")` hit is in `src/tests.rs:30`, behind
+`#[cfg(test)]` (a dev-only formatting-comparison test), never compiled into a
+shipped build -- confirmed by reading the enclosing test module. No network,
+filesystem, or process use outside that test.
+"""
+
+[[audits.windows-interface]]
+version = "0.59.3"
+checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Proc-macro
+crate (`#[interface(...)]`); read `src/lib.rs` in full (762 lines, its
+entire source, no other files) -- parses the interface's GUID and trait
+definition and emits the matching `Interface`/vtable/`ScopedInterface`
+`quote!{}` token stream. Every `unsafe`/`transmute` hit from grep is inside a
+`quote!{}` block emitting code for the macro's caller (COM vtable function
+pointers and pointer-cast interface coercions), not unsafe code the macro
+itself executes -- confirmed by reading each occurrence in context. No
+network, filesystem, or process use; no build script.
+"""
+
+[[audits.windows-link]]
+version = "0.2.1"
+checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. Trivial crate
+(39 lines total): defines the `link!` macro used throughout windows-sys/
+windows to declare a raw `extern "system"` function bound to a DLL import,
+nothing else. Read the full source. No unsafe of its own (the macro emits
+`unsafe extern` items for its callers), no build script, one
+`include_str!("../readme.md")` for the crate doc, no network/filesystem/
+process use.
+"""
+
+[[audits.windows-numerics]]
+version = "0.3.1"
+checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Small (1193 lines) hand-written WinRT numerics type crate (`Vector2`,
+`Matrix3x2`, `Quaternion`, etc.) -- plain-data math types, not FFI-heavy. Read
+`src/` in full given its size; only 3 unsafe uses, all `#[repr(C)]`
+transmute-free field-layout guarantees for interop with the WinRT ABI's
+numeric structs. One `include_str!("../readme.md")` for the crate doc. No
+network, filesystem, or process use.
+"""
+
+[[audits.windows-result]]
+version = "0.4.1"
+checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Small (891 lines) `HRESULT`/`Error`/`Result` type crate, read in full. 27
+unsafe uses are `HRESULT` bit-pattern construction and `Error::from_hresult`
+-style FFI boundary crossings, consistent with its documented purpose. One
+`include_str!("../readme.md")` for the crate doc. No network, filesystem, or
+process use.
+"""
+
+[[audits.windows-strings]]
+version = "0.5.1"
+checksum = "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+`BSTR`/`PCWSTR`/`HSTRING` string-marshaling crate (1366 lines), read in full.
+73 unsafe uses are UTF-16/UTF-8 conversion pointer arithmetic and raw
+`Vec`/slice construction over `*const u16` buffers at the Windows ABI
+boundary -- the crate's whole documented purpose. One
+`include_str!("../readme.md")` for the crate doc. No network, filesystem, or
+process use.
+"""
+
+[[audits.windows-sys]]
+version = "0.61.2"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Microsoft's raw-FFI-only windows-rs crate (`#![no_std]`, 334,283 lines): read
+`src/lib.rs` in full (17 lines, just module wiring and an `include!` of the
+generated tree) and sampled a leaf binding file in full
+(`src/Windows/Win32/System/Diagnostics/Debug/Extensions/mod.rs`, 166 unsafe
+uses out of the file) -- confirmed the mechanical generator shape:
+`windows_link::link!(...)` extern declarations one per Win32 function,
+`#[repr(C)]` structs, and `unsafe { core::mem::zeroed() }` in `Default` impls
+for structs with no safe zero value. Every function/struct maps 1:1 to an
+entry in Microsoft's win32metadata; no free-standing logic found anywhere
+sampled. 12,530 unsafe uses total were not read individually at this scale;
+the audit relies on the confirmed generator shape plus consistent sampling
+across the file tree rather than a full manual pass. No network, filesystem,
+or process use.
+"""
+
+[[audits.windows-threading]]
+version = "0.2.1"
+checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+`cargo tree` confirms unreachable on x86_64-unknown-linux-gnu. No build.rs.
+Small (284 lines) crate providing `Once`/thread-local-storage-slot wrappers
+over Win32 primitives, read in full. 20 unsafe uses are direct
+`windows-sys` TLS/synchronization API calls, consistent with its documented
+purpose. One `include_str!("../readme.md")` for the crate doc. No network,
+filesystem, or process use.
+"""
+
+[[audits.xattr]]
+version = "1.6.1"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+No build.rs, no network/process/`include_*!`. Read src/sys/linux_macos.rs in
+full: on Linux this crate delegates entirely to `rustix::fs::{fgetxattr,
+fsetxattr,fremovexattr,flistxattr}` (see the `rustix` entry) with zero raw
+unsafe of its own in that file; the crate's 16 unsafe sites are concentrated
+in src/sys/bsd.rs (FreeBSD `extattr_*` FFI, not compiled here) and a couple of
+`BorrowedFd::borrow_raw` calls in lib.rs, a standard safe-wrapper pattern.
+Matches its documented purpose (extended-attribute get/set/list/remove).
+"""
+
+[[audits.zerocopy]]
+version = "0.8.57"
+checksum = "d35102a9f36d089ccae9e4c6802bc118be4487b80aaffc0ab4e0cf5ce92d2873"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Read build.rs in full: reads its own Cargo.toml (`fs::read_to_string
+("Cargo.toml")`) to parse a `[package.metadata.build-rs]` version table it
+authored itself, and spawns only `rustc --version` (via the `RUSTC` env var)
+to gate cfg flags by toolchain version; no other I/O. The crate denies
+`clippy::undocumented_unsafe_blocks` in its own lints; sampled lib.rs (27
+`unsafe {` blocks, 29 `SAFETY:` comments — matching pairing) including the
+`pointer_to_metadata` slice-pointer cast and `zero()`'s `ptr::write_bytes`,
+both carefully justified against the type's documented invariants. The one
+`include_bytes!` reference is inside the public `include_bytes_as!` macro
+(macros.rs:984), a documented user-facing feature (embed a file as a typed
+value in the *caller's* crate), not a hidden read by zerocopy itself. No
+network/process beyond the build-time rustc probe. Given the crate's size
+(28.6k loc, 544 unsafe), lib.rs was sampled, not read line-by-line in full.
+"""
+
+[[audits.zerocopy-derive]]
+version = "0.8.57"
+checksum = "146c01f5ab44258da43cf276c74a2763db2ff3969c9c652c3f2de07041d0b2bc"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Proc-macro crate; read src/lib.rs (225 lines, every entry point) in full: the
+`derive!`-macro-generated `#[proc_macro_derive(...)]` functions for
+KnownLayout/Immutable/TryFromBytes/FromZeros/FromBytes/IntoBytes/Unaligned/
+ByteHash/ByteEq/SplitAt, plus `most_traits` and the deprecated `FromZeroes`/
+`AsBytes` aliases. Each parses its `TokenStream` via `syn::parse_macro_input!`
+and emits generated impl code via `syn`/`quote`; no I/O, no network, no
+process spawn, no `include_*!` outside test code. Grepped derive/, util.rs and
+repr.rs for the same risky patterns — clean. The one filesystem hit
+(`std::fs::write` in src/output_tests/mod.rs) is a `#[cfg(test)]`-only
+snapshot-"bless" helper for the derive-output golden tests, not part of the
+shipped macro. Companion crate to `zerocopy` (reviewed above), from the same
+project.
+"""
+
+[[audits.zeroize]]
+version = "1.9.0"
+checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The RustCrypto Project Developers, github.com/RustCrypto/utils. No build script.
+Read all 20 unsafe sites in src/lib.rs: every one is `ptr::write_volatile`,
+`MaybeUninit::zeroed()`, or a `volatile_set` helper writing zero bytes over `self`
+followed by an `optimization_barrier` call, each carrying an inline `// SAFETY:`
+comment (alignment/valid-for-any-bit-pattern/single-allocated-object arguments) —
+exactly this crate's documented purpose of best-effort memory zeroing that the
+optimizer cannot elide. No env, fs, process or network access.
+"""
+
+[[audits.zeroize_derive]]
+version = "1.5.0"
+checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+The RustCrypto Project Developers, github.com/RustCrypto/utils. Proc-macro crate;
+read both entry points in src/lib.rs (`#[proc_macro_derive(Zeroize, ...)]` and
+`#[proc_macro_derive(ZeroizeOnDrop, ...)]`, 870 lines total). Generates
+field-by-field `.zeroize()` calls for derive targets; no env, fs, process spawning,
+network access, or `include_bytes!`/`include_str!` anywhere in the crate.
+"""
+
+[[audits.zmij]]
+version = "1.0.23"
+checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+who = "continuum-dev"
+criteria = ["safe-to-deploy"]
+notes = """
+Cargo.toml.orig: author David Tolnay, repository github.com/dtolnay/zmij,
+description "A double-to-string conversion algorithm based on Schubfach and
+xjb" — this is dtolnay's own float-to-string formatting crate (a sibling of
+his `ryu`, which is pulled in as a dev-dependency for comparison testing),
+the unfamiliar name is simply this crate's chosen name, not an unrelated or
+suspicious rename. Read build.rs in full: an `rustc -vV`-based nightly-probe
+emitting `cargo:rustc-cfg=is_nightly`; no network, no filesystem writes
+outside cfg emission. 2088 LOC, unsafe_kw=70 (the highest density in this
+slice, ~1 per 30 lines) — sampled roughly 30 of the 70 directly, covering
+every category present: src/stdarch_x86.rs (read in full, 4/4) reimplements
+`_mm_set_epi8/16/32/64x` as `const fn` via `mem::transmute` from integer
+arrays, needed because the real `core::arch::x86_64` intrinsics of the same
+name are not `const fn` on stable — a standard, narrowly-scoped workaround;
+src/lib.rs's remaining unsafe is `get_unchecked`/pointer-offset reads into
+statically-bounded power-of-ten lookup tables (`POW10_MINOR`/`POW10_MAJOR`/
+`POW10_FIXUPS`), SIMD digit-shuffle writes gated by
+`#[cfg(target_feature = ...)]` (SSE4.1/SSE2/NEON), `mem::transmute` building
+`int32x4_t`/`int16x8_t` SIMD constants from integer arrays (same pattern as
+stdarch_x86.rs), and `asm!("/*{}*/", ...)` used only as an empty compiler
+barrier (forcing register/instruction-scheduling behavior, not executing any
+real assembly instruction) — the same well-known trick used throughout
+performance-sensitive Rust code. All of this is inherent to a SIMD-optimized
+float-formatting algorithm and structurally matches itoa/ryu from the same
+author elsewhere in this slice. No I/O, network, or process access; no
+`include_bytes!`/`include_str!`.
 """

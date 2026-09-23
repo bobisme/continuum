@@ -17,8 +17,10 @@
 //!   never linked into the definition of meaning.
 //! - Kernel crates may not depend on this crate either — the kernel is synchronous by
 //!   covenant.
-//! - This crate depends on `continuum-task` (the region calculus it is held to) and on
-//!   `continuum-value` (the ADR-0013 digest seam), and on nothing external.
+//! - This crate depends on `continuum-task` (the region calculus it is held to), on
+//!   `continuum-value` (the ADR-0013 digest seam), and on `asupersync` itself (pinned
+//!   `=0.5.0` with `deterministic-mode` only; `tools/governance/dependency-rationale.toml`
+//!   gives the reasons and `dependency-audits.toml` records the audit of its tree).
 //!
 //! # What has landed (PR-14-IMPL-01, bn-lf4i)
 //!
@@ -37,14 +39,17 @@
 //!   so "identical choice logs give identical events" is testable with no substrate;
 //! - [`lift`] — the journal replayed into `continuum_task::region::RegionTree`, with a
 //!   three-way verdict: conforms, violates at a sequence number, or inconclusive;
-//! - [`binding`] — the substrate binding, as a typed absence.
+//! - [`binding`] — the substrate binding for the lifecycle family: asupersync's lab
+//!   runtime driven under a [`choice::ChoiceLog`], with the journal observed from the
+//!   substrate's own trace. The PR-14 exit sentence holds at this grain too, and the
+//!   substrate's journal is byte-equal to the scripted source's at every interleaving
+//!   the tests enumerate.
 //!
 //! # What is not here
 //!
-//! The binding to the substrate itself. See [`binding`]. The PR-14 exit sentence holds at
-//! the grain of the scripted source; at the grain of real substrate events it is open
-//! until the binding lands. `tools/check_crate_boundaries.py` enforces the forbidden
-//! edges mechanically.
+//! The other five families' bindings: [`binding::substrate_binding`] answers each of
+//! them with the typed absence [`binding::BindingAbsence::FamilyNotBound`].
+//! `tools/check_crate_boundaries.py` enforces the forbidden edges mechanically.
 
 pub mod binding;
 pub mod choice;

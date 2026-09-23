@@ -3,7 +3,8 @@
 //! docs/01 §6 maps the substrate's "Lab scheduler choice" to Continuum's "replay
 //! choice". This type is the Continuum half of that row, defined here and owned here:
 //! no substrate type appears in it, so a log is meaningful with the substrate absent and
-//! stays meaningful when a binding lands.
+//! stays meaningful now that the binding has landed ([`crate::binding::run`] takes the same
+//! log).
 //!
 //! # What one choice means
 //!

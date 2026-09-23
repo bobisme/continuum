@@ -43,6 +43,20 @@ members = ["crates/*"]
 # `blake3_matches_the_published_test_vectors` pins.
 blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
 
+# asupersync, the Phase B substrate (ADR-0001, plan §21) that PR-14-IMPL-01's
+# continuum-asupersync adapter binds. Exact pin: its license rider travels with
+# every linked binary (ADR-0053 D0), and the audit gate binds to one checksum.
+#
+# `default-features = false` drops `proc-macros` (a proc-macro crate executes in
+# the compiler and adds syn/quote to the build graph; the adapter writes no
+# attribute macros) and `nightly-outcome-try` (a nightly-only `Try` impl; the
+# toolchain here is stable). `deterministic-mode` is a dependency-free cfg flag:
+# it replaces `SystemTime::now()` with a fixed epoch in the four lab oracles
+# (cancellation_protocol, channel_atomicity, region_leak, waker_dedup), so an
+# oracle's violation stream is a function of the schedule alone (INV-005,
+# ADR-0003). The lab runtime itself is not feature-gated upstream.
+asupersync = { version = "=0.5.0", default-features = false, features = ["deterministic-mode"] }
+
 [workspace.package]
 version = "0.0.0"
 edition = "2024"

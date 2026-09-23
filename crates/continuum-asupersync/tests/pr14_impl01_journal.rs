@@ -8,10 +8,10 @@
 //!
 //! # The grain these tests close at
 //!
-//! The substrate binding is a typed absence (`binding.rs`), so events come from the
-//! crate's scripted source: per-actor scripts interleaved by a choice log. Every test
-//! here is at that grain. The real-substrate grain stays open until the binding lands,
-//! and `the_substrate_binding_is_a_typed_absence` pins that so it cannot be forgotten.
+//! Every test here is at the grain of the crate's scripted source: per-actor scripts
+//! interleaved by a choice log. The real-substrate grain is
+//! `tests/pr14_impl01_binding.rs`, which also holds the substrate journal byte-equal to
+//! this file's scripted journals at every interleaving of its programs.
 //!
 //! # Evidence map
 //!
@@ -31,7 +31,6 @@
 
 use std::collections::BTreeMap;
 
-use continuum_asupersync::binding::{BindingAbsence, SubstrateBinding, substrate_binding};
 use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::encoding::DecodeError;
 use continuum_asupersync::family::lifecycle::{
@@ -706,17 +705,4 @@ fn malformed_choice_logs_are_typed_refusals() {
         Err(RecordRefusal::ChoiceLogOverrun { position: 1 })
     );
     assert_eq!(record(&[], &ChoiceLog::default()), Ok(Journal::new()));
-}
-
-#[test]
-fn the_substrate_binding_is_a_typed_absence() {
-    let binding = substrate_binding();
-    assert_eq!(
-        binding,
-        SubstrateBinding::Absent(BindingAbsence::DependencyNotDeclared)
-    );
-    assert_eq!(
-        binding.inconclusive_reason(),
-        InconclusiveReason::Unsupported
-    );
 }

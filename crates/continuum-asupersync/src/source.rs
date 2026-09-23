@@ -158,6 +158,16 @@ impl RecordContext {
             self.full = true;
         }
     }
+
+    /// Whether an append failed.
+    pub(crate) const fn is_full(&self) -> bool {
+        self.full
+    }
+
+    /// The recorded journal, or `None` when an append failed.
+    pub(crate) fn into_journal(self) -> Option<Journal> {
+        (!self.full).then_some(self.journal)
+    }
 }
 
 /// Record `scripts` interleaved by `log`.
