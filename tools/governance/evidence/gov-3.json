@@ -14,11 +14,14 @@
     "generated_mirror": "notes/plan/notes/PLAN_REQUIREMENTS.json (category \u201cclaim\u201d)",
     "ownership_ledger": ".bones/events/*.events",
     "referenced_by_document": [
+      "C001",
+      "C015",
+      "C028",
+      "C034",
       "C035"
     ],
     "referenced_claims": 33,
     "referenced_only_by_bone": [
-      "C001",
       "C002",
       "C003",
       "C004",
@@ -32,7 +35,6 @@
       "C012",
       "C013",
       "C014",
-      "C015",
       "C016",
       "C017",
       "C018",
@@ -44,12 +46,10 @@
       "C024",
       "C026",
       "C027",
-      "C028",
       "C029",
       "C031",
       "C032",
-      "C033",
-      "C034"
+      "C033"
     ],
     "registry": "notes/plan/docs/18_CLAIMS_MATRIX.md",
     "rows": 35
@@ -66,7 +66,7 @@
   "counts": {
     "bounded": 2,
     "certificate checked": 0,
-    "exempted:hedged": 4,
+    "exempted:hedged": 5,
     "exempted:negated": 6,
     "exempted:qualified": 4,
     "exhaustively checked": 0,
@@ -74,7 +74,7 @@
     "observed": 0,
     "proved under": 0,
     "tested": 4,
-    "uncontrolled-candidates": 11
+    "uncontrolled-candidates": 12
   },
   "cross_check": {
     "bone": "bn-18cg",
@@ -120,7 +120,7 @@
         "text": "- Context Packs are bounded, carry omission manifests and expansion handles, and improve agent benchmark effectiveness;"
       },
       {
-        "line": 2335,
+        "line": 2465,
         "path": "notes/plan/plan.md",
         "reason": "plan \u00a722's mirror of the same G2 criterion. Both copies are grandfathered separately so paying one off does not silently cover the other.",
         "rule": "claim-verb-discipline",
@@ -141,6 +141,7 @@
     "GOV-3-01": {
       "boundary": "Proxy. Only assertive uses (copula or perfect + `observed` in predicate position) are seen; an observation reported as a noun phrase or a bare table cell is not.",
       "fixtures_caught": [
+        "claim-c006-prohibited-wording.md",
         "claim-observed-tested-no-scope.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -170,6 +171,7 @@
     "GOV-3-02": {
       "boundary": "Proxy. Only assertive uses are seen, and the corpus requirement is satisfied by any scope preposition \u2014 the check cannot tell a named corpus from a vague one.",
       "fixtures_caught": [
+        "claim-c006-prohibited-wording.md",
         "claim-observed-tested-no-scope.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -200,6 +202,7 @@
       "boundary": "Proxy. A numeral or a scope preposition counts as the bound; the check does not verify the bound is the one the evidence actually holds within.",
       "fixtures_caught": [
         "claim-bounded-no-bound.md",
+        "claim-c006-prohibited-wording.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
       ],
@@ -229,6 +232,7 @@
       "boundary": "Proxy. Same bound test as `bounded`. The check cannot verify exhaustiveness \u2014 only that a bound is stated alongside the word.",
       "fixtures_caught": [
         "claim-bounded-no-bound.md",
+        "claim-c006-prohibited-wording.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
       ],
@@ -257,6 +261,7 @@
     "GOV-3-05": {
       "boundary": "Proxy. The check verifies that assumptions are *named* after `under`; it cannot verify they are the assumptions the proof actually needs.",
       "fixtures_caught": [
+        "claim-c006-prohibited-wording.md",
         "claim-proved-under-no-assumptions.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -286,6 +291,7 @@
     "GOV-3-06": {
       "boundary": "Proxy. The check verifies an artifact or checker is named in the sentence; it does not re-check the certificate.",
       "fixtures_caught": [
+        "claim-c006-prohibited-wording.md",
         "claim-certificate-checked-no-artifact.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -315,6 +321,7 @@
     "GOV-3-07": {
       "boundary": "Proxy. The check rejects a hypothesis stated alongside a stronger claim word; it cannot judge whether a statement should have been a hypothesis.",
       "fixtures_caught": [
+        "claim-c006-prohibited-wording.md",
         "claim-hypothesized-with-strength.md",
         "claim-uncontrolled-verb.md",
         "claim-verb-set-drift.md"
@@ -427,7 +434,7 @@
   },
   "self_test": {
     "failures": [],
-    "fixtures": 13,
+    "fixtures": 15,
     "status": "pass"
   },
   "status": "pass"

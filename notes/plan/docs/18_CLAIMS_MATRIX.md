@@ -21,7 +21,7 @@ REFUTED
 | C003 | CIR preserves relevant partial-order behavior | reference semantics and projection theorems/tests | HYPOTHESIS |
 | C004 | Asupersync adapter captures all supported nondeterminism | API inventory, lint/MIR audits, mutation corpus | TARGET |
 | C005 | Baseline DPOR preserves finite safety verdicts | exhaustive differential corpus | TARGET |
-| C006 | Exact finite explorer has no fingerprint unsoundness | exact equality and collision injection | TARGET |
+| C006 | Exact finite explorer has no fingerprint unsoundness | exact equality and collision injection | OBSERVED |
 | C007 | Abstract model Agreement holds in configured scope | checked finite certificate | TARGET |
 | C008 | Runtime implementation refines abstract register in configured scope | checked refinement evidence | TARGET |
 | C009 | Continuum replaces one project's bespoke DST | migration metrics and bug corpus | TARGET |
@@ -72,3 +72,17 @@ CI should reject bare “verified,” “sound,” “complete,” “determinis
 | C033 | Agents can repair concurrent Rust without semantic weakening | locked-spec hidden-mutant benchmark | TARGET |
 | C034 | Semiring-valued traversal provides reusable analysis without claim confusion | specialized-baseline equivalence and performance | HYPOTHESIS |
 | C035 | Lean seed files are verified | successful pinned `lake build`, zero `sorry`, axiom reports | BLOCKED |
+
+## Evidence records
+
+A row leaves `TARGET` only with a record here that names the scope of its evidence.
+
+C006 is observed on the reference explorer, `bfs::explore` in
+`continuum-engine-reference`. That explorer is the whole scope. The evidence is
+`crates/continuum-engine-reference/tests/bfs_exact_identity.rs` (bn-286s). The
+visited map keys on the full state vector with derived equality and order, and a
+source guard pins that. Under injected fingerprint collisions (total, pairwise, and
+pigeonhole on a 4-bit fingerprint) the explorer returns the exact reachable count.
+A fingerprint-only deduplication mutant loses states, and the same exactness check
+rejects it. The optimized engine `continuum-engine-explicit` is a scaffold today. When
+it lands, C006 needs new evidence for it under ADR-0013.
