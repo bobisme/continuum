@@ -79,3 +79,4 @@
 {"ts":"2026-09-23T20:24:53.020823024Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-3sioqn","reason":"Verified against target 6f1b7faf444c8ec08ed7a455cf7748ad25166140; fix is fail-closed."}}
 {"ts":"2026-09-23T20:25:12.055099714Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-3hcpn4","vote":"lgtm","reason":"LGTM at 6f1b7faf444c8ec08ed7a455cf7748ad25166140. Whole persisted range reviewed. All security threads are resolved. Risk-critical human approval remains a separate mandatory gate.","target_commit":"6f1b7faf444c8ec08ed7a455cf7748ad25166140"}}
 {"ts":"2026-09-23T20:25:12.092558075Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-3hcpn4","target_commit":"6f1b7faf444c8ec08ed7a455cf7748ad25166140"}}
+{"ts":"2026-09-23T20:33:48.967755959Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-3hcpn4","final_commit":"7b9afb2"}}
