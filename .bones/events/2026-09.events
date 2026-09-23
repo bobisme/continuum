@@ -309,3 +309,9 @@
 1790139140170861	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEyrhI		item.link	bn-2318t	{"link_type":"blocks","target":"bn-19p"}	blake3:9aQgkEDlGKsclt8fy5XVrRxhJYckJr1uv3ieJMSuoLY
 1790139171273110	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEyrxI		item.link	bn-3qzd	{"link_type":"blocks","target":"bn-2318t"}	blake3:qveyKWOWj3PJFyd8Ds9sreo9AUrPbLCuyKPAxUgR11s
 1790139171315493	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEysBI		item.move	bn-gzy1	{"state":"done"}	blake3:yw3tP1H_sUoppCRMMSyZtS9I17VQR4phhuzS2Z5pUOw
+1790139194921112	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEysRI		item.move	bn-6nm8	{"state":"doing"}	blake3:FKgzDtv1aOf-cy0-G68PE5HU8g62IR6H0IIi43uSsWo
+1790139194934063	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEyshI		item.assign	bn-6nm8	{"action":"assign","agent":"continuum-dev"}	blake3:el0Ik03yDyd7dGVfulGyZSKaFzQVy-hhttGljw-MA8w
+1790139195318366	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEysxI		item.move	bn-36x3b	{"state":"doing"}	blake3:UmbbxR4qTqCUERdcvFFcY9wJwW_HxA6QLRoQ_UaLz_w
+1790139195331919	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEytBI		item.assign	bn-36x3b	{"action":"assign","agent":"continuum-dev"}	blake3:mTJt292QVfgWWdQs6bG2x33_h9QR8yF5J5K79zbGzf8
+1790139195713496	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEytRI		item.move	bn-hakt3	{"state":"doing"}	blake3:8-9sBJl5vmkITfS0tEvk8iUQkL3tF1jrAJLx3YhR9NU
+1790139195718863	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEythI		item.assign	bn-hakt3	{"action":"assign","agent":"continuum-dev"}	blake3:iav18R72a4az0ilWaBFVOXQuBt_Xq6iXBVQp6ItYf_Y
