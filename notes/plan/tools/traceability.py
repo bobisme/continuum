@@ -29,6 +29,27 @@ REGISTRY_PATH = ROOT / "notes/PLAN_REQUIREMENTS.json"
 REPORT_PATH = ROOT / "notes/PLAN_BONE_TRACEABILITY.md"
 ACTIVE = "active"
 
+# The living-document completion record: "(delivered: bn-… — note)" names the
+# Bone that owns the evidence. The pattern stops at the first ")", so an
+# annotation must not nest parentheses; a nested pair would leave its tail in
+# the stripped text.
+DELIVERED_RE = re.compile(r"\s*\(delivered:[^)]*\)")
+
+# Plan §22 phase-to-gate map: a phase exit closes exactly these gates.
+PHASE_GATES: dict[str, frozenset[str]] = {
+    "A": frozenset({"G0", "G1", "G2"}),
+    "B": frozenset({"G3", "G4"}),
+    "C": frozenset({"G5"}),
+    "D": frozenset({"G6"}),
+    "E": frozenset({"G7"}),
+    "F": frozenset({"G8", "G9", "G10"}),
+}
+
+
+def strip_delivered(value: str) -> str:
+    """Remove every "(delivered: …)" completion record from `value`."""
+    return DELIVERED_RE.sub("", value)
+
 # These edges are the semantic prerequisites for the initial dispatch frontier.
 # Requirement coverage proves that work exists; this contract additionally
 # proves that the work is executable in the order it is offered to agents.
@@ -168,9 +189,11 @@ def _requirement(
     return result
 
 
-def _extract_phases(requirements: list[dict[str, Any]]) -> None:
+def _extract_phases(
+    requirements: list[dict[str, Any]], *, text: str | None = None
+) -> None:
     path = "plan.md"
-    text = _text(path)
+    text = _text(path) if text is None else text
     section = re.search(r"^## 21\. .*?(?=^## 22\.)", text, re.MULTILINE | re.DOTALL)
     if not section:
         raise AssertionError("plan.md: implementation program section missing")
@@ -181,11 +204,10 @@ def _extract_phases(requirements: list[dict[str, Any]]) -> None:
         phase, title = match.groups()
         phase_id = f"PHASE-{phase}"
         source_line = _line_number(text, section.start() + match.start())
-        requirements.append(
-            _requirement(
-                phase_id, "phase", title, path, source_line, coverage="any"
-            )
+        phase_requirement = _requirement(
+            phase_id, "phase", title, path, source_line, coverage="any"
         )
+        requirements.append(phase_requirement)
         deliver_match = re.search(
             r"\nDeliver:\s*(.*?)(?=\nExit:)", body, re.DOTALL
         )
@@ -210,16 +232,26 @@ def _extract_phases(requirements: list[dict[str, Any]]) -> None:
         exit_match = re.search(r"\nExit:\s*(.*?)(?=\n\n|\Z)", body, re.DOTALL)
         if not exit_match:
             raise AssertionError(f"{phase_id}: Exit block missing")
+        # Same living-document completion record as PR exits:
+        # "(delivered: bn-…)" on the Exit text names the Bone that closed the
+        # phase exit, normally the goal:manual exit goal.
+        exit_delivered = "(delivered:" in exit_match.group(1)
         requirements.append(
             _requirement(
                 f"{phase_id}-EXIT",
                 "phase-exit",
-                exit_match.group(1),
+                strip_delivered(exit_match.group(1)),
                 path,
                 source_line,
                 parent=phase_id,
+                status="satisfied" if exit_delivered else ACTIVE,
             )
         )
+        if exit_delivered:
+            # A delivered exit completes the phase itself, as a delivered PR
+            # exit completes its PR: the exit criterion is the phase's
+            # definition of done.
+            phase_requirement["status"] = "satisfied"
 
 
 def _normalize_pr_id(raw: str) -> str:
@@ -286,8 +318,19 @@ def _extract_gates(
         body = text[match.end() : end]
         line = _line_number(text, match.start())
         gate_id = f"G{gate}"
+        # A "(delivered: bn-…)" annotation at the end of the heading is the
+        # gate's own completion record: it names the goal:manual gate Bone
+        # whose close accepted the gate. The title drops it.
         requirements.append(
-            _requirement(gate_id, "gate", title, path, line, coverage="any")
+            _requirement(
+                gate_id,
+                "gate",
+                strip_delivered(title),
+                path,
+                line,
+                coverage="any",
+                status="satisfied" if "(delivered:" in title else ACTIVE,
+            )
         )
         bullets = _top_level_bullets(body)
         if not bullets:
@@ -302,7 +345,8 @@ def _extract_gates(
             # "(delivered: bn-…)" on a criterion names the Bone that owns its
             # evidence, so the criterion no longer needs an active carrier.
             # The parent gate keeps its own status either way — a gate closes
-            # when its goal:manual gate Bone closes, never because one of its
+            # only through the annotation on its own heading, recorded when
+            # its goal:manual gate Bone closes, never because one of its
             # criteria was delivered.
             status = "satisfied" if "(delivered:" in summary else ACTIVE
             summary = re.sub(r"\s*\(delivered:[^)]*\)", "", summary)
@@ -965,6 +1009,24 @@ def graph_contract_state(
         if item["kind"] == "goal" and item.get("size") not in {"l", "xl"}
     )
 
+    requirement_map = {item["id"]: item for item in registry["requirements"]}
+
+    # A closed phase is one whose plan §21 Exit text carries a delivered
+    # annotation (PHASE-X-EXIT satisfied). Only a closed phase may have its
+    # phase goal, exit goal, and integration carrier in the done state. An
+    # open phase keeps every check below at full strength.
+    closed_phases = {
+        phase
+        for phase in "ABCDEF"
+        if requirement_map.get(f"PHASE-{phase}-EXIT", {}).get("status")
+        == "satisfied"
+    }
+    done_bones = {
+        item_id: item
+        for item_id, item in all_bones.items()
+        if not item["deleted"] and item["state"] in {"done", "closed", "archived"}
+    }
+
     phase_ids: dict[str, str] = {}
     phase_failures: list[str] = []
     for phase in "ABCDEF":
@@ -974,12 +1036,27 @@ def graph_contract_state(
             if item["title"].startswith(f"Phase {phase} —")
             and item["kind"] == "goal"
         ]
+        if not matches and phase in closed_phases:
+            matches = [
+                item_id
+                for item_id, item in done_bones.items()
+                if item["title"].startswith(f"Phase {phase} —")
+                and item["kind"] == "goal"
+            ]
         if len(matches) != 1:
             phase_failures.append(f"Phase {phase}: expected one goal, found {matches}")
             continue
         phase_ids[phase] = matches[0]
-        if "goal:manual" not in bones[matches[0]]["labels"]:
+        if "goal:manual" not in all_bones[matches[0]]["labels"]:
             phase_failures.append(f"Phase {phase}: goal:manual missing")
+
+    def barrier_discharged(phase: str) -> bool:
+        """A closed phase whose goal is done has discharged its barrier edges.
+
+        The graph keeps only edges between active Bones, so a done phase goal
+        blocks nothing. That is correct only when the phase exit is delivered.
+        """
+        return phase in closed_phases and phase_ids.get(phase) in done_bones
 
     def descendants(parent: str) -> set[str]:
         result: set[str] = set()
@@ -995,6 +1072,8 @@ def graph_contract_state(
     phase_barrier_failures: list[str] = []
     if len(phase_ids) == 6:
         for previous, current in zip("ABCDE", "BCDEF", strict=True):
+            if barrier_discharged(previous):
+                continue
             required = phase_ids[previous]
             for leaf in sorted(leaves & descendants(phase_ids[current])):
                 if (required, leaf) not in links:
@@ -1012,17 +1091,43 @@ def graph_contract_state(
                 and item["parent"] == phase_id
                 and f"req:phase-{phase.lower()}-exit" in item["labels"]
             ]
+            done_matches = [
+                item_id
+                for item_id, item in done_bones.items()
+                if item["kind"] == "goal"
+                and item["parent"] == phase_id
+                and f"req:phase-{phase.lower()}-exit" in item["labels"]
+            ]
+            if not matches and phase in closed_phases:
+                # The delivered exit annotation is the record; the exit goal
+                # that accepted it is closed.
+                matches = done_matches
+            elif not matches and done_matches:
+                phase_exit_failures.append(
+                    f"Phase {phase}: exit goal {done_matches} is done but "
+                    f"PHASE-{phase}-EXIT carries no delivered annotation"
+                )
+                continue
             if len(matches) != 1:
                 phase_exit_failures.append(
                     f"Phase {phase}: expected one exit goal, found {matches}"
                 )
                 continue
-            if "goal:manual" not in bones[matches[0]]["labels"]:
+            if "goal:manual" not in all_bones[matches[0]]["labels"]:
                 phase_exit_failures.append(
                     f"Phase {phase}: exit goal {matches[0]} lacks goal:manual"
                 )
+    for phase in sorted(closed_phases):
+        # A delivered phase exit may not outrun its gates: every gate the
+        # phase closes carries its own delivered heading annotation.
+        for gate in sorted(PHASE_GATES[phase]):
+            gate_requirement = requirement_map.get(gate)
+            if gate_requirement is not None and gate_requirement["status"] != "satisfied":
+                phase_exit_failures.append(
+                    f"Phase {phase}: exit delivered but gate {gate} is "
+                    f"{gate_requirement['status']}"
+                )
 
-    requirement_map = {item["id"]: item for item in registry["requirements"]}
     pr_exit_failures: list[str] = []
     for requirement in registry["requirements"]:
         if requirement["category"] != "pr":
@@ -1072,17 +1177,14 @@ def graph_contract_state(
             continue
         req_id = requirement["id"]
         gate = requirement["parent"]
+        if requirement_map.get(gate, {}).get("status") == "satisfied":
+            # A delivered gate heading may not outrun its criteria.
+            gate_failures.append(
+                f"{req_id}: gate {gate} is delivered but this criterion is active"
+            )
+            continue
         phase = next(
-            phase
-            for phase, gates in {
-                "A": {"G0", "G1", "G2"},
-                "B": {"G3", "G4"},
-                "C": {"G5"},
-                "D": {"G6"},
-                "E": {"G7"},
-                "F": {"G8", "G9", "G10"},
-            }.items()
-            if gate in gates
+            phase for phase, gates in PHASE_GATES.items() if gate in gates
         )
         criterion = [
             item_id
@@ -1126,7 +1228,13 @@ def graph_contract_state(
             if f"plan-key:phase-exit-{phase.lower()}-integration"
             in candidate_item["labels"]
         ]
-        if len(integration) != 1:
+        if not integration and phase in closed_phases:
+            # The phase exit is delivered and its carrier is closed, so an
+            # active checkpoint of that phase was never discharged.
+            risk_checkpoint_failures.append(
+                f"{item_id}: Phase {phase} is closed but this checkpoint is active"
+            )
+        elif len(integration) != 1:
             risk_checkpoint_failures.append(
                 f"{item_id}: Phase {phase} integration={integration}"
             )
@@ -1136,7 +1244,10 @@ def graph_contract_state(
             )
         if phase != "A":
             previous = chr(ord(phase) - 1)
-            if previous not in phase_ids or (phase_ids[previous], item_id) not in links:
+            if not barrier_discharged(previous) and (
+                previous not in phase_ids
+                or (phase_ids[previous], item_id) not in links
+            ):
                 risk_checkpoint_failures.append(
                     f"{item_id}: lacks predecessor Phase {previous} barrier"
                 )
@@ -1211,7 +1322,7 @@ def graph_contract_state(
         deadline = phase_labels[0][-1].upper()
         if deadline >= "C":
             barrier_phase = chr(ord(deadline) - 2)
-            if (
+            if not barrier_discharged(barrier_phase) and (
                 barrier_phase not in phase_ids
                 or (phase_ids[barrier_phase], item_id) not in links
             ):
@@ -1489,7 +1600,7 @@ def validate_checked_traceability() -> dict[str, Any]:
 
 _SELF_TEST_GATES = """# Revision 3 Release Gates
 
-## G1 — Workbench identity and lifecycle
+## G1 — Workbench identity and lifecycle{g1_heading}
 
 - snapshots, intent contracts, and artifacts are immutable and content-addressed{g1_01};
 - explicit handles across the native API;
@@ -1508,32 +1619,128 @@ _SELF_TEST_ANNOTATIONS = {
 }
 
 
+# The gate-heading annotation is separate from the criterion annotations: the
+# criterion controls (C4, C7) need the parent gate left unannotated.
+_SELF_TEST_HEADING_ANNOTATION = " (delivered: bn-dddd — gate accepted at the phase exit)"
+_SELF_TEST_GATE_KEYS = (*_SELF_TEST_ANNOTATIONS, "g1_heading")
+
+
 def _self_test_gates(**annotations: str) -> dict[str, dict[str, Any]]:
     """Extract the fixture's gate requirements, keyed by requirement id."""
     requirements: list[dict[str, Any]] = []
     _extract_gates(
         requirements,
         text=_SELF_TEST_GATES.format(
-            **{key: annotations.get(key, "") for key in _SELF_TEST_ANNOTATIONS}
+            **{key: annotations.get(key, "") for key in _SELF_TEST_GATE_KEYS}
+        ),
+    )
+    return {item["id"]: item for item in requirements}
+
+
+# A two-phase plan §21 fixture. The Phase A exit annotation wraps across a line
+# break, as a real Exit paragraph does.
+_SELF_TEST_PLAN = """# Plan
+
+## 21. Implementation program
+
+### Phase A — Trust spine
+
+Deliver:
+
+- immutable schemas;
+
+Exit: Die Hard can be checked through the native API; continuation resume
+validates epochs (G1).{phase_a_exit}
+
+### Phase B — Real-code failure loop
+
+Deliver:
+
+- replay;
+
+Exit: an agent fixes ack-before-durable without changing intent.{phase_b_exit}
+
+## 22. Gates
+"""
+
+_SELF_TEST_PHASE_ANNOTATION = (
+    " (delivered: bn-eeee — exit accepted by the user;\nlater exits delegated)"
+)
+
+
+def _self_test_phases(**annotations: str) -> dict[str, dict[str, Any]]:
+    """Extract the fixture's phase requirements, keyed by requirement id."""
+    requirements: list[dict[str, Any]] = []
+    _extract_phases(
+        requirements,
+        text=_SELF_TEST_PLAN.format(
+            phase_a_exit=annotations.get("phase_a_exit", ""),
+            phase_b_exit=annotations.get("phase_b_exit", ""),
         ),
     )
     return {item["id"]: item for item in requirements}
 
 
 def _self_test_bone(
-    item_id: str, labels: set[str], *, kind: str = "task"
+    item_id: str,
+    labels: set[str],
+    *,
+    kind: str = "task",
+    title: str | None = None,
+    parent: str | None = None,
+    state: str = "open",
 ) -> dict[str, Any]:
     return {
         "id": item_id,
-        "title": item_id,
+        "title": title or item_id,
         "description": "",
         "kind": kind,
-        "parent": None,
-        "size": "s",
+        "parent": parent,
+        "size": "l" if kind == "goal" else "s",
         "labels": labels,
-        "state": "open",
+        "state": state,
         "deleted": False,
     }
+
+
+def _self_test_graph(
+    requirements: list[dict[str, Any]],
+    all_bones: dict[str, dict[str, Any]],
+    links: set[tuple[str, str]],
+    coverage: dict[str, set[str]],
+    *,
+    leaves: set[str] | None = None,
+) -> dict[str, Any]:
+    """Run `graph_contract_state` on a synthetic graph, without the log.
+
+    `graph_contract_state` reads the Bones event log through the two module
+    projections, so the fixture swaps them to stay hermetic. The active view
+    and the active-only edge set are derived exactly as `traceability_state`
+    and `graph_contract_state` derive them from the real log.
+    """
+    global project_bones, project_blocking_links
+    active = {
+        item_id: item
+        for item_id, item in all_bones.items()
+        if not item["deleted"] and item["state"] not in {"done", "closed", "archived"}
+    }
+    if leaves is None:
+        parents = {item["parent"] for item in active.values()}
+        leaves = {item_id for item_id in active if item_id not in parents}
+    saved = (project_bones, project_blocking_links)
+    project_bones = lambda: all_bones  # noqa: E731
+    project_blocking_links = lambda: set(links)  # noqa: E731
+    try:
+        return graph_contract_state(
+            {"requirements": requirements},
+            {
+                "bones": active,
+                "leaves": leaves,
+                "coverage": defaultdict(set, coverage),
+            },
+        )
+    finally:
+        project_bones, project_blocking_links = saved
 
 
 def _self_test_gate_wiring(
@@ -1542,26 +1749,63 @@ def _self_test_gate_wiring(
     links: set[tuple[str, str]],
     coverage: dict[str, set[str]],
 ) -> list[str]:
-    """Return `gate_failures` for a synthetic graph, without touching the log.
+    """Return `gate_failures` for a synthetic all-active graph."""
+    return _self_test_graph(
+        requirements, bones, links, coverage, leaves=set(bones)
+    )["gate_failures"]
 
-    `graph_contract_state` reads the Bones event log through the two module
-    projections, so the fixture swaps them to stay hermetic.
+
+def _self_test_phase_graph(
+    *, phase_a_closed_bones: bool
+) -> tuple[dict[str, dict[str, Any]], set[tuple[str, str]]]:
+    """Six phase goals, each with a goal:manual exit goal, plus Phase A's
+    integration carrier and a Phase B leaf and risk checkpoint.
+
+    With `phase_a_closed_bones`, the Phase A goal, exit goal, and integration
+    carrier are done, and nothing links from them: the log keeps no active
+    edge from a done Bone. Otherwise the Phase A exit goal and carrier are
+    done but the Phase A goal is active and still owes its barrier edges.
     """
-    global project_bones, project_blocking_links
-    saved = (project_bones, project_blocking_links)
-    project_bones = lambda: bones  # noqa: E731
-    project_blocking_links = lambda: set(links)  # noqa: E731
-    try:
-        return graph_contract_state(
-            {"requirements": requirements},
-            {
-                "bones": bones,
-                "leaves": set(bones),
-                "coverage": defaultdict(set, coverage),
-            },
-        )["gate_failures"]
-    finally:
-        project_bones, project_blocking_links = saved
+    bones: dict[str, dict[str, Any]] = {}
+    links: set[tuple[str, str]] = set()
+    for phase in "ABCDEF":
+        goal = f"bn-ph{phase.lower()}"
+        exit_goal = f"bn-ex{phase.lower()}"
+        closed = phase == "A"
+        bones[goal] = _self_test_bone(
+            goal,
+            {"goal:manual", f"req:phase-{phase.lower()}"},
+            kind="goal",
+            title=f"Phase {phase} — fixture",
+            state="done" if closed and phase_a_closed_bones else "open",
+        )
+        bones[exit_goal] = _self_test_bone(
+            exit_goal,
+            {"goal:manual", f"req:phase-{phase.lower()}-exit"},
+            kind="goal",
+            parent=goal,
+            state="done" if closed else "open",
+        )
+    bones["bn-inta"] = _self_test_bone(
+        "bn-inta",
+        {"plan-key:phase-exit-a-integration", "req:phase-a-exit"},
+        parent="bn-exa",
+        state="done",
+    )
+    bones["bn-intb"] = _self_test_bone(
+        "bn-intb", {"plan-key:phase-exit-b-integration", "req:phase-b-exit"}
+    )
+    bones["bn-leafb"] = _self_test_bone("bn-leafb", {"req:phase-b"}, parent="bn-phb")
+    bones["bn-riskb"] = _self_test_bone("bn-riskb", {"risk", "phase-b"})
+    links.add(("bn-riskb", "bn-intb"))
+    # Every later-phase exit goal carries its predecessor barrier.
+    for previous, current in zip("BCDE", "CDEF", strict=True):
+        links.add((f"bn-ph{previous.lower()}", f"bn-ex{current.lower()}"))
+    if not phase_a_closed_bones:
+        # The Phase A goal is active, so the Phase B exit goal has its edge;
+        # the Phase B leaf and risk checkpoint deliberately do not.
+        links.add(("bn-pha", "bn-exb"))
+    return bones, links
 
 
 def self_test() -> int:
@@ -1654,12 +1898,201 @@ def self_test() -> int:
         f"gate_failures={_self_test_gate_wiring(stale, bones, links, coverage)}",
     )
 
+    print("self-test: delivered annotation on a gate heading")
+    headed = _self_test_gates(g1_heading=_SELF_TEST_HEADING_ANNOTATION)
+    check(
+        "H1 delivered gate heading is satisfied",
+        headed["G1"]["status"] == "satisfied",
+        f"status={headed['G1']['status']}",
+    )
+    check(
+        "H2 delivered gate title drops the annotation",
+        "(delivered:" not in headed["G1"]["summary"]
+        and headed["G1"]["summary"] == plain["G1"]["summary"],
+        f"summary={headed['G1']['summary']!r}",
+    )
+    check(
+        "H3 the annotated heading still delimits its criteria",
+        [key for key in headed if key.startswith("G1")]
+        == [key for key in plain if key.startswith("G1")]
+        and headed["G1-01"]["summary"] == plain["G1-01"]["summary"],
+        f"ids={sorted(headed)}",
+    )
+    check(
+        "H4 an unannotated sibling gate stays active",
+        headed["G2"]["status"] == ACTIVE,
+        f"status={headed['G2']['status']}",
+    )
+    check(
+        "H5 a gate heading annotation leaves its criteria active",
+        headed["G1-01"]["status"] == ACTIVE and headed["G1-02"]["status"] == ACTIVE,
+        f"statuses={headed['G1-01']['status']}, {headed['G1-02']['status']}",
+    )
+    heading_failures = _self_test_gate_wiring(
+        [headed["G1"], headed["G1-01"], headed["G1-02"]], bones, links, coverage
+    )
+    check(
+        "H6 a delivered gate with an active criterion fails the wiring",
+        any("gate G1 is delivered" in failure for failure in heading_failures),
+        f"gate_failures={heading_failures}",
+    )
+
+    print("self-test: delivered annotation on a phase exit")
+    phase_closed = _self_test_phases(phase_a_exit=_SELF_TEST_PHASE_ANNOTATION)
+    phase_plain = _self_test_phases()
+    check(
+        "P1 delivered phase exit is satisfied",
+        phase_closed["PHASE-A-EXIT"]["status"] == "satisfied",
+        f"status={phase_closed['PHASE-A-EXIT']['status']}",
+    )
+    check(
+        "P2 delivered phase exit completes the phase",
+        phase_closed["PHASE-A"]["status"] == "satisfied",
+        f"status={phase_closed['PHASE-A']['status']}",
+    )
+    check(
+        "P3 delivered exit summary drops the wrapped annotation",
+        "(delivered:" not in phase_closed["PHASE-A-EXIT"]["summary"]
+        and "delegated" not in phase_closed["PHASE-A-EXIT"]["summary"]
+        and phase_closed["PHASE-A-EXIT"]["summary"]
+        == phase_plain["PHASE-A-EXIT"]["summary"],
+        f"summary={phase_closed['PHASE-A-EXIT']['summary']!r}",
+    )
+    check(
+        "P4 an undelivered sibling phase and its exit stay active",
+        phase_closed["PHASE-B"]["status"] == ACTIVE
+        and phase_closed["PHASE-B-EXIT"]["status"] == ACTIVE,
+        f"statuses={phase_closed['PHASE-B']['status']}, "
+        f"{phase_closed['PHASE-B-EXIT']['status']}",
+    )
+    check(
+        "P5 an unannotated plan yields active phases and exits",
+        all(
+            phase_plain[key]["status"] == ACTIVE
+            for key in ("PHASE-A", "PHASE-A-EXIT", "PHASE-B", "PHASE-B-EXIT")
+        ),
+        f"statuses={ {key: item['status'] for key, item in phase_plain.items()} }",
+    )
+    check(
+        "P6 a phase exit annotation leaves the Deliver bullets alone",
+        phase_closed["PHASE-A-DEL-01"]["status"] == ACTIVE,
+        f"status={phase_closed['PHASE-A-DEL-01']['status']}",
+    )
+
+    # The consequence: closing the phase goal, exit goal, and integration
+    # carrier of a delivered phase leaves the phase wiring clean, while the
+    # same done Bones under an undelivered exit still fail it.
+    print("self-test: phase wiring for a closed and an open phase")
+    wiring_keys = (
+        "phase_failures",
+        "phase_barrier_failures",
+        "phase_exit_failures",
+        "gate_failures",
+        "risk_checkpoint_failures",
+    )
+    satisfied_gates = [
+        {"id": gate, "category": "gate", "status": "satisfied"}
+        for gate in ("G0", "G1", "G2")
+    ]
+    satisfied_criterion = {
+        "id": "G1-01",
+        "category": "gate-criterion",
+        "status": "satisfied",
+        "parent": "G1",
+    }
+    closed_bones, closed_links = _self_test_phase_graph(phase_a_closed_bones=True)
+    closed_graph = _self_test_graph(
+        [*phase_closed.values(), *satisfied_gates, satisfied_criterion],
+        closed_bones,
+        closed_links,
+        {},
+    )
+    closed_wiring = {key: closed_graph[key] for key in wiring_keys}
+    check(
+        "W1 a closed phase with done goal, exit goal, and carrier passes wiring",
+        not any(closed_wiring.values()),
+        f"failures={closed_wiring}",
+    )
+
+    open_bones, open_links = _self_test_phase_graph(phase_a_closed_bones=False)
+    open_bones["bn-c101"] = _self_test_bone(
+        "bn-c101", {"req:g1-01", "plan-key:gate-g1-01"}
+    )
+    active_gates = [
+        {"id": gate, "category": "gate", "status": ACTIVE} for gate in ("G0", "G1", "G2")
+    ]
+    open_graph = _self_test_graph(
+        [
+            *phase_plain.values(),
+            *active_gates,
+            dict(satisfied_criterion, status=ACTIVE),
+        ],
+        open_bones,
+        open_links,
+        {"G1-01": {"bn-c101"}},
+    )
+    check(
+        "W2 an open phase with a done exit goal fails the exit wiring",
+        any(
+            "bn-exa" in failure and "no delivered annotation" in failure
+            for failure in open_graph["phase_exit_failures"]
+        ),
+        f"phase_exit_failures={open_graph['phase_exit_failures']}",
+    )
+    check(
+        "W3 an open phase with a done carrier fails its active criteria",
+        any(
+            failure.startswith("G1-01:") for failure in open_graph["gate_failures"]
+        ),
+        f"gate_failures={open_graph['gate_failures']}",
+    )
+    check(
+        "W4 an open phase keeps its successor barrier strict",
+        any("bn-leafb" in failure for failure in open_graph["phase_barrier_failures"])
+        and any(
+            failure.startswith("bn-riskb:")
+            for failure in open_graph["risk_checkpoint_failures"]
+        ),
+        f"barrier={open_graph['phase_barrier_failures']}, "
+        f"risk={open_graph['risk_checkpoint_failures']}",
+    )
+
+    done_goal_graph = _self_test_graph(
+        [*phase_plain.values(), *satisfied_gates], closed_bones, closed_links, {}
+    )
+    check(
+        "W5 a done phase goal under an undelivered exit fails the phase check",
+        any(
+            failure.startswith("Phase A:")
+            for failure in done_goal_graph["phase_failures"]
+        ),
+        f"phase_failures={done_goal_graph['phase_failures']}",
+    )
+    outrun_graph = _self_test_graph(
+        [
+            *phase_closed.values(),
+            *satisfied_gates[:2],
+            {"id": "G2", "category": "gate", "status": ACTIVE},
+        ],
+        closed_bones,
+        closed_links,
+        {},
+    )
+    check(
+        "W6 a delivered phase exit with an active gate fails the exit wiring",
+        any("gate G2" in failure for failure in outrun_graph["phase_exit_failures"]),
+        f"phase_exit_failures={outrun_graph['phase_exit_failures']}",
+    )
+
     if failures:
         print("self-test: FAILED")
         for failure in failures:
             print(f"  {failure}")
         return 1
-    print("self-test: gate criteria honor delivered annotations, gates do not")
+    print(
+        "self-test: delivered annotations close criteria, gate headings, and "
+        "phase exits; closed phases pass wiring, open phases stay strict"
+    )
     return 0
 
 

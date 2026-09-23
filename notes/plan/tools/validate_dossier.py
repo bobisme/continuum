@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
-from traceability import validate_checked_traceability
+from traceability import strip_delivered, validate_checked_traceability
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = ROOT.parents[1]
@@ -404,14 +404,15 @@ def _parse_gate_sections(text: str) -> dict[int, list[str]]:
         if current is not None and bullet:
             # Correspondence is over the normative text: a "(delivered: bn-…)"
             # annotation is a completion record, stripped exactly as the
-            # traceability extractors strip it.
-            gates[current].append(
-                re.sub(r"\s*\(delivered:[^)]*\)", "", " ".join(bullet))
-            )
+            # traceability extractors strip it. The strip stops at the first
+            # ")", so an annotation with nested parentheses is not supported.
+            gates[current].append(strip_delivered(" ".join(bullet)))
         bullet.clear()
 
     for line in text.splitlines():
-        heading = GATE_HEADING_RE.match(line)
+        # A delivered annotation on a gate heading ("## G1 — title
+        # (delivered: bn-…)") is a completion record, not a heading change.
+        heading = GATE_HEADING_RE.match(strip_delivered(line))
         if heading:
             flush()
             current = int(heading.group(1))
@@ -1093,9 +1094,14 @@ def check_phase_gate_tables() -> dict[str, Any]:
     plan_text = (ROOT / "plan.md").read_text(encoding="utf-8")
     match = re.search(r"^## 22\..*?(?=^## \d)", plan_text, re.MULTILINE | re.DOTALL)
     assert match, "plan.md section 22 not found"
-    plan_table = _phase_gate_table(match.group(0))
+    # Delivered annotations are completion records; the tables compare the
+    # normative text only (nested parentheses inside an annotation are not
+    # supported).
+    plan_table = _phase_gate_table(strip_delivered(match.group(0)))
     docs_table = _phase_gate_table(
-        (ROOT / "docs/52_RELEASE_GATES_REV3.md").read_text(encoding="utf-8")
+        strip_delivered(
+            (ROOT / "docs/52_RELEASE_GATES_REV3.md").read_text(encoding="utf-8")
+        )
     )
     assert set(plan_table) == set("ABCDEF"), f"plan phase table rows: {sorted(plan_table)}"
     assert set(docs_table) == set("ABCDEF"), f"docs/52 phase table rows: {sorted(docs_table)}"
@@ -1114,7 +1120,12 @@ def check_g10_two_system() -> dict[str, Any]:
     needle = "at least two migrated projects stop requiring a separate TLA+ workflow"
     legacy = "at least one migrated project stops requiring"
     for rel in ("plan.md", "docs/52_RELEASE_GATES_REV3.md"):
-        norm = re.sub(r"\s+", " ", (ROOT / rel).read_text(encoding="utf-8"))
+        # Compare the normative text: a delivered annotation on a plan §21
+        # Exit line or a docs/52 heading is a completion record (nested
+        # parentheses inside an annotation are not supported).
+        norm = re.sub(
+            r"\s+", " ", strip_delivered((ROOT / rel).read_text(encoding="utf-8"))
+        )
         assert needle in norm, f"{rel}: two-system G10 criterion missing"
         assert legacy not in norm, f"{rel}: superseded one-system G10 criterion still present"
     return {"criterion": "two-system"}
