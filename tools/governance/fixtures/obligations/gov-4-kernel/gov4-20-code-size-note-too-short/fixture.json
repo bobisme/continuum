@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "kernel-code-size-report-names-the-change",
+  "description": "`kernel.code_size` numbers match, but the note is too short to name the changed crate.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture.rs": "head-crates__continuum-kernel-core__src__gov4_fixture.rs",
+    "crates/continuum-kernel-core/tests/gov4_fixture.rs": "head-crates__continuum-kernel-core__tests__gov4_fixture.rs",
+    "tools/governance/reviews/gov4-kernel-fixture.toml": "head-tools__governance__reviews__gov4-kernel-fixture.toml"
+  },
+  "id": "gov4-20-code-size-note-too-short",
+  "requirement": "GOV-4-20",
+  "rule": "kernel-code-size-report"
+}

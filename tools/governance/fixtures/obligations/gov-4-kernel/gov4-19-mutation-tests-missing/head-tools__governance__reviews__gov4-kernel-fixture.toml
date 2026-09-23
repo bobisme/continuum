@@ -1,0 +1,17 @@
+[change]
+bone = "bn-2b4e"
+author = "fixture-author"
+summary = "fixture: a kernel change with a kernel record"
+
+[kernel]
+covers = ["crates/continuum-kernel-core/src/gov4_fixture.rs"]
+
+[kernel.code_size]
+total = 11009
+budget = 15000
+note = "continuum-kernel-core grew by five lines for the governance fixture marker"
+
+[kernel.no_unchecked_optimization]
+is_optimization = true
+verified_by = "crates/continuum-kernel-core/tests/gov4_fixture.rs::fast_path_matches_reference"
+

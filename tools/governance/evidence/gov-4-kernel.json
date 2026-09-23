@@ -1,0 +1,423 @@
+{
+  "artifact": "continuum.governance.evidence/gov-4-kernel",
+  "authority": {
+    "requirement_ids": "notes/plan/notes/PLAN_REQUIREMENTS.json",
+    "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements"
+  },
+  "determinism": "No timestamp, commit id, or absolute path: an unchanged tree reproduces this file byte-for-byte. Delta-rule verdicts are functions of history and are not recorded.",
+  "harness_at_head": {
+    "checks": "review-record envelope over every record at head; delivery link for every discovered set",
+    "result": "pass",
+    "violations": []
+  },
+  "harness_self_test": {
+    "failures": [],
+    "fixtures": 7,
+    "status": "pass",
+    "violating_by_check": {
+      "delivery-agrees-with-registry": [
+        "harness-delivered-id-not-satisfied",
+        "harness-undelivered-id-marked-satisfied"
+      ],
+      "review-record-change-table": [
+        "harness-change-table-malformed"
+      ],
+      "review-record-parses": [
+        "harness-record-does-not-parse"
+      ],
+      "review-record-sections-closed": [
+        "harness-unknown-key",
+        "harness-unknown-section"
+      ]
+    }
+  },
+  "notes": [
+    "GOV-4-17/18 (two reviewers, fuzz corpus) and GOV-4-13..16 (the remaining Pack-changes obligations) are sibling Bone bn-4x90's; KERNEL_SECTION_ITEMS names the whole five-item Kernel-changes list so the list check still catches drift in the two items this set does not own.",
+    "KERNEL_CORE is `tools/check_kernel_covenant.KERNEL_CRATES`, reused rather than retyped: both files mean plan \u00a720's same four crates, and `check_kernel_covenant.count_crate` is reused unchanged for GOV-4-20's live recomputation."
+  ],
+  "produced_by": "tools/governance/check_obligations.py (tools/governance/obligations/gov4_kernel.py)",
+  "regime": "The delta rules are in force for a delta whose base contains tools/governance/obligations/gov4_kernel.py; for an older base their findings are deferred (printed, reported, not failures).",
+  "reproduce": "python3 tools/governance/check_obligations.py --set gov-4-kernel --evidence",
+  "requirements": {
+    "GOV-4-19": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-19-mutation-class-not-registered",
+        "gov4-19-mutation-test-did-not-move",
+        "gov4-19-mutation-test-does-not-exist",
+        "gov4-19-mutation-test-unrelated-crate",
+        "gov4-19-mutation-tests-missing",
+        "gov4-kernel-no-record",
+        "gov4-kernel-section-list-drifted"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-change-has-review-record",
+            "kernel-review-record-covers-a-kernel-change"
+          ],
+          "enforces": "Every kernel change (a `continuum-kernel-*` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `kernel.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "kernel-change-has-review-record": [
+              "gov4-kernel-no-record"
+            ],
+            "kernel-review-record-covers-a-kernel-change": [
+              "gov4-kernel-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-review-record",
+          "shared_with": [
+            "GOV-4-20",
+            "GOV-4-21"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed kernel crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the mutation or the checked equivalence they claim.",
+          "checks": [
+            "kernel-mutation-tests-named",
+            "kernel-mutation-test-resolves",
+            "kernel-mutation-test-exercises-the-change",
+            "kernel-mutation-test-is-fresh",
+            "kernel-mutation-class-registered"
+          ],
+          "enforces": "`kernel.mutation_tests` names at least one test that resolves, reaches the change, is new or changed, and at least one class from tools/kernel-covenant/mutation-matrix.toml's registered mutation classes.",
+          "fixtures_proven_caught": {
+            "kernel-mutation-class-registered": [
+              "gov4-19-mutation-class-not-registered"
+            ],
+            "kernel-mutation-test-exercises-the-change": [
+              "gov4-19-mutation-test-unrelated-crate"
+            ],
+            "kernel-mutation-test-is-fresh": [
+              "gov4-19-mutation-test-did-not-move"
+            ],
+            "kernel-mutation-test-resolves": [
+              "gov4-19-mutation-test-does-not-exist"
+            ],
+            "kernel-mutation-tests-named": [
+              "gov4-19-mutation-tests-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-mutation-tests",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-review-list-registered",
+            "kernel-mutation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Kernel changes list, and the generated registry's GOV-4-19..21 summaries, still name these ids in order; tools/kernel-covenant/mutation-matrix.toml still carries the mutation classes GOV-4-19 types against.",
+          "fixtures_proven_caught": {
+            "kernel-mutation-vocabulary-present": [
+              "gov4-kernel-vocabulary-gone"
+            ],
+            "kernel-review-list-registered": [
+              "gov4-kernel-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "kernel-review-list",
+          "shared_with": [
+            "GOV-4-20",
+            "GOV-4-21"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "mutation tests"
+    },
+    "GOV-4-20": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-20-code-size-mismatch",
+        "gov4-20-code-size-missing",
+        "gov4-20-code-size-note-too-short",
+        "gov4-kernel-covers-mismatch",
+        "gov4-kernel-vocabulary-gone"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-change-has-review-record",
+            "kernel-review-record-covers-a-kernel-change"
+          ],
+          "enforces": "Every kernel change (a `continuum-kernel-*` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `kernel.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "kernel-change-has-review-record": [
+              "gov4-kernel-no-record"
+            ],
+            "kernel-review-record-covers-a-kernel-change": [
+              "gov4-kernel-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-review-record",
+          "shared_with": [
+            "GOV-4-19",
+            "GOV-4-21"
+          ]
+        },
+        {
+          "boundary": "EXACT: `total` and `budget` are recomputed against `ctx.head` on every run and compared for equality, not trusted from the record or from the separately-committed kernel-covenant evidence file, which can be stale relative to the tree under review.",
+          "checks": [
+            "kernel-code-size-report-present",
+            "kernel-code-size-report-matches-live-count",
+            "kernel-code-size-report-names-the-change"
+          ],
+          "enforces": "`[kernel.code_size]` states `total` and `budget`, recomputed live over the four kernel crates by the same method KCOV-01 (tools/check_kernel_covenant.py) uses, and a `note` of minimum length naming a changed kernel crate.",
+          "fixtures_proven_caught": {
+            "kernel-code-size-report-matches-live-count": [
+              "gov4-20-code-size-mismatch"
+            ],
+            "kernel-code-size-report-names-the-change": [
+              "gov4-20-code-size-note-too-short"
+            ],
+            "kernel-code-size-report-present": [
+              "gov4-20-code-size-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-code-size-report",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-review-list-registered",
+            "kernel-mutation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Kernel changes list, and the generated registry's GOV-4-19..21 summaries, still name these ids in order; tools/kernel-covenant/mutation-matrix.toml still carries the mutation classes GOV-4-19 types against.",
+          "fixtures_proven_caught": {
+            "kernel-mutation-vocabulary-present": [
+              "gov4-kernel-vocabulary-gone"
+            ],
+            "kernel-review-list-registered": [
+              "gov4-kernel-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "kernel-review-list",
+          "shared_with": [
+            "GOV-4-19",
+            "GOV-4-21"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "code-size report"
+    },
+    "GOV-4-21": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-21-non-optimization-reason-missing",
+        "gov4-21-optimization-not-declared",
+        "gov4-21-optimization-verified-by-missing",
+        "gov4-21-optimization-verified-by-stale",
+        "gov4-21-optimization-verified-by-unrelated"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-change-has-review-record",
+            "kernel-review-record-covers-a-kernel-change"
+          ],
+          "enforces": "Every kernel change (a `continuum-kernel-*` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `kernel.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "kernel-change-has-review-record": [
+              "gov4-kernel-no-record"
+            ],
+            "kernel-review-record-covers-a-kernel-change": [
+              "gov4-kernel-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-review-record",
+          "shared_with": [
+            "GOV-4-19",
+            "GOV-4-20"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed kernel crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the mutation or the checked equivalence they claim. `is_optimization` is self-reported, the same shape `gov4_impact_reduction_pack`'s claim-impact obligation (GOV-4-07) already carries: the check proves the claim is typed and, when it claims an optimization, that a fresh test in the changed crate exists to check it \u2014 not that the test actually establishes the checked equivalence, which is a review judgement.",
+          "checks": [
+            "kernel-optimization-declared",
+            "kernel-optimization-verified-by-resolves",
+            "kernel-optimization-verified-by-is-fresh",
+            "kernel-optimization-verified-by-exercises-the-change",
+            "kernel-non-optimization-reason-present"
+          ],
+          "enforces": "`[kernel.no_unchecked_optimization]` states a boolean `is_optimization`; when true, `verified_by` names a test that resolves, reaches the change, and is new or changed; when false, `reason` carries a minimum-length explanation.",
+          "fixtures_proven_caught": {
+            "kernel-non-optimization-reason-present": [
+              "gov4-21-non-optimization-reason-missing"
+            ],
+            "kernel-optimization-declared": [
+              "gov4-21-optimization-not-declared"
+            ],
+            "kernel-optimization-verified-by-exercises-the-change": [
+              "gov4-21-optimization-verified-by-unrelated"
+            ],
+            "kernel-optimization-verified-by-is-fresh": [
+              "gov4-21-optimization-verified-by-stale"
+            ],
+            "kernel-optimization-verified-by-resolves": [
+              "gov4-21-optimization-verified-by-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "kernel-no-unchecked-optimization",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "kernel-review-list-registered",
+            "kernel-mutation-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's Kernel changes list, and the generated registry's GOV-4-19..21 summaries, still name these ids in order; tools/kernel-covenant/mutation-matrix.toml still carries the mutation classes GOV-4-19 types against.",
+          "fixtures_proven_caught": {
+            "kernel-mutation-vocabulary-present": [
+              "gov4-kernel-vocabulary-gone"
+            ],
+            "kernel-review-list-registered": [
+              "gov4-kernel-section-list-drifted"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "kernel-review-list",
+          "shared_with": [
+            "GOV-4-19",
+            "GOV-4-20"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "no unchecked optimization"
+    }
+  },
+  "self_test": {
+    "clean": [
+      "gov4-kernel-complete-record-is-clean",
+      "gov4-kernel-non-optimization-record-is-clean"
+    ],
+    "deferred": [
+      "gov4-kernel-before-the-set-landed"
+    ],
+    "failures": [],
+    "fixtures": 20,
+    "status": "pass",
+    "violating_by_check": {
+      "kernel-change-has-review-record": [
+        "gov4-kernel-no-record"
+      ],
+      "kernel-code-size-report-matches-live-count": [
+        "gov4-20-code-size-mismatch"
+      ],
+      "kernel-code-size-report-names-the-change": [
+        "gov4-20-code-size-note-too-short"
+      ],
+      "kernel-code-size-report-present": [
+        "gov4-20-code-size-missing"
+      ],
+      "kernel-mutation-class-registered": [
+        "gov4-19-mutation-class-not-registered"
+      ],
+      "kernel-mutation-test-exercises-the-change": [
+        "gov4-19-mutation-test-unrelated-crate"
+      ],
+      "kernel-mutation-test-is-fresh": [
+        "gov4-19-mutation-test-did-not-move"
+      ],
+      "kernel-mutation-test-resolves": [
+        "gov4-19-mutation-test-does-not-exist"
+      ],
+      "kernel-mutation-tests-named": [
+        "gov4-19-mutation-tests-missing"
+      ],
+      "kernel-mutation-vocabulary-present": [
+        "gov4-kernel-vocabulary-gone"
+      ],
+      "kernel-non-optimization-reason-present": [
+        "gov4-21-non-optimization-reason-missing"
+      ],
+      "kernel-optimization-declared": [
+        "gov4-21-optimization-not-declared"
+      ],
+      "kernel-optimization-verified-by-exercises-the-change": [
+        "gov4-21-optimization-verified-by-unrelated"
+      ],
+      "kernel-optimization-verified-by-is-fresh": [
+        "gov4-21-optimization-verified-by-stale"
+      ],
+      "kernel-optimization-verified-by-resolves": [
+        "gov4-21-optimization-verified-by-missing"
+      ],
+      "kernel-review-list-registered": [
+        "gov4-kernel-section-list-drifted"
+      ],
+      "kernel-review-record-covers-a-kernel-change": [
+        "gov4-kernel-covers-mismatch"
+      ]
+    },
+    "violating_by_requirement": {
+      "GOV-4-19": [
+        "gov4-19-mutation-class-not-registered",
+        "gov4-19-mutation-test-did-not-move",
+        "gov4-19-mutation-test-does-not-exist",
+        "gov4-19-mutation-test-unrelated-crate",
+        "gov4-19-mutation-tests-missing",
+        "gov4-kernel-no-record",
+        "gov4-kernel-section-list-drifted"
+      ],
+      "GOV-4-20": [
+        "gov4-20-code-size-mismatch",
+        "gov4-20-code-size-missing",
+        "gov4-20-code-size-note-too-short",
+        "gov4-kernel-covers-mismatch",
+        "gov4-kernel-vocabulary-gone"
+      ],
+      "GOV-4-21": [
+        "gov4-21-non-optimization-reason-missing",
+        "gov4-21-optimization-not-declared",
+        "gov4-21-optimization-verified-by-missing",
+        "gov4-21-optimization-verified-by-stale",
+        "gov4-21-optimization-verified-by-unrelated"
+      ]
+    }
+  },
+  "status": "pass",
+  "title": "GOV \u00a74 kernel changes \u2014 mutation tests, code-size report, no unchecked optimization (GOV-4-19..21)"
+}

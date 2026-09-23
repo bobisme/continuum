@@ -1,0 +1,732 @@
+{
+  "artifact": "continuum.governance.evidence/gov-4-impact-reduction-pack",
+  "authority": {
+    "requirement_ids": "notes/plan/notes/PLAN_REQUIREMENTS.json",
+    "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements"
+  },
+  "determinism": "No timestamp, commit id, or absolute path: an unchanged tree reproduces this file byte-for-byte. Delta-rule verdicts are functions of history and are not recorded.",
+  "harness_at_head": {
+    "checks": "review-record envelope over every record at head; delivery link for every discovered set",
+    "result": "pass",
+    "violations": []
+  },
+  "harness_self_test": {
+    "failures": [],
+    "fixtures": 7,
+    "status": "pass",
+    "violating_by_check": {
+      "delivery-agrees-with-registry": [
+        "harness-delivered-id-not-satisfied",
+        "harness-undelivered-id-marked-satisfied"
+      ],
+      "review-record-change-table": [
+        "harness-change-table-malformed"
+      ],
+      "review-record-parses": [
+        "harness-record-does-not-parse"
+      ],
+      "review-record-sections-closed": [
+        "harness-unknown-key",
+        "harness-unknown-section"
+      ]
+    }
+  },
+  "notes": [
+    "GOV-4-13..GOV-4-16 (the remaining Pack-changes obligations: host/Lab conformance, fault coverage, independence review, version bump) are a later Bone's; PACK_SECTION_ITEMS names them so the list check still catches drift in the whole section.",
+    "POR_REDUCTION_CORE and PACK_CORE are this set's own crate classification, not `check_code_policy.SEMANTIC_CORE`: POR/reduction and pack changes are a different change class from the semantic changes `gov4_semantic.py` enforces."
+  ],
+  "produced_by": "tools/governance/check_obligations.py (tools/governance/obligations/gov4_impact_reduction_pack.py)",
+  "regime": "The delta rules are in force for a delta whose base contains tools/governance/obligations/gov4_impact_reduction_pack.py; for an older base their findings are deferred (printed, reported, not failures).",
+  "reproduce": "python3 tools/governance/check_obligations.py --set gov-4-impact-reduction-pack --evidence",
+  "requirements": {
+    "GOV-4-07": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-07-claim-id-unknown",
+        "gov4-07-no-claim-impact-table"
+      ],
+      "rules": [
+        {
+          "boundary": "Coverage of the semantic change itself is `gov4_semantic`'s `semantic-review-record` rule; this rule only proves the extension field on a record that already covers one.",
+          "checks": [
+            "claim-impact-declared",
+            "claim-impact-ids-resolve"
+          ],
+          "enforces": "A semantic change's review record (GOV-1-08's predicate, reused from `gov4_semantic`) states, in `[semantic.claim_impact]`, which docs/18 claim ids it bears on, with a reason when there are none; every named claim id resolves to a docs/18 row.",
+          "fixtures_proven_caught": {
+            "claim-impact-declared": [
+              "gov4-07-no-claim-impact-table"
+            ],
+            "claim-impact-ids-resolve": [
+              "gov4-07-claim-id-unknown"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "semantic-claim-impact",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-07-12-list-registered",
+            "gov4-07-12-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's POR/reduction and Pack changes lists, and the generated registry's GOV-4-07..12 summaries, still name these ids in order; docs/18, RFC 0014, docs/19 \u00a74, and RFC 0002 still carry the vocabularies these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-07-12-list-registered": [
+              "gov4-por-section-list-drifted"
+            ],
+            "gov4-07-12-vocabulary-present": [
+              "gov4-vocabulary-tiers-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-07-12-review-list",
+          "shared_with": [
+            "GOV-4-08",
+            "GOV-4-09",
+            "GOV-4-10",
+            "GOV-4-11",
+            "GOV-4-12"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "claim impact"
+    },
+    "GOV-4-08": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-08-no-reduction-test-did-not-move",
+        "gov4-08-no-reduction-test-does-not-exist",
+        "gov4-08-no-reduction-tests-missing",
+        "gov4-08-oracle-is-subject",
+        "gov4-08-subject-is-not-the-reduction-engine",
+        "gov4-08-test-never-names-subject",
+        "gov4-por-no-record"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "por-change-has-review-record",
+            "por-review-record-covers-a-por-change"
+          ],
+          "enforces": "Every POR/reduction change (a `continuum-engine-dpor` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `por_reduction.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "por-change-has-review-record": [
+              "gov4-por-no-record"
+            ],
+            "por-review-record-covers-a-por-change": [
+              "gov4-por-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "por-review-record",
+          "shared_with": [
+            "GOV-4-09",
+            "GOV-4-10",
+            "GOV-4-11"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour. Only in-workspace pairs are recognized. `subject` is pinned to `POR_REDUCTION_CORE`, which today has one member, so a passing pair always reaches the change; the rule does not carry a separate `exercises` check for that reason.",
+          "checks": [
+            "no-reduction-tests-named",
+            "no-reduction-test-resolves",
+            "no-reduction-pair-distinct-implementations",
+            "no-reduction-test-uses-both-implementations",
+            "no-reduction-test-is-fresh"
+          ],
+          "enforces": "`por_reduction.no_reduction_tests` names at least one differential test pairing the reduction engine (`subject`) against a distinct, unreduced workspace crate (`oracle`), both named as Rust paths in the test file; the test resolves and is new or changed.",
+          "fixtures_proven_caught": {
+            "no-reduction-pair-distinct-implementations": [
+              "gov4-08-oracle-is-subject",
+              "gov4-08-subject-is-not-the-reduction-engine"
+            ],
+            "no-reduction-test-is-fresh": [
+              "gov4-08-no-reduction-test-did-not-move"
+            ],
+            "no-reduction-test-resolves": [
+              "gov4-08-no-reduction-test-does-not-exist"
+            ],
+            "no-reduction-test-uses-both-implementations": [
+              "gov4-08-test-never-names-subject"
+            ],
+            "no-reduction-tests-named": [
+              "gov4-08-no-reduction-tests-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "no-reduction-differential",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-07-12-list-registered",
+            "gov4-07-12-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's POR/reduction and Pack changes lists, and the generated registry's GOV-4-07..12 summaries, still name these ids in order; docs/18, RFC 0014, docs/19 \u00a74, and RFC 0002 still carry the vocabularies these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-07-12-list-registered": [
+              "gov4-por-section-list-drifted"
+            ],
+            "gov4-07-12-vocabulary-present": [
+              "gov4-vocabulary-tiers-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-07-12-review-list",
+          "shared_with": [
+            "GOV-4-07",
+            "GOV-4-09",
+            "GOV-4-10",
+            "GOV-4-11",
+            "GOV-4-12"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "no-reduction differential campaign"
+    },
+    "GOV-4-09": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-09-mutation-not-named-at-test",
+        "gov4-09-mutation-test-did-not-move",
+        "gov4-09-mutation-test-does-not-exist",
+        "gov4-09-mutation-test-unrelated-crate",
+        "gov4-09-mutation-tests-missing",
+        "gov4-por-covers-mismatch",
+        "gov4-por-section-list-drifted"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "por-change-has-review-record",
+            "por-review-record-covers-a-por-change"
+          ],
+          "enforces": "Every POR/reduction change (a `continuum-engine-dpor` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `por_reduction.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "por-change-has-review-record": [
+              "gov4-por-no-record"
+            ],
+            "por-review-record-covers-a-por-change": [
+              "gov4-por-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "por-review-record",
+          "shared_with": [
+            "GOV-4-08",
+            "GOV-4-10",
+            "GOV-4-11"
+          ]
+        },
+        {
+          "boundary": "Proves the named test exists at head, is a non-ignored `#[test]` that `just check` runs, lives in or reaches a changed crate, and that at least one named test is new or changed in the delta. It does not judge whether the assertions pin the new behaviour. The mutation text proves the claimed mutation is named at the test, not that the test applies it.",
+          "checks": [
+            "dependence-mutation-tests-named",
+            "dependence-mutation-test-resolves",
+            "dependence-mutation-test-exercises-the-change",
+            "dependence-mutation-test-is-fresh",
+            "dependence-mutation-named-at-the-test"
+          ],
+          "enforces": "`por_reduction.dependence_mutation_tests` names at least one test that resolves, reaches the change, is new or changed, and names one of docs/19 \u00a74's semantic-engine mutation kinds in its doc comment or body.",
+          "fixtures_proven_caught": {
+            "dependence-mutation-named-at-the-test": [
+              "gov4-09-mutation-not-named-at-test"
+            ],
+            "dependence-mutation-test-exercises-the-change": [
+              "gov4-09-mutation-test-unrelated-crate"
+            ],
+            "dependence-mutation-test-is-fresh": [
+              "gov4-09-mutation-test-did-not-move"
+            ],
+            "dependence-mutation-test-resolves": [
+              "gov4-09-mutation-test-does-not-exist"
+            ],
+            "dependence-mutation-tests-named": [
+              "gov4-09-mutation-tests-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "dependence-mutation",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-07-12-list-registered",
+            "gov4-07-12-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's POR/reduction and Pack changes lists, and the generated registry's GOV-4-07..12 summaries, still name these ids in order; docs/18, RFC 0014, docs/19 \u00a74, and RFC 0002 still carry the vocabularies these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-07-12-list-registered": [
+              "gov4-por-section-list-drifted"
+            ],
+            "gov4-07-12-vocabulary-present": [
+              "gov4-vocabulary-tiers-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-07-12-review-list",
+          "shared_with": [
+            "GOV-4-07",
+            "GOV-4-08",
+            "GOV-4-10",
+            "GOV-4-11",
+            "GOV-4-12"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "mutation of dependence relation"
+    },
+    "GOV-4-10": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-10-note-too-short",
+        "gov4-10-property-analysis-missing",
+        "gov4-10-tier-not-registered",
+        "gov4-vocabulary-tiers-gone"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "por-change-has-review-record",
+            "por-review-record-covers-a-por-change"
+          ],
+          "enforces": "Every POR/reduction change (a `continuum-engine-dpor` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `por_reduction.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "por-change-has-review-record": [
+              "gov4-por-no-record"
+            ],
+            "por-review-record-covers-a-por-change": [
+              "gov4-por-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "por-review-record",
+          "shared_with": [
+            "GOV-4-08",
+            "GOV-4-09",
+            "GOV-4-11"
+          ]
+        },
+        {
+          "boundary": "Proves a typed field exists, is one of the registered vocabulary, and a note of minimum length names a changed crate. Whether the tier, metric, or profile is the correct one, or the note is accurate, is a review judgement.",
+          "checks": [
+            "property-analysis-present",
+            "property-tier-registered",
+            "property-analysis-names-the-change"
+          ],
+          "enforces": "`[por_reduction.property_analysis]` carries a `tier` from RFC 0014's property preservation tiers and a `note` of minimum length naming a changed crate.",
+          "fixtures_proven_caught": {
+            "property-analysis-names-the-change": [
+              "gov4-10-note-too-short"
+            ],
+            "property-analysis-present": [
+              "gov4-10-property-analysis-missing"
+            ],
+            "property-tier-registered": [
+              "gov4-10-tier-not-registered"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "property-class-analysis",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-07-12-list-registered",
+            "gov4-07-12-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's POR/reduction and Pack changes lists, and the generated registry's GOV-4-07..12 summaries, still name these ids in order; docs/18, RFC 0014, docs/19 \u00a74, and RFC 0002 still carry the vocabularies these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-07-12-list-registered": [
+              "gov4-por-section-list-drifted"
+            ],
+            "gov4-07-12-vocabulary-present": [
+              "gov4-vocabulary-tiers-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-07-12-review-list",
+          "shared_with": [
+            "GOV-4-07",
+            "GOV-4-08",
+            "GOV-4-09",
+            "GOV-4-11",
+            "GOV-4-12"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "liveness/property-class analysis"
+    },
+    "GOV-4-11": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-11-metric-not-registered",
+        "gov4-11-note-does-not-name-crate",
+        "gov4-11-performance-missing"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "por-change-has-review-record",
+            "por-review-record-covers-a-por-change"
+          ],
+          "enforces": "Every POR/reduction change (a `continuum-engine-dpor` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `por_reduction.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "por-change-has-review-record": [
+              "gov4-por-no-record"
+            ],
+            "por-review-record-covers-a-por-change": [
+              "gov4-por-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "por-review-record",
+          "shared_with": [
+            "GOV-4-08",
+            "GOV-4-09",
+            "GOV-4-10"
+          ]
+        },
+        {
+          "boundary": "Proves a typed field exists, is one of the registered vocabulary, and a note of minimum length names a changed crate. Whether the tier, metric, or profile is the correct one, or the note is accurate, is a review judgement.",
+          "checks": [
+            "performance-report-present",
+            "performance-metric-registered",
+            "performance-report-names-the-change"
+          ],
+          "enforces": "`[por_reduction.performance]` carries a `metric` from RFC 0014's `Evaluation` metrics and a `note` of minimum length naming a changed crate.",
+          "fixtures_proven_caught": {
+            "performance-metric-registered": [
+              "gov4-11-metric-not-registered"
+            ],
+            "performance-report-names-the-change": [
+              "gov4-11-note-does-not-name-crate"
+            ],
+            "performance-report-present": [
+              "gov4-11-performance-missing"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "performance-report",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-07-12-list-registered",
+            "gov4-07-12-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's POR/reduction and Pack changes lists, and the generated registry's GOV-4-07..12 summaries, still name these ids in order; docs/18, RFC 0014, docs/19 \u00a74, and RFC 0002 still carry the vocabularies these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-07-12-list-registered": [
+              "gov4-por-section-list-drifted"
+            ],
+            "gov4-07-12-vocabulary-present": [
+              "gov4-vocabulary-tiers-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-07-12-review-list",
+          "shared_with": [
+            "GOV-4-07",
+            "GOV-4-08",
+            "GOV-4-09",
+            "GOV-4-10",
+            "GOV-4-12"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "performance report"
+    },
+    "GOV-4-12": {
+      "delivery": {
+        "link": "the source bullet carries `(delivered: \u2026)`; notes/plan/notes/PLAN_REQUIREMENTS.json reads it `satisfied`; `delivery-agrees-with-registry` fails if the two disagree",
+        "status": "delivered"
+      },
+      "own_violating_fixtures": [
+        "gov4-12-fidelity-missing",
+        "gov4-12-fidelity-note-too-short",
+        "gov4-12-fidelity-profile-not-registered",
+        "gov4-12-pack-covers-mismatch",
+        "gov4-12-pack-no-record"
+      ],
+      "rules": [
+        {
+          "boundary": null,
+          "checks": [
+            "pack-change-has-review-record",
+            "pack-review-record-covers-a-pack-change"
+          ],
+          "enforces": "Every pack change (a `continuum-effects-*` source file whose comment-stripped code changed or that the delta added) is covered by a review record the delta adds or modifies; every `pack.covers` entry matches such a change.",
+          "fixtures_proven_caught": {
+            "pack-change-has-review-record": [
+              "gov4-12-pack-no-record"
+            ],
+            "pack-review-record-covers-a-pack-change": [
+              "gov4-12-pack-covers-mismatch"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "pack-review-record",
+          "shared_with": []
+        },
+        {
+          "boundary": "Proves a typed field exists, is one of the registered vocabulary, and a note of minimum length names a changed crate. Whether the tier, metric, or profile is the correct one, or the note is accurate, is a review judgement.",
+          "checks": [
+            "pack-fidelity-profile-declared",
+            "pack-fidelity-profile-registered",
+            "pack-fidelity-profile-names-the-change"
+          ],
+          "enforces": "`[pack.fidelity_profile]` carries a `profile` from RFC 0002's required profiles and a `note` of minimum length naming a changed pack crate.",
+          "fixtures_proven_caught": {
+            "pack-fidelity-profile-declared": [
+              "gov4-12-fidelity-missing"
+            ],
+            "pack-fidelity-profile-names-the-change": [
+              "gov4-12-fidelity-note-too-short"
+            ],
+            "pack-fidelity-profile-registered": [
+              "gov4-12-fidelity-profile-not-registered"
+            ]
+          },
+          "mode": "delta",
+          "real_run": "delta rule: the verdict is a function of two revisions and is reported to stdout and CI, never recorded here",
+          "rule": "pack-fidelity-profile",
+          "shared_with": []
+        },
+        {
+          "boundary": null,
+          "checks": [
+            "gov4-07-12-list-registered",
+            "gov4-07-12-vocabulary-present"
+          ],
+          "enforces": "docs/12 \u00a74's POR/reduction and Pack changes lists, and the generated registry's GOV-4-07..12 summaries, still name these ids in order; docs/18, RFC 0014, docs/19 \u00a74, and RFC 0002 still carry the vocabularies these rules type against.",
+          "fixtures_proven_caught": {
+            "gov4-07-12-list-registered": [
+              "gov4-por-section-list-drifted"
+            ],
+            "gov4-07-12-vocabulary-present": [
+              "gov4-vocabulary-tiers-gone"
+            ]
+          },
+          "mode": "tree",
+          "real_run": {
+            "result": "pass",
+            "violations": []
+          },
+          "rule": "gov4-07-12-review-list",
+          "shared_with": [
+            "GOV-4-07",
+            "GOV-4-08",
+            "GOV-4-09",
+            "GOV-4-10",
+            "GOV-4-11"
+          ]
+        }
+      ],
+      "source": "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md \u00a74 Review requirements",
+      "source_bullet": "fidelity profile"
+    }
+  },
+  "self_test": {
+    "clean": [
+      "gov4-claim-impact-complete-is-clean",
+      "gov4-claim-impact-no-claims-with-reason-is-clean",
+      "gov4-pack-complete-record-is-clean",
+      "gov4-por-complete-record-is-clean"
+    ],
+    "deferred": [
+      "gov4-por-uncovered-change-before-the-set-landed"
+    ],
+    "failures": [],
+    "fixtures": 33,
+    "status": "pass",
+    "violating_by_check": {
+      "claim-impact-declared": [
+        "gov4-07-no-claim-impact-table"
+      ],
+      "claim-impact-ids-resolve": [
+        "gov4-07-claim-id-unknown"
+      ],
+      "dependence-mutation-named-at-the-test": [
+        "gov4-09-mutation-not-named-at-test"
+      ],
+      "dependence-mutation-test-exercises-the-change": [
+        "gov4-09-mutation-test-unrelated-crate"
+      ],
+      "dependence-mutation-test-is-fresh": [
+        "gov4-09-mutation-test-did-not-move"
+      ],
+      "dependence-mutation-test-resolves": [
+        "gov4-09-mutation-test-does-not-exist"
+      ],
+      "dependence-mutation-tests-named": [
+        "gov4-09-mutation-tests-missing"
+      ],
+      "gov4-07-12-list-registered": [
+        "gov4-por-section-list-drifted"
+      ],
+      "gov4-07-12-vocabulary-present": [
+        "gov4-vocabulary-tiers-gone"
+      ],
+      "no-reduction-pair-distinct-implementations": [
+        "gov4-08-oracle-is-subject",
+        "gov4-08-subject-is-not-the-reduction-engine"
+      ],
+      "no-reduction-test-is-fresh": [
+        "gov4-08-no-reduction-test-did-not-move"
+      ],
+      "no-reduction-test-resolves": [
+        "gov4-08-no-reduction-test-does-not-exist"
+      ],
+      "no-reduction-test-uses-both-implementations": [
+        "gov4-08-test-never-names-subject"
+      ],
+      "no-reduction-tests-named": [
+        "gov4-08-no-reduction-tests-missing"
+      ],
+      "pack-change-has-review-record": [
+        "gov4-12-pack-no-record"
+      ],
+      "pack-fidelity-profile-declared": [
+        "gov4-12-fidelity-missing"
+      ],
+      "pack-fidelity-profile-names-the-change": [
+        "gov4-12-fidelity-note-too-short"
+      ],
+      "pack-fidelity-profile-registered": [
+        "gov4-12-fidelity-profile-not-registered"
+      ],
+      "pack-review-record-covers-a-pack-change": [
+        "gov4-12-pack-covers-mismatch"
+      ],
+      "performance-metric-registered": [
+        "gov4-11-metric-not-registered"
+      ],
+      "performance-report-names-the-change": [
+        "gov4-11-note-does-not-name-crate"
+      ],
+      "performance-report-present": [
+        "gov4-11-performance-missing"
+      ],
+      "por-change-has-review-record": [
+        "gov4-por-no-record"
+      ],
+      "por-review-record-covers-a-por-change": [
+        "gov4-por-covers-mismatch"
+      ],
+      "property-analysis-names-the-change": [
+        "gov4-10-note-too-short"
+      ],
+      "property-analysis-present": [
+        "gov4-10-property-analysis-missing"
+      ],
+      "property-tier-registered": [
+        "gov4-10-tier-not-registered"
+      ]
+    },
+    "violating_by_requirement": {
+      "GOV-4-07": [
+        "gov4-07-claim-id-unknown",
+        "gov4-07-no-claim-impact-table"
+      ],
+      "GOV-4-08": [
+        "gov4-08-no-reduction-test-did-not-move",
+        "gov4-08-no-reduction-test-does-not-exist",
+        "gov4-08-no-reduction-tests-missing",
+        "gov4-08-oracle-is-subject",
+        "gov4-08-subject-is-not-the-reduction-engine",
+        "gov4-08-test-never-names-subject",
+        "gov4-por-no-record"
+      ],
+      "GOV-4-09": [
+        "gov4-09-mutation-not-named-at-test",
+        "gov4-09-mutation-test-did-not-move",
+        "gov4-09-mutation-test-does-not-exist",
+        "gov4-09-mutation-test-unrelated-crate",
+        "gov4-09-mutation-tests-missing",
+        "gov4-por-covers-mismatch",
+        "gov4-por-section-list-drifted"
+      ],
+      "GOV-4-10": [
+        "gov4-10-note-too-short",
+        "gov4-10-property-analysis-missing",
+        "gov4-10-tier-not-registered",
+        "gov4-vocabulary-tiers-gone"
+      ],
+      "GOV-4-11": [
+        "gov4-11-metric-not-registered",
+        "gov4-11-note-does-not-name-crate",
+        "gov4-11-performance-missing"
+      ],
+      "GOV-4-12": [
+        "gov4-12-fidelity-missing",
+        "gov4-12-fidelity-note-too-short",
+        "gov4-12-fidelity-profile-not-registered",
+        "gov4-12-pack-covers-mismatch",
+        "gov4-12-pack-no-record"
+      ]
+    }
+  },
+  "status": "pass",
+  "title": "GOV \u00a74 claim impact, POR/reduction changes, and the first pack-changes obligation \u2014 GOV-4-07..12"
+}

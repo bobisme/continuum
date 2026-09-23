@@ -1,0 +1,12 @@
+{
+  "base": {},
+  "check": "kernel-change-has-review-record",
+  "description": "A kernel change (continuum-kernel-core source) with no review record at all.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture.rs": "head-crates__continuum-kernel-core__src__gov4_fixture.rs"
+  },
+  "id": "gov4-kernel-no-record",
+  "requirement": "GOV-4-19",
+  "rule": "kernel-review-record"
+}

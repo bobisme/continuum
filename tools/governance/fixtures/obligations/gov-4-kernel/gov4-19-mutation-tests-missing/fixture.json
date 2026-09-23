@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "kernel-mutation-tests-named",
+  "description": "A kernel record with no `[kernel.mutation_tests]` table.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture.rs": "head-crates__continuum-kernel-core__src__gov4_fixture.rs",
+    "crates/continuum-kernel-core/tests/gov4_fixture.rs": "head-crates__continuum-kernel-core__tests__gov4_fixture.rs",
+    "tools/governance/reviews/gov4-kernel-fixture.toml": "head-tools__governance__reviews__gov4-kernel-fixture.toml"
+  },
+  "id": "gov4-19-mutation-tests-missing",
+  "requirement": "GOV-4-19",
+  "rule": "kernel-mutation-tests"
+}

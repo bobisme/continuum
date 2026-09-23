@@ -10352,7 +10352,7 @@
         "line": 78,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "mutation tests"
     },
     {
@@ -10363,7 +10363,7 @@
         "line": 78,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "code-size report"
     },
     {
@@ -10374,7 +10374,7 @@
         "line": 78,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "no unchecked optimization."
     },
     {

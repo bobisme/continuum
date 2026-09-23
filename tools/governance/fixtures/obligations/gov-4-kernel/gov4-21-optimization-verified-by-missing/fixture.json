@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "kernel-optimization-verified-by-resolves",
+  "description": "`is_optimization = true` but `verified_by` names a function the test file does not declare.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture.rs": "head-crates__continuum-kernel-core__src__gov4_fixture.rs",
+    "crates/continuum-kernel-core/tests/gov4_fixture.rs": "head-crates__continuum-kernel-core__tests__gov4_fixture.rs",
+    "tools/governance/reviews/gov4-kernel-fixture.toml": "head-tools__governance__reviews__gov4-kernel-fixture.toml"
+  },
+  "id": "gov4-21-optimization-verified-by-missing",
+  "requirement": "GOV-4-21",
+  "rule": "kernel-no-unchecked-optimization"
+}

@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "kernel-mutation-vocabulary-present",
+  "description": "tools/kernel-covenant/mutation-matrix.toml becomes malformed TOML, so GOV-4-19 has no registered classes.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "tools/kernel-covenant/mutation-matrix.toml": [
+      {
+        "find": "schema = \"continuum.kernel-covenant.mutation-matrix/1\"",
+        "replace": "schema = \"continuum.kernel-covenant.mutation-matrix/1"
+      }
+    ]
+  },
+  "id": "gov4-kernel-vocabulary-gone",
+  "requirement": "GOV-4-20",
+  "rule": "kernel-review-list"
+}

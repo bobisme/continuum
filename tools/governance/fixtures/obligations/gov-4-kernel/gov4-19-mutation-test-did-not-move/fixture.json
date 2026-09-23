@@ -1,0 +1,16 @@
+{
+  "base": {
+    "crates/continuum-kernel-core/tests/gov4_fixture.rs": "base-crates__continuum-kernel-core__tests__gov4_fixture.rs"
+  },
+  "check": "kernel-mutation-test-is-fresh",
+  "description": "The named mutation test resolves and exercises the change, but is unchanged from the base.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-kernel-core/src/gov4_fixture.rs": "head-crates__continuum-kernel-core__src__gov4_fixture.rs",
+    "crates/continuum-kernel-core/tests/gov4_fixture.rs": "head-crates__continuum-kernel-core__tests__gov4_fixture.rs",
+    "tools/governance/reviews/gov4-kernel-fixture.toml": "head-tools__governance__reviews__gov4-kernel-fixture.toml"
+  },
+  "id": "gov4-19-mutation-test-did-not-move",
+  "requirement": "GOV-4-19",
+  "rule": "kernel-mutation-tests"
+}

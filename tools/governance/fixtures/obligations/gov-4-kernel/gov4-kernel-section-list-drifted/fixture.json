@@ -1,0 +1,18 @@
+{
+  "base": {},
+  "check": "kernel-review-list-registered",
+  "description": "docs/12 \u00a74's Kernel changes list renames the last item, so the positional GOV-4 ids no longer bind what they say.",
+  "expect": "violation",
+  "head": {},
+  "head_substitute": {
+    "notes/plan/docs/12_GOVERNANCE_AND_ENGINEERING.md": [
+      {
+        "find": "- no unchecked optimization. (delivered: bn-2b4e)",
+        "replace": "- no unchecked shortcuts. (delivered: bn-2b4e)"
+      }
+    ]
+  },
+  "id": "gov4-kernel-section-list-drifted",
+  "requirement": "GOV-4-19",
+  "rule": "kernel-review-list"
+}

@@ -145,9 +145,9 @@ Require:
 
 - two reviewers;
 - fuzz corpus;
-- mutation tests;
-- code-size report;
-- no unchecked optimization.
+- mutation tests; (delivered: bn-2b4e)
+- code-size report; (delivered: bn-2b4e)
+- no unchecked optimization. (delivered: bn-2b4e)
 
 ## 5. Reproducibility
 
