@@ -79,6 +79,18 @@
 //! identity is a digest, not claim B's campaign envelope artifact. The scenario's
 //! `[network]` faults, `max_partitions` and `[storage]` torn tails are not modeled.
 //!
+//! Every crash of the campaign is graceful region cancellation, not a fail-stop crash
+//! (`register::CRASH_SEMANTICS`, bn-20d8u). The crashed incarnation's cleanup aborts its
+//! permit and unsynced bytes, its tasks end and its region finalizes. So the zero
+//! findings of `RuntimeToAbstract`, `asupersync::Quiescence` and
+//! `asupersync::ObligationConservation` on plans with crashes rest on that cleanup: the
+//! projection reads a crash's `Lose` from the cleanup's aborts, so the refinement map
+//! itself is specific to graceful cancellation (IMPL-03 `neg-03-crash-keeps-bytes`).
+//! Under the process pack's fail-stop crash, the crashed incarnation's tasks would never
+//! end and its in-flight obligations would stay pending, and all three properties would
+//! need a fail-stop reading that this campaign does not define or run. The counts of runs with a crash, such as a crash after an
+//! ack, count region cancellations.
+//!
 //! The coordinator counts confirmations: it has no data to tell senders apart. So
 //! "count each replica once" (M05's subject) rests on the replica rule
 //! [`Breach::ConfirmTwice`], and a restarted replica that sends its confirmation again
@@ -135,7 +147,7 @@ pub struct Bounds {
     /// Crashes per plan, over every replica.
     pub max_crashes: usize,
     /// Cancellations per plan: explicit permit aborts and crashes (a crash cancels a
-    /// region).
+    /// region: graceful region cancellation, `register::CRASH_SEMANTICS`).
     pub max_cancellations: usize,
 }
 

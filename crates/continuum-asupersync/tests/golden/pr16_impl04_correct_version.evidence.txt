@@ -2,6 +2,7 @@
 # the program with its shutdown, and the baseline campaign in
 # crates/continuum-asupersync/tests/support/register_baseline.rs.
 # Regenerate: PR16_IMPL04_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl04_correct_version
+# crash: a crash is modelled as graceful region cancellation (Cancel of the incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; a fail-stop crash, which runs no handler and fences pending completions by (node, epoch), is not covered: bn-20d8u
 
 [pr16-impl04-pos-01-baseline]
 campaign pr16-correct-baseline seed 104729 (scenario cancel-after-submit-before-sync); bounds nodes=3 values=2 epochs<=2 crashes<=2 cancellations<=3

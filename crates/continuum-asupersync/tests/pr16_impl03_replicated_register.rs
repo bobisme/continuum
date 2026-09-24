@@ -38,7 +38,7 @@
 //! | writer's `IoOp` opened | `Submit(n, e, v)`: bytes in the volatile log |
 //! | that `IoOp` committed | `Sync(n, e)`: the bytes are durable |
 //! | permit aborted `explicit`, or committed, before any bytes | `Abort(n, e)` |
-//! | replica region cancelled: `IoOp` aborted / permit aborted `cancel` before any bytes | `Lose(n, e, v)`: a crash loses the in-flight write |
+//! | replica region cancelled: `IoOp` aborted / permit aborted `cancel` before any bytes | `Lose(n, e, v)`: a crash, as graceful region cancellation, loses the in-flight write |
 //! | coordinator's `Transaction` committed after a majority of confirmations | `Ack(e, v)`: the quorum ack |
 //! | every other event: spawns, polls, the permit's release, confirmations on the channel, receives, the ack's reserve, cancellation phases, region drains | stutter |
 //!
@@ -70,12 +70,25 @@
 //! interleaving across replicas and coordinators. This is a test-level check, not the
 //! PR-17 refinement checker, and it is not the correct-version exit (bn-5fpl) or the
 //! mutants (bn-28oa).
+//!
+//! A crash is modelled as graceful region cancellation (`register::CRASH_SEMANTICS`,
+//! bn-20d8u): the crashed incarnation's writers run their cancellation cleanup, which
+//! aborts their permits and unsynced bytes, and the projection reads those aborts as
+//! `Lose`. The process pack's profile `process/crash-restart-v0` calls that graceful
+//! cancellation. Its fail-stop crash runs no handler and leaves pending operations
+//! pending, fenced by `(node, epoch)`. So `pos-03-crash-restart` and `pos-05-two-epochs`
+//! show refinement for crashes as graceful region cancellation, and not for a fail-stop
+//! crash, which the binding cannot express. `neg-03-crash-keeps-bytes` shows that the
+//! projection needs the cleanup's abort to read a crash as `Lose`, so a fail-stop
+//! journal would need a different map.
+//! [`a_crash_is_a_graceful_region_cancellation_and_not_a_fail_stop_crash`] holds the
+//! program to that reading.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
-use continuum_asupersync::binding::{BindingConfig, BindingRefusal, run};
+use continuum_asupersync::binding::{BindingConfig, BindingRefusal, SubstrateOp, run};
 use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::family::effect::EffectEvent;
 use continuum_asupersync::family::{EventBody, Family};
@@ -370,6 +383,106 @@ fn the_program_exercises_regions_tasks_effects_obligations_cancellation_and_chan
     assert!(
         !families.contains(&Family::Time),
         "the program uses no timer"
+    );
+}
+
+/// Whether `op` stops a task without its cancellation cleanup: what a fail-stop crash of
+/// `process/crash-restart-v0` needs. The match has no wildcard, so an operation added to
+/// the binding must be classed here before this file compiles again (bn-20d8u).
+const fn stops_a_task_without_cleanup(op: &SubstrateOp) -> bool {
+    match op {
+        // `Cancel` runs each task's cancellation cleanup; `Finish` returns through the
+        // task's own body; `Close` waits for the region's tasks.
+        SubstrateOp::OpenRegion { .. }
+        | SubstrateOp::Spawn { .. }
+        | SubstrateOp::SpawnWithDeadline { .. }
+        | SubstrateOp::Begin { .. }
+        | SubstrateOp::Continue { .. }
+        | SubstrateOp::Finish { .. }
+        | SubstrateOp::Close { .. }
+        | SubstrateOp::Cancel { .. }
+        | SubstrateOp::Reserve { .. }
+        | SubstrateOp::Commit { .. }
+        | SubstrateOp::Abort { .. }
+        | SubstrateOp::Acquire { .. }
+        | SubstrateOp::Sleep { .. }
+        | SubstrateOp::OpenChannel { .. }
+        | SubstrateOp::Send { .. }
+        | SubstrateOp::Recv { .. }
+        | SubstrateOp::CloseSenders { .. }
+        | SubstrateOp::Advance { .. }
+        | SubstrateOp::Transfer { .. } => false,
+    }
+}
+
+/// A crash is graceful region cancellation, not a fail-stop crash (bn-20d8u,
+/// `register::CRASH_SEMANTICS`). Each crash act is one `Cancel` of the crashing
+/// incarnation's region, never of the root or the coordinators' region; in every crash
+/// plan's journals the crashed writers acknowledge the cancellation, which is their
+/// cleanup starting. That the
+/// binding has no operation that stops a task without its cleanup is a compile-time
+/// check: `stops_a_task_without_cleanup` matches every `SubstrateOp` with no wildcard.
+#[test]
+fn a_crash_is_a_graceful_region_cancellation_and_not_a_fail_stop_crash() {
+    use continuum_asupersync::family::cancellation::CancellationEvent;
+    use continuum_asupersync::family::lifecycle::LifecycleEvent;
+    for (e, o) in corpus().iter().zip(outcomes()) {
+        let setup = &e.built.programs[0];
+        // The setup opens every incarnation's region, then the coordinators' region.
+        let mut replica_regions: Vec<_> = setup
+            .iter()
+            .filter_map(|op| match op {
+                SubstrateOp::OpenRegion { child, .. } => Some(*child),
+                _ => None,
+            })
+            .collect();
+        replica_regions.pop();
+        let mut crashes = 0;
+        for n in 0..3 {
+            let script = &e.plan.replicas[n];
+            let ops = &e.built.programs[1 + n];
+            assert_eq!(script.len(), ops.len(), "one operation per act");
+            for (act, op) in script.iter().zip(ops) {
+                if matches!(act, Act::Crash | Act::CrashRepropose(..)) {
+                    crashes += 1;
+                    let SubstrateOp::Cancel { region } = op else {
+                        panic!("{}: a crash is {op:?}", e.id)
+                    };
+                    assert!(replica_regions.contains(region), "{}", e.id);
+                }
+            }
+        }
+        for j in &o.journals {
+            let cancels = j
+                .events()
+                .iter()
+                .filter(|ev| {
+                    matches!(
+                        ev.body(),
+                        EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { .. })
+                    )
+                })
+                .count();
+            let acks = j
+                .events()
+                .iter()
+                .filter(|ev| {
+                    matches!(
+                        ev.body(),
+                        EventBody::Cancellation(CancellationEvent::Acknowledged { .. })
+                    )
+                })
+                .count();
+            assert_eq!(cancels, crashes, "{}", e.id);
+            // Each crash cancels a region of `epochs` writers, and each acknowledges.
+            assert_eq!(acks, crashes * usize::from(e.plan.epochs), "{}", e.id);
+        }
+    }
+    // Referenced so the exhaustive match is compiled; it is false for every variant.
+    let _ = stops_a_task_without_cleanup;
+    assert!(
+        register::CRASH_SEMANTICS
+            .starts_with("a crash is modelled as graceful region cancellation")
     );
 }
 
@@ -1064,8 +1177,9 @@ fn evidence() -> String {
         "# PR-16/IMPL-03 replicated register on asupersync 0.5.0 (bn-131yp): the program in\n\
          # crates/continuum-asupersync/tests/support/replicated_register.rs, run through the\n\
          # binding, projected onto notes/plan/examples/durable_register.ctm.\n\
-         # Regenerate: PR16_IMPL03_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl03_replicated_register\n\n",
+         # Regenerate: PR16_IMPL03_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl03_replicated_register\n",
     );
+    let _ = writeln!(out, "# crash: {}\n", register::CRASH_SEMANTICS);
     for (e, o) in corpus().iter().zip(outcomes()) {
         out.push_str(&render_entry(e, o));
         out.push('\n');

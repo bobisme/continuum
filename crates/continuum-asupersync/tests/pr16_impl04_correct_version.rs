@@ -38,6 +38,13 @@
 //! the log fixes interleavings. A crashed writer's value is not corroborated by the
 //! journal. The shutdown runs after the protocol, the coordinators do not crash, and
 //! virtual time is not used. Not DPOR and not the PR-17 checker.
+//!
+//! Every crash is graceful region cancellation, not a fail-stop crash
+//! (`register::CRASH_SEMANTICS`, bn-20d8u). The zero findings on plans with crashes,
+//! Quiescence and ObligationConservation above all, rest on the crashed incarnation's
+//! cancellation cleanup: it aborts what the writers hold, the writers end, and the
+//! region finalizes. A fail-stop crash of `process/crash-restart-v0` runs no cleanup and
+//! leaves the dead incarnation's operations pending, and this campaign does not run it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -802,8 +809,9 @@ fn evidence() -> String {
         "# PR-16/IMPL-04 correct version of the replicated register (bn-5fpl): the protocol rule,\n\
          # the program with its shutdown, and the baseline campaign in\n\
          # crates/continuum-asupersync/tests/support/register_baseline.rs.\n\
-         # Regenerate: PR16_IMPL04_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl04_correct_version\n\n",
+         # Regenerate: PR16_IMPL04_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl04_correct_version\n",
     );
+    let _ = writeln!(out, "# crash: {}\n", register::CRASH_SEMANTICS);
     let _ = writeln!(out, "[pr16-impl04-pos-01-baseline]");
     let _ = writeln!(
         out,

@@ -52,6 +52,11 @@
 //! the shallowest failing run the campaign found, replayed, not a minimized one (PR 18
 //! reduces). The binding has no data-dependent control flow, so a mutant's decisions are
 //! its scripts' structure.
+//!
+//! Every crash here is graceful region cancellation, not the process pack's fail-stop
+//! crash (`register::CRASH_SEMANTICS`, bn-20d8u). [`crash_dependence`] states, for each
+//! mutant, which part of its result rests on that cleanup and what is only argued, not
+//! run, for a fail-stop crash.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -301,7 +306,11 @@ impl Symptom {
 /// Why a mutant cannot be realized in this program's shape. Neither is a detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exclusion {
-    /// A crash cancels the incarnation's region, and so ends its tasks. Every run of a
+    /// A crash cancels the incarnation's region, and so ends its tasks: graceful region
+    /// cancellation, not a fail-stop crash, which would stop them without ending them and
+    /// fence their late completions by `(node, epoch)` (see [`crash_dependence`]). The
+    /// "fence" in this variant's name is that `TaskEnded` refusal after graceful
+    /// cancellation, not the process pack's fence. Every run of a
     /// changed plan is the binding's typed [`Refusal::TaskEnded`] when the new process
     /// commands a task of the old epoch. That refusal is the binding's own check before
     /// it sends a command, with no INV-008 reason: the binding reads such a program as
@@ -310,7 +319,9 @@ pub enum Exclusion {
     EpochFenced,
     /// A crash's region cancellation drops the old incarnation's timer: the substrate
     /// traces `TimerCancelled`, and the binding fires only timers of tasks that still
-    /// sleep. No timer fires after its task's region is cancelled, and no run has a
+    /// sleep. That is the cancellation cleanup of graceful region cancellation. A
+    /// fail-stop crash runs no cleanup, so the timer would stay pending (see
+    /// [`crash_dependence`]). No timer fires after its task's region is cancelled, and no run has a
     /// finding. The zero is the binding's bookkeeping over the substrate's trace, not an
     /// independent observation.
     TimerDropped,
@@ -412,6 +423,64 @@ pub const fn expected(id: Id) -> Expected {
             why: "it changes the independence relation DPOR reduces with; no campaign here \
                   uses one",
         },
+    }
+}
+
+/// What each mutant's result rests on about a crash, given that every crash here is
+/// graceful region cancellation (`register::CRASH_SEMANTICS`, bn-20d8u); `None` when the
+/// mutant has no campaign. "Shown" is what the campaign runs; "argued" is not run.
+#[must_use]
+pub const fn crash_dependence(id: Id) -> Option<&'static str> {
+    match id {
+        Id::M01 => Some(
+            "the RuntimeToAbstract witness has no crash, so that detection does not rest on \
+             the crash semantics; the Agreement witness loses a's \
+             volatile bytes through the crash's cancellation cleanup (a Lose from the IoOp's \
+             cancel abort), so it is shown for graceful region cancellation only; a \
+             fail-stop crash is not run",
+        ),
+        Id::M02 => Some(
+            "the lost abort is not a crash; a changed plan's runs are runs, not the \
+             ReservationDropped refusal, exactly when each lost permit's incarnation later \
+             crashes and its cancellation cleanup aborts the permit, so the detection is \
+             shown for graceful region cancellation only; the detecting event comes before \
+             the crash, and under a fail-stop crash the permit would stay pending in the \
+             dead incarnation, so the refusal might not arise: argued, not run",
+        ),
+        Id::M03 => Some(
+            "the exclusion is the region cancellation ending the old epoch's tasks \
+             (TaskEnded); a fail-stop crash stops them without ending them and fences their \
+             late completions by (node, epoch), and the binding has no such fence, so the \
+             exclusion is shown for graceful region cancellation only",
+        ),
+        Id::M04 => Some(
+            "the witness has no crash, so the detection does not rest on the crash \
+             semantics; runs of changed plans with crashes use graceful region cancellation",
+        ),
+        Id::M05 => Some(
+            "each witness crashes after its confirmation with nothing in flight, so the \
+             cancellation cleanup aborts nothing and the ack over one durable replica does \
+             not rest on it; a fail-stop crash is not run",
+        ),
+        Id::M06 => Some(
+            "the finding is a live coordinator, and coordinators never crash; under a \
+             fail-stop crash Quiescence as defined would also fail for every crashed \
+             incarnation, whose tasks never end: argued, not run",
+        ),
+        Id::M07 => Some(
+            "the crash's cancellation cleanup aborts the recovered record's IoOp (a Lose); a \
+             fail-stop crash leaves that IoOp pending, and whether its bytes become durable is \
+             the storage pack's to state; the detection holds only where they stay volatile \
+             (a pending slot is not durable), and the witness's does not if they become \
+             durable: argued on projected states, not run",
+        ),
+        Id::M08 => Some(
+            "the exclusion is the region cancellation dropping the old timer; a fail-stop \
+             crash runs no cleanup, so the timer would stay pending and a late fire would \
+             need a (node, epoch) fence the binding does not have, so the exclusion is \
+             shown for graceful region cancellation only",
+        ),
+        Id::M09 | Id::M10 => None,
     }
 }
 

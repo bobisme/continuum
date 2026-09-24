@@ -24,7 +24,10 @@
 //! As the baseline's: the explored runs only, most logs sampled, not DPOR. A witness is
 //! the shallowest failing run the campaign found, replayed from its plan and log, and not
 //! minimized. Two mutants (M03, M08) are excluded by the substrate rather than detected,
-//! and two (M09, M10) are not program mutants and are deferred to their owners.
+//! and two (M09, M10) are not program mutants and are deferred to their owners. Every
+//! crash is graceful region cancellation, not a fail-stop crash
+//! (`register::CRASH_SEMANTICS`, bn-20d8u); each mutant's `crash:` line in the golden
+//! states what its result rests on.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -453,9 +456,157 @@ fn mut_02_lost_abort_is_detected_as_a_slot_still_reserved() {
     assert_eq!(s.detecting_runs + s.refused_runs, s.failing_runs);
 }
 
+/// Whether every explicit abort that M02 drops from `plan` is followed, in the same
+/// replica's script, by a crash: the graceful region cancellation whose cleanup then
+/// aborts the lost permit (bn-20d8u).
+fn lost_permits_meet_a_crash(plan: &register::Plan) -> bool {
+    plan.replicas.iter().all(|s| {
+        s.iter().enumerate().all(|(i, a)| {
+            !matches!(a, register::Act::Abort(_))
+                || s[i + 1..]
+                    .iter()
+                    .any(|b| matches!(b, register::Act::Crash | register::Act::CrashRepropose(..)))
+        })
+    })
+}
+
+/// mut-02 and the crash semantics (bn-20d8u): a changed plan's runs are runs exactly when
+/// each lost permit's incarnation later crashes, because the crash is graceful region
+/// cancellation and its cleanup aborts the permit for `Cancel`. Every other changed plan
+/// is refused on every run. So the detection is shown for graceful cancellation only.
+#[test]
+fn mut_02_detects_only_where_a_graceful_crash_aborts_the_lost_permit() {
+    use continuum_asupersync::family::EventBody;
+    use continuum_asupersync::family::effect::{AbortCause, EffectEvent};
+    let (m, o) = get(Id::M02);
+    let base = &all().base;
+    let (mut admitted, mut refused) = (0, 0);
+    for p in &o.plans {
+        let gi = base.groups.iter().position(|g| g.id == p.group).expect("g");
+        if !mutants::changed(m, base, gi, p.index) {
+            continue;
+        }
+        let runs_refused = p
+            .findings
+            .iter()
+            .filter(|(_, fs)| {
+                fs.iter().any(
+                    |f| matches!(f, Finding::Refused(r) if Refusal::ReservationDropped.matches(r)),
+                )
+            })
+            .count();
+        if lost_permits_meet_a_crash(&base.groups[gi].plans[p.index]) {
+            assert_eq!(runs_refused, 0, "{}/{}", p.group, p.index);
+            admitted += p.runs;
+        } else {
+            assert_eq!(runs_refused, p.runs, "{}/{}", p.group, p.index);
+            refused += p.runs;
+        }
+    }
+    let s = &summaries()[&Id::M02];
+    assert_eq!((admitted, refused), (s.detecting_runs, s.refused_runs));
+    // In the witness, the lost permit is released only by the crash's cleanup: a
+    // `cancel` abort of a writer permit that never had bytes, which projects as `Lose`.
+    let w = s.witness.as_ref().expect("a witness");
+    let plan = &m.campaign.groups[w.group.0].plans[w.plan];
+    let built = (m.builder)(plan).expect("built");
+    let journal = continuum_asupersync::binding::run(&built.programs, &w.log, &baseline::config())
+        .expect("a run");
+    assert!(journal.events().iter().any(|e| matches!(
+        e.body(),
+        EventBody::Effect(EffectEvent::Aborted {
+            cause: AbortCause::Cancel,
+            ..
+        })
+    )));
+    // A `Lose` of a permit with no bytes is a label prefix: every value names it. The
+    // witness's lost permit is b's first epoch-0 permit.
+    assert!(
+        mutants::story(m, w)
+            .iter()
+            .any(|l| l == "Lose(n=b,epoch=0,")
+    );
+}
+
+/// mut-07 and the crash semantics (bn-20d8u): the crash's cleanup aborts the recovered
+/// record's bytes, a `Lose`. A fail-stop crash leaves that `IoOp` pending, and whether
+/// its bytes become durable is the storage pack's to state. The detection holds where
+/// they stay volatile, by argument: a pending slot is not durable, so putting the bytes
+/// back as volatile changes neither the durable set nor the acks. It fails where they
+/// become durable: the witness's ack then has its majority. A check on the witness's
+/// projected states, not a fail-stop run.
+#[test]
+fn mut_07_detection_does_not_rest_on_the_crash_losing_the_bytes() {
+    let (m, _) = get(Id::M07);
+    let lost_and_ack = |plan: &register::Plan,
+                        log: &continuum_asupersync::choice::ChoiceLog,
+                        seq: u64|
+     -> (Vec<(u8, u8, u8)>, register::Raw) {
+        let built = (m.builder)(plan).expect("built");
+        let journal = continuum_asupersync::binding::run(&built.programs, log, &baseline::config())
+            .expect("a run");
+        let steps = register::observe(&built.roles, &journal).expect("projects");
+        let mut lost = Vec::new();
+        for st in steps.iter().filter(|st| st.seq <= seq) {
+            if let (register::Expect::Step(l), Some(pre), Some(post)) =
+                (&st.expect, &st.pre, &st.post)
+                && l.starts_with("Lose(")
+            {
+                let (before, _, _) = register::parts_of(pre);
+                let (after, _, _) = register::parts_of(post);
+                lost.extend(before.into_iter().filter(|r| !after.contains(r)));
+            }
+        }
+        let at = steps.iter().find(|st| st.seq == seq).expect("the event");
+        (lost, at.post.clone().expect("projectable"))
+    };
+    let restore = |ack: &register::Raw, lost: &[(u8, u8, u8)], volatile: bool| {
+        let (mut log, mut pending, acks) = register::parts_of(ack);
+        for &(n, e, v) in lost {
+            // Only a slot the crash left free: no retry wrote it since.
+            if log.iter().all(|&(m, f, _)| (m, f) != (n, e)) && !pending.contains(&(n, e)) {
+                log.push((n, e, v));
+                if volatile {
+                    pending.push((n, e));
+                }
+            }
+        }
+        register::raw_of(&log, &pending, &acks)
+    };
+    // The witness: the crash lost c's bytes, and had storage made them durable, the ack
+    // would have its majority.
+    let w = summaries()[&Id::M07].witness.as_ref().expect("a witness");
+    let Finding::AckedNotDurable(seq) = w.finding else {
+        panic!("{:?}", w.finding)
+    };
+    let (lost, ack) = lost_and_ack(&m.campaign.groups[w.group.0].plans[w.plan], &w.log, seq);
+    assert!(!lost.is_empty(), "the crash's cleanup lost the record");
+    assert!(baseline::ack_without_majority(&ack));
+    assert!(baseline::ack_without_majority(&restore(&ack, &lost, true)));
+    assert!(!baseline::ack_without_majority(&restore(
+        &ack, &lost, false
+    )));
+}
+
+/// Each mutant with a campaign states what its result rests on about a crash
+/// (bn-20d8u), and the evidence's header states the crash semantics.
+#[test]
+fn every_mutant_campaign_states_its_crash_dependence() {
+    for id in Id::ALL {
+        assert_eq!(
+            mutants::crash_dependence(id).is_some(),
+            all().mutants.contains_key(&id),
+            "{id:?}"
+        );
+    }
+    assert!(register::CRASH_SEMANTICS.contains("graceful region cancellation"));
+    assert!(register::CRASH_SEMANTICS.contains("bn-20d8u"));
+}
+
 /// mut-03, stale-epoch: excluded. Every run of every changed plan is the binding's typed
 /// `TaskEnded` refusal: the crash cancelled the old epoch's region, so its tasks cannot
-/// act for the new process.
+/// act for the new process. The "fence" in the name is that refusal after graceful
+/// region cancellation, not the process pack's `(node, epoch)` fence (bn-20d8u).
 #[test]
 fn mut_03_stale_epoch_is_excluded_by_the_region_fence() {
     let (m, o) = get(Id::M03);
@@ -714,8 +865,9 @@ fn evidence() -> String {
         "# PR-16/IMPL-05 mutants of the replicated register (bn-28oa): each required mutant of\n\
          # notes/plan/examples/replicated_register.md with its expected result and a deterministic\n\
          # campaign derived from pr16-correct-baseline; tests/support/register_mutants.rs.\n\
-         # Regenerate: PR16_IMPL05_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl05_mutants\n\n",
+         # Regenerate: PR16_IMPL05_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl05_mutants\n",
     );
+    let _ = writeln!(out, "# crash: {}\n", register::CRASH_SEMANTICS);
     let _ = writeln!(out, "[pr16-impl05-mut-00-baseline]");
     let _ = writeln!(
         out,
@@ -732,6 +884,9 @@ fn evidence() -> String {
         let _ = writeln!(out, "defect {id:?}: {}", id.defect());
         let _ = writeln!(out, "mutation: {}", id.mutation());
         let _ = writeln!(out, "expected: {}", expected_line(id));
+        if let Some(c) = mutants::crash_dependence(id) {
+            let _ = writeln!(out, "crash: {c}");
+        }
         let Some((m, o)) = a.mutants.get(&id) else {
             let _ = writeln!(out, "campaign: none\nresult: deferred\n");
             continue;

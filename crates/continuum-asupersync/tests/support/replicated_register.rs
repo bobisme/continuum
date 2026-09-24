@@ -19,8 +19,8 @@
 //! | [`Act::Release`] | `Commit` of the permit | the permit is released after the durable write |
 //! | [`Act::Abort`] | `Abort` of the permit | a cancelled writer releases its permit |
 //! | [`Act::Confirm`] | `Send` on the coordinator's channel | a stable confirmation |
-//! | [`Act::Crash`] | `Cancel` of the replica's region | a crash: in-flight obligations abort, the incarnation ends |
-//! | [`Act::CrashRepropose`] | as [`Act::Crash`] | a crash, and the next incarnation is proposed another value for one epoch |
+//! | [`Act::Crash`] | `Cancel` of the replica's region | a crash, modelled as graceful region cancellation: the incarnation's tasks run their cancellation cleanup, in-flight obligations abort, the incarnation ends |
+//! | [`Act::CrashRepropose`] | as [`Act::Crash`] | a crash as [`Act::Crash`], and the next incarnation is proposed another value for one epoch |
 //!
 //! Each replica incarnation is a region under the root, with one writer task per
 //! epoch. A crash cancels the region; the next incarnation is a region and writers
@@ -36,6 +36,25 @@
 //! (`TaskBlocked`), so a log that commands it is not a run of this program. The log
 //! generators ([`admissible_logs`], [`sample_logs`]) produce only admissible logs, and
 //! the tests show a log that is not admissible is that typed refusal.
+//!
+//! # What a crash is here, and what it is not (bn-20d8u)
+//!
+//! A crash is modelled as graceful region cancellation, [`CRASH_SEMANTICS`]. The replica
+//! cancels its incarnation's region through the binding's `Cancel`. Each writer task then
+//! observes its cancellation at a checkpoint, and the binding's gate runs its cleanup: it
+//! aborts every obligation the task holds, for `Cancel`, and the task ends. So the permit
+//! and the unsynced bytes of a crashed writer are aborted by the crashed incarnation's
+//! own cleanup, and the projection reads those aborts as `Lose`. The incarnation's tasks
+//! end and its region finalizes, and a timer that one of its tasks armed is dropped.
+//!
+//! The process pack's profile `process/crash-restart-v0` (bn-3mmf) calls this graceful
+//! cancellation, not a crash. Its fail-stop crash runs nothing more of the incarnation,
+//! no finalizer and no cancellation handler, and leaves each operation the incarnation
+//! began pending, with a late completion fenced by `(node, epoch)`. The binding has no
+//! operation that stops a task without its cancellation cleanup, so this program does
+//! not realize a fail-stop crash. Every claim here, and in `register_baseline.rs` and
+//! `register_mutants.rs`, about what a crash does is a claim about graceful region
+//! cancellation. Fail-stop crash coverage is open, owned by bn-20d8u.
 //!
 //! Virtual time is not used: no step of the durable register waits for a timer, and a
 //! sleeping writer would only add a refusal (`TaskAsleep`) to the admissibility rule.
@@ -135,6 +154,16 @@ use continuum_task::region::worker::Resumability;
 /// The values, by index, as the durable register's run configuration names them.
 pub const VALUES: [&str; 2] = ["v0", "v1"];
 
+/// What [`Act::Crash`] and [`Act::CrashRepropose`] are, in the terms of the process
+/// pack's profile `process/crash-restart-v0` (bn-3mmf): its `graceful-cancellation`
+/// row, not its `fail-stop-crash` row. The evidence renders this line, and
+/// `pr16_impl03_replicated_register.rs` holds the program to it.
+pub const CRASH_SEMANTICS: &str = "a crash is modelled as graceful region cancellation (Cancel of the \
+     incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), \
+     process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; \
+     a fail-stop crash, which runs no \
+     handler and fences pending completions by (node, epoch), is not covered: bn-20d8u";
+
 // ---------------------------------------------------------------------------
 // 1. the program
 // ---------------------------------------------------------------------------
@@ -154,7 +183,8 @@ pub enum Act {
     Abort(u8),
     /// The writer confirms the durable value to the coordinator of its value.
     Confirm(u8),
-    /// The replica crashes: its incarnation's region is cancelled.
+    /// The replica crashes: its incarnation's region is cancelled. This is graceful
+    /// region cancellation, not a fail-stop crash ([`CRASH_SEMANTICS`]).
     Crash,
     /// The replica crashes as [`Act::Crash`] does, and a client proposes `value` for
     /// `epoch` to its next incarnation: that incarnation's writer for `epoch` writes
