@@ -1,0 +1,8 @@
+{
+  "description": "all three guard_equivalence.rs binding tests exist, are #[test], are not #[ignore]d, and still assert their own tokens",
+  "expect": "clean",
+  "system": {
+    "kind": "guard-normalize-rust-binding",
+    "source": "#[test]\nfn nested_conjunction_splits_the_same_as_three_separate_requires() {\n    let a = elab(LEFT_NESTED);\n    let c = elab(THREE_REQUIRES);\n    assert_eq!(a.identity(), c.identity(), \"a nested && chain and three separate requires are one guard\");\n}\n\n#[test]\nfn guards_that_differ_in_meaning_keep_different_identities() {\n    let a = elab(base);\n    assert_ne!(a.identity(), elab(dropped_conjunct).identity(), \"dropping a conjunct changes the guard\");\n}\n\n#[test]\nfn disabling_conjunct_splitting_breaks_the_relation() {\n    let split = elab(THREE_REQUIRES);\n    let unsplit = merge_guard(split.clone());\n    assert_ne!(\n        split.identity(),\n        unsplit.identity(),\n        \"an unsplit guard conjunction is not norm.rs's documented normalized form -- \\\n         disabling conjunct splitting must change the identity, or the relation this \\\n         obligation names would not be testing anything\"\n    );\n}\n"
+  }
+}

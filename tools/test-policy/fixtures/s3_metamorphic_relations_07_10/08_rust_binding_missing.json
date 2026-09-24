@@ -1,0 +1,9 @@
+{
+  "description": "disabling_conjunct_splitting_breaks_the_relation is #[ignore]d and no longer asserts that disabling conjunct splitting changes the identity; guards_that_differ_in_meaning_keep_different_identities is entirely absent from the (synthetic) source",
+  "requirement": "TEST-3-08",
+  "rule": "guard-normalize-rust-binding-missing",
+  "system": {
+    "kind": "guard-normalize-rust-binding",
+    "source": "#[test]\nfn nested_conjunction_splits_the_same_as_three_separate_requires() {\n    assert_eq!(a.identity(), c.identity(), \"a nested && chain and three separate requires are one guard\");\n}\n\n#[ignore]\nfn disabling_conjunct_splitting_breaks_the_relation() {\n    assert!(true, \"no longer checks anything\");\n}\n"
+  }
+}

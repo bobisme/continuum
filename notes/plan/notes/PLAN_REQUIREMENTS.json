@@ -9109,7 +9109,7 @@
         "line": 33,
         "path": "docs/19_TEST_STRATEGY.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "equivalent guard normalization"
     },
     {

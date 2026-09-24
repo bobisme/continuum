@@ -41,7 +41,7 @@ Expected preservation:
 - joining adjacent internal stutter steps; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
 - symmetry renaming; (delivered: bn-2sn5 — tools/test-policy/evidence/s3_metamorphic_relations.json)
 - independent-event swap; (delivered: bn-1rt2 — tools/test-policy/evidence/s3_metamorphic_relations_07_10.json)
-- equivalent guard normalization;
+- equivalent guard normalization; (delivered: bn-33g98 — tools/test-policy/evidence/s3_metamorphic_relations_07_10.json)
 - serialization round trip; (delivered: bn-1rt2 — tools/test-policy/evidence/s3_metamorphic_relations_07_10.json)
 - snapshot restore versus root replay.
 

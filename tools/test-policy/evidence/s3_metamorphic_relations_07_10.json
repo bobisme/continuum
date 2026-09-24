@@ -34,6 +34,12 @@
     {
       "caught": [],
       "expect": "clean",
+      "fixture": "clean_rust_binding_3_08.json",
+      "ok": true
+    },
+    {
+      "caught": [],
+      "expect": "clean",
       "fixture": "clean_rust_binding_3_09.json",
       "ok": true
     },
@@ -110,11 +116,11 @@
       "summary": "independent-event swap"
     },
     "TEST-3-08": {
-      "absence": "no crate normalizes a transition guard's boolean expression; continuum-cml-elab (PR 15a's named home for it) is a documented stub, continuum-engine-reference/src/expr.rs has no rewrite pass, and continuum-intent/src/cpnf.rs's real CPNF-1 normalizes intent-contract properties, not transition guards \u2014 a different denotation; see BOUNDARIES",
       "boundaries": [
-        "docs/02 \u00a712 lists 'normalized expressions' in the canonical model form, but no crate implements guard normalization over the docs/19 \u00a72 generated-system sense of 'guard' this section's sibling module and tsys use. continuum-cml-elab \u2014 PR 15a's named home for source-level normalization \u2014 is a 22-line documented stub with no function bodies (checked directly). continuum-engine-reference/src/expr.rs has evaluation only, no rewrite or simplification pass (checked directly). continuum-intent/src/cpnf.rs's CPNF-1 is real and tested, but it normalizes top-level intent-contract properties (RFC 0037's N1-N7 over leads_to/invariant/temporal formulas) \u2014 a different denotation from a transition's guard, so it is not cited as this ID's binding. The check below (_guard_equivalence) still runs for real: it applies a De Morgan push plus a double-negation wrap (normalize_guard) to every generated system's guards and requires the reachable state set and oracle metrics to be unchanged, and a corrupted rewrite (_corrupt_guard_normalize, which leaves the guard's real logical negation) is required to be caught."
+        "continuum-cml-elab is real now (bn-ybq): norm.rs documents Action::guard as a Vec<Expr> of conjuncts in source order, over which NormModel::identity is content-addressed (ADR-0013); elab.rs's conjuncts/split_clauses is the code that splits require a && b, or two require clauses, into that one list. crates/continuum-cml-elab/tests/guard_equivalence.rs exercises it directly: nested_conjunction_splits_the_same_as_three_separate_requires shows two && associations and three separate requires share one NormModel identity and one lowered Model identity; guards_that_differ_in_meaning_keep_different_identities is the negative control (a dropped conjunct or a changed bound keeps a different identity); disabling_conjunct_splitting_breaks_the_relation is the mutant \u2014 a hand-built NormModel with the split guard merged back into one unsplit && no longer shares the elaborator's identity, showing the splitting rule is load-bearing. continuum-intent/src/cpnf.rs's CPNF-1 remains a different denotation (top-level intent-contract properties under RFC 0037's N1-N7, not a transition's guard) and is still not cited as this ID's binding. The tsys-level check below (_guard_equivalence) also still runs for real, over the harness's own oracle: it applies a De Morgan push plus a double-negation wrap (normalize_guard) to every generated system's guards and requires the reachable state set and oracle metrics to be unchanged, and a corrupted rewrite (_corrupt_guard_normalize, which leaves the guard's real logical negation) is required to be caught. This tsys-level rewrite is independent of elab.rs's algorithm (it is not a port of conjunct splitting), so no drift check applies to it, the same relationship TEST-3-09's tsys round trip has to CVNF-1."
       ],
       "corpus": {
+        "rust_tests_bound": 3,
         "systems": 256
       },
       "failures": [],
@@ -127,17 +133,35 @@
           "ok": true,
           "requirement": "TEST-3-08",
           "rule": "guard-normalize-preserved"
+        },
+        {
+          "caught": [
+            "guard-normalize-rust-binding-missing"
+          ],
+          "fixture": "08_rust_binding_missing.json",
+          "ok": true,
+          "requirement": "TEST-3-08",
+          "rule": "guard-normalize-rust-binding-missing"
         }
       ],
       "mutant": {
         "applied": 256,
         "detected": 256
       },
-      "registry_status": "active",
+      "registry_status": "satisfied",
       "rules": [
-        "guard-normalize-preserved"
+        "guard-normalize-preserved",
+        "guard-normalize-rust-binding-missing"
       ],
-      "status": "partial",
+      "rust_binding": {
+        "path": "crates/continuum-cml-elab/tests/guard_equivalence.rs",
+        "tests": {
+          "disabling_conjunct_splitting_breaks_the_relation": "disabling conjunct splitting must change the identity",
+          "guards_that_differ_in_meaning_keep_different_identities": "\"dropping a conjunct changes the guard\"",
+          "nested_conjunction_splits_the_same_as_three_separate_requires": "\"a nested && chain and three separate requires are one guard\""
+        }
+      },
+      "status": "enforced",
       "summary": "equivalent guard normalization"
     },
     "TEST-3-09": {

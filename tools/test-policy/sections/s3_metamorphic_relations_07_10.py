@@ -28,19 +28,18 @@ IDs, regardless of what the sibling module did before it existed:
   (`tests/phase_a_canonical_round_trip.rs`) states and tests exactly the two laws
   "serialization round trip" names — `decode(encode(v)) == v` and
   `encode(decode(b)) == b`. `enforced`.
-- **TEST-3-08** (equivalent guard normalization) has no real counterpart.
-  `continuum-cml-elab` — the crate docs/02 §12's "normalized expressions" and PR
-  15a name as where source-level normalization would live — is a 22-line
-  documented stub (checked: no function bodies, no `normalize`/`simplify` of any
-  kind). `continuum-engine-reference/src/expr.rs` has no rewrite or simplification
-  pass either (checked: only evaluation and a canonical-name comment).
-  `continuum-intent/src/cpnf.rs`'s CPNF-1 is real, tested normalization — but it
-  normalizes top-level intent-contract *properties* (`leads_to`, `invariant`,
-  temporal formulas under RFC 0037's N1–N7), a different denotation from a
-  transition's *guard* in the docs/19 §2 generated-system sense this section's
-  sibling module and `tsys` use throughout. Citing it here would bind one concept
-  to evidence about a different one, which the delivered bar exists to prevent.
-  `partial`.
+- **TEST-3-08** (equivalent guard normalization) now has a real counterpart
+  (bn-33g98, once bn-ybq landed the elaborator): `continuum-cml-elab`'s `norm`
+  module normalizes a CML action's guard to `Action::guard`, a `Vec<Expr>` of
+  conjuncts in source order, over which `NormModel::identity` is content-addressed
+  (ADR-0013) — so two guards that normalize alike share one identity, and two that
+  do not, do not. `elab.rs`'s `conjuncts`/`split_clauses` is the real code that
+  does the splitting; `crates/continuum-cml-elab/tests/guard_equivalence.rs`
+  exercises it directly: nested and separately-declared conjunctions share an
+  identity, a dropped conjunct or a changed bound does not, and a hand-built
+  mutant that disables the splitting rule (merges the split guard back into one
+  unsplit `&&`) is shown to break the identity equality — the same discipline
+  `s4_protocol_corpus.py` (bn-2dt2) established. `enforced`.
 - **TEST-3-10** (snapshot restore versus root replay) also has no real
   counterpart. `continuum-engine-reference/src/bfs.rs`'s `Partial::frontier` is
   documented as "a resume point" and states that "a resumed walk agree[s] with an
@@ -65,14 +64,20 @@ existing functions (`compile_system`, `initial_state`, `enabled`, `fire`,
 `explore`, `canonical`, `generate`, `SplitMix64`, `Finding`) without editing a line
 of it or of any other section's module, per README-test.md.
 
-Where a real Rust binding exists (TEST-3-07, TEST-3-09), `RUST_BINDING` names the
-`crates/` test(s) that exercise the real code, and `real_run()` verifies —
-textually, no cargo — that each named test exists, is `#[test]`, is not
+Where a real Rust binding exists (TEST-3-07, TEST-3-08, TEST-3-09), `RUST_BINDING`
+names the `crates/` test(s) that exercise the real code, and `real_run()`
+verifies — textually, no cargo — that each named test exists, is `#[test]`, is not
 `#[ignore]`d, and still contains the token that names the assertion this ID's
 relation would break. TEST-3-07 additionally re-derives the breach-classification
 tokens `check_independence` reports (`FirstDisablesSecond`, `SecondDisablesFirst`,
 `DiamondOpen`) from the live source, so the Python port's own three-way
 classification (`_swap_order`) cannot silently drift from the function it mirrors.
+TEST-3-08 needs no such drift check: its tsys-level check (`_guard_equivalence`,
+via `normalize_guard`'s De Morgan-plus-double-negation rewrite) is not a port of
+`elab.rs`'s conjunct-splitting algorithm — it is an independent, oracle-preserving
+rewrite over the harness's own system shape, the same relationship TEST-3-09's
+tsys-level round trip has to CVNF-1 (`_BOUNDARY_09`). There is nothing for it to
+drift from; only the Rust-binding check applies.
 """
 
 from __future__ import annotations
@@ -98,6 +103,7 @@ RULES: dict[str, str] = {
     "independent-swap-rust-binding-missing": "TEST-3-07",
     "independent-swap-diamond-drift": "TEST-3-07",
     "guard-normalize-preserved": "TEST-3-08",
+    "guard-normalize-rust-binding-missing": "TEST-3-08",
     "serialization-round-trip-tsys": "TEST-3-09",
     "serialization-round-trip-rust-binding-missing": "TEST-3-09",
     "snapshot-restore-matches-replay": "TEST-3-10",
@@ -148,9 +154,23 @@ RUST_BINDING: dict[str, dict[str, Any]] = {
             "positive_re_encoding_a_decoded_value_reproduces_its_bytes": '"encode(decode(b)) == b"',
         },
     },
+    "TEST-3-08": {
+        "path": "crates/continuum-cml-elab/tests/guard_equivalence.rs",
+        "tests": {
+            # nested and separately-declared conjunctions share one identity.
+            "nested_conjunction_splits_the_same_as_three_separate_requires": (
+                '"a nested && chain and three separate requires are one guard"'
+            ),
+            # the negative control: a dropped conjunct is a real change of meaning.
+            "guards_that_differ_in_meaning_keep_different_identities": '"dropping a conjunct changes the guard"',
+            # the mutant: disabling conjunct splitting must break the identity equality.
+            "disabling_conjunct_splitting_breaks_the_relation": "disabling conjunct splitting must change the identity",
+        },
+    },
 }
 BINDING_RULE = {
     "TEST-3-07": "independent-swap-rust-binding-missing",
+    "TEST-3-08": "guard-normalize-rust-binding-missing",
     "TEST-3-09": "serialization-round-trip-rust-binding-missing",
 }
 
@@ -211,6 +231,12 @@ def _check_rust_binding_3_09(payload: Any) -> list[dict]:
     if not (isinstance(payload, dict) and set(payload) == {"source"}):
         return [_finding("serialization-round-trip-rust-binding-missing", "<payload>", "payload must have exactly source").as_json()]
     return _check_rust_binding("TEST-3-09", payload["source"])
+
+
+def _check_rust_binding_3_08(payload: Any) -> list[dict]:
+    if not (isinstance(payload, dict) and set(payload) == {"source"}):
+        return [_finding("guard-normalize-rust-binding-missing", "<payload>", "payload must have exactly source").as_json()]
+    return _check_rust_binding("TEST-3-08", payload["source"])
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +590,7 @@ _KIND_CHECKERS = {
     "independent-swap-rust-binding": _check_rust_binding_3_07,
     "independent-swap-drift": _check_independence_drift,
     "guard-normalize": _check_guard_normalize,
+    "guard-normalize-rust-binding": _check_rust_binding_3_08,
     "round-trip": _check_round_trip,
     "round-trip-rust-binding": _check_rust_binding_3_09,
     "snapshot-restore": _check_snapshot_restore,
@@ -604,21 +631,29 @@ _BOUNDARY_07 = (
     "TEST-2-04 record)."
 )
 _BOUNDARY_08 = (
-    "docs/02 §12 lists 'normalized expressions' in the canonical model form, but no "
-    "crate implements guard normalization over the docs/19 §2 generated-system sense of "
-    "'guard' this section's sibling module and tsys use. continuum-cml-elab — PR 15a's "
-    "named home for source-level normalization — is a 22-line documented stub with no "
-    "function bodies (checked directly). continuum-engine-reference/src/expr.rs has "
-    "evaluation only, no rewrite or simplification pass (checked directly). "
-    "continuum-intent/src/cpnf.rs's CPNF-1 is real and tested, but it normalizes "
-    "top-level intent-contract properties (RFC 0037's N1-N7 over leads_to/invariant/"
-    "temporal formulas) — a different denotation from a transition's guard, so it is not "
-    "cited as this ID's binding. The check below (_guard_equivalence) still runs for "
-    "real: it applies a De Morgan push plus a double-negation wrap "
-    "(normalize_guard) to every generated system's guards and requires the reachable "
-    "state set and oracle metrics to be unchanged, and a corrupted rewrite "
-    "(_corrupt_guard_normalize, which leaves the guard's real logical negation) is "
-    "required to be caught."
+    "continuum-cml-elab is real now (bn-ybq): norm.rs documents Action::guard as a "
+    "Vec<Expr> of conjuncts in source order, over which NormModel::identity is "
+    "content-addressed (ADR-0013); elab.rs's conjuncts/split_clauses is the code that "
+    "splits require a && b, or two require clauses, into that one list. "
+    "crates/continuum-cml-elab/tests/guard_equivalence.rs exercises it directly: "
+    "nested_conjunction_splits_the_same_as_three_separate_requires shows two && "
+    "associations and three separate requires share one NormModel identity and one "
+    "lowered Model identity; guards_that_differ_in_meaning_keep_different_identities is "
+    "the negative control (a dropped conjunct or a changed bound keeps a different "
+    "identity); disabling_conjunct_splitting_breaks_the_relation is the mutant — a "
+    "hand-built NormModel with the split guard merged back into one unsplit && no "
+    "longer shares the elaborator's identity, showing the splitting rule is load-"
+    "bearing. continuum-intent/src/cpnf.rs's CPNF-1 remains a different denotation "
+    "(top-level intent-contract properties under RFC 0037's N1-N7, not a transition's "
+    "guard) and is still not cited as this ID's binding. The tsys-level check below "
+    "(_guard_equivalence) also still runs for real, over the harness's own oracle: it "
+    "applies a De Morgan push plus a double-negation wrap (normalize_guard) to every "
+    "generated system's guards and requires the reachable state set and oracle metrics "
+    "to be unchanged, and a corrupted rewrite (_corrupt_guard_normalize, which leaves "
+    "the guard's real logical negation) is required to be caught. This tsys-level "
+    "rewrite is independent of elab.rs's algorithm (it is not a port of conjunct "
+    "splitting), so no drift check applies to it, the same relationship TEST-3-09's "
+    "tsys round trip has to CVNF-1."
 )
 _BOUNDARY_09 = (
     "crates/continuum-value/tests/phase_a_canonical_round_trip.rs states and tests "
@@ -778,15 +813,11 @@ def real_run() -> dict[str, Any]:
 
     status = {
         "TEST-3-07": "enforced",
-        "TEST-3-08": "partial",
+        "TEST-3-08": "enforced",
         "TEST-3-09": "enforced",
         "TEST-3-10": "partial",
     }
     absence = {
-        "TEST-3-08": "no crate normalizes a transition guard's boolean expression; continuum-cml-elab "
-        "(PR 15a's named home for it) is a documented stub, continuum-engine-reference/src/expr.rs has no "
-        "rewrite pass, and continuum-intent/src/cpnf.rs's real CPNF-1 normalizes intent-contract properties, "
-        "not transition guards — a different denotation; see BOUNDARIES",
         "TEST-3-10": "no resume/restore function exists anywhere in continuum-engine-reference (bfs.rs's "
         "Partial::frontier only documents itself as 'a resume point'), and continuumd's restart path is "
         "architecturally the opposite of a root-replay comparison (docs/35: 'MUST NOT reconstruct task state "
