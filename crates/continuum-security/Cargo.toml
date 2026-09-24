@@ -2,7 +2,11 @@
 name = "continuum-security"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# The keystore's exclusive store lock (bn-18w74) is `File::try_lock`, stable since 1.89:
+# std's only safe lock, and this crate forbids `unsafe` and adds no dependency. So this
+# crate's compatibility floor is 1.89, above the workspace's 1.85; the pinned toolchain
+# (`rust-toolchain.toml`, 1.97.0) is the one every gate builds with.
+rust-version = "1.89"
 license.workspace = true
 publish = false
 

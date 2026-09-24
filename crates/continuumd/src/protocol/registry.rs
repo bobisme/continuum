@@ -19,7 +19,9 @@ use super::spec::{
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
 ///
-/// `"1.16"` as of bn-3glnv, which adds the signing wire (eight operations, three
+/// `"1.17"` as of bn-18w74, which adds the error code `OutcomeUnknown` and `rule
+/// signing.custody` (54 -> 55) and raises [`PROTOCOL_VERSION`] to `"3.9"`.
+/// `"1.16"` (bn-3glnv) added the signing wire (eight operations, three
 /// enums, one alias, one optional field, and three rules, 51 -> 54) and raises
 /// [`PROTOCOL_VERSION`] to `"3.8"`. `"1.15"` (bn-28kv4) added
 /// `CapabilityDescriptor.instances` and
@@ -28,7 +30,7 @@ use super::spec::{
 /// the domains of six `String` leaves, 45 -> 50), `"1.13"` (bn-3ncfp, `rule
 /// artifact_class.spelling`, 44 -> 45) and `"1.12"` (bn-12plt, doc comments
 /// only) moved no declaration, so they left the protocol at `"3.6"`.
-pub const IDL_VERSION: &str = "1.16";
+pub const IDL_VERSION: &str = "1.17";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
@@ -159,7 +161,19 @@ pub const IDL_VERSION: &str = "1.16";
 /// serves the new operations only on a connection negotiated at 3.8 or later, and
 /// keeps the new field off an older one. Counts: 83 operations in 20 namespaces,
 /// 47 named structs, 37 enums, 10 aliases, rules 51 -> 54.
-pub const PROTOCOL_VERSION: &str = "3.8";
+///
+/// The 3.8 -> 3.9 bump covers IDL 1.17 (bn-18w74, cr-33e464) and adds one **error
+/// code**, `OutcomeUnknown`, to the `@open` `ErrorCode` — a minor under `rule
+/// versioning.error_codes` — and one rule, `signing.custody`. The code answers a
+/// signing write whose durable record passed its commit point unconfirmed. It is never
+/// emitted below 3.9: a daemon with durable signing custody refuses its four signing
+/// writes on an older connection ([`OUTCOME_UNKNOWN_SINCE`]). Counts: 83 operations,
+/// 37 enums, rules 54 -> 55.
+pub const PROTOCOL_VERSION: &str = "3.9";
+
+/// The first protocol version that defines `ErrorCode::OutcomeUnknown`
+/// (`@since("3.9")`).
+pub const OUTCOME_UNKNOWN_SINCE: ProtocolVersion = ProtocolVersion::new(3, 9);
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -342,7 +356,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
         response: StructSpec::of::<IntentImportBundleResponse>(),
         verdict: Some("StructuralVerdictValue"),
         events: None,
-        errors: &[ErrorCode::IntentMutationDenied],
+        errors: &[ErrorCode::IntentMutationDenied, ErrorCode::OutcomeUnknown],
     },
     OperationSpec {
         name: "verification.start",
@@ -1112,7 +1126,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
         response: StructSpec::of::<SigningMintResponse>(),
         verdict: Some("StructuralVerdictValue"),
         events: None,
-        errors: &[ErrorCode::PolicyGateFailed],
+        errors: &[ErrorCode::PolicyGateFailed, ErrorCode::OutcomeUnknown],
     },
     OperationSpec {
         name: "signing.rotate",
@@ -1126,7 +1140,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
         response: StructSpec::of::<SigningRotateResponse>(),
         verdict: Some("StructuralVerdictValue"),
         events: None,
-        errors: &[ErrorCode::PolicyGateFailed],
+        errors: &[ErrorCode::PolicyGateFailed, ErrorCode::OutcomeUnknown],
     },
     OperationSpec {
         name: "signing.revoke",
@@ -1140,7 +1154,7 @@ pub const OPERATIONS: &[OperationSpec] = &[
         response: StructSpec::of::<SigningRevokeResponse>(),
         verdict: Some("StructuralVerdictValue"),
         events: None,
-        errors: &[ErrorCode::PolicyGateFailed],
+        errors: &[ErrorCode::PolicyGateFailed, ErrorCode::OutcomeUnknown],
     },
     OperationSpec {
         name: "signing.registry",

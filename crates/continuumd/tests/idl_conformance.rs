@@ -1058,11 +1058,15 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // `signing.verification`, and `intent.bundles`, 51 -> 54. Its one `optional` field,
     // `EvidenceGetResponse.signature`, moves none of these counts. No named struct is added:
     // every new body is anonymous.
+    //
+    // Protocol 3.9 (IDL 1.17, bn-18w74) adds one error code, `OutcomeUnknown`, to the
+    // `@open` `ErrorCode` — a member, which these counts do not see — and one rule,
+    // `signing.custody`, 54 -> 55.
     assert_eq!(document.aliases.len(), 10, "aliases");
     assert_eq!(document.enums.len(), 37, "enums");
     assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 54, "rules");
+    assert_eq!(document.rules.len(), 55, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
@@ -1187,7 +1191,8 @@ fn the_error_taxonomy_is_the_complete_idl_set() {
         .map(|member| member.ident.as_str())
         .collect();
     assert_eq!(mine, theirs, "the §10.3 taxonomy");
-    assert_eq!(mine.len(), 20);
+    // 20 through 3.8; 3.9 (bn-18w74) adds `OutcomeUnknown`.
+    assert_eq!(mine.len(), 21);
 
     // The seven codes the PR 5 slice names explicitly, asserted by name so that losing
     // one is a failure here and not only inside a list comparison.

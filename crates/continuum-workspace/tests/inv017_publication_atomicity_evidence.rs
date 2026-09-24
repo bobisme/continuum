@@ -1317,6 +1317,20 @@ const BARE_HANDLE_FIELDS: &[(&str, &str, &str, &str)] = &[
         "ambiguous",
         "a signer name that names two keys and is never resolved; not content the store holds",
     ),
+    // bn-18w74: the authority's state before a change, restored if the custody refuses
+    // the change. A copy of the two fields above, and no more a publication than they are.
+    (
+        SIGNING_RS,
+        "Checkpoint",
+        "index",
+        "a copy of `SigningAuthority::index` kept to undo a refused change: a signer's name, not content the store holds",
+    ),
+    (
+        SIGNING_RS,
+        "Checkpoint",
+        "ambiguous",
+        "a copy of `SigningAuthority::ambiguous` kept to undo a refused change: never resolved, not content the store holds",
+    ),
     (
         SIGNING_RS,
         "SigningAuthority",

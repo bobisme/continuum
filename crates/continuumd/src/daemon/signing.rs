@@ -19,6 +19,23 @@
 //! here reads a clock, a file, or the operating system's entropy (INV-005): the entropy is
 //! a capability handed in by the builder, and a daemon without one refuses to mint.
 //!
+//! # Custody across restart (bn-18w74)
+//!
+//! A deployment that supplies a [`SigningCustody`] (through
+//! [`Builder::launch_signing`](super::Builder::launch_signing)) makes every change durable:
+//! each operation that changes the authority builds the change, records the resulting
+//! [`SigningCustodyState`] through the custody — with the new key's seed, captured from the
+//! entropy capability, when the change made one — and only then holds the new key and keeps
+//! the new state. A record refused before the custody's commit point undoes the change,
+//! answers `PublicationAborted`, and stops every later signing write and signature until a
+//! restart; one that passed the commit point unconfirmed answers `OutcomeUnknown`
+//! (protocol 3.9) and quarantines the authority the same way until a restart reconciles it
+//! from whichever record is durable (review cr-33e464, `rule signing.custody`). Below 3.9 a
+//! daemon with custody refuses its signing writes ([`require_custody_version`]). At restart,
+//! [`validate_custody`] checks the loaded state before any key is used. This daemon's own
+//! keys are recorded apart from the registry's signers, so a key the registry learned from
+//! a bundle is never taken as its own.
+//!
 //! # The operations, and the rules they keep
 //!
 //! | Operation | Level | What it does |
@@ -57,10 +74,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_evidence::actor::ActorId as SigningActor;
 use continuum_evidence::signing::{
-    AllowedSigners, ArtifactSignature, KeyEntropy, LinkEvent, LocalSigner, MintError, Provenance,
-    RegistryHead, RevocationReason as LibraryReason, SignatureVerifier, SignedArtifactKind as Kind,
-    SignerIdentity, SignerLink, SignerStanding, SigningEvent, SigningRegistry, StandingError,
-    UnverifiedReason, VerifiedStanding,
+    AllowedSigners, ArtifactSignature, CustodyWrite, EntropyUnavailable, KeyEntropy, LinkEvent,
+    LocalSigner, MintError, Provenance, RegistryHead, RevocationReason as LibraryReason, SEED_LEN,
+    SignatureVerifier, SignedArtifactKind as Kind, SignerIdentity, SignerLink, SignerStanding,
+    SigningCustody, SigningCustodyState, SigningEvent, SigningRegistry, StandingError,
+    UnverifiedReason, VerifiedStanding, Zeroizing,
 };
 use continuum_value::identity::ContentIdentity;
 use continuum_workspace::publication::ReferenceStore;
@@ -101,14 +119,20 @@ pub const MAX_HELD_BUNDLE_BYTES: usize = 64 << 20;
 pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("signing.mint", ErrorCode::MalformedRequest),
     ("signing.mint", ErrorCode::PolicyGateFailed),
+    ("signing.mint", ErrorCode::PublicationAborted),
+    ("signing.mint", ErrorCode::OutcomeUnknown),
     ("signing.mint", ErrorCode::QuotaExhausted),
     ("signing.mint", ErrorCode::UnsupportedSemanticFeature),
     ("signing.rotate", ErrorCode::MalformedRequest),
     ("signing.rotate", ErrorCode::PolicyGateFailed),
+    ("signing.rotate", ErrorCode::PublicationAborted),
+    ("signing.rotate", ErrorCode::OutcomeUnknown),
     ("signing.rotate", ErrorCode::QuotaExhausted),
     ("signing.rotate", ErrorCode::UnsupportedSemanticFeature),
     ("signing.revoke", ErrorCode::MalformedRequest),
     ("signing.revoke", ErrorCode::PolicyGateFailed),
+    ("signing.revoke", ErrorCode::PublicationAborted),
+    ("signing.revoke", ErrorCode::OutcomeUnknown),
     ("signing.revoke", ErrorCode::QuotaExhausted),
     ("signing.revoke", ErrorCode::UnsupportedSemanticFeature),
     ("signing.registry", ErrorCode::MalformedRequest),
@@ -165,6 +189,338 @@ impl Reserve {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Custody: what survives a restart (bn-18w74).
+// ---------------------------------------------------------------------------
+
+/// Check every part of a restored custody `state` against its registry and against the
+/// invariants the daemon keeps, before any key is used (bn-18w74). `held` is the identity of
+/// the key the caller restored.
+///
+/// Bounded: every set is checked against its bound before it is walked, and each membership
+/// test is an index lookup, never a scan.
+///
+/// # Errors
+///
+/// The first [`CustodyRefusal`].
+pub fn validate_custody(
+    state: &SigningCustodyState,
+    held: &SignerIdentity,
+) -> Result<(), CustodyRefusal> {
+    let registry = state.registry();
+    let own = state.own();
+    if state.held() != Some(held) {
+        return Err(CustodyRefusal::HeldKeyMismatch);
+    }
+    let records = registry.audit_log().len();
+    if records > MAX_AUDIT_RECORDS
+        || own.len() > records
+        || state.own_links().len() > records
+        || state.presigned().len() > records
+        || state.adopted_links().len() > MAX_BUNDLE_LINKS
+    {
+        return Err(CustodyRefusal::Bound);
+    }
+    if !own.contains_key(held) || own.keys().any(|key| registry.standing(key).is_none()) {
+        return Err(CustodyRefusal::OwnKeyUnknown);
+    }
+    // The held key is active, or revoked and waiting for a replacement; a held key the
+    // registry records as retired is a state no daemon writes.
+    if matches!(
+        registry.standing(held),
+        Some(SignerStanding::Rotated { .. })
+    ) {
+        return Err(CustodyRefusal::HeldKeyRetired);
+    }
+    // Every transition the audit log records that a link could attest, as an index.
+    let recorded: BTreeSet<LinkEvent> = registry
+        .audit_log()
+        .iter()
+        .filter_map(|record| match record.event() {
+            SigningEvent::Rotated { from, to } => Some(LinkEvent::Rotated {
+                from: from.clone(),
+                to: to.clone(),
+            }),
+            SigningEvent::Revoked {
+                signer,
+                reason: LibraryReason::Compromised,
+            } => Some(LinkEvent::Revoked {
+                signer: signer.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+    let concerns = |link: &SignerLink| -> Vec<SignerIdentity> {
+        match link.event() {
+            LinkEvent::Rotated { from, to } => vec![from.clone(), to.clone()],
+            LinkEvent::Revoked { signer } => vec![signer.clone()],
+        }
+    };
+    let mut seen: BTreeSet<&SignerLink> = BTreeSet::new();
+    for link in state.own_links() {
+        if !seen.insert(link)
+            || !recorded.contains(link.event())
+            || !concerns(link).iter().all(|key| own.contains_key(key))
+            || !link.verify()
+        {
+            return Err(CustodyRefusal::OwnLink);
+        }
+    }
+    if !links_form_chains(state.own_links().iter().map(SignerLink::event)) {
+        return Err(CustodyRefusal::Topology);
+    }
+    // The completeness sweep (review cr-33e464 round 4): every audit record export or a
+    // restart depends on has the link or entry the running daemon keeps with it, and
+    // (below) no link or entry exists without its record. Pairs:
+    //
+    // | record | own key(s) | peer key(s) |
+    // |---|---|---|
+    // | `Minted` | none needed | none needed (a bundle signer's introduction) |
+    // | `Rotated{from,to}` | own rotation link | adopted rotation link; mixed own/peer never recorded |
+    // | `Revoked{Compromised}` | own revocation link | adopted revocation link, or a local revocation — exactly one |
+    // | `Revoked{KeyLost}` | none (a lost key cannot sign) | a local revocation (links never carry a loss) |
+    // | `Superseded{lost,successor}` | both own | never recorded |
+    let own_events: BTreeSet<&LinkEvent> =
+        state.own_links().iter().map(SignerLink::event).collect();
+    let adopted_events: BTreeSet<&LinkEvent> = state
+        .adopted_links()
+        .iter()
+        .map(SignerLink::event)
+        .collect();
+    let local = state.local_revocations();
+    for record in registry.audit_log() {
+        match record.event() {
+            SigningEvent::Minted { .. } => {}
+            SigningEvent::Rotated { from, to } => {
+                let rotation = LinkEvent::Rotated {
+                    from: from.clone(),
+                    to: to.clone(),
+                };
+                match (own.contains_key(from), own.contains_key(to)) {
+                    (true, true) if own_events.contains(&rotation) => {}
+                    (false, false) if adopted_events.contains(&rotation) => {}
+                    (false, false) => return Err(CustodyRefusal::AdoptedLink),
+                    _ => return Err(CustodyRefusal::OwnLink),
+                }
+            }
+            SigningEvent::Revoked { signer, reason } => {
+                let revocation = LinkEvent::Revoked {
+                    signer: signer.clone(),
+                };
+                let is_local = local.contains(signer);
+                match (own.contains_key(signer), reason) {
+                    (true, LibraryReason::Compromised) => {
+                        if !own_events.contains(&revocation) || is_local {
+                            return Err(CustodyRefusal::OwnLink);
+                        }
+                    }
+                    (true, LibraryReason::KeyLost) => {
+                        if is_local {
+                            return Err(CustodyRefusal::LocalRevocation);
+                        }
+                    }
+                    (false, LibraryReason::Compromised) => {
+                        if adopted_events.contains(&revocation) == is_local {
+                            return Err(CustodyRefusal::AdoptedLink);
+                        }
+                    }
+                    (false, LibraryReason::KeyLost) => {
+                        if !is_local {
+                            return Err(CustodyRefusal::LocalRevocation);
+                        }
+                    }
+                }
+            }
+            SigningEvent::Superseded { lost, successor } => {
+                if !own.contains_key(lost) || !own.contains_key(successor) {
+                    return Err(CustodyRefusal::OwnStanding);
+                }
+            }
+        }
+    }
+    // The reverse for local revocations: each names a peer key the registry records as
+    // revoked. (Links are held to their records above, `recorded`.)
+    for key in local {
+        if own.contains_key(key)
+            || !matches!(registry.standing(key), Some(SignerStanding::Revoked { .. }))
+        {
+            return Err(CustodyRefusal::LocalRevocation);
+        }
+    }
+    // What the standing of an own key requires beyond its records: a key retired by
+    // rotation keeps its pre-signed revocation until it is revoked, and only the held key
+    // is active.
+    for key in own.keys() {
+        match registry.standing(key) {
+            Some(SignerStanding::Rotated { .. }) if !state.presigned().contains_key(key) => {
+                return Err(CustodyRefusal::OwnLink);
+            }
+            Some(SignerStanding::Active) if key != held => {
+                return Err(CustodyRefusal::OwnStanding);
+            }
+            _ => {}
+        }
+    }
+    for link in state.adopted_links() {
+        if !seen.insert(link)
+            || !recorded.contains(link.event())
+            || concerns(link).iter().any(|key| own.contains_key(key))
+            || !link.verify()
+        {
+            return Err(CustodyRefusal::AdoptedLink);
+        }
+    }
+    // Adopted rotations may share a successor across bundles, but a key retires once and
+    // is revoked once: the registry never records either twice.
+    let mut retired = BTreeSet::new();
+    let mut revoked = BTreeSet::new();
+    for link in state.adopted_links() {
+        let fresh = match link.event() {
+            LinkEvent::Rotated { from, .. } => retired.insert(from),
+            LinkEvent::Revoked { signer } => revoked.insert(signer),
+        };
+        if !fresh {
+            return Err(CustodyRefusal::Topology);
+        }
+    }
+    for (key, link) in state.presigned() {
+        let retired_here = matches!(registry.standing(key), Some(SignerStanding::Rotated { .. }));
+        let own_revocation = link.event()
+            == &LinkEvent::Revoked {
+                signer: key.clone(),
+            };
+        if key == held
+            || !own.contains_key(key)
+            || !retired_here
+            || !own_revocation
+            || !link.verify()
+        {
+            return Err(CustodyRefusal::Presigned);
+        }
+    }
+    Ok(())
+}
+
+/// Why a persisted [`SigningCustodyState`] was refused at restart. Typed, and carrying no
+/// key material or link bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CustodyRefusal {
+    /// The state names another held key than the one restored.
+    HeldKeyMismatch,
+    /// The held key is retired by rotation.
+    HeldKeyRetired,
+    /// An own key other than the held one is active, or a lost own key's successor is not
+    /// own.
+    OwnStanding,
+    /// A set is larger than its bound.
+    Bound,
+    /// The held key is not an own key, or an own key has no standing in the registry.
+    OwnKeyUnknown,
+    /// An own link is duplicated, not recorded in the audit log, concerns a key that is
+    /// not this daemon's, or is not signed by every key it concerns; or a retired own key
+    /// lacks its rotation link or its pre-signed revocation; or an own key revoked as
+    /// compromised lacks its revocation link.
+    OwnLink,
+    /// An adopted link is duplicated, not recorded, concerns one of this daemon's keys, or
+    /// is not signed by every key it concerns; or a recorded peer rotation has no adopted
+    /// link, or a peer's compromise revocation has neither an adopted link nor a local
+    /// entry, or has both.
+    AdoptedLink,
+    /// A local revocation names an own key or a key not revoked, or a peer's loss
+    /// revocation (which only the local operator records) has no local entry.
+    LocalRevocation,
+    /// The own links do not form disjoint chains, or an adopted key retires or is revoked
+    /// twice.
+    Topology,
+    /// A pre-signed revocation is not the retired own key's own revocation, or that key is
+    /// held, not retired, or not this daemon's.
+    Presigned,
+}
+
+/// The daemon's view of a [`SigningCustody`]: its error erased, its commit phase kept
+/// ([`CustodyWrite`]), so the authority can hold any custody without naming its error type.
+trait HeldCustody: Send + Sync {
+    fn persist(
+        &mut self,
+        state: &SigningCustodyState,
+        minted: Option<Zeroizing<[u8; SEED_LEN]>>,
+    ) -> Result<(), CustodyWrite<()>>;
+}
+
+struct Erased<C>(C);
+
+impl<C: SigningCustody> HeldCustody for Erased<C> {
+    fn persist(
+        &mut self,
+        state: &SigningCustodyState,
+        minted: Option<Zeroizing<[u8; SEED_LEN]>>,
+    ) -> Result<(), CustodyWrite<()>> {
+        self.0.persist(state, minted).map_err(|write| match write {
+            CustodyWrite::NotRecorded(_) => CustodyWrite::NotRecorded(()),
+            CustodyWrite::Unconfirmed(_) => CustodyWrite::Unconfirmed(()),
+        })
+    }
+}
+
+/// Wraps the daemon's entropy capability during a mint so that, when a custody will
+/// persist the new key, the seed it supplied is kept, in a zeroizing buffer, until it is
+/// handed to the custody. It consults the capability it wraps and adds none of its own.
+struct Capture<'a> {
+    inner: &'a mut dyn KeyEntropy,
+    keep: bool,
+    seed: Option<Zeroizing<[u8; SEED_LEN]>>,
+}
+
+impl KeyEntropy for Capture<'_> {
+    fn seed(&mut self) -> Result<Zeroizing<[u8; SEED_LEN]>, EntropyUnavailable> {
+        let seed = self.inner.seed()?;
+        if self.keep {
+            let mut kept = Zeroizing::new([0u8; SEED_LEN]);
+            kept.copy_from_slice(seed.as_ref());
+            self.seed = Some(kept);
+        }
+        Ok(seed)
+    }
+}
+
+/// How a change passed its custody's commit point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+enum Recorded {
+    /// Durable: the operation succeeds.
+    Confirmed,
+    /// Past the commit point, durability unknown: the change stays in memory (for reads
+    /// only: the authority is quarantined) and the operation answers `OutcomeUnknown`.
+    Unconfirmed,
+}
+
+impl Recorded {
+    fn answer(self) -> Result<(), Fault> {
+        match self {
+            Self::Confirmed => Ok(()),
+            Self::Unconfirmed => Err(outcome_unknown()),
+        }
+    }
+}
+
+/// The authority's public state before a change: restored if the custody refuses it.
+struct Checkpoint {
+    registry: SigningRegistry,
+    head: RegistryHead,
+    index: BTreeMap<SignerHandle, SignerIdentity>,
+    ambiguous: BTreeSet<SignerHandle>,
+    allowed: AllowedSigners,
+    own: BTreeMap<SignerIdentity, BTreeSet<Kind>>,
+    presigned: BTreeMap<SignerIdentity, SignerLink>,
+    own_links: Vec<SignerLink>,
+    adopted_links: Vec<SignerLink>,
+    /// Peer keys revoked on this daemon's own operator's word (`signing.revoke` of a key
+    /// that is not this daemon's): no key attested it, so no link records it. Persisted so
+    /// a restart can account for every revocation record (review cr-33e464 round 4).
+    local_revocations: BTreeSet<SignerIdentity>,
+    identity_collisions: u64,
+}
+
 /// The deployment's signing authority, as [`DaemonState`] holds it.
 pub struct SigningAuthority {
     registry: SigningRegistry,
@@ -186,9 +542,10 @@ pub struct SigningAuthority {
     /// Refusals because a content-addressed handle already named byte-different content
     /// (an `in_*` or `inb_*` identity collision). Counted, never logged with the content.
     identity_collisions: u64,
-    /// This daemon's own signers: every signer of the installed registry and every key a
-    /// local operation minted. A bundle never changes the standing of one of them.
-    own: BTreeSet<SignerIdentity>,
+    /// This daemon's own keys, each with the kinds it was allowed when it was made: the
+    /// installed key and every key a local operation minted — never a signer the registry
+    /// learned from a bundle (bn-18w74). A bundle never changes the standing of one of them.
+    own: BTreeMap<SignerIdentity, BTreeSet<Kind>>,
     /// For each key this daemon rotated away from and has not revoked, that key's own
     /// compromise revocation, signed at rotation time while the key was active. The key
     /// itself is wiped when it retires; this link is published only if the key is later
@@ -200,8 +557,24 @@ pub struct SigningAuthority {
     /// The links adopted from verified bundles, relayed by export. Deduplicated, and capped
     /// so that together with `own_links` they fit one bundle.
     adopted_links: Vec<SignerLink>,
+    /// Peer keys revoked on this daemon's own operator's word (`signing.revoke` of a key
+    /// that is not this daemon's): no key attested it, so no link records it. Persisted so
+    /// a restart can account for every revocation record (review cr-33e464 round 4).
+    local_revocations: BTreeSet<SignerIdentity>,
     /// Imports refused because a carried link was not signed by every key it concerns.
     unattested_links: u64,
+    /// The deployment's durable custody, when it supplied one: every change is recorded
+    /// through it before it takes effect.
+    custody: Option<Box<dyn HeldCustody>>,
+    /// Set when the custody refused a change. The change was undone in memory, and every
+    /// later signing write and signature is refused until a restart reloads the custody.
+    custody_failed: bool,
+    /// Set when a custody write passed its commit point without confirming durability
+    /// (review cr-33e464). The authority is then quarantined, so no later write clears it:
+    /// only a restart, which reconciles the custody, does.
+    custody_unconfirmed: bool,
+    /// Custody writes that committed without confirming durability. Counted, never logged.
+    unconfirmed_writes: u64,
 }
 
 /// What a verified bundle would change: the registry with its facts applied, and the
@@ -245,12 +618,17 @@ impl Default for SigningAuthority {
             bundles: BTreeMap::new(),
             held_bytes: 0,
             imported: BTreeMap::new(),
-            own: BTreeSet::new(),
+            own: BTreeMap::new(),
             presigned: BTreeMap::new(),
             own_links: Vec::new(),
             adopted_links: Vec::new(),
+            local_revocations: BTreeSet::new(),
             unattested_links: 0,
             identity_collisions: 0,
+            custody: None,
+            custody_failed: false,
+            custody_unconfirmed: false,
+            unconfirmed_writes: 0,
         }
     }
 }
@@ -274,6 +652,10 @@ impl fmt::Debug for SigningAuthority {
             .field("adopted_links", &self.adopted_links.len())
             .field("unattested_links", &self.unattested_links)
             .field("identity_collisions", &self.identity_collisions)
+            .field("custody", &self.custody.is_some())
+            .field("custody_failed", &self.custody_failed)
+            .field("custody_unconfirmed", &self.custody_unconfirmed)
+            .field("unconfirmed_writes", &self.unconfirmed_writes)
             .finish()
     }
 }
@@ -327,6 +709,10 @@ fn wire_handle(identity: &SignerIdentity) -> Result<SignerHandle, Fault> {
 
 impl SigningAuthority {
     /// The registry: standing and the audit log.
+    ///
+    /// Not a trust decision: while [`custody_unreconciled`](Self::custody_unreconciled)
+    /// holds, this may be ahead of what a restart loads, and every trust-deciding path of
+    /// the daemon refuses instead of reading it (review cr-1dc5ii).
     #[must_use]
     pub const fn registry(&self) -> &SigningRegistry {
         &self.registry
@@ -339,12 +725,20 @@ impl SigningAuthority {
     }
 
     /// The local allowed-signers policy.
+    ///
+    /// Not a trust decision: while [`custody_unreconciled`](Self::custody_unreconciled)
+    /// holds, this may be ahead of what a restart loads, and every trust-deciding path of
+    /// the daemon refuses instead of reading it (review cr-1dc5ii).
     #[must_use]
     pub const fn allowed(&self) -> &AllowedSigners {
         &self.allowed
     }
 
     /// A held intent bundle.
+    ///
+    /// Not a trust decision: while [`custody_unreconciled`](Self::custody_unreconciled)
+    /// holds, this may be ahead of what a restart loads, and every trust-deciding path of
+    /// the daemon refuses instead of reading it (review cr-1dc5ii).
     #[must_use]
     pub fn bundle(&self, handle: &IntentBundleHandle) -> Option<&SignedBundle> {
         self.bundles.get(handle)
@@ -380,26 +774,191 @@ impl SigningAuthority {
         self.imported.get(intent)
     }
 
-    /// Install the deployment's registry and key (the builder's `receipt_signer`). The key
-    /// is allowed every kind: it is the deployment's own identity (plan §18.6's
-    /// solo-developer default). Installing again replaces the registry and the key; a
-    /// deployment installs once.
-    pub(crate) fn install(&mut self, registry: SigningRegistry, signer: LocalSigner) {
+    /// Install the deployment's registry and key (the builder's `receipt_signer`).
+    ///
+    /// With no restored custody state the key is this daemon's only own key and is allowed
+    /// every kind (plan §18.6's solo-developer default); every other signer of the registry
+    /// is a peer, whose standing an attested link may change (bn-18w74: before, every
+    /// signer of the installed registry was taken as this daemon's own). With a restored
+    /// state — already checked by [`ReceiptSigner::restored`](super::ReceiptSigner::restored)
+    /// — the own keys, their kinds, the links, and the pre-signed revocations are the
+    /// persisted ones. Installing again replaces all of it; a deployment installs once.
+    pub(crate) fn install(
+        &mut self,
+        registry: SigningRegistry,
+        signer: LocalSigner,
+        restored: Option<SigningCustodyState>,
+    ) {
+        // A custody attached by the launcher holds the store it loaded. Installing any
+        // other identity afterwards would record that identity over the store, so the
+        // authority refuses every write instead (review of bn-18w74, S1).
+        if self.custody.is_some() {
+            self.custody_failed = true;
+        }
         self.registry = registry;
         self.refresh();
         self.reindex();
-        self.own = self
-            .registry
-            .signers()
-            .map(|(identity, _)| identity.clone())
-            .collect();
+        self.own.clear();
         self.presigned.clear();
         self.own_links.clear();
         self.adopted_links.clear();
+        self.local_revocations.clear();
         let identity = signer.identity().clone();
-        self.own.insert(identity.clone());
-        self.allow_one(identity, Kind::ALL);
+        match restored {
+            Some(state) => {
+                self.local_revocations = state.local_revocations().clone();
+                let (_, _, own, own_links, adopted_links, presigned) = state.into_parts();
+                for (key, kinds) in own {
+                    self.own_key(key, kinds);
+                }
+                self.own_links = own_links;
+                self.adopted_links = adopted_links;
+                self.presigned = presigned;
+            }
+            None => self.own_key(identity, Kind::ALL),
+        }
         self.held = Some(signer);
+    }
+
+    /// Record `identity` as one of this daemon's own keys, allowed `kinds`.
+    fn own_key(&mut self, identity: SignerIdentity, kinds: impl IntoIterator<Item = Kind>) {
+        let kinds: BTreeSet<Kind> = kinds.into_iter().collect();
+        self.own
+            .entry(identity.clone())
+            .or_default()
+            .extend(kinds.iter().copied());
+        self.allow_one(identity, kinds);
+    }
+
+    /// Supply the durable custody (the builder's `signing_custody`).
+    pub(crate) fn set_custody<C: SigningCustody + 'static>(&mut self, custody: C) {
+        self.custody = Some(Box::new(Erased(custody)));
+    }
+
+    /// Whether a custody write passed its commit point unconfirmed, so the live standing may
+    /// be ahead of what a restart loads. Until a restart reconciles it, no trust-deciding
+    /// read uses it: `signing.verify` answers `standing-stale`, a bundle does not verify,
+    /// a bundle-backed acceptance fails closed, and `signing.registry` refuses.
+    #[must_use]
+    pub const fn custody_unreconciled(&self) -> bool {
+        self.custody_unconfirmed
+    }
+
+    /// Whether this daemon's custody refused a change and it now refuses signing writes.
+    #[must_use]
+    pub const fn custody_failed(&self) -> bool {
+        self.custody_failed
+    }
+
+    /// The custody state this authority would persist with `held` as its held key.
+    fn custody_state(&self, held: Option<&SignerIdentity>) -> SigningCustodyState {
+        SigningCustodyState::from_parts(
+            self.registry.clone(),
+            held.cloned(),
+            self.own.clone(),
+            self.own_links.clone(),
+            self.adopted_links.clone(),
+            self.presigned.clone(),
+        )
+        .with_local_revocations(self.local_revocations.clone())
+    }
+
+    /// The custody state as it stands: what a restart would reload.
+    ///
+    /// Not a trust decision: while [`custody_unreconciled`](Self::custody_unreconciled)
+    /// holds, this may be ahead of what a restart loads, and every trust-deciding path of
+    /// the daemon refuses instead of reading it (review cr-1dc5ii).
+    #[must_use]
+    pub fn custody_snapshot(&self) -> SigningCustodyState {
+        self.custody_state(self.held())
+    }
+
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            registry: self.registry.clone(),
+            head: self.head.clone(),
+            index: self.index.clone(),
+            ambiguous: self.ambiguous.clone(),
+            allowed: self.allowed.clone(),
+            own: self.own.clone(),
+            presigned: self.presigned.clone(),
+            own_links: self.own_links.clone(),
+            adopted_links: self.adopted_links.clone(),
+            local_revocations: self.local_revocations.clone(),
+            identity_collisions: self.identity_collisions,
+        }
+    }
+
+    fn rollback(&mut self, checkpoint: Checkpoint) {
+        self.registry = checkpoint.registry;
+        self.head = checkpoint.head;
+        self.index = checkpoint.index;
+        self.ambiguous = checkpoint.ambiguous;
+        self.allowed = checkpoint.allowed;
+        self.own = checkpoint.own;
+        self.presigned = checkpoint.presigned;
+        self.own_links = checkpoint.own_links;
+        self.adopted_links = checkpoint.adopted_links;
+        self.local_revocations = checkpoint.local_revocations;
+        self.identity_collisions = checkpoint.identity_collisions;
+    }
+
+    /// Refuse a signing write once the custody has failed.
+    fn writable(&self) -> Result<(), Fault> {
+        if self.custody_failed {
+            return Err(custody_fault());
+        }
+        Ok(())
+    }
+
+    /// Record the change made since `checkpoint` through the custody, with `held` as the
+    /// held key and `minted` its seed when the change made it. Without a custody this is
+    /// a no-op. When the custody refuses, the change is undone, the authority refuses
+    /// every later signing write and signature, and the answer is `PublicationAborted`.
+    fn commit(
+        &mut self,
+        checkpoint: Checkpoint,
+        held: Option<&SignerIdentity>,
+        minted: Option<Zeroizing<[u8; SEED_LEN]>>,
+    ) -> Result<Recorded, Fault> {
+        if self.custody.is_none() {
+            return Ok(Recorded::Confirmed);
+        }
+        let state = self.custody_state(held);
+        let recorded = self
+            .custody
+            .as_mut()
+            .map_or(Err(CustodyWrite::NotRecorded(())), |custody| {
+                custody.persist(&state, minted)
+            });
+        match recorded {
+            Ok(()) => Ok(Recorded::Confirmed),
+            // Past the commit point, unconfirmed (review cr-33e464, round 2): a crash may
+            // keep the change or lose it. The answer is `OutcomeUnknown`, never success;
+            // the custody marked itself unreconciled before its commit point, and the
+            // authority is quarantined — it refuses every signature and signing write —
+            // until a restart reconciles it from whichever record is durable. The change
+            // stays in memory only for reads until then.
+            Err(CustodyWrite::Unconfirmed(())) => {
+                self.custody_unconfirmed = true;
+                self.custody_failed = true;
+                self.unconfirmed_writes = self.unconfirmed_writes.saturating_add(1);
+                Ok(Recorded::Unconfirmed)
+            }
+            // Before the commit point: nothing a restart loads changed, so neither does
+            // anything here.
+            Err(CustodyWrite::NotRecorded(())) => {
+                self.rollback(checkpoint);
+                self.custody_failed = true;
+                Err(custody_fault())
+            }
+        }
+    }
+
+    /// How many custody writes committed without confirming their durability.
+    #[must_use]
+    pub const fn unconfirmed_writes(&self) -> u64 {
+        self.unconfirmed_writes
     }
 
     /// Add `allowed` to local policy (the builder's `allowed_signers`).
@@ -475,6 +1034,11 @@ impl SigningAuthority {
         artifact: &ContentIdentity,
     ) -> Option<Result<ArtifactSignature, &'static str>> {
         self.held.as_ref().map(|key| {
+            if self.custody_failed {
+                return Err(
+                    "the signing custody failed; this daemon signs nothing until restarted",
+                );
+            }
             if !self.allowed.permits(key.identity(), kind) {
                 return Err("the held key is not allowed to sign this kind");
             }
@@ -579,7 +1143,7 @@ impl SigningAuthority {
     /// policy pins it, it is unknown here, and it is not one of this daemon's keys.
     fn introducible(&self, candidate: &SigningRegistry, signer: &SignerIdentity) -> bool {
         candidate.standing(signer).is_none()
-            && !self.own.contains(signer)
+            && !self.own.contains_key(signer)
             && self.allowed.kinds(signer).is_some()
     }
 
@@ -592,7 +1156,7 @@ impl SigningAuthority {
         from: &SignerIdentity,
         to: &SignerIdentity,
     ) -> Option<Vec<SigningEvent>> {
-        if self.own.contains(from) || self.own.contains(to) {
+        if self.own.contains_key(from) || self.own.contains_key(to) {
             return None;
         }
         let mut facts = Vec::new();
@@ -743,7 +1307,7 @@ impl SigningAuthority {
             .collect();
         revocations.sort_by(|left, right| left.0.cmp(right.0));
         for (revoked, link) in revocations {
-            if self.own.contains(revoked) {
+            if self.own.contains_key(revoked) {
                 continue;
             }
             let mut facts = Vec::new();
@@ -790,6 +1354,12 @@ impl SigningAuthority {
         bundle: &SignedBundle,
         actor: &SigningActor,
     ) -> Result<Adoption, SignatureOutcome> {
+        // While custody is unreconciled the live standing may be ahead of what a restart
+        // loads, so it decides nothing: no bundle verifies and nothing is adopted or held,
+        // a zero-fact retry included (review cr-1dc5ii).
+        if self.custody_unconfirmed {
+            return Err(SignatureOutcome::StandingStale);
+        }
         let carried = self.with_carried_facts(bundle, actor);
         let allowed = self.allowed.intersection(&bundle.body().allowed);
         let head = carried.registry.head();
@@ -821,17 +1391,26 @@ impl SigningAuthority {
     /// Commit an [`Adoption`] [`verify_bundle`](Self::verify_bundle) built. Monotone: its
     /// facts were appended to a copy of this registry, each a legal transition. Returns
     /// how many facts it recorded.
-    pub(crate) fn adopt(&mut self, adoption: Adoption) -> u32 {
+    ///
+    /// # Errors
+    ///
+    /// `PublicationAborted` when the custody refuses the change, or refused an earlier one;
+    /// nothing is then adopted.
+    pub(crate) fn adopt(&mut self, adoption: Adoption) -> Result<u32, Fault> {
         if adoption.applied == 0 {
-            return 0;
+            return Ok(0);
         }
+        self.writable()?;
+        let checkpoint = self.checkpoint();
         self.registry = adoption.registry;
         self.head = adoption.head;
         self.reindex();
         for link in adoption.links {
             self.keep_adopted_link(link);
         }
-        adoption.applied
+        let held = self.held().cloned();
+        self.commit(checkpoint, held.as_ref(), None)?.answer()?;
+        Ok(adoption.applied)
     }
 
     /// Whether the held key may sign `kind`: held, active, and allowed it by local policy.
@@ -928,6 +1507,9 @@ impl SigningAuthority {
         claim: &AcceptanceClaim<'_>,
         actor: &SigningActor,
     ) -> Result<Vec<ChainElement>, AcceptanceFault> {
+        if self.custody_unconfirmed {
+            return Err(AcceptanceFault::CustodyUnreconciled);
+        }
         let bundle = self
             .bundles
             .get(handle)
@@ -1048,6 +1630,9 @@ pub enum AcceptanceFault {
     BundleAbsent,
     /// The bundle's own signature does not pass the fail-closed CI check.
     BundleUnverified,
+    /// The signing custody is unreconciled: the live standing may not be what a restart
+    /// loads, so it vouches for no acceptance (review cr-1dc5ii).
+    CustodyUnreconciled,
     /// The bundle's signer is retired.
     BundleSignerRetired,
     /// The bundle does not export the proposal.
@@ -1126,6 +1711,50 @@ pub fn links_form_chains<'a>(events: impl IntoIterator<Item = &'a LinkEvent>) ->
         }
     }
     visited.len() == successor.len()
+}
+
+fn outcome_unknown() -> Fault {
+    Fault::new(
+        ErrorCode::OutcomeUnknown,
+        "the signing custody passed its commit point without confirming durability; the \
+         change may or may not survive a crash, and this daemon signs nothing until a restart \
+         reconciles it",
+    )
+    .not_retryable()
+}
+
+/// Refuse a signing write on a connection negotiated below 3.9 when the daemon keeps its
+/// signing authority in durable custody: such a write could only be answered
+/// `OutcomeUnknown`, which that version does not define (`rule signing.custody`).
+///
+/// # Errors
+///
+/// `UnsupportedSemanticFeature`, before anything changes.
+pub(crate) fn require_custody_version(
+    services: &Services,
+    authority: &SigningAuthority,
+) -> Result<(), Fault> {
+    if authority.custody.is_some()
+        && services.negotiated().protocol_version()
+            < crate::protocol::registry::OUTCOME_UNKNOWN_SINCE
+    {
+        return Err(Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "this daemon records signing changes durably; a signing write needs protocol 3.9, \
+             where an unconfirmed record has a typed answer",
+        )
+        .not_retryable());
+    }
+    Ok(())
+}
+
+fn custody_fault() -> Fault {
+    Fault::new(
+        ErrorCode::PublicationAborted,
+        "the signing custody could not record this change; nothing changed here, and this \
+         daemon refuses signing writes until it is restarted from its custody",
+    )
+    .not_retryable()
 }
 
 pub(crate) fn no_active_key() -> Fault {
@@ -1230,6 +1859,12 @@ impl OperationFamily for SigningFamily {
         _store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         require_signing_version(services)?;
+        if matches!(
+            call.arguments,
+            Arguments::SigningMint(_) | Arguments::SigningRotate(_) | Arguments::SigningRevoke(_)
+        ) {
+            require_custody_version(services, state.signing())?;
+        }
         let authority = state.signing_mut();
         match call.arguments {
             Arguments::SigningMint(request) => mint(call, request, authority),
@@ -1285,22 +1920,36 @@ fn mint(
         authority.room(1, Reserve::Ordinary)?;
     }
     let actor = actor(call)?;
-    let entropy = authority.entropy.as_deref_mut().ok_or_else(|| {
+    authority.writable()?;
+    let checkpoint = authority.checkpoint();
+    let keep = authority.custody.is_some();
+    let inner = authority.entropy.as_deref_mut().ok_or_else(|| {
         Fault::new(
             ErrorCode::UnsupportedSemanticFeature,
             "this deployment supplied no key-entropy capability",
         )
     })?;
+    let mut capture = Capture {
+        inner,
+        keep,
+        seed: None,
+    };
+    let entropy = &mut capture;
     let key = authority
         .registry
         .mint(&actor, entropy)
         .map_err(entropy_fault)?;
+    let minted = capture.seed.take();
     let identity = key.identity().clone();
     authority.refresh();
     authority.index_one(&identity);
-    authority.own.insert(identity.clone());
-    authority.allow_one(identity.clone(), kinds);
+    authority.own_key(identity.clone(), kinds);
+    // Recorded before the key is held: a refused change drops (and wipes) the new key.
+    let recorded = authority.commit(checkpoint, Some(&identity), minted)?;
+    // Past the commit point the new key is the one a crash may keep: it is held (the
+    // authority is quarantined if unconfirmed), and the answer follows the record.
     authority.held = Some(key);
+    recorded.answer()?;
     Ok(Effect::new(
         Payload::SigningMint(SigningMintResponse {
             signer: wire_handle(&identity)?,
@@ -1327,28 +1976,35 @@ fn rotate(
     }
     authority.room(2, Reserve::Ordinary)?;
     let actor = actor(call)?;
+    authority.writable()?;
+    let checkpoint = authority.checkpoint();
+    let keep = authority.custody.is_some();
     let SigningAuthority {
         registry,
         held,
         entropy,
         ..
     } = authority;
-    let entropy = entropy.as_deref_mut().ok_or_else(|| {
+    let inner = entropy.as_deref_mut().ok_or_else(|| {
         Fault::new(
             ErrorCode::UnsupportedSemanticFeature,
             "this deployment supplied no key-entropy capability",
         )
     })?;
+    let mut capture = Capture {
+        inner,
+        keep,
+        seed: None,
+    };
     let current = held.as_ref().ok_or_else(no_active_key)?;
     // Both keys attest the rotation, so another registry can adopt it on their word; the
     // retiring key also signs its own compromise revocation now, so it can be wiped at
     // once and still be revoked across deployments later.
     let attested = registry
-        .rotate_attested(current, &actor, entropy)
+        .rotate_attested(current, &actor, &mut capture)
         .map_err(standing_fault)?;
+    let minted = capture.seed.take();
     let identity = attested.successor.identity().clone();
-    // The retiring key drops here, and is wiped (`zeroize`).
-    drop(held.replace(attested.successor));
     authority
         .presigned
         .insert(named.clone(), attested.revocation);
@@ -1360,8 +2016,13 @@ fn rotate(
         .map(|kinds| kinds.iter().copied().collect())
         .unwrap_or_default();
     authority.index_one(&identity);
-    authority.own.insert(identity.clone());
-    authority.allow_one(identity.clone(), kinds);
+    authority.own_key(identity.clone(), kinds);
+    // Recorded before the successor is held: a refused change drops (and wipes) the
+    // successor and leaves the retiring key held and active.
+    let recorded = authority.commit(checkpoint, Some(&identity), minted)?;
+    // The retiring key drops here, and is wiped (`zeroize`).
+    drop(authority.held.replace(attested.successor));
+    recorded.answer()?;
     Ok(Effect::new(
         Payload::SigningRotate(SigningRotateResponse {
             retired: request.signer.clone(),
@@ -1380,6 +2041,8 @@ fn revoke(
 ) -> Result<Effect, Fault> {
     let named = authority.resolve(&request.signer)?;
     let actor = actor(call)?;
+    authority.writable()?;
+    let checkpoint = authority.checkpoint();
     // A loss recovery that cannot fit, with room for its successor's revocation, falls back
     // to a plain revocation: the lost key is still retired, and no key is made that could
     // not in turn be revoked.
@@ -1390,30 +2053,40 @@ fn revoke(
         // Loss recovery (docs/09 §10): revoke, mint a successor, link the two. It may use the
         // held key's reserve, and leaves one record for the successor's own revocation.
         authority.room(4, Reserve::HeldKey)?;
+        let keep = authority.custody.is_some();
         let SigningAuthority {
             registry, entropy, ..
         } = authority;
-        let entropy = entropy.as_deref_mut().ok_or_else(|| {
+        let inner = entropy.as_deref_mut().ok_or_else(|| {
             Fault::new(
                 ErrorCode::UnsupportedSemanticFeature,
                 "this deployment supplied no key-entropy capability",
             )
         })?;
+        let mut capture = Capture {
+            inner,
+            keep,
+            seed: None,
+        };
         // A lost key cannot sign, so no link is made: a peer learns of the loss only from
         // its own operator.
         let successor = registry
-            .supersede_lost(&named, &actor, entropy)
+            .supersede_lost(&named, &actor, &mut capture)
             .map_err(standing_fault)?;
+        let minted = capture.seed.take();
         let identity = successor.identity().clone();
-        authority.held = Some(successor);
         let kinds: Vec<Kind> = authority
             .allowed
             .kinds(&named)
             .map(|kinds| kinds.iter().copied().collect())
             .unwrap_or_default();
         authority.index_one(&identity);
-        authority.own.insert(identity.clone());
-        authority.allow_one(identity.clone(), kinds);
+        authority.own_key(identity.clone(), kinds);
+        authority.refresh();
+        // Recorded before the successor is held; a refused change drops (and wipes) it.
+        let recorded = authority.commit(checkpoint, Some(&identity), minted)?;
+        authority.held = Some(successor);
+        recorded.answer()?;
         Nullable::Value(wire_handle(&identity)?)
     } else {
         // An active held key always has a record left for its revocation: every operation
@@ -1448,6 +2121,11 @@ fn revoke(
             .revoke(&named, &actor, reason)
             .map_err(standing_fault)?;
         let presigned = authority.presigned.remove(&named);
+        if !authority.own.contains_key(&named) {
+            // A peer key revoked on this operator's word: recorded as local, so a restart
+            // accounts for the record, and never relayed, because no key attested it.
+            authority.local_revocations.insert(named.clone());
+        }
         if reason == LibraryReason::Compromised {
             if let Some(link) = link.or(presigned) {
                 authority.keep_own_link(link);
@@ -1455,9 +2133,13 @@ fn revoke(
         }
         // A revoked held key stays held, so every later signing refuses rather than
         // publishing unsigned; a later `signing.mint` replaces it.
+        authority.refresh();
+        let held = authority.held().cloned();
+        authority
+            .commit(checkpoint, held.as_ref(), None)?
+            .answer()?;
         Nullable::Null
     };
-    authority.refresh();
     Ok(Effect::new(
         Payload::SigningRevoke(SigningRevokeResponse {
             signer: request.signer.clone(),
@@ -1469,6 +2151,16 @@ fn revoke(
 }
 
 fn registry(authority: &SigningAuthority) -> Result<Effect, Fault> {
+    if authority.custody_unconfirmed {
+        // Its head is what a verifier treats as authoritative, and the live log may be
+        // ahead of what a restart loads.
+        return Err(Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "the signing custody is unreconciled; a restart reconciles it before the \
+             registry is served",
+        )
+        .not_retryable());
+    }
     let log = authority
         .registry
         .audit_log()
@@ -1498,6 +2190,17 @@ fn verify(request: &SigningVerifyRequest, authority: &SigningAuthority) -> Resul
             "the artifact exceeds the signed-artifact size bound",
         )
         .not_retryable());
+    }
+    if authority.custody_unconfirmed {
+        // The live standing may not survive a restart; it vouches for nothing.
+        return Ok(Effect::new(
+            Payload::SigningVerify(SigningVerifyResponse {
+                outcome: SignatureOutcome::StandingStale,
+                signer: Optional::Absent,
+                successor: Optional::Absent,
+            }),
+            Nullable::Null,
+        ));
     }
     let provenance = authority.provenance(
         library_kind(request.kind),
@@ -1629,6 +2332,38 @@ mod tests {
         assert!(
             !links_form_chains(&[revocation.clone(), revocation]),
             "a revocation replayed"
+        );
+    }
+
+    /// Review cr-1dc5ii round 2: while custody is unreconciled, the CI acceptance check
+    /// fails closed before it reads any bundle or standing — the path a bundle-backed
+    /// `intent.accept` takes, answered `AcceptanceChainInvalid` on the wire. The control:
+    /// the same call on a reconciled authority gets as far as the bundle lookup.
+    #[test]
+    fn an_unreconciled_custody_vouches_for_no_acceptance() {
+        let handle = IntentBundleHandle::new("inb_somewhere").expect("an inb_");
+        let proposal = IntentHandle::new("in_somewhere").expect("an in_");
+        let claim = AcceptanceClaim {
+            contract: b"",
+            accepted_by: "human:peer",
+            signature: "",
+            timestamp: "2026-09-24T00:00:00.000Z",
+            supersedes: None,
+        };
+        let mut authority = SigningAuthority::default();
+        assert_eq!(
+            authority
+                .check_acceptance_chain(&handle, &proposal, &claim, &actor())
+                .err(),
+            Some(AcceptanceFault::BundleAbsent),
+            "control: a reconciled authority reaches the bundle lookup"
+        );
+        authority.custody_unconfirmed = true;
+        assert_eq!(
+            authority
+                .check_acceptance_chain(&handle, &proposal, &claim, &actor())
+                .err(),
+            Some(AcceptanceFault::CustodyUnreconciled)
         );
     }
 

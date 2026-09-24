@@ -469,8 +469,10 @@ mod blindness {
             .filter(|line| line.contains("@since(\"") && !line.trim_start().starts_with("//"))
             .count();
         // 15 until protocol 3.8 (bn-3glnv) dated thirteen more: eight operations, three
-        // enums, the `SignerHandle` alias, and `EvidenceGetResponse.signature`.
-        assert_eq!(sites, 28, "declaration sites carrying @since");
+        // enums, the `SignerHandle` alias, and `EvidenceGetResponse.signature`. Protocol
+        // 3.9 (bn-18w74) dated one more, the first enum member to carry one:
+        // `ErrorCode::OutcomeUnknown`.
+        assert_eq!(sites, 29, "declaration sites carrying @since");
 
         // None of the seven spec types carries a field to compare them against. This is
         // structural, not a gap in a comparison: there is nothing on the shipped side to
@@ -544,14 +546,14 @@ mod blindness {
 
     #[test]
     fn rule_bodies_are_dropped_except_the_one_rule_leg_one_reads_by_hand() {
-        // The parser skips `"""` blocks, so the 54 rules' normative bodies are compared
+        // The parser skips `"""` blocks, so the 55 rules' normative bodies are compared
         // against nothing. Leg one reaches back into the raw text for exactly one of
-        // them — `errors.common` — which is the measure of the hole: 53 rule bodies,
+        // them — `errors.common` — which is the measure of the hole: 54 rule bodies,
         // including `encoding.opaque_payloads` and `conformance.registry_agreement`
         // themselves, are unchecked prose as far as both checkers are concerned.
         let idl = read(IDL);
         let rules = idl.lines().filter(|line| line.starts_with("rule ")).count();
-        assert_eq!(rules, 54, "rules the IDL declares");
+        assert_eq!(rules, 55, "rules the IDL declares");
 
         let conformance = read(CHECKERS[0]);
         assert!(conformance.contains("dropping comments and `\"\"\"` blocks"));

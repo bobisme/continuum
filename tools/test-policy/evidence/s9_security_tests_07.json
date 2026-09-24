@@ -11,7 +11,7 @@
   "module": "tools/test-policy/sections/s9_security_tests_07.py",
   "requirements": {
     "TEST-9-07": {
-      "absence": "Outside this obligation, stated so it is not read as covered. The daemon is sans-IO: a key `signing.mint`, `signing.rotate`, or a `key-lost` `signing.revoke` draws lives in daemon memory, and persisting it through `LocalKeystore` \u2014 with a deployment launcher that builds a daemon from the keystore \u2014 is a follow-up. A verifier that never received a bundle carrying a revocation cannot know of it; adoption is monotone, so once any bundle carries it the revocation is never unlearned. research/35 now names an eleventh red-team class, `forged or unattested signing lineage` (bn-1uspo): its three-per-outcome floor runs inside the generic corpus at protocol 3.2, on operations the corpus already served, because a `Case` names no protocol version and the six signing-wire operations are refused below 3.8 by the codec, not the capability check the corpus measures. `daemon_signing.rs`'s `every_signing_wire_operation_refuses_or_answers_typed_for_an_unprivileged_reader` and `the_signing_wires_refusal_does_not_move_with_a_hostile_corpus_payload` drive the six signing-wire operations and `intent.import_bundle` directly, at 3.8, against the real daemon, with the corpus's own payloads; `g2_injection_corpus_evidence.rs`'s `SIGNING_WIRE_PROBES` still stands in for them there, because that file's shared runner fixes protocol 3.2 for the whole corpus in one pass and has no per-case protocol floor \u2014 closing that gap is a follow-up. `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
+      "absence": "Outside this obligation, stated so it is not read as covered. Held intent bundles and the record of which contracts an import entered are not persisted: after a restart, `intent.accept` naming a bundle held before it fails closed (`AcceptanceChainInvalid`) until the bundle is imported again. A verifier that never received a bundle carrying a revocation cannot know of it; adoption is monotone, so once any bundle carries it the revocation is never unlearned. research/35 now names an eleventh red-team class, `forged or unattested signing lineage` (bn-1uspo): its three-per-outcome floor runs inside the generic corpus at protocol 3.2, on operations the corpus already served, because a `Case` names no protocol version and the six signing-wire operations are refused below 3.8 by the codec, not the capability check the corpus measures. `daemon_signing.rs`'s `every_signing_wire_operation_refuses_or_answers_typed_for_an_unprivileged_reader` and `the_signing_wires_refusal_does_not_move_with_a_hostile_corpus_payload` drive the six signing-wire operations and `intent.import_bundle` directly, at 3.8, against the real daemon, with the corpus's own payloads; `g2_injection_corpus_evidence.rs`'s `SIGNING_WIRE_PROBES` still stands in for them there, because that file's shared runner fixes protocol 3.2 for the whole corpus in one pass and has no per-case protocol floor \u2014 closing that gap is a follow-up. `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
       "boundaries": [
         "`_check_publication_attest` ports `PublishedName::names`/`Published::attest` (`publication.rs`: `fn names(&self, handle: &ArtifactHandle) -> bool { self == handle }`) as plain equality on (class, identity) \u2014 the real predicate needs no hash to state, so the port is exact, not approximate. `_check_identity_outcome` ports the store's convergence/collision/distinctness trichotomy structurally (same content implies same identity; different content sharing a claimed identity is a collision that must abort; different content with different identity stands as two artifacts) \u2014 this is the property the real `ContentIdentifier::identify` doc contract states ('a pure function \u2026 two calls with equal arguments \u2026 must return equal handles', INV-005/INV-006) and that `an_identity_collision_aborts_rather_than_conflating_two_artifacts` and `distinct_artifacts_never_share_identity` corroborate; it is independent of which hash algorithm the real `ContentIdentifier` fixture uses; this module never computes one. `_check_digest_token` ports `Digest256::from_token` (`identity.rs`) as a length-and-character-class check, drift-tied by extracting `DIGEST_BITS` at run time and confirming the `DIGEST_LEN * 2`/`DIGEST_BITS / 8` arithmetic phrases are still present, so a change to the digest width is noticed, not just a change to the accept/reject outcome. What this cannot do: compute a real `blake3-256` digest, run `Value::encode`'s canonical-encoding rules, or exercise `ReferenceStore` concurrency itself (no cargo) \u2014 only the structural properties named above, which is what the named real Rust tests exercise for real.",
         "`_check_signature_verdict` ports `SignatureVerifier::check` (`signing.rs`) as its decision order over eight observable facts \u2014 present, well-formed, kind matches, authentic under the claimed key, registry current against the authoritative head, signer standing known, signer not revoked, signer allowed for the kind \u2014 and the two policies over it: `verify` (any failure is typed unverified provenance with the first failing reason) and `verify_for_ci_acceptance` (any failure is `AcceptanceChainInvalid`). The port is exact about order and outcome, and `_check_signing_drift` confirms at run time that the real `fn check` body still tests those facts in that order and that the real verifier still calls `verify_strict`. What it cannot do: compute an Ed25519 signature or a canonical encoding (no cargo). That is what the named Rust tests do for real, including the RFC 8032 \u00a77.1 known-answer vectors and a pinned envelope signature."
@@ -27,9 +27,9 @@
         "outcome_converged": 2,
         "outcome_distinct": 2,
         "production_signing_callers": 4,
-        "production_signing_phrases_bound": 41,
-        "rust_tests_named": 112,
-        "rust_tests_present": 112,
+        "production_signing_phrases_bound": 62,
+        "rust_tests_named": 161,
+        "rust_tests_present": 161,
         "signature_cases": 512,
         "signature_ci_rejected": 255,
         "signature_unverified": 255,
@@ -282,7 +282,7 @@
         {
           "path": "crates/continuum-security/tests/keystore.rs",
           "present": true,
-          "test": "an_exposed_key_file_is_refused"
+          "test": "an_exposed_key_or_state_file_is_refused"
         },
         {
           "path": "crates/continuum-security/tests/keystore.rs",
@@ -292,7 +292,42 @@
         {
           "path": "crates/continuum-security/tests/keystore.rs",
           "present": true,
-          "test": "a_missing_or_corrupt_audit_log_is_refused"
+          "test": "a_missing_state_or_key_file_is_refused_and_never_re_minted"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_truncated_extended_or_garbage_state_file_fails_closed"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "an_oversize_state_file_is_refused_before_it_is_read"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_store_of_the_earlier_layout_is_refused_and_never_minted_over"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_persisted_rotation_round_trips_and_removes_the_retired_key"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_refused_persist_leaves_the_previous_state"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "the_sweep_removes_what_a_crash_leaves_and_keeps_the_held_key"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "no_error_or_debug_output_carries_key_material"
         },
         {
           "path": "crates/continuum-security/tests/keystore.rs",
@@ -312,7 +347,7 @@
         {
           "path": "crates/continuum-security/tests/keystore.rs",
           "present": true,
-          "test": "a_symlinked_key_file_is_refused"
+          "test": "a_symlinked_key_or_state_file_is_refused"
         },
         {
           "path": "crates/continuum-security/tests/keystore.rs",
@@ -325,7 +360,7 @@
           "test": "a_world_writable_non_sticky_ancestor_is_refused"
         },
         {
-          "path": "crates/continuum-security/tests/keystore.rs",
+          "path": "crates/continuum-security/tests/keystore_processes.rs",
           "present": true,
           "test": "a_hostile_audit_log_is_refused_within_a_memory_limit"
         },
@@ -703,6 +738,216 @@
           "path": "crates/continuumd/tests/daemon_signing.rs",
           "present": true,
           "test": "no_answer_fault_or_debug_output_carries_key_material"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_restart_keeps_rotations_revocations_and_adopted_links"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "own_and_adopted_keys_stay_apart_across_a_restart"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "an_install_without_custody_state_owns_only_the_held_key"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_corrupt_truncated_or_oversize_store_fails_closed_at_launch"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_state_that_does_not_hold_is_refused_before_any_key_is_used"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_restored_state_without_room_to_recover_is_refused"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "an_exposed_or_symlinked_store_is_refused_at_launch"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_custody_that_refuses_a_write_changes_nothing_and_stops_signing"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "the_launch_sweeps_a_retired_key_left_by_a_crash"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "no_launch_error_or_debug_output_carries_key_material"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "the_keystore_bounds_are_the_daemons"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_replacement_minted_near_the_bound_survives_a_restart"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_signer_installed_over_a_launched_custody_writes_nothing"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_second_launch_on_a_held_store_is_refused"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_state_missing_what_a_rotation_leaves_is_refused"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "the_restored_authority_matches_the_library_running_the_same_operations"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_store_held_as_a_custody_is_locked_against_every_other_writer"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_hard_linked_key_file_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_custody_state_survives_the_serialization_round_trip"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_write_reports_which_side_of_the_rename_it_failed_on"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "concurrent_writes_through_one_handle_are_serialized"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_second_handle_in_process_is_refused_while_one_holds_the_store"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore_processes.rs",
+          "present": true,
+          "test": "a_spawned_process_inherits_nothing_and_is_refused_the_store"
+        },
+        {
+          "path": "crates/continuum-security/src/keystore.rs",
+          "present": true,
+          "test": "every_store_descriptor_is_close_on_exec"
+        },
+        {
+          "path": "crates/continuum-security/src/keystore.rs",
+          "present": true,
+          "test": "a_handle_owned_by_another_process_is_refused_before_it_touches_a_path"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "an_inherited_handle_is_refused_at_every_window_its_mutex_can_be_held"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "an_inherited_handle_is_refused_its_first_load"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_symlink_in_or_through_a_writable_directory_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_trusted_symlink_chain_reaches_the_store"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_symlink_swapped_after_validation_cannot_redirect_a_write"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_symlink_in_the_ancestry_is_itself_held_to_the_owner_rule"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_store_directory_another_user_owns_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/tests/keystore.rs",
+          "present": true,
+          "test": "a_hard_linked_symlink_in_the_path_is_refused"
+        },
+        {
+          "path": "crates/continuum-security/src/keystore.rs",
+          "present": true,
+          "test": "an_ancestor_another_user_owns_or_can_write_is_refused"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "unreconciled_standing_decides_no_trust"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_recorded_outcome_unknown_is_never_replayed_to_a_3_8_client"
+        },
+        {
+          "path": "crates/continuumd/src/daemon/signing.rs",
+          "present": true,
+          "test": "an_unreconciled_custody_vouches_for_no_acceptance"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_bundle_acceptance_fails_closed_while_the_importers_custody_is_unreconciled"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "every_answer_agrees_with_every_state_a_crash_can_leave"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_custody_daemon_refuses_signing_writes_below_3_9"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "every_record_keeps_its_link_or_entry_across_a_restart"
+        },
+        {
+          "path": "crates/continuumd/tests/signing_custody.rs",
+          "present": true,
+          "test": "a_compromised_own_key_without_its_revocation_link_is_refused"
         }
       ],
       "status": "enforced",

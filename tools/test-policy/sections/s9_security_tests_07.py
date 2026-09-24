@@ -17,7 +17,8 @@ docs/19 §9's seventh bullet names two things in one phrase. Searched independen
      in a boundary crate that no semantic-core crate reaches;
    - `continuum-security::keystore::LocalKeystore` persists the solo-developer key,
      minted on first use through `SigningRegistry::mint` (an audit record), `0600`/`0700`,
-     zeroized, with typed refusal of a corrupt, incomplete, or exposed store;
+     zeroized, with typed refusal of a corrupt, truncated, oversize, incomplete, or exposed
+     store;
    - `continuumd`'s `evidence.link`, the daemon's one receipt producer, signs the
      receipt's canonical bytes through `SigningRegistry::sign` (`ReceiptSigner`) before
      publishing, and refuses to publish when its identity is not active.
@@ -35,9 +36,13 @@ docs/19 §9's seventh bullet names two things in one phrase. Searched independen
    `_check_production_signing_paths` binds every one of those call sites in the real
    source, and fails if the verifier appears in an unbound `src/` file. The named Rust
    tests in `crates/continuumd/tests/daemon_signing.rs` drive each path through
-   `Daemon::dispatch`. What stays out of scope is stated in `ABSENCE`, and none of it is
-   verification: keys minted over the wire are not yet persisted, and no deployment
-   launcher builds a daemon from the keystore.
+   `Daemon::dispatch`. bn-18w74 made the authority survive a restart: the keystore
+   persists every change the daemon makes (keys minted over the wire, own and adopted
+   signer links, pre-signed revocations, and the own-key set, recorded apart from the
+   registry's signers) through the `SigningCustody` capability, atomically, and
+   `Builder::launch_signing` builds a daemon from it, re-validating everything before a
+   key is used; `crates/continuumd/tests/signing_custody.rs` drives each restart path.
+   What stays out of scope is stated in `ABSENCE`, and none of it is verification.
 2. **Content-addressed provenance — real, landed, non-stub.** Two production
    mechanisms bind an artifact's claimed identity to its actual bytes and reject a
    forged, tampered, or substituted claim:
@@ -108,10 +113,12 @@ SIGNING_TESTS_PATH = ROOT / "crates/continuum-evidence/tests/signing_identities.
 ENTROPY_RS_PATH = ROOT / "crates/continuum-security/src/entropy.rs"
 ENTROPY_ISOLATION_PATH = ROOT / "crates/continuum-security/tests/entropy_isolation.rs"
 KEYSTORE_TESTS_PATH = ROOT / "crates/continuum-security/tests/keystore.rs"
+KEYSTORE_PROCESSES_PATH = ROOT / "crates/continuum-security/tests/keystore_processes.rs"
 KEYSTORE_RS_PATH = ROOT / "crates/continuum-security/src/keystore.rs"
 RECEIPT_SIGNING_PATH = ROOT / "crates/continuumd/tests/receipt_signing.rs"
 DAEMON_SIGNING_RS_PATH = ROOT / "crates/continuumd/src/daemon/signing.rs"
 DAEMON_SIGNING_PATH = ROOT / "crates/continuumd/tests/daemon_signing.rs"
+CUSTODY_PATH = ROOT / "crates/continuumd/tests/signing_custody.rs"
 CARGO_TOML_PATHS = sorted((ROOT / "crates").glob("*/Cargo.toml")) + [ROOT / "Cargo.toml"]
 
 OBLIGATIONS = {
@@ -172,10 +179,10 @@ _BOUNDARY_07_SIGNATURE = (
     "RFC 8032 §7.1 known-answer vectors and a pinned envelope signature."
 )
 _ABSENCE_07 = (
-    "Outside this obligation, stated so it is not read as covered. The daemon is sans-IO: "
-    "a key `signing.mint`, `signing.rotate`, or a `key-lost` `signing.revoke` draws lives "
-    "in daemon memory, and persisting it through `LocalKeystore` — with a deployment "
-    "launcher that builds a daemon from the keystore — is a follow-up. A verifier that "
+    "Outside this obligation, stated so it is not read as covered. Held intent bundles "
+    "and the record of which contracts an import entered are not persisted: after a "
+    "restart, `intent.accept` naming a bundle held before it fails closed "
+    "(`AcceptanceChainInvalid`) until the bundle is imported again. A verifier that "
     "never received a bundle carrying a revocation cannot know of it; adoption is "
     "monotone, so once any bundle carries it the revocation is never unlearned. research/35 "
     "now names an eleventh red-team class, `forged or unattested signing lineage` "
@@ -230,16 +237,23 @@ RUST_TESTS: list[tuple[Path, str]] = [
     (ENTROPY_ISOLATION_PATH, "continuum_evidence_names_no_entropy_source"),
     (KEYSTORE_TESTS_PATH, "first_use_mints_once_with_os_entropy_and_reopening_restores_the_same_key"),
     (KEYSTORE_TESTS_PATH, "the_store_is_private_to_its_owner"),
-    (KEYSTORE_TESTS_PATH, "an_exposed_key_file_is_refused"),
+    (KEYSTORE_TESTS_PATH, "an_exposed_key_or_state_file_is_refused"),
     (KEYSTORE_TESTS_PATH, "a_corrupt_key_file_is_refused_and_never_re_minted"),
-    (KEYSTORE_TESTS_PATH, "a_missing_or_corrupt_audit_log_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_missing_state_or_key_file_is_refused_and_never_re_minted"),
+    (KEYSTORE_TESTS_PATH, "a_truncated_extended_or_garbage_state_file_fails_closed"),
+    (KEYSTORE_TESTS_PATH, "an_oversize_state_file_is_refused_before_it_is_read"),
+    (KEYSTORE_TESTS_PATH, "a_store_of_the_earlier_layout_is_refused_and_never_minted_over"),
+    (KEYSTORE_TESTS_PATH, "a_persisted_rotation_round_trips_and_removes_the_retired_key"),
+    (KEYSTORE_TESTS_PATH, "a_refused_persist_leaves_the_previous_state"),
+    (KEYSTORE_TESTS_PATH, "the_sweep_removes_what_a_crash_leaves_and_keeps_the_held_key"),
+    (KEYSTORE_TESTS_PATH, "no_error_or_debug_output_carries_key_material"),
     (KEYSTORE_TESTS_PATH, "an_absent_store_opens_as_absent_and_a_failed_source_mints_nothing"),
     (KEYSTORE_TESTS_PATH, "a_group_or_world_writable_store_directory_is_refused_and_not_re_minted"),
     (KEYSTORE_TESTS_PATH, "a_store_owned_by_another_user_is_refused"),
-    (KEYSTORE_TESTS_PATH, "a_symlinked_key_file_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_symlinked_key_or_state_file_is_refused"),
     (KEYSTORE_TESTS_PATH, "a_symlinked_store_directory_is_refused"),
     (KEYSTORE_TESTS_PATH, "a_world_writable_non_sticky_ancestor_is_refused"),
-    (KEYSTORE_TESTS_PATH, "a_hostile_audit_log_is_refused_within_a_memory_limit"),
+    (KEYSTORE_PROCESSES_PATH, "a_hostile_audit_log_is_refused_within_a_memory_limit"),
     (KEYSTORE_RS_PATH, "swap_after_open_reads_the_original_descriptor"),
     (KEYSTORE_RS_PATH, "o_nofollow_refuses_a_symlink_at_open"),
     (KEYSTORE_RS_PATH, "audit_records_fit_the_record_bound"),
@@ -317,6 +331,49 @@ RUST_TESTS: list[tuple[Path, str]] = [
     (DAEMON_SIGNING_PATH, "every_signing_wire_operation_is_refused_to_a_scoped_grant"),
     (DAEMON_SIGNING_PATH, "the_writes_are_refused_without_the_privilege"),
     (DAEMON_SIGNING_PATH, "no_answer_fault_or_debug_output_carries_key_material"),
+    # The signing authority across a restart (bn-18w74), launched from the real keystore.
+    (CUSTODY_PATH, "a_restart_keeps_rotations_revocations_and_adopted_links"),
+    (CUSTODY_PATH, "own_and_adopted_keys_stay_apart_across_a_restart"),
+    (CUSTODY_PATH, "an_install_without_custody_state_owns_only_the_held_key"),
+    (CUSTODY_PATH, "a_corrupt_truncated_or_oversize_store_fails_closed_at_launch"),
+    (CUSTODY_PATH, "a_state_that_does_not_hold_is_refused_before_any_key_is_used"),
+    (CUSTODY_PATH, "a_restored_state_without_room_to_recover_is_refused"),
+    (CUSTODY_PATH, "an_exposed_or_symlinked_store_is_refused_at_launch"),
+    (CUSTODY_PATH, "a_custody_that_refuses_a_write_changes_nothing_and_stops_signing"),
+    (CUSTODY_PATH, "the_launch_sweeps_a_retired_key_left_by_a_crash"),
+    (CUSTODY_PATH, "no_launch_error_or_debug_output_carries_key_material"),
+    (CUSTODY_PATH, "the_keystore_bounds_are_the_daemons"),
+    (CUSTODY_PATH, "a_replacement_minted_near_the_bound_survives_a_restart"),
+    (CUSTODY_PATH, "a_signer_installed_over_a_launched_custody_writes_nothing"),
+    (CUSTODY_PATH, "a_second_launch_on_a_held_store_is_refused"),
+    (CUSTODY_PATH, "a_state_missing_what_a_rotation_leaves_is_refused"),
+    (CUSTODY_PATH, "the_restored_authority_matches_the_library_running_the_same_operations"),
+    (KEYSTORE_TESTS_PATH, "a_store_held_as_a_custody_is_locked_against_every_other_writer"),
+    (KEYSTORE_TESTS_PATH, "a_hard_linked_key_file_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_custody_state_survives_the_serialization_round_trip"),
+    (KEYSTORE_TESTS_PATH, "a_write_reports_which_side_of_the_rename_it_failed_on"),
+    (KEYSTORE_TESTS_PATH, "concurrent_writes_through_one_handle_are_serialized"),
+    (KEYSTORE_TESTS_PATH, "a_second_handle_in_process_is_refused_while_one_holds_the_store"),
+    (KEYSTORE_PROCESSES_PATH, "a_spawned_process_inherits_nothing_and_is_refused_the_store"),
+    (KEYSTORE_RS_PATH, "every_store_descriptor_is_close_on_exec"),
+    (KEYSTORE_RS_PATH, "a_handle_owned_by_another_process_is_refused_before_it_touches_a_path"),
+    (KEYSTORE_TESTS_PATH, "an_inherited_handle_is_refused_at_every_window_its_mutex_can_be_held"),
+    (KEYSTORE_TESTS_PATH, "an_inherited_handle_is_refused_its_first_load"),
+    (KEYSTORE_TESTS_PATH, "a_symlink_in_or_through_a_writable_directory_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_trusted_symlink_chain_reaches_the_store"),
+    (KEYSTORE_TESTS_PATH, "a_symlink_swapped_after_validation_cannot_redirect_a_write"),
+    (KEYSTORE_TESTS_PATH, "a_symlink_in_the_ancestry_is_itself_held_to_the_owner_rule"),
+    (KEYSTORE_TESTS_PATH, "a_store_directory_another_user_owns_is_refused"),
+    (KEYSTORE_TESTS_PATH, "a_hard_linked_symlink_in_the_path_is_refused"),
+    (KEYSTORE_RS_PATH, "an_ancestor_another_user_owns_or_can_write_is_refused"),
+    (CUSTODY_PATH, "unreconciled_standing_decides_no_trust"),
+    (CUSTODY_PATH, "a_recorded_outcome_unknown_is_never_replayed_to_a_3_8_client"),
+    (DAEMON_SIGNING_RS_PATH, "an_unreconciled_custody_vouches_for_no_acceptance"),
+    (DAEMON_SIGNING_PATH, "a_bundle_acceptance_fails_closed_while_the_importers_custody_is_unreconciled"),
+    (CUSTODY_PATH, "every_answer_agrees_with_every_state_a_crash_can_leave"),
+    (CUSTODY_PATH, "a_custody_daemon_refuses_signing_writes_below_3_9"),
+    (CUSTODY_PATH, "every_record_keeps_its_link_or_entry_across_a_restart"),
+    (CUSTODY_PATH, "a_compromised_own_key_without_its_revocation_link_is_refused"),
 ]
 
 
@@ -476,6 +533,23 @@ _SIGNING_PATHS: dict[str, list[str]] = {
     ],
     "crates/continuum-security/src/keystore.rs": [
         ".mint(actor, &mut capture)",
+        # bn-18w74: every later change, written whole and renamed into place, and a
+        # held key's secret written before the state that names it.
+        "fn replace_state(",
+        "fs::rename(&temp, &state).map_err(io(\"replacing the state file\"))",
+        # cr-33e464: the rename is the commit point, and the result says which side.
+        "marked_here = mark_pending(store, owner)?;",
+        # cr-1dc5ii: one writer, owned by one process.
+        "owned_here(store)?;",
+        # cr-2qu5zr: every component of the store's ancestry is trusted, and re-checked
+        # right before the commit point.
+        "fn trusted_ancestry(path: &Path, owner: u32) -> Result<bool, KeystoreError> {",
+        "trusted_symlink(&current, &next, &metadata, owner)?;",
+        "if metadata.nlink() != 1 {",
+        "recheck(store, owner)?;\n            fs::rename(&temp, &state)",
+        "return Err(CustodyWrite::Unconfirmed(error));",
+        "write_key(store, owner, held, seed)?;",
+        "impl SigningCustody for LocalKeystore {",
         ".mode(0o600)",
         ".mode(0o700)",
         "registry.restore(seed)",
@@ -488,7 +562,13 @@ _SIGNING_PATHS: dict[str, list[str]] = {
     ],
     "crates/continuumd/src/daemon/mod.rs": [
         "pub fn receipt_signer(mut self, signer: ReceiptSigner)",
-        "self.state.signing_mut().install(registry, key)",
+        "self.state.signing_mut().install(registry, key, restored)",
+        # bn-18w74: the launcher re-validates a restored custody before the key is used.
+        "pub fn launch_signing<C>(",
+        # cr-1dc5ii round 2: a replayed or fresh answer is held to the negotiated version.
+        "if !errors::defined_at(",
+        "let signer = ReceiptSigner::restored(key, state).map_err(LaunchRefusal::Install)?;",
+        "signing::validate_custody(&state, signer.identity()).map_err(InstallRefusal::Custody)?;",
     ],
     # bn-3glnv: the signing authority — the one production verifier outside
     # `continuum-evidence`, and the receipt, bundle, and pack signers.
@@ -507,7 +587,15 @@ _SIGNING_PATHS: dict[str, list[str]] = {
         ".map_err(AcceptanceFault::Chain)?;",
         "if !signature.authenticates(Kind::IntentBundle, &body)",
         "|| !links_are_attested(&bundle.body().links)",
-        ".rotate_attested(current, &actor, entropy)",
+        ".rotate_attested(current, &actor, &mut capture)",
+        # bn-18w74: every change is recorded through the custody before it takes effect.
+        "authority.commit(checkpoint, Some(&identity), minted)?;",
+        "Err(CustodyWrite::Unconfirmed(())) => {",
+        "Self::Unconfirmed => Err(outcome_unknown()),",
+        # cr-1dc5ii round 2: unreconciled standing decides no trust.
+        "return Err(AcceptanceFault::CustodyUnreconciled);",
+        "return Err(SignatureOutcome::StandingStale);",
+        "pub fn validate_custody(",
         ".and_then(|key| authority.registry.attest_revocation(key).ok())",
         "authority.room(4, Reserve::HeldKey)?;",
         "if entry.contract != claim.contract {",

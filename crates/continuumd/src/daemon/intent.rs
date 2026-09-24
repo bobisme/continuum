@@ -172,6 +172,7 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("intent.import_bundle", ErrorCode::QuotaExhausted),
     ("intent.import_bundle", ErrorCode::IntentMutationDenied),
     ("intent.import_bundle", ErrorCode::PublicationAborted),
+    ("intent.import_bundle", ErrorCode::OutcomeUnknown),
 ];
 
 /// The `$id` of the governing schema, with the `v<schema_epoch>/` segment removed
@@ -379,7 +380,18 @@ fn accept(
     // referenced bundle is absent or its chain does not verify". Below 3.8 no bundle can
     // verify, so a connection negotiated there keeps the 3.0–3.7 answer for every named
     // bundle.
+    // While the signing custody is unreconciled, the live signing state may not be what a
+    // restart loads, and it decides whether an acceptance is signed, by which key, and
+    // whether a bundle's chain holds. No acceptance is decided from it (review cr-1dc5ii).
     let bundle = request.bundle.value();
+    if state.signing().custody_unreconciled() {
+        // A bundle acceptance is the CI check, and it fails closed on its own code.
+        return Err(if bundle.is_some() {
+            chain_invalid()
+        } else {
+            unreconciled_custody()
+        });
+    }
     let legacy = services.negotiated().protocol_version() < super::signing::SIGNING_SINCE;
     if bundle.is_some_and(|handle| legacy || state.signing().bundle(handle).is_none()) {
         return Err(chain_invalid());
@@ -695,6 +707,9 @@ fn lock_acceptance(
     successor: &IntentHandle,
     predecessor: &IntentHandle,
 ) -> Result<Acceptance, Fault> {
+    if state.signing().custody_unreconciled() {
+        return Err(unreconciled_custody());
+    }
     let now = services.now().ok_or_else(|| {
         Fault::new(
             ErrorCode::UnsupportedSemanticFeature,
@@ -1047,6 +1062,12 @@ fn import_bundle(
     services: &Services,
 ) -> Result<Effect, Fault> {
     require_signing_version(services)?;
+    super::signing::require_custody_version(services, state.signing())?;
+    // Checked first, before any decoding: while custody is unreconciled nothing verifies,
+    // so the answer is known (review cr-1dc5ii). `verify_bundle` checks again.
+    if state.signing().custody_unreconciled() {
+        return Err(unreconciled_custody());
+    }
     // Bounded before any byte is decoded (`decode_signed` checks the length first).
     let signed = decode_signed(&request.content).map_err(|_| malformed_bundle())?;
     // A bundle whose signature authenticates its body is then held to its links before
@@ -1176,8 +1197,9 @@ fn import_bundle(
         .not_retryable());
     }
 
+    // The facts are recorded through the custody first; a refusal there changes nothing.
+    let adopted = state.signing_mut().adopt(adoption)?;
     // Nothing below can fail: the facts are committed with everything else, or not at all.
-    let adopted = state.signing_mut().adopt(adoption);
     for (intent, contract, record) in entries {
         if fresh.contains(&intent) {
             state
@@ -1498,4 +1520,15 @@ fn wire_policy(table: &PolicyTable) -> BTreeMap<String, String> {
 
 fn structural(outcome: StructuralOutcome) -> Nullable<Verdict> {
     Nullable::Value(Verdict::Structural(StructuralVerdictValue { outcome }))
+}
+
+/// The refusal of an acceptance or a lock while the signing custody is unreconciled: the
+/// signing state that would decide it may not survive a restart. Nothing changes.
+fn unreconciled_custody() -> Fault {
+    Fault::new(
+        ErrorCode::UnsupportedSemanticFeature,
+        "the signing custody is unreconciled; nothing was accepted or locked, and a restart \
+         reconciles it",
+    )
+    .not_retryable()
 }

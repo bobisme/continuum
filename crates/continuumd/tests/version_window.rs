@@ -18,7 +18,7 @@
 //!
 //! # The minor bumps, and why none of them is a window
 //!
-//! `protocol.version` is `"3.8"` as of IDL 1.16, and the whole claim of a *compatible*
+//! `protocol.version` is `"3.9"` as of IDL 1.17, and the whole claim of a *compatible*
 //! bump is that a client pinned to an older minor is unaffected. That claim is a test, not
 //! a sentence: `a_client_pinned_to_the_previous_minor_still_gets_it` is it. The window is
 //! stated in *majors* (`[3, 2]`), so a bump moves nothing about it — 2.x remains
@@ -91,6 +91,7 @@ fn implemented() -> Vec<ProtocolVersion> {
         ProtocolVersion::new(3, 6),
         ProtocolVersion::new(3, 7),
         ProtocolVersion::new(3, 8),
+        ProtocolVersion::new(3, 9),
     ]
 }
 
@@ -142,9 +143,9 @@ fn a_client_on_the_current_major_is_served() {
 fn the_declared_version_is_the_idls() {
     // `protocol.version` is the version the *document* defines; the conformance test
     // holds this constant to the IDL. This asserts the two facts that make the bump a
-    // bump: the constant reads 3.8 (bn-3glnv, the signing wire), and 3.8 is a version the
-    // daemon of this test can actually negotiate.
-    assert_eq!(PROTOCOL_VERSION, "3.8");
+    // bump: the constant reads 3.9 (bn-18w74, the `OutcomeUnknown` code), and 3.9 is a
+    // version the daemon of this test can actually negotiate.
+    assert_eq!(PROTOCOL_VERSION, "3.9");
     let declared: ProtocolVersion = PROTOCOL_VERSION.parse().expect("canonical");
     assert!(implemented().contains(&declared));
     assert!(window().serves(declared));
@@ -192,6 +193,15 @@ fn a_client_pinned_to_the_previous_minor_still_gets_it() {
         !pinned.admits_request(ProtocolVersion::new(3, 8)),
         "a connection negotiated at 3.7 does not admit a 3.8 request"
     );
+
+    // And the 3.9 obligation, one minor on: exactly 3.8 is served as 3.8, so a 3.8 client
+    // is never sent `OutcomeUnknown` (`rule signing.custody`).
+    let pinned = open((3, 8), (3, 8)).expect("3.8 is still implemented and served");
+    assert_eq!(pinned.protocol_version(), ProtocolVersion::new(3, 8));
+    assert!(
+        !pinned.admits_request(ProtocolVersion::new(3, 9)),
+        "a connection negotiated at 3.8 does not admit a 3.9 request"
+    );
 }
 
 #[test]
@@ -229,8 +239,8 @@ fn a_range_spanning_the_window_selects_the_highest_served_version() {
     // The client would accept anything from 1.0 to 9.9. The daemon must not hand back
     // 1.0 (outside its window) or 4.0 (which it does not implement), and must prefer the
     // newest minor it implements inside the window.
-    let negotiated = open((1, 0), (9, 9)).expect("3.8 is common and served");
-    assert_eq!(negotiated.protocol_version(), ProtocolVersion::new(3, 8));
+    let negotiated = open((1, 0), (9, 9)).expect("3.9 is common and served");
+    assert_eq!(negotiated.protocol_version(), ProtocolVersion::new(3, 9));
 }
 
 #[test]

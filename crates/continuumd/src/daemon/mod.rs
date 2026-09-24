@@ -176,7 +176,30 @@ pub struct Services {
 pub struct ReceiptSigner {
     registry: continuum_evidence::signing::SigningRegistry,
     signer: continuum_evidence::signing::LocalSigner,
+    restored: Option<continuum_evidence::signing::SigningCustodyState>,
 }
+
+/// Why [`Builder::launch_signing`] refused to build a daemon from a custody (bn-18w74).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchRefusal<E> {
+    /// The custody did not load, or could not remove a secret it no longer holds.
+    Custody(E),
+    /// The loaded state does not hold against its registry or the daemon's invariants.
+    Install(InstallRefusal),
+}
+
+impl<E: fmt::Display> fmt::Display for LaunchRefusal<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Custody(error) => write!(f, "the signing custody refused: {error}"),
+            Self::Install(refusal) => {
+                write!(f, "the signing custody's state does not hold: {refusal:?}")
+            }
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> core::error::Error for LaunchRefusal<E> {}
 
 /// Why a registry and key cannot be installed as the deployment's signing identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +212,8 @@ pub enum InstallRefusal {
     /// compromise: its revocation, a replacement mint, and that replacement's own
     /// revocation (bn-3glnv, cr-2unxyh).
     NoRoomToRecover,
+    /// A restored custody state does not hold against its registry (bn-18w74).
+    Custody(signing::CustodyRefusal),
 }
 
 impl ReceiptSigner {
@@ -218,7 +243,58 @@ impl ReceiptSigner {
         {
             return Err(InstallRefusal::NoRoomToRecover);
         }
-        Ok(Self { registry, signer })
+        Ok(Self {
+            registry,
+            signer,
+            restored: None,
+        })
+    }
+
+    /// A receipt signer restarted from its custody (bn-18w74): the held key and the
+    /// persisted [`SigningCustodyState`](continuum_evidence::signing::SigningCustodyState)
+    /// — own keys, links, and pre-signed revocations beside the registry.
+    ///
+    /// Everything is checked before the key can be used: the key is known, the record
+    /// bound holds, an active key can still be revoked — the reserve every daemon operation
+    /// keeps (a restored state was written by a daemon, which may leave fewer than
+    /// [`RECOVERY_RECORDS`](signing::RECOVERY_RECORDS) free after a replacing mint) — then
+    /// [`validate_custody`](signing::validate_custody) — the held key is the one restored,
+    /// every own key has standing, every link is attested by the keys it concerns, is
+    /// recorded in the audit log, and sits on the right side of the own/adopted line, the
+    /// own links form disjoint chains, and every pre-signed revocation is a retired own
+    /// key's own.
+    ///
+    /// # Errors
+    ///
+    /// [`InstallRefusal`], typed; a state that does not hold is never repaired.
+    pub fn restored(
+        signer: continuum_evidence::signing::LocalSigner,
+        state: continuum_evidence::signing::SigningCustodyState,
+    ) -> Result<Self, InstallRefusal> {
+        // The reserve a restored state must keep is the one the running daemon keeps: an
+        // active held key can still be revoked (one record). A replacing mint or a loss
+        // recovery may legitimately leave fewer than `RECOVERY_RECORDS` free, and a state
+        // the daemon wrote must restart (review of bn-18w74, B1). A registry built outside
+        // the daemon still needs the full reserve (`new`).
+        let registry = state.registry().clone();
+        let records = registry.audit_log().len();
+        let standing = registry
+            .standing(signer.identity())
+            .ok_or(InstallRefusal::UnknownSigner)?;
+        if records > bundle::MAX_AUDIT_RECORDS {
+            return Err(InstallRefusal::RecordBound);
+        }
+        if *standing == continuum_evidence::signing::SignerStanding::Active
+            && records >= bundle::MAX_AUDIT_RECORDS
+        {
+            return Err(InstallRefusal::NoRoomToRecover);
+        }
+        signing::validate_custody(&state, signer.identity()).map_err(InstallRefusal::Custody)?;
+        Ok(Self {
+            registry,
+            signer,
+            restored: Some(state),
+        })
     }
 
     /// The registry whose standing governs this signer.
@@ -238,8 +314,9 @@ impl ReceiptSigner {
     ) -> (
         continuum_evidence::signing::SigningRegistry,
         continuum_evidence::signing::LocalSigner,
+        Option<continuum_evidence::signing::SigningCustodyState>,
     ) {
-        (self.registry, self.signer)
+        (self.registry, self.signer, self.restored)
     }
 }
 
@@ -753,6 +830,24 @@ impl Daemon {
                             audit_required,
                         ));
                     }
+                    // Only after the replay's authority is decided (so a presenter it does
+                    // not cover learns nothing of the recorded answer): a recorded answer is
+                    // re-emitted on this connection, so it is held to
+                    // this connection's version: an error code the negotiated version does
+                    // not define (a 3.9 `OutcomeUnknown` replayed to 3.8, for example after
+                    // state moved to a new connection) is refused typed, and nothing runs
+                    // (`rule versioning.enums`, review cr-1dc5ii).
+                    if let Some(error) = previous.outcome.envelope.error.value() {
+                        if !errors::defined_at(error.code, services.negotiated.protocol_version()) {
+                            return Ok(raise(
+                                services,
+                                envelope,
+                                version_undefined_outcome(),
+                                &audit,
+                                audit_required,
+                            ));
+                        }
+                    }
                     return Ok(outcome);
                 }
                 return Ok(raise(
@@ -818,6 +913,22 @@ impl Daemon {
                     data: family::ErrorData::None,
                     recovery: Vec::new(),
                 }
+            }
+            Err(fault)
+                if !errors::defined_at(fault.code, services.negotiated.protocol_version()) =>
+            {
+                // Every family gates its version-dated codes itself, before anything changes
+                // (`signing::require_custody_version`), so this arm is unreachable today. It
+                // is the backstop at emission: were a gate missing, no code the negotiated
+                // version does not define leaves, although the refusal could then follow a
+                // change the handler made.
+                raise(
+                    services,
+                    envelope,
+                    version_undefined_outcome(),
+                    &audit,
+                    audit_required,
+                )
             }
             Err(fault) => {
                 if fault.derived_denial {
@@ -1173,6 +1284,17 @@ fn unsupported_surface(
     )
 }
 
+/// The refusal an answer gets when its error code is not defined at the negotiated
+/// protocol version: a typed, non-retryable `UnsupportedSemanticFeature`, which every
+/// version defines and which claims nothing about what the refused answer said.
+fn version_undefined_outcome() -> Fault {
+    Fault::new(
+        ErrorCode::UnsupportedSemanticFeature,
+        "the outcome of this request is not defined at the negotiated protocol version",
+    )
+    .not_retryable()
+}
+
 /// The namespace half of a `namespace.verb` operation name.
 fn namespace(operation: &str) -> Option<&str> {
     operation.split_once('.').map(|(namespace, _)| namespace)
@@ -1222,9 +1344,71 @@ impl Builder {
     /// reads as `UnverifiedReason::Unsigned`.
     #[must_use]
     pub fn receipt_signer(mut self, signer: ReceiptSigner) -> Self {
-        let (registry, key) = signer.into_parts();
-        self.state.signing_mut().install(registry, key);
+        let (registry, key, restored) = signer.into_parts();
+        self.state.signing_mut().install(registry, key, restored);
         self
+    }
+
+    /// Supply the signing authority's durable custody (bn-18w74). Every change the
+    /// `signing` operations and a bundle adoption make is then recorded through it before
+    /// it takes effect, and a change it refuses is undone and answered
+    /// `PublicationAborted`, after which the daemon refuses every signing write and
+    /// signature until it is restarted from what the custody holds. The daemon performs
+    /// no I/O itself: the custody is the deployment's capability, normally
+    /// `continuum_security`'s `LocalKeystore`. Reached only through
+    /// [`launch_signing`](Self::launch_signing), so a custody is never attached to a
+    /// signing identity it did not load; a later [`receipt_signer`](Self::receipt_signer)
+    /// replacing that identity makes the authority refuse every write.
+    #[must_use]
+    fn signing_custody<C>(mut self, custody: C) -> Self
+    where
+        C: continuum_evidence::signing::SigningCustody + 'static,
+    {
+        self.state.signing_mut().set_custody(custody);
+        self
+    }
+
+    /// The deployment launcher (bn-18w74): build the signing authority from its durable
+    /// custody, so its identities survive a restart.
+    ///
+    /// 1. [`load_or_mint`](continuum_evidence::signing::SigningCustody::load_or_mint): the
+    ///    recorded state and held key, or, on first use only, a key minted with `entropy`
+    ///    and recorded as audit record 0 attributed to `actor`;
+    /// 2. [`ReceiptSigner::restored`]: every part checked against the registry and the
+    ///    daemon's invariants — the record bound, the recovery reserve, own keys, link
+    ///    attestation and topology, pre-signed revocations — before the key is used;
+    /// 3. [`sweep`](continuum_evidence::signing::SigningCustody::sweep): any secret the
+    ///    validated state does not hold (a crash between a change and its clean-up) is
+    ///    removed;
+    /// 4. the key is installed, `entropy` becomes the daemon's key-entropy capability, and
+    ///    the custody records every later change ([`signing_custody`](Self::signing_custody)).
+    ///
+    /// The daemon performs no I/O here: every effect is the custody's.
+    ///
+    /// # Errors
+    ///
+    /// [`LaunchRefusal`], typed, carrying no key material. A custody that does not load
+    /// or does not validate is refused, never repaired and never minted over.
+    pub fn launch_signing<C>(
+        self,
+        mut custody: C,
+        actor: &continuum_evidence::actor::ActorId,
+        mut entropy: Box<dyn continuum_evidence::signing::KeyEntropy + Send + Sync>,
+    ) -> Result<Self, LaunchRefusal<C::Error>>
+    where
+        C: continuum_evidence::signing::SigningCustody + 'static,
+    {
+        let (state, key) = custody
+            .load_or_mint(actor, &mut *entropy)
+            .map_err(LaunchRefusal::Custody)?;
+        let signer = ReceiptSigner::restored(key, state).map_err(LaunchRefusal::Install)?;
+        custody
+            .sweep(signer.identity())
+            .map_err(LaunchRefusal::Custody)?;
+        Ok(self
+            .receipt_signer(signer)
+            .key_entropy(entropy)
+            .signing_custody(custody))
     }
 
     /// Add signers to the local allowed-signers policy (plan §18.6's organizational

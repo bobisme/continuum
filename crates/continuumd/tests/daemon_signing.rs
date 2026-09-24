@@ -175,6 +175,12 @@ struct Setup {
     signer: Option<ReceiptSigner>,
     version: Option<ProtocolVersion>,
     collide: Option<Colliding>,
+    /// A durable keystore custody at this directory, with this fault seam, launched through
+    /// `Builder::launch_signing` (bn-18w74); `entropy` is then the launch's entropy.
+    custody: Option<(
+        std::path::PathBuf,
+        std::sync::Arc<dyn continuum_security::keystore::KeystoreFaults>,
+    )>,
 }
 
 fn world(setup: Setup) -> World {
@@ -229,7 +235,15 @@ fn world(setup: Setup) -> World {
         .family(IntentFamily)
         .family(EvidenceFamily::verifying_as(who(CHECKER.0)))
         .family(ObserveFamily);
-    if let Some(start) = setup.entropy {
+    if let Some((dir, faults)) = setup.custody {
+        builder = builder
+            .launch_signing(
+                continuum_security::keystore::LocalKeystore::new(dir).with_faults(faults),
+                &SigningActor::new("human:steward").expect("actor"),
+                Box::new(Seeds(setup.entropy.unwrap_or(1))),
+            )
+            .expect("launches");
+    } else if let Some(start) = setup.entropy {
         builder = builder.key_entropy(Box::new(Seeds(start)));
     }
     if let Some(allowed) = &setup.allowed {
@@ -4637,4 +4651,88 @@ fn an_unsigned_local_acceptance_names_only_the_admitted_principal_at_the_daemons
         "unsigned: there is no key to replace the caller's text"
     );
     assert!(acceptance.chain.is_empty());
+}
+
+/// Fails the `nth` state write (1-based) at the directory sync, once.
+struct FailNthSync {
+    nth: usize,
+    seen: std::sync::atomic::AtomicUsize,
+}
+
+impl continuum_security::keystore::KeystoreFaults for FailNthSync {
+    fn fail(&self, phase: continuum_security::keystore::PersistPhase) -> bool {
+        use std::sync::atomic::Ordering;
+        phase == continuum_security::keystore::PersistPhase::DirectorySync
+            && self.seen.fetch_add(1, Ordering::SeqCst) + 1 == self.nth
+    }
+}
+
+/// Review cr-1dc5ii round 2, end to end: a bundle-backed `intent.accept` that would pass —
+/// the bundle is held, verified, and its chain signed by a pinned exporter — fails closed
+/// with `AcceptanceChainInvalid` once the importer's durable custody is unreconciled (a
+/// later write answered `OutcomeUnknown`), and the proposal stays `proposed`. The control:
+/// the identical flow with no fault accepts (`an_exported_bundle_imports_and_its_chain_accepts_the_proposal`).
+#[test]
+fn a_bundle_acceptance_fails_closed_while_the_importers_custody_is_unreconciled() {
+    let mut exporter = with_entropy(10);
+    let (_, identity) = exporter.mint(&[
+        SignedArtifactKind::IntentBundle,
+        SignedArtifactKind::Receipt,
+    ]);
+    let proposal = exporter.put_accepted(&contract(None), None);
+    let (bundle, content) = exporter.export(vec![proposal.clone()]);
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/tmp")
+        .join(format!(
+            "daemon-signing-unreconciled-{}",
+            std::process::id()
+        ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let faults = std::sync::Arc::new(FailNthSync {
+        // Write 1 is the launch's first-use mint, write 2 the import's adoption; write 3,
+        // the rotation, is left unconfirmed.
+        nth: 3,
+        seen: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let mut importer = world(Setup {
+        entropy: Some(100),
+        allowed: Some(AllowedSigners::new().allow(identity, BUNDLE_KINDS)),
+        version: Some(ProtocolVersion::new(3, 9)),
+        custody: Some((dir.join("store"), faults)),
+        ..Setup::default()
+    });
+    let (outcome, _, entered) = import_outcome(&importer.import(content));
+    assert_eq!((outcome, entered), (SignatureOutcome::Verified, 1));
+    let held = importer
+        .daemon
+        .state()
+        .signing()
+        .held()
+        .cloned()
+        .expect("the launch minted a key");
+    let rotated = importer.call(
+        STEWARD,
+        Arguments::SigningRotate(SigningRotateRequest {
+            signer: signer_handle(&held),
+        }),
+    );
+    assert_eq!(rotated.error_code(), Some(ErrorCode::OutcomeUnknown));
+
+    let accepted = importer.accept(&proposal, Some(&bundle), FROM_BUNDLE);
+    assert_eq!(
+        accepted.error_code(),
+        Some(ErrorCode::AcceptanceChainInvalid),
+        "an unreconciled custody vouches for no acceptance"
+    );
+    assert_eq!(
+        importer
+            .daemon
+            .state()
+            .intent(&proposal)
+            .expect("held")
+            .status,
+        RegistryStatus::Proposed
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

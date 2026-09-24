@@ -98,6 +98,28 @@ pub fn admits_with_snapshot(spec: &OperationSpec, code: ErrorCode, snapshot: boo
 /// retry the table says can succeed unable to.
 #[must_use]
 pub const fn retryable(code: ErrorCode) -> bool {
+    retryable_code(code)
+}
+
+/// The first protocol version that defines `code` (`@since`), or `None` for a code every
+/// version of the current major defines.
+#[must_use]
+pub const fn introduced_at(code: ErrorCode) -> Option<crate::protocol::scalar::ProtocolVersion> {
+    match code {
+        ErrorCode::OutcomeUnknown => Some(crate::protocol::registry::OUTCOME_UNKNOWN_SINCE),
+        _ => None,
+    }
+}
+
+/// Whether a connection negotiated at `version` defines `code`. A daemon MUST NOT emit a
+/// member the negotiated version does not define (`rule versioning.enums`), and this is the
+/// check at the one boundary every answer, fresh or replayed, crosses (review cr-1dc5ii).
+#[must_use]
+pub fn defined_at(code: ErrorCode, version: crate::protocol::scalar::ProtocolVersion) -> bool {
+    introduced_at(code).is_none_or(|since| version >= since)
+}
+
+const fn retryable_code(code: ErrorCode) -> bool {
     match code {
         ErrorCode::StatusConflict | ErrorCode::QuotaExhausted | ErrorCode::PublicationAborted => {
             true
@@ -118,7 +140,8 @@ pub const fn retryable(code: ErrorCode) -> bool {
         | ErrorCode::EpochUnsupported
         | ErrorCode::ProtocolVersionUnsupported
         | ErrorCode::IdempotencyKeyReused
-        | ErrorCode::MalformedRequest => false,
+        | ErrorCode::MalformedRequest
+        | ErrorCode::OutcomeUnknown => false,
     }
 }
 

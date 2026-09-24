@@ -21,6 +21,7 @@
 //! | [`LocalSigner`], [`LocalKeyring`] | the secret half, and the solo-developer "minted on first use" default |
 //! | [`SigningRegistry`] | signer standing, and the append-only audit log of mint, rotation, revocation, and supersession |
 //! | [`AllowedSigners`] | the trust root an intent bundle pins: which signer may sign which kind |
+//! | [`SigningCustodyState`], [`SigningCustody`] | what a signing authority persists across a restart, and the capability it persists through (bn-18w74) |
 //! | [`SignatureVerifier`] | the two verification policies: downgrade ([`Provenance`]) and CI fail-closed ([`AcceptanceChainInvalid`]) |
 //!
 //! # The signed message
@@ -75,7 +76,10 @@
 //! `intent.export_bundle` signs an intent bundle that carries this registry's audit log;
 //! `intent.import_bundle` applies the standing facts that log carries through
 //! [`SigningRegistry::record_observed`] when the bundle verifies; and `intent.accept` checks
-//! a held bundle through [`SignatureVerifier::verify_for_ci_acceptance`].
+//! a held bundle through [`SignatureVerifier::verify_for_ci_acceptance`]. What the
+//! authority keeps across a restart is a [`SigningCustodyState`], loaded and recorded
+//! through the [`SigningCustody`] capability a deployment supplies (bn-18w74); the keystore
+//! in `continuum-security` implements it.
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1704,6 +1708,231 @@ impl LocalKeyring {
     pub const fn signer(&self) -> Option<&LocalSigner> {
         self.signer.as_ref()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Custody across restart (bn-18w74).
+// ---------------------------------------------------------------------------
+
+/// Everything a restarted signing authority needs except the held key's secret
+/// (bn-18w74, ADR-0054 "Revision: custody across restart").
+///
+/// - the registry (standing and the audit log);
+/// - the held key's identity, whose secret the custody keeps apart;
+/// - the authority's **own** keys, each with the kinds it was allowed when it was made —
+///   kept apart from the registry's signers, which also name every peer key a registry
+///   adopted from a verified bundle;
+/// - the links the own keys attested, and the links the authority adopted and relays;
+/// - the compromise revocation each retired own key signed before it was wiped.
+///
+/// It holds no secret, so its `Debug` output is counts and the held key's public name. It
+/// is a plain value: nothing is checked when it is built, and the authority that restores
+/// it checks every part against the registry before a key is used (`continuumd`'s
+/// `ReceiptSigner::restored`).
+#[derive(Clone, PartialEq, Eq)]
+pub struct SigningCustodyState {
+    registry: SigningRegistry,
+    held: Option<SignerIdentity>,
+    own: BTreeMap<SignerIdentity, BTreeSet<SignedArtifactKind>>,
+    own_links: Vec<SignerLink>,
+    adopted_links: Vec<SignerLink>,
+    presigned: BTreeMap<SignerIdentity, SignerLink>,
+    local_revocations: BTreeSet<SignerIdentity>,
+}
+
+impl fmt::Debug for SigningCustodyState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SigningCustodyState")
+            .field("records", &self.registry.audit_log().len())
+            .field("held", &self.held.as_ref().map(SignerIdentity::handle))
+            .field("own", &self.own.len())
+            .field("own_links", &self.own_links.len())
+            .field("adopted_links", &self.adopted_links.len())
+            .field("presigned", &self.presigned.len())
+            .field("local_revocations", &self.local_revocations.len())
+            .finish()
+    }
+}
+
+impl SigningCustodyState {
+    /// The state of a store that has just minted its first key: that key is held and is
+    /// the only own key, allowed every kind (plan §18.6's solo-developer default), with no
+    /// links.
+    #[must_use]
+    pub fn first_use(registry: SigningRegistry, held: SignerIdentity) -> Self {
+        let own = BTreeMap::from([(held.clone(), SignedArtifactKind::ALL.into_iter().collect())]);
+        Self {
+            registry,
+            held: Some(held),
+            own,
+            own_links: Vec::new(),
+            adopted_links: Vec::new(),
+            presigned: BTreeMap::new(),
+            local_revocations: BTreeSet::new(),
+        }
+    }
+
+    /// A state from its parts, with no local revocation of a peer key
+    /// ([`with_local_revocations`](Self::with_local_revocations) adds them). Unchecked;
+    /// see the type.
+    #[must_use]
+    pub const fn from_parts(
+        registry: SigningRegistry,
+        held: Option<SignerIdentity>,
+        own: BTreeMap<SignerIdentity, BTreeSet<SignedArtifactKind>>,
+        own_links: Vec<SignerLink>,
+        adopted_links: Vec<SignerLink>,
+        presigned: BTreeMap<SignerIdentity, SignerLink>,
+    ) -> Self {
+        Self {
+            registry,
+            held,
+            own,
+            own_links,
+            adopted_links,
+            presigned,
+            local_revocations: BTreeSet::new(),
+        }
+    }
+
+    /// This state with `revoked` as the peer keys the authority revoked on its own
+    /// operator's word, which carry no link (review cr-33e464 round 4).
+    #[must_use]
+    pub fn with_local_revocations(mut self, revoked: BTreeSet<SignerIdentity>) -> Self {
+        self.local_revocations = revoked;
+        self
+    }
+
+    /// The peer keys revoked locally, by this authority's own operator: no key they
+    /// concern attested the revocation, so no link records it and none travels.
+    #[must_use]
+    pub const fn local_revocations(&self) -> &BTreeSet<SignerIdentity> {
+        &self.local_revocations
+    }
+
+    /// The registry.
+    #[must_use]
+    pub const fn registry(&self) -> &SigningRegistry {
+        &self.registry
+    }
+
+    /// The held key's identity.
+    #[must_use]
+    pub const fn held(&self) -> Option<&SignerIdentity> {
+        self.held.as_ref()
+    }
+
+    /// The own keys, each with the kinds it was allowed.
+    #[must_use]
+    pub const fn own(&self) -> &BTreeMap<SignerIdentity, BTreeSet<SignedArtifactKind>> {
+        &self.own
+    }
+
+    /// The links the own keys attested.
+    #[must_use]
+    pub fn own_links(&self) -> &[SignerLink] {
+        &self.own_links
+    }
+
+    /// The links adopted from verified bundles.
+    #[must_use]
+    pub fn adopted_links(&self) -> &[SignerLink] {
+        &self.adopted_links
+    }
+
+    /// Each retired own key's pre-signed compromise revocation, by that key.
+    #[must_use]
+    pub const fn presigned(&self) -> &BTreeMap<SignerIdentity, SignerLink> {
+        &self.presigned
+    }
+
+    /// Every part but the local revocations ([`local_revocations`](Self::local_revocations)),
+    /// by value.
+    #[must_use]
+    #[allow(clippy::type_complexity)]
+    pub fn into_parts(
+        self,
+    ) -> (
+        SigningRegistry,
+        Option<SignerIdentity>,
+        BTreeMap<SignerIdentity, BTreeSet<SignedArtifactKind>>,
+        Vec<SignerLink>,
+        Vec<SignerLink>,
+        BTreeMap<SignerIdentity, SignerLink>,
+    ) {
+        (
+            self.registry,
+            self.held,
+            self.own,
+            self.own_links,
+            self.adopted_links,
+            self.presigned,
+        )
+    }
+}
+
+/// Why [`SigningCustody::persist`] did not confirm a write, split at its commit point
+/// (review cr-33e464).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CustodyWrite<E> {
+    /// The write failed before its commit point: what was recorded before is still what a
+    /// restart loads. The caller undoes the change.
+    NotRecorded(E),
+    /// The write passed its commit point, but its durability was not confirmed (for
+    /// example a directory sync failed after the rename). A restart may load the new state,
+    /// so the caller keeps the change as committed.
+    Unconfirmed(E),
+}
+
+/// Durable custody of a signing authority: the capability through which a deployment
+/// loads the authority at start and records every later change (bn-18w74).
+///
+/// Nothing in this crate or in `continuumd` performs I/O (INV-005, ADR-0003): a boundary
+/// crate implements this (`continuum-security`'s keystore) and the deployment hands it to
+/// the daemon, which calls [`persist`](Self::persist) before each change takes effect.
+///
+/// An implementation keeps the held key's seed out of every error and `Debug` output.
+pub trait SigningCustody: Send + Sync {
+    /// Why the custody refused. Carries no key material.
+    type Error: fmt::Debug + fmt::Display;
+
+    /// Load the recorded state and the held key, or — when nothing is recorded at all —
+    /// mint the first key with `entropy`, record it as audit record 0 attributed to
+    /// `actor`, and return [`SigningCustodyState::first_use`]. A custody that holds a
+    /// partial, corrupt, or exposed record refuses; it never mints over one.
+    ///
+    /// # Errors
+    ///
+    /// [`Self::Error`], typed.
+    fn load_or_mint(
+        &mut self,
+        actor: &ActorId,
+        entropy: &mut dyn KeyEntropy,
+    ) -> Result<(SigningCustodyState, LocalSigner), Self::Error>;
+
+    /// Record `state` durably, replacing what was recorded before, as one atomic step with
+    /// one commit point. `minted` is the seed of the held key when this change made that
+    /// key (a mint, a rotation, or a loss recovery), and `None` otherwise; it is wiped when
+    /// dropped.
+    ///
+    /// # Errors
+    ///
+    /// [`CustodyWrite::NotRecorded`] for a failure before the commit point, and
+    /// [`CustodyWrite::Unconfirmed`] for one at or after it. An implementation never
+    /// reports `NotRecorded` for a write a restart could load.
+    fn persist(
+        &mut self,
+        state: &SigningCustodyState,
+        minted: Option<Zeroizing<[u8; SEED_LEN]>>,
+    ) -> Result<(), CustodyWrite<Self::Error>>;
+
+    /// Remove every recorded secret other than `held`'s: what a crash between a change and
+    /// its clean-up leaves. Called after a restart validated the loaded state.
+    ///
+    /// # Errors
+    ///
+    /// [`Self::Error`] when a secret could not be removed.
+    fn sweep(&mut self, held: &SignerIdentity) -> Result<(), Self::Error>;
 }
 
 // ---------------------------------------------------------------------------

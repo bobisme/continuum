@@ -174,13 +174,14 @@ revocation are all keyed by the exact identity.
    the signing wire" below.
 2. **An operating-system `KeyEntropy` source and an on-disk keystore — done (bn-1hape).**
    `OsEntropy` and `LocalKeystore` in `continuum-security`. Persisting later rotations and
-   revocations to the keystore belongs with the daemon operations of follow-up 1.
+   revocations to the keystore — done (bn-18w74): see "Revision: custody across restart".
 3. **Signing at the producers — receipts done (bn-1hape).** `evidence.link`, the daemon's
    receipt producer, signs through `SigningRegistry::sign`. The kernel crates never sign
    (INV-004); their receipts are signed where the daemon publishes them. Promotion
    receipts (`repair.promote` is not served), intent-bundle export, and domain-pack
-   publication have no producer on trunk, and sign when they land. No deployment launcher
-   on trunk builds a daemon from the keystore; that wiring is follow-up 1.
+   publication have no producer on trunk, and sign when they land. The deployment
+   launcher that builds a daemon from the keystore is `Builder::launch_signing`
+   (bn-18w74).
 4. **Distributed revocation — done (bn-3glnv).** The intent bundle carries the exporter's
    key-attested signer links inside its signed body: a rotation signed by both keys, a
    compromise revocation signed by the revoked key. An importer adopts a standing change
@@ -249,11 +250,133 @@ decisions above:
 - **Acceptance needs an active signer.** `verify_for_ci_acceptance` still reports a rotated
   signer's signature as verified (plan §4.6). `intent.accept` additionally requires the
   bundle's signer to be active, because a retired key vouches for no new acceptance.
-- **Still out of scope.** The daemon is sans-IO, so keys minted or rotated over the wire
-  live in daemon memory; persisting them through `LocalKeystore`, and a deployment
-  launcher that builds a daemon from the keystore, are a follow-up. The residual risk
-  under "Revocation is local" narrows but does not close: a verifier that never received
-  a bundle carrying a revocation cannot know of it.
+- **Still out of scope at 3.8.** The daemon is sans-IO, so keys minted or rotated over
+  the wire lived in daemon memory; bn-18w74 persisted them (next revision). The residual
+  risk under "Revocation is local" narrows but does not close: a verifier that never
+  received a bundle carrying a revocation cannot know of it.
+
+## Revision: custody across restart (bn-18w74)
+
+One additive wire change, and no schema change: protocol 3.8 → 3.9 and IDL 1.16 → 1.17
+add the error code `OutcomeUnknown` (RFC 0026 correction 60). `signing.mint`,
+`signing.rotate`, `signing.revoke` and `intent.import_bundle` declare it, and
+`rule signing.custody` states it. A daemon with durable custody refuses those four
+operations below 3.9 with `UnsupportedSemanticFeature`. What changed:
+
+- **What persists.** `continuum_evidence::signing::SigningCustodyState` is everything a
+  restarted authority needs except the held key's secret: the registry, the held key's
+  identity, the **own** keys with the kinds each was allowed, the own links (rotations
+  and compromise revocations the own keys attested), the adopted links (relayed from
+  verified bundles), and each retired own key's pre-signed revocation.
+  `SigningCustody` is the capability a deployment supplies to load and record it; the
+  daemon and the signing library perform no I/O (INV-005, ADR-0003).
+- **Own keys are recorded apart from the registry's signers.** Before, `install` took
+  every signer of the installed registry as the daemon's own, and a restart would have
+  taken every adopted peer key as own. Now the own set is persisted, and an install
+  without restored state owns its held key alone: every other signer of the registry is
+  a peer whose standing an attested link may change. This closes the residual formerly
+  stated under Security.
+- **Every change is recorded before it takes effect.** `signing.mint`, `signing.rotate`,
+  `signing.revoke`, and a bundle adoption build the change, record it through the
+  custody, and only then hold the new key and keep the new state. A new key's seed is
+  captured from the entropy capability into a zeroizing buffer for that one write. A
+  custody write has one commit point (the keystore's rename), and its result says which
+  side of it a failure fell on (`CustodyWrite`, review cr-33e464). Before it
+  (`NotRecorded`): nothing a restart loads changed, so the change is undone in memory,
+  the answer is `PublicationAborted`, and the authority refuses every later signing
+  write and signature until a restart. At or after it (`Unconfirmed`, for example a
+  failed directory sync): a crash may keep the change or lose it, so the answer is
+  `OutcomeUnknown` — an error code added for this at protocol 3.9 (IDL 1.17, RFC 0026
+  correction 60, `rule signing.custody`) — never success, and the authority is
+  quarantined: no signature, no signing write. The keystore writes a pending marker,
+  durably, before the commit point and removes it after a confirmed sync, so the
+  ambiguity survives a crash; a restart loads whichever record is durable, validates it
+  in full, removes what no durable record names, and clears the marker before it signs.
+  So a success is only ever a confirmed record, and a `PublicationAborted` never becomes
+  an applied state. While a record is unconfirmed, no trust-deciding read uses the live
+  standing (review cr-1dc5ii round 2): verification is `standing-stale`, a bundle-backed
+  acceptance fails closed, and an import, a local acceptance, a lock, and the registry
+  are refused. A recorded `OutcomeUnknown` is never replayed to a connection below 3.9. A daemon with durable custody refuses these writes on a connection
+  below 3.9 (`UnsupportedSemanticFeature`), because no older code is honest for an
+  unknown outcome.
+- **The keystore.** `LocalKeystore` implements `SigningCustody`. One state file holds
+  the whole state and is replaced atomically (a new `0600` file created with `O_EXCL`
+  and `O_NOFOLLOW`, synced, renamed over the old one, and the directory synced); each
+  held key's seed is its own `0600` file, named by its public key, written and synced
+  before the state that names it, and removed after the state that retires it. A key
+  file no state names — what a crash leaves — is removed by the launcher's sweep, only
+  after the loaded state validated. Reads keep bn-1hape's descriptor-bound checks
+  (`lstat`, `O_NOFOLLOW`, `fstat` device, inode, owner, and mode; directory and ancestor
+  trust), check the file length on the descriptor before reading, bound every section
+  count and record length before it is read, and replay the audit log one record at a
+  time. A daemon's custody holds an exclusive lock on the store (`signing.lock`,
+  `File::try_lock`) for its whole life, and every other write takes it too, so two
+  processes never write one store; a second launch is refused (`Locked`). The handle
+  that holds it is its only owner (review cr-1dc5ii): `LocalKeystore` is not `Clone`,
+  every write through it runs under one mutex that owns the lock, a second handle in the
+  same process is refused like another process (flock locks belong to the open file
+  description), and each write stages its state in a fresh `O_EXCL` temporary file.
+  Every store descriptor is close-on-exec, so a spawned process inherits none, and the
+  handle records the process that took its lifetime lock: a copy a `fork` left in a child
+  shares that lock's open file description, and is refused (`InheritedHandle`) before it
+  takes a lock or reads or writes a store file. The owning process is recorded outside
+  the writer mutex and checked before any lock, so a child forked while another thread
+  held that mutex is refused instead of blocking on it (review cr-1dc5ii round 3); a child
+  dropping its copy only closes its descriptor and never releases the parent's flock.
+  The owner is recorded when the handle is constructed, before any lock exists, and a
+  handle whose process cannot be read is refused rather than treated as owned (round 4).
+  Residual: a child another thread starts is forked before it execs and, until then,
+  holds a copy of every descriptor, so a flock released in that window stays held and a
+  concurrent lock attempt is answered `Locked` (typed, fail-closed). The process id comes from `/proc/self`,
+  so a durable custody launches on Linux and Android only; elsewhere the launch is
+  refused (`Unsupported`), a stated residual (the keystore names filesystem facilities
+  only, which INV-015's audit holds it to). The store path is
+  resolved one component at a time, following each symlink by hand, and every directory
+  and every symlink it passes through must be owned by root or the store's owner, a
+  directory not group- or world-writable unless sticky (review cr-2qu5zr, ssh
+  `StrictModes` style): only root and the owner can then change what the path resolves
+  to, so the later lock, opens, and rename reach the directory validated. The check is
+  re-run immediately before each of them, and the directory must keep the device and
+  inode first validated (`StoreMoved`). A traversed symlink must also sit in a directory
+  only root and the owner can write, sticky or not, and have exactly one link, so a hard
+  link to one of the owner's symlinks planted where `fs.protected_hardlinks` is off is
+  refused (round 2). A store file with a second hard link is refused, and the store
+  directory is private (no group or other bits), so only root and the owner can name or
+  create entries in it. Stated limits: a FUSE mount can report any owner; and where
+  `fs.protected_hardlinks` is off, another user who can search a directory holding one of
+  the path's symlinks can hard-link it elsewhere, so the store is refused until the owner
+  recreates the symlink — availability only, never an acceptance. The bn-1hape two-file layout could not be replaced atomically; a store that
+  still holds either of its files is refused (`LegacyLayout`), never read or minted
+  over. No production store of that layout existed: nothing on trunk launched a daemon
+  from the keystore before this revision.
+- **The launcher re-validates everything.** `Builder::launch_signing` loads or, on first
+  use only, mints; then `ReceiptSigner::restored` checks the record bound and the reserve
+  every daemon operation keeps — an active held key can still be revoked; a state the
+  daemon wrote after a replacing mint near the bound may hold fewer than
+  `RECOVERY_RECORDS` free, and must restart — and `validate_custody`: the held key is the
+  restored one, is own, and is not retired; every own key has standing; every link verifies, is recorded
+  in the audit log, appears once, and sits on the right side of the own/adopted line; the
+  own links form disjoint chains; every retired own key keeps its rotation link and its
+  pre-signed revocation; an adopted key retires and is revoked at most once; and
+  every pre-signed revocation is a retired own key's own; every own key revoked as
+  compromised keeps its revocation link, so export still relays it; no own key but the
+  held one is active; and a lost own key's successor is own. The check is complete in
+  both directions against the audit log (review cr-33e464 round 4): every own rotation
+  and compromise revocation has its own link; every peer rotation has its adopted link;
+  every peer compromise revocation has exactly one of an adopted link or a local entry;
+  every peer loss revocation has a local entry; a supersession joins two own keys; and
+  no link or local entry exists without its record. The state persists the peer keys the
+  operator revoked locally (`local_revocations`), because such a revocation carries no
+  link and the log alone cannot tell it from an adopted one. Any failure is a typed
+  `LaunchRefusal`, and nothing is swept or minted. The custody is attached only by the
+  launcher; installing another identity afterwards makes the authority refuse every
+  write, so it is never recorded over the store. Residual: the audit log does not say
+  which keys were minted locally, so a state edited to claim a peer key as own, with no
+  adopted link about it, is not detected; the state file's owner-only permissions are the
+  control.
+- **Not persisted.** Held intent bundles and the import records: after a restart,
+  `intent.accept` naming a bundle held before it fails closed until the bundle is
+  imported again.
 
 ## Alternatives considered
 
@@ -278,7 +401,9 @@ decisions above:
 
 ## Compatibility
 
-No semantic epoch change, no schema change, no protocol change. Existing artifacts carry no
+No semantic epoch change and no schema change. The protocol changed twice after this ADR:
+3.8 (bn-3glnv) added the signing operations, and 3.9 (bn-18w74) added `OutcomeUnknown`
+and the pre-3.9 custody refusal boundary ("Revision: custody across restart"). Existing artifacts carry no
 signature and continue to read as they did. The first artifact to carry a signature will
 carry the D4 record, and the envelope's `domain` string versions it for any later change.
 
@@ -289,19 +414,13 @@ artifact's claim is true, and it never replaces certificate or proof checking (A
 The threat-model controls it serves are docs/09 T04 ("optional signing/attestation") and T07
 ("pack signature/provenance"). Residual risks, stated rather than discounted:
 
-- **Key custody.** The library holds a `LocalSigner` in memory and wipes it on drop. On-disk
-  custody is follow-up 2. Until it lands, a restarted process mints a new identity.
+- **Key custody.** The library holds a `LocalSigner` in memory and wipes it on drop. On disk
+  (bn-1hape, bn-18w74) a seed is protected by owner-only permissions and the store's
+  directory checks, not by encryption, and a removed key file's blocks may stay on the
+  device until the filesystem reuses them.
 - **Rotation cannot date a signature.** Without a trusted timestamp, a signature from a
   rotated key cannot be proven to predate the rotation. So compromise must be answered with
   revocation, not rotation, and the API names the two separately.
-- **Links and own keys do not survive a restart yet.** `continuumd` keeps its signer links
-  (own and adopted), the pre-signed revocations of its retired keys, and the set of its own
-  keys in memory; `install` rebuilds "own" from every signer of the installed registry. So
-  until they are persisted beside the registry (a follow-up with follow-up 2's keystore),
-  a restarted daemon exports no links made before the restart, cannot publish a retired
-  key's pre-signed revocation, and would treat previously adopted peer keys as its own.
-  Today the builder installs only the deployment's own registry, so the last does not yet
-  arise.
 - **Revocation is local.** A verifier whose registry lacks a revocation reports
   `StandingStale` against the authoritative head, never `Active`. But until the head is
   distributed (follow-up 1), a remote verifier cannot reach `Verified` at all. Follow-ups 1

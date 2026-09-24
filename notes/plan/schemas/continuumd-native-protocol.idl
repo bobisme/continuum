@@ -157,6 +157,28 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.17 — an honest answer for a change whose durability is unknown
+  ///         (bn-18w74, cr-33e464); `version` "3.9". A daemon that keeps its
+  ///         signing authority in durable custody records every change
+  ///         before it takes effect, and a record can pass its commit point
+  ///         without its durability being confirmed (a failed directory
+  ///         sync after the rename): a crash may then keep the change or
+  ///         lose it. No existing code says that. `PublicationAborted`
+  ///         claims nothing was published, and success claims the change
+  ///         survives. `ErrorCode` gains `OutcomeUnknown @since("3.9")`,
+  ///         never retryable. `signing.mint`, `signing.rotate`,
+  ///         `signing.revoke`, and `intent.import_bundle` declare it, and
+  ///         `rule signing.custody` arrives, 54 → 55.
+  ///
+  ///         **Why a minor.** `ErrorCode` is `@open`, and adding a code is
+  ///         a minor change (`rule versioning.error_codes`). No existing
+  ///         declaration moves. A daemon MUST NOT emit a member the
+  ///         negotiated version does not define (`rule versioning.enums`),
+  ///         so a daemon with durable signing custody refuses those four
+  ///         operations on a connection negotiated below 3.9 with
+  ///         `UnsupportedSemanticFeature`, before anything changes: no
+  ///         older code is honest for an unknown outcome. A daemon without
+  ///         custody serves them at 3.8 exactly as before.
   ///   1.16 — the signing wire (bn-3glnv); `version` "3.8". Plan §18.6's
   ///         signing identities reach the wire: identities "are minted
   ///         through audited daemon operations", and these are they. A
@@ -766,8 +788,14 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.16";
+  idl_version = "1.17";
   /// The protocol version this document defines.
+  ///
+  /// 3.9 is the single minor bump for IDL 1.17 (bn-18w74): one error
+  /// code, `OutcomeUnknown`, added to the `@open` `ErrorCode`, and one
+  /// rule. No operation, field, or other enum member is added, so the
+  /// major window `[3, 2]` is untouched. The code is never emitted below
+  /// 3.9 (`rule signing.custody`).
   ///
   /// 3.8 is the single minor bump for IDL 1.16 (bn-3glnv), and it is the
   /// fourth that adds operations: eight, six of them in a 20th namespace,
@@ -933,7 +961,7 @@ protocol continuum.native {
   /// and the F13 discipline is now mechanically enforced rather than
   /// remembered: the dossier validator parses all three sources and
   /// fails closed on any disagreement, preferring none.
-  version = "3.8";
+  version = "3.9";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -1865,6 +1893,12 @@ enum ErrorCode {
   /// The request does not parse, does not validate against this file, or
   /// uses an unknown closed-enum member.
   MalformedRequest,
+  /// The change passed its commit point, but its durability was not
+  /// confirmed: after a crash it may be in effect or it may not. Never
+  /// retryable — a retry could apply it twice. The daemon stops serving
+  /// what the change concerns until a restart reconciles it from what is
+  /// durable (`rule signing.custody`).
+  OutcomeUnknown @since("3.9"),
 }
 
 /// A typed error. `recovery` is the only recovery channel: a list of
@@ -3702,7 +3736,7 @@ operation intent.import_bundle {
     adopted: U32 required;
   };
   verdict StructuralVerdictValue;
-  errors [IntentMutationDenied];
+  errors [IntentMutationDenied, OutcomeUnknown];
 }
 
 // --- verification ----------------------------------------------------
@@ -5064,6 +5098,43 @@ rule signing.identities {
   """
 }
 
+rule signing.custody {
+  """
+  A daemon MAY keep its signing authority in durable custody (bn-18w74,
+  ADR-0054). It then records every change `signing.mint`,
+  `signing.rotate`, `signing.revoke`, and an `intent.import_bundle` that
+  adopts standing facts make, before the change takes effect, as one
+  atomic record with one commit point. The answer follows the record:
+  - a failure before the commit point changes nothing, in the daemon or
+    in custody, and is `PublicationAborted`;
+  - a record whose commit point passed but whose durability is not
+    confirmed is `OutcomeUnknown`, never success: after a crash the
+    change may be in effect or not. The daemon marks the custody as
+    unreconciled in durable form before the commit point, and from the
+    answer on it refuses every signature and every signing write;
+  - only a confirmed record is success, and a confirmed record survives
+    any crash.
+  A restart loads whichever record is durable, validates it in full,
+  removes what no durable record names, and clears the mark; only then
+  does it sign. `OutcomeUnknown` is defined from 3.9. A daemon with
+  durable custody refuses the four operations above on a connection
+  negotiated below 3.9 with `UnsupportedSemanticFeature`, before
+  anything changes, so no older client can receive an outcome its
+  version cannot express. The same holds for a recorded answer: a
+  replayed outcome whose code the negotiated version does not define is
+  refused with `UnsupportedSemanticFeature`, and nothing runs. A daemon
+  without custody serves them at 3.8 unchanged.
+
+  While a record is unconfirmed, the live standing may be ahead of what
+  a restart loads, so it decides no trust: `signing.verify` answers
+  `standing-stale`; a bundle-backed `intent.accept` is
+  `AcceptanceChainInvalid`; and `intent.import_bundle`, a local
+  `intent.accept`, `intent.lock`, and `signing.registry` are refused
+  with `UnsupportedSemanticFeature`, with nothing changed, until a
+  restart reconciles the custody.
+  """
+}
+
 rule signing.verification {
   """
   A signature is the canonical `ArtifactSignature` record of ADR-0054
@@ -5301,7 +5372,7 @@ operation signing.mint {
     registry_head: Bytes required;
   };
   verdict StructuralVerdictValue;
-  errors [PolicyGateFailed];
+  errors [PolicyGateFailed, OutcomeUnknown];
 }
 
 /// Retire the held key for a fresh successor. The retired signer's
@@ -5321,7 +5392,7 @@ operation signing.rotate {
     registry_head: Bytes required;
   };
   verdict StructuralVerdictValue;
-  errors [PolicyGateFailed];
+  errors [PolicyGateFailed, OutcomeUnknown];
 }
 
 /// Revoke a signer. Its signatures verify as `signer-revoked` from now
@@ -5342,7 +5413,7 @@ operation signing.revoke {
     registry_head: Bytes required;
   };
   verdict StructuralVerdictValue;
-  errors [PolicyGateFailed];
+  errors [PolicyGateFailed, OutcomeUnknown];
 }
 
 /// Read the signing registry: every audit record, the head digest, and

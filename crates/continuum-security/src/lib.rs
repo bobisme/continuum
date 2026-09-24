@@ -41,6 +41,12 @@
 //! resource behind an explicit capability is a boundary crate's job (INV-005, ADR-0003); no
 //! semantic-core crate depends on this one (`tests/entropy_isolation.rs`). This adds two
 //! edges, `continuum-evidence` and `continuum-value`; the rationale is in `Cargo.toml`.
+//!
+//! bn-18w74 made the keystore the daemon's durable custody: [`keystore::LocalKeystore`]
+//! implements `continuum_evidence::signing::SigningCustody`, persisting every change the
+//! daemon's signing authority makes, atomically, and `continuumd`'s
+//! `Builder::launch_signing` builds a daemon from it. No edge is added: the capability is
+//! the signing library's, and this crate still names no adapter or engine.
 
 pub mod entropy;
 pub mod injection;

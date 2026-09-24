@@ -1,0 +1,60 @@
+[change]
+bone = "bn-18w74"
+author = "continuum-dev"
+summary = "Signing custody across restart (plan 18.6, ADR-0054): continuum-evidence gains SigningCustodyState and the SigningCustody capability; continuumd records every signing change through it before the change takes effect, keeps its own keys apart from the registry's signers, and re-validates a restored state in Builder::launch_signing, and reports an unconfirmed commit as OutcomeUnknown (protocol 3.9, IDL 1.17); continuum-security's LocalKeystore persists it atomically with descriptor-bound, bounded, fail-closed reads"
+
+[semantic]
+covers = [
+  "crates/continuum-evidence/src/signing.rs",
+]
+reference_tests = [
+  "crates/continuumd/tests/signing_custody.rs::a_restart_keeps_rotations_revocations_and_adopted_links",
+  "crates/continuumd/tests/signing_custody.rs::own_and_adopted_keys_stay_apart_across_a_restart",
+  "crates/continuumd/tests/signing_custody.rs::an_install_without_custody_state_owns_only_the_held_key",
+  "crates/continuumd/tests/signing_custody.rs::a_corrupt_truncated_or_oversize_store_fails_closed_at_launch",
+  "crates/continuumd/tests/signing_custody.rs::a_state_that_does_not_hold_is_refused_before_any_key_is_used",
+  "crates/continuumd/tests/signing_custody.rs::a_restored_state_without_room_to_recover_is_refused",
+  "crates/continuumd/tests/signing_custody.rs::an_exposed_or_symlinked_store_is_refused_at_launch",
+  "crates/continuumd/tests/signing_custody.rs::a_custody_that_refuses_a_write_changes_nothing_and_stops_signing",
+  "crates/continuumd/tests/signing_custody.rs::the_launch_sweeps_a_retired_key_left_by_a_crash",
+  "crates/continuumd/tests/signing_custody.rs::no_launch_error_or_debug_output_carries_key_material",
+  "crates/continuumd/tests/signing_custody.rs::a_replacement_minted_near_the_bound_survives_a_restart",
+  "crates/continuumd/tests/signing_custody.rs::a_signer_installed_over_a_launched_custody_writes_nothing",
+  "crates/continuumd/tests/signing_custody.rs::a_state_missing_what_a_rotation_leaves_is_refused",
+  "crates/continuumd/tests/signing_custody.rs::every_answer_agrees_with_every_state_a_crash_can_leave",
+  "crates/continuumd/tests/signing_custody.rs::a_custody_daemon_refuses_signing_writes_below_3_9",
+  "crates/continuumd/tests/signing_custody.rs::every_record_keeps_its_link_or_entry_across_a_restart",
+  "crates/continuumd/tests/signing_custody.rs::unreconciled_standing_decides_no_trust",
+  "crates/continuumd/tests/signing_custody.rs::a_recorded_outcome_unknown_is_never_replayed_to_a_3_8_client",
+  "crates/continuumd/tests/daemon_signing.rs::a_bundle_acceptance_fails_closed_while_the_importers_custody_is_unreconciled",
+  "crates/continuumd/tests/signing_custody.rs::a_compromised_own_key_without_its_revocation_link_is_refused",
+  "crates/continuum-security/tests/keystore.rs::a_write_reports_which_side_of_the_rename_it_failed_on",
+  "crates/continuum-security/tests/keystore.rs::a_persisted_rotation_round_trips_and_removes_the_retired_key",
+  "crates/continuum-security/tests/keystore.rs::a_truncated_extended_or_garbage_state_file_fails_closed",
+  "crates/continuum-security/tests/keystore.rs::a_refused_persist_leaves_the_previous_state",
+  "crates/continuum-security/tests/keystore.rs::concurrent_writes_through_one_handle_are_serialized",
+  "crates/continuum-security/tests/keystore.rs::a_second_handle_in_process_is_refused_while_one_holds_the_store",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-security/tests/keystore.rs::a_custody_state_survives_the_serialization_round_trip", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/signing_custody.rs::the_restored_authority_matches_the_library_running_the_same_operations", oracle = "continuum-evidence", subject = "continuumd" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers signing, signatures, key custody, or provenance verification; this change makes the signing authority survive a restart and keeps TEST-9-07 enforced with more bound evidence, neither of which is a docs/18 claim row"
+
+[semantic.schemas]
+updated = []
+reason = "no JSON schema document changes; the keystore's state file is a private on-disk format of continuum-security, not a machine contract under notes/plan/schemas, and every signed encoding is unchanged. The wire changes additively (cr-33e464, user-approved): protocol 3.8 to 3.9 and IDL 1.16 to 1.17 add ErrorCode OutcomeUnknown @since(3.9), never retryable, to the error clauses of signing.mint, signing.rotate, signing.revoke and intent.import_bundle, and add rule signing.custody (RFC 0026 correction 60)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-evidence gains the additive SigningCustodyState value, the SigningCustody trait, CustodyWrite, the commit-point split of a custody write (cr-33e464), and local_revocations, the peer keys an operator revoked locally (cr-33e464 round 4); no existing encoding, signature, standing rule, or verdict changes. continuumd's install now owns only the held key when no custody state is restored, and continuum-security's keystore moves to a single atomically replaced state file, refusing a store of the unlaunched bn-1hape layout rather than reading it. Wire compatibility boundary: a daemon with durable custody refuses those four signing writes on a connection below 3.9 with UnsupportedSemanticFeature before anything changes, because no pre-3.9 code honestly reports an unknown outcome; a daemon without custody serves them at 3.8 unchanged. After an unconfirmed commit the daemon answers OutcomeUnknown, quarantines signing, and on relaunch validates whichever durable state survives"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2qu5zr"
+verdict = "approved"

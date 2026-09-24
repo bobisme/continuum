@@ -201,9 +201,10 @@ fn the_protocol_bump_is_byte_neutral() {
     // "3.6" are the same length. A bump that changed the frame size would have put an
     // unattributed byte into every row of the table. The registry has since moved to 3.7
     // (bn-28kv4, a capability field this instrument never reads) and to 3.8 (bn-3glnv,
-    // the signing wire, whose operations this instrument never names); the instrument
-    // stays at the version it measured.
-    assert_eq!(PROTOCOL_VERSION, "3.8");
+    // the signing wire, whose operations this instrument never names) and to 3.9
+    // (bn-18w74, one error code this instrument never receives); the instrument stays at
+    // the version it measured.
+    assert_eq!(PROTOCOL_VERSION, "3.9");
     assert_eq!(
         continuum_benchmark::rig::VERSION,
         (3, 6),

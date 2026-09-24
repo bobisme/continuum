@@ -577,6 +577,10 @@ protocol_enum! {
         /// The request does not parse, does not validate against this file, or
         /// uses an unknown closed-enum member.
         MalformedRequest => MalformedRequest,
+        /// The change passed its commit point, but its durability was not
+        /// confirmed: after a crash it may be in effect or it may not. Never
+        /// retryable. `@since("3.9")`; `rule signing.custody`.
+        OutcomeUnknown => OutcomeUnknown,
     }
 }
 
