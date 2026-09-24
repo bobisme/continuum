@@ -111,10 +111,10 @@ id = "core-v2-successor-lookup-ignored"
 side = "checker"
 file = "crates/continuum-kernel-core/src/check.rs"
 targets = "Post(S) ⊆ S under the model's relation: a derived successor must be in the table"
-find = """                None => Err(Rejection::SuccessorNotInTable {
+find = """                None => Err(WalkFault::Rejection(Rejection::SuccessorNotInTable {
                     state: index,
                     action,
-                }),"""
+                })),"""
 replace = """                None => Ok(()),"""
 expect = "killed"
 

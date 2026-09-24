@@ -17,11 +17,27 @@
 //! Each of the four `continuum-kernel-*` crates declares its own `WIRE_EPOCH`, and
 //! all four currently read `1`. They are *four different contracts* that happen to
 //! share ordinals: `CONTCERT 2`, `CONTSATC 1`, `CONTSMTC 1`, `CONTTMPC 1`. A
-//! receipt that recorded a bare `1` would name none of them.
+//! receipt that recorded a bare `1` would name none of them, so every qualified
+//! spelling below is `<crate>/<magic>/<epoch>`.
 //!
-//! So this crate's wire epoch is written only in its qualified spelling —
-//! [`WIRE_EPOCH_ID`], `continuum-kernel-core/CONTCERT/2` — and it is carried in
-//! `checker.version`, never in the receipt's `epochs` object:
+//! Two different facts get this spelling, and a receipt keeps them apart
+//! (bn-ympz5; the kernel review of bn-35y4f, cr-18l29w, found them collapsed into
+//! one hard-coded `2`):
+//!
+//! - **The checker's own identity** — the newest epoch this build implements, never
+//!   the certificate's — is carried in `checker.version` as semver build metadata
+//!   ([`checker_version`], [`WIRE_EPOCH_ID`]). It reads `2` for every receipt this
+//!   build emits, including one over an epoch-1 certificate, because this build
+//!   still decodes epoch 1 and says so honestly by naming the highest epoch it
+//!   supports — the same convention a compiler's own `--version` names its newest
+//!   supported language edition, not the edition of the file it just compiled.
+//! - **The certificate's own epoch** — which of the two grammars the checked bytes
+//!   actually used — is [`CheckedClaim::wire_epoch`], carried per receipt in
+//!   [`Receipt::wire_epoch_id`]. An epoch-1 certificate's receipt names
+//!   `continuum-kernel-core/CONTCERT/1` here even though `checker.version` still
+//!   says `2`.
+//!
+//! Neither is written into the receipt's `epochs` object:
 //!
 //! > **There is no checker epoch.** `EpochSet` has no `checker` member. […] checker
 //! > identity is the `proof` epoch for Lean-backed checkers and engine identity for
@@ -29,11 +45,18 @@
 //! >
 //! > — `notes/plan/rfcs/0026-continuumd-native-protocol.md`, correction 17
 //!
-//! `epochs` therefore carries the *artifact's* epochs — `semantic` read out of the
-//! certificate envelope, `proof` supplied at the seam — and the checker's own
-//! identity lives in the `checker` object where the schema puts it. START_HERE PR 9
-//! and this bone's acceptance criteria say "checker epoch"; correction 17 calls that
-//! phrasing an alias, and this module resolves the alias to checker *identity*.
+//! `epochs` therefore carries only the *artifact's* epochs — `semantic` read out of
+//! the certificate envelope, `proof` supplied at the seam. `Receipt::wire_epoch_id`
+//! is a fact about this Rust value, not a `proof-receipt.schema.json` field: the
+//! schema already lets a reader recover a checked certificate's epoch from fields it
+//! does define, without a schema change — `trusted_components` names
+//! `certificate-model-correspondence` only for epoch 1, and `claim.text` prefixes
+//! "model-bound finite-closure certificate (wire epoch 2)" only for epoch 2 — so
+//! [`Receipt::wire_epoch_id`] states the same fact plainly rather than adding a
+//! second way to spell it on the wire. START_HERE PR 9 and this bone's acceptance
+//! criteria say "checker epoch"; correction 17 calls that phrasing an alias, and
+//! this module resolves the alias to checker *identity*, kept separate from the
+//! certificate's own epoch as above.
 //!
 //! # The seam, and why it is not a digest this crate computes
 //!
@@ -83,16 +106,19 @@ pub const SCHEMA_EPOCH: &str = "1";
 /// This crate's name, as it appears in a receipt's `checker.name`.
 pub const CHECKER_NAME: &str = "continuum-kernel-core";
 
-/// The qualified spelling of this crate's wire epoch.
+/// The qualified spelling of this *checker's own* newest-supported wire epoch.
 ///
 /// `<crate>/<magic>/<epoch>`. The crate name and the eight-byte magic are what
 /// distinguish this crate's epoch from the sibling kernel crates'; see the module
-/// documentation. The epoch is the newest this checker implements
-/// ([`crate::wire::WIRE_EPOCH`]); it also decodes the legacy epoch 1. The epoch of
-/// the certificate a receipt covers shows in its trusted components (an epoch-1 claim
-/// lists `certificate-model-correspondence`) and, for epoch 2, in `claim.text`
-/// (bn-35y4f).
+/// documentation. This is [`crate::wire::WIRE_EPOCH`], the newest epoch this build
+/// implements, embedded in [`checker_version`] — it does not vary per receipt, and
+/// it is not the epoch of the certificate any one receipt covers. For that, see
+/// [`Receipt::wire_epoch_id`].
 pub const WIRE_EPOCH_ID: &str = "continuum-kernel-core/CONTCERT/2";
+
+/// The qualified spelling of the crate's legacy wire epoch, the other value
+/// [`Receipt::wire_epoch_id`] can hold.
+const LEGACY_WIRE_EPOCH_ID: &str = "continuum-kernel-core/CONTCERT/1";
 
 /// The receipt fields a certificate checker cannot derive, and is therefore given.
 ///
@@ -193,6 +219,7 @@ pub struct Receipt {
     proof_epoch: String,
     certificate_kind: &'static str,
     certificate_hash: String,
+    wire_epoch_id: &'static str,
     checker_version: String,
     checker_source_hash: String,
     checker_binary_hash: String,
@@ -213,13 +240,23 @@ impl Receipt {
         CHECKER_NAME
     }
 
-    /// The qualified wire-epoch identity of the checker: [`WIRE_EPOCH_ID`].
+    /// The qualified wire-epoch identity of the *certificate this receipt covers*
+    /// (bn-ympz5): `continuum-kernel-core/CONTCERT/1` for an epoch-1 certificate,
+    /// `.../2` for epoch 2, set from [`CheckedClaim::wire_epoch`] at construction.
+    ///
+    /// Distinct from [`Receipt::checker_version`], which always names the newest
+    /// epoch this checker build implements, whichever epoch this particular
+    /// certificate declared. See the module documentation, "Which epoch this
+    /// receipt means".
     #[must_use]
     pub const fn wire_epoch_id(&self) -> &'static str {
-        WIRE_EPOCH_ID
+        self.wire_epoch_id
     }
 
-    /// `checker.version`: the crate version with the wire contract as build metadata.
+    /// `checker.version`: the crate version, with the *checker's own* newest
+    /// supported wire epoch as build metadata — [`WIRE_EPOCH_ID`], not the
+    /// certificate's. It reads the same for every receipt this build emits; see
+    /// [`Receipt::wire_epoch_id`] for the per-certificate fact.
     #[must_use]
     pub fn checker_version(&self) -> &str {
         &self.checker_version
@@ -379,6 +416,7 @@ pub fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptErr
         proof_epoch: seam.proof_epoch.to_owned(),
         certificate_kind: schema_certificate_kind(claim.kind()),
         certificate_hash: seam.certificate_digest.to_owned(),
+        wire_epoch_id: certificate_wire_epoch_id(claim.wire_epoch()),
         checker_version: checker_version(),
         checker_source_hash: seam.source_digest.to_owned(),
         checker_binary_hash: seam.binary_digest.to_owned(),
@@ -387,10 +425,16 @@ pub fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptErr
     })
 }
 
-/// `checker.version`: the crate version, with the wire contract as build metadata.
+/// `checker.version`: the crate version, with the *checker's own* wire contract as
+/// build metadata.
 ///
 /// Semver build metadata is the one place a version string may carry an identity
-/// that does not order — which is exactly what a wire epoch is.
+/// that does not order — which is exactly what a wire epoch is. Deliberately always
+/// [`crate::wire::WIRE_EPOCH`], the newest epoch this build implements, and never
+/// the epoch of the certificate a given receipt covers: `checker.version` describes
+/// the checker, once per build, not the certificate, once per receipt. A reader who
+/// wants the certificate's own epoch reads [`Receipt::wire_epoch_id`] instead (see
+/// the module documentation, "Which epoch this receipt means").
 fn checker_version() -> String {
     let magic = core::str::from_utf8(&MAGIC).unwrap_or("");
     let mut out = String::from(env!("CARGO_PKG_VERSION"));
@@ -399,6 +443,31 @@ fn checker_version() -> String {
     out.push('.');
     out.push_str(&WIRE_EPOCH.to_string());
     out
+}
+
+/// [`Receipt::wire_epoch_id`]: the qualified spelling of the certificate's own wire
+/// epoch, from [`CheckedClaim::wire_epoch`].
+///
+/// The decoder admits only [`crate::wire::LEGACY_WIRE_EPOCH`] and
+/// [`crate::wire::WIRE_EPOCH`] (`crate::wire::decode` rejects every other value as
+/// [`crate::verdict::Feature::WireEpoch`] before a [`CheckedClaim`] can be minted),
+/// so a verified claim's epoch is always one of the two today. This function does
+/// not check that — KCOV-05 forbids a panicking escape hatch anywhere in this
+/// crate, `debug_assert!` included (`tools/check_kernel_covenant.py`'s
+/// `no-panic-escape` rule), so there is no assertion to add, and the `else` arm is
+/// a real, silent fallback, not a proven-unreachable one (bn-ympz5, adversarial
+/// review of this bone: the earlier draft here claimed otherwise and was wrong). A
+/// third wire epoch must extend this into a `match` that names it explicitly,
+/// verified instead by the exhaustive `match` in
+/// [`crate::verdict::CheckedClaim::wire_epoch`]'s two constructors staying in sync
+/// with [`crate::wire::LEGACY_WIRE_EPOCH`]/[`crate::wire::WIRE_EPOCH`] — a fact
+/// [`crate::check`]'s tests pin, not this function.
+const fn certificate_wire_epoch_id(wire_epoch: u16) -> &'static str {
+    if wire_epoch == crate::wire::LEGACY_WIRE_EPOCH {
+        LEGACY_WIRE_EPOCH_ID
+    } else {
+        WIRE_EPOCH_ID
+    }
 }
 
 /// The docs/03 §7 assurance class every receipt this crate emits carries.
@@ -591,7 +660,7 @@ mod tests {
 
     use super::*;
     use crate::check::check_certificate;
-    use crate::fixture::Plan;
+    use crate::fixture::{Plan, PlanV2};
 
     const SEAM: Seam<'static> = Seam {
         receipt_id: "receipt_diehard-closure-0001",
@@ -623,7 +692,6 @@ mod tests {
         let verdict = verified(&Plan::diehard_closure());
         let built = receipt(&verdict, &SEAM).unwrap();
         // A bare `1` would name all four kernel crates at once, which is to say none.
-        assert_eq!(built.wire_epoch_id(), "continuum-kernel-core/CONTCERT/2");
         assert_eq!(built.checker_name(), "continuum-kernel-core");
         assert!(built.checker_version().ends_with("+wire.CONTCERT.2"));
         // RFC 0026 correction 17: there is no checker epoch, so the wire epoch is
@@ -633,6 +701,27 @@ mod tests {
         let epochs = epochs.split("},").next().unwrap();
         assert!(!epochs.contains("CONTCERT"));
         assert!(!epochs.contains("checker"));
+    }
+
+    #[test]
+    fn wire_epoch_id_names_the_certificates_epoch_not_the_checkers_newest() {
+        // bn-ympz5 (kernel review of bn-35y4f, cr-18l29w): before this fix,
+        // `wire_epoch_id()` returned the checker's own newest-supported epoch for
+        // every receipt, including one over an epoch-1 certificate.
+        //
+        // `Plan::diehard_closure()` is wire epoch 1 (legacy, no carried model): its
+        // receipt must name epoch 1, even though `checker.version` still names 2,
+        // the highest epoch this checker build implements.
+        let epoch1 = verified(&Plan::diehard_closure());
+        let built1 = receipt(&epoch1, &SEAM).unwrap();
+        assert_eq!(built1.wire_epoch_id(), "continuum-kernel-core/CONTCERT/1");
+        assert!(built1.checker_version().ends_with("+wire.CONTCERT.2"));
+
+        // A wire-epoch-2 (model-bound) certificate's receipt names epoch 2.
+        let epoch2 = check_certificate(&PlanV2::diehard().encode());
+        let built2 = receipt(&epoch2, &SEAM).unwrap();
+        assert_eq!(built2.wire_epoch_id(), "continuum-kernel-core/CONTCERT/2");
+        assert!(built2.checker_version().ends_with("+wire.CONTCERT.2"));
     }
 
     #[test]

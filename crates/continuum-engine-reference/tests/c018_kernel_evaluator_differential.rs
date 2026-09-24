@@ -236,6 +236,34 @@ fn certificate(
     out
 }
 
+/// bn-ympz5 (kernel review of bn-35y4f, cr-18l29w): the kernel's evaluator now
+/// distinguishes its own exhausted nesting budget from an arithmetic overflow —
+/// `Fault::DepthExhausted`, mapped to `Verdict::Unsupported(Feature::ResourceBound
+/// { resource: Resource::ExpressionDepth, .. })` — instead of folding it into
+/// `Rejection::EvaluationOverflow` alongside genuine overflow. This outcome should
+/// never be observed here; asserting its absence over 400+ random models is exactly
+/// the check that a decoder/evaluator depth-bound divergence, or this refactor
+/// itself, could not silently reclassify a real disagreement as a typed-inconclusive
+/// result instead of surfacing it.
+///
+/// `random_model` (above) builds every guard, assignment and predicate expression
+/// with `bool_expr`/`int_expr` at a fixed nesting depth of `4`, an eighth of
+/// `MAX_EXPRESSION_DEPTH` (`32`), so this corpus cannot brush the bound on its own;
+/// the assertion is a floor, not a tautology.
+fn assert_not_depth_unsupported(verdict: &Verdict, model: &Model) {
+    assert!(
+        !matches!(
+            verdict,
+            Verdict::Unsupported(continuum_kernel_core::Feature::ResourceBound {
+                resource: continuum_kernel_core::Resource::ExpressionDepth,
+                ..
+            })
+        ),
+        "the kernel reported its own depth-budget exhaustion over a model this corpus \
+         bounds well inside MAX_EXPRESSION_DEPTH: {verdict:?}\n{model:?}"
+    );
+}
+
 /// How one model compared.
 #[derive(Debug, Default)]
 struct Tally {
@@ -278,6 +306,7 @@ fn compare(model: &Model, tally: &mut Tally) {
     }
 
     let verdict = check_certificate(&certificate(model, &states, &rows, None));
+    assert_not_depth_unsupported(&verdict, model);
     match first_fault {
         None => {
             let Verdict::Verified(claim) = &verdict else {
@@ -329,6 +358,7 @@ fn compare(model: &Model, tally: &mut Tally) {
         }
         let name = predicate.name().as_str();
         let verdict = check_certificate(&certificate(model, &states, &rows, Some(name)));
+        assert_not_depth_unsupported(&verdict, model);
         match (&verdict, first) {
             (Verdict::Verified(claim), None) => {
                 assert_eq!(claim.property(), PropertyClass::Invariant);
@@ -380,4 +410,13 @@ fn the_kernel_and_the_model_core_agree_on_every_random_model() {
     assert!(tally.rejected_at_the_same_state >= 50, "{tally:?}");
     assert!(tally.invariants_verified >= 10, "{tally:?}");
     assert!(tally.invariants_refuted >= 10, "{tally:?}");
+    // bn-ympz5: every top-level comparison resolves to `verified` or
+    // `rejected_at_the_same_state` (`compare`'s own `assert_not_depth_unsupported`
+    // rules the kernel's own depth-budget outcome out of both); this is the same
+    // fact stated as a count instead of a per-call absence, over the whole run.
+    assert_eq!(
+        tally.verified + tally.rejected_at_the_same_state,
+        models,
+        "{tally:?}"
+    );
 }

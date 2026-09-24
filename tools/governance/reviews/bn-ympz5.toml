@@ -1,0 +1,76 @@
+[change]
+bone = "bn-ympz5"
+author = "continuum-dev"
+summary = "kernel review of bn-35y4f (cr-18l29w): the receipt names the certificate's own wire epoch instead of the checker's newest-supported one for every receipt, and the evaluator's own depth-budget exhaustion is Unsupported(ExpressionDepth), never Rejected(EvaluationOverflow)"
+
+[semantic]
+covers = [
+  "crates/continuum-kernel-core/src/receipt.rs",
+  "crates/continuum-kernel-core/src/model.rs",
+  "crates/continuum-kernel-core/src/check.rs",
+]
+reference_tests = [
+  "crates/continuum-kernel-core/src/receipt.rs::wire_epoch_id_names_the_certificates_epoch_not_the_checkers_newest",
+  "crates/continuum-kernel-core/src/model.rs::an_exhausted_evaluator_budget_is_a_distinct_fault_from_overflow",
+  "crates/continuum-kernel-core/src/check.rs::evaluator_depth_exhaustion_is_unsupported_not_a_rejection",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-kernel-core/src/check.rs::metamorphic_equivalent_guard_normalization_keeps_the_verdict", relation = "equivalent guard normalization" },
+]
+differential_tests = [
+  { test = "crates/continuum-engine-reference/tests/c018_kernel_evaluator_differential.rs::the_kernel_and_the_model_core_agree_on_every_random_model", oracle = "continuum-engine-reference", subject = "continuum-kernel-core" },
+]
+
+[semantic.schemas]
+updated = []
+reason = "proof-receipt.schema.json is unchanged: `checker.version` and the receipt's other fields keep their shape and meaning, and the certificate's own wire epoch is a fact this Rust value now carries (Receipt::wire_epoch_id) without a new wire field — the schema already lets a reader recover it from trusted_components and claim.text (see receipt.rs module docs, \"Which epoch this receipt means\"). The evaluator's Unsupported(ResourceBound{ExpressionDepth}) outcome reuses the Feature vocabulary the decoder's own depth_bound already writes; no new Rejection or Feature member is added"
+
+unaffected = { proof-receipt = "checker.version, the epochs object and every other receipt field keep the same shape; only Receipt::wire_epoch_id's per-instance value changes, and it is not written into the receipt's JSON form" }
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-kernel-core's Receipt::wire_epoch_id keeps its signature (`pub const fn wire_epoch_id(&self) -> &'static str`); only its returned value changes, from a build-wide constant to the certificate's own epoch, and no in-tree caller reads it today (grep across the workspace). check_certificate's public signature and every existing Verified/Rejected outcome are unchanged; only the one unreachable-in-practice depth-exhaustion path changes from Rejected(EvaluationOverflow) to Unsupported(ResourceBound{ExpressionDepth}), and no certificate a live decoder accepts can reach it (decoder depth_bound and the evaluator's starting budget admit the same range), so no stored verdict moves"
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim moves: the receipt fix changes which Rust value Receipt::wire_epoch_id returns, not a checked obligation, and the evaluator fix only retypes an unreachable-in-practice fault (no certificate a live decoder accepts can reach Fault::DepthExhausted), so no verdict any claim cites changes"
+
+[kernel]
+covers = [
+  "crates/continuum-kernel-core/src/receipt.rs",
+  "crates/continuum-kernel-core/src/model.rs",
+  "crates/continuum-kernel-core/src/check.rs",
+]
+
+[kernel.mutation_tests]
+tests = [
+  "crates/continuum-kernel-core/src/receipt.rs::wire_epoch_id_names_the_certificates_epoch_not_the_checkers_newest",
+  "crates/continuum-kernel-core/src/model.rs::an_exhausted_evaluator_budget_is_a_distinct_fault_from_overflow",
+  "crates/continuum-kernel-core/src/check.rs::evaluator_depth_exhaustion_is_unsupported_not_a_rejection",
+  "crates/continuum-kernel-core/src/check.rs::walk_fault_routes_depth_exhaustion_to_unsupported_not_rejected",
+]
+classes = ["framing.wire-epoch-substitution"]
+
+[kernel.code_size]
+total = 12828
+budget = 15000
+note = "continuum-kernel-core grew (a new Fault::DepthExhausted arm and its doc, a WalkFault enum, a walk_fault routing function and expression_depth_unsupported helper in check.rs, an exhaustive Fault match in the invariant loop, and a per-certificate wire_epoch_id field and its doc in receipt.rs); the other three kernel crates are unchanged"
+
+[kernel.no_unchecked_optimization]
+is_optimization = false
+reason = "no optimized path changes: receipt.rs adds one per-receipt field carried from CheckedClaim::wire_epoch and a doc/naming fix, and model.rs/check.rs replace one Fault arm (Overflow) with a distinct one (DepthExhausted) on a path no accepted certificate reaches, then translate it to Unsupported instead of Rejected; no evaluation order, no bound and no skipped check changes"
+
+[kernel.fuzz_corpus]
+files = ["crates/continuum-certificate/tests/c018-corpus/cases.txt"]
+test = "crates/continuum-certificate/tests/c018_checker_mutation.rs::the_committed_corpus_replays_with_its_recorded_verdicts"
+
+[kernel.reviewers]
+entries = [
+  { reviewer = "continuum-security", review = "cr-t0jb19", verdict = "approved" },
+  { reviewer = "continuum-kernel-review", review = "cr-t0jb19", verdict = "approved" },
+]
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-t0jb19"
+verdict = "approved"

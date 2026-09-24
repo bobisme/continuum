@@ -74,8 +74,8 @@ use crate::model::Fault;
 use crate::verdict::Resource;
 use crate::verdict::{CertificateKind, CheckedClaim, Feature, PropertyClass, Rejection, Verdict};
 use crate::wire::{
-    Body, DecodeFailure, Envelope, FiniteClosureBody, MAX_EVALUATION_WORK, ModelClosureBody,
-    StateTable, StateTypeBody, Variable, decode,
+    Body, DecodeFailure, Envelope, FiniteClosureBody, MAX_EVALUATION_WORK, MAX_EXPRESSION_DEPTH,
+    ModelClosureBody, StateTable, StateTypeBody, Variable, decode,
 };
 
 /// Check one certificate from its wire form.
@@ -225,23 +225,19 @@ fn check_model_closure(envelope: &Envelope, body: &ModelClosureBody) -> Verdict 
                     derived.push((action, position));
                     Ok(())
                 }
-                None => Err(Rejection::SuccessorNotInTable {
+                None => Err(WalkFault::Rejection(Rejection::SuccessorNotInTable {
                     state: index,
                     action,
-                }),
+                })),
             },
-            |action, fault| match fault {
-                Fault::Overflow => Rejection::EvaluationOverflow { state: index },
-                Fault::OutsideDomain { variable, value } => Rejection::UpdateOutsideDomain {
-                    state: index,
-                    action,
-                    variable,
-                    value,
-                },
-            },
+            |action, fault| walk_fault(index, action, fault),
         );
-        if let Err(rejection) = walk {
-            return Verdict::Rejected(rejection);
+        match walk {
+            Ok(()) => {}
+            Err(WalkFault::DepthExhausted) => {
+                return Verdict::Unsupported(expression_depth_unsupported());
+            }
+            Err(WalkFault::Rejection(rejection)) => return Verdict::Rejected(rejection),
         }
         // Actions are visited in index order, so sorting orders targets within an
         // action; two outcomes with one target are one transition.
@@ -280,7 +276,15 @@ fn check_model_closure(envelope: &Envelope, body: &ModelClosureBody) -> Verdict 
                     Some(Ok(false)) | None => {
                         return Verdict::Rejected(Rejection::InvariantViolated { state: index });
                     }
-                    Some(Err(_)) => {
+                    // The evaluator's own budget, not a fact about the certificate
+                    // (bn-ympz5): typed-inconclusive, never a rejection.
+                    Some(Err(Fault::DepthExhausted)) => {
+                        return Verdict::Unsupported(expression_depth_unsupported());
+                    }
+                    // Listed by name, not `_`, so a future `Fault` variant fails to
+                    // compile here instead of silently falling into `Rejected`
+                    // (bn-ympz5, adversarial review of this bone).
+                    Some(Err(Fault::Overflow | Fault::OutsideDomain { .. })) => {
                         return Verdict::Rejected(Rejection::EvaluationOverflow { state: index });
                     }
                 }
@@ -301,6 +305,64 @@ fn check_model_closure(envelope: &Envelope, body: &ModelClosureBody) -> Verdict 
         model.identity(),
         invariant,
     ))
+}
+
+/// What `Model::successors` can fail with, inside step 3 of [`check_model_closure`].
+///
+/// A [`Fault::DepthExhausted`] is kept apart from every other fault on purpose: it is
+/// the evaluator's own resource limit, never a defect the certificate carries, so it
+/// must become [`Verdict::Unsupported`], not a member of [`Rejection`] (INV-008;
+/// bn-ympz5, cr-18l29w). Every other fault, and every rejection `visit` reports
+/// directly (a derived successor missing from the table), is a genuine finding about
+/// the certificate and stays a [`Rejection`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WalkFault {
+    /// A genuine defect: the certificate is wrong about something re-derivable.
+    Rejection(Rejection),
+    /// The evaluator ran out of its own nesting budget. See [`Fault::DepthExhausted`].
+    DepthExhausted,
+}
+
+/// The routing decision itself, pulled out of the `successors` fault closure so it is
+/// directly unit-testable (bn-ympz5, adversarial review of this bone): a test that
+/// only exercises [`expression_depth_unsupported`]'s shape does not pin that
+/// `Fault::DepthExhausted` actually reaches `WalkFault::DepthExhausted` rather than
+/// `WalkFault::Rejection(Rejection::EvaluationOverflow { .. })` — the exact
+/// regression this bone fixes, and the one a future edit could silently reintroduce.
+const fn walk_fault(state: u32, action: u16, fault: Fault) -> WalkFault {
+    match fault {
+        Fault::Overflow => WalkFault::Rejection(Rejection::EvaluationOverflow { state }),
+        Fault::OutsideDomain { variable, value } => {
+            WalkFault::Rejection(Rejection::UpdateOutsideDomain {
+                state,
+                action,
+                variable,
+                value,
+            })
+        }
+        // The evaluator's own budget, not a fact about the certificate (bn-ympz5):
+        // typed-inconclusive, never a rejection.
+        Fault::DepthExhausted => WalkFault::DepthExhausted,
+    }
+}
+
+/// The typed-inconclusive outcome for an evaluator that exhausted its own nesting
+/// budget ([`Fault::DepthExhausted`]).
+///
+/// Spelled the same way the decoder spells the identical bound in `depth_bound`
+/// (`crate::model::decode`): same [`Resource::ExpressionDepth`], same
+/// `limit`. The decoder guarantees no certificate it accepts can drive the
+/// evaluator's budget past this limit, so `needed` is never observed exactly; it is
+/// reported as one past the limit, the same lower-bound convention the decoder's own
+/// `push` (`Resource::ExpressionNodes`) uses when a bound is merely exceeded, not
+/// measured.
+fn expression_depth_unsupported() -> Feature {
+    let limit = u64::try_from(MAX_EXPRESSION_DEPTH).unwrap_or(u64::MAX);
+    Feature::ResourceBound {
+        resource: Resource::ExpressionDepth,
+        needed: limit.saturating_add(1),
+        limit,
+    }
 }
 
 /// The row-sort share charged per derived successor: one comparison per level of a
@@ -1143,6 +1205,10 @@ mod tests {
             assert_eq!(claim.initial_states(), green.initial_states());
             assert_eq!(claim.property(), green.property());
             assert_ne!(claim.model_identity(), green.model_identity());
+            // bn-ympz5: a certificate's `wire_epoch()` now feeds `Receipt::wire_epoch_id`
+            // per receipt (kernel review of bn-35y4f, cr-18l29w); it must be as
+            // invariant under this relation as every other re-derived fact above.
+            assert_eq!(claim.wire_epoch(), green.wire_epoch());
         }
     }
 
@@ -1374,6 +1440,67 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn evaluator_depth_exhaustion_is_unsupported_not_a_rejection() {
+        // bn-ympz5 (kernel review of bn-35y4f, cr-18l29w): `check_model_closure`
+        // must turn `Fault::DepthExhausted` into the same `Feature::ResourceBound`
+        // shape the decoder's own `depth_bound` uses for
+        // `Resource::ExpressionDepth` (same `Resource`, same `limit`), never
+        // `Rejection::EvaluationOverflow`. No certificate a live decoder accepts can
+        // drive the evaluator there — the decoder's bound and the evaluator's
+        // starting budget match exactly (see
+        // `model::tests::an_exhausted_evaluator_budget_is_a_distinct_fault_from_overflow`
+        // and `model::tests::expression_depth_beyond_the_bound_is_unsupported_not_rejected`)
+        // — so this pins the translation `check_model_closure` performs directly,
+        // the same way that test pins the evaluator side.
+        let limit = u64::try_from(MAX_EXPRESSION_DEPTH).unwrap();
+        assert_eq!(
+            expression_depth_unsupported(),
+            Feature::ResourceBound {
+                resource: Resource::ExpressionDepth,
+                needed: limit + 1,
+                limit,
+            }
+        );
+    }
+
+    #[test]
+    fn walk_fault_routes_depth_exhaustion_to_unsupported_not_rejected() {
+        // bn-ympz5 (adversarial review of this bone): the test above only pins the
+        // *shape* `expression_depth_unsupported()` builds; it never calls
+        // `walk_fault`, so it would not catch `Fault::DepthExhausted` being folded
+        // back into `WalkFault::Rejection(EvaluationOverflow)` (the exact regression
+        // this bone fixes) or the `Some(Err(Fault::DepthExhausted))` arm in the
+        // invariant loop being deleted. This pins the routing function itself.
+        assert_eq!(
+            walk_fault(7, 3, Fault::DepthExhausted),
+            WalkFault::DepthExhausted
+        );
+        // Every other fault stays a genuine rejection, named for the state and
+        // action `walk_fault` was given — never silently swallowed into the same
+        // typed-inconclusive outcome.
+        assert_eq!(
+            walk_fault(7, 3, Fault::Overflow),
+            WalkFault::Rejection(Rejection::EvaluationOverflow { state: 7 })
+        );
+        assert_eq!(
+            walk_fault(
+                7,
+                3,
+                Fault::OutsideDomain {
+                    variable: 2,
+                    value: 99,
+                },
+            ),
+            WalkFault::Rejection(Rejection::UpdateOutsideDomain {
+                state: 7,
+                action: 3,
+                variable: 2,
+                value: 99,
+            })
+        );
     }
 
     #[test]

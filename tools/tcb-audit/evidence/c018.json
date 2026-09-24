@@ -84,7 +84,7 @@
     "tools/tcb-audit/mutants.toml",
     "tools/tcb-audit/public-api.txt"
   ],
-  "checker_inputs_sha256": "5e570cc216c0a3472e424ac471cb546eec7f8714ad0c68bc27df9a73153d81e0",
+  "checker_inputs_sha256": "86bdb85d7f4306a7911c881073c7b5531b15b22b7f11b2b467079def6b66cc38",
   "checking_base": [
     "continuum-certificate",
     "continuum-kernel-core",
@@ -182,15 +182,15 @@
       },
       "continuum-kernel-core": {
         "by_file": {
-          "check.rs": 419,
+          "check.rs": 481,
           "lib.rs": 134,
-          "model.rs": 861,
-          "receipt.rs": 579,
+          "model.rs": 874,
+          "receipt.rs": 648,
           "verdict.rs": 872,
           "wire.rs": 1240
         },
-        "code_lines": 2511,
-        "lines": 4105
+        "code_lines": 2548,
+        "lines": 4249
       },
       "continuum-kernel-sat": {
         "by_file": {
@@ -227,16 +227,16 @@
       }
     },
     "checking_base_total": {
-      "code_lines": 7679,
-      "lines": 13156
+      "code_lines": 7716,
+      "lines": 13300
     },
     "finite_closure_checker": {
-      "code_lines": 2653,
+      "code_lines": 2690,
       "crates": [
         "continuum-certificate",
         "continuum-kernel-core"
       ],
-      "lines": 4577
+      "lines": 4721
     },
     "method": "tools/check_kernel_covenant.py count_crate: shipped src lines; code_lines are non-blank non-comment"
   },

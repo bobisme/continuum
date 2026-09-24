@@ -2086,6 +2086,27 @@ fn the_committed_corpus_replays_with_its_recorded_verdicts() {
     ] {
         assert!(CORPUS.contains(line), "the corpus carries {line:?}");
     }
+    // bn-ympz5 (kernel review of bn-35y4f, cr-18l29w): `continuum-kernel-core`'s
+    // successor-walk fault handling was refactored — `Fault::Overflow` and
+    // `Fault::OutsideDomain` now flow through a `WalkFault` enum inside
+    // `check_model_closure`, and a new `Fault::DepthExhausted` arm was added,
+    // mapped to `Verdict::Unsupported(Feature::ResourceBound { resource:
+    // ExpressionDepth, .. })` instead of a rejection. The line-by-line replay
+    // above already pins every recorded verdict byte-for-byte; this closes the
+    // one gap that check alone would not catch on its own: the refactor must not
+    // have reclassified any existing corpus lie from a rejection into this new
+    // unsupported outcome. `ExpressionDepth` never legitimately appears in this
+    // corpus (every wire-epoch-2 lie here is well within
+    // `MAX_EXPRESSION_DEPTH`), so its absence is exactly the regression guard. A
+    // future *decoder*-level depth-bound corpus entry (`Feature::ResourceBound`
+    // straight from `decode`, not from the evaluator) would render identically and
+    // trip this same assertion; that is not this bone's regression, so widen or
+    // retire this check first if such an entry is ever added.
+    assert!(
+        !CORPUS.contains("ExpressionDepth"),
+        "no corpus verdict should have moved to the evaluator's own depth-budget \
+         outcome; that would mean the refactor changed a real recorded verdict"
+    );
     assert!(
         rendered == CORPUS,
         "the committed corpus drifted from the generator; the rendered corpus is at {}",

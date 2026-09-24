@@ -189,6 +189,19 @@ pub(crate) enum Fault {
         /// The value it would have taken.
         value: i64,
     },
+    /// The evaluator's own nesting budget ran out before an expression finished.
+    ///
+    /// `holds`, `successors` and every recursive call below start the budget at
+    /// [`crate::wire::MAX_EXPRESSION_DEPTH`], and [`decode`]'s own `depth_bound`
+    /// refuses any expression that nests deeper than that same bound before this
+    /// evaluator ever runs — so on a certificate this crate decoded, the budget
+    /// cannot reach zero. This arm exists so that a future mismatch between the
+    /// decoder's bound and the evaluator's budget degrades to a typed inconclusive
+    /// outcome (INV-008) instead of misreporting a possibly-valid certificate as
+    /// rejected. Distinct from [`Fault::Overflow`] on purpose: an exhausted budget
+    /// is a checker resource limit, never a fact about the certificate (bn-ympz5,
+    /// cr-18l29w).
+    DepthExhausted,
 }
 
 impl Model {
@@ -321,11 +334,11 @@ impl Model {
     }
 
     /// Integer evaluation. `depth` is the remaining nesting budget; the decoder
-    /// guarantees it is never exhausted, and exhaustion is a fault rather than a
-    /// panic in case that invariant is ever weakened.
+    /// guarantees it is never exhausted, and exhaustion is [`Fault::DepthExhausted`]
+    /// rather than a panic in case that invariant is ever weakened.
     fn integer(&self, id: NodeId, state: &[i64], depth: usize) -> Result<i64, Fault> {
         let Some(inner) = depth.checked_sub(1) else {
-            return Err(Fault::Overflow);
+            return Err(Fault::DepthExhausted);
         };
         match self.node(id)? {
             Node::Const(value) => Ok(value),
@@ -366,7 +379,7 @@ impl Model {
     /// Boolean evaluation. Connectives evaluate both operands (no short-circuit).
     fn boolean(&self, id: NodeId, state: &[i64], depth: usize) -> Result<bool, Fault> {
         let Some(inner) = depth.checked_sub(1) else {
-            return Err(Fault::Overflow);
+            return Err(Fault::DepthExhausted);
         };
         match self.node(id)? {
             Node::Bool(value) => Ok(value),
@@ -1069,6 +1082,44 @@ mod tests {
             |_, fault| fault,
         );
         assert_eq!(outcome, Err(Fault::Overflow));
+    }
+
+    #[test]
+    fn an_exhausted_evaluator_budget_is_a_distinct_fault_from_overflow() {
+        // bn-ympz5 (kernel review of bn-35y4f, cr-18l29w): the decoder's own
+        // `depth_bound` admits nesting only up to `MAX_EXPRESSION_DEPTH`, matching
+        // this evaluator's starting budget one-for-one (see
+        // `expression_depth_beyond_the_bound_is_unsupported_not_rejected` above), so
+        // no certificate a live decoder accepted can ever drive `integer`/`boolean`
+        // to exhaust their budget. That is exactly why this test builds the `Model`
+        // directly instead of going through `decode`: it forces the evaluator's own
+        // bound so the fault this crate returns for it — `DepthExhausted`, mapped to
+        // `Verdict::Unsupported`, never `Verdict::Rejected` — is pinned even though
+        // no encodable certificate can reach it today.
+        let int_model = Model {
+            identity: Vec::new(),
+            variables: Vec::new(),
+            actions: Vec::new(),
+            initial_states: Vec::new(),
+            predicates: Vec::new(),
+            nodes: vec![Node::Const(1)],
+        };
+        // A zero budget exhausts immediately, before the node is even read.
+        assert_eq!(int_model.integer(0, &[], 0), Err(Fault::DepthExhausted));
+        // A one-level budget is enough for one leaf node.
+        assert_eq!(int_model.integer(0, &[], 1), Ok(1));
+
+        let bool_model = Model {
+            nodes: vec![Node::Bool(true)],
+            ..int_model
+        };
+        assert_eq!(bool_model.boolean(0, &[], 0), Err(Fault::DepthExhausted));
+        assert_eq!(bool_model.boolean(0, &[], 1), Ok(true));
+
+        // Distinct from arithmetic overflow, which stays `Fault::Overflow` and,
+        // through `check_model_closure`, a genuine `Rejection` — the exhausted
+        // budget is a checker resource limit, never a fact about the certificate.
+        assert_ne!(Fault::DepthExhausted, Fault::Overflow);
     }
 
     #[test]
