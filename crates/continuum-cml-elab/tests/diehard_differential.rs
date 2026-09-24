@@ -16,7 +16,9 @@
 //!    the reference engine checks it;
 //! 2. the reference engine's exploration, check report, and witness are equal for the
 //!    two models, and so are the finite-closure certificate bytes;
-//! 3. the two models have one semantic identity (`Model::identity`).
+//! 3. the two models have one semantic identity (`Model::identity`);
+//! 4. that identity is pinned against a committed golden hex file (bn-3jz, PR 15a
+//!    exit), so the check in point 3 cannot pass by both front ends drifting together.
 //!
 //! Point 3 implies the others; points 1 and 2 are kept so that a defect in the identity
 //! encoding cannot hide a behavioural difference.
@@ -130,6 +132,47 @@ fn the_elaborated_and_programmatic_models_have_one_identity() {
     let oracle = programmatic();
     assert_eq!(subject, oracle, "the two front ends built equal models");
     assert_eq!(subject.identity(), oracle.identity());
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for (i, b) in bytes.iter().enumerate() {
+        out.push_str(&format!("{b:02x}"));
+        if i % 32 == 31 {
+            out.push('\n');
+        }
+    }
+    out.push('\n');
+    out
+}
+
+/// Point 3's identity, pinned in CI against a committed golden (bn-3jz, PR 15a exit).
+/// The point above shows the two front ends *agree*; agreement alone would still pass
+/// if both sides drifted together under a shared encoding defect. A third, independent
+/// value — bytes fixed at review time, not recomputed from either front end — is what
+/// makes the check non-vacuous, the same anchor `tests/pr15a_identity.rs` gives the
+/// replicated register. Regenerate with `CML_IDENTITY_BLESS=1 cargo test -p
+/// continuum-cml-elab --test diehard_differential`, and review the diff.
+#[test]
+fn the_identity_is_pinned_byte_for_byte() {
+    let subject = elaborated();
+    let oracle = programmatic();
+    assert_eq!(subject.identity(), oracle.identity());
+
+    let got = hex(oracle.identity().as_bytes());
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden/DieHard.identity.hex");
+    if std::env::var_os("CML_IDENTITY_BLESS").is_some() {
+        std::fs::write(&path, &got).expect("write golden");
+    }
+    let want = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e} (regenerate with CML_IDENTITY_BLESS=1)",
+            path.display()
+        )
+    });
+    assert_eq!(got, want, "Die Hard's identity changed");
+    assert_eq!(hex(subject.identity().as_bytes()), want);
 }
 
 /// The differential is not vacuous: a one-token change to the corpus source (the

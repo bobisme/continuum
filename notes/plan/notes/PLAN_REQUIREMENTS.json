@@ -2194,7 +2194,7 @@
         "line": 418,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "CML core-fragment parser and elaborator [G4]"
     },
     {
@@ -2219,7 +2219,7 @@
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
       "status": "satisfied",
-      "summary": "enough surface for the replicated register and the Wave 0 corpus ports (delivered: bn-ybq, bn-36x3b, bn-2ouro \u2014 at the elaboration surface: every Wave 0 language force elaborates, namely finite sets and bounded integers, functions, records, tuples, sequences, quantifiers and comprehensions, primed variables and relational actions per RFC 0003 correction 2, stuttering, and recursive definitions under the RFC 0003 termination rule, and the replicated register and every parser fixture elaborate. Evidence: crates/continuum-cml-elab/tests/fixtures.rs, recursion.rs, relational.rs, and resourcebounds.rs under one pre-charged output, depth and work budget reviewed by dedicated security reviews cr-8zf003, cr-15xb20 and cr-22lrdf. Lowering to an engine now takes the whole replicated register under the schema example run configuration: run-configuration constants (bn-3a9sr), parameterized actions (bn-3bq78, bn-10j7z), collection-valued state and quantifiers (bn-15zfa, bn-10j7z, bn-23hzh), and weak and strong fairness, each schema one assumption over the union of its instances and part of the model identity (bn-1ln12, RFC 0003 correction 5; the reference engine checks \u25c7/\u25a1\u25c7 under it, crates/continuum-cml-elab/tests/register.rs). Narrowing: the CML/programmatic same-identity goldens are bn-3jz; the kernel's fair-SCC certificate carries weak fairness of single actions only, so union scopes and strong fairness are not yet certifiable; the Wave 0 ports themselves beyond TV-009 Die Hard are PR 27a work)"
+      "summary": "enough surface for the replicated register and the Wave 0 corpus ports (delivered: bn-ybq, bn-36x3b, bn-2ouro \u2014 at the elaboration surface: every Wave 0 language force elaborates, namely finite sets and bounded integers, functions, records, tuples, sequences, quantifiers and comprehensions, primed variables and relational actions per RFC 0003 correction 2, stuttering, and recursive definitions under the RFC 0003 termination rule, and the replicated register and every parser fixture elaborate. Evidence: crates/continuum-cml-elab/tests/fixtures.rs, recursion.rs, relational.rs, and resourcebounds.rs under one pre-charged output, depth and work budget reviewed by dedicated security reviews cr-8zf003, cr-15xb20 and cr-22lrdf. Lowering to an engine now takes the whole replicated register under the schema example run configuration: run-configuration constants (bn-3a9sr), parameterized actions (bn-3bq78, bn-10j7z), collection-valued state and quantifiers (bn-15zfa, bn-10j7z, bn-23hzh), and weak and strong fairness, each schema one assumption over the union of its instances and part of the model identity (bn-1ln12, RFC 0003 correction 5; the reference engine checks \u25c7/\u25a1\u25c7 under it, crates/continuum-cml-elab/tests/register.rs). Narrowing: the CML/programmatic same-identity goldens, tests/pr15aidentity.rs and tests/dieharddifferential.rs, are delivered by bn-3jz; the kernel's fair-SCC certificate carries weak fairness of single actions only, so union scopes and strong fairness are not yet certifiable; the Wave 0 ports themselves beyond TV-009 Die Hard are PR 27a work)"
     },
     {
       "category": "pr-deliverable",
@@ -2242,8 +2242,8 @@
         "line": 418,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "the replicated-register model written in CML elaborates to the same semantic model identity as its programmatic equivalent."
+      "status": "satisfied",
+      "summary": "the replicated-register model written in CML elaborates to the same semantic model identity as its programmatic equivalent (delivered: bn-3jz \u2014 an identity-equality golden pins the CML lowering against a hand-built ModelBuilder twin written from RFC 0003 and the register's own text, byte for byte, with a committed golden hex file and three anti-vacuity mutants: crates/continuum-cml-elab/tests/pr15aidentity.rs. Die Hard, the one other Wave 0 fixture that lowers today, gets the same golden pin added to its existing independent differential: tests/dieharddifferential.rs. No other Wave 0 fixture lowers yet, unconfigured or under a run configuration, so no further golden applies)."
     },
     {
       "category": "pr",
