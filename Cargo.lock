@@ -436,6 +436,13 @@ dependencies = [
 [[package]]
 name = "continuum-incremental"
 version = "0.0.0"
+dependencies = [
+ "continuum-certificate",
+ "continuum-cml-elab",
+ "continuum-cml-syntax",
+ "continuum-engine-reference",
+ "continuum-value",
+]
 
 [[package]]
 name = "continuum-intent"

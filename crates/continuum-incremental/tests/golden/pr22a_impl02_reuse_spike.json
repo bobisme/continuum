@@ -1,0 +1,2173 @@
+{
+  "artifact_id": "pr22a-impl02-reuse-spike",
+  "schema_version": 1,
+  "bone": "bn-31vf",
+  "requirement": "PR-22A-IMPL-02",
+  "spec": "notes/plan/rfcs/0030-incremental-semantic-query-engine.md",
+  "model": "notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm",
+  "method": "lanes: for each edit, a fresh engine revises the base once (cold, not counted) and then the edit once (counted_revisions); that revision is compared with an independent clean recomputation of the edit (crate::audit::clean, which derives its own basis), and its invalidation cone with the clean runs of base and edit. traces: one engine per lane revises the base once (not counted), then every edit in corpus order and the base again, each exactly once (counted_revisions). In both, a Mismatch whose first divergence is attributed to one reuse (Blame::Reuse) quarantines that licence triple and revises the edit one more time (quarantine_reruns; reported under after_quarantine, whose counted_revisions is that one re-run, and excluded from the totals); an ambiguous or recompute attribution quarantines nothing and re-runs nothing. In a trace the re-run is the next step's baseline. An Inconclusive audit counts only in parity_inconclusive_runs. Counts are deterministic: revisions, queries, reuses by licence class, records by derivation class, states explored.",
+  "baseline_module_granularity": "module-granularity invalidation recomputes every query of a changed file: its explored states equal explored_states_clean, and its reuse is zero",
+  "lanes": {
+    "promotion": {
+      "cases": [
+        {
+          "id": "ws-reindent",
+          "kind": "whitespace",
+          "description": "re-indent every action and add a blank line before each",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "parse"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse"
+            ],
+            "unknown": [],
+            "reused": [
+              "elaborate licence=Exact evidence=content-identity class=Exact",
+              "build_model licence=Exact evidence=content-identity class=Exact",
+              "project_transition_system licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:TypeOK licence=Exact evidence=content-identity class=Exact",
+              "explore licence=Exact evidence=content-identity class=Exact",
+              "domain_safety licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:TypeOK licence=Exact evidence=content-identity class=Exact"
+            ]
+          }
+        },
+        {
+          "id": "ws-trailing",
+          "kind": "whitespace",
+          "description": "trailing spaces after every closing brace",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "parse"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse"
+            ],
+            "unknown": [],
+            "reused": [
+              "elaborate licence=Exact evidence=content-identity class=Exact",
+              "build_model licence=Exact evidence=content-identity class=Exact",
+              "project_transition_system licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:TypeOK licence=Exact evidence=content-identity class=Exact",
+              "explore licence=Exact evidence=content-identity class=Exact",
+              "domain_safety licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:TypeOK licence=Exact evidence=content-identity class=Exact"
+            ]
+          }
+        },
+        {
+          "id": "comment-add",
+          "kind": "comment",
+          "description": "a new line comment before the init block",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "parse"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse"
+            ],
+            "unknown": [],
+            "reused": [
+              "elaborate licence=Exact evidence=content-identity class=Exact",
+              "build_model licence=Exact evidence=content-identity class=Exact",
+              "project_transition_system licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:TypeOK licence=Exact evidence=content-identity class=Exact",
+              "explore licence=Exact evidence=content-identity class=Exact",
+              "domain_safety licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:TypeOK licence=Exact evidence=content-identity class=Exact"
+            ]
+          }
+        },
+        {
+          "id": "comment-edit",
+          "kind": "comment",
+          "description": "shorten the trailing comment on NotSolved",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "parse"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse"
+            ],
+            "unknown": [],
+            "reused": [
+              "elaborate licence=Exact evidence=content-identity class=Exact",
+              "build_model licence=Exact evidence=content-identity class=Exact",
+              "project_transition_system licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:TypeOK licence=Exact evidence=content-identity class=Exact",
+              "explore licence=Exact evidence=content-identity class=Exact",
+              "domain_safety licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:TypeOK licence=Exact evidence=content-identity class=Exact"
+            ]
+          }
+        },
+        {
+          "id": "rename-let",
+          "kind": "rename",
+          "description": "rename the let binding next_big to nb",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "elaborate"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 8,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 2,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 1,
+            "computed_cone": 2,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate"
+            ],
+            "unknown": [],
+            "reused": [
+              "build_model licence=Exact evidence=content-identity class=Exact",
+              "project_transition_system licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:TypeOK licence=Exact evidence=content-identity class=Exact",
+              "explore licence=Exact evidence=content-identity class=Exact",
+              "domain_safety licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:TypeOK licence=Exact evidence=content-identity class=Exact"
+            ]
+          }
+        },
+        {
+          "id": "rename-invariant",
+          "kind": "rename",
+          "description": "rename the invariant NotSolved to BigNotFour",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 6,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "recomputed": 6,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 4,
+            "computed_cone": 2,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:BigNotFour [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:BigNotFour",
+              "project_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved -reads-value/Exact-> check_invariant:NotSolved"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:BigNotFour licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2",
+              "check_invariant:TypeOK licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "rename-action",
+          "kind": "rename",
+          "description": "rename the action FillSmall to FillSmallJug everywhere",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "explore",
+            "check_invariant:NotSolved",
+            "check_invariant:TypeOK"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 9,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 9,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 2,
+            "computed_cone": 5,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 3,
+            "explored_states_incremental": 16,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "domain_safety licence=Validated evidence=checked-certificate class=Validated assumes=V1"
+            ]
+          }
+        },
+        {
+          "id": "prop-edit",
+          "kind": "property",
+          "description": "NotSolved checks big != 3 instead of big != 4",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 3,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 6,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "recomputed": 7,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 3,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved -reads-value/Exact-> check_invariant:NotSolved"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:TypeOK licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "prop-add",
+          "kind": "property",
+          "description": "add the invariant SmallCapped",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 12,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 7,
+              "Validated": 0,
+              "Conservative": 5,
+              "Experimental": 0
+            },
+            "recomputed": 8,
+            "not_memoized": 0,
+            "compared": 7,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 3,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:SmallCapped [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:SmallCapped",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:SmallCapped [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:SmallCapped -reads-value/Exact-> check_invariant:SmallCapped"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:NotSolved licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2",
+              "check_invariant:TypeOK licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "prop-remove",
+          "kind": "property",
+          "description": "remove the invariant TypeOK",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 8,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 3,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 5,
+              "Validated": 0,
+              "Conservative": 3,
+              "Experimental": 0
+            },
+            "recomputed": 5,
+            "not_memoized": 0,
+            "compared": 5,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 2,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK -reads-value/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:NotSolved licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "sem-domain-widen",
+          "kind": "semantic",
+          "description": "widen big's domain to 0..6 (the reachable states do not change)",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "explore",
+            "check_invariant:NotSolved",
+            "check_invariant:TypeOK"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 9,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 9,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 2,
+            "computed_cone": 5,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 3,
+            "explored_states_incremental": 16,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "domain_safety licence=Validated evidence=checked-certificate class=Validated assumes=V1"
+            ]
+          }
+        },
+        {
+          "id": "sem-fillbig-4",
+          "kind": "semantic",
+          "description": "FillBig fills big to 4 instead of 5",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "domain_safety"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 10,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 5,
+            "computed_cone": 6,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 18,
+            "explored_states_clean": 18
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "domain_safety [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> domain_safety",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": []
+          }
+        },
+        {
+          "id": "sem-emptybig-noop",
+          "kind": "semantic",
+          "description": "EmptyBig no longer empties big (fewer reachable states)",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "check_invariant:NotSolved",
+            "check_invariant:TypeOK"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 9,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 9,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 5,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 2,
+            "explored_states_incremental": 16,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "domain_safety licence=Validated evidence=checked-certificate class=Validated assumes=V1"
+            ]
+          }
+        },
+        {
+          "id": "sem-domain-narrow",
+          "kind": "semantic",
+          "description": "narrow small's domain to 0..2, below what FillSmall writes",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 10,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 6,
+            "computed_cone": 6,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 0
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "domain_safety [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> domain_safety",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": []
+          }
+        },
+        {
+          "id": "trap-join-lines",
+          "kind": "heuristic-trap",
+          "description": "join two statements of SmallToBig onto one line (line breaks separate statements)",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 1,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 1,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 1,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 6,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 0
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "domain_safety [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> domain_safety",
+              "check_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved -reads-value/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK -reads-value/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": []
+          }
+        },
+        {
+          "id": "trap-split-expression",
+          "kind": "heuristic-trap",
+          "description": "break the expression big' == next_big across two lines",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "parse"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse"
+            ],
+            "unknown": [],
+            "reused": [
+              "elaborate licence=Exact evidence=content-identity class=Exact",
+              "build_model licence=Exact evidence=content-identity class=Exact",
+              "project_transition_system licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:TypeOK licence=Exact evidence=content-identity class=Exact",
+              "explore licence=Exact evidence=content-identity class=Exact",
+              "domain_safety licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:TypeOK licence=Exact evidence=content-identity class=Exact"
+            ]
+          }
+        },
+        {
+          "id": "parse-error",
+          "kind": "syntax",
+          "description": "drop the model's closing brace",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 1,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 1,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 1,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 6,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 0
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "domain_safety [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> domain_safety",
+              "check_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved -reads-value/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK -reads-value/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": []
+          }
+        }
+      ],
+      "totals": {
+        "counted_revisions": 17,
+        "quarantine_reruns": 0,
+        "queries": 152,
+        "reused_by_licence": {
+          "Exact": 53,
+          "Validated": 3,
+          "Conservative": 14,
+          "Experimental": 0
+        },
+        "records_by_derivation_class": {
+          "Exact": 133,
+          "Validated": 3,
+          "Conservative": 16,
+          "Experimental": 0
+        },
+        "recomputed": 82,
+        "not_memoized": 0,
+        "compared": 92,
+        "parity_mismatches": 0,
+        "parity_inconclusive_runs": 0,
+        "true_cone": 44,
+        "computed_cone": 46,
+        "under_invalidated": 0,
+        "experimental_misses": 0,
+        "over_invalidated": 15,
+        "explored_states_incremental": 66,
+        "explored_states_clean": 226
+      }
+    },
+    "interactive": {
+      "cases": [
+        {
+          "id": "ws-reindent",
+          "kind": "whitespace",
+          "description": "re-indent every action and add a blank line before each",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 1
+            },
+            "records_by_derivation_class": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 10
+            },
+            "recomputed": 0,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 0,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [],
+            "unknown": [
+              "parse",
+              "elaborate",
+              "build_model",
+              "project_transition_system",
+              "project_invariant:NotSolved",
+              "project_invariant:TypeOK",
+              "explore",
+              "domain_safety",
+              "check_invariant:NotSolved",
+              "check_invariant:TypeOK"
+            ],
+            "reused": []
+          }
+        },
+        {
+          "id": "ws-trailing",
+          "kind": "whitespace",
+          "description": "trailing spaces after every closing brace",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 1
+            },
+            "records_by_derivation_class": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 10
+            },
+            "recomputed": 0,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 0,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [],
+            "unknown": [
+              "parse",
+              "elaborate",
+              "build_model",
+              "project_transition_system",
+              "project_invariant:NotSolved",
+              "project_invariant:TypeOK",
+              "explore",
+              "domain_safety",
+              "check_invariant:NotSolved",
+              "check_invariant:TypeOK"
+            ],
+            "reused": []
+          }
+        },
+        {
+          "id": "comment-add",
+          "kind": "comment",
+          "description": "a new line comment before the init block",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 1
+            },
+            "records_by_derivation_class": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 10
+            },
+            "recomputed": 0,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 0,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [],
+            "unknown": [
+              "parse",
+              "elaborate",
+              "build_model",
+              "project_transition_system",
+              "project_invariant:NotSolved",
+              "project_invariant:TypeOK",
+              "explore",
+              "domain_safety",
+              "check_invariant:NotSolved",
+              "check_invariant:TypeOK"
+            ],
+            "reused": []
+          }
+        },
+        {
+          "id": "comment-edit",
+          "kind": "comment",
+          "description": "shorten the trailing comment on NotSolved",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 1
+            },
+            "records_by_derivation_class": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 10
+            },
+            "recomputed": 0,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 0,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [],
+            "unknown": [
+              "parse",
+              "elaborate",
+              "build_model",
+              "project_transition_system",
+              "project_invariant:NotSolved",
+              "project_invariant:TypeOK",
+              "explore",
+              "domain_safety",
+              "check_invariant:NotSolved",
+              "check_invariant:TypeOK"
+            ],
+            "reused": []
+          }
+        },
+        {
+          "id": "rename-let",
+          "kind": "rename",
+          "description": "rename the let binding next_big to nb",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "elaborate"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 8,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 2,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 1,
+            "computed_cone": 2,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate"
+            ],
+            "unknown": [],
+            "reused": [
+              "build_model licence=Exact evidence=content-identity class=Exact",
+              "project_transition_system licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "project_invariant:TypeOK licence=Exact evidence=content-identity class=Exact",
+              "explore licence=Exact evidence=content-identity class=Exact",
+              "domain_safety licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:NotSolved licence=Exact evidence=content-identity class=Exact",
+              "check_invariant:TypeOK licence=Exact evidence=content-identity class=Exact"
+            ]
+          }
+        },
+        {
+          "id": "rename-invariant",
+          "kind": "rename",
+          "description": "rename the invariant NotSolved to BigNotFour",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 6,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "recomputed": 6,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 4,
+            "computed_cone": 2,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:BigNotFour [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:BigNotFour",
+              "project_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved -reads-value/Exact-> check_invariant:NotSolved"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:BigNotFour licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2",
+              "check_invariant:TypeOK licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "rename-action",
+          "kind": "rename",
+          "description": "rename the action FillSmall to FillSmallJug everywhere",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "explore",
+            "check_invariant:NotSolved",
+            "check_invariant:TypeOK"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 9,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 9,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 2,
+            "computed_cone": 5,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 3,
+            "explored_states_incremental": 16,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "domain_safety licence=Validated evidence=checked-certificate class=Validated assumes=V1"
+            ]
+          }
+        },
+        {
+          "id": "prop-edit",
+          "kind": "property",
+          "description": "NotSolved checks big != 3 instead of big != 4",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 3,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 6,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "recomputed": 7,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 3,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved -reads-value/Exact-> check_invariant:NotSolved"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:TypeOK licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "prop-add",
+          "kind": "property",
+          "description": "add the invariant SmallCapped",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 12,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 4,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 7,
+              "Validated": 0,
+              "Conservative": 5,
+              "Experimental": 0
+            },
+            "recomputed": 8,
+            "not_memoized": 0,
+            "compared": 7,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 3,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:SmallCapped [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:SmallCapped",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:SmallCapped [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:SmallCapped -reads-value/Exact-> check_invariant:SmallCapped"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:NotSolved licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2",
+              "check_invariant:TypeOK licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "prop-remove",
+          "kind": "property",
+          "description": "remove the invariant TypeOK",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 8,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 3,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 5,
+              "Validated": 0,
+              "Conservative": 3,
+              "Experimental": 0
+            },
+            "recomputed": 5,
+            "not_memoized": 0,
+            "compared": 5,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 2,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "check_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK -reads-value/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "explore licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "domain_safety licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A1",
+              "check_invariant:NotSolved licence=Conservative evidence=conservative-dependency-theorem class=Conservative assumes=A2"
+            ]
+          }
+        },
+        {
+          "id": "sem-domain-widen",
+          "kind": "semantic",
+          "description": "widen big's domain to 0..6 (the reachable states do not change)",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "explore",
+            "check_invariant:NotSolved",
+            "check_invariant:TypeOK"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 9,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 9,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 2,
+            "computed_cone": 5,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 3,
+            "explored_states_incremental": 16,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "domain_safety licence=Validated evidence=checked-certificate class=Validated assumes=V1"
+            ]
+          }
+        },
+        {
+          "id": "sem-fillbig-4",
+          "kind": "semantic",
+          "description": "FillBig fills big to 4 instead of 5",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "domain_safety"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 10,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 5,
+            "computed_cone": 6,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 1,
+            "explored_states_incremental": 18,
+            "explored_states_clean": 18
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "domain_safety [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> domain_safety",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": []
+          }
+        },
+        {
+          "id": "sem-emptybig-noop",
+          "kind": "semantic",
+          "description": "EmptyBig no longer empties big (fewer reachable states)",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [
+            "check_invariant:NotSolved",
+            "check_invariant:TypeOK"
+          ],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 9,
+              "Validated": 1,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 9,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 3,
+            "computed_cone": 5,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 2,
+            "explored_states_incremental": 16,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": [
+              "domain_safety licence=Validated evidence=checked-certificate class=Validated assumes=V1"
+            ]
+          }
+        },
+        {
+          "id": "sem-domain-narrow",
+          "kind": "semantic",
+          "description": "narrow small's domain to 0..2, below what FillSmall writes",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 10,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 10,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 6,
+            "computed_cone": 6,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 0
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "domain_safety [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> domain_safety",
+              "check_invariant:NotSolved [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Recomputed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-type/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": []
+          }
+        },
+        {
+          "id": "trap-join-lines",
+          "kind": "heuristic-trap",
+          "description": "join two statements of SmallToBig onto one line (line breaks separate statements)",
+          "parity": "mismatch",
+          "mismatches": [
+            "parse Diverges class=Some(Experimental)",
+            "elaborate OnlyInEngine class=Some(Experimental)",
+            "explore OnlyInEngine class=Some(Experimental)",
+            "domain_safety OnlyInEngine class=Some(Experimental)",
+            "check_invariant:NotSolved OnlyInEngine class=Some(Experimental)",
+            "check_invariant:TypeOK OnlyInEngine class=Some(Experimental)"
+          ],
+          "under_invalidated": [],
+          "experimental_misses": [
+            "parse",
+            "elaborate",
+            "explore",
+            "domain_safety",
+            "check_invariant:NotSolved",
+            "check_invariant:TypeOK"
+          ],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 1
+            },
+            "records_by_derivation_class": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 10
+            },
+            "recomputed": 0,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 6,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 6,
+            "computed_cone": 0,
+            "under_invalidated": 0,
+            "experimental_misses": 6,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 0
+          },
+          "explain": {
+            "invalidated": [],
+            "unknown": [
+              "parse",
+              "elaborate",
+              "build_model",
+              "project_transition_system",
+              "project_invariant:NotSolved",
+              "project_invariant:TypeOK",
+              "explore",
+              "domain_safety",
+              "check_invariant:NotSolved",
+              "check_invariant:TypeOK"
+            ],
+            "reused": []
+          },
+          "first_divergent": "parse",
+          "quarantined": "(Experimental, parse, 1)",
+          "after_quarantine": {
+            "parity": "parity",
+            "counts": {
+              "counted_revisions": 1,
+              "quarantine_reruns": 0,
+              "queries": 1,
+              "reused_by_licence": {
+                "Exact": 0,
+                "Validated": 0,
+                "Conservative": 0,
+                "Experimental": 0
+              },
+              "records_by_derivation_class": {
+                "Exact": 1,
+                "Validated": 0,
+                "Conservative": 0,
+                "Experimental": 0
+              },
+              "recomputed": 1,
+              "not_memoized": 0,
+              "compared": 1,
+              "parity_mismatches": 0,
+              "parity_inconclusive_runs": 0,
+              "true_cone": 0,
+              "computed_cone": 0,
+              "under_invalidated": 0,
+              "experimental_misses": 0,
+              "over_invalidated": 0,
+              "explored_states_incremental": 0,
+              "explored_states_clean": 0
+            }
+          }
+        },
+        {
+          "id": "trap-split-expression",
+          "kind": "heuristic-trap",
+          "description": "break the expression big' == next_big across two lines",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 10,
+            "reused_by_licence": {
+              "Exact": 9,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 1
+            },
+            "records_by_derivation_class": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 10
+            },
+            "recomputed": 0,
+            "not_memoized": 0,
+            "compared": 6,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 0,
+            "computed_cone": 0,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 16
+          },
+          "explain": {
+            "invalidated": [],
+            "unknown": [
+              "parse",
+              "elaborate",
+              "build_model",
+              "project_transition_system",
+              "project_invariant:NotSolved",
+              "project_invariant:TypeOK",
+              "explore",
+              "domain_safety",
+              "check_invariant:NotSolved",
+              "check_invariant:TypeOK"
+            ],
+            "reused": []
+          }
+        },
+        {
+          "id": "parse-error",
+          "kind": "syntax",
+          "description": "drop the model's closing brace",
+          "parity": "parity",
+          "mismatches": [],
+          "under_invalidated": [],
+          "experimental_misses": [],
+          "over_invalidated": [],
+          "counts": {
+            "counted_revisions": 1,
+            "quarantine_reruns": 0,
+            "queries": 1,
+            "reused_by_licence": {
+              "Exact": 0,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "records_by_derivation_class": {
+              "Exact": 1,
+              "Validated": 0,
+              "Conservative": 0,
+              "Experimental": 0
+            },
+            "recomputed": 1,
+            "not_memoized": 0,
+            "compared": 1,
+            "parity_mismatches": 0,
+            "parity_inconclusive_runs": 0,
+            "true_cone": 6,
+            "computed_cone": 1,
+            "under_invalidated": 0,
+            "experimental_misses": 0,
+            "over_invalidated": 0,
+            "explored_states_incremental": 0,
+            "explored_states_clean": 0
+          },
+          "explain": {
+            "invalidated": [
+              "parse [Recomputed] source -reads-value/Exact-> parse",
+              "elaborate [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate",
+              "build_model [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> build_model",
+              "project_transition_system [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system",
+              "project_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved",
+              "project_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK",
+              "explore [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> explore",
+              "domain_safety [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_transition_system -reads-value/Exact-> domain_safety",
+              "check_invariant:NotSolved [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:NotSolved -reads-value/Exact-> check_invariant:NotSolved",
+              "check_invariant:TypeOK [Removed] source -reads-value/Exact-> parse -reads-value/Exact-> elaborate -reads-value/Exact-> project_invariant:TypeOK -reads-value/Exact-> check_invariant:TypeOK"
+            ],
+            "unknown": [],
+            "reused": []
+          }
+        }
+      ],
+      "totals": {
+        "counted_revisions": 17,
+        "quarantine_reruns": 1,
+        "queries": 161,
+        "reused_by_licence": {
+          "Exact": 62,
+          "Validated": 3,
+          "Conservative": 14,
+          "Experimental": 6
+        },
+        "records_by_derivation_class": {
+          "Exact": 82,
+          "Validated": 3,
+          "Conservative": 16,
+          "Experimental": 60
+        },
+        "recomputed": 76,
+        "not_memoized": 0,
+        "compared": 97,
+        "parity_mismatches": 6,
+        "parity_inconclusive_runs": 0,
+        "true_cone": 44,
+        "computed_cone": 40,
+        "under_invalidated": 0,
+        "experimental_misses": 6,
+        "over_invalidated": 10,
+        "explored_states_incremental": 66,
+        "explored_states_clean": 226
+      }
+    }
+  },
+  "traces": {
+    "promotion": {
+      "steps": [
+        "ws-reindent: parity",
+        "ws-trailing: parity",
+        "comment-add: parity",
+        "comment-edit: parity",
+        "rename-let: parity",
+        "rename-invariant: parity",
+        "rename-action: parity",
+        "prop-edit: parity",
+        "prop-add: parity",
+        "prop-remove: parity",
+        "sem-domain-widen: parity",
+        "sem-fillbig-4: parity",
+        "sem-emptybig-noop: parity",
+        "sem-domain-narrow: parity",
+        "trap-join-lines: parity",
+        "trap-split-expression: parity",
+        "parse-error: parity",
+        "base: parity"
+      ],
+      "quarantined_at_end": [],
+      "totals": {
+        "counted_revisions": 18,
+        "quarantine_reruns": 0,
+        "queries": 162,
+        "reused_by_licence": {
+          "Exact": 53,
+          "Validated": 3,
+          "Conservative": 13,
+          "Experimental": 0
+        },
+        "records_by_derivation_class": {
+          "Exact": 143,
+          "Validated": 3,
+          "Conservative": 16,
+          "Experimental": 0
+        },
+        "recomputed": 93,
+        "not_memoized": 0,
+        "compared": 98,
+        "parity_mismatches": 0,
+        "parity_inconclusive_runs": 0,
+        "true_cone": 63,
+        "computed_cone": 53,
+        "under_invalidated": 0,
+        "experimental_misses": 0,
+        "over_invalidated": 10,
+        "explored_states_incremental": 82,
+        "explored_states_clean": 242
+      }
+    },
+    "interactive": {
+      "steps": [
+        "ws-reindent: parity",
+        "ws-trailing: parity",
+        "comment-add: parity",
+        "comment-edit: parity",
+        "rename-let: parity",
+        "rename-invariant: parity",
+        "rename-action: parity",
+        "prop-edit: parity",
+        "prop-add: parity",
+        "prop-remove: parity",
+        "sem-domain-widen: parity",
+        "sem-fillbig-4: parity",
+        "sem-emptybig-noop: parity",
+        "sem-domain-narrow: parity",
+        "trap-join-lines: parity",
+        "trap-split-expression: mismatch, quarantined (Experimental, parse, 1)",
+        "parse-error: parity",
+        "base: parity"
+      ],
+      "quarantined_at_end": [
+        "(Experimental, parse, 1)"
+      ],
+      "totals": {
+        "counted_revisions": 18,
+        "quarantine_reruns": 1,
+        "queries": 153,
+        "reused_by_licence": {
+          "Exact": 53,
+          "Validated": 3,
+          "Conservative": 13,
+          "Experimental": 5
+        },
+        "records_by_derivation_class": {
+          "Exact": 93,
+          "Validated": 3,
+          "Conservative": 16,
+          "Experimental": 41
+        },
+        "recomputed": 79,
+        "not_memoized": 0,
+        "compared": 93,
+        "parity_mismatches": 6,
+        "parity_inconclusive_runs": 0,
+        "true_cone": 63,
+        "computed_cone": 43,
+        "under_invalidated": 0,
+        "experimental_misses": 1,
+        "over_invalidated": 6,
+        "explored_states_incremental": 66,
+        "explored_states_clean": 242
+      }
+    }
+  }
+}

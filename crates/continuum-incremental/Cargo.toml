@@ -6,5 +6,25 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# PR-22A / IMPL-02 (bn-31vf): the custom-engine spike over parse, elaborate, and
+# explore. Every edge is workspace-internal; no crates.io package is added.
+#
+# - `continuum-cml-syntax` and `continuum-cml-elab`: the front end the `parse`,
+#   `elaborate`, and `build_model` queries memoize.
+# - `continuum-engine-reference`: the engine the `explore` query memoizes, and the
+#   producer of the finite-closure certificate a `Validated` reuse is witnessed by.
+# - `continuum-certificate`: the independent checker of that witness, from wire form
+#   (INV-004). The engine never checks its own witness.
+# - `continuum-value`: the BLAKE3 content commitments of keys and outputs.
+#
+# Forbidden and absent: `continuum-forge` and every adapter (lib.rs, "Dependency-
+# boundary contract"; tools/check_crate_boundaries.py).
+[dependencies]
+continuum-cml-syntax = { path = "../continuum-cml-syntax" }
+continuum-cml-elab = { path = "../continuum-cml-elab" }
+continuum-engine-reference = { path = "../continuum-engine-reference" }
+continuum-certificate = { path = "../continuum-certificate" }
+continuum-value = { path = "../continuum-value" }
+
 [lints]
 workspace = true

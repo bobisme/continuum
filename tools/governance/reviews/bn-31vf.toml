@@ -1,0 +1,94 @@
+[change]
+bone = "bn-31vf"
+author = "continuum-dev"
+summary = "continuum-incremental: PR-22A / IMPL-02 spike — a custom content-addressed query engine over parse, elaborate, build, project, explore, domain safety, and per-invariant check, with RFC 0030's four reuse-edge classes (Exact by content identity, Conservative through a side input under a recorded assumption, Validated by a finite-closure certificate the independent kernel verifies for the current model, Experimental by a deliberately unsound textual heuristic in the interactive lane only), triple-scoped quarantine, lane admission, explain_invalidation with typed edge chains, and an independent clean-recompute parity audit run over a CML mutation corpus with a retained report"
+
+[semantic]
+covers = [
+  "crates/continuum-incremental/src/",
+]
+reference_tests = [
+  "crates/continuum-incremental/src/vocab.rs::meet_is_the_weakest_class_and_experimental_absorbs",
+  "crates/continuum-incremental/src/vocab.rs::an_unrecognized_class_token_fails_closed_to_experimental",
+  "crates/continuum-incremental/src/vocab.rs::the_reason_set_is_the_nine_rfc_tokens",
+  "crates/continuum-incremental/src/vocab.rs::only_the_promotion_lane_refuses_experimental",
+  "crates/continuum-incremental/src/query.rs::every_stage_but_source_has_exactly_one_definition",
+  "crates/continuum-incremental/src/query.rs::keys_are_injective_over_field_boundaries",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_unchanged_source_reuses_every_query_exactly",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_whitespace_edit_reparses_and_cuts_off_early_with_exact_reuse",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_property_edit_reuses_the_exploration_through_a_conservative_edge",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_renamed_invariant_reuses_its_check_by_content",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_validated_reuse_is_licensed_by_a_kernel_checked_certificate",
+  "crates/continuum-incremental/tests/engine_classes.rs::explanations_are_deterministic_and_partition_every_query_once",
+  "crates/continuum-incremental/tests/engine_classes.rs::quarantining_an_exact_triple_forces_a_recompute_in_the_promotion_lane",
+  "crates/continuum-incremental/tests/engine_classes.rs::quarantining_a_conservative_triple_forces_a_recompute_and_explains_the_downgrade",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_promotion_lane_never_uses_the_experimental_heuristic",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_experimental_reuse_is_unknown_never_reused_and_the_audit_catches_its_miss",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_witness_the_kernel_rejects_licenses_nothing",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_audit_catches_a_stale_conservative_reuse_it_did_not_compute",
+  "crates/continuum-incremental/tests/engine_classes.rs::unknown_class_tokens_fail_closed",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_oversized_source_is_refused_before_any_work_and_changes_nothing",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_work_budget_too_small_for_the_source_refuses_atomically",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_query_count_is_checked_before_any_per_invariant_query_exists",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_budget_dependent_front_end_failure_is_returned_but_not_memoized",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_changed_semantic_epoch_shares_no_key",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_conservative_reuse_stays_conservative_with_its_assumption_until_recomputed",
+  "crates/continuum-incremental/tests/engine_classes.rs::quarantining_a_conservative_triple_reaches_a_result_reused_under_it_before",
+  "crates/continuum-incremental/tests/engine_classes.rs::quarantining_a_validated_triple_reaches_the_identical_rerun",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_reused_record_carries_its_licence_in_its_provenance",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_validated_witness_source_survives_consecutive_semantic_edits",
+  "crates/continuum-incremental/tests/engine_classes.rs::every_query_has_its_own_handle_even_when_two_share_a_key",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_refusal_on_a_warm_engine_leaves_every_later_answer_unchanged",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_invariant_that_cannot_be_evaluated_is_a_typed_outcome_on_both_sides",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_undefined_map_read_is_undefined_in_the_engine_and_in_the_audit",
+  "crates/continuum-incremental/tests/engine_classes.rs::two_graphs_with_one_bfs_tree_but_different_non_tree_edges_encode_differently",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_verified_witness_for_another_envelope_licenses_nothing",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_true_witness_about_another_model_licenses_nothing",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_elaboration_budget_failure_is_inconclusive_not_parity",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_lowering_budget_failure_is_inconclusive_not_parity",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_bounded_exploration_is_inconclusive_not_parity",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_clean_run_that_exhausts_its_work_budget_is_inconclusive",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_clean_run_over_a_huge_input_is_refused_before_any_work",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_clean_run_with_too_many_invariants_is_refused_before_per_invariant_work",
+  "crates/continuum-incremental/tests/engine_classes.rs::initial_states_beyond_the_state_bound_are_inconclusive_not_parity",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_incomplete_engine_run_alone_makes_the_audit_inconclusive",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_cone_is_not_judged_against_an_incomplete_clean_run",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_budget_code_lists_agree_with_each_other_and_the_front_end",
+  "crates/continuum-incremental/tests/engine_classes.rs::clean_evidence_on_another_basis_is_inconclusive_never_parity",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_cone_is_not_judged_for_an_incomplete_engine_revision",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_audit_refuses_a_revision_of_another_definition_version",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_normalized_identity_is_precharged_and_its_bound_holds",
+  "crates/continuum-incremental/tests/engine_classes.rs::domain_safety_inherits_the_exploration_class_and_its_quarantine",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_result_derived_under_a_quarantined_triple_is_rederived",
+  "crates/continuum-incremental/tests/engine_classes.rs::the_triple_names_the_edge_licence_and_the_record_keeps_the_origin_class",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_undefined_read_in_an_action_is_a_typed_outcome_in_the_engine_and_in_the_audit",
+  "crates/continuum-incremental/src/engine.rs::an_entry_keeps_its_producing_class",
+  "crates/continuum-incremental/tests/engine_classes.rs::a_validated_witness_is_refused_when_an_action_read_becomes_undefined",
+  "crates/continuum-incremental/tests/engine_classes.rs::an_undefined_action_read_outranks_a_shallower_undefined_invariant_read",
+  "crates/continuum-incremental/tests/independence.rs::the_audit_imports_only_the_engines_read_only_records",
+  "crates/continuum-incremental/tests/independence.rs::the_audit_names_no_engine_decision_logic",
+  "crates/continuum-incremental/tests/reuse_spike.rs::the_retained_spike_report_is_current_and_sound",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-incremental/tests/engine_classes.rs::alpha_renaming_a_let_binding_changes_no_output_and_reuses_everything_downstream", relation = "alpha-renaming" },
+]
+differential_tests = [
+  { test = "crates/continuum-incremental/tests/differential.rs::every_reused_exploration_and_verdict_equals_the_reference_engine_run_directly", oracle = "continuum-engine-reference", subject = "continuum-incremental" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers incremental reuse or its parity audit; this spike is the PR-22A build-vs-adopt evidence (docs/08 R21) and moves no claim's evidence state"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: query keys, reuse records, and the explain result are crate-level values; the spike builds no wire projection of the explain result (rule query.invalidation_edges is an ADR residual) and the daemon wire is untouched"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-incremental was a documented stub; this adds its first public surface (vocab, query, engine, explain, audit, output) and five workspace path edges (cml-syntax, cml-elab, engine-reference, certificate, value). No existing crate, type, wire value, schema, or published artifact changes"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-174gtd"
+verdict = "approved"
