@@ -41,3 +41,4 @@
 {"ts":"2026-09-24T19:18:05.324170031Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-dbwhy1","reason":"Resolved at target 29796151: Cargo resolved metadata and the structural TOML checker reject every reviewed build and links form."}}
 {"ts":"2026-09-24T19:18:10.233293819Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-35ujnx","vote":"lgtm","reason":"LGTM at 29796151 after full persisted-range static review. All security threads are resolved. The risk:critical human approval gate remains separate.","target_commit":"29796151bbdaddde2e5d3f73e61ec1f93ab92689"}}
 {"ts":"2026-09-24T19:18:10.271444362Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-35ujnx","target_commit":"29796151bbdaddde2e5d3f73e61ec1f93ab92689"}}
+{"ts":"2026-09-24T19:45:29.973645838Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-35ujnx","final_commit":"659a4b4d"}}
