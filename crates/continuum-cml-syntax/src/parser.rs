@@ -131,8 +131,15 @@ struct Parser<'a> {
     pos: usize,
     /// When positive, line breaks are insignificant (inside brackets).
     nl_skip: u32,
-    /// Current nesting depth, bounded by `MAX_NESTING`.
+    /// Current nesting depth, bounded by `MAX_NESTING`: the level the next entered node
+    /// sits at, counted from the root of the enclosing declaration's expression or type.
     depth: u32,
+    /// The deepest level any node parsed since the last reset sits at, *after* the
+    /// operator chains around it are accounted for. A left-deep chain (`a + b + c`,
+    /// `x.f[0]`) pushes nodes that were already parsed one level down per operator, so
+    /// the level they were entered at understates where they end up; `binary` and
+    /// `postfix` measure each operand with this mark and add the shift (bn-1nmq).
+    high: u32,
     /// The lexical error at the final [`Tok::LexError`] token, if lexing failed.
     lex_error: Option<ParseError>,
 }
@@ -234,6 +241,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             nl_skip: 0,
             depth: 0,
+            high: 0,
             lex_error,
         })
     }
@@ -375,6 +383,7 @@ impl<'a> Parser<'a> {
 
     fn enter(&mut self) -> PResult<()> {
         self.depth += 1;
+        self.high = self.high.max(self.depth);
         if self.depth > crate::MAX_NESTING {
             return Err(ParseError {
                 kind: ParseErrorKind::NestingTooDeep,
@@ -775,15 +784,41 @@ impl<'a> Parser<'a> {
         r
     }
 
+    /// A type, and its arrow if it has one.
+    ///
+    /// `A -> B` re-attaches the already parsed `A` one level down, under the new
+    /// `Function` node, exactly as an operator chain does in an expression (see
+    /// [`Parser::binary`]). So the left side's deepest level is measured with
+    /// [`Parser::high`] and charged one more when the arrow arrives, and a function type
+    /// whose left side would then pass the bound is refused at the arrow (bn-1nmq,
+    /// cr-3rqxh8: before, `Set[Set[…] -> Nat] -> Nat` nested 63 times parsed to a type
+    /// tree 127 deep, and every recursive consumer of types inherited the depth).
     fn ty_inner(&mut self) -> PResult<TypeExpr> {
+        let at = self.depth;
+        let outer = std::mem::replace(&mut self.high, at);
         let lhs = self.ty_atom()?;
+        let mut top = self.high;
+        let arrow = self.peek_span();
         if self.eat(&Tok::Arrow).is_some() {
+            // The left side moves one level down, below the `Function` node at `at`.
+            top += 1;
+            if top > crate::MAX_NESTING {
+                return Err(ParseError {
+                    kind: ParseErrorKind::NestingTooDeep,
+                    span: arrow,
+                });
+            }
+            // The right side is entered as a child of the `Function` node.
+            self.high = at;
             let rhs = self.ty()?;
+            top = top.max(self.high);
+            self.high = outer.max(top);
             return Ok(TypeExpr {
                 span: lhs.span.to(rhs.span),
                 kind: TypeKind::Function(Box::new(lhs), Box::new(rhs)),
             });
         }
+        self.high = outer.max(top);
         Ok(lhs)
     }
 
@@ -883,18 +918,39 @@ impl<'a> Parser<'a> {
     }
 
     /// Precedence climbing over the operators binding at `min_level` or tighter.
+    ///
+    /// # The nesting bound on a chain
+    ///
+    /// The bound limits the depth of the returned tree, not only the parser's recursion,
+    /// so every later recursive pass over the tree (dump, print, elaboration, `Drop`)
+    /// inherits it. A left-associative chain builds its tree left-deep: each operator
+    /// puts a new root above everything parsed so far, so the left operand and every
+    /// earlier right operand move one level down. The level an operand was entered at
+    /// therefore understates where it ends up, and a bound on that level alone admitted a
+    /// staircase such as `((x + x + …) + x + …) + x + …`, whose tree is about
+    /// `MAX_NESTING² / 2` levels deep, from a few kilobytes of source (bn-1nmq). So the
+    /// chain tracks `top`, the deepest level of the tree built so far, measured with
+    /// [`Parser::high`]: each operator adds one, each right operand is entered as a
+    /// child of the new root and its own deepest level joins `top`, and `top` past the
+    /// bound is [`ParseErrorKind::NestingTooDeep`] at the operator.
     fn binary(&mut self, min_level: u8) -> PResult<Expr> {
+        let base = self.depth;
+        let outer = std::mem::replace(&mut self.high, base);
         let mut lhs = self.unary()?;
-        // Each operator deepens the tree by one, so it counts against the nesting bound:
-        // the bound limits tree depth, not only parser recursion, and every later
-        // recursive pass over the tree inherits it.
-        let mut chain: u32 = 0;
-        let r = self.binary_loop(min_level, &mut lhs, &mut chain);
-        self.depth -= chain;
-        r.map(|()| lhs)
+        let mut top = self.high;
+        self.binary_loop(min_level, base, &mut lhs, &mut top)?;
+        self.depth = base;
+        self.high = outer.max(top);
+        Ok(lhs)
     }
 
-    fn binary_loop(&mut self, min_level: u8, lhs: &mut Expr, chain: &mut u32) -> PResult<()> {
+    fn binary_loop(
+        &mut self,
+        min_level: u8,
+        base: u32,
+        lhs: &mut Expr,
+        top: &mut u32,
+    ) -> PResult<()> {
         let mut last_non: Option<u8> = None;
         while let Some(op) = self.peek_binop(min_level) {
             let (level, assoc) = level_of(op);
@@ -905,9 +961,9 @@ impl<'a> Parser<'a> {
                     span: op_span,
                 });
             }
-            self.depth += 1;
-            *chain += 1;
-            if self.depth > crate::MAX_NESTING {
+            // The new root takes the chain's level; everything built so far moves down.
+            *top += 1;
+            if *top > crate::MAX_NESTING {
                 return Err(ParseError {
                     kind: ParseErrorKind::NestingTooDeep,
                     span: op_span,
@@ -916,11 +972,16 @@ impl<'a> Parser<'a> {
             self.bump();
             // An operator at the end of a line continues onto the next one.
             self.skip_newlines();
+            // The right operand is a child of the new root, one level below it.
+            self.depth = base + 1;
+            self.high = base + 1;
             let rhs = if assoc == Assoc::Right {
                 self.binary(level)?
             } else {
                 self.binary(level + 1)?
             };
+            self.depth = base;
+            *top = (*top).max(self.high);
             let left = std::mem::replace(lhs, placeholder());
             *lhs = Expr {
                 span: left.span.to(rhs.span),
@@ -953,60 +1014,93 @@ impl<'a> Parser<'a> {
                 kind: ExprKind::Unary(op, Box::new(operand)),
             });
         }
+        // The primary is the bottom of any postfix chain after it: measure its depth.
+        let at = self.depth;
+        let outer = std::mem::replace(&mut self.high, at);
         let base = self.primary()?;
-        self.postfix(base)
+        let mut top = self.high;
+        let e = self.postfix(base, at, &mut top)?;
+        self.depth = at;
+        self.high = outer.max(top);
+        Ok(e)
     }
 
-    fn postfix(&mut self, mut e: Expr) -> PResult<Expr> {
-        loop {
-            match self.peek_tok() {
-                Tok::Prime => {
-                    let end = self.bump().span;
-                    e = Expr {
-                        span: e.span.to(end),
-                        kind: ExprKind::Prime(Box::new(e)),
-                    };
-                }
-                Tok::Dot => {
-                    self.bump();
-                    let name = self.ident("field or method name")?;
-                    if self.at(&Tok::LParen) {
-                        let args = self.call_args()?;
-                        e = Expr {
-                            span: e.span.to(self.prev_span()),
-                            kind: ExprKind::Method(Box::new(e), name, args),
-                        };
-                    } else {
-                        e = Expr {
-                            span: e.span.to(name.span),
-                            kind: ExprKind::Field(Box::new(e), name),
-                        };
-                    }
-                }
-                Tok::LBracket => {
-                    self.bump();
-                    let (key, value) = self.bracketed(|p| {
-                        let key = p.expr()?;
-                        let value = if p.eat(&Tok::ColonEq).is_some() {
-                            Some(p.expr()?)
-                        } else {
-                            None
-                        };
-                        p.expect(&Tok::RBracket, "`]` or `:=`")?;
-                        Ok((key, value))
-                    })?;
-                    let span = e.span.to(self.prev_span());
-                    e = Expr {
-                        span,
-                        kind: match value {
-                            Some(v) => ExprKind::Update(Box::new(e), Box::new(key), Box::new(v)),
-                            None => ExprKind::Index(Box::new(e), Box::new(key)),
-                        },
-                    };
-                }
-                _ => return Ok(e),
+    /// Postfix operators: `'`, `.f`, `.m(..)`, `[k]`, `[k := v]`.
+    ///
+    /// A postfix chain is left-deep like an infix one (`x` with three primes is three
+    /// `Prime` nodes over `x`), so it is bounded the same way (see [`Parser::binary`]):
+    /// `top` is the deepest level of the tree so far, each operator adds one, and each
+    /// argument, key, or value is entered as a child of the node the operator builds,
+    /// which sits at `at`. Before bn-1nmq a postfix chain was not counted at all, and `x`
+    /// followed by thousands of primes parsed.
+    fn postfix(&mut self, mut e: Expr, at: u32, top: &mut u32) -> PResult<Expr> {
+        while matches!(self.peek_tok(), Tok::Prime | Tok::Dot | Tok::LBracket) {
+            *top += 1;
+            if *top > crate::MAX_NESTING {
+                return Err(ParseError {
+                    kind: ParseErrorKind::NestingTooDeep,
+                    span: self.peek_span(),
+                });
             }
+            self.depth = at;
+            self.high = at;
+            e = self.postfix_step(e)?;
+            self.depth = at;
+            *top = (*top).max(self.high);
         }
+        Ok(e)
+    }
+
+    /// Apply the one postfix operator at the current token to `e`.
+    fn postfix_step(&mut self, mut e: Expr) -> PResult<Expr> {
+        match self.peek_tok() {
+            Tok::Prime => {
+                let end = self.bump().span;
+                e = Expr {
+                    span: e.span.to(end),
+                    kind: ExprKind::Prime(Box::new(e)),
+                };
+            }
+            Tok::Dot => {
+                self.bump();
+                let name = self.ident("field or method name")?;
+                if self.at(&Tok::LParen) {
+                    let args = self.call_args()?;
+                    e = Expr {
+                        span: e.span.to(self.prev_span()),
+                        kind: ExprKind::Method(Box::new(e), name, args),
+                    };
+                } else {
+                    e = Expr {
+                        span: e.span.to(name.span),
+                        kind: ExprKind::Field(Box::new(e), name),
+                    };
+                }
+            }
+            Tok::LBracket => {
+                self.bump();
+                let (key, value) = self.bracketed(|p| {
+                    let key = p.expr()?;
+                    let value = if p.eat(&Tok::ColonEq).is_some() {
+                        Some(p.expr()?)
+                    } else {
+                        None
+                    };
+                    p.expect(&Tok::RBracket, "`]` or `:=`")?;
+                    Ok((key, value))
+                })?;
+                let span = e.span.to(self.prev_span());
+                e = Expr {
+                    span,
+                    kind: match value {
+                        Some(v) => ExprKind::Update(Box::new(e), Box::new(key), Box::new(v)),
+                        None => ExprKind::Index(Box::new(e), Box::new(key)),
+                    },
+                };
+            }
+            _ => {}
+        }
+        Ok(e)
     }
 
     fn call_args(&mut self) -> PResult<Vec<Expr>> {
@@ -1076,6 +1170,15 @@ impl<'a> Parser<'a> {
 
     fn paren(&mut self, start: Span) -> PResult<Expr> {
         self.bump();
+        // A group is not a tree node: its expression takes the group's own level. The
+        // expression is still entered one level down, so the parser's recursion stays
+        // bounded by the parentheses, but the depth it reports up is one less (bn-1nmq),
+        // so a chain *around* a group is not charged for the group. A chain *inside*
+        // groups still counts them: it is checked against the raw level, which counts
+        // every enclosing parenthesis, so the bound is conservative there (for example
+        // forty groups around `x` with thirty primes is refused, a tree 31 deep).
+        let at = self.depth;
+        let outer = std::mem::replace(&mut self.high, at);
         let mut items = self.bracketed(|p| {
             let mut items = vec![p.expr()?];
             while p.eat(&Tok::Comma).is_some() {
@@ -1087,10 +1190,12 @@ impl<'a> Parser<'a> {
         let span = start.to(self.prev_span());
         if items.len() == 1 {
             // Parentheses group; they are not a tree node.
+            self.high = outer.max(self.high.saturating_sub(1).max(at));
             let mut inner = items.remove(0);
             inner.span = span;
             return Ok(inner);
         }
+        self.high = outer.max(self.high);
         Ok(Expr {
             kind: ExprKind::Tuple(items),
             span,

@@ -1,0 +1,5 @@
+// cr-3rqxh8 regression: Tn = Set[Tn-1] -> Nat written out. An arrow's left side was
+// parsed at the arrow's level and then put below the new Function node, so this type
+// tree, 9223372036854775807 deep, was accepted at MAX_NESTING.
+module FunctionTypes
+const C: Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat

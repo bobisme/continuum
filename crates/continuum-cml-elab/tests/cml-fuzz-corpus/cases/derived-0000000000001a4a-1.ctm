@@ -1,0 +1,7 @@
+module Dup
+state {
+  x: Nat where x <= 1
+  x: ((((((Nat) && true && true) && true && true && true && true && true && true && true && true && true && true) && true && true && true && true && true && true && true && true && true && true && true && true) && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true) && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true) && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true && true where x <= 2
+}
+init { x == 0 }
+action Keep { unchanged x }

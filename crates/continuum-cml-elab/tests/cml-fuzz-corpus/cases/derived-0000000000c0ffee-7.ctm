@@ -1,0 +1,74 @@
+// Grammar-coverage fixture: every declaration, statement, type, and expression form the
+// Finite core parser accepts, in the `model Name { … }` header style. It is parser
+// acceptance input; it is not meant to elaborate.
+model SyntaxCoverage {
+  type Proc
+  type Pair = (Proc, Nat)
+  type Msg = {src: Proc, dst: Proc, body: Seq[Nat]}
+  type Rel = Proc -> Proc -> Bool
+  enum Phase { Idle, Busy, Done, }
+  const Procs: Set[Proc]
+
+  state {
+    phase: Map[Proc, Phase],
+    inbox: Map[Proc, Seq[Msg]];
+    log: Seq[Pair]
+    label: Map[Proc, Nat] where forall p in Procs: label[p] < 10
+  }
+  init Init { big == 0 && small == 0 }
+
+  init Start {
+    phase = {p -> Idle | p in Procs}
+    inbox = {p -> [] | p in Procs}
+    log = []; label = {p -> 0 | p in Procs}
+  }
+
+  action Send(p: Proc, q: Proc, n: Nat) {
+    require phase[p] == Idle && p != q
+    let m = {src: p, dst: q, body: [n, n + 1]}
+    next inbox = inbox[q := inbox[q].append(m)]
+    next phase = phase[p := Busy]
+    unchanged(log, label)
+  }
+
+  action Receive(q: Proc) {
+    require inbox[q] != []
+    let m = inbox[q].head()
+    next inbox = inbox[q := inbox[q].tail()]
+    next log = log.append((m.src, m.body.len()))
+    next label = label[q := if label[q] >= 9 then 0 else label[q] + 1]
+    phase'[m.src] == Done
+  }
+
+  action Reset(p: Proc) { require phase[p] == Done; next phase = phase[p := Idle]; unchanged inbox, log, label }
+
+  action Step = Send | Receive | Reset
+
+  invariant LabelsBounded {
+    let limit = 9
+    forall p in Procs: label[p] in 0..limit
+  }
+
+  invariant Arithmetic {
+    -1 + 2 * 3 / 1 % 4 - 0 == 5 || {1, 2} intersect {2} subseteq {2}
+  }
+
+  invariant Logic {
+    true => false => !true
+    "busy'" != "idle\n" <=> (1, 2) == (1, 2)
+  }
+
+  invariant Collections {
+    {n * 2 | n in 0..3 where n != 1} == {0, 4, 6}
+    {1 -> 2, 3 -> 4}.get(1) == Some(2)
+    Procs \ {} == Procs
+    exists p, q in Procs: p notin {q}
+  }
+
+  behavior Live = always(eventually(phase == phase))
+    && (true ~> false)
+
+  fairness strong Receive, Reset
+
+  def double(n: Nat): Nat = n + n
+}

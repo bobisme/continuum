@@ -443,6 +443,229 @@ fn negative_columns_count_characters() {
     assert_eq!(slice(src, &e), "@");
 }
 
+/// A postfix chain deepens the tree by one per operator, so it counts against the nesting
+/// bound, like an infix chain (bn-1nmq). Before, `x` followed by thousands of primes, or
+/// of `.f`, `.m()`, `[k]`, or `[k := v]`, parsed to a tree that deep, and the recursive
+/// passes over it (dump, print, elaboration, `Drop`) overflowed the stack. It was found
+/// with adversarial inputs written for the CML fuzz harness
+/// (`continuum-cml-elab/tests/cml_fuzz.rs`), whose corpus keeps the three
+/// `oversized-postfix-*` cases and whose mutator now draws postfix chains too.
+#[test]
+fn adversarial_postfix_chains_count_against_the_nesting_bound() {
+    let bound = usize::try_from(MAX_NESTING).expect("small");
+    let forms: [(&str, &str); 5] = [
+        ("prime", "'"),
+        ("field", ".f"),
+        ("method", ".m()"),
+        ("index", "[0]"),
+        ("update", "[0 := 1]"),
+    ];
+    for (name, step) in forms {
+        let within = format!("x{}", step.repeat(bound - 2));
+        parse_expr(&within).unwrap_or_else(|e| panic!("{name}: a chain within the bound: {e}"));
+        for n in [bound + 1, 5000] {
+            let src = format!("x{}", step.repeat(n));
+            let e = parse_expr(&src).expect_err("an over-long postfix chain is refused");
+            assert_eq!(e.kind, ParseErrorKind::NestingTooDeep, "{name} × {n}");
+            // Refused at the operator that passes the bound, not at the end of the chain.
+            let at = e.span.start as usize;
+            assert!(src[at..].starts_with(&step[..1]), "{name}: refused at {at}");
+            assert!(
+                at < 1 + step.len() * (bound + 1),
+                "{name}: refused late, at {at}"
+            );
+        }
+    }
+    // A chain inside groups shares one bound with them. The bound is conservative here:
+    // the tree is only 31 deep (groups are not nodes), but the chain is checked against
+    // a level that counts the forty enclosing groups, so it is refused. Pinned so that a
+    // change to this trade-off is a deliberate, visible one.
+    let mixed = format!("{}x{}{}", "(".repeat(40), "'".repeat(30), ")".repeat(40));
+    assert_eq!(
+        parse_expr(&mixed)
+            .expect_err("a chain inside forty groups passes the counted level")
+            .kind,
+        ParseErrorKind::NestingTooDeep
+    );
+    // In a whole model, the refusal is the first defect.
+    let model = format!(
+        "module M\nstate {{ x: Nat }}\naction A {{\n  x{} == x\n}}\n",
+        "'".repeat(5000)
+    );
+    assert_eq!(err_of(&model).kind, ParseErrorKind::NestingTooDeep);
+}
+
+/// The depth of the tree an expression parses to, without recursion.
+fn tree_depth(root: &continuum_cml_syntax::ast::Expr) -> usize {
+    use continuum_cml_syntax::ast::{Binder, Expr, ExprKind as K};
+    fn domains(bs: &[Binder]) -> impl Iterator<Item = &Expr> {
+        bs.iter().filter_map(|b| b.domain.as_ref())
+    }
+    let mut deepest = 0;
+    let mut stack = vec![(root, 1_usize)];
+    while let Some((e, d)) = stack.pop() {
+        deepest = deepest.max(d);
+        let children: Vec<&Expr> = match &e.kind {
+            K::Int(_) | K::Bool(_) | K::Str(_) | K::Name(_) | K::WholeState | K::EmptyBraces => {
+                vec![]
+            }
+            K::Prime(a) | K::Unary(_, a) | K::Temporal(_, a) | K::Field(a, _) => vec![a],
+            K::Binary(_, a, b) | K::Index(a, b) => vec![a, b],
+            K::If(a, b, c) | K::Update(a, b, c) => vec![a, b, c],
+            K::Quant(_, bs, body) => domains(bs).chain([&**body]).collect(),
+            K::Call(_, xs) | K::Tuple(xs) | K::SetLit(xs) | K::SeqLit(xs) => xs.iter().collect(),
+            K::Method(a, _, xs) => std::iter::once(&**a).chain(xs).collect(),
+            K::MapLit(kvs) => kvs.iter().flat_map(|(k, v)| [k, v]).collect(),
+            K::Record(fs) => fs.iter().map(|(_, v)| v).collect(),
+            K::SetComp(a, bs, w) => std::iter::once(&**a)
+                .chain(domains(bs))
+                .chain(w.as_deref())
+                .collect(),
+            K::MapComp(a, b, bs, w) => [&**a, &**b]
+                .into_iter()
+                .chain(domains(bs))
+                .chain(w.as_deref())
+                .collect(),
+        };
+        stack.extend(children.into_iter().map(|c| (c, d + 1)));
+    }
+    deepest
+}
+
+/// The bound is on the depth of the *tree*, and an operator chain puts every operand
+/// parsed before it one level deeper (bn-1nmq). Before, the parser bounded the level each
+/// operand was entered at, so a staircase — each level a parenthesized chain as the left
+/// operand of a longer chain — was admitted with a tree about `MAX_NESTING² / 2` levels
+/// deep: 7.5 KB of source, 1,830 levels, a stack overflow in `dump_file` on a default
+/// 2 MiB thread. Every accepted expression here is measured without recursion.
+#[test]
+fn adversarial_chains_cannot_stack_past_the_bound() {
+    let bound = usize::try_from(MAX_NESTING).expect("small");
+    // Staircases with each operator family, and with postfix chains, the left-deep forms.
+    let steps: [(&str, &str, &str); 4] = [
+        ("(", ")", " + x"),
+        ("(", ")", " && x"),
+        ("(", ")", " union x"),
+        ("(", ")", "'"),
+    ];
+    for (open, close, step) in steps {
+        for width in [2, 8, 60] {
+            let mut e = "x".to_owned();
+            for level in (0..60).rev() {
+                e = format!("{open}{e}{close}{}", step.repeat((60 - level).min(width)));
+            }
+            match parse_expr(&e) {
+                Ok(tree) => {
+                    let depth = tree_depth(&tree);
+                    assert!(
+                        depth <= bound,
+                        "{step:?} × {width}: a tree {depth} deep parsed"
+                    );
+                }
+                Err(err) => assert_eq!(err.kind, ParseErrorKind::NestingTooDeep, "{step:?}"),
+            }
+        }
+    }
+    // Every early right operand moves down too: `x + (deep) + x + …`.
+    let deep = format!("{}x{}", "(".repeat(40), ")".repeat(40));
+    let src = format!("x + {deep}{}", " + x".repeat(40));
+    match parse_expr(&src) {
+        Ok(tree) => assert!(tree_depth(&tree) <= bound),
+        Err(err) => assert_eq!(err.kind, ParseErrorKind::NestingTooDeep),
+    }
+    // A method argument moves down with the chain after it.
+    let src = format!("x.m({}){}", vec!["x"; 50].join(" + "), "'".repeat(30));
+    match parse_expr(&src) {
+        Ok(tree) => assert!(tree_depth(&tree) <= bound),
+        Err(err) => assert_eq!(err.kind, ParseErrorKind::NestingTooDeep),
+    }
+    // Exactness for a flat chain: `n` operands are a tree `n` deep, accepted exactly up to
+    // the bound. (Inside parentheses the bound is conservative: a chain there is checked
+    // against a level that counts every enclosing group; see the `mixed` case above.)
+    for n in 1..=bound + 1 {
+        let src = vec!["x"; n].join(" + ");
+        match parse_expr(&src) {
+            Ok(tree) => {
+                assert!(
+                    n <= bound,
+                    "a chain of {n} operands, past the bound, parsed"
+                );
+                assert_eq!(tree_depth(&tree), n);
+            }
+            Err(err) => {
+                assert_eq!(err.kind, ParseErrorKind::NestingTooDeep);
+                assert!(
+                    n > bound,
+                    "a chain of {n} operands, within the bound, was refused"
+                );
+            }
+        }
+    }
+}
+
+/// The depth of a type tree, without recursion.
+fn type_tree_depth(root: &continuum_cml_syntax::ast::TypeExpr) -> usize {
+    use continuum_cml_syntax::ast::TypeKind as T;
+    let mut deepest = 0;
+    let mut stack = vec![(root, 1_usize)];
+    while let Some((t, d)) = stack.pop() {
+        deepest = deepest.max(d);
+        match &t.kind {
+            T::Named(_) => {}
+            T::Applied(_, xs) | T::Tuple(xs) => stack.extend(xs.iter().map(|x| (x, d + 1))),
+            T::Function(a, b) => stack.extend([(&**a, d + 1), (&**b, d + 1)]),
+            T::Record(fs) => stack.extend(fs.iter().map(|(_, x)| (x, d + 1))),
+        }
+    }
+    deepest
+}
+
+/// A function type's left side is re-attached below the new `Function` node, so it is
+/// charged one level more when the arrow arrives (bn-1nmq, cr-3rqxh8). Before, `Tn =
+/// Set[Tn-1] -> Nat` written out was counted at `n + 1` levels though its tree is
+/// `2n + 1` deep, and `T63` (127 deep) parsed.
+#[test]
+fn adversarial_function_types_cannot_stack_past_the_bound() {
+    let bound = usize::try_from(MAX_NESTING).expect("small");
+    let t = |n: usize| {
+        let mut ty = String::from("Nat");
+        for _ in 0..n {
+            ty = format!("Set[{ty}] -> Nat");
+        }
+        ty
+    };
+    for n in 0..=64 {
+        match continuum_cml_syntax::parse_type(&t(n)) {
+            Ok(ty) => {
+                assert!(2 * n < bound, "T{n} accepted, a tree {} deep", 2 * n + 1);
+                assert_eq!(type_tree_depth(&ty), 2 * n + 1);
+            }
+            Err(e) => {
+                assert!(2 * n >= bound, "T{n} refused within the bound: {e}");
+                assert_eq!(e.kind, ParseErrorKind::NestingTooDeep);
+                // Refused at an arrow, the first one whose left side passes the bound,
+                // until the `Set[` nesting alone passes it (from T64 on), where the
+                // innermost type is refused first, in source order.
+                let src = t(n);
+                if n < bound {
+                    assert!(src[e.span.start as usize..].starts_with("->"), "T{n}: {e}");
+                }
+            }
+        }
+    }
+    // Left-nested arrows: `((Nat -> Nat) -> Nat) -> …` is left-deep too.
+    for n in [bound - 2, bound - 1, bound, 5000] {
+        let mut ty = String::from("Nat");
+        for _ in 0..n {
+            ty = format!("({ty}) -> Nat");
+        }
+        match continuum_cml_syntax::parse_type(&ty) {
+            Ok(tree) => assert!(type_tree_depth(&tree) <= bound, "{n} left arrows"),
+            Err(e) => assert_eq!(e.kind, ParseErrorKind::NestingTooDeep, "{n}"),
+        }
+    }
+}
+
 #[test]
 fn adversarial_nesting_and_size_bounds_refuse() {
     let depth = usize::try_from(MAX_NESTING).expect("small") - 2;

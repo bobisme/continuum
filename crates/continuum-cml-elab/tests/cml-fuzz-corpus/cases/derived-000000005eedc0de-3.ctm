@@ -1,0 +1,7 @@
+// cr-3rqxh8 regression: Tn = Set[Tn-1] -> Nat written out. An arrow's left side was
+// parsed at the arrow's level and then put below the new Function node, so this type
+// tree, 127 deep, was accepted at MAX_NESTING.
+module FunctionTypes
+view V from P {
+}
+const C: Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[{{ 0 -> [0][0 := if true then [0][0 := {[0][0 := { a: !(-always([forall q in 0..1: always({ 0 -> ![always(min(0, if true then if true then { a: { a: (min(0, -{[0][0 := { 0 -> forall q in 0..1: ![0][0 := ({ a: !-[0][0 := min(0, forall q in 0..1: ([0][0 := min(0, if true then ((([0][0 := [0][0 := { a: (forall q in 0..1: [0][0 := { a: [0][0 := (!Set)] }.a])' }.a]] + 1) + 1) + 1) else 0)]))] }.a)'] }[0]]}) + 1) }.a }.a else 0 else 0))][0] }[0])][0])) }.a]}] else 0] }[0]}[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Set[Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat] -> Nat

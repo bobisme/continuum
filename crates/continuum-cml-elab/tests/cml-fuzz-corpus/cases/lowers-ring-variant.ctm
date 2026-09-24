@@ -1,0 +1,42 @@
+// The Ring model under its committed run configuration, with other actions, so the
+// configured lowering is reached by more than one host.
+module Ring
+
+type Node
+
+const Start: Node
+const Limit: Nat
+const Open: Bool
+
+state {
+  leader: Node
+  round: Nat where round <= 3
+}
+
+init {
+  leader == Start && round == 0
+}
+
+action Pass {
+  require Open && round < Limit
+  leader' != leader
+  next round = round + 1
+}
+
+action Reset {
+  require round == Limit
+  next leader = Start
+  next round = 0
+}
+
+action Idle {
+  unchanged leader, round
+}
+
+invariant Bounded {
+  round <= Limit
+}
+
+invariant Started {
+  round == 0 => leader == Start
+}

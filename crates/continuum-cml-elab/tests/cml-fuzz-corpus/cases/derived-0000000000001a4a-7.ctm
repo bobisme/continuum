@@ -1,0 +1,11 @@
+model Wide {
+  state {
+    big: Nat where big <= 5
+    small: Nat where small <= 3
+  }
+  init Init { big == 0 && small == 2147483648 }
+  action FillBig { big' == 5 && small' == small }
+  action Empty { big' == 0 && small' == 0 }
+  invariant NotSolved { big != 4 }
+  invariant W { big < 18446744073709551616 }
+}

@@ -1,0 +1,36 @@
+// Grammar fixture in the shape of the Wave 0 Tower of Hanoi port (PORTING_WAVES.md anchor).
+// It exercises sequences, type aliases, model functions, and chained map updates.
+// It is parser acceptance input, not the PR 27a port.
+module TowerOfHanoi
+
+type Tower = Seq[Nat]
+
+state {
+  towers: Seq[Tower]
+  towers: Seq[Tower]
+}
+
+init {
+  towers == [[1, 2, 3], [], []]
+}
+
+def top(t: Tower): Nat = t.head()
+
+action Move(from: Nat, to: Nat) {
+  require from in 0..2 && to in 0..2
+  require from != to
+  require towers[from] != []
+  require towers[to] == [] || top(towers[from]) < top(towers[to])
+  next towers = towers[from := towers[from].tail()][to := towers[to].prepend(top(towers[from]))]
+}
+
+invariant Sorted {
+  forall t in 0..2:
+    forall i in 0..2:
+      i + 1 < towers[t].len()
+      => towers[t][i] < towers[t][i + 1]
+}
+
+invariant NotSolved {
+  towers[2] != [1, 2, 3]
+}

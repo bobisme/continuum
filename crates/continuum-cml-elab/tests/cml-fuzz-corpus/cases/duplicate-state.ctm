@@ -1,0 +1,7 @@
+module Dup
+state {
+  x: Nat where x <= 1
+  x: Nat where x <= 2
+}
+init { x == 0 }
+action Keep { unchanged x }

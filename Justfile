@@ -60,8 +60,13 @@ build:
 # CI can schedule this on its own cadence; the gate does not require it, because a
 # lane whose value is *more inputs* is a lane whose absence delays a finding rather
 # than admitting a wrong one.
+#
+# The CML front-end lane (bn-1nmq) is the same shape: `crates/continuum-cml-elab/tests/
+# cml_fuzz.rs` runs its gate campaign, corpus replay, and anti-vacuity mutants in `just
+# check`, and its one ignored test is the extended campaign over eight seeds.
 fuzz:
     cargo test --locked -p continuumd --test wire_fuzz -- --ignored --nocapture
+    cargo test --locked -p continuum-cml-elab --test cml_fuzz -- --ignored the_extended_campaign_finds_no_defect --nocapture
 
 # Enforce the plan §20 crate list and the forbidden dependency edges.
 # The self-test runs first so the check cannot pass vacuously.

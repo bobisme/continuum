@@ -1,0 +1,14 @@
+model NoMeasure {
+const FuzzT: Set[Map[Nat, Set[{ a: { a: (Set[Set[(Set[({ a: Set[{ a: (Set[Nat -> Set[Nat -> Map[Nat, Set[Map[Nat, (({ a: { a: Map[Nat, Set[Set[(Map[Nat, Nat -> Set[({ a: { a: Set[Set[Set[Nat -> Map[Nat, (Nat, Nat)]] -> Nat] -> Nat] -> Nat -> Nat } }, Nat)] -> Nat])]]] } }, Nat), Nat)]]]] -> Nat] -> Nat) }] }, Nat)], Nat)]] -> Nat) } }]] -> Nat]
+  state {
+    big: Nat where big <= 5
+    small: Nat where small <= 3
+  }
+  }
+  init Init { big == 0 && small == 0 }
+  action FillBig { big' == 5 && small' == small }
+  action Empty { big' == 0 && small' == 0 }
+  invariant NotSolved { big != 4 }
+  def spin(n: Nat): Nat = spin(n + 1)
+  invariant S { spin(0) >= 0 }
+}

@@ -1,0 +1,13 @@
+model Mutual {
+  state {
+    big: Nat where big <= 5
+    small: Nat where small <= 3
+  }
+  init Init { big == 0 && small == 0 }
+  action FillBig { big' == 5 && small' == small }
+  action Empty { big' == 0 && small' == 0 }
+  invariant NotSolved { big != 4 }
+  def even(n: Nat): Bool = if n == 0 then true else odd(n - 1)
+  def odd(n: Nat): Bool = if n == 0 then false else even(n - 1)
+  invariant E { even(4) }
+}

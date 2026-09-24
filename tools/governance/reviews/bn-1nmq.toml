@@ -1,0 +1,42 @@
+[change]
+bone = "bn-1nmq"
+author = "continuum-dev"
+summary = "continuum-cml-syntax: the nesting bound now bounds the depth of every parsed tree, expression and type, not only the level each operand was entered at, so postfix chains, staircases of infix chains, and function types whose left side is re-attached below the arrow are refused before a later recursive pass can overflow the stack"
+
+[semantic]
+covers = [
+  "crates/continuum-cml-syntax/src/",
+]
+reference_tests = [
+  "crates/continuum-cml-syntax/tests/errors.rs::adversarial_postfix_chains_count_against_the_nesting_bound",
+  "crates/continuum-cml-syntax/tests/errors.rs::adversarial_chains_cannot_stack_past_the_bound",
+  "crates/continuum-cml-syntax/tests/errors.rs::adversarial_function_types_cannot_stack_past_the_bound",
+  "crates/continuum-cml-elab/tests/cml_fuzz.rs::the_function_type_boundary_holds_on_the_probe_stack",
+  "crates/continuum-cml-elab/tests/cml_fuzz.rs::every_corpus_entry_lands_where_the_manifest_declares",
+  "crates/continuum-cml-elab/tests/cml_fuzz.rs::the_campaign_finds_no_defect",
+  "crates/continuum-cml-elab/tests/cml_laws.rs::law_c_every_syntactic_out_of_fragment_construct_is_refused_everywhere",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/cml_laws.rs::law_a_print_then_parse_is_the_identity_on_every_corpus_entry", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/chain_differential.rs::a_left_deep_chain_lowers_to_the_programmatic_fold", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/chain_differential.rs::a_right_associated_chain_is_told_apart", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "the CML front end is the evidence path for corpus ports (C021) and CML expressiveness (C022); this change only refuses sources whose parse tree passes the documented nesting bound, which no committed CML source or golden reaches, so it adds robustness evidence to both and promotes neither: both stay TARGET"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the parse tree is an in-process value with no wire schema, and every source the parser accepted within the bound parses to the same tree, dump, and normalized identity as before"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-cml-syntax: every committed CML source and golden parses to the same tree, dump, and normalized identity as before. A postfix chain, a staircase of operator chains, or a function type whose re-attached left side (Tn = Set[Tn-1] -> Nat, cr-3rqxh8) passes the bound, which parsed before and then overflowed the stack of dump, print, elaboration, or Drop, is now the typed refusal cml.limit.nesting_too_deep at the operator that passes the bound. The bound is conservative inside parentheses: a chain inside groups is checked against a level that counts every enclosing group, so a few sources within the tree bound that parsed before are now refused, such as forty groups around a postfix chain of thirty (a tree 31 deep)"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3rqxh8"
+verdict = "approved"

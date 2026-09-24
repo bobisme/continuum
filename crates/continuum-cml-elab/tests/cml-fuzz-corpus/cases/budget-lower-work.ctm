@@ -1,0 +1,8 @@
+module Grid
+state {
+  x: Nat where x <= 299
+  y: Nat where y <= 299
+}
+init { x + y >= 0 }
+action Step { unchanged x, y }
+invariant Sum { x + y <= 598 }

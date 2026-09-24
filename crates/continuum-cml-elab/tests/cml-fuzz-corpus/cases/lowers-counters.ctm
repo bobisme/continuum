@@ -1,0 +1,38 @@
+// Two guarded counters and a switch, with an `if` in a guard and `min` in an update.
+module Counters
+
+state {
+  a: Int where a >= -2 && a <= 2
+  b: Nat where b <= 4
+  on: Nat where on <= 1
+}
+
+init {
+  a == 0 && b == 0 && on == 0
+}
+
+action Up {
+  require on == 1 && a < 2
+  next a = a + 1
+  unchanged b, on
+}
+
+action Down {
+  require if on == 1 then a > -2 else false
+  a' == a - 1
+  unchanged b, on
+}
+
+action Toggle {
+  next on = 1 - on
+  next b = min(b + 1, 4)
+  unchanged a
+}
+
+invariant Range {
+  a >= -2 && a <= 2 && b <= 4
+}
+
+invariant Implication {
+  on == 1 || a <= 2
+}

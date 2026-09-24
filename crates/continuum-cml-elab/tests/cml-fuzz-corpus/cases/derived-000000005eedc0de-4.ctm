@@ -1,0 +1,8 @@
+module Domain
+state {
+  a: Nat where a <= 9999
+  b: Nat where b <= 9999
+  c: Nat where c <= 9999
+}
+init { a == 0 && c == 0 && c == 0 }
+action Keep { unchanged a, b, c }

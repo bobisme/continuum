@@ -1,0 +1,8 @@
+const FuzzT: (Nat -> (Set[(Map[Nat, { a: (Nat -> (Set[{ a: (Map[Nat, { a: { a: Nat -> (Set[{ a: Set[Map[Nat, Set[Map[Nat, Set[{ a: (((Set[({ a: Map[Nat, Map[Nat, (Map[Nat, (Map[Nat, { a: Nat -> Set[(Set[Set[Set[(Set[Set[Nat -> Set[Nat -> Nat -> Nat -> Set[Set[Set[(Set[Nat -> Map[Nat, { a: Nat }]], Nat)] -> Nat]]]] -> Nat] -> Nat)] -> Nat]] -> Nat, Nat)] }]) -> Nat] -> Nat)]] })] -> Nat, Nat), Nat)) }]]]] -> Nat] -> Nat }] -> Nat, Nat) -> Nat } }] -> Nat) }] -> Nat, Nat), Nat) }], Nat) -> Nat]))
+module Dup
+state {
+  x: Nat where x <= 1
+  x: Nat where x <= 2
+}
+init { x == 0 }
+action Keep { unchanged x }

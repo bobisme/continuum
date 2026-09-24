@@ -1,0 +1,3 @@
+module Proc
+process P(p in Nodes) {
+}

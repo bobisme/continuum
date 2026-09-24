@@ -45,6 +45,13 @@ states an honesty boundary about production coverage, not a broken check
 | TEST-6-05 | `notes/plan/rfcs/0006-production-trace-conformance.md`'s typed outcome vocabulary and "MUST NOT invent a total event order" rule, modeled standalone | none: no crate exists (`continuum-corpus`, `continuum-observer` are 20-line stubs) | partial |
 | TEST-6-06 | the LRAT body grammar's canonicity rules, quoted verbatim from `crates/continuum-kernel-sat/src/wire.rs`'s own doc comment, modeled against that cited grammar (drift-tied: the exact grammar phrases are re-checked present at run time) | `wire.rs::the_canonical_literal_order_is_by_variable_then_polarity` + `check.rs`'s five malformed-proof rejection tests (unordered/duplicated literals, descending clause id, unordered deletion list, undefined-clause antecedent, undefined-clause deletion) | enforced |
 
+TEST-6-01's parser half also names the CML front-end fuzz lane (bn-1nmq):
+`crates/continuum-cml-elab/tests/cml_fuzz.rs` fuzzes the real
+`continuum_cml_syntax::parse`, `continuum_cml_elab::elaborate_source_with`,
+`lower_with`, and `lower_configured` from a committed corpus, and
+`cml_laws.rs` pins the pipeline's round-trip, determinism, and out-of-fragment
+laws; see `_BOUNDARY_01_CML`.
+
 None of this reads or writes `crates/*/Cargo.toml`, `tsys.py`, or another
 section's fixtures; it is a new file per README-test.md's extension rule.
 """
@@ -114,6 +121,32 @@ _BOUNDARY_01 = (
     "validate_dossier.py (a separate Python tool using the real jsonschema library), not "
     "to Rust, and the byte-identity-vs-canonical re-encoding check is a freestanding "
     "property demonstration over real example content, not a port of any Rust logic."
+)
+_BOUNDARY_01_CML = (
+    "The parser half of TEST-6-01 is also corroborated by the CML front-end fuzz lane "
+    "(bn-1nmq), real, non-#[ignore]d Rust tests over the real code: "
+    "crates/continuum-cml-elab/tests/cml_fuzz.rs runs a seeded, structure-aware mutation "
+    "campaign over continuum_cml_syntax::parse, continuum_cml_elab::elaborate_source_with, "
+    "lower_with, and lower_configured, each probe on a 1 MiB thread (a child-process test "
+    "shows a 1.5 MiB recursion dies there and passes on a 3 MiB thread) under explicit "
+    "elaboration and lowering limits and a wall-clock backstop, with eight oracles (panic, "
+    "hang, nondeterminism, untyped landing, mislocated span, overspent budget, print round "
+    "trip, tree depth past the bound), each armed by a deliberately defective mutant; it "
+    "replays a committed corpus (tests/cml-fuzz-corpus/) whose MANIFEST pins every "
+    "target's landing and identity fingerprint. Its hand-written adversarial cases found "
+    "that the parser's nesting bound did not bound the tree (postfix chains and "
+    "staircases of operator chains parsed to trees thousands of levels deep and "
+    "overflowed the stack), and review cr-3rqxh8 found that a function type's left side "
+    "escaped it too (Set[...] -> Nat nested 63 times parsed to a type tree 127 deep); "
+    "both are fixed in continuum-cml-syntax and pinned by errors.rs's three adversarial "
+    "tests and the function-type boundary test on the probe stack. The tree-depth "
+    "oracle measures every expression and type tree exactly; the mutator now also "
+    "draws postfix chains, staircases, and nested function types, "
+    "and against the unfixed parser its gate campaign reports the defect as typed "
+    "tree-depth findings. "
+    "crates/continuum-cml-elab/tests/cml_laws.rs pins the three pipeline laws. There is "
+    "no coverage-guided lane: libFuzzer cannot satisfy unsafe_code = forbid, needs "
+    "nightly, and needs audited dependencies (the wire-fuzz lane records the same)."
 )
 _ABSENT_02 = (
     "continuum-cir/src/lib.rs (crates/continuum-cir/src/lib.rs) is a 20-line documented "
@@ -194,7 +227,7 @@ _BOUNDARY_06 = (
     "continuum-kernel-smt's Alethe grammar is not modeled at all."
 )
 BOUNDARIES: dict[str, list[str]] = {
-    "TEST-6-01": [_BOUNDARY_01],
+    "TEST-6-01": [_BOUNDARY_01, _BOUNDARY_01_CML],
     "TEST-6-02": [_ABSENT_02],
     "TEST-6-03": [_BOUNDARY_03],
     "TEST-6-04": [_ABSENT_04],
@@ -230,6 +263,16 @@ RUST_TESTS: dict[str, list[tuple[Path, str]]] = {
         (ROOT / "crates/continuumd/tests/gate_g2_01_acceptance.rs", "every_shipped_schema_document_declares_the_readme_identity_triple"),
         (ROOT / "crates/continuum-value/src/identity.rs", "a_certified_identity_is_the_canonical_encoding"),
         (ROOT / "crates/continuum-value/src/identity.rs", "non_canonical_bytes_are_not_an_identity"),
+        (ROOT / "crates/continuum-cml-elab/tests/cml_fuzz.rs", "the_campaign_finds_no_defect"),
+        (ROOT / "crates/continuum-cml-elab/tests/cml_fuzz.rs", "every_corpus_entry_lands_where_the_manifest_declares"),
+        (ROOT / "crates/continuum-cml-elab/tests/cml_fuzz.rs", "every_oracle_is_armed"),
+        (ROOT / "crates/continuum-cml-elab/tests/cml_fuzz.rs", "the_fuzz_limits_bind_and_are_typed"),
+        (ROOT / "crates/continuum-cml-elab/tests/cml_fuzz.rs", "the_probe_stack_is_small_and_an_overflow_is_fatal"),
+        (ROOT / "crates/continuum-cml-syntax/tests/errors.rs", "adversarial_postfix_chains_count_against_the_nesting_bound"),
+        (ROOT / "crates/continuum-cml-syntax/tests/errors.rs", "adversarial_chains_cannot_stack_past_the_bound"),
+        (ROOT / "crates/continuum-cml-syntax/tests/errors.rs", "adversarial_function_types_cannot_stack_past_the_bound"),
+        (ROOT / "crates/continuum-cml-elab/tests/cml_fuzz.rs", "the_function_type_boundary_holds_on_the_probe_stack"),
+        (ROOT / "crates/continuum-cml-elab/tests/cml_laws.rs", "law_c_every_syntactic_out_of_fragment_construct_is_refused_everywhere"),
     ],
     "TEST-6-03": [
         (ROOT / "crates/continuum-certificate/tests/family_routing.rs", "the_routing_table_is_the_kernels_own_magics_and_they_partition_the_input_space"),

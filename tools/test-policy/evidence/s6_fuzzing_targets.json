@@ -36,13 +36,14 @@
   "requirements": {
     "TEST-6-01": {
       "boundaries": [
-        "This module's schema-id-grammar-detected rule is independently corroborated by a real, non-#[ignore]d Rust test: crates/continuumd/tests/gate_g2_01_acceptance.rs's every_shipped_schema_document_declares_the_readme_identity_triple() asserts, over the same real notes/plan/schemas/*.schema.json files, that each one declares the exact $id/schema_epoch/schema_kind triple this module also checks. The canonical- encoding half of the concept is independently corroborated by continuum-value's own canonical-content-identity test suite (crates/continuum-value/src/identity.rs, ADR-0013). Two rules this module also runs \u2014 instance-header-mismatch-detected and canonical-encoding-not-value-identical-detected \u2014 have no equivalent named Rust test: notes/plan/schemas/README.md itself assigns instance-level validation to validate_dossier.py (a separate Python tool using the real jsonschema library), not to Rust, and the byte-identity-vs-canonical re-encoding check is a freestanding property demonstration over real example content, not a port of any Rust logic."
+        "This module's schema-id-grammar-detected rule is independently corroborated by a real, non-#[ignore]d Rust test: crates/continuumd/tests/gate_g2_01_acceptance.rs's every_shipped_schema_document_declares_the_readme_identity_triple() asserts, over the same real notes/plan/schemas/*.schema.json files, that each one declares the exact $id/schema_epoch/schema_kind triple this module also checks. The canonical- encoding half of the concept is independently corroborated by continuum-value's own canonical-content-identity test suite (crates/continuum-value/src/identity.rs, ADR-0013). Two rules this module also runs \u2014 instance-header-mismatch-detected and canonical-encoding-not-value-identical-detected \u2014 have no equivalent named Rust test: notes/plan/schemas/README.md itself assigns instance-level validation to validate_dossier.py (a separate Python tool using the real jsonschema library), not to Rust, and the byte-identity-vs-canonical re-encoding check is a freestanding property demonstration over real example content, not a port of any Rust logic.",
+        "The parser half of TEST-6-01 is also corroborated by the CML front-end fuzz lane (bn-1nmq), real, non-#[ignore]d Rust tests over the real code: crates/continuum-cml-elab/tests/cml_fuzz.rs runs a seeded, structure-aware mutation campaign over continuum_cml_syntax::parse, continuum_cml_elab::elaborate_source_with, lower_with, and lower_configured, each probe on a 1 MiB thread (a child-process test shows a 1.5 MiB recursion dies there and passes on a 3 MiB thread) under explicit elaboration and lowering limits and a wall-clock backstop, with eight oracles (panic, hang, nondeterminism, untyped landing, mislocated span, overspent budget, print round trip, tree depth past the bound), each armed by a deliberately defective mutant; it replays a committed corpus (tests/cml-fuzz-corpus/) whose MANIFEST pins every target's landing and identity fingerprint. Its hand-written adversarial cases found that the parser's nesting bound did not bound the tree (postfix chains and staircases of operator chains parsed to trees thousands of levels deep and overflowed the stack), and review cr-3rqxh8 found that a function type's left side escaped it too (Set[...] -> Nat nested 63 times parsed to a type tree 127 deep); both are fixed in continuum-cml-syntax and pinned by errors.rs's three adversarial tests and the function-type boundary test on the probe stack. The tree-depth oracle measures every expression and type tree exactly; the mutator now also draws postfix chains, staircases, and nested function types, and against the unfixed parser its gate campaign reports the defect as typed tree-depth findings. crates/continuum-cml-elab/tests/cml_laws.rs pins the three pipeline laws. There is no coverage-guided lane: libFuzzer cannot satisfy unsafe_code = forbid, needs nightly, and needs audited dependencies (the wire-fuzz lane records the same)."
       ],
       "corpus": {
         "examples_matched_to_a_schema": 20,
         "examples_re_encoded": 20,
-        "rust_tests_named": 3,
-        "rust_tests_present": 3,
+        "rust_tests_named": 13,
+        "rust_tests_present": 13,
         "schema_documents": 21
       },
       "failures": [],
@@ -100,6 +101,56 @@
           "path": "crates/continuum-value/src/identity.rs",
           "present": true,
           "test": "non_canonical_bytes_are_not_an_identity"
+        },
+        {
+          "path": "crates/continuum-cml-elab/tests/cml_fuzz.rs",
+          "present": true,
+          "test": "the_campaign_finds_no_defect"
+        },
+        {
+          "path": "crates/continuum-cml-elab/tests/cml_fuzz.rs",
+          "present": true,
+          "test": "every_corpus_entry_lands_where_the_manifest_declares"
+        },
+        {
+          "path": "crates/continuum-cml-elab/tests/cml_fuzz.rs",
+          "present": true,
+          "test": "every_oracle_is_armed"
+        },
+        {
+          "path": "crates/continuum-cml-elab/tests/cml_fuzz.rs",
+          "present": true,
+          "test": "the_fuzz_limits_bind_and_are_typed"
+        },
+        {
+          "path": "crates/continuum-cml-elab/tests/cml_fuzz.rs",
+          "present": true,
+          "test": "the_probe_stack_is_small_and_an_overflow_is_fatal"
+        },
+        {
+          "path": "crates/continuum-cml-syntax/tests/errors.rs",
+          "present": true,
+          "test": "adversarial_postfix_chains_count_against_the_nesting_bound"
+        },
+        {
+          "path": "crates/continuum-cml-syntax/tests/errors.rs",
+          "present": true,
+          "test": "adversarial_chains_cannot_stack_past_the_bound"
+        },
+        {
+          "path": "crates/continuum-cml-syntax/tests/errors.rs",
+          "present": true,
+          "test": "adversarial_function_types_cannot_stack_past_the_bound"
+        },
+        {
+          "path": "crates/continuum-cml-elab/tests/cml_fuzz.rs",
+          "present": true,
+          "test": "the_function_type_boundary_holds_on_the_probe_stack"
+        },
+        {
+          "path": "crates/continuum-cml-elab/tests/cml_laws.rs",
+          "present": true,
+          "test": "law_c_every_syntactic_out_of_fragment_construct_is_refused_everywhere"
         }
       ],
       "status": "enforced",

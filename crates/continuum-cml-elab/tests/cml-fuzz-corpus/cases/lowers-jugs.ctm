@@ -1,0 +1,28 @@
+// A Die Hard shape that lowers without a configuration: bounded integer state, a
+// `let`, a set-literal quantifier, weak fairness, and the standard behavior.
+model Jugs {
+  state {
+    big: Nat where big <= 5
+    small: Nat where small <= 3
+  }
+  init Init { big == 0 && small == 0 }
+  action FillBig { big' == 5 && small' == small }
+  action FillSmall { next small = 3; unchanged big }
+  action EmptyBig { big' == 0 && small' == small }
+  action SmallToBig {
+    let next_big = min(big + small, 5)
+    big' == next_big
+    small' == small - (next_big - big)
+  }
+  action BigToSmall {
+    require big > 0 && small < 3
+    let moved = min(big, 3 - small)
+    next big = big - moved
+    next small = small + moved
+  }
+  action Next = FillBig | FillSmall | EmptyBig | SmallToBig | BigToSmall
+  invariant NotSolved { big != 4 }
+  invariant Bounds { forall j in {3, 1, 2}: big + j >= j }
+  fairness weak SmallToBig
+  behavior Spec = Init && always(step(Next) || stutter(state))
+}

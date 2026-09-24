@@ -1,0 +1,7 @@
+module Cyc
+type A = B
+type B = C
+type C = A
+state { x: Nat where x <= 1 }
+init { x == 0 }
+action Keep { unchanged x }

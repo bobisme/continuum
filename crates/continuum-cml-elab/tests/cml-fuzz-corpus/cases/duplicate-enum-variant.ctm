@@ -1,0 +1,5 @@
+module Colors
+enum Color { Red, Green, Red }
+state { c: Color }
+init { c == Red }
+action Keep { unchanged c }

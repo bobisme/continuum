@@ -1,0 +1,6 @@
+// bn-1nmq: a postfix chain within the nesting bound still parses (and fails to type).
+module Chain
+state { x: Nat where x <= 3 }
+init { x == 0 }
+action A { unchanged x }
+invariant I { [x][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0] == x }
