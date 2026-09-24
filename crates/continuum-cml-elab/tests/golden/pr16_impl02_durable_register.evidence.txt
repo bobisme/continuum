@@ -1,0 +1,171 @@
+# PR-16/IMPL-02 operational durable register (bn-2rsp): notes/plan/examples/durable_register.ctm
+# checked by continuum-engine-reference, steps related to abstract_register.ctm.
+# Regenerate: CML_BLESS=1 cargo test -p continuum-cml-elab --test pr16_impl02_durable_register
+
+[pr16-impl02-pos-01-claim-a]
+committed configuration: nodes {a,b,c}, majority quorums, epochs {0,1}, values {v0,v1}, crashes unbounded
+model: slots=22 actions=46 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 61504 }
+AckedIsDurable: established states=61504
+Agreement: established states=61504
+OneValuePerSlot: established states=61504
+deadlock established states=61504
+correspondence: steps=597184 stutters=581312 chooses=15872 realized=4 covered=9 failures=0
+  failing steps from projectable states: 0
+durability step violations: 0
+
+[pr16-impl02-pos-02-one-epoch]
+one epoch: one independent component of claim A
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 248 }
+AckedIsDurable: established states=248
+Agreement: established states=248
+OneValuePerSlot: established states=248
+deadlock established states=248
+correspondence: steps=1204 stutters=1172 chooses=32 realized=2 covered=3 failures=0
+  failing steps from projectable states: 0
+durability step violations: 0
+
+[pr16-impl02-pos-03-one-epoch-counted-crashes]
+one epoch, crashes counted and at most two: Lose is the atomic crash here
+model: slots=12 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 744 }
+AckedIsDurable: established states=744
+Agreement: established states=744
+OneValuePerSlot: established states=744
+deadlock established states=744
+correspondence: steps=3156 stutters=3060 chooses=96 realized=2 covered=3 failures=0
+  failing steps from projectable states: 0
+durability step violations: 0
+
+[pr16-impl02-neg-01-ack-before-sync]
+seeded bug M01: Ack counts volatile bytes; its witnesses replay at the claim-A scope
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 864 }
+AckedIsDurable: refuted state=(0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1) depth=5 violations=616
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Submit(n=c,epoch=0,value=v1) ; Submit(n=b,epoch=0,value=v1) ; Ack(epoch=0,value=v1)
+Agreement: refuted state=(1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1) depth=11 violations=216
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Reserve(n=a,epoch=0) ; Submit(n=c,epoch=0,value=v0) ; Submit(n=b,epoch=0,value=v1) ; Submit(n=a,epoch=0,value=v0) ; Ack(epoch=0,value=v0) ; Lose(n=a,epoch=0,value=v0) ; Reserve(n=a,epoch=0) ; Submit(n=a,epoch=0,value=v1) ; Ack(epoch=0,value=v1)
+OneValuePerSlot: established states=864
+deadlock established states=864
+claim-A replay: AckedIsDurable witness of 5 steps ends where AckedIsDurable is false
+claim-A replay: Agreement witness of 11 steps ends where Agreement is false
+correspondence: steps=4768 stutters=3352 chooses=112 realized=2 covered=3 failures=1304
+  failing steps from projectable states: 112
+  first: NotAnEnabledChoose Ack(epoch=0,value=v0) from log[a0=v0 b0=v0] reserved[] acks[0=v1] to log[a0=v0 b0=v0] reserved[] acks[0=v0 0=v1]
+durability step violations: 0
+
+[pr16-impl02-neg-02-lose-durable]
+seeded bug: a crash may lose a synced record
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 864 }
+AckedIsDurable: refuted state=(0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0) depth=8 violations=616
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Submit(n=c,epoch=0,value=v1) ; Sync(n=c,epoch=0) ; Submit(n=b,epoch=0,value=v1) ; Sync(n=b,epoch=0) ; Ack(epoch=0,value=v1) ; Lose(n=b,epoch=0,value=v1)
+Agreement: refuted state=(1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0) depth=15 violations=216
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Reserve(n=a,epoch=0) ; Submit(n=c,epoch=0,value=v0) ; Sync(n=c,epoch=0) ; Submit(n=b,epoch=0,value=v1) ; Sync(n=b,epoch=0) ; Submit(n=a,epoch=0,value=v0) ; Sync(n=a,epoch=0) ; Ack(epoch=0,value=v0) ; Lose(n=a,epoch=0,value=v0) ; Reserve(n=a,epoch=0) ; Submit(n=a,epoch=0,value=v1) ; Sync(n=a,epoch=0) ; Ack(epoch=0,value=v1)
+OneValuePerSlot: established states=864
+deadlock established states=864
+correspondence: steps=6176 stutters=4568 chooses=32 realized=2 covered=3 failures=1576
+  failing steps from projectable states: 32
+  first: NotAnEnabledChoose Ack(epoch=0,value=v0) from log[a0=v0 b0=v0] reserved[] acks[0=v1] to log[a0=v0 b0=v0] reserved[] acks[0=v0 0=v1]
+durability step violations: 864
+
+[pr16-impl02-neg-03-double-vote]
+seeded bug: Submit into a slot that holds bytes
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 700 }
+AckedIsDurable: established states=700
+Agreement: refuted state=(1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0) depth=10 violations=28
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Submit(n=c,epoch=0,value=v1) ; Submit(n=c,epoch=0,value=v0) ; Sync(n=c,epoch=0) ; Submit(n=b,epoch=0,value=v1) ; Submit(n=b,epoch=0,value=v0) ; Sync(n=b,epoch=0) ; Ack(epoch=0,value=v1) ; Ack(epoch=0,value=v0)
+OneValuePerSlot: refuted state=(0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1) depth=3 violations=452
+  witness: Reserve(n=c,epoch=0) ; Submit(n=c,epoch=0,value=v1) ; Submit(n=c,epoch=0,value=v0)
+deadlock established states=700
+correspondence: steps=4155 stutters=3832 chooses=160 realized=2 covered=3 failures=163
+  failing steps from projectable states: 56
+  first: NotAnEnabledChoose Ack(epoch=0,value=v0) from log[a0=v0 a0=v1 b0=v0 b0=v1] reserved[] acks[0=v1] to log[a0=v0 a0=v1 b0=v0 b0=v1] reserved[] acks[0=v0 0=v1]
+durability step violations: 0
+
+[pr16-impl02-neg-04-one-replica-quorum]
+seeded bug, shadow of M05: one durable replica counts as a quorum
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 428 }
+AckedIsDurable: refuted state=(0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0) depth=4 violations=180
+  witness: Reserve(n=c,epoch=0) ; Submit(n=c,epoch=0,value=v1) ; Sync(n=c,epoch=0) ; Ack(epoch=0,value=v1)
+Agreement: refuted state=(1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0) depth=8 violations=30
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Submit(n=c,epoch=0,value=v0) ; Sync(n=c,epoch=0) ; Submit(n=b,epoch=0,value=v1) ; Sync(n=b,epoch=0) ; Ack(epoch=0,value=v1) ; Ack(epoch=0,value=v0)
+OneValuePerSlot: established states=428
+deadlock established states=428
+correspondence: steps=2284 stutters=1922 chooses=182 realized=2 covered=3 failures=180
+  failing steps from projectable states: 60
+  first: NotAnEnabledChoose Ack(epoch=0,value=v0) from log[a0=v0 b0=v1] reserved[] acks[0=v1] to log[a0=v0 b0=v1] reserved[] acks[0=v0 0=v1]
+durability step violations: 0
+
+[pr16-impl02-neg-05-retract]
+seeded bug outside the invariants: Retract withdraws an acknowledgement
+model: slots=11 actions=25 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 248 }
+AckedIsDurable: established states=248
+Agreement: established states=248
+OneValuePerSlot: established states=248
+deadlock established states=248
+correspondence: steps=1700 stutters=1636 chooses=32 realized=2 covered=3 failures=32
+  failing steps from projectable states: 32
+  first: NotAStutter Retract(epoch=0,value=v0) from log[a0=v0 b0=v0] reserved[] acks[0=v0] to log[a0=v0 b0=v0] reserved[] acks[]
+durability step violations: 32
+
+[pr16-impl02-neg-06-release-without-sync]
+seeded bug outside the invariants: Abort after Submit leaves unsynced bytes as if synced
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 248 }
+AckedIsDurable: established states=248
+Agreement: established states=248
+OneValuePerSlot: established states=248
+deadlock established states=248
+correspondence: steps=1432 stutters=1400 chooses=32 realized=2 covered=3 failures=0
+  failing steps from projectable states: 0
+durability step violations: 228
+
+[pr16-impl02-bnd-01-default-limits]
+the committed configuration under Limits::default()
+lowering: refused Unlowerable(WorkLimitExceeded)
+
+[pr16-impl02-bnd-02-counted-crashes-claim-a]
+crashes counted at the claim-A scope: the counter triples the init domain
+lowering: refused Unlowerable(InitDomainTooLarge)
+
+[pr16-impl02-bnd-03-ack-before-sync-no-crash]
+M01 without Lose: no crash, so the early acknowledgement is never contradicted
+model: slots=11 actions=17 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 328 }
+AckedIsDurable: refuted state=(0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1) depth=5 violations=80
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Submit(n=c,epoch=0,value=v1) ; Submit(n=b,epoch=0,value=v1) ; Ack(epoch=0,value=v1)
+Agreement: established states=328
+OneValuePerSlot: established states=328
+deadlock established states=328
+correspondence: steps=1112 stutters=1000 chooses=112 realized=2 covered=3 failures=0
+  failing steps from projectable states: 0
+durability step violations: 0
+
+[pr16-impl02-bnd-04-disjoint-quorums]
+the correct register under quorums {a} and {b,c}, which do not intersect
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Complete { states: 300 }
+AckedIsDurable: established states=300
+Agreement: refuted state=(1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0) depth=11 violations=2
+  witness: Reserve(n=c,epoch=0) ; Reserve(n=b,epoch=0) ; Reserve(n=a,epoch=0) ; Submit(n=c,epoch=0,value=v0) ; Sync(n=c,epoch=0) ; Submit(n=b,epoch=0,value=v0) ; Sync(n=b,epoch=0) ; Submit(n=a,epoch=0,value=v1) ; Sync(n=a,epoch=0) ; Ack(epoch=0,value=v1) ; Ack(epoch=0,value=v0)
+OneValuePerSlot: established states=300
+deadlock established states=300
+correspondence: steps=1512 stutters=1422 chooses=82 realized=2 covered=3 failures=8
+  failing steps from projectable states: 4
+  first: NotAnEnabledChoose Ack(epoch=0,value=v0) from log[a0=v0 b0=v1 c0=v1] reserved[] acks[0=v1] to log[a0=v0 b0=v1 c0=v1] reserved[] acks[0=v0 0=v1]
+durability step violations: 0
+
+[pr16-impl02-bnd-05-depth-bound]
+M01 at one epoch under a depth bound of 6
+model: slots=11 actions=23 predicates=AckedIsDurable,Agreement,OneValuePerSlot
+scope: Bounded { states: 178, tripped: Depth, frontier: 68 }
+AckedIsDurable: refuted state=(0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1) depth=5 violations=30
+  witness: none (the exploration reached its depth bound after 178 states, so no path from it is known to be shortest)
+Agreement: inconclusive reason=ResourceExhausted tripped=depth explored=178 frontier=68
+OneValuePerSlot: inconclusive reason=ResourceExhausted tripped=depth explored=178 frontier=68
+deadlock inconclusive reason=ResourceExhausted tripped=depth explored=178 frontier=68

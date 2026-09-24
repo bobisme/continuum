@@ -1,0 +1,138 @@
+module DurableRegister
+
+// The operational durable register (START_HERE PR 16, second bullet): the replicas and
+// the storage path of the replicated register (examples/replicated_register.md,
+// "Operational protocol"), below the abstract atomic register
+// (examples/abstract_register.ctm), which it refines.
+//
+// It abstracts the protocol to a storage-level voting register: there is no
+// coordinator, no `Prepare`, `Prepared`, or `Commit` message, and no process epoch.
+// `Ack` reads replica durability directly. `Agreement` rests on two facts only: a
+// replica slot takes one value, and every two quorums intersect.
+//
+// Each replica keeps one log slot per epoch. A write to a slot goes through three
+// steps: `Reserve` takes a write permit for the slot, `Submit` puts the bytes in the
+// replica's volatile log (the page cache), and `Sync` makes them durable. A reserved
+// write that is cancelled is released by `Abort`. `Lose` is a crash: the replica loses
+// an in-flight write, its bytes or its permit. A durable record is never lost. `Ack`
+// publishes an acknowledgement for `(epoch, value)` once a quorum holds that value
+// durably: "an acknowledgement means the value is stable on a configured quorum"
+// (replicated_register.md, "Service contract").
+//
+// Storage. `log` holds the bytes each replica's log has for each epoch, volatile or
+// durable. `pending` holds the slots with a write in flight: reserved (no bytes yet) or
+// submitted (bytes not yet synced). So a slot is in one of four states: free (no bytes,
+// not pending), reserved (no bytes, pending), volatile (bytes, pending), and durable
+// (bytes, not pending). The volatile log is `log` at the pending slots, and the durable
+// log is `log` at the others.
+//
+// Crash. A crash of replica `n` loses every write in flight at `n` and nothing else.
+// `Lose(n, epoch, value)` loses one of them, so a crash of `n` is the sequence of
+// `Lose` steps over the slots in flight at `n`, and the register has every
+// crash-and-restart behaviour of its replicas, with any number of crashes. It also
+// has partial losses, which only widen what is checked. A crash that keeps an unsynced
+// write (RFC 0007) is a `Sync` before the crash. Crash is not a counted fault
+// here: a crash counter would triple the state domain, past the lowering's
+// init-enumeration limit at three nodes, two values, and two epochs. A writer
+// cancelled after `Submit` needs no step of its own: its bytes stay volatile until a
+// `Sync` or a `Lose`.
+//
+// Refinement. The abstract register's `chosen` is the set of acknowledgements, `acks`,
+// read as a map, and its `history` is the graph of `chosen`. `Ack(epoch, value)` maps to
+// `Choose(epoch, value)`; every other step stutters (replicated_register.md, acceptance
+// claim C). The concrete `Agreement` is the abstract one read through that map.
+
+type Node
+type Value
+
+// The configured quorums. Every two of them must intersect for `Agreement` to hold.
+const Quorum: Set[Set[Node]]
+
+state {
+  log: Set[(Node, Nat, Value)]
+  pending: Set[(Node, Nat)]
+  acks: Set[(Nat, Value)]
+}
+
+init {
+  log = {}
+  pending = {}
+  acks = {}
+}
+
+// Replica `n` holds `value` at `epoch` durably: the bytes are in its log and synced.
+def durable(n: Node, epoch: Nat, value: Value): Bool =
+  (n, epoch, value) in log && (n, epoch) notin pending
+
+// A writer takes the permit for a free slot: no bytes there, and no write in flight.
+action Reserve(n: Node, epoch: Nat) {
+  require (n, epoch) notin pending
+  require forall v: (n, epoch, v) notin log
+  next pending = pending union {(n, epoch)}
+  unchanged log, acks
+}
+
+// A cancelled writer releases its permit before it submits any bytes.
+action Abort(n: Node, epoch: Nat) {
+  require (n, epoch) in pending
+  require forall v: (n, epoch, v) notin log
+  next pending = pending \ {(n, epoch)}
+  unchanged log, acks
+}
+
+// The writer submits the bytes of its proposal: they enter the volatile log.
+action Submit(n: Node, epoch: Nat, value: Value) {
+  require (n, epoch) in pending
+  require forall v: (n, epoch, v) notin log
+  next log = log union {(n, epoch, value)}
+  unchanged pending, acks
+}
+
+// `sync` completes: the submitted bytes are durable.
+action Sync(n: Node, epoch: Nat) {
+  require (n, epoch) in pending
+  require exists v: (n, epoch, v) in log
+  next pending = pending \ {(n, epoch)}
+  unchanged log, acks
+}
+
+// A crash of replica `n` loses its in-flight write at `epoch`: the permit, and the
+// bytes if they were submitted (`value` names them). Durable records are not touched.
+action Lose(n: Node, epoch: Nat, value: Value) {
+  require (n, epoch) in pending
+  require forall v: (n, epoch, v) in log => v == value
+  next pending = pending \ {(n, epoch)}
+  next log = log \ {(n, epoch, value)}
+  unchanged acks
+}
+
+// The coordinator acknowledges `(epoch, value)` to the client once a quorum holds it
+// durably. This is the stable-quorum step: the only step that maps to `Choose`.
+action Ack(epoch: Nat, value: Value) {
+  require exists q in Quorum: forall n in q: durable(n, epoch, value)
+  next acks = acks union {(epoch, value)}
+  unchanged log, pending
+}
+
+// abstract_register::Agreement, read through the refinement map: no epoch is ever
+// acknowledged with two values.
+invariant Agreement {
+  forall epoch, v1, v2:
+    (epoch, v1) in acks && (epoch, v2) in acks
+    => v1 == v2
+}
+
+// Durability: every acknowledged value is durable on some quorum, so no crash can
+// lose it.
+invariant AckedIsDurable {
+  forall epoch, value:
+    (epoch, value) in acks
+    => exists q in Quorum: forall n in q: durable(n, epoch, value)
+}
+
+// A replica's log holds at most one value per epoch.
+invariant OneValuePerSlot {
+  forall n, epoch, v1, v2:
+    (n, epoch, v1) in log && (n, epoch, v2) in log
+    => v1 == v2
+}

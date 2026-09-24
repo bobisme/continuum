@@ -1,0 +1,79 @@
+{
+  "schema_id": "https://continuum.dev/schema/run-config.json",
+  "schema_epoch": 1,
+  "model": "DurableRegister",
+  "bounds": {
+    "Nat": {
+      "max": 1
+    }
+  },
+  "sorts": {
+    "Node": {
+      "elements": [
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    "Value": {
+      "elements": [
+        "v0",
+        "v1"
+      ]
+    }
+  },
+  "constants": {
+    "Quorum": {
+      "set": [
+        {
+          "set": [
+            {
+              "elem": {
+                "sort": "Node",
+                "name": "a"
+              }
+            },
+            {
+              "elem": {
+                "sort": "Node",
+                "name": "b"
+              }
+            }
+          ]
+        },
+        {
+          "set": [
+            {
+              "elem": {
+                "sort": "Node",
+                "name": "a"
+              }
+            },
+            {
+              "elem": {
+                "sort": "Node",
+                "name": "c"
+              }
+            }
+          ]
+        },
+        {
+          "set": [
+            {
+              "elem": {
+                "sort": "Node",
+                "name": "b"
+              }
+            },
+            {
+              "elem": {
+                "sort": "Node",
+                "name": "c"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
