@@ -115,6 +115,10 @@
 //!   at most once per replica, as every IMPL-03 plan does. The correct protocol, the
 //!   baseline campaign and the four scenario properties are in
 //!   `support/register_baseline.rs`; a mutant is run beside that campaign.
+//! - bn-28oa (IMPL-05) added [`Built::labels`], each task's program label by ordinal,
+//!   and [`with_op`], so a program mutant can retarget or insert operations. The
+//!   mutants themselves are in `support/register_mutants.rs`. [`build`] and
+//!   [`build_with_shutdown`] build the same programs as before.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -239,6 +243,9 @@ pub struct Built {
     pub programs: Vec<Program>,
     /// Task roles by ordinal.
     pub roles: Roles,
+    /// Each task's program label, by journal ordinal, as [`Roles::tasks`] indexes them:
+    /// what a program mutant rewrites (PR-16/IMPL-05, bn-28oa).
+    pub labels: Vec<TaskLabel>,
     meta: Vec<Vec<Meta>>,
     coordinators: usize,
 }
@@ -345,6 +352,51 @@ pub fn without_op(built: &Built, actor: usize, index: usize) -> Built {
     out
 }
 
+/// `built` with `op` inserted as operation `index` of actor `actor`, with no
+/// admissibility facts of its own: a program mutant for bn-28oa. It may command only a
+/// task that no coordinator's admissibility depends on (a writer), or none.
+///
+/// # Panics
+///
+/// When the actor does not exist, `index` is past its end, or `op` commands a task that
+/// is not a writer.
+#[must_use]
+pub fn with_op(built: &Built, actor: usize, index: usize, op: SubstrateOp) -> Built {
+    let task = match &op {
+        SubstrateOp::Begin { task }
+        | SubstrateOp::Continue { task }
+        | SubstrateOp::Finish { task }
+        | SubstrateOp::Reserve { task, .. }
+        | SubstrateOp::Acquire { task, .. }
+        | SubstrateOp::Sleep { task, .. }
+        | SubstrateOp::Send { task, .. } => Some(*task),
+        _ => None,
+    };
+    assert!(
+        !matches!(op, SubstrateOp::Recv { .. }),
+        "a receive commands a coordinator"
+    );
+    if let Some(t) = task {
+        let ordinal = built.labels.iter().position(|l| *l == t);
+        assert!(
+            ordinal.is_some_and(|i| matches!(built.roles.tasks[i].0, Role::Writer { .. })),
+            "with_op commands only a writer"
+        );
+    }
+    let mut out = built.clone();
+    out.programs[actor].insert(index, op);
+    out.meta[actor].insert(
+        index,
+        Meta {
+            commands: None,
+            feeds: None,
+            recv: false,
+            last: false,
+        },
+    );
+    out
+}
+
 fn build_inner(plan: &Plan, shutdown: bool) -> Built {
     assert!((1..=2).contains(&plan.epochs), "one or two epochs");
     assert!(
@@ -358,6 +410,7 @@ fn build_inner(plan: &Plan, shutdown: bool) -> Built {
     let mut setup: Program = Vec::new();
     let mut tasks: Vec<(Role, u32)> = Vec::new();
     let mut region_ordinal = 0_u32;
+    let mut task_labels: Vec<TaskLabel> = Vec::new();
 
     // Regions and writers: every incarnation of every replica.
     let incarnations: Vec<usize> = plan
@@ -386,6 +439,7 @@ fn build_inner(plan: &Plan, shutdown: bool) -> Built {
             region.insert((n, inc), r);
             for e in 0..plan.epochs {
                 let t = TaskLabel(labels.take());
+                task_labels.push(t);
                 writer.insert((n, inc, e), t);
                 let value = values[usize::from(e)];
                 tasks.push((
@@ -411,6 +465,7 @@ fn build_inner(plan: &Plan, shutdown: bool) -> Built {
     let mut channel = BTreeMap::new();
     for (i, &(e, v, _)) in coords.iter().enumerate() {
         let t = TaskLabel(labels.take());
+        task_labels.push(t);
         tasks.push((Role::Coordinator { epoch: e, value: v }, region_ordinal));
         spawns.push((coord_region, t));
         coord_task.push(t);
@@ -600,6 +655,7 @@ fn build_inner(plan: &Plan, shutdown: bool) -> Built {
             tasks,
             regions: region_ordinal,
         },
+        labels: task_labels,
         meta,
         coordinators: coords.len(),
     }

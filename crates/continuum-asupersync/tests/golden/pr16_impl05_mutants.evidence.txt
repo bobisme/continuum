@@ -1,0 +1,123 @@
+# PR-16/IMPL-05 mutants of the replicated register (bn-28oa): each required mutant of
+# notes/plan/examples/replicated_register.md with its expected result and a deterministic
+# campaign derived from pr16-correct-baseline; tests/support/register_mutants.rs.
+# Regenerate: PR16_IMPL05_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl05_mutants
+
+[pr16-impl05-mut-00-baseline]
+campaign pr16-correct-baseline seed 104729: 357 plans, 2925 runs; identity 65f82bbde578dad46296b1fe687ad470cc8c1c5d4086164cb7868a2ccfb4e1c9 (IMPL-04's); findings none
+
+[pr16-impl05-mut-01-ack-before-sync]
+defect M01: acknowledge after volatile append but before `sync`
+mutation: plan mutant: every Confirm moves to right after its Submit, so a replica confirms bytes that are still volatile, and a restarted replica confirms again after its retry is submitted, which also breaks ConfirmTwice after the first breach
+expected: detected; protocol breach ConfirmBeforeSync; property RuntimeToAbstract with AckedNotDurable; also abstract_register::Agreement with Agreement
+campaign pr16-impl05-mut-01-ack-before-sync from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity 2bdaeb0dbc9ed38a31ba53adfb8d978af294124596f1c6bd172ef61d066472df
+plans changed 356 (runs 2924), failing 288, detecting 288; runs failing 1442, refused 0, detecting a scenario property 1442; protocol breaches ConfirmBeforeSync=356; findings abstract_register::Agreement=27085 RuntimeToAbstract=100772
+result: detected, RuntimeToAbstract with AckedNotDurable, and abstract_register::Agreement with Agreement
+witness: sweep-one-epoch plan 81 log 5 (42 choices) reproduces
+  plan epochs=1 | a[v0]: reserve0 submit0 confirm0 sync0 release0 | b[v0]: reserve0 submit0 confirm0 sync0 release0 | c[v0]: reserve0 submit0 confirm0 sync0 release0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,1,3,0,0,0,1,1,3,3,3,2,1,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding AckedNotDurable(43) at event 43 of 97; replayed: 22 findings, as recorded
+second witness: scenario plan 0 log 146 (56 choices) reproduces
+  plan epochs=1 | a[v0,v1]: reserve0 submit0 confirm0 crash-repropose0=v1 reserve0 submit0 confirm0 sync0 release0 | b[v0]: reserve0 submit0 confirm0 sync0 release0 | c[v1]: reserve0 submit0 confirm0 sync0 release0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,3,4,3,1,3,2,3,2,0,0,1,2,0,0,1,0,2,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0]
+  finding Agreement(99) at event 99 of 137; replayed: 200 findings, as recorded
+  causal story: Reserve(n=b,epoch=0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v0) Submit(n=b,epoch=0,value=v0) Reserve(n=c,epoch=0) Ack(epoch=0,value=v0) Submit(n=c,epoch=0,value=v1) Lose(n=a,epoch=0,value=v0) Reserve(n=a,epoch=0) Sync(n=b,epoch=0) Submit(n=a,epoch=0,value=v1) Sync(n=a,epoch=0) Sync(n=c,epoch=0) Ack(epoch=0,value=v1)
+
+[pr16-impl05-mut-02-lost-abort]
+defect M02: canceled sender loses a reserved message without abort
+mutation: plan mutant: the explicit Abort of a cancelled writer's permit is dropped, so the writer retries while the lost permit stays reserved. The spec's reserved message is a channel send permit; the binding's Send has no reserve phase, so the mutant uses the write permit, a Transaction. A run whose writer ends holding it is the binding's ReservationDropped refusal, an INV-008 Unsupported inconclusive, so ObligationConservation never sees the leak
+expected: detected; protocol breach ReserveHeld; property RuntimeToAbstract with Unprojectable; some runs are the typed refusal ReservationDropped, not counted
+campaign pr16-impl05-mut-02-lost-abort from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity e60224c8d393e93837aa0e46f5f19b9ecd7cb0ec23311e6db1141647b83e2a55
+plans changed 185 (runs 1110), failing 185, detecting 4; runs failing 1110, refused 1086, detecting a scenario property 24; protocol breaches ReserveHeld=185; findings run=1086 RuntimeToAbstract=1553
+result: detected, RuntimeToAbstract with Unprojectable
+witness: sample-two-epochs plan 44 log 4 (84 choices) reproduces
+  plan epochs=2 | a[v1/v0]: reserve0 submit0 sync0 release0 confirm0 reserve1 submit1 sync1 release1 confirm1 | b[v0/v0,v0/v0]: reserve0 reserve0 submit0 sync0 release0 confirm0 reserve1 submit1 crash reserve1 submit1 sync1 release1 confirm1 | c[v0/v1]: reserve1 submit1 sync1 release1 confirm1
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,4,1,5,3,1,1,0,3,1,1,1,0,1,2,2,0,2,2,1,1,2,0,1,1,0,1,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Refinement(Unprojectable, 51) at event 51 of 208; replayed: 43 findings, as recorded
+
+[pr16-impl05-mut-03-stale-epoch]
+defect M03: restart reuses the old process epoch
+mutation: program mutant: every command to a restarted incarnation's writer, the shutdown's Finish included, goes to the first incarnation's writer of that epoch, so the new process acts in the epoch the crash cancelled
+expected: excluded by the substrate: typed refusal TaskEnded on every run, the binding's check for a command to an ended task, with no INV-008 reason, on every changed plan; residual, not covered here: a stale epoch carried in message or record data, accepted by a receiver that compares epochs; the program's messages and records carry no data, so it needs data-carrying Prepare, Prepared and Commit messages
+campaign pr16-impl05-mut-03-stale-epoch from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity ec03f8780b1f85adb5b645290eb62270bd4f1c353906d5821cea44009e8c5be3
+plans changed 336 (runs 2804), failing 336, detecting 0; runs failing 2804, refused 2804, detecting a scenario property 0; protocol breaches none; findings run=2804
+result: excluded, every run of the 336 changed plans is the typed refusal TaskEnded, the binding's check with no INV-008 reason; no detection claimed
+witness: sweep-one-epoch plan 7 log 0 (31 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: idle | c[v0,v0]: reserve0 submit0 sync0 crash confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Refused("task t2 has ended and cannot take a command") the binding refuses the log; replayed: 1 findings, as recorded
+
+[pr16-impl05-mut-04-duplicate-commit]
+defect M04: duplicate `Commit` is not idempotent
+mutation: plan mutant: after each Confirm the replica applies the same Commit again, a second reserve, submit, sync and release of the slot it already holds durably
+expected: detected; protocol breach RewriteDurable; property RuntimeToAbstract with Unprojectable
+campaign pr16-impl05-mut-04-duplicate-commit from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity c2230fde304b7d86085b6aabec515cfdb9b0e54f67c7f3f294784fd74b7743b2
+plans changed 356 (runs 2924), failing 356, detecting 356; runs failing 2924, refused 0, detecting a scenario property 2924; protocol breaches RewriteDurable=356; findings RuntimeToAbstract=257670
+result: detected, RuntimeToAbstract with Unprojectable
+witness: sweep-one-epoch plan 1 log 5 (32 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: idle | c[v0]: reserve0 submit0 sync0 release0 confirm0 reserve0 submit0 sync0 release0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Refinement(Unprojectable, 34) at event 34 of 70; replayed: 36 findings, as recorded
+
+[pr16-impl05-mut-05-double-count]
+defect M05: coordinator counts one replica twice across restart
+mutation: plan mutant: a restarted replica confirms again every epoch its crashed incarnation confirmed, and the coordinator counts confirmations, so it counts that replica twice
+expected: detected; protocol breach ConfirmTwice; property RuntimeToAbstract with AckedNotDurable; also abstract_register::Agreement with Agreement
+campaign pr16-impl05-mut-05-double-count from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity d321e0b8257a819a1622f646ebf8ffd7b4bc22a919236d182ed29e18f4cfe1a3
+plans changed 105 (runs 1024), failing 71, detecting 71; runs failing 266, refused 0, detecting a scenario property 266; protocol breaches ConfirmTwice=105; findings abstract_register::Agreement=6329 RuntimeToAbstract=22971
+result: detected, RuntimeToAbstract with AckedNotDurable, and abstract_register::Agreement with Agreement
+witness: sweep-one-epoch plan 8 log 2 (36 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: idle | c[v0,v0]: reserve0 submit0 sync0 release0 confirm0 crash confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding AckedNotDurable(58) at event 58 of 90; replayed: 65 findings, as recorded
+second witness: sweep-one-epoch plan 96 log 2 (54 choices) reproduces
+  plan epochs=1 | a[v0]: reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1,v1]: reserve0 submit0 sync0 release0 confirm0 crash confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,2,2,2,3,2,0,0,0,0,2,0,0,0,1,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Agreement(103) at event 103 of 138; replayed: 106 findings, as recorded
+
+[pr16-impl05-mut-06-orphan]
+defect M06: loser task from a quorum race is not drained
+mutation: program mutant: the shutdown does not finish the loser of a quorum race, the coordinator of a value that fewer than two replicas confirm in an epoch where another value gets a majority. The program has no race or quorum combinator and no per-reply task, so the loser is that coordinator; its detection is the one IMPL-04's missing-Finish probe shows, on exactly the plans that have a loser
+expected: detected; protocol breach none, a program mutant; property asupersync::Quiescence with CoordinatorLive
+campaign pr16-impl05-mut-06-orphan from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity ec21a465a353d49bdeca36e2e72b8e29e4d12a5d445e1bb24a342da5632aa52b
+plans changed 196 (runs 1570), failing 196, detecting 196; runs failing 1570, refused 0, detecting a scenario property 1570; protocol breaches none; findings asupersync::Quiescence=4764
+result: detected, asupersync::Quiescence with CoordinatorLive
+witness: sweep-one-epoch plan 89 log 0 (45 choices) reproduces
+  plan epochs=1 | a[v0]: reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1]: reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,1,0,2,1,3,1,2,1,1,1,0,2,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Quiescence(TaskLive(4)) at the end, 107 events; replayed: 3 findings, as recorded
+
+[pr16-impl05-mut-07-torn-tail]
+defect M07: recovery ignores checksum/truncated-tail state
+mutation: plan mutant: a replica that crashes after its submit and before its sync recovers the lost record as if it were durable: its next incarnation keeps the old value and confirms it without writing
+expected: detected; protocol breach ConfirmBeforeSync; property RuntimeToAbstract with AckedNotDurable
+campaign pr16-impl05-mut-07-torn-tail from pr16-correct-baseline: seed 104729, 357 plans, 2923 runs; identity de3b8bdb62bb9172a3a10d4b3a417e6b92e58ddeb87580d561da68edc8163100
+plans changed 156 (runs 1328), failing 105, detecting 105; runs failing 942, refused 0, detecting a scenario property 942; protocol breaches ConfirmBeforeSync=156; findings RuntimeToAbstract=71146
+result: detected, RuntimeToAbstract with AckedNotDurable
+witness: sweep-one-epoch plan 12 log 3 (38 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v0,v0]: reserve0 submit0 crash confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding AckedNotDurable(62) at event 62 of 94; replayed: 65 findings, as recorded
+
+[pr16-impl05-mut-08-stale-timer]
+defect M08: timer from an old epoch fires in a new process
+mutation: program mutant: before each crash the in-flight writer arms a timer (Sleep), and after the crash the clock advances past its deadline, so the timer comes due in the new process
+expected: excluded by the substrate: typed TimeEvent::Cancelled for every armed timer the crash overtakes, and no timer fired after its epoch is cancelled, by the binding's bookkeeping over the substrate's trace, on every changed plan; residual, not covered here: a timer armed outside the incarnation's region, whose firing carries the old epoch into the new process; the binding's timers carry no data and the correct program has no timers, so it needs data-carrying timer callbacks
+campaign pr16-impl05-mut-08-stale-timer from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity f57f32db8c688c0cd6a6d5a1ec6a3ccdd4c13c204be529ad5676cb4723a3a5ba
+plans changed 336 (runs 2804), failing 0, detecting 0; runs failing 0, refused 0, detecting a scenario property 0; protocol breaches none; findings none
+result: excluded, timers scheduled 4184, cancelled 3875, fired 309, fired after their task's region was cancelled 0; no finding; no detection claimed
+
+[pr16-impl05-mut-09-submitted-as-chosen]
+defect M09: view maps `Submitted` storage to abstract `Chosen`
+mutation: none: a mutant of the refinement view, not of the program
+expected: deferred to bn-2et (PR 17 concrete/abstract projection) and bn-1mm (mutants fail at mapped transitions): it changes the refinement view, which PR 17 owns; the program is unchanged
+campaign: none
+result: deferred
+
+[pr16-impl05-mut-10-same-epoch-commute]
+defect M10: independence rule says two writes to same epoch commute
+mutation: none: a mutant of the independence relation, not of the program
+expected: deferred to bn-voq4 (C005, baseline DPOR): it changes the independence relation DPOR reduces with; no campaign here uses one
+campaign: none
+result: deferred
+

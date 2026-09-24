@@ -96,6 +96,9 @@
 //! gives each plan's first [`Finding`] and its property. [`discipline`] names the rule a
 //! mutated plan breaks, as the mutant's expected intent. M05 can be written only as a
 //! replica script that breaks [`Breach::ConfirmTwice`] (see the scope above).
+//!
+//! bn-28oa used these hooks: the mutants are in `support/register_mutants.rs`, and
+//! [`Tally::timers`] counts the virtual timers the stale-timer mutant sets.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -105,6 +108,7 @@ use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::family::channel::ChannelEvent;
 use continuum_asupersync::family::lifecycle::{LifecycleEvent, TaskStep};
 use continuum_asupersync::family::obligation::{Discharge, ObligationEvent};
+use continuum_asupersync::family::time::TimeEvent;
 use continuum_asupersync::family::{EventBody, Family};
 use continuum_asupersync::journal::Journal;
 use continuum_asupersync::lift::{LiftVerdict, lift};
@@ -841,6 +845,10 @@ pub struct Tally {
     pub finalized: usize,
     /// Messages sent.
     pub sent: usize,
+    /// Virtual timers scheduled, fired, cancelled, and fired after their task's region
+    /// was cancelled: a timer of an old epoch firing in the new one. The correct program
+    /// sets none; the IMPL-05 stale-timer mutant M08 does (bn-28oa).
+    pub timers: [usize; 4],
 }
 
 impl Tally {
@@ -855,6 +863,9 @@ impl Tally {
         self.cancelled += other.cancelled;
         self.finalized += other.finalized;
         self.sent += other.sent;
+        for (a, b) in self.timers.iter_mut().zip(other.timers) {
+            *a += b;
+        }
     }
 }
 
@@ -873,11 +884,18 @@ pub fn settle(
     let mut open = BTreeSet::new();
     let mut sent = BTreeSet::new();
     let mut received = BTreeSet::new();
+    let mut region_of: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut timer_task: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut cancelled_regions = BTreeSet::new();
     for event in journal.events() {
         match event.body() {
-            EventBody::Lifecycle(LifecycleEvent::TaskSpawned { task, .. }) => {
+            EventBody::Lifecycle(LifecycleEvent::TaskSpawned { task, region, .. }) => {
                 tally.tasks += 1;
                 live.insert(task.0);
+                region_of.insert(task.0, region.0);
+            }
+            EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { region }) => {
+                cancelled_regions.insert(region.0);
             }
             EventBody::Lifecycle(LifecycleEvent::TaskStepped { task, step }) => match step {
                 TaskStep::Complete | TaskStep::Cancel => {
@@ -941,6 +959,18 @@ pub fn settle(
             EventBody::Channel(ChannelEvent::Received { channel, message }) => {
                 received.insert((channel.0, message.0));
             }
+            EventBody::Time(TimeEvent::Scheduled { timer, task, .. }) => {
+                tally.timers[0] += 1;
+                timer_task.insert(timer.0, task.0);
+            }
+            EventBody::Time(TimeEvent::Fired { timer, .. }) => {
+                tally.timers[1] += 1;
+                let region = timer_task.get(&timer.0).and_then(|t| region_of.get(t));
+                if region.is_some_and(|r| cancelled_regions.contains(r)) {
+                    tally.timers[3] += 1;
+                }
+            }
+            EventBody::Time(TimeEvent::Cancelled { .. }) => tally.timers[2] += 1,
             _ => {}
         }
     }
