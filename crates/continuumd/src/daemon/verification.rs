@@ -1484,7 +1484,10 @@ fn result(
     };
     let mut effect = Effect::new(payload, Nullable::Value(Verdict::Semantic(verdict)))
         .observing(entry.handle.clone());
-    effect.assurance = Optional::Present(assurance(campaign.as_deref()));
+    effect.assurance = Optional::Present(assurance(
+        campaign.as_deref(),
+        state.models().get(&entry.model),
+    ));
     effect.omissions = [entry.omissions(), coverage()].concat();
     // `verification.await` is `@task_starting` and `verification.result` is not, so only
     // the first may report a parked task on the `task_suspended` lane. The asymmetry is
@@ -1664,12 +1667,13 @@ fn coverage() -> Vec<Omission> {
 /// > — `rule envelope.assurance_required`
 ///
 /// Three dimensions name [`ENGINE`] because it genuinely produced them; six carry a typed
-/// reason because this engine declares no fault model, no fairness constraint, no
-/// concurrency, no memory model, no observer and no certificate. Every summary is a stable
-/// machine token — docs/03 §3's own scope names, and the IDL's own
+/// reason because this engine declares no fault model, no concurrency, no memory model, no
+/// observer and no certificate, and — see [`fairness_dimension`] — either declares no
+/// fairness assumption or declares one this campaign does not consume. Every summary is a
+/// stable machine token — docs/03 §3's own scope names, and the IDL's own
 /// `sequential-consistency-only` example — and none of them interpolates anything
 /// (`rule envelope.no_prose`).
-fn assurance(campaign: Option<&Campaign>) -> AssuranceEnvelope {
+fn assurance(campaign: Option<&Campaign>, model: Option<&Model>) -> AssuranceEnvelope {
     let scope = campaign.map_or("no-exploration", |campaign| match campaign.report.scope() {
         Scope::Complete { .. } => "exhaustive-finite",
         Scope::Bounded { .. } => "bounded-states",
@@ -1677,7 +1681,7 @@ fn assurance(campaign: Option<&Campaign>) -> AssuranceEnvelope {
     AssuranceEnvelope {
         bounds: produced(scope),
         faults: unsupported_dimension("no-fault-model"),
-        fairness: unsupported_dimension("no-fairness-model"),
+        fairness: fairness_dimension(model),
         values: produced("finite-declared-domains"),
         schedules: unsupported_dimension("no-concurrency-model"),
         memory_model: unsupported_dimension("sequential-consistency-only"),
@@ -1688,6 +1692,36 @@ fn assurance(campaign: Option<&Campaign>) -> AssuranceEnvelope {
         } else {
             "bounded-frontier"
         }),
+    }
+}
+
+/// The `fairness` dimension of the nine-dimension envelope, honest about what
+/// [`Model::fairness`] declares and about what this daemon's finite reachability engine
+/// actually consumes (bn-rkrt7, following bn-1ln12).
+///
+/// This binding's `obligations` builds invariant obligations only — `Fragment::Temporal` is
+/// unsupported (see [`coverage`]), so no run through [`run`] ever calls
+/// `continuum_engine_reference::liveness`, the one consumer [`Model::fairness`] has
+/// (`continuum-model-core/src/model.rs`: "consumed by the reference engine's liveness
+/// check … A safety check … [ignores] them, as [it] must: fairness constrains infinite
+/// executions only"). So this dimension is never `produced` here — claiming a liveness
+/// result under a fairness this engine did not use is exactly what it must never do — but
+/// "the model has none" and "the model has one this check does not reach" are different
+/// facts, and INV-003/`rule envelope.no_prose` forbid collapsing them into one token that is
+/// false half the time:
+///
+/// - no model, or a model with an empty [`Model::fairness`]: `no-fairness-model`, unchanged
+///   from before this bone.
+/// - a model whose [`Model::fairness`] is non-empty: `fairness-declared-unused`, naming the
+///   real fact — the model carries a fairness assumption — without interpolating its
+///   strength or scope (`rule envelope.no_prose` keeps a summary a stable token, not a
+///   rendering of the model's own declarations) and without claiming this campaign used it.
+fn fairness_dimension(model: Option<&Model>) -> EnvelopeDimension {
+    match model {
+        Some(model) if !model.fairness().is_empty() => {
+            unsupported_dimension("fairness-declared-unused")
+        }
+        Some(_) | None => unsupported_dimension("no-fairness-model"),
     }
 }
 
@@ -1734,4 +1768,96 @@ pub(super) fn no_model() -> Fault {
         "this daemon compiles no CML source; it verifies the models a deployment registered, \
          and the named snapshot's modules are not one of them",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use continuum_engine_reference::model::{ActionDecl, ModelBuilder};
+    use continuum_engine_reference::{BoolExpr, IntExpr, Strength};
+
+    use super::{EnvelopeDimension, fairness_dimension};
+
+    /// A minimal model with no declared actions worth fairness over, and no fairness
+    /// declaration — [`ModelBuilder::fairness`] untouched.
+    fn plain_model() -> continuum_engine_reference::model::Model {
+        ModelBuilder::new()
+            .variable("x", 0, 1)
+            .initial_state(&[("x", 0)])
+            .action(ActionDecl::deterministic(
+                "A",
+                BoolExpr::Const(true),
+                vec![("x", IntExpr::constant(1))],
+            ))
+            .build()
+            .expect("a two-state model with one action builds")
+    }
+
+    /// The same model, plus one weak fairness assumption over `A` (bn-1ln12).
+    fn fair_model() -> continuum_engine_reference::model::Model {
+        ModelBuilder::new()
+            .variable("x", 0, 1)
+            .initial_state(&[("x", 0)])
+            .action(ActionDecl::deterministic(
+                "A",
+                BoolExpr::Const(true),
+                vec![("x", IntExpr::constant(1))],
+            ))
+            .fairness(Strength::Weak, ["A"])
+            .build()
+            .expect("the same model plus one fairness assumption builds")
+    }
+
+    fn reason(dimension: &EnvelopeDimension) -> &str {
+        match dimension {
+            EnvelopeDimension::Unsupported(unsupported) => unsupported.reason.as_str(),
+            EnvelopeDimension::Produced(_) => {
+                panic!("this daemon runs no liveness check, so `fairness` is never `produced`")
+            }
+        }
+    }
+
+    /// No `Model` at all — a cached or re-derived result over a source this catalog no
+    /// longer holds — reads exactly as a model with no fairness does.
+    #[test]
+    fn no_model_reports_no_fairness_model() {
+        assert_eq!(reason(&fairness_dimension(None)), "no-fairness-model");
+    }
+
+    /// A model without fairness reports `no-fairness-model`, unchanged (bn-rkrt7).
+    #[test]
+    fn a_model_without_fairness_reports_no_fairness_model() {
+        let model = plain_model();
+        assert_eq!(
+            reason(&fairness_dimension(Some(&model))),
+            "no-fairness-model"
+        );
+    }
+
+    /// A model with a declared fairness assumption reports that it has one, and the token
+    /// is not the one a fairness-free model reports (bn-rkrt7, following bn-1ln12).
+    #[test]
+    fn a_model_with_fairness_reports_it() {
+        let model = fair_model();
+        let dimension = fairness_dimension(Some(&model));
+        assert_eq!(reason(&dimension), "fairness-declared-unused");
+        assert_ne!(reason(&dimension), "no-fairness-model");
+    }
+
+    /// This daemon's finite reachability engine never runs a liveness check, so `fairness`
+    /// is `unsupported` for every model this catalog can hold — declared or not — never
+    /// `produced`: a `produced` fairness dimension would claim a liveness verdict was
+    /// established under it, which this engine binding never does.
+    #[test]
+    fn fairness_is_never_produced_regardless_of_the_model() {
+        for dimension in [
+            fairness_dimension(None),
+            fairness_dimension(Some(&plain_model())),
+            fairness_dimension(Some(&fair_model())),
+        ] {
+            assert!(
+                matches!(dimension, EnvelopeDimension::Unsupported(_)),
+                "a liveness result must never overstate the fairness the engine used"
+            );
+        }
+    }
 }
