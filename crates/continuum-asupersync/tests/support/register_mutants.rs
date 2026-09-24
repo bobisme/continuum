@@ -59,6 +59,22 @@
 //! result rests on it ([`FAIL_STOP`]) are rerun with each crash fail-stop
 //! ([`mutant_fail_stop`], `register::FAIL_STOP_SEMANTICS`), each with its own expected
 //! result ([`expected_fail_stop`]).
+//!
+//! # The carried reruns (bn-2faf1)
+//!
+//! M03 and M08 are excluded above by task identity: a command to a prior incarnation's
+//! task is `TaskEnded` or `TaskCrashed`, and a crash cancels or fences the incarnation's
+//! own timers. The version of each defect that identity does not exclude is a stale epoch
+//! carried in data. [`CARRIED`] reruns each against the carrier its defect names
+//! ([`carrier_of`], `register::build_carried`), under both crash semantics, beside the
+//! correct program with the same carrier ([`carrier_baseline`]), which must have no
+//! finding. The mutant changes only the fence ([`carried_fence`]): M03's restart reuses
+//! the old process epoch, so the receiver's check passes on the late completion of the
+//! crashed incarnation's submit; M08's timer delivery skips the check. Each rerun has a
+//! typed expected result ([`expected_carried`]), checked by the tests
+//! `carried_mut_03_stale_epoch_in_a_message_is_detected` and
+//! `carried_mut_08_stale_timer_payload_is_detected`. Nothing here records when it was
+//! written relative to a run.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -67,7 +83,7 @@ use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::family::lifecycle::TaskLabel;
 
 use crate::baseline::{self, Breach, Campaign, Finding, Outcome, Property, RunReport};
-use crate::register::{self, Act, Built, CrashMode, Plan, Role};
+use crate::register::{self, Act, Built, Carrier, CrashMode, Fence, Plan, Role};
 
 /// The required mutants of `replicated_register.md`, by their IDs there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -396,10 +412,11 @@ pub const fn expected(id: Id) -> Expected {
         },
         Id::M03 => Expected::Excluded {
             exclusion: Exclusion::EpochFenced,
-            residual: "a stale epoch carried in message or record data, accepted by a \
-                       receiver that compares epochs; the program's messages and records \
-                       carry no data, so it needs data-carrying Prepare, Prepared and \
-                       Commit messages",
+            residual: "a stale epoch carried in message data, accepted by a receiver \
+                       that compares epochs, is not expressible through task identity; the \
+                       carried lines below run it against a message carrier (bn-2faf1); a \
+                       stale epoch in record data is not modeled, since the durable \
+                       records carry no epoch",
         },
         Id::M04 => Expected::Detected {
             breach: Some(Breach::RewriteDurable),
@@ -428,9 +445,10 @@ pub const fn expected(id: Id) -> Expected {
         Id::M08 => Expected::Excluded {
             exclusion: Exclusion::TimerDropped,
             residual: "a timer armed outside the incarnation's region, whose firing \
-                       carries the old epoch into the new process; the binding's timers \
-                       carry no data and the correct program has no timers, so it needs \
-                       data-carrying timer callbacks",
+                       carries the old epoch into the new process, is not expressible \
+                       through a timer of the incarnation's own tasks; the carried lines \
+                       below run it against a timer carrier on the node's supervisor \
+                       (bn-2faf1)",
         },
         Id::M09 => Expected::Deferred {
             owner: "bn-2et (PR 17 concrete/abstract projection) and bn-1mm (mutants fail at mapped transitions)",
@@ -899,10 +917,11 @@ pub const fn expected_fail_stop(id: Id) -> Option<Expected> {
         },
         Id::M03 => Expected::Excluded {
             exclusion: Exclusion::EpochFencedByCrash,
-            residual: "a stale epoch carried in message or record data, accepted by a \
-                       receiver that compares epochs; the program's messages and records \
-                       carry no data, so it needs data-carrying Prepare, Prepared and \
-                       Commit messages",
+            residual: "a stale epoch carried in message data, accepted by a receiver \
+                       that compares epochs, is not expressible through task identity; the \
+                       carried lines below run it against a message carrier (bn-2faf1); a \
+                       stale epoch in record data is not modeled, since the durable \
+                       records carry no epoch",
         },
         Id::M07 => Expected::Detected {
             breach: Some(Breach::ConfirmBeforeSync),
@@ -913,9 +932,10 @@ pub const fn expected_fail_stop(id: Id) -> Option<Expected> {
         Id::M08 => Expected::Excluded {
             exclusion: Exclusion::TimerFenced,
             residual: "a timer armed outside the incarnation's region, whose firing \
-                       carries the old epoch into the new process; the binding's timers \
-                       carry no data and the correct program has no timers, so it needs \
-                       data-carrying timer callbacks",
+                       carries the old epoch into the new process, is not expressible \
+                       through a timer of the incarnation's own tasks; the carried lines \
+                       below run it against a timer carrier on the node's supervisor \
+                       (bn-2faf1)",
         },
         _ => return None,
     })
@@ -995,6 +1015,265 @@ pub fn changed_fail_stop(m: &Mutant, base: &Campaign, group: usize, plan: usize)
         (m.builder)(before).map(|b| b.programs)
             != Ok(register::build_with_shutdown_in(before, CrashMode::FailStop).programs)
     }
+}
+
+// ---------------------------------------------------------------------------
+// the carried reruns (bn-2faf1)
+// ---------------------------------------------------------------------------
+
+/// The mutants rerun against a process epoch carried in data (bn-2faf1): the two whose
+/// graceful and fail-stop results are exclusions by task identity. Each is run against the
+/// carrier its defect names ([`carrier_of`]) under both crash semantics.
+pub const CARRIED: [Id; 2] = [Id::M03, Id::M08];
+
+/// The carrier a rerun mutant is run against: M03's "restart reuses the old process
+/// epoch" against a message, M08's "timer from an old epoch fires in a new process"
+/// against a timer payload.
+#[must_use]
+pub const fn carrier_of(id: Id) -> Carrier {
+    match id {
+        Id::M08 => Carrier::Timer,
+        _ => Carrier::Message,
+    }
+}
+
+/// The program change each carried rerun makes: M03's restart takes the process epoch of
+/// the incarnation before it, so a carried epoch check passes on a stale epoch; M08's
+/// timer delivery skips the epoch check. The carrier, its sites and every other operation
+/// are the correct program's.
+#[must_use]
+pub const fn carried_fence(id: Id) -> Fence {
+    match id {
+        Id::M03 => Fence {
+            reuse_epoch: true,
+            check_timers: true,
+        },
+        Id::M08 => Fence {
+            reuse_epoch: false,
+            check_timers: false,
+        },
+        _ => register::CORRECT_FENCE,
+    }
+}
+
+/// How each carried rerun is written.
+#[must_use]
+pub const fn carried_mutation(id: Id) -> &'static str {
+    match id {
+        Id::M03 => {
+            "program mutant against the message carrier: a restarted incarnation takes the \
+             process epoch of the one before it, so the late completion that the crashed \
+             incarnation's pending submit sends, which names that epoch, passes the \
+             receiver's epoch check, and the new process confirms the lost write"
+        }
+        Id::M08 => {
+            "program mutant against the timer carrier: the supervisor's timer delivery is \
+             not held to the epoch check, so the payload of the timer the crashed \
+             incarnation armed on its pending submit, which names the old epoch, is acted \
+             on in the new process, which confirms the lost write"
+        }
+        _ => "",
+    }
+}
+
+/// A carried campaign's name and evidence ID.
+#[must_use]
+pub const fn carried_name(id: Id, mode: CrashMode) -> &'static str {
+    match (id, mode) {
+        (Id::M03, CrashMode::Graceful) => "pr16-impl05-mut-03-stale-epoch-carried",
+        (Id::M03, CrashMode::FailStop) => "pr16-impl05-mut-03-stale-epoch-carried-fail-stop",
+        (Id::M08, CrashMode::Graceful) => "pr16-impl05-mut-08-stale-timer-carried",
+        (Id::M08, CrashMode::FailStop) => "pr16-impl05-mut-08-stale-timer-carried-fail-stop",
+        _ => "",
+    }
+}
+
+/// A carrier baseline's name: the correct program, correct fence, with `carrier`.
+#[must_use]
+pub const fn carrier_baseline_name(carrier: Carrier, mode: CrashMode) -> &'static str {
+    match (carrier, mode) {
+        (Carrier::Message, CrashMode::Graceful) => "pr16-correct-baseline-carried-message",
+        (Carrier::Message, CrashMode::FailStop) => {
+            "pr16-correct-baseline-carried-message-fail-stop"
+        }
+        (Carrier::Timer, CrashMode::Graceful) => "pr16-correct-baseline-carried-timer",
+        (Carrier::Timer, CrashMode::FailStop) => "pr16-correct-baseline-carried-timer-fail-stop",
+        (Carrier::Recovery, CrashMode::Graceful) => "pr16-correct-baseline-carried-recovery",
+        (Carrier::Recovery, CrashMode::FailStop) => {
+            "pr16-correct-baseline-carried-recovery-fail-stop"
+        }
+    }
+}
+
+/// Each carried rerun's typed expected result (bn-2faf1), checked by the carried tests;
+/// `None` for a mutant not in [`CARRIED`]. The same under both crash semantics: the
+/// carrier's sites are crashes with a submit in flight, whose bytes both semantics lose
+/// (the graceful crash's cleanup aborts them, the fail-stop crash fences them and the
+/// projection reads their `Lose` from the crash). The stale confirmation then counts
+/// toward the old value's majority with no durable record under it: an ack with no
+/// durable majority (`RuntimeToAbstract`). Where the new incarnation is re-proposed the
+/// other value and confirms it too, as on the scenario plan, both values are acked for
+/// the epoch (`Agreement`). No run is expected to be refused: the carrier's operations
+/// are admissible by construction.
+#[must_use]
+pub const fn expected_carried(id: Id) -> Option<Expected> {
+    match id {
+        Id::M03 | Id::M08 => Some(Expected::Detected {
+            breach: None,
+            symptom: Symptom::AckedNotDurable,
+            also: Some(Symptom::Agreement),
+            refusal: None,
+        }),
+        _ => None,
+    }
+}
+
+fn carried_message(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::Graceful,
+        Carrier::Message,
+        register::CORRECT_FENCE,
+    ))
+}
+
+fn carried_message_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::FailStop,
+        Carrier::Message,
+        register::CORRECT_FENCE,
+    ))
+}
+
+fn carried_timer(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::Graceful,
+        Carrier::Timer,
+        register::CORRECT_FENCE,
+    ))
+}
+
+fn carried_timer_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::FailStop,
+        Carrier::Timer,
+        register::CORRECT_FENCE,
+    ))
+}
+
+fn carried_recovery(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::Graceful,
+        Carrier::Recovery,
+        register::CORRECT_FENCE,
+    ))
+}
+
+fn carried_recovery_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::FailStop,
+        Carrier::Recovery,
+        register::CORRECT_FENCE,
+    ))
+}
+
+/// The correct program with `carrier` under `mode`, as a builder.
+#[must_use]
+pub const fn carrier_builder(carrier: Carrier, mode: CrashMode) -> Builder {
+    match (carrier, mode) {
+        (Carrier::Message, CrashMode::Graceful) => carried_message,
+        (Carrier::Message, CrashMode::FailStop) => carried_message_fail_stop,
+        (Carrier::Timer, CrashMode::Graceful) => carried_timer,
+        (Carrier::Timer, CrashMode::FailStop) => carried_timer_fail_stop,
+        (Carrier::Recovery, CrashMode::Graceful) => carried_recovery,
+        (Carrier::Recovery, CrashMode::FailStop) => carried_recovery_fail_stop,
+    }
+}
+
+fn stale_epoch_carried(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::Graceful,
+        Carrier::Message,
+        carried_fence(Id::M03),
+    ))
+}
+
+fn stale_epoch_carried_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::FailStop,
+        Carrier::Message,
+        carried_fence(Id::M03),
+    ))
+}
+
+fn stale_timer_carried(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::Graceful,
+        Carrier::Timer,
+        carried_fence(Id::M08),
+    ))
+}
+
+fn stale_timer_carried_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_carried(
+        plan,
+        CrashMode::FailStop,
+        Carrier::Timer,
+        carried_fence(Id::M08),
+    ))
+}
+
+/// A carrier baseline: the baseline's plans under [`carrier_baseline_name`], with its
+/// builder. Its `id` is unused.
+#[must_use]
+pub fn carrier_baseline(carrier: Carrier, mode: CrashMode, base: &Campaign) -> Mutant {
+    Mutant {
+        id: Id::M03,
+        campaign: base.mutated(carrier_baseline_name(carrier, mode), Plan::clone),
+        builder: carrier_builder(carrier, mode),
+        plan_mutant: false,
+    }
+}
+
+/// The carried rerun of `id` under `mode`; `None` for a mutant not in [`CARRIED`].
+#[must_use]
+pub fn mutant_carried(id: Id, mode: CrashMode, base: &Campaign) -> Option<Mutant> {
+    let builder: Builder = match (id, mode) {
+        (Id::M03, CrashMode::Graceful) => stale_epoch_carried,
+        (Id::M03, CrashMode::FailStop) => stale_epoch_carried_fail_stop,
+        (Id::M08, CrashMode::Graceful) => stale_timer_carried,
+        (Id::M08, CrashMode::FailStop) => stale_timer_carried_fail_stop,
+        _ => return None,
+    };
+    Some(Mutant {
+        id,
+        campaign: base.mutated(carried_name(id, mode), Plan::clone),
+        builder,
+        plan_mutant: false,
+    })
+}
+
+/// Whether the carried rerun changed plan `plan` of group `group` against the correct
+/// program with the same carrier and crash semantics.
+#[must_use]
+pub fn changed_carried(
+    m: &Mutant,
+    mode: CrashMode,
+    base: &Campaign,
+    group: usize,
+    plan: usize,
+) -> bool {
+    let before = &base.groups[group].plans[plan];
+    (m.builder)(before).map(|b| b.programs)
+        != carrier_builder(carrier_of(m.id), mode)(before).map(|b| b.programs)
 }
 
 // ---------------------------------------------------------------------------

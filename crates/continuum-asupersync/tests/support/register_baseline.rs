@@ -1176,6 +1176,9 @@ pub struct RunReport {
     pub crash_after_ack: bool,
     /// Whether some projected state holds both values durable in one epoch.
     pub contested: bool,
+    /// A carried build's payloads, read from the journal (`register::carried_in_journal`,
+    /// bn-2faf1): received, and received and then confirmed by the receiver.
+    pub carried: [usize; 2],
 }
 
 /// Whether some epoch has two acknowledged values: `abstract_register::Agreement`
@@ -1243,6 +1246,7 @@ pub fn run_one(built: &Built, epochs: u8, log: &ChoiceLog, reachable: &BTreeSet<
         cancel_after_submit: false,
         crash_after_ack: false,
         contested: false,
+        carried: [0; 2],
     };
     let journal = match run(&built.programs, log, &config()) {
         Ok(j) => j,
@@ -1253,6 +1257,13 @@ pub fn run_one(built: &Built, epochs: u8, log: &ChoiceLog, reachable: &BTreeSet<
         }
     };
     report.digest = journal.digest().expect("digests").to_string();
+    for d in register::carried_in_journal(&built.roles, &journal)
+        .into_iter()
+        .flatten()
+    {
+        report.carried[0] += 1;
+        report.carried[1] += usize::from(d);
+    }
     let verdict = lift(&journal);
     if !matches!(verdict, LiftVerdict::Conforms(_)) {
         report
@@ -1355,6 +1366,9 @@ pub struct Outcome {
     pub crash_after_ack: usize,
     /// Runs with both values durable in one epoch.
     pub contested: usize,
+    /// Carried payloads over every run, from the journals: received, and confirmed by the
+    /// receiver (bn-2faf1).
+    pub carried: [usize; 2],
     /// Findings, by property.
     pub by_property: BTreeMap<Property, usize>,
     /// Plans that break [`discipline`], by rule.
@@ -1482,6 +1496,8 @@ pub fn execute_with(
                 out.cancel_after_submit += usize::from(r.cancel_after_submit);
                 out.crash_after_ack += usize::from(r.crash_after_ack);
                 out.contested += usize::from(r.contested);
+                out.carried[0] += r.carried[0];
+                out.carried[1] += r.carried[1];
                 out.tally.absorb(&r.tally);
                 for f in &r.findings {
                     *out.by_property.entry(f.property()).or_default() += 1;

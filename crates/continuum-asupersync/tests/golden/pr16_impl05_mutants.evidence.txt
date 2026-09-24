@@ -4,10 +4,17 @@
 # Regenerate: PR16_IMPL05_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl05_mutants
 # crash: a crash is modelled as graceful region cancellation (Cancel of the incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; a fail-stop crash, which runs no handler and fences pending completions by (node, epoch), is run separately where the evidence says fail-stop: bn-20d8u
 # fail-stop: a fail-stop crash is the binding's Crash of the incarnation's region: its tasks stop where they are and run nothing, no cancellation handler and no cleanup; the permit and the unsynced IoOp they held are fenced, never aborted, and the projection reads their Lose from the crash event; process/crash-restart-v0 row fail-stop-crash (bn-20d8u)
+# carried: a process epoch carried in data: each incarnation of a replica has a process epoch, one more than the one before it; at a replica's last crash with a submit in flight, the late completion of that submit (a message the crashed writer sends) or a timer it armed on the node's supervisor outside the incarnation's region (whose callback sends after the clock passes it) carries the crashed incarnation's process epoch, slot and value to the new incarnation right after the restart; the receiver acts on a payload, by confirming its slot and value, only when the payload names its own process epoch; the recovery carrier sends, after a crash between sync and confirm, a report that names the new incarnation's own epoch, which it confirms from; the binding carries no payload, so the check is decided at build time from the payload and the receiver's epoch, and the projection corroborates a confirmation made from a payload by the journal's delivery of it (bn-2faf1); the payload's process epoch is a program-side fact bound to its mailbox and never appears in the journal, and the supervisor's send is a scripted operation after the Advance, not a substrate callback of the timer's fire; what the journal shows is each payload's receipt and whether the receiver's next step confirms it
 
 [pr16-impl05-mut-00-baseline]
 campaign pr16-correct-baseline seed 104729: 357 plans, 2925 runs; identity 2354ce7bf1c083023c2db8e3ab4df4098f027150a46dbed3731c521f0db716eb (IMPL-04's); findings none
 fail-stop campaign pr16-correct-baseline-fail-stop seed 104729: 357 plans, 2925 runs; identity 31b4d2a3aae2e1fd788d0a92efbbd181523740fa53001d90acbf3fd765a2473f; findings none; fenced tasks 4652, obligations 4712, reservations 3202, timers 0; tasks cancelled in drains 0
+carried message campaign pr16-correct-baseline-carried-message seed 104729: 357 plans, 2925 runs; identity 9b9aee23d1713570fa262db0a35c00b668db0d5dab86fbbce61a43481421b5b1; findings none; plans with a site 156 (runs 1330); payloads sent 1504, received 1504, confirmed by the receiver 0 (journals; the build accepts 0); timers scheduled 0, fired 0, cancelled 0, fenced 0
+carried message campaign pr16-correct-baseline-carried-message-fail-stop seed 104729: 357 plans, 2925 runs; identity 60806f52adbede0decd25cc51eb1ded9c601a962c28b61538038d73bdcb1381b; findings none; plans with a site 156 (runs 1330); payloads sent 1504, received 1504, confirmed by the receiver 0 (journals; the build accepts 0); timers scheduled 0, fired 0, cancelled 0, fenced 0
+carried timer campaign pr16-correct-baseline-carried-timer seed 104729: 357 plans, 2925 runs; identity dad360f9203616afc918f6fbfc2cc41b933a19ee6e0a879ccf27c239f4d26ced; findings none; plans with a site 156 (runs 1330); payloads sent 1504, received 1504, confirmed by the receiver 0 (journals; the build accepts 0); timers scheduled 1504, fired 1504, cancelled 0, fenced 0
+carried timer campaign pr16-correct-baseline-carried-timer-fail-stop seed 104729: 357 plans, 2925 runs; identity 2357438fc6ebe19567b619feaae33b818612858d4334be3853168a883ad1a452; findings none; plans with a site 156 (runs 1330); payloads sent 1504, received 1504, confirmed by the receiver 0 (journals; the build accepts 0); timers scheduled 1504, fired 1504, cancelled 0, fenced 0
+carried recovery campaign pr16-correct-baseline-carried-recovery seed 104729: 357 plans, 2925 runs; identity 1318028d8304cc4d8c390bd44e823e2d9fdccc8f60f75426b9a4a2f2d61fd99b; findings none; plans with a site 83 (runs 498); payloads sent 546, received 546, confirmed by the receiver 546 (journals; the build accepts 546); timers scheduled 0, fired 0, cancelled 0, fenced 0
+carried recovery campaign pr16-correct-baseline-carried-recovery-fail-stop seed 104729: 357 plans, 2925 runs; identity 2c55ae7e88bb24956f47c02c84726c651a1a72a2cd9457643566510d6f8b9ab9; findings none; plans with a site 83 (runs 498); payloads sent 546, received 546, confirmed by the receiver 546 (journals; the build accepts 546); timers scheduled 0, fired 0, cancelled 0, fenced 0
 
 [pr16-impl05-mut-01-ack-before-sync]
 defect M01: acknowledge after volatile append but before `sync`
@@ -51,7 +58,7 @@ fail-stop witness: sample-two-epochs plan 44 log 4 (84 choices) reproduces
 [pr16-impl05-mut-03-stale-epoch]
 defect M03: restart reuses the old process epoch
 mutation: program mutant: every command to a restarted incarnation's writer, the shutdown's Finish included, goes to the first incarnation's writer of that epoch, so the new process acts in the epoch the crash cancelled
-expected: excluded by the substrate: typed refusal TaskEnded on every run, the binding's check for a command to an ended task, with no INV-008 reason, on every changed plan; residual, not covered here: a stale epoch carried in message or record data, accepted by a receiver that compares epochs; the program's messages and records carry no data, so it needs data-carrying Prepare, Prepared and Commit messages
+expected: excluded by the substrate: typed refusal TaskEnded on every run, the binding's check for a command to an ended task, with no INV-008 reason, on every changed plan; residual, not covered by this campaign: a stale epoch carried in message data, accepted by a receiver that compares epochs, is not expressible through task identity; the carried lines below run it against a message carrier (bn-2faf1); a stale epoch in record data is not modeled, since the durable records carry no epoch
 crash: the exclusion here is the region cancellation ending the old epoch's tasks (TaskEnded); the fail-stop rerun stops them without ending them, and every changed run is the binding's TaskCrashed refusal instead: the crashed incarnation takes no command, a fence by task identity, not of an epoch carried in data
 campaign pr16-impl05-mut-03-stale-epoch from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity c1a267cf7868845dec4f2a52a8bfc17e4ec549a22efb87e2b4bbd495b54c15cb
 plans changed 336 (runs 2804), failing 336, detecting 0; runs failing 2804, refused 2804, detecting a scenario property 0; protocol breaches none; findings run=2804
@@ -60,7 +67,7 @@ witness: sweep-one-epoch plan 7 log 0 (31 choices) reproduces
   plan epochs=1 | a[v0]: idle | b[v0]: idle | c[v0,v0]: reserve0 submit0 sync0 crash confirm0
   log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
   finding Refused("task t2 has ended and cannot take a command") the binding refuses the log; replayed: 1 findings, as recorded
-fail-stop expected: excluded by the substrate: typed refusal TaskCrashed on every run, the binding's check for a command to a task a fail-stop crash stopped, with no INV-008 reason, on every changed plan; residual, not covered here: a stale epoch carried in message or record data, accepted by a receiver that compares epochs; the program's messages and records carry no data, so it needs data-carrying Prepare, Prepared and Commit messages
+fail-stop expected: excluded by the substrate: typed refusal TaskCrashed on every run, the binding's check for a command to a task a fail-stop crash stopped, with no INV-008 reason, on every changed plan; residual, not covered by this campaign: a stale epoch carried in message data, accepted by a receiver that compares epochs, is not expressible through task identity; the carried lines below run it against a message carrier (bn-2faf1); a stale epoch in record data is not modeled, since the durable records carry no epoch
 fail-stop campaign pr16-impl05-mut-03-stale-epoch-fail-stop from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity 84255b26380e7b817d80af3f8fc4b860964062acda0d2c989539cb8f4dd4ccec
 fail-stop plans changed 336 (runs 2804), failing 336, detecting 0; runs failing 2804, refused 2804, detecting a scenario property 0; protocol breaches none; findings run=2804; fenced tasks 0, obligations 0, reservations 0, timers 0
 fail-stop result: excluded, every run of the 336 changed plans is the typed refusal TaskCrashed, the binding's check with no INV-008 reason; no detection claimed
@@ -68,6 +75,35 @@ fail-stop witness: sweep-one-epoch plan 7 log 0 (31 choices) reproduces
   plan epochs=1 | a[v0]: idle | b[v0]: idle | c[v0,v0]: reserve0 submit0 sync0 crash confirm0
   log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
   finding Refused("task t2 crashed and cannot take a command") the binding refuses the log; replayed: 1 findings, as recorded
+carried mutation: program mutant against the message carrier: a restarted incarnation takes the process epoch of the one before it, so the late completion that the crashed incarnation's pending submit sends, which names that epoch, passes the receiver's epoch check, and the new process confirms the lost write
+carried expected: detected; protocol breach none, a program mutant; property RuntimeToAbstract with AckedNotDurable; also abstract_register::Agreement with Agreement
+carried campaign pr16-impl05-mut-03-stale-epoch-carried from pr16-correct-baseline-carried-message: seed 104729, 357 plans, 2925 runs; identity c44c5be63da9ada02f4258bc6ef538ee8fbf1edf63ae65804583068fef442de1
+carried plans changed 156 (runs 1330), failing 120, detecting 120; runs failing 953, refused 0, detecting a scenario property 953; protocol breaches none; findings abstract_register::Agreement=26511 RuntimeToAbstract=87231; stale payloads sent 1504, received 1504, confirmed by the receiver 1504 (journals; the build accepts 1504)
+carried changed plans with no finding 36: the stale confirmation's coordinator gets fewer than two confirmations 21; an ack can follow and the campaign's logs order two durable confirmations first 15, of which 256 more sampled logs detect 15
+carried result: detected, RuntimeToAbstract with AckedNotDurable, and abstract_register::Agreement with Agreement
+carried witness: sweep-one-epoch plan 12 log 5 (47 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v0,v0]: reserve0 submit0 crash reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,0,2,1,0,1,0,1,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding AckedNotDurable(72) at event 72 of 121; replayed: 16 findings, as recorded
+carried second witness: scenario plan 0 log 46 (59 choices) reproduces
+  plan epochs=1 | a[v0,v1]: reserve0 submit0 crash-repropose0=v1 reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1]: reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,0,3,2,1,0,1,1,1,0,0,3,0,1,0,0,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Agreement(117) at event 117 of 153; replayed: 138 findings, as recorded
+  causal story: Reserve(n=c,epoch=0) Submit(n=c,epoch=0,value=v1) Sync(n=c,epoch=0) Reserve(n=a,epoch=0) Reserve(n=b,epoch=0) Submit(n=a,epoch=0,value=v0) Submit(n=b,epoch=0,value=v0) Sync(n=b,epoch=0) Lose(n=a,epoch=0,value=v0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v1) Sync(n=a,epoch=0) Ack(epoch=0,value=v0) Ack(epoch=0,value=v1)
+carried fail-stop expected: detected; protocol breach none, a program mutant; property RuntimeToAbstract with AckedNotDurable; also abstract_register::Agreement with Agreement
+carried fail-stop campaign pr16-impl05-mut-03-stale-epoch-carried-fail-stop from pr16-correct-baseline-carried-message-fail-stop: seed 104729, 357 plans, 2925 runs; identity a6888e0b22defffd7ada845cba690f3526b9ed3698f79435473781fb13bda6c2
+carried fail-stop plans changed 156 (runs 1330), failing 120, detecting 120; runs failing 953, refused 0, detecting a scenario property 953; protocol breaches none; findings abstract_register::Agreement=26511 RuntimeToAbstract=87117; stale payloads sent 1504, received 1504, confirmed by the receiver 1504 (journals; the build accepts 1504)
+carried fail-stop changed plans with no finding 36: the stale confirmation's coordinator gets fewer than two confirmations 21; an ack can follow and the campaign's logs order two durable confirmations first 15, of which 256 more sampled logs detect 15
+carried fail-stop result: detected, RuntimeToAbstract with AckedNotDurable, and abstract_register::Agreement with Agreement
+carried fail-stop witness: sweep-one-epoch plan 12 log 5 (47 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v0,v0]: reserve0 submit0 crash reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,1,0,2,1,0,1,0,1,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding AckedNotDurable(69) at event 69 of 118; replayed: 16 findings, as recorded
+carried fail-stop second witness: scenario plan 0 log 46 (59 choices) reproduces
+  plan epochs=1 | a[v0,v1]: reserve0 submit0 crash-repropose0=v1 reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1]: reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,0,3,2,1,0,1,1,1,0,0,3,0,1,0,0,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Agreement(114) at event 114 of 150; replayed: 138 findings, as recorded
+  causal story: Reserve(n=c,epoch=0) Submit(n=c,epoch=0,value=v1) Sync(n=c,epoch=0) Reserve(n=a,epoch=0) Reserve(n=b,epoch=0) Submit(n=a,epoch=0,value=v0) Submit(n=b,epoch=0,value=v0) Sync(n=b,epoch=0) Lose(n=a,epoch=0,value=v0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v1) Sync(n=a,epoch=0) Ack(epoch=0,value=v0) Ack(epoch=0,value=v1)
 
 [pr16-impl05-mut-04-duplicate-commit]
 defect M04: duplicate `Commit` is not idempotent
@@ -136,15 +172,44 @@ fail-stop witness: sweep-one-epoch plan 12 log 3 (38 choices) reproduces
 [pr16-impl05-mut-08-stale-timer]
 defect M08: timer from an old epoch fires in a new process
 mutation: program mutant: before each crash the in-flight writer arms a timer (Sleep), and after the crash the clock advances past its deadline, so the timer comes due in the new process
-expected: excluded by the substrate: typed TimeEvent::Cancelled for every armed timer the crash overtakes, and no timer fired after its epoch is cancelled, by the binding's bookkeeping over the substrate's trace, on every changed plan; residual, not covered here: a timer armed outside the incarnation's region, whose firing carries the old epoch into the new process; the binding's timers carry no data and the correct program has no timers, so it needs data-carrying timer callbacks
+expected: excluded by the substrate: typed TimeEvent::Cancelled for every armed timer the crash overtakes, and no timer fired after its epoch is cancelled, by the binding's bookkeeping over the substrate's trace, on every changed plan; residual, not covered by this campaign: a timer armed outside the incarnation's region, whose firing carries the old epoch into the new process, is not expressible through a timer of the incarnation's own tasks; the carried lines below run it against a timer carrier on the node's supervisor (bn-2faf1)
 crash: the exclusion here is the region cancellation dropping the old timer; the fail-stop rerun runs no cleanup, the timer stays armed in the substrate and is fenced in the journal, and its fire after the crash reaches no task, so the exclusion is run under both
 campaign pr16-impl05-mut-08-stale-timer from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity 8b065a730ef50e62495997668fc1786600663e081b22f63be5744ede619e2f9f
 plans changed 336 (runs 2804), failing 0, detecting 0; runs failing 0, refused 0, detecting a scenario property 0; protocol breaches none; findings none
 result: excluded, timers scheduled 4184, cancelled 3875, fired 309, fired after their task's region was cancelled 0; no finding; no detection claimed
-fail-stop expected: excluded by the substrate: typed TimeEvent::Fenced for every armed timer the crash stops, and no timer fired after its incarnation crashed, on every changed plan; residual, not covered here: a timer armed outside the incarnation's region, whose firing carries the old epoch into the new process; the binding's timers carry no data and the correct program has no timers, so it needs data-carrying timer callbacks
+fail-stop expected: excluded by the substrate: typed TimeEvent::Fenced for every armed timer the crash stops, and no timer fired after its incarnation crashed, on every changed plan; residual, not covered by this campaign: a timer armed outside the incarnation's region, whose firing carries the old epoch into the new process, is not expressible through a timer of the incarnation's own tasks; the carried lines below run it against a timer carrier on the node's supervisor (bn-2faf1)
 fail-stop campaign pr16-impl05-mut-08-stale-timer-fail-stop from pr16-correct-baseline: seed 104729, 357 plans, 2925 runs; identity ef5a894221271ac31763eff51c0e5fba6a07beb4ffdad4bc14da14f799056435
 fail-stop plans changed 336 (runs 2804), failing 0, detecting 0; runs failing 0, refused 0, detecting a scenario property 0; protocol breaches none; findings none; fenced tasks 4652, obligations 4712, reservations 3202, timers 3875
 fail-stop result: excluded, timers scheduled 4184, fired before the crash 309, fenced by the crash 3875, cancelled 0, fired after their incarnation crashed 0; no finding; no detection claimed
+carried mutation: program mutant against the timer carrier: the supervisor's timer delivery is not held to the epoch check, so the payload of the timer the crashed incarnation armed on its pending submit, which names the old epoch, is acted on in the new process, which confirms the lost write
+carried expected: detected; protocol breach none, a program mutant; property RuntimeToAbstract with AckedNotDurable; also abstract_register::Agreement with Agreement
+carried campaign pr16-impl05-mut-08-stale-timer-carried from pr16-correct-baseline-carried-timer: seed 104729, 357 plans, 2925 runs; identity c98f5dfab171faad5dc4c5eec11597d24b3a9e080e5fcf5b013e30dc38568e47
+carried plans changed 156 (runs 1330), failing 120, detecting 120; runs failing 972, refused 0, detecting a scenario property 972; protocol breaches none; findings abstract_register::Agreement=31285 RuntimeToAbstract=99499; stale payloads sent 1504, received 1504, confirmed by the receiver 1504 (journals; the build accepts 1504)
+carried changed plans with no finding 36: the stale confirmation's coordinator gets fewer than two confirmations 21; an ack can follow and the campaign's logs order two durable confirmations first 15, of which 256 more sampled logs detect 15
+carried result: detected, RuntimeToAbstract with AckedNotDurable, and abstract_register::Agreement with Agreement
+carried witness: sweep-one-epoch plan 12 log 2 (54 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v0,v0]: reserve0 submit0 crash reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding AckedNotDurable(85) at event 85 of 140; replayed: 16 findings, as recorded
+carried second witness: scenario plan 0 log 84 (66 choices) reproduces
+  plan epochs=1 | a[v0,v1]: reserve0 submit0 crash-repropose0=v1 reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1]: reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,1,0,1,1,4,2,0,1,0,0,0,1,0,1,0,0,1,0,2,0,2,2,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Agreement(130) at event 130 of 172; replayed: 186 findings, as recorded
+  causal story: Reserve(n=b,epoch=0) Reserve(n=a,epoch=0) Submit(n=b,epoch=0,value=v0) Sync(n=b,epoch=0) Reserve(n=c,epoch=0) Submit(n=a,epoch=0,value=v0) Lose(n=a,epoch=0,value=v0) Submit(n=c,epoch=0,value=v1) Sync(n=c,epoch=0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v1) Ack(epoch=0,value=v0) Sync(n=a,epoch=0) Ack(epoch=0,value=v1)
+carried fail-stop expected: detected; protocol breach none, a program mutant; property RuntimeToAbstract with AckedNotDurable; also abstract_register::Agreement with Agreement
+carried fail-stop campaign pr16-impl05-mut-08-stale-timer-carried-fail-stop from pr16-correct-baseline-carried-timer-fail-stop: seed 104729, 357 plans, 2925 runs; identity 892961625ada1bdb85d47c3fc47c40811f04b8e5406e92d4118eeb7647c7d429
+carried fail-stop plans changed 156 (runs 1330), failing 120, detecting 120; runs failing 972, refused 0, detecting a scenario property 972; protocol breaches none; findings abstract_register::Agreement=31279 RuntimeToAbstract=99439; stale payloads sent 1504, received 1504, confirmed by the receiver 1504 (journals; the build accepts 1504)
+carried fail-stop changed plans with no finding 36: the stale confirmation's coordinator gets fewer than two confirmations 21; an ack can follow and the campaign's logs order two durable confirmations first 15, of which 256 more sampled logs detect 15
+carried fail-stop result: detected, RuntimeToAbstract with AckedNotDurable, and abstract_register::Agreement with Agreement
+carried fail-stop witness: sweep-one-epoch plan 12 log 2 (54 choices) reproduces
+  plan epochs=1 | a[v0]: idle | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v0,v0]: reserve0 submit0 crash reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding AckedNotDurable(82) at event 82 of 137; replayed: 16 findings, as recorded
+carried fail-stop second witness: scenario plan 0 log 84 (66 choices) reproduces
+  plan epochs=1 | a[v0,v1]: reserve0 submit0 crash-repropose0=v1 reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1]: reserve0 submit0 sync0 release0 confirm0
+  log [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,1,0,1,1,4,2,0,1,0,0,0,1,0,1,0,0,1,0,2,0,2,2,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  finding Agreement(127) at event 127 of 169; replayed: 186 findings, as recorded
+  causal story: Reserve(n=b,epoch=0) Reserve(n=a,epoch=0) Submit(n=b,epoch=0,value=v0) Sync(n=b,epoch=0) Reserve(n=c,epoch=0) Submit(n=a,epoch=0,value=v0) Lose(n=a,epoch=0,value=v0) Submit(n=c,epoch=0,value=v1) Sync(n=c,epoch=0) Reserve(n=a,epoch=0) Submit(n=a,epoch=0,value=v1) Ack(epoch=0,value=v0) Sync(n=a,epoch=0) Ack(epoch=0,value=v1)
 
 [pr16-impl05-mut-09-submitted-as-chosen]
 defect M09: view maps `Submitted` storage to abstract `Chosen`

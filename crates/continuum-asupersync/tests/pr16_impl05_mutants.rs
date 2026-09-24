@@ -37,6 +37,21 @@
 //! zero findings with what the crashes stopped and fenced counted apart. Each mutant's
 //! section of the golden gains `fail-stop` lines next to the graceful ones: its expected
 //! result, the campaign and its identity, the result and a replayed witness.
+//!
+//! # The carried reruns (bn-2faf1)
+//!
+//! M03 and M08 (`mutants::CARRIED`) are run again against a process epoch carried in data
+//! (`register::CARRIER_SEMANTICS`): M03 against the late completion of the crashed
+//! incarnation's pending submit, a message, and M08 against a timer armed on the node's
+//! supervisor, each under both crash semantics. Beside them run the correct program with
+//! each carrier, message, timer and the recovery boundary, under both semantics, which
+//! must have no finding. `pr16-impl05-mut-00-baseline` gains a `carried` line for each
+//! carrier baseline, and the M03 and M08 sections gain `carried` lines: the mutation, the
+//! typed expected result, the campaign and its identity, the result, and two replayed
+//! witnesses with the second's causal story. Against the golden before bn-2faf1, four
+//! pre-existing lines change, the M03 and M08 `expected:` and `fail-stop expected:` lines,
+//! whose residual now points at the carried lines; every other change is an added
+//! line, and no identity line changes.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -60,6 +75,7 @@ mod mutants;
 
 use baseline::{Campaign, Finding, Outcome, Property, render_plan};
 use mutants::{Exclusion, Expected, Id, Mutant, Refusal, Symptom, Witness};
+use register::Carrier;
 
 struct All {
     base: Campaign,
@@ -69,7 +85,14 @@ struct All {
     fail_stop_baseline: Outcome,
     /// The fail-stop reruns of `mutants::FAIL_STOP`.
     fail_stop: BTreeMap<Id, (Mutant, Outcome)>,
+    /// The correct program with each carrier, under each crash semantics (bn-2faf1).
+    carrier_baselines: BTreeMap<(Carrier, Mode), (Mutant, Outcome)>,
+    /// The carried reruns of `mutants::CARRIED`, under each crash semantics.
+    carried: BTreeMap<(Id, Mode), (Mutant, Outcome)>,
 }
+
+/// The carriers, each run under both crash semantics.
+const CARRIERS: [Carrier; 3] = [Carrier::Message, Carrier::Timer, Carrier::Recovery];
 
 /// The baseline and every mutant campaign, run once, in parallel.
 fn all() -> &'static All {
@@ -84,6 +107,22 @@ fn all() -> &'static All {
             .iter()
             .filter_map(|id| mutants::mutant_fail_stop(*id, &base))
             .collect();
+        let modes = [Mode::Graceful, Mode::FailStop];
+        let cbs: Vec<((Carrier, Mode), Mutant)> = CARRIERS
+            .iter()
+            .flat_map(|c| modes.map(|m| ((*c, m), mutants::carrier_baseline(*c, m.crash(), &base))))
+            .collect();
+        let cms: Vec<((Id, Mode), Mutant)> = mutants::CARRIED
+            .iter()
+            .flat_map(|id| {
+                modes.map(|m| {
+                    (
+                        (*id, m),
+                        mutants::mutant_carried(*id, m.crash(), &base).expect("a carried rerun"),
+                    )
+                })
+            })
+            .collect();
         std::thread::scope(|s| {
             let b = s.spawn(|| baseline::execute(&base));
             let fb = s.spawn(|| baseline::execute_in(&base, register::CrashMode::FailStop));
@@ -94,6 +133,14 @@ fn all() -> &'static All {
             let fhs: Vec<_> = fs
                 .iter()
                 .map(|m| s.spawn(move || mutants::execute(m)))
+                .collect();
+            let cbhs: Vec<_> = cbs
+                .iter()
+                .map(|(_, m)| s.spawn(move || mutants::execute(m)))
+                .collect();
+            let cmhs: Vec<_> = cms
+                .iter()
+                .map(|(_, m)| s.spawn(move || mutants::execute(m)))
                 .collect();
             let mutants = ms
                 .iter()
@@ -107,12 +154,26 @@ fn all() -> &'static All {
                 .zip(fhs)
                 .map(|(m, h)| (m.id, (m, h.join().expect("a fail-stop campaign"))))
                 .collect();
+            let carrier_baselines = cbs
+                .iter()
+                .cloned()
+                .zip(cbhs)
+                .map(|((k, m), h)| (k, (m, h.join().expect("a carrier baseline"))))
+                .collect();
+            let carried = cms
+                .iter()
+                .cloned()
+                .zip(cmhs)
+                .map(|((k, m), h)| (k, (m, h.join().expect("a carried campaign"))))
+                .collect();
             All {
                 baseline: b.join().expect("the baseline"),
                 base: base.clone(),
                 mutants,
                 fail_stop_baseline: fb.join().expect("the fail-stop baseline"),
                 fail_stop,
+                carrier_baselines,
+                carried,
             }
         })
     })
@@ -128,14 +189,46 @@ fn repo(rel: &str) -> String {
 }
 
 /// Which crash semantics a campaign runs under (bn-20d8u).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Mode {
     Graceful,
     FailStop,
 }
 
+impl Mode {
+    const fn crash(self) -> register::CrashMode {
+        match self {
+            Self::Graceful => register::CrashMode::Graceful,
+            Self::FailStop => register::CrashMode::FailStop,
+        }
+    }
+}
+
+/// Which campaign of a mutant: the graceful one, the fail-stop rerun, or a carried rerun
+/// under a crash semantics (bn-2faf1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Run {
+    Plain(Mode),
+    Carried(Mode),
+}
+
 /// A campaign and its outcome, and its expected result, under `mode`.
 fn run_of(id: Id, mode: Mode) -> (&'static Mutant, &'static Outcome, Expected) {
+    run_in(id, Run::Plain(mode))
+}
+
+fn run_in(id: Id, run: Run) -> (&'static Mutant, &'static Outcome, Expected) {
+    let mode = match run {
+        Run::Plain(m) => m,
+        Run::Carried(m) => {
+            let (mu, o) = &all().carried[&(id, m)];
+            return (
+                mu,
+                o,
+                mutants::expected_carried(id).expect("a carried expectation"),
+            );
+        }
+    };
     match mode {
         Mode::Graceful => {
             let (m, o) = get(id);
@@ -153,20 +246,21 @@ fn run_of(id: Id, mode: Mode) -> (&'static Mutant, &'static Outcome, Expected) {
 }
 
 /// Whether the mutant changed a plan, against the build of its own mode.
-fn changed_in(mode: Mode, m: &Mutant, gi: usize, pi: usize) -> bool {
+fn changed_in(run: Run, m: &Mutant, gi: usize, pi: usize) -> bool {
     let base = &all().base;
-    match mode {
-        Mode::Graceful => mutants::changed(m, base, gi, pi),
-        Mode::FailStop => mutants::changed_fail_stop(m, base, gi, pi),
+    match run {
+        Run::Plain(Mode::Graceful) => mutants::changed(m, base, gi, pi),
+        Run::Plain(Mode::FailStop) => mutants::changed_fail_stop(m, base, gi, pi),
+        Run::Carried(mode) => mutants::changed_carried(m, mode.crash(), base, gi, pi),
     }
 }
 
 /// Per plan of a mutant campaign: `(group, plan, changed, runs, failing runs)`.
 fn per_plan(m: &Mutant, o: &Outcome) -> Vec<(usize, usize, bool, usize, usize)> {
-    per_plan_in(Mode::Graceful, m, o)
+    per_plan_in(Run::Plain(Mode::Graceful), m, o)
 }
 
-fn per_plan_in(mode: Mode, m: &Mutant, o: &Outcome) -> Vec<(usize, usize, bool, usize, usize)> {
+fn per_plan_in(mode: Run, m: &Mutant, o: &Outcome) -> Vec<(usize, usize, bool, usize, usize)> {
     let base = &all().base;
     o.plans
         .iter()
@@ -204,11 +298,11 @@ struct Summary {
 }
 
 fn summary(id: Id) -> Summary {
-    summary_in(id, Mode::Graceful)
+    summary_in(id, Run::Plain(Mode::Graceful))
 }
 
-fn summary_in(id: Id, mode: Mode) -> Summary {
-    let (m, o, expected) = run_of(id, mode);
+fn summary_in(id: Id, mode: Run) -> Summary {
+    let (m, o, expected) = run_in(id, mode);
     let rows = per_plan_in(mode, m, o);
     let (symptom, also) = match expected {
         Expected::Detected { symptom, also, .. } => (Some(symptom), also),
@@ -319,9 +413,28 @@ fn fail_stop_summaries() -> &'static BTreeMap<Id, Summary> {
     CELL.get_or_init(|| {
         mutants::FAIL_STOP
             .iter()
-            .map(|id| (*id, summary_in(*id, Mode::FailStop)))
+            .map(|id| (*id, summary_in(*id, Run::Plain(Mode::FailStop))))
             .collect()
     })
+}
+
+fn carried_summaries() -> &'static BTreeMap<(Id, Mode), Summary> {
+    static CELL: OnceLock<BTreeMap<(Id, Mode), Summary>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        all()
+            .carried
+            .keys()
+            .map(|&(id, m)| ((id, m), summary_in(id, Run::Carried(m))))
+            .collect()
+    })
+}
+
+fn summary_of(id: Id, run: Run) -> &'static Summary {
+    match run {
+        Run::Plain(Mode::Graceful) => &summaries()[&id],
+        Run::Plain(Mode::FailStop) => &fail_stop_summaries()[&id],
+        Run::Carried(m) => &carried_summaries()[&(id, m)],
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +561,11 @@ fn check_detected(id: Id) {
 }
 
 fn check_detected_in(id: Id, mode: Mode) {
-    let (m, o, expected) = run_of(id, mode);
+    check_detected_run(id, Run::Plain(mode));
+}
+
+fn check_detected_run(id: Id, mode: Run) {
+    let (m, o, expected) = run_in(id, mode);
     let Expected::Detected {
         breach,
         symptom,
@@ -458,10 +575,7 @@ fn check_detected_in(id: Id, mode: Mode) {
     else {
         panic!("{id:?} is expected to be detected");
     };
-    let s = match mode {
-        Mode::Graceful => &summaries()[&id],
-        Mode::FailStop => &fail_stop_summaries()[&id],
-    };
+    let s = summary_of(id, mode);
     // The mutant changes some plans, and each changed plan of a plan mutant breaks the
     // named protocol rule first. A program mutant's plans are the correct ones.
     assert!(s.changed > 0, "{id:?} changes something");
@@ -1012,7 +1126,7 @@ fn fail_stop_mut_03_stale_epoch_is_excluded_by_the_crash_fence() {
     assert_eq!(o.breaches, BTreeMap::new());
     let s = &fail_stop_summaries()[&Id::M03];
     assert!(s.changed > 0);
-    for (g, p, changed, runs, failing) in per_plan_in(Mode::FailStop, m, o) {
+    for (g, p, changed, runs, failing) in per_plan_in(Run::Plain(Mode::FailStop), m, o) {
         assert_eq!(failing, if changed { runs } else { 0 }, "{g}/{p}");
     }
     for (_, fs) in o.plans.iter().flat_map(|p| &p.findings) {
@@ -1076,6 +1190,517 @@ fn fail_stop_mut_08_stale_timer_is_excluded_by_the_fence() {
         "every timer fires before the crash or is fenced"
     );
     assert!(fenced > fired);
+}
+
+// ---------------------------------------------------------------------------
+// the carried reruns (bn-2faf1)
+// ---------------------------------------------------------------------------
+
+const MODES: [Mode; 2] = [Mode::Graceful, Mode::FailStop];
+
+/// The payloads a campaign's build puts on its mailboxes over its runs, and how many the
+/// build makes the receiver act on: its sites, by plan, times the plan's runs. A static
+/// count, held in the tests to the journals' own count (`Outcome::carried`).
+fn deliveries(m: &Mutant, o: &Outcome, carrier: Carrier, fence: register::Fence) -> (usize, usize) {
+    let (mut delivered, mut accepted) = (0, 0);
+    for p in &o.plans {
+        let g = m
+            .campaign
+            .groups
+            .iter()
+            .find(|g| g.id == p.group)
+            .expect("g");
+        let sites = register::carrier_sites(&g.plans[p.index], carrier, fence);
+        delivered += sites.len() * p.runs;
+        accepted += sites.iter().filter(|s| s.accepted).count() * p.runs;
+    }
+    (delivered, accepted)
+}
+
+/// The journal of one run of `m`'s plan `(group, plan)` under `log`.
+fn journal_of(
+    m: &Mutant,
+    group: usize,
+    plan: usize,
+    log: &continuum_asupersync::choice::ChoiceLog,
+) -> (register::Built, continuum_asupersync::journal::Journal) {
+    let built = (m.builder)(&m.campaign.groups[group].plans[plan]).expect("built");
+    let journal = continuum_asupersync::binding::run(&built.programs, log, &baseline::config())
+        .expect("a run");
+    (built, journal)
+}
+
+/// The receiver's epoch check, alone: the correct check accepts exactly a payload of the
+/// receiver's own process epoch, for a message and a timer alike; M03's reused epoch makes
+/// the old epoch the receiver's own; M08's unchecked timer accepts any timer payload and
+/// still refuses a stale message.
+#[test]
+fn carried_the_epoch_check_accepts_exactly_its_own_epoch() {
+    use register::{CORRECT_FENCE, accepts, process_epoch};
+    for via in [Carrier::Message, Carrier::Timer, Carrier::Recovery] {
+        assert!(!accepts(CORRECT_FENCE, via, 1, 0), "{via:?}: stale");
+        assert!(accepts(CORRECT_FENCE, via, 1, 1), "{via:?}: current");
+        assert!(accepts(CORRECT_FENCE, via, 0, 0), "{via:?}: first");
+    }
+    let m03 = mutants::carried_fence(Id::M03);
+    assert_eq!(process_epoch(1, m03), process_epoch(0, m03));
+    assert_eq!(process_epoch(2, CORRECT_FENCE), 2);
+    let m08 = mutants::carried_fence(Id::M08);
+    assert!(accepts(m08, Carrier::Timer, 1, 0));
+    assert!(!accepts(m08, Carrier::Message, 1, 0));
+    // M08's defect is the timer's: with the message carrier, its fence builds the correct
+    // program on every plan.
+    for g in &all().base.groups {
+        for plan in &g.plans {
+            for mode in MODES {
+                assert_eq!(
+                    register::build_carried(plan, mode.crash(), Carrier::Message, m08).programs,
+                    register::build_carried(plan, mode.crash(), Carrier::Message, CORRECT_FENCE)
+                        .programs
+                );
+            }
+        }
+    }
+    // The scenario plan: `a` crashes with its v0 bytes submitted and not synced, so the
+    // message carrier has one site, at `a`'s crash, naming process epoch 0; the new
+    // incarnation, epoch 1, refuses it; under M03 it is epoch 0 again and acts on it.
+    let plan = baseline::scenario_plan();
+    let sites = register::carrier_sites(&plan, Carrier::Message, CORRECT_FENCE);
+    assert_eq!(sites.len(), 1);
+    let s = sites[0];
+    assert_eq!((s.node, s.at, s.crashed), (0, 2, 0));
+    assert_eq!(
+        (
+            s.payload.process,
+            s.payload.epoch,
+            s.payload.value,
+            s.accepted
+        ),
+        (0, 0, 0, false)
+    );
+    let s = register::carrier_sites(&plan, Carrier::Message, m03)[0];
+    assert!(s.accepted);
+    // A crash with nothing in flight has no pending completion, so no message or timer
+    // site: the crash-after-reply plan has none, and one recovery-free plan stays as built.
+    let reply = baseline::crash_after_reply_plan();
+    for c in [Carrier::Message, Carrier::Timer, Carrier::Recovery] {
+        assert!(
+            register::carrier_sites(&reply, c, CORRECT_FENCE).is_empty(),
+            "{c:?}"
+        );
+        assert_eq!(
+            register::build_carried(&reply, register::CrashMode::FailStop, c, CORRECT_FENCE)
+                .programs,
+            register::build_with_shutdown_in(&reply, register::CrashMode::FailStop).programs
+        );
+    }
+}
+
+/// The negative: the correct program with each carrier, under each crash semantics, has no
+/// finding. Every stale payload is delivered and refused; every recovery report, which
+/// names the receiver's own epoch, is delivered and acted on; plans with no site build
+/// exactly as the baseline; the timer carrier's timers all fire, none is cancelled or
+/// fenced (the supervisor never crashes).
+#[test]
+fn carried_mut_00_the_correct_program_with_each_carrier_has_zero_findings() {
+    let a = all();
+    for c in CARRIERS {
+        for mode in MODES {
+            let (m, o) = &a.carrier_baselines[&(c, mode)];
+            let what = format!("{c:?} {mode:?}");
+            assert_eq!(o.by_property, BTreeMap::new(), "{what}");
+            assert!(o.plans.iter().all(|p| p.findings.is_empty()), "{what}");
+            assert_eq!(o.breaches, BTreeMap::new(), "{what}");
+            assert_eq!(o.runs, a.baseline.runs, "{what}");
+            assert_ne!(o.digest, a.baseline.digest, "{what}: its own identity");
+            let (delivered, accepted) = deliveries(m, o, c, register::CORRECT_FENCE);
+            assert!(delivered > 0, "{what}");
+            // The journals receive every payload the build sends, and the receivers act on
+            // exactly the ones the build accepts.
+            assert_eq!(o.carried, [delivered, accepted], "{what}");
+            if c == Carrier::Recovery {
+                assert_eq!(accepted, delivered, "{what}: the current epoch is accepted");
+            } else {
+                assert_eq!(accepted, 0, "{what}: every stale payload is refused");
+            }
+            for (gi, g) in m.campaign.groups.iter().enumerate() {
+                for plan in &g.plans {
+                    let sites = register::carrier_sites(plan, c, register::CORRECT_FENCE);
+                    let plain = register::build_with_shutdown_in(plan, mode.crash()).programs;
+                    let built = (m.builder)(plan).expect("built").programs;
+                    assert_eq!(sites.is_empty(), built == plain, "{what} group {gi}");
+                }
+            }
+            let [scheduled, fired, cancelled, stale] = o.tally.timers;
+            if c == Carrier::Timer {
+                assert_eq!((scheduled, fired), (delivered, delivered), "{what}");
+            } else {
+                assert_eq!((scheduled, fired), (0, 0), "{what}");
+            }
+            assert_eq!((cancelled, stale, o.tally.fenced[3]), (0, 0, 0), "{what}");
+        }
+    }
+    // The same crashes are graceful in one and fail-stop in the other.
+    for c in CARRIERS {
+        let g = &a.carrier_baselines[&(c, Mode::Graceful)].1;
+        let f = &a.carrier_baselines[&(c, Mode::FailStop)].1;
+        assert_eq!(g.tally.fenced, [0; 4]);
+        assert!(f.tally.fenced[0] > 0);
+        assert_eq!(f.tally.cancelled, 0);
+    }
+}
+
+/// A carried rerun is the carrier baseline's plans with one field of the fence changed:
+/// the same seed, groups and plans, its own name and identity, and it changes exactly
+/// the plans whose site it makes the receiver act on.
+fn check_carried_derivation(id: Id, mode: Mode) {
+    let a = all();
+    let (m, o) = &a.carried[&(id, mode)];
+    let c = mutants::carrier_of(id);
+    assert_eq!(m.campaign.name, mutants::carried_name(id, mode.crash()));
+    assert_eq!(m.campaign.seed, a.base.seed);
+    for (x, y) in m.campaign.groups.iter().zip(&a.base.groups) {
+        assert_eq!((x.id, x.logs, x.plans.len()), (y.id, y.logs, y.plans.len()));
+        for (p, q) in x.plans.iter().zip(&y.plans) {
+            assert_eq!(render_plan(p), render_plan(q), "{id:?}");
+        }
+    }
+    let (_, co) = &a.carrier_baselines[&(c, mode)];
+    assert_ne!(o.digest, co.digest, "{id:?} {mode:?}");
+    for (gi, g) in a.base.groups.iter().enumerate() {
+        for (pi, plan) in g.plans.iter().enumerate() {
+            let acted = register::carrier_sites(plan, c, mutants::carried_fence(id))
+                .iter()
+                .any(|s| s.accepted);
+            assert_eq!(
+                mutants::changed_carried(m, mode.crash(), &a.base, gi, pi),
+                acted,
+                "{id:?} {mode:?} {gi}/{pi}"
+            );
+        }
+    }
+}
+
+/// In a carried witness, each payload names the crashed incarnation's process epoch under
+/// the mutant's fence, is received by the last incarnation's writer after the crash, and
+/// the receiver's first own step after the receipt is the confirmation of the payload's
+/// slot and value (`register::carried_in_journal`): the new process acts on the stale
+/// payload. On the scenario plan, only the payload's delivery corroborates that
+/// confirmation: with the payload's value flipped in the roles, or with the journal's
+/// receipt of it deleted, the projection refuses the journal.
+fn check_carried_witness(id: Id, mode: Mode) {
+    use continuum_asupersync::family::EventBody;
+    use continuum_asupersync::family::channel::ChannelEvent;
+    use continuum_asupersync::family::lifecycle::LifecycleEvent;
+    let (m, _) = &all().carried[&(id, mode)];
+    let s = &carried_summaries()[&(id, mode)];
+    let w = s.witness.as_ref().expect("a witness");
+    let (built, journal) = journal_of(m, w.group.0, w.plan, &w.log);
+    let fence = mutants::carried_fence(id);
+    let sites = register::carrier_sites(
+        &m.campaign.groups[w.group.0].plans[w.plan],
+        mutants::carrier_of(id),
+        fence,
+    );
+    assert!(!sites.is_empty());
+    assert_eq!(sites.len(), built.roles.mailboxes.len());
+    for (s, mb) in sites.iter().zip(&built.roles.mailboxes) {
+        assert_eq!(s.payload, mb.payload);
+        assert_eq!(s.payload.process, register::process_epoch(s.crashed, fence));
+        assert!(mb.accepted);
+    }
+    let crash_at = journal
+        .events()
+        .iter()
+        .position(|e| {
+            matches!(
+                e.body(),
+                EventBody::Lifecycle(
+                    LifecycleEvent::RegionCancelRequested { .. }
+                        | LifecycleEvent::RegionCrashed { .. }
+                )
+            )
+        })
+        .expect("a crash");
+    for mb in &built.roles.mailboxes {
+        let received = journal
+            .events()
+            .iter()
+            .position(|e| {
+                matches!(e.body(), EventBody::Channel(ChannelEvent::Received { channel, .. }) if channel.0 == mb.channel)
+            })
+            .expect("received");
+        assert!(received > crash_at);
+    }
+    assert!(
+        register::carried_in_journal(&built.roles, &journal)
+            .iter()
+            .all(|d| *d == Some(true)),
+        "each receiver's next step confirms the payload"
+    );
+    let plan = &m.campaign.groups[0].plans[0];
+    assert_eq!(render_plan(plan), render_plan(&baseline::scenario_plan()));
+    let built = (m.builder)(plan).expect("built");
+    let (_, logs) = baseline::logs_for(&built, 1, m.campaign.plan_seed(0, 0));
+    let (_, journal) = journal_of(m, 0, 0, &logs[0]);
+    assert!(register::observe(&built.roles, &journal).is_ok());
+    let mut roles = built.roles.clone();
+    for mb in &mut roles.mailboxes {
+        mb.payload.value = 1 - mb.payload.value;
+    }
+    assert!(matches!(
+        register::observe(&roles, &journal),
+        Err(register::ProjectionRefusal::RolesDisagree { .. })
+    ));
+    let channel = built.roles.mailboxes[0].channel;
+    let mut edited = continuum_asupersync::journal::Journal::new();
+    for ev in journal.events() {
+        if !matches!(ev.body(), EventBody::Channel(ChannelEvent::Received { channel: c, .. }) if c.0 == channel)
+        {
+            edited.append(ev.body().clone()).expect("appends");
+        }
+    }
+    assert!(matches!(
+        register::observe(&built.roles, &edited),
+        Err(register::ProjectionRefusal::RolesDisagree { .. })
+    ));
+}
+
+/// M03 against the message carrier, graceful and fail-stop: detected. A restart that
+/// reuses the old process epoch acts on the late completion of the crashed incarnation's
+/// pending submit, and confirms the lost write: an ack with no durable majority, and on
+/// the scenario plan two values acked for one epoch.
+#[test]
+fn carried_mut_03_stale_epoch_in_a_message_is_detected() {
+    for mode in MODES {
+        check_carried_derivation(Id::M03, mode);
+        check_detected_run(Id::M03, Run::Carried(mode));
+        check_carried_witness(Id::M03, mode);
+    }
+}
+
+/// M08 against the timer carrier, graceful and fail-stop: detected. The crashed
+/// incarnation's timer, armed on its node's supervisor outside the incarnation's region,
+/// comes due after the crash, and its unchecked delivery confirms the lost write.
+#[test]
+fn carried_mut_08_stale_timer_payload_is_detected() {
+    for mode in MODES {
+        check_carried_derivation(Id::M08, mode);
+        check_detected_run(Id::M08, Run::Carried(mode));
+        check_carried_witness(Id::M08, mode);
+        let (m, o) = &all().carried[&(Id::M08, mode)];
+        let (delivered, accepted) =
+            deliveries(m, o, Carrier::Timer, mutants::carried_fence(Id::M08));
+        assert_eq!(delivered, accepted, "every stale timer payload is acted on");
+        assert_eq!(
+            o.carried,
+            [delivered, accepted],
+            "read back from the journals"
+        );
+        assert_eq!(o.tally.timers[0], delivered);
+        assert_eq!(o.tally.timers[1], delivered, "every carried timer fires");
+    }
+}
+
+/// The boundary: a payload that names the receiver's current epoch, delivered right after
+/// the restart (the recovery report of a synced, unconfirmed write), is accepted and acted
+/// on, and the campaign is clean (`carried_mut_00`). In a run, the receiver takes no step
+/// of its own between the crash and the receipt, and its first step after the receipt is
+/// the confirmation. "Right after" is program order in the replica's actor: other actors
+/// interleave. The same report naming the crashed incarnation's epoch is refused: built
+/// with that stale payload, the receiver receives it and never confirms.
+#[test]
+fn carried_boundary_a_current_epoch_right_after_restart_is_accepted() {
+    use continuum_asupersync::family::EventBody;
+    use continuum_asupersync::family::channel::ChannelEvent;
+    use continuum_asupersync::family::effect::EffectEvent;
+    use continuum_asupersync::family::lifecycle::LifecycleEvent;
+    use continuum_asupersync::family::obligation::ObligationEvent;
+    let a = all();
+    for mode in MODES {
+        let (m, o) = &a.carrier_baselines[&(Carrier::Recovery, mode)];
+        let mut checked = 0;
+        for p in &o.plans {
+            let gi = m
+                .campaign
+                .groups
+                .iter()
+                .position(|g| g.id == p.group)
+                .expect("g");
+            let plan = &m.campaign.groups[gi].plans[p.index];
+            let sites = register::carrier_sites(plan, Carrier::Recovery, register::CORRECT_FENCE);
+            for s in &sites {
+                assert_eq!(s.payload.process, s.crashed + 1, "the current epoch");
+                assert!(s.accepted);
+            }
+            if sites.is_empty() || checked >= 3 {
+                continue;
+            }
+            let built = (m.builder)(plan).expect("built");
+            let (_, logs) = baseline::logs_for(&built, 3, m.campaign.plan_seed(gi, p.index));
+            let reach = register::reachable(plan.epochs);
+            for log in &logs {
+                let journal =
+                    continuum_asupersync::binding::run(&built.programs, log, &baseline::config())
+                        .expect("a run");
+                assert!(
+                    register::carried_in_journal(&built.roles, &journal)
+                        .iter()
+                        .all(|d| *d == Some(true))
+                );
+                let mb = built.roles.mailboxes[0];
+                let events = journal.events();
+                let crash = events
+                    .iter()
+                    .position(|e| {
+                        matches!(
+                            e.body(),
+                            EventBody::Lifecycle(
+                                LifecycleEvent::RegionCancelRequested { .. }
+                                    | LifecycleEvent::RegionCrashed { .. }
+                            )
+                        )
+                    })
+                    .expect("a crash");
+                let received = events
+                    .iter()
+                    .position(|e| {
+                        matches!(e.body(), EventBody::Channel(ChannelEvent::Received { channel, .. }) if channel.0 == mb.channel)
+                    })
+                    .expect("received");
+                assert!(crash < received);
+                let own_step = events[crash..received].iter().any(|e| match e.body() {
+                    EventBody::Effect(EffectEvent::Reserved { task, .. }) => task.0 == mb.taker,
+                    EventBody::Obligation(ObligationEvent::Opened { holder, kind, .. }) => holder.0
+                        == mb.taker
+                        && *kind
+                            != continuum_asupersync::family::obligation::ObligationKind::SendPermit,
+                    EventBody::Channel(ChannelEvent::Sent { sender, .. }) => sender.0 == mb.taker,
+                    _ => false,
+                });
+                assert!(
+                    !own_step,
+                    "the report is the receiver's first input after the restart"
+                );
+                let r = baseline::run_one(&built, plan.epochs, log, &reach);
+                assert!(r.findings.is_empty(), "{:?}", r.findings);
+            }
+            // The same report naming the crashed incarnation's epoch: refused.
+            let stale: Vec<register::Site> = sites
+                .iter()
+                .map(|s| {
+                    let mut t = *s;
+                    t.payload.process = s.crashed;
+                    t.accepted = register::accepts(
+                        register::CORRECT_FENCE,
+                        Carrier::Recovery,
+                        s.crashed + 1,
+                        s.crashed,
+                    );
+                    t
+                })
+                .collect();
+            assert!(stale.iter().all(|s| !s.accepted));
+            let refused = register::build_with_sites(plan, mode.crash(), &stale);
+            let (_, logs) = baseline::logs_for(&refused, 1, m.campaign.plan_seed(gi, p.index));
+            let journal = continuum_asupersync::binding::run(
+                &refused.programs,
+                &logs[0],
+                &baseline::config(),
+            )
+            .expect("a run");
+            assert!(
+                register::carried_in_journal(&refused.roles, &journal)
+                    .iter()
+                    .all(|d| *d == Some(false))
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 3, "{mode:?}: recovery sites exist");
+    }
+}
+
+/// Why a carried rerun's changed plan has no finding (reviewer finding, bn-2faf1): either
+/// the stale confirmation's coordinator gets fewer than two confirmations, so no ack can
+/// follow ("no quorum"), or an ack can follow and the campaign's logs put two durable
+/// confirmations first ("unexplored"). For the second kind, 256 fresh sampled logs of the
+/// plan: `(plans, of them detected with 256 logs)`.
+fn silent_plans(id: Id, mode: Mode) -> (usize, usize, usize) {
+    let a = all();
+    let (m, o) = &a.carried[&(id, mode)];
+    let fence = mutants::carried_fence(id);
+    let (mut no_quorum, mut unexplored, mut found) = (0, 0, 0);
+    for p in &o.plans {
+        let gi = a
+            .base
+            .groups
+            .iter()
+            .position(|g| g.id == p.group)
+            .expect("g");
+        if !mutants::changed_carried(m, mode.crash(), &a.base, gi, p.index)
+            || !p.findings.is_empty()
+        {
+            continue;
+        }
+        let plan = &a.base.groups[gi].plans[p.index];
+        let mut counts = mutants::confirmation_counts(plan);
+        for s in register::carrier_sites(plan, mutants::carrier_of(id), fence) {
+            if s.accepted {
+                *counts
+                    .entry((s.payload.epoch, s.payload.value))
+                    .or_default() += 1;
+            }
+        }
+        let quorum = register::carrier_sites(plan, mutants::carrier_of(id), fence)
+            .iter()
+            .any(|s| s.accepted && counts[&(s.payload.epoch, s.payload.value)] >= 2);
+        if !quorum {
+            no_quorum += 1;
+            continue;
+        }
+        unexplored += 1;
+        let built = (m.builder)(plan).expect("built");
+        let reach = register::reachable(plan.epochs);
+        let logs = register::sample_logs(&built, 256, m.campaign.plan_seed(gi, p.index) ^ 0x5eed);
+        if logs.iter().any(|l| {
+            baseline::run_one(&built, plan.epochs, l, &reach)
+                .findings
+                .iter()
+                .any(|f| f.property() != Property::Run)
+        }) {
+            found += 1;
+        }
+    }
+    (no_quorum, unexplored, found)
+}
+
+/// `(no quorum, unexplored, detected with more logs)` by carried rerun.
+type Silent = BTreeMap<(Id, Mode), (usize, usize, usize)>;
+
+fn silent_summaries() -> &'static Silent {
+    static CELL: OnceLock<Silent> = OnceLock::new();
+    CELL.get_or_init(|| {
+        all()
+            .carried
+            .keys()
+            .map(|&(id, m)| ((id, m), silent_plans(id, m)))
+            .collect()
+    })
+}
+
+/// Every changed plan of a carried rerun that has no finding is classified, and each
+/// "unexplored" one is detected by more logs.
+#[test]
+fn carried_silent_plans_are_classified() {
+    for (&(id, mode), &(no_quorum, unexplored, found)) in silent_summaries() {
+        let s = &carried_summaries()[&(id, mode)];
+        assert_eq!(
+            no_quorum + unexplored,
+            s.changed - s.failing,
+            "{id:?} {mode:?}"
+        );
+        assert_eq!(found, unexplored, "{id:?} {mode:?}: more logs detect each");
+    }
 }
 
 /// mut-09 and mut-10: deferred, with owners.
@@ -1143,7 +1768,7 @@ fn render_expected(expected: Expected) -> String {
             exclusion,
             residual,
         } => format!(
-            "excluded by the substrate: {}, on every changed plan; residual, not covered here: {residual}",
+            "excluded by the substrate: {}, on every changed plan; residual, not covered by this campaign: {residual}",
             match exclusion {
                 Exclusion::EpochFenced =>
                     "typed refusal TaskEnded on every run, the binding's check for a command to an ended task, with no INV-008 reason",
@@ -1193,7 +1818,8 @@ fn evidence() -> String {
          # Regenerate: PR16_IMPL05_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl05_mutants\n",
     );
     let _ = writeln!(out, "# crash: {}", register::CRASH_SEMANTICS);
-    let _ = writeln!(out, "# fail-stop: {}\n", register::FAIL_STOP_SEMANTICS);
+    let _ = writeln!(out, "# fail-stop: {}", register::FAIL_STOP_SEMANTICS);
+    let _ = writeln!(out, "# carried: {}\n", register::CARRIER_SEMANTICS);
     let _ = writeln!(out, "[pr16-impl05-mut-00-baseline]");
     let _ = writeln!(
         out,
@@ -1211,7 +1837,7 @@ fn evidence() -> String {
     let fb = &a.fail_stop_baseline;
     let _ = writeln!(
         out,
-        "fail-stop campaign {} seed {}: {} plans, {} runs; identity {}; findings {}; fenced tasks {}, obligations {}, reservations {}, timers {}; tasks cancelled in drains {}\n",
+        "fail-stop campaign {} seed {}: {} plans, {} runs; identity {}; findings {}; fenced tasks {}, obligations {}, reservations {}, timers {}; tasks cancelled in drains {}",
         mutants::FAIL_STOP_BASELINE,
         a.base.seed,
         fb.plans.len(),
@@ -1224,6 +1850,44 @@ fn evidence() -> String {
         fb.tally.fenced[3],
         fb.tally.cancelled
     );
+    for c in CARRIERS {
+        for mode in MODES {
+            let (m, o) = &a.carrier_baselines[&(c, mode)];
+            let (delivered, accepted) = deliveries(m, o, c, register::CORRECT_FENCE);
+            let site_plans: Vec<&baseline::PlanOutcome> = o
+                .plans
+                .iter()
+                .filter(|p| {
+                    let g = m
+                        .campaign
+                        .groups
+                        .iter()
+                        .find(|g| g.id == p.group)
+                        .expect("g");
+                    !register::carrier_sites(&g.plans[p.index], c, register::CORRECT_FENCE)
+                        .is_empty()
+                })
+                .collect();
+            let [sch, fired, can, _] = o.tally.timers;
+            let _ = writeln!(
+                out,
+                "carried {} campaign {} seed {}: {} plans, {} runs; identity {}; findings {}; plans with a site {} (runs {}); payloads sent {delivered}, received {}, confirmed by the receiver {} (journals; the build accepts {accepted}); timers scheduled {sch}, fired {fired}, cancelled {can}, fenced {}",
+                carrier_token(c),
+                m.campaign.name,
+                m.campaign.seed,
+                o.plans.len(),
+                o.runs,
+                o.digest,
+                by_property(o),
+                site_plans.len(),
+                site_plans.iter().map(|p| p.runs).sum::<usize>(),
+                o.carried[0],
+                o.carried[1],
+                o.tally.fenced[3]
+            );
+        }
+    }
+    out.push('\n');
     for id in Id::ALL {
         let _ = writeln!(out, "[{}]", id.name());
         let _ = writeln!(out, "defect {id:?}: {}", id.defect());
@@ -1270,7 +1934,72 @@ fn evidence() -> String {
         if let Some((fm, fo)) = a.fail_stop.get(&id) {
             out.push_str(&fail_stop_lines(id, fm, fo));
         }
+        if mutants::CARRIED.contains(&id) {
+            out.push_str(&carried_lines(id));
+        }
         out.push('\n');
+    }
+    out
+}
+
+fn carrier_token(c: Carrier) -> &'static str {
+    match c {
+        Carrier::Message => "message",
+        Carrier::Timer => "timer",
+        Carrier::Recovery => "recovery",
+    }
+}
+
+/// A mutant's `carried` lines, graceful then fail-stop (bn-2faf1).
+fn carried_lines(id: Id) -> String {
+    let expected = mutants::expected_carried(id).expect("a carried expectation");
+    let c = mutants::carrier_of(id);
+    let mut out = String::new();
+    let _ = writeln!(out, "carried mutation: {}", mutants::carried_mutation(id));
+    for mode in MODES {
+        let label = match mode {
+            Mode::Graceful => "carried",
+            Mode::FailStop => "carried fail-stop",
+        };
+        let (m, o) = &all().carried[&(id, mode)];
+        let (cm, _) = &all().carrier_baselines[&(c, mode)];
+        let s = &carried_summaries()[&(id, mode)];
+        let (delivered, accepted) = deliveries(m, o, c, mutants::carried_fence(id));
+        let _ = writeln!(out, "{label} expected: {}", render_expected(expected));
+        let _ = writeln!(
+            out,
+            "{label} campaign {} from {}: seed {}, {} plans, {} runs; identity {}",
+            m.campaign.name, cm.campaign.name, m.campaign.seed, s.plans, s.runs, o.digest
+        );
+        let _ = writeln!(
+            out,
+            "{label} plans changed {} (runs {}), failing {}, detecting {}; runs failing {}, refused {}, detecting a scenario property {}; protocol breaches {}; findings {}; stale payloads sent {delivered}, received {}, confirmed by the receiver {} (journals; the build accepts {accepted})",
+            s.changed,
+            s.changed_runs,
+            s.failing,
+            s.detecting_plans,
+            s.failing_runs,
+            s.refused_runs,
+            s.detecting_runs,
+            counts(o.breaches.iter().map(|(b, n)| (format!("{b:?}"), *n))),
+            by_property(o),
+            o.carried[0],
+            o.carried[1]
+        );
+        let (no_quorum, unexplored, found) = silent_summaries()[&(id, mode)];
+        let _ = writeln!(
+            out,
+            "{label} changed plans with no finding {}: the stale confirmation's coordinator gets fewer than two confirmations {no_quorum}; an ack can follow and the campaign's logs order two durable confirmations first {unexplored}, of which 256 more sampled logs detect {found}",
+            s.changed - s.failing
+        );
+        let _ = writeln!(out, "{label} {}", result_line(expected, s, o));
+        if let Some(w) = &s.witness {
+            out.push_str(&witness_line(&format!("{label} witness"), m, w));
+        }
+        if let Some(w) = &s.also {
+            out.push_str(&witness_line(&format!("{label} second witness"), m, w));
+            let _ = writeln!(out, "  causal story: {}", mutants::story(m, w).join(" "));
+        }
     }
     out
 }

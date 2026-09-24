@@ -68,8 +68,40 @@
 //! cleanup, and `register_baseline.rs` reads quiescence and conservation with the stopped
 //! tasks and the fenced obligations counted apart.
 //!
-//! Virtual time is not used: no step of the durable register waits for a timer, and a
-//! sleeping writer would only add a refusal (`TaskAsleep`) to the admissibility rule.
+//! Virtual time is not used by [`build`], [`build_with_shutdown`] or
+//! [`build_with_shutdown_in`]: no step of the durable register waits for a timer, and a
+//! sleeping writer would only add a refusal (`TaskAsleep`) to the admissibility rule. The
+//! timer carrier below uses it, on a task that no other actor commands.
+//!
+//! # The carrier: a process epoch carried in data (bn-2faf1)
+//!
+//! [`build_carried`] gives each incarnation of a replica a process epoch, one more than the
+//! one before it ([`process_epoch`], [`Fence`]), and carries that epoch in data to the next
+//! incarnation, at the replica's last crash ([`carrier_sites`], [`CARRIER_SEMANTICS`]):
+//!
+//! - [`Carrier::Message`]: the crashed incarnation's writer has a submit in flight, not
+//!   synced. Its late completion is a message it sends, before the crash, on a mailbox the
+//!   next incarnation's writer of the slot receives; the payload names the crashed
+//!   incarnation's process epoch, the slot and the value.
+//! - [`Carrier::Timer`]: at the same site, the incarnation arms a timer on its node's
+//!   supervisor ([`Role::Supervisor`]), a task in its own region outside every
+//!   incarnation's, so neither crash semantics touches it. After the crash the clock
+//!   passes the deadline, and the supervisor's callback sends the payload on the mailbox.
+//! - [`Carrier::Recovery`], the boundary: after a crash between a `Sync` and its `Confirm`,
+//!   the supervisor's recovery report names the new incarnation's own process epoch and the
+//!   durable record, right after the restart.
+//!
+//! The receiver acts on a payload, by confirming its slot and value, only when the payload
+//! names its own process epoch ([`accepts`]); otherwise it drops it. The binding carries no
+//! payload and has no data-dependent control flow, so each payload is a program-side fact
+//! bound to its mailbox ([`Roles::mailboxes`]), and the check is decided at build time from
+//! that payload and the receiver's epoch: the built program is the check's outcome. Each
+//! mailbox carries one message, from one sender, so the payload a receive delivers is fixed
+//! by the program, not by the schedule. A mutant changes the fence ([`Fence::reuse_epoch`]
+//! for M03, [`Fence::check_timers`] for M08), never the carrier. The receiver is always the
+//! last incarnation, which never crashes, because a fail-stop crash of a task that holds a
+//! channel's receiver is the binding's typed `CrashUnsupported`. A crash with no submit in
+//! flight has no pending completion, and so no message or timer site.
 //!
 //! What the choice log controls: the interleaving of the replicas and coordinators,
 //! and so every order of reserve, submit, sync, crash, confirmation and ack across
@@ -98,11 +130,17 @@
 //! release with no write); a coordinator's commit is `Ack`. Every other event must
 //! stutter.
 //!
-//! The program carries no data. A writer's value is a label of the role table. The
-//! projection corroborates it only for writers that confirm: each confirmation must
-//! go to the coordinator of the sender's epoch and value. A writer that crashes before
-//! it confirms has an uncorroborated value, which the step check covers only in the
-//! aggregate: a wrong label there is refuted where an ack quorum depends on it.
+//! The program carries no data except a carried build's payloads. A writer's value is a
+//! label of the role table. The projection corroborates it only for writers that confirm:
+//! each confirmation must go to the coordinator of the sender's epoch and value. A writer
+//! that crashes before it confirms has an uncorroborated value, which the step check covers
+//! only in the aggregate: a wrong label there is refuted where an ack quorum depends on it.
+//!
+//! In a carried build (bn-2faf1), each mailbox's channel must be opened, in order after the
+//! coordinators', to the writer the roles name, each send on it must come from the
+//! payload's node (its writer of the slot for a message, its supervisor otherwise), and a
+//! confirmation may also name a slot and value the journal has delivered to the sender in
+//! a payload: that confirmation is corroborated by the delivery, not by the sender's label.
 //!
 //! # 3. The oracle
 //!
@@ -150,6 +188,12 @@
 //!   and [`with_op`], so a program mutant can retarget or insert operations. The
 //!   mutants themselves are in `support/register_mutants.rs`. [`build`] and
 //!   [`build_with_shutdown`] build the same programs as before.
+//! - bn-2faf1 added the carrier ([`build_carried`]), so M03 and M08 run against a process
+//!   epoch carried in data. A plan with no carrier site builds as before, operation for
+//!   operation, and the admissibility rule gained a full-channel wait for a confirmation
+//!   ([`CONFIRM_CAPACITY`]) that no plan of the correct program reaches. Every earlier
+//!   campaign identity in the IMPL-03, IMPL-04 and IMPL-05 goldens is the same as before
+//!   bn-2faf1 (checked by diff; the IMPL-03 and IMPL-04 goldens are byte-identical).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -185,6 +229,21 @@ pub const FAIL_STOP_SEMANTICS: &str = "a fail-stop crash is the binding's Crash 
      the unsynced IoOp they held are fenced, never aborted, and the projection reads their Lose from the \
      crash event; process/crash-restart-v0 row fail-stop-crash (bn-20d8u)";
 
+/// What the carried builds are ([`build_carried`], bn-2faf1). The evidence renders this
+/// line.
+pub const CARRIER_SEMANTICS: &str = "a process epoch carried in data: each incarnation of a replica has a process \
+     epoch, one more than the one before it; at a replica's last crash with a submit in flight, the late completion \
+     of that submit (a message the crashed writer sends) or a timer it armed on the node's supervisor outside the \
+     incarnation's region (whose callback sends after the clock passes it) carries the crashed incarnation's process \
+     epoch, slot and value to the new incarnation right after the restart; the receiver acts on a payload, by \
+     confirming its slot and value, only when the payload names its own process epoch; the recovery carrier sends, \
+     after a crash between sync and confirm, a report that names the new incarnation's own epoch, which it confirms \
+     from; the binding carries no payload, so the check is decided at build time from the payload and the receiver's \
+     epoch, and the projection corroborates a confirmation made from a payload by the journal's delivery of it \
+     (bn-2faf1); the payload's process epoch is a program-side fact bound to its mailbox and never appears in the \
+     journal, and the supervisor's send is a scripted operation after the Advance, not a substrate callback of the \
+     timer's fire; what the journal shows is each payload's receipt and whether the receiver's next step confirms it";
+
 /// How a build realizes a crash act (bn-20d8u).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrashMode {
@@ -193,6 +252,100 @@ pub enum CrashMode {
     /// `Crash` of the incarnation's region: the profile's fail-stop crash.
     FailStop,
 }
+
+/// A process epoch carried in data (bn-2faf1): what carries it to a restarted replica's new
+/// incarnation. See "The carrier" in the module documentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Carrier {
+    /// The late completion of the crashed incarnation's pending submit: a message its
+    /// writer sends to the node's mailbox before the crash, which names that incarnation's
+    /// process epoch and the slot and value it submitted. The new incarnation receives it
+    /// right after the restart.
+    Message,
+    /// A timer the crashed incarnation arms on its node's supervisor, outside every
+    /// incarnation's region, before the crash, with the same payload. The clock passes
+    /// its deadline after the crash, and the supervisor delivers the payload to the new
+    /// incarnation.
+    Timer,
+    /// The boundary: right after a restart that follows a synced and unconfirmed write,
+    /// the supervisor's recovery report names the new incarnation's own process epoch and
+    /// the durable record. The new incarnation confirms from it, in place of its scripted
+    /// confirmation.
+    Recovery,
+}
+
+/// How a program checks a carried process epoch (bn-2faf1). The correct program is
+/// [`CORRECT_FENCE`]; a mutant changes one field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fence {
+    /// A restarted incarnation takes the process epoch of the incarnation before it,
+    /// instead of one more (M03's defect).
+    pub reuse_epoch: bool,
+    /// A timer's delivery is held to the epoch check (M08's defect drops it).
+    pub check_timers: bool,
+}
+
+/// The correct program's fence: every incarnation's process epoch is one more than the one
+/// before it, and every carried payload, message or timer, is held to the epoch check.
+pub const CORRECT_FENCE: Fence = Fence {
+    reuse_epoch: false,
+    check_timers: true,
+};
+
+/// The process epoch of incarnation `inc` of a replica under `fence`: `inc`, or `0` for
+/// every incarnation when a restart reuses the epoch before it.
+#[must_use]
+pub const fn process_epoch(inc: usize, fence: Fence) -> usize {
+    if fence.reuse_epoch { 0 } else { inc }
+}
+
+/// The receiver's epoch check: whether an incarnation whose process epoch is `own` acts on
+/// a payload that `via` carried and that names process epoch `carried`. The correct check
+/// accepts exactly the payloads of its own epoch.
+#[must_use]
+pub fn accepts(fence: Fence, via: Carrier, own: usize, carried: usize) -> bool {
+    (via == Carrier::Timer && !fence.check_timers) || own == carried
+}
+
+/// A carried payload: the slot and value a replica's incarnation, by process epoch,
+/// reports as written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Payload {
+    /// What carries it.
+    pub via: Carrier,
+    /// Replica index.
+    pub node: u8,
+    /// The process epoch it names.
+    pub process: usize,
+    /// The slot's epoch.
+    pub epoch: u8,
+    /// The value index.
+    pub value: u8,
+}
+
+/// One mailbox of a carried build: the task that receives on it, by ordinal, the payload
+/// of the one message it carries, and whether the receiver acts on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mailbox {
+    /// Its channel ordinal: after every coordinator's channel, in site order.
+    pub channel: u32,
+    /// The one task that sends on it, by ordinal: the crashed incarnation's writer of the
+    /// slot for a message, the node's supervisor otherwise.
+    pub sender: u32,
+    /// The receiving writer's task ordinal.
+    pub taker: u32,
+    /// The payload.
+    pub payload: Payload,
+    /// Whether the receiver's epoch check accepts it.
+    pub accepted: bool,
+}
+
+/// The capacity of each coordinator's channel.
+pub const CONFIRM_CAPACITY: u32 = 4;
+
+/// The virtual timer the [`Carrier::Timer`] arms, and how far the clock moves after the
+/// crash.
+pub const CARRIER_TIMER: (u64, u64) = (10, 20);
 
 // ---------------------------------------------------------------------------
 // 1. the program
@@ -265,6 +418,12 @@ pub enum Role {
         /// The value index.
         value: u8,
     },
+    /// Replica `node`'s supervisor, in its own region outside every incarnation's: it
+    /// holds the node's timers and its recovery report (bn-2faf1, [`Carrier`]).
+    Supervisor {
+        /// Replica index.
+        node: u8,
+    },
 }
 
 /// Every task's role and owning region ordinal, indexed by task ordinal, as the
@@ -281,6 +440,9 @@ pub struct Roles {
     pub tasks: Vec<(Role, u32)>,
     /// Regions the setup opens under the root.
     pub regions: u32,
+    /// The carried build's mailboxes, in the order the setup opens them, after every
+    /// coordinator's channel; empty for a build with no carrier (bn-2faf1).
+    pub mailboxes: Vec<Mailbox>,
 }
 
 /// Static facts about one operation, for the admissibility rule.
@@ -355,10 +517,127 @@ fn confirmations(plan: &Plan) -> Vec<(u8, u8)> {
     out
 }
 
+/// One carrier site (bn-2faf1): the crash act of replica `node` it sits at, by script
+/// index, its payload, and whether the new incarnation's epoch check accepts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Site {
+    /// Replica index.
+    pub node: u8,
+    /// The crash act's index in the replica's script.
+    pub at: usize,
+    /// The crashed incarnation's index; the receiver is the next one.
+    pub crashed: usize,
+    /// The payload.
+    pub payload: Payload,
+    /// Whether the receiver acts on it.
+    pub accepted: bool,
+}
+
+/// The carrier sites of `plan` (bn-2faf1). Each replica has at most one: its last crash,
+/// so the receiver is its last incarnation, which never crashes (a fail-stop crash of a
+/// task that holds a channel's receiver is the binding's `CrashUnsupported`).
+///
+/// - [`Carrier::Message`] and [`Carrier::Timer`]: the last crash of a replica whose
+///   crashed incarnation has exactly one submit in flight, not synced; the payload names
+///   that incarnation's process epoch, the slot and its value. A crash with no submit in
+///   flight has no pending completion, and so no site.
+/// - [`Carrier::Recovery`]: the last crash of a replica right after a `Sync(e)` and right
+///   before the new incarnation's `Confirm(e)`; the payload names the new incarnation's
+///   process epoch and the durable record.
+#[must_use]
+pub fn carrier_sites(plan: &Plan, carrier: Carrier, fence: Fence) -> Vec<Site> {
+    let mut out = Vec::new();
+    for n in 0..3_u8 {
+        let script = &plan.replicas[usize::from(n)];
+        let crashes: Vec<usize> = script
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| matches!(a, Act::Crash | Act::CrashRepropose(..)))
+            .map(|(i, _)| i)
+            .collect();
+        let Some(&at) = crashes.last() else {
+            continue;
+        };
+        let crashed = crashes.len() - 1;
+        let start = crashes.len().checked_sub(2).map_or(0, |i| crashes[i] + 1);
+        let values = incarnation_values(plan, usize::from(n));
+        let (process, epoch, value) = match carrier {
+            Carrier::Message | Carrier::Timer => {
+                let mut pending = BTreeSet::new();
+                for act in &script[start..at] {
+                    match *act {
+                        Act::Submit(e) => {
+                            pending.insert(e);
+                        }
+                        Act::Sync(e) => {
+                            pending.remove(&e);
+                        }
+                        _ => {}
+                    }
+                }
+                let [e] = pending.into_iter().collect::<Vec<_>>()[..] else {
+                    continue;
+                };
+                (
+                    process_epoch(crashed, fence),
+                    e,
+                    values[crashed][usize::from(e)],
+                )
+            }
+            Carrier::Recovery => {
+                let Some(Act::Sync(e)) = at.checked_sub(1).map(|i| script[i]) else {
+                    continue;
+                };
+                if script.get(at + 1) != Some(&Act::Confirm(e)) {
+                    continue;
+                }
+                (
+                    process_epoch(crashed + 1, fence),
+                    e,
+                    values[crashed + 1][usize::from(e)],
+                )
+            }
+        };
+        let payload = Payload {
+            via: carrier,
+            node: n,
+            process,
+            epoch,
+            value,
+        };
+        out.push(Site {
+            node: n,
+            at,
+            crashed,
+            payload,
+            accepted: accepts(fence, carrier, process_epoch(crashed + 1, fence), process),
+        });
+    }
+    out
+}
+
 /// The coordinators of a plan: every `(epoch, value)` some replica confirms, with how
-/// many confirmations it gets.
-fn coordinators(plan: &Plan) -> Vec<(u8, u8, usize)> {
-    let confirmed = confirmations(plan);
+/// many confirmations it gets. With carrier sites (bn-2faf1), an accepted payload is a
+/// confirmation of its slot and value, and a recovery site replaces the scripted
+/// confirmation that follows its crash.
+fn coordinators_with(plan: &Plan, sites: &[Site]) -> Vec<(u8, u8, usize)> {
+    let mut confirmed = confirmations(plan);
+    for s in sites {
+        if s.payload.via == Carrier::Recovery {
+            // The scripted `Confirm(e)` right after the crash confirms the new
+            // incarnation's value of `e`, which is the payload's value: both read
+            // `incarnation_values` of that incarnation, so it is in `confirmed`.
+            let replaced = (s.payload.epoch, s.payload.value);
+            let i = confirmed
+                .iter()
+                .position(|c| *c == replaced)
+                .expect("the scripted confirmation a recovery site replaces");
+            confirmed.remove(i);
+        }
+        if s.accepted {
+            confirmed.push((s.payload.epoch, s.payload.value));
+        }
+    }
     let mut out = Vec::new();
     for e in 0..plan.epochs {
         for v in 0..u8::try_from(VALUES.len()).expect("two values") {
@@ -378,7 +657,7 @@ fn coordinators(plan: &Plan) -> Vec<(u8, u8, usize)> {
 /// On a plan that is not well formed: an epoch out of range, or an act on a permit or
 /// bytes that the same incarnation has not taken.
 pub fn build(plan: &Plan) -> Built {
-    build_inner(plan, false, CrashMode::Graceful)
+    build_inner(plan, false, CrashMode::Graceful, &[])
 }
 
 /// The binding programs of `plan` with the service's shutdown (PR-16/IMPL-04, bn-5fpl):
@@ -395,7 +674,7 @@ pub fn build(plan: &Plan) -> Built {
 ///
 /// As [`build`].
 pub fn build_with_shutdown(plan: &Plan) -> Built {
-    build_inner(plan, true, CrashMode::Graceful)
+    build_inner(plan, true, CrashMode::Graceful, &[])
 }
 
 /// [`build_with_shutdown`] with each crash act realized as `mode` says (bn-20d8u). The
@@ -405,7 +684,46 @@ pub fn build_with_shutdown(plan: &Plan) -> Built {
 ///
 /// As [`build`].
 pub fn build_with_shutdown_in(plan: &Plan, mode: CrashMode) -> Built {
-    build_inner(plan, true, mode)
+    build_inner(plan, true, mode, &[])
+}
+
+/// [`build_with_shutdown_in`] with `carrier` at every site of [`carrier_sites`], and each
+/// payload held to `fence` (bn-2faf1). A plan with no site builds exactly as
+/// [`build_with_shutdown_in`] does, operation for operation. At a site of replica `n`,
+/// whose last crash ends incarnation `k`:
+///
+/// - [`Carrier::Message`]: right before the crash, `k`'s writer of the slot sends the
+///   payload on the site's mailbox; right after it, the last incarnation's writer of the
+///   slot receives it;
+/// - [`Carrier::Timer`]: right before the crash, `n`'s supervisor sleeps
+///   [`CARRIER_TIMER`]`.0` (the timer, armed outside the incarnation's region); right after
+///   it, the clock advances [`CARRIER_TIMER`]`.1`, the supervisor sends the payload on the
+///   mailbox (the timer's callback), and the last incarnation's writer receives it;
+/// - [`Carrier::Recovery`]: right after the crash, the supervisor sends the recovery
+///   report on the mailbox and the writer receives it, and the scripted `Confirm` that
+///   follows the crash is dropped.
+///
+/// Then, when the receiver's epoch check accepts the payload ([`accepts`]), the receiver
+/// confirms the payload's slot and value to that coordinator; otherwise it drops it. The
+/// binding has no data-dependent control flow, so the check is decided here, from the
+/// payload and the receiver's process epoch, and the program is its outcome; the journal
+/// carries the payload's delivery, and [`observe`] reads it back ([`Roles::mailboxes`]).
+///
+/// # Panics
+///
+/// As [`build`].
+pub fn build_carried(plan: &Plan, mode: CrashMode, carrier: Carrier, fence: Fence) -> Built {
+    build_inner(plan, true, mode, &carrier_sites(plan, carrier, fence))
+}
+
+/// [`build_carried`] with explicit `sites`, for a test that needs a payload
+/// [`carrier_sites`] does not make, such as a recovery report naming a stale epoch.
+///
+/// # Panics
+///
+/// As [`build`], and on a site that is not at a crash act of its replica.
+pub fn build_with_sites(plan: &Plan, mode: CrashMode, sites: &[Site]) -> Built {
+    build_inner(plan, true, mode, sites)
 }
 
 /// `built` without operation `index` of actor `actor`, its admissibility facts kept in
@@ -467,7 +785,7 @@ pub fn with_op(built: &Built, actor: usize, index: usize, op: SubstrateOp) -> Bu
     out
 }
 
-fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
+fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode, sites: &[Site]) -> Built {
     assert!((1..=2).contains(&plan.epochs), "one or two epochs");
     assert!(
         plan.values
@@ -524,22 +842,44 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
             }
         }
     }
-    let coords = coordinators(plan);
+    let coords = coordinators_with(plan, sites);
     let coord_region = RegionLabel(labels.take());
     setup.push(SubstrateOp::OpenRegion {
         parent: RegionLabel::ROOT,
         child: coord_region,
     });
     region_ordinal += 1;
+    let coord_ordinal = region_ordinal;
+    // The supervisors of the nodes whose site needs one, each in its own region under the
+    // root, outside every incarnation (bn-2faf1).
+    let mut supervisor: BTreeMap<u8, (RegionLabel, TaskLabel)> = BTreeMap::new();
+    let mut supervisor_region: BTreeMap<u8, u32> = BTreeMap::new();
+    for site in sites {
+        if site.payload.via != Carrier::Message {
+            let r = RegionLabel(labels.take());
+            setup.push(SubstrateOp::OpenRegion {
+                parent: RegionLabel::ROOT,
+                child: r,
+            });
+            region_ordinal += 1;
+            supervisor_region.insert(site.node, region_ordinal);
+            supervisor.insert(site.node, (r, TaskLabel(labels.take())));
+        }
+    }
     let mut coord_task = Vec::new();
     let mut channel = BTreeMap::new();
     for (i, &(e, v, _)) in coords.iter().enumerate() {
         let t = TaskLabel(labels.take());
         task_labels.push(t);
-        tasks.push((Role::Coordinator { epoch: e, value: v }, region_ordinal));
+        tasks.push((Role::Coordinator { epoch: e, value: v }, coord_ordinal));
         spawns.push((coord_region, t));
         coord_task.push(t);
         channel.insert((e, v), (i, ChannelLabel(labels.take())));
+    }
+    for (&node, &(r, t)) in &supervisor {
+        task_labels.push(t);
+        tasks.push((Role::Supervisor { node }, supervisor_region[&node]));
+        spawns.push((r, t));
     }
     for &(r, t) in &spawns {
         setup.push(SubstrateOp::Spawn {
@@ -554,8 +894,35 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
     for (i, &(e, v, _)) in coords.iter().enumerate() {
         setup.push(SubstrateOp::OpenChannel {
             channel: channel[&(e, v)].1,
-            capacity: 4,
+            capacity: CONFIRM_CAPACITY,
             receiver: coord_task[i],
+        });
+    }
+    // One mailbox per site, received by the slot's writer in the last incarnation.
+    let mut mailbox: BTreeMap<u8, ChannelLabel> = BTreeMap::new();
+    let mut mailboxes = Vec::new();
+    let ordinal_of = |t: TaskLabel| {
+        u32::try_from(task_labels.iter().position(|x| *x == t).expect("a task")).expect("few tasks")
+    };
+    for (k, site) in sites.iter().enumerate() {
+        let c = ChannelLabel(labels.take());
+        let taker = writer[&(site.node, site.crashed + 1, site.payload.epoch)];
+        let sender = match site.payload.via {
+            Carrier::Message => writer[&(site.node, site.crashed, site.payload.epoch)],
+            Carrier::Timer | Carrier::Recovery => supervisor[&site.node].1,
+        };
+        setup.push(SubstrateOp::OpenChannel {
+            channel: c,
+            capacity: 1,
+            receiver: taker,
+        });
+        mailbox.insert(site.node, c);
+        mailboxes.push(Mailbox {
+            channel: u32::try_from(coords.len() + k).expect("few channels"),
+            sender: ordinal_of(sender),
+            taker: ordinal_of(taker),
+            payload: site.payload,
+            accepted: site.accepted,
         });
     }
 
@@ -576,7 +943,33 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
         let mut bytes: BTreeMap<u8, ReservationLabel> = BTreeMap::new();
         let mut ops = Vec::new();
         let mut m = Vec::new();
-        for act in &plan.replicas[usize::from(n)] {
+        let site = sites.iter().find(|s| s.node == n);
+        let mut skip = None;
+        for (at, act) in plan.replicas[usize::from(n)].iter().enumerate() {
+            if skip == Some(at) {
+                continue;
+            }
+            let carried_here = site.filter(|s| s.at == at);
+            if let Some(s) = carried_here {
+                // Before the crash: the message's send, or the timer's arming.
+                match s.payload.via {
+                    Carrier::Message => {
+                        ops.push(SubstrateOp::Send {
+                            task: writer[&(n, inc, s.payload.epoch)],
+                            channel: mailbox[&n],
+                        });
+                        m.push(none);
+                    }
+                    Carrier::Timer => {
+                        ops.push(SubstrateOp::Sleep {
+                            task: supervisor[&n].1,
+                            nanos: CARRIER_TIMER.0,
+                        });
+                        m.push(none);
+                    }
+                    Carrier::Recovery => {}
+                }
+            }
             let w = |e: u8| {
                 assert!(e < plan.epochs, "epoch in range");
                 writer[&(n, inc, e)]
@@ -647,6 +1040,43 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
             };
             ops.push(op);
             m.push(Meta { feeds, ..none });
+            if let Some(s) = carried_here {
+                // After the crash: the timer comes due and its callback sends; the
+                // recovery report is sent; then the new incarnation receives, and acts on
+                // the payload only when its epoch check accepts it.
+                let e = s.payload.epoch;
+                if s.payload.via == Carrier::Timer {
+                    ops.push(SubstrateOp::Advance {
+                        nanos: CARRIER_TIMER.1,
+                    });
+                    m.push(none);
+                }
+                if s.payload.via != Carrier::Message {
+                    ops.push(SubstrateOp::Send {
+                        task: supervisor[&n].1,
+                        channel: mailbox[&n],
+                    });
+                    m.push(none);
+                }
+                ops.push(SubstrateOp::Recv {
+                    channel: mailbox[&n],
+                });
+                m.push(none);
+                if s.payload.via == Carrier::Recovery {
+                    skip = Some(at + 1);
+                }
+                if s.accepted {
+                    let (i, c) = channel[&(e, s.payload.value)];
+                    ops.push(SubstrateOp::Send {
+                        task: writer[&(n, inc, e)],
+                        channel: c,
+                    });
+                    m.push(Meta {
+                        feeds: Some(i),
+                        ..none
+                    });
+                }
+            }
         }
         programs.push(ops);
         meta.push(m);
@@ -714,6 +1144,11 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
             live.push(region[&(n, inc)]);
         }
         live.push(coord_region);
+        for &(r, t) in supervisor.values() {
+            ops.push(SubstrateOp::Finish { task: t });
+            m.push(last);
+            live.push(r);
+        }
         live.push(RegionLabel::ROOT);
         for r in live {
             ops.push(SubstrateOp::Close { region: r });
@@ -727,6 +1162,7 @@ fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
         roles: Roles {
             tasks,
             regions: region_ordinal,
+            mailboxes,
         },
         labels: task_labels,
         meta,
@@ -763,10 +1199,17 @@ impl Sched {
     }
 
     /// Whether `actor`'s next operation commands a task that is not parked, and, for
-    /// the shutdown, whether every other actor has finished.
+    /// the shutdown, whether every other actor has finished. A confirmation waits while
+    /// its coordinator's channel is full ([`CONFIRM_CAPACITY`]): the sender would park
+    /// on it. No plan of the correct program sends a coordinator more than three
+    /// confirmations, so this never binds there; it can bind only where two accepted
+    /// payloads add two confirmations to one coordinator (bn-2faf1).
     fn admissible(&self, built: &Built, actor: usize) -> bool {
         let m = built.meta[actor][self.cursors[actor]];
         m.commands.is_none_or(|k| self.received[k] <= self.sent[k])
+            && m.feeds.is_none_or(|k| {
+                self.sent[k].saturating_sub(self.received[k]) < CONFIRM_CAPACITY as usize
+            })
             && (!m.last
                 || (0..built.programs.len())
                     .all(|a| a == actor || self.cursors[a] == built.programs[a].len()))
@@ -1073,6 +1516,11 @@ pub fn observe(roles: &Roles, journal: &Journal) -> Result<Vec<Observed>, Projec
     let mut regions = 0_u32;
     // Channel ordinal → the `(epoch, value)` of the coordinator that receives on it.
     let mut channels: BTreeMap<u32, (u8, u8)> = BTreeMap::new();
+    // Channel ordinal → the carried build's mailbox it is, by index (bn-2faf1).
+    let mut mailboxes: BTreeMap<u32, usize> = BTreeMap::new();
+    // Writer task ordinal → the `(epoch, value)` of each payload the journal delivered to
+    // it: what corroborates a confirmation made from a payload.
+    let mut delivered: BTreeMap<u32, BTreeSet<(u8, u8)>> = BTreeMap::new();
     let role_of = |task: u32| roles.tasks.get(task as usize).map(|r| r.0);
     for event in journal.events() {
         let seq = event.seq();
@@ -1152,19 +1600,60 @@ pub fn observe(roles: &Roles, journal: &Journal) -> Result<Vec<Observed>, Projec
             EventBody::Channel(ChannelEvent::Opened {
                 channel, receiver, ..
             }) => {
-                let Some(Role::Coordinator { epoch, value }) = role_of(receiver.0) else {
-                    return Err(ProjectionRefusal::RolesDisagree { seq });
-                };
-                channels.insert(channel.0, (epoch, value));
+                match role_of(receiver.0) {
+                    Some(Role::Coordinator { epoch, value }) => {
+                        channels.insert(channel.0, (epoch, value));
+                    }
+                    // A mailbox: the next one the roles name, with this receiver.
+                    Some(Role::Writer { .. })
+                        if roles.mailboxes.get(mailboxes.len()).is_some_and(|mb| {
+                            mb.taker == receiver.0 && mb.channel == channel.0
+                        }) =>
+                    {
+                        mailboxes.insert(channel.0, mailboxes.len());
+                    }
+                    _ => return Err(ProjectionRefusal::RolesDisagree { seq }),
+                }
                 Expect::Stutter
             }
             EventBody::Channel(ChannelEvent::Sent {
                 channel, sender, ..
             }) => {
-                let to = channels.get(&channel.0).ok_or_else(|| unknown.clone())?;
-                match role_of(sender.0) {
-                    Some(Role::Writer { epoch, value, .. }) if (epoch, value) == *to => {}
-                    _ => return Err(ProjectionRefusal::RolesDisagree { seq }),
+                if let Some(&k) = mailboxes.get(&channel.0) {
+                    // A payload's send: by the crashed incarnation's writer of its node
+                    // and slot (a message), or by its node's supervisor.
+                    let p = roles.mailboxes[k].payload;
+                    if sender.0 != roles.mailboxes[k].sender {
+                        return Err(ProjectionRefusal::RolesDisagree { seq });
+                    }
+                    match (p.via, role_of(sender.0)) {
+                        (Carrier::Message, Some(Role::Writer { node, epoch, .. }))
+                            if (node, epoch) == (p.node, p.epoch) => {}
+                        (Carrier::Timer | Carrier::Recovery, Some(Role::Supervisor { node }))
+                            if node == p.node => {}
+                        _ => return Err(ProjectionRefusal::RolesDisagree { seq }),
+                    }
+                } else {
+                    let to = *channels.get(&channel.0).ok_or_else(|| unknown.clone())?;
+                    match role_of(sender.0) {
+                        Some(Role::Writer { epoch, value, .. }) if (epoch, value) == to => {}
+                        // Corroborated by a payload the journal delivered to the sender,
+                        // used once.
+                        Some(Role::Writer { epoch, .. })
+                            if epoch == to.0
+                                && delivered.get_mut(&sender.0).is_some_and(|d| d.remove(&to)) => {}
+                        _ => return Err(ProjectionRefusal::RolesDisagree { seq }),
+                    }
+                }
+                Expect::Stutter
+            }
+            EventBody::Channel(ChannelEvent::Received { channel, .. }) => {
+                if let Some(&k) = mailboxes.get(&channel.0) {
+                    let mb = roles.mailboxes[k];
+                    delivered
+                        .entry(mb.taker)
+                        .or_default()
+                        .insert((mb.payload.epoch, mb.payload.value));
                 }
                 Expect::Stutter
             }
@@ -1191,6 +1680,9 @@ pub fn observe(roles: &Roles, journal: &Journal) -> Result<Vec<Observed>, Projec
                     Role::Coordinator { epoch, value } => {
                         view.permits.insert(reservation.0, Err((epoch, value)));
                         Expect::Stutter
+                    }
+                    Role::Supervisor { .. } => {
+                        return Err(ProjectionRefusal::RolesDisagree { seq });
                     }
                 }
             }
@@ -1299,10 +1791,61 @@ pub fn observe(roles: &Roles, journal: &Journal) -> Result<Vec<Observed>, Projec
             post: view.raw(),
         });
     }
-    if spawned != roles.tasks.len() || regions != roles.regions {
+    if spawned != roles.tasks.len()
+        || regions != roles.regions
+        || mailboxes.len() != roles.mailboxes.len()
+    {
         return Err(ProjectionRefusal::RolesUnspawned);
     }
     Ok(out)
+}
+
+/// What a carried build's journal shows of its payloads (bn-2faf1): for each mailbox, in
+/// order, `None` when its message was never received, or `Some(acted)`, where `acted` says
+/// whether the receiver's first own step after the receipt (a reserve, an obligation it
+/// opens other than a send's permit, or a send) is a send to the coordinator of the payload's slot and value. That is
+/// the confirmation made from the payload; a receiver that drops the payload goes on to its
+/// own write instead. Read from the journal alone, with the mailboxes of `roles`.
+#[must_use]
+pub fn carried_in_journal(roles: &Roles, journal: &Journal) -> Vec<Option<bool>> {
+    let mut coordinator_of: BTreeMap<u32, (u8, u8)> = BTreeMap::new();
+    let events = journal.events();
+    for e in events {
+        if let EventBody::Channel(ChannelEvent::Opened {
+            channel, receiver, ..
+        }) = e.body()
+            && let Some((Role::Coordinator { epoch, value }, _)) =
+                roles.tasks.get(receiver.0 as usize)
+        {
+            coordinator_of.insert(channel.0, (*epoch, *value));
+        }
+    }
+    roles
+        .mailboxes
+        .iter()
+        .map(|mb| {
+            let at = events.iter().position(|e| {
+                matches!(e.body(), EventBody::Channel(ChannelEvent::Received { channel, .. }) if channel.0 == mb.channel)
+            })?;
+            let next = events[at + 1..].iter().find_map(|e| match e.body() {
+                EventBody::Effect(EffectEvent::Reserved { task, .. }) if task.0 == mb.taker => {
+                    Some(None)
+                }
+                // A send opens its send permit first: that is the send, not a step
+                // of its own.
+                EventBody::Obligation(ObligationEvent::Opened { holder, kind, .. })
+                    if holder.0 == mb.taker && *kind != ObligationKind::SendPermit =>
+                {
+                    Some(None)
+                }
+                EventBody::Channel(ChannelEvent::Sent {
+                    channel, sender, ..
+                }) if sender.0 == mb.taker => Some(coordinator_of.get(&channel.0).copied()),
+                _ => None,
+            });
+            Some(next.flatten() == Some((mb.payload.epoch, mb.payload.value)))
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
