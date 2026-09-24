@@ -46,7 +46,12 @@
 //!    the ledger's own: the obligations still open in it and the ones leaked in it;
 //! 4. a settled region with an open or leaked obligation violates "region close implies
 //!    no obligations", and the calculus's own finalization is not total either;
-//! 5. every region the model finalized has settled.
+//! 5. every region the model finalized has settled, in the same batch (docs/01 §6): a
+//!    finalized region the journal's end never reports settled is held to this family's
+//!    own ledger for it, the same one a settle report would be held to. An open or
+//!    leaked obligation there is still `UnbalancedAtClose`, a violation, with or without
+//!    a report naming it; only a clean balance with no report is the absence of
+//!    evidence, `LiftStop::Incomplete` (RFC 0026 correction 56, bn-eaxx0).
 //!
 //! # Identity
 //!
@@ -555,11 +560,9 @@ pub enum LedgerFault {
         /// Obligations leaked.
         leaked: Vec<u32>,
     },
-    /// The model finalized a region that never settled.
-    Unsettled {
-        /// The region.
-        region: u32,
-    },
+    // A finalized region that never settled is not a contradiction: the journal may
+    // simply have ended before the settle report arrived. `finish` types that
+    // `LiftStop::Incomplete`, never a `LedgerFault` (INV-008, bn-eaxx0).
 }
 
 impl fmt::Display for LedgerFault {
@@ -628,9 +631,6 @@ impl fmt::Display for LedgerFault {
                 f,
                 "r{region} closed with open {open:?} and leaked {leaked:?} obligations"
             ),
-            Self::Unsettled { region } => {
-                write!(f, "r{region} was finalized but never settled")
-            }
         }
     }
 }
@@ -901,15 +901,7 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
             if cx.obligation.settled.insert(region.0, true).is_some() {
                 return Err(fault(LedgerFault::SettledTwice { region: region.0 }));
             }
-            let in_region = |wanted: State| -> Vec<u32> {
-                cx.obligation
-                    .entries
-                    .iter()
-                    .filter(|(_, e)| e.region == region.0 && e.state == wanted)
-                    .map(|(o, _)| *o)
-                    .collect()
-            };
-            let ledger = (in_region(State::Open), in_region(State::Leaked));
+            let ledger = region_balance(cx, region.0);
             let reported = (members(open), members(leaked));
             if reported != ledger {
                 return Err(fault(LedgerFault::BalanceMismatch {
@@ -930,12 +922,54 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
     Ok(())
 }
 
+/// The obligations this family's own account still has open, or reports leaked, in
+/// `region`: the balance a `RegionSettled` event for it would have to report.
+fn region_balance(cx: &LiftContext, region: u32) -> (Vec<u32>, Vec<u32>) {
+    let in_region = |wanted: State| -> Vec<u32> {
+        cx.obligation
+            .entries
+            .iter()
+            .filter(|(_, e)| e.region == region && e.state == wanted)
+            .map(|(o, _)| *o)
+            .collect()
+    };
+    (in_region(State::Open), in_region(State::Leaked))
+}
+
 /// The whole-journal check, run after the last event: when the journal carries this
 /// family, every region the model finalized has settled.
+///
+/// A region settles in the same batch as its finalize (`RegionSettled` after the
+/// region's finalize, docs/01 §6): a real run never leaves that gap open. So a
+/// finalized region with no settle report by the journal's end is checked against this
+/// family's own account of it (`region_balance`), the same one a real settle event
+/// would be held to:
+///
+/// - an open or leaked obligation still in it is proof the region closed unbalanced
+///   ("region close implies no obligations" does not hold) whether or not a settle
+///   report ever names it, so it is `LedgerFault::UnbalancedAtClose`, a violation, at
+///   `finish` exactly as it would be at the settle event (bn-eaxx0's own adversarial
+///   pass: a forged journal that finalizes a region over an obligation its holder ended
+///   still holding, never leaked, and never settled, must not read as merely absent
+///   telemetry);
+/// - an empty balance is not evidence the settle disagrees or never comes: it is the
+///   absence of a report the journal may simply have ended before reaching. INV-008
+///   types that `LiftStop::Incomplete` (`InconclusiveReason::InsufficientTelemetry`),
+///   never `Violates(Unsettled)` (bn-eaxx0, found by the bn-28hup adversarial pass).
+///
+/// A settle the journal does report is still held to its region and its balance:
+/// `SettledBeforeFinalized`, `SettledTwice` and `BalanceMismatch` above catch a settle
+/// that disagrees, and `RegionNotOpen` catches new work after finalize, all at the
+/// event itself, not here.
 pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
     if !cx.obligation.present {
         return Ok(());
     }
+    // A violation found anywhere below outranks an incomplete found earlier: neither
+    // loop returns on its own incomplete case, so the region loop's `UnbalancedAtClose`
+    // is never masked by an unresolved leak found first, and no one finalized-unsettled
+    // region's clean balance masks a later, genuinely unbalanced one (cr-19ec8g).
+    let mut incomplete = false;
     // A leak is reported with its holder's end: a holder still live at the end of the
     // journal lost that end (a truncation, never a conformance; cr-3pu5cu round 7).
     for entry in cx.obligation.entries.values() {
@@ -945,7 +979,7 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
                 .worker_state(WorkerId::at(entry.holder))?
                 .is_terminal()
         {
-            return Err(LiftStop::Incomplete(crate::family::Family::Obligation));
+            incomplete = true;
         }
     }
     let count = u32::try_from(cx.tree.region_count()).unwrap_or(u32::MAX);
@@ -953,8 +987,19 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
         if cx.tree.state(RegionId::at(region))? == RegionState::Finalized
             && !cx.obligation.settled.contains_key(&region)
         {
-            return Err(fault(LedgerFault::Unsettled { region }));
+            let (open, leaked) = region_balance(cx, region);
+            if !open.is_empty() || !leaked.is_empty() {
+                return Err(fault(LedgerFault::UnbalancedAtClose {
+                    region,
+                    open,
+                    leaked,
+                }));
+            }
+            incomplete = true;
         }
+    }
+    if incomplete {
+        return Err(LiftStop::Incomplete(crate::family::Family::Obligation));
     }
     Ok(())
 }

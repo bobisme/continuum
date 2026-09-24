@@ -441,16 +441,24 @@ fn ordinal(count: usize) -> u32 {
 /// reservation, an open obligation, an armed timer or a blocked channel operation is a
 /// state a run can end in, and is not checked here.
 pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
+    // A violation `finish_alone` finds outranks an incomplete region found here, so the
+    // region loop only notes the incomplete case and keeps scanning: it must not return
+    // before `finish_alone` runs (cr-19ec8g).
     let count = ordinal(cx.tree.region_count());
+    let mut incomplete = false;
     for region in 0..count {
         let state = cx.tree.state(RegionId::at(region))?;
         if state == RegionState::Draining(DrainCause::Cancelled)
             || (cx.drained.contains(&region) && state != RegionState::Finalized)
         {
-            return Err(LiftStop::Incomplete(crate::family::Family::Lifecycle));
+            incomplete = true;
         }
     }
-    crate::family::cancellation::finish_alone(cx)
+    crate::family::cancellation::finish_alone(cx)?;
+    if incomplete {
+        return Err(LiftStop::Incomplete(crate::family::Family::Lifecycle));
+    }
+    Ok(())
 }
 
 /// A lifecycle `cancel-requested`: one task's own cancellation is requested

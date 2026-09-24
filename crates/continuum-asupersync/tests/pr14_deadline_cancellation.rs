@@ -1372,6 +1372,23 @@ fn truncated_deadline_journals_do_not_conform_and_complete_prefixes_do() {
                 match truncation::mid_protocol(&all[..cut]) {
                     Some(what) => {
                         assert!(!conforms, "{name} log {log} cut {cut} ({what}) conforms");
+                        // A cut between a region's finalize and its settle is a missing
+                        // report, not a contradiction: it must type
+                        // `Inconclusive(InsufficientTelemetry)`, never a violation
+                        // (bn-eaxx0, found by the bn-28hup adversarial pass).
+                        if what == "a finalize not settled" {
+                            assert!(
+                                matches!(
+                                    lift(&prefix),
+                                    LiftVerdict::Inconclusive {
+                                        reason: InconclusiveReason::InsufficientTelemetry,
+                                        ..
+                                    }
+                                ),
+                                "{name} log {log} cut {cut} ({what}) is not Inconclusive: {:?}",
+                                lift(&prefix)
+                            );
+                        }
                         mid += 1;
                     }
                     None => {

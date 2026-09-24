@@ -47,6 +47,9 @@
 //! | a deadline declared anywhere but right after its task's spawn is `DeadlineNotAtSpawn` in the lift and the model; the adjacent declaration and no deadline conform (cr-3pu5cu round 8) | [`a_deadline_is_declared_right_after_its_spawn`] |
 //! | encoding versions 1 and 2 are two grammars: both readers read both, and refuse a version-2 tag under a version-1 label for each table that grew (cr-3pu5cu round 8) | [`the_two_encoding_versions_are_two_grammars`] |
 //! | 13 hand-built journals from the round-6 pre-review pass (cleanup without the cancellation family then ordinary work, own work past a deadline, a repeated region cancel): the lift reports a violation and the model rejects each | [`round_six_pre_review_journals_are_rejected`] |
+//! | a journal cut between a region's finalize and its settle is `Inconclusive(InsufficientTelemetry)`, never `Violates(Unsettled)`; restoring the settle conforms (bn-eaxx0, found by the bn-28hup adversarial pass) | [`a_journal_cut_between_finalize_and_settle_is_inconclusive`] |
+//! | a region finalized over an obligation its holder ended still holding, never leaked, never settled, and with unrelated legitimate work after it, is `Violates(UnbalancedAtClose)`, not `Inconclusive`, closing the hole a first, unconditional fix reopened (bn-eaxx0's own pre-review adversarial pass) | [`a_finalized_region_with_an_open_obligation_and_no_settle_is_unbalanced_not_inconclusive`] |
+//! | two finalized-unsettled regions, one clean and one genuinely unbalanced, siblings or nested, in both scan orders: always `Violates(UnbalancedAtClose)`, never masked by the clean one's incomplete found first; both clean is still `Inconclusive` (cr-19ec8g) | [`sibling_regions_one_clean_one_unbalanced_missing_settlement_is_unbalanced_at_close`], [`nested_regions_one_clean_one_unbalanced_missing_settlement_is_unbalanced_at_close`], [`two_regions_both_clean_missing_settlement_is_inconclusive`] |
 
 #[path = "support/primitive_conformance_model.rs"]
 mod model;
@@ -2011,6 +2014,26 @@ fn truncated_journals_do_not_conform_and_complete_prefixes_do() {
                             entry.name,
                             prefix.render()
                         );
+                        // A cut between a region's finalize and its settle is a missing
+                        // report, not a contradiction: it must type
+                        // `Inconclusive(InsufficientTelemetry)`, never a violation
+                        // (bn-eaxx0, found by the bn-28hup adversarial pass).
+                        if what == "a finalize not settled" {
+                            assert!(
+                                matches!(
+                                    lift(&prefix),
+                                    LiftVerdict::Inconclusive {
+                                        reason:
+                                            continuum_value::assurance::InconclusiveReason::InsufficientTelemetry,
+                                        ..
+                                    }
+                                ),
+                                "{} log {log} cut {cut} ({what}) is not Inconclusive: {:?}\n{}",
+                                entry.name,
+                                lift(&prefix),
+                                prefix.render()
+                            );
+                        }
                         *mid.entry(what).or_default() += 1;
                     }
                     None => {
@@ -2088,6 +2111,314 @@ fn a_deadline_journal_cut_before_its_cancel_is_inconclusive() {
     assert!(!judge(&entry.config, &truncated).is_accepted());
     let restored = rebuild(all[..=end].iter().cloned());
     assert!(lift_accepts(&restored), "{:?}", lift(&restored));
+}
+
+/// Anti-vacuity: a journal cut between a region's finalize and its settle is
+/// `Inconclusive(InsufficientTelemetry)`, never `Violates(Unsettled)` (bn-eaxx0, found
+/// by the bn-28hup adversarial pass). The old lift rejected this cut with a violation:
+/// this test fails against that behaviour. Putting the settle back makes the same
+/// journal conform.
+#[test]
+fn a_journal_cut_between_finalize_and_settle_is_inconclusive() {
+    let (all, end) = corpus()
+        .into_iter()
+        .find_map(|entry| {
+            entry.logs.iter().find_map(|log| {
+                let all = bodies(&journal_of(&entry, log));
+                // The cut right before a settle: exactly "a finalize not settled" rules
+                // out a log whose cut also lands inside some other unresolved protocol
+                // (a sibling task's cancellation, say), which would report that instead.
+                let cut = (0..all.len()).find(|cut| {
+                    matches!(
+                        all.get(*cut),
+                        Some(EventBody::Obligation(ObligationEvent::RegionSettled { .. }))
+                    ) && mid_protocol(&all[..*cut]) == Some("a finalize not settled")
+                })?;
+                Some((all, cut))
+            })
+        })
+        .expect("a clean finalize-not-settled cut somewhere in the corpus");
+    let truncated = rebuild(all[..end].iter().cloned());
+    assert_eq!(
+        mid_protocol(&all[..end]),
+        Some("a finalize not settled"),
+        "{}",
+        truncated.render()
+    );
+    assert!(
+        matches!(
+            lift(&truncated),
+            LiftVerdict::Inconclusive {
+                reason: continuum_value::assurance::InconclusiveReason::InsufficientTelemetry,
+                ..
+            }
+        ),
+        "{:?}",
+        lift(&truncated)
+    );
+    assert!(!judge_carried(&all[..end], &truncated).is_accepted());
+    let restored = rebuild(all[..=end].iter().cloned());
+    assert!(lift_accepts(&restored), "{:?}", lift(&restored));
+}
+
+/// Regression, bn-eaxx0's own adversarial pass: a region finalized over an obligation
+/// its holder ended still holding, never leaked and never settled, is a violation
+/// (`LedgerFault::UnbalancedAtClose`), never merely absent telemetry, even when the
+/// journal is not truncated and unrelated legitimate work follows. `finish` must read
+/// this family's own ledger for the region, not only whether a settle report arrived,
+/// or the fix for the finalize/settle truncation case would have reopened this hole:
+/// before it, the old unconditional `Violates(Unsettled)` caught this by accident.
+#[test]
+fn a_finalized_region_with_an_open_obligation_and_no_settle_is_unbalanced_not_inconclusive() {
+    use continuum_asupersync::family::obligation::LedgerFault;
+    let r = RegionOrdinal;
+    let t = TaskOrdinal;
+    let open_region = |region, parent| {
+        EventBody::Lifecycle(LifecycleEvent::RegionOpened {
+            region: r(region),
+            parent: r(parent),
+        })
+    };
+    let spawn = |task, region| {
+        EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
+            task: t(task),
+            region: r(region),
+            resumability: Resumability::Resumable,
+        })
+    };
+    let step = |task, step| {
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task: t(task),
+            step,
+        })
+    };
+    let close =
+        |region| EventBody::Lifecycle(LifecycleEvent::RegionCloseRequested { region: r(region) });
+    let drained = |region| {
+        EventBody::Lifecycle(LifecycleEvent::RegionDrained {
+            region: r(region),
+            cancelled: TaskSet::new([]),
+        })
+    };
+    let finalized =
+        |region| EventBody::Lifecycle(LifecycleEvent::RegionFinalized { region: r(region) });
+    let ob_open = |o, holder, region| {
+        EventBody::Obligation(ObligationEvent::Opened {
+            obligation: ObligationOrdinal(o),
+            kind: ObligationKind::Lease,
+            holder: t(holder),
+            region: r(region),
+        })
+    };
+
+    let forged = rebuild([
+        open_region(1, 0),
+        spawn(0, 1),
+        step(0, TaskStep::Begin),
+        ob_open(0, 0, 1),
+        // t0 completes without discharging or leaking o0: the calculus's own `Complete`
+        // does not check held obligations (only `Cancelled` does, docs/02 §7), so this
+        // is admitted.
+        step(0, TaskStep::Complete),
+        close(1),
+        drained(1),
+        finalized(1),
+        // No `RegionSettled` for r1 ever comes. The journal is not truncated:
+        // legitimate, unrelated work for another task follows.
+        spawn(1, 0),
+        step(1, TaskStep::Begin),
+        step(1, TaskStep::Complete),
+    ]);
+    match lift(&forged) {
+        LiftVerdict::Violates {
+            reason:
+                Nonconformance::Obligation(LedgerFault::UnbalancedAtClose {
+                    region: 1,
+                    open,
+                    leaked,
+                }),
+            ..
+        } => {
+            assert_eq!(open, vec![0]);
+            assert!(leaked.is_empty());
+        }
+        other => panic!("{other:?}\n{}", forged.render()),
+    }
+}
+
+/// A two-region forged journal (cr-19ec8g): `r1` and `r2`, siblings under root or `r2`
+/// nested inside `r1`, each with one task that opens one obligation. `dirty` names
+/// which region (by ordinal, `1` or `2`) leaves its obligation open when its task
+/// completes; the other discharges cleanly. `None` leaves both clean. Neither region
+/// ever gets a `RegionSettled`. `r2` finalizes first (so a nested `r1` may finalize
+/// once its child already has), then `r1`; legitimate, unrelated work for a third task
+/// follows, so the journal is not truncated.
+fn two_region_no_settle_events(nested: bool, dirty: Option<u32>) -> Vec<EventBody> {
+    let r = RegionOrdinal;
+    let t = TaskOrdinal;
+    let open_region = |region, parent| {
+        EventBody::Lifecycle(LifecycleEvent::RegionOpened {
+            region: r(region),
+            parent: r(parent),
+        })
+    };
+    let spawn = |task, region| {
+        EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
+            task: t(task),
+            region: r(region),
+            resumability: Resumability::Resumable,
+        })
+    };
+    let step = |task, step| {
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+            task: t(task),
+            step,
+        })
+    };
+    let close =
+        |region| EventBody::Lifecycle(LifecycleEvent::RegionCloseRequested { region: r(region) });
+    let drained = |region| {
+        EventBody::Lifecycle(LifecycleEvent::RegionDrained {
+            region: r(region),
+            cancelled: TaskSet::new([]),
+        })
+    };
+    let finalized =
+        |region| EventBody::Lifecycle(LifecycleEvent::RegionFinalized { region: r(region) });
+    let ob_open = |o, holder, region| {
+        EventBody::Obligation(ObligationEvent::Opened {
+            obligation: ObligationOrdinal(o),
+            kind: ObligationKind::Lease,
+            holder: t(holder),
+            region: r(region),
+        })
+    };
+    let ob_dis = |o| {
+        EventBody::Obligation(ObligationEvent::Discharged {
+            obligation: ObligationOrdinal(o),
+            how: Discharge::Committed,
+        })
+    };
+
+    let parent_of_r2 = if nested { 1 } else { 0 };
+    let mut events = vec![
+        open_region(1, 0),
+        open_region(2, parent_of_r2),
+        spawn(0, 1),
+        step(0, TaskStep::Begin),
+        ob_open(0, 0, 1),
+    ];
+    if dirty != Some(1) {
+        events.push(ob_dis(0));
+    }
+    events.push(step(0, TaskStep::Complete));
+    events.extend([spawn(1, 2), step(1, TaskStep::Begin), ob_open(1, 1, 2)]);
+    if dirty != Some(2) {
+        events.push(ob_dis(1));
+    }
+    events.push(step(1, TaskStep::Complete));
+    // r2 finalizes first: a nested r1 may finalize once its child already has.
+    events.extend([close(2), drained(2), finalized(2)]);
+    events.extend([close(1), drained(1), finalized(1)]);
+    // Legitimate, unrelated work follows: the journal is not truncated.
+    events.extend([
+        spawn(2, 0),
+        step(2, TaskStep::Begin),
+        step(2, TaskStep::Complete),
+    ]);
+    events
+}
+
+/// Regression, cr-19ec8g: sibling regions, one finalized-unsettled with a clean balance
+/// and one finalized-unsettled with an open obligation, in both region orders. The
+/// clean one's incomplete must never mask the other's violation, whichever region
+/// (lower or higher ordinal) `finish` scans first: it must scan every finalized region,
+/// not stop at the first unsettled one.
+#[test]
+fn sibling_regions_one_clean_one_unbalanced_missing_settlement_is_unbalanced_at_close() {
+    use continuum_asupersync::family::obligation::LedgerFault;
+    for dirty in [1_u32, 2] {
+        let events = two_region_no_settle_events(false, Some(dirty));
+        let forged = rebuild(events.iter().cloned());
+        match lift(&forged) {
+            LiftVerdict::Violates {
+                reason:
+                    Nonconformance::Obligation(LedgerFault::UnbalancedAtClose {
+                        region,
+                        open,
+                        leaked,
+                    }),
+                ..
+            } => {
+                assert_eq!(region, dirty, "dirty={dirty}\n{}", forged.render());
+                assert_eq!(open.len(), 1, "dirty={dirty}");
+                assert!(leaked.is_empty(), "dirty={dirty}");
+            }
+            other => panic!("dirty={dirty}: {other:?}\n{}", forged.render()),
+        }
+        assert!(
+            !judge_carried(&events, &forged).is_accepted(),
+            "dirty={dirty}: the model accepts it"
+        );
+    }
+}
+
+/// The same, `r2` nested inside `r1` instead of a sibling of it.
+#[test]
+fn nested_regions_one_clean_one_unbalanced_missing_settlement_is_unbalanced_at_close() {
+    use continuum_asupersync::family::obligation::LedgerFault;
+    for dirty in [1_u32, 2] {
+        let events = two_region_no_settle_events(true, Some(dirty));
+        let forged = rebuild(events.iter().cloned());
+        match lift(&forged) {
+            LiftVerdict::Violates {
+                reason:
+                    Nonconformance::Obligation(LedgerFault::UnbalancedAtClose {
+                        region,
+                        open,
+                        leaked,
+                    }),
+                ..
+            } => {
+                assert_eq!(region, dirty, "dirty={dirty}\n{}", forged.render());
+                assert_eq!(open.len(), 1, "dirty={dirty}");
+                assert!(leaked.is_empty(), "dirty={dirty}");
+            }
+            other => panic!("dirty={dirty}: {other:?}\n{}", forged.render()),
+        }
+        assert!(
+            !judge_carried(&events, &forged).is_accepted(),
+            "dirty={dirty}: the model accepts it"
+        );
+    }
+}
+
+/// Control, cr-19ec8g: two finalized-unsettled regions, both with a clean balance, over
+/// both topologies, is `Inconclusive`, never a violation — the full scan for a
+/// violation must not manufacture one where the ledger is clean everywhere, and the
+/// model agrees.
+#[test]
+fn two_regions_both_clean_missing_settlement_is_inconclusive() {
+    for nested in [false, true] {
+        let events = two_region_no_settle_events(nested, None);
+        let forged = rebuild(events.iter().cloned());
+        assert!(
+            matches!(
+                lift(&forged),
+                LiftVerdict::Inconclusive {
+                    reason: continuum_value::assurance::InconclusiveReason::InsufficientTelemetry,
+                    ..
+                }
+            ),
+            "nested={nested}: {:?}\n{}",
+            lift(&forged),
+            forged.render()
+        );
+        assert!(
+            !judge_carried(&events, &forged).is_accepted(),
+            "nested={nested}: the model accepts it"
+        );
+    }
 }
 
 // --- a task's own cancellation ends by its own `cancel` (cr-3pu5cu, th-1shbkn) -------

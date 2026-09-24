@@ -26,7 +26,7 @@
 //! | the family adds events and changes no byte of the other three families' journals | [`dropping_a_family_gives_that_projection_byte_for_byte`] |
 //! | balanced runs lift and settle every region; a leak is a violation at its region's close | [`balanced_runs_conform_and_leaks_violate_at_close`] |
 //! | one pinned run, rendered: kinds, a cross-region transfer, cancellation discharges | [`a_cancelled_subtree_settles_its_ledger_in_canonical_order`] |
-//! | mutated journals are rejected, each with its own fault (anti-vacuity) | [`mutated_ledger_journals_are_rejected`] |
+//! | mutated journals are rejected: a fault, or (a dropped settlement) insufficient telemetry (anti-vacuity) | [`mutated_ledger_journals_are_rejected`] |
 //! | malformed transfers, unobserved leaks, lost steps, bad bytes: typed refusals | [`refusals_are_typed`] |
 //! | no ambient filesystem or environment path in the family | [`the_obligation_family_names_no_ambient_path`] |
 
@@ -1026,8 +1026,10 @@ fn is_cancel_discharge(event: &ObligationEvent) -> bool {
     )
 }
 
-/// Eight mutation operators over real substrate journals, each rejected with its own
-/// fault. The unmutated journal conforms, so each rejection is the mutant's doing.
+/// Eight mutation operators over real substrate journals, each rejected: seven with
+/// their own fault, and the dropped-settlement one `Inconclusive(InsufficientTelemetry)`
+/// (bn-eaxx0), since an absent report is not a contradiction. The unmutated journal
+/// conforms, so each rejection is the mutant's doing.
 #[test]
 fn mutated_ledger_journals_are_rejected() {
     let programs = ledger();
@@ -1200,19 +1202,22 @@ fn mutated_ledger_journals_are_rejected() {
             "log {log}"
         );
 
-        // 7. A region's settlement dropped.
+        // 7. A region's settlement dropped: an absent report is not a contradiction, so
+        // INV-008 types it insufficient telemetry, never a violation (bn-eaxx0, found
+        // by the bn-28hup adversarial pass).
         let mut events = original.clone();
         let at = position(&events, |e| {
             matches!(e, ObligationEvent::RegionSettled { .. })
         });
-        let EventBody::Obligation(ObligationEvent::RegionSettled { region, .. }) =
-            events.remove(at)
-        else {
-            unreachable!()
-        };
-        assert_eq!(
-            fault_of(events),
-            LedgerFault::Unsettled { region: region.0 },
+        events.remove(at);
+        assert!(
+            matches!(
+                lift(&rebuilt(events)),
+                LiftVerdict::Inconclusive {
+                    reason: InconclusiveReason::InsufficientTelemetry,
+                    ..
+                }
+            ),
             "log {log}"
         );
 

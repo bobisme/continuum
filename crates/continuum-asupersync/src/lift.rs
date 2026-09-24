@@ -243,12 +243,16 @@ impl LiftVerdict {
 
 /// Lift `journal` into a fresh region tree.
 ///
-/// After the last event, the families that make a whole-journal claim check it, in
-/// family-tag order: the reserve/commit/abort family ([`family::effect`]), the
-/// cancellation family ([`family::cancellation`]), the obligations family
-/// ([`family::obligation`]), the virtual time family ([`family::time`]) and the channel
-/// family ([`family::channel`]). A violation one finds is reported
-/// at the last event's sequence number.
+/// After the last event, every family that makes a whole-journal claim checks it: the
+/// lifecycle family ([`family::lifecycle`]), the reserve/commit/abort family
+/// ([`family::effect`]), the cancellation family ([`family::cancellation`]), the
+/// obligations family ([`family::obligation`]), the virtual time family
+/// ([`family::time`]) and the channel family ([`family::channel`]). Every one of them
+/// runs, whatever an earlier one found: a violation, from any family, is reported at
+/// the last event's sequence number and outranks an incomplete or an unsupported family
+/// an earlier check found, which would otherwise mask it (cr-19ec8g). With no
+/// violation, the first incomplete or unsupported family found, in that same order,
+/// is reported.
 #[must_use]
 pub fn lift(journal: &Journal) -> LiftVerdict {
     let mut cx = LiftContext::default();
@@ -298,16 +302,35 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
             }
         }
     }
-    if let Err(stop) = family::lifecycle::finish(&cx)
-        .and_then(|()| family::effect::finish(&cx))
-        .and_then(|()| family::cancellation::finish(&cx))
-        .and_then(|()| family::obligation::finish(&cx))
-        .and_then(|()| family::time::finish(&cx))
-        .and_then(|()| family::channel::finish(&cx))
-    {
+    // Every family's whole-journal check runs, whatever an earlier one found: chaining
+    // these with `?` or `and_then` would let one family's incomplete short-circuit the
+    // rest, silently hiding a genuine violation a later family's check would have
+    // reported. A violation, from any family, always outranks an incomplete or an
+    // unsupported family found by an earlier one (cr-19ec8g).
+    let mut deferred = None;
+    for stop in [
+        family::lifecycle::finish(&cx),
+        family::effect::finish(&cx),
+        family::cancellation::finish(&cx),
+        family::obligation::finish(&cx),
+        family::time::finish(&cx),
+        family::channel::finish(&cx),
+    ] {
+        match stop {
+            Ok(()) => {}
+            Err(LiftStop::Violation(reason)) => {
+                let seq = journal.events().last().map_or(0, |event| event.seq());
+                return LiftVerdict::Violates { seq, reason };
+            }
+            Err(other) => {
+                deferred.get_or_insert(other);
+            }
+        }
+    }
+    if let Some(stop) = deferred {
         let seq = journal.events().last().map_or(0, |event| event.seq());
         return match stop {
-            LiftStop::Violation(reason) => LiftVerdict::Violates { seq, reason },
+            LiftStop::Violation(_) => unreachable!("violations return above"),
             LiftStop::Unsupported(family) => LiftVerdict::Inconclusive {
                 seq,
                 family,

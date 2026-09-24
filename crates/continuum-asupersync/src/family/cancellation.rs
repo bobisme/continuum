@@ -929,6 +929,11 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
     if !cx.cancellation.present {
         return Ok(());
     }
+    // A violation found anywhere in this check outranks an incomplete found earlier:
+    // each loop below reports a violation the moment it finds one, but only notes an
+    // incomplete case and keeps scanning, so a later loop's violation is never masked
+    // by an earlier loop's truncation (cr-19ec8g).
+    let mut incomplete = false;
     // Every reported phase agrees with the calculus at the end (cr-3pu5cu): a task still
     // `requested` or `acknowledged`, or `cancelled` but not yet terminal in the model
     // (its drain or its own `cancel` step missing), means the journal stops inside the
@@ -948,7 +953,7 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
                 phase: phase.token(),
             }));
         }
-        return Err(LiftStop::Incomplete(crate::family::Family::Cancellation));
+        incomplete = true;
     }
     let count = u32::try_from(cx.tree.worker_count()).unwrap_or(u32::MAX);
     // Every worker a cancellation reached has a reported phase, whatever state it ended
@@ -966,7 +971,8 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
         }
         let state = cx.tree.worker_state(worker)?;
         if !state.is_terminal() {
-            return Err(LiftStop::Incomplete(crate::family::Family::Cancellation));
+            incomplete = true;
+            continue;
         }
         if *state != WorkerState::Cancelled {
             return Err(fault(CancellationFault::UnreportedRequest {
@@ -986,6 +992,9 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
                 phase: phase.map_or("active", Phase::token),
             }));
         }
+    }
+    if incomplete {
+        return Err(LiftStop::Incomplete(crate::family::Family::Cancellation));
     }
     Ok(())
 }
