@@ -45,7 +45,7 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 
-use crate::profile::{ADVERSARIAL_V0, Semantic, put_str, u32_len};
+use crate::profile::{ADVERSARIAL_V1, Semantic, put_str, u32_len};
 use crate::refusal::{Bound, Malformed, NotEnabled, Refusal, RunRefusal};
 use crate::step::{EnvelopeId, Event, MAX_STEPS, NetworkConfig, NodeId, NodeSet, Payload, Step};
 
@@ -590,13 +590,18 @@ impl Journal {
     }
 }
 
+/// The journal's canonical bytes. The header names the current profile,
+/// [`crate::profile::ADVERSARIAL_V1`]. This handler implements the rows every entry of
+/// [`crate::profile::PROFILES`] shares, and the profiles differ only in what they
+/// declare about the host, so a journal is equally a run under the frozen `-v0`; a
+/// consumer that cites `-v0` reads the rows, not the header's name.
 fn encode(config: &NetworkConfig, events: &[Event], retained: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(usize::try_from(retained).unwrap_or(0));
     out.extend_from_slice(JOURNAL_MAGIC);
-    put_str(&mut out, ADVERSARIAL_V0.name);
-    out.extend_from_slice(&ADVERSARIAL_V0.version.major.to_be_bytes());
-    out.extend_from_slice(&ADVERSARIAL_V0.version.minor.to_be_bytes());
-    out.extend_from_slice(&ADVERSARIAL_V0.version.patch.to_be_bytes());
+    put_str(&mut out, ADVERSARIAL_V1.name);
+    out.extend_from_slice(&ADVERSARIAL_V1.version.major.to_be_bytes());
+    out.extend_from_slice(&ADVERSARIAL_V1.version.minor.to_be_bytes());
+    out.extend_from_slice(&ADVERSARIAL_V1.version.patch.to_be_bytes());
     let faults = config.faults();
     out.push(config.nodes());
     out.extend_from_slice(&config.max_in_flight().to_be_bytes());

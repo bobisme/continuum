@@ -1,0 +1,50 @@
+[change]
+bone = "bn-1oj6"
+author = "continuum-dev"
+summary = "PR-15/IMPL-04: declared unsupported cases for the time, network, process and storage packs, each a machine-readable, versioned part of its fidelity profile with a typed request and reliance, reachable as the declared Unsupported refusal where a step can ask for it"
+
+[pack]
+covers = [
+  "crates/continuum-effects-network/src/",
+  "crates/continuum-effects-process/src/",
+  "crates/continuum-effects-storage/src/",
+  "crates/continuum-effects-time/src/",
+]
+
+# No modelled row changed. The fault tests below drive a modelled fault next to the
+# unsupported case it borders. `partition`: a second partition while one is active is
+# refused as overlapping, and after Heal the same Partition step is accepted. `crash`:
+# a power loss is refused, and the consecutive crashes the `power-loss-as-crashes`
+# assumption covers are accepted under the budget and refused one past it. `delay`: a
+# recall is refused, and Delay, the unbounded-delay row the case is subsumed by, holds
+# the envelope.
+fault_coverage_tests = [
+  { test = "crates/continuum-effects-network/tests/pr15_impl04_unsupported.rs::case_overlapping_partitions_are_refused_while_active_and_modelled_after_heal", fault = "partition" },
+  { test = "crates/continuum-effects-process/tests/pr15_impl04_unsupported.rs::case_power_loss_is_refused_and_consecutive_crashes_are_modelled_under_the_budget", fault = "crash" },
+  { test = "crates/continuum-effects-network/tests/pr15_impl04_unsupported.rs::case_recall_is_refused_and_delay_is_modelled", fault = "delay" },
+]
+
+# GOV-4-13: no host path exists in any of the four packs. Each is #![no_std] with its
+# own compiler lane (the network pack's lane applied unchanged; the time pack's lane is
+# new here), and every profile they declare says HostQualification::None. The named
+# tests are the time pack's, which this change makes a declared pack; the other three
+# keep the lanes and profile tests their IMPL-01..03 records name.
+[pack.host_conformance]
+status = "not-applicable"
+reason = "the four effect packs are no_std and declare only profiles with HostQualification::None: there is no production handler, no clock, socket, process or file, and no host path, so there is nothing for a Lab handler to conform to; continuum-effects-time has no handler at all"
+profile_test = "crates/continuum-effects-time/tests/pr15_impl04_time.rs::profile_declares_host_qualification_none"
+no_std_lane_test = "crates/continuum-effects-time/tests/pr15_no_std_lane.rs::the_compiler_refuses_a_host_facility_in_the_time_pack"
+
+[pack.fidelity_profile]
+profile = "adversarial-envelope"
+note = "network/adversarial-v1, process/crash-restart-v1 and storage/append-log-v1 keep the adversarial-envelope class of their frozen -v0 predecessors and state, per unsupported row, how it is requested and what a verdict gives a program that depends on it; continuum-effects-time declares time/unmodelled-v0, adversarial-envelope only in the trivial sense that it has no operation, which its canonical bytes state as operations-none, with every RFC 0002 clock semantic unsupported"
+
+[pack.version_bump]
+from = "0.1.0"
+to = "1.0.0"
+note = "continuum-effects-network, continuum-effects-process and continuum-effects-storage publish the IMPL-04 content as new profiles, network/adversarial-v1, process/crash-restart-v1 and storage/append-log-v1 at 1.0.0, and keep each -v0 at 0.1.0 byte for byte, because a profile name identifies its canonical bytes (RFC 0002 correction 1, cr-37bshu); the -v1 profiles add the declared unsupported cases and eight assumptions (connectionless-send, atomic-payload, fixed-addressing, power-loss-as-crashes, node-level-lifecycle, no-medium-corruption, no-device-profile, durable-log-entry) while no modelled row, step or refusal changed; the Lab journal header names -v1; continuum-effects-time goes from a scaffold to time/unmodelled-v0 0.1.0, its first version"
+
+[pack.independence_review]
+reviewer = "continuum-security"
+review = "cr-37bshu"
+verdict = "approved"

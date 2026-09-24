@@ -12,8 +12,12 @@
 //!
 //! # What is here (PR-15 / IMPL-02, bn-3mmf)
 //!
-//! One fidelity profile, [`profile::CRASH_RESTART_V0`] — `process/crash-restart-v0` at
-//! version 0.1.0, class `adversarial-envelope` — and one Lab handler,
+//! Two fidelity profiles over the same rows, class `adversarial-envelope`: the frozen
+//! [`profile::CRASH_RESTART_V0`] — `process/crash-restart-v0` at version 0.1.0, byte for
+//! byte as published — and the current [`profile::CRASH_RESTART_V1`] —
+//! `process/crash-restart-v1` at 1.0.0, which adds the declared unsupported cases and
+//! their assumptions (bn-1oj6; a profile's name identifies its content, RFC 0002
+//! correction 1) — and one Lab handler,
 //! [`lab::Process`], that implements exactly the profile's modelled rows:
 //!
 //! | Modelled | Step | Event |
@@ -30,8 +34,9 @@
 //! a caller can ask for — graceful cancellation, panic and power loss — and that step
 //! is refused with [`Refusal::Unsupported`], never approximated. The other two —
 //! partial cleanup and supervisor decisions — have no step at all; the profile row is
-//! their declaration. The profile states three assumptions ([`profile::ASSUMPTIONS`]):
-//! fail-stop, no eventual restart, and no failure detection.
+//! their declaration. The profile states five assumptions ([`profile::ASSUMPTIONS`]):
+//! fail-stop, no eventual restart, no failure detection, power loss as crashes, and a
+//! node-level lifecycle.
 //!
 //! # What a crash does to in-flight state
 //!
@@ -40,6 +45,21 @@
 //! operation it started is not undone: its ticket stays pending, and a late completion
 //! is `Fenced` — journalled, never delivered to a later incarnation. Network envelopes
 //! are untouched and stay in flight. What stable storage keeps is the storage pack's.
+//!
+//! # Declared unsupported cases (PR-15 / IMPL-04, bn-1oj6)
+//!
+//! [`profile::UNSUPPORTED`] is the machine-readable, versioned enumeration of what the
+//! profile does not model: one [`profile::UnsupportedCase`] per unsupported row, part of
+//! the profile's canonical bytes. Each names the host behaviour, the
+//! [`profile::Request`] by which a caller could ask for it — a step or no operation —
+//! and the [`profile::Reliance`] that says what a verdict gives a program that depends
+//! on it: the `node-level-lifecycle` assumption, for graceful cancellation and panic;
+//! the `power-loss-as-crashes` assumption; or a modelled row that already covers it
+//! (a fail-stop crash at a step boundary covers the program's own partial cleanup, and
+//! the adversary's restart choice covers node-level supervisor decisions). At the step
+//! bound every step is refused as `BoundReached(Steps)` first. [`profile::UnsupportedCase::refusal`]
+//! is the refusal a caller gets, and `tests/pr15_impl04_unsupported.rs` holds the Lab
+//! handler to it.
 //!
 //! # What is not here
 //!
@@ -108,6 +128,9 @@ pub mod refusal;
 pub mod step;
 
 pub use lab::{Journal, Process, run};
-pub use profile::{CRASH_RESTART_V0, FidelityClass, FidelityProfile, Semantic, Support};
+pub use profile::{
+    CRASH_RESTART_V0, CRASH_RESTART_V1, FidelityClass, FidelityProfile, PROFILES, Reliance,
+    Request, Semantic, Support, UNSUPPORTED, UnsupportedCase,
+};
 pub use refusal::{Refusal, RefusalClass, RunRefusal};
-pub use step::{Epoch, Event, NodeId, NodeSet, ProcessConfig, Step, TicketId};
+pub use step::{Epoch, Event, NodeId, NodeSet, ProcessConfig, Step, StepKind, TicketId};

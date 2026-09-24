@@ -282,6 +282,77 @@ pub enum Step {
     Recall(EnvelopeId),
 }
 
+/// The kind of a [`Step`], without its arguments: the name a declared
+/// [`crate::profile::UnsupportedCase`] uses for the step that asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StepKind {
+    /// [`Step::Send`].
+    Send,
+    /// [`Step::Deliver`].
+    Deliver,
+    /// [`Step::Drop`].
+    Drop,
+    /// [`Step::Duplicate`].
+    Duplicate,
+    /// [`Step::Delay`].
+    Delay,
+    /// [`Step::Partition`].
+    Partition,
+    /// [`Step::Heal`].
+    Heal,
+    /// [`Step::OneWayPartition`].
+    OneWayPartition,
+    /// [`Step::Corrupt`].
+    Corrupt,
+    /// [`Step::Forge`].
+    Forge,
+    /// [`Step::ConnectionReset`].
+    ConnectionReset,
+    /// [`Step::CrashEndpoint`].
+    CrashEndpoint,
+    /// [`Step::Recall`].
+    Recall,
+}
+
+impl StepKind {
+    /// Every kind, in [`Step`]'s declaration order.
+    pub const ALL: [Self; 13] = [
+        Self::Send,
+        Self::Deliver,
+        Self::Drop,
+        Self::Duplicate,
+        Self::Delay,
+        Self::Partition,
+        Self::Heal,
+        Self::OneWayPartition,
+        Self::Corrupt,
+        Self::Forge,
+        Self::ConnectionReset,
+        Self::CrashEndpoint,
+        Self::Recall,
+    ];
+
+    /// The step's name, as [`Step`] spells its variant.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Send => "Send",
+            Self::Deliver => "Deliver",
+            Self::Drop => "Drop",
+            Self::Duplicate => "Duplicate",
+            Self::Delay => "Delay",
+            Self::Partition => "Partition",
+            Self::Heal => "Heal",
+            Self::OneWayPartition => "OneWayPartition",
+            Self::Corrupt => "Corrupt",
+            Self::Forge => "Forge",
+            Self::ConnectionReset => "ConnectionReset",
+            Self::CrashEndpoint => "CrashEndpoint",
+            Self::Recall => "Recall",
+        }
+    }
+}
+
 /// Who makes a step's choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Chooser {
@@ -311,6 +382,26 @@ impl Step {
             | Self::ConnectionReset(..)
             | Self::CrashEndpoint(_)
             | Self::Recall(_) => Chooser::Adversary,
+        }
+    }
+
+    /// The step's kind.
+    #[must_use]
+    pub const fn kind(&self) -> StepKind {
+        match self {
+            Self::Send { .. } => StepKind::Send,
+            Self::Deliver(_) => StepKind::Deliver,
+            Self::Drop(_) => StepKind::Drop,
+            Self::Duplicate(_) => StepKind::Duplicate,
+            Self::Delay(_) => StepKind::Delay,
+            Self::Partition(_) => StepKind::Partition,
+            Self::Heal => StepKind::Heal,
+            Self::OneWayPartition { .. } => StepKind::OneWayPartition,
+            Self::Corrupt(_) => StepKind::Corrupt,
+            Self::Forge { .. } => StepKind::Forge,
+            Self::ConnectionReset(..) => StepKind::ConnectionReset,
+            Self::CrashEndpoint(_) => StepKind::CrashEndpoint,
+            Self::Recall(_) => StepKind::Recall,
         }
     }
 

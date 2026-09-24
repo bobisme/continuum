@@ -239,6 +239,57 @@ pub enum Step {
     PowerLoss(NodeSet),
 }
 
+/// The kind of a [`Step`], without its arguments: the name a declared
+/// [`crate::profile::UnsupportedCase`] uses for the step that asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StepKind {
+    /// [`Step::Begin`].
+    Begin,
+    /// [`Step::Complete`].
+    Complete,
+    /// [`Step::Delay`].
+    Delay,
+    /// [`Step::Crash`].
+    Crash,
+    /// [`Step::Restart`].
+    Restart,
+    /// [`Step::CancelGracefully`].
+    CancelGracefully,
+    /// [`Step::Panic`].
+    Panic,
+    /// [`Step::PowerLoss`].
+    PowerLoss,
+}
+
+impl StepKind {
+    /// Every kind, in [`Step`]'s declaration order.
+    pub const ALL: [Self; 8] = [
+        Self::Begin,
+        Self::Complete,
+        Self::Delay,
+        Self::Crash,
+        Self::Restart,
+        Self::CancelGracefully,
+        Self::Panic,
+        Self::PowerLoss,
+    ];
+
+    /// The step's name, as [`Step`] spells its variant.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Begin => "Begin",
+            Self::Complete => "Complete",
+            Self::Delay => "Delay",
+            Self::Crash => "Crash",
+            Self::Restart => "Restart",
+            Self::CancelGracefully => "CancelGracefully",
+            Self::Panic => "Panic",
+            Self::PowerLoss => "PowerLoss",
+        }
+    }
+}
+
 /// Who makes a step's choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Chooser {
@@ -263,6 +314,21 @@ impl Step {
             | Self::CancelGracefully(_)
             | Self::Panic(_)
             | Self::PowerLoss(_) => Chooser::Adversary,
+        }
+    }
+
+    /// The step's kind.
+    #[must_use]
+    pub const fn kind(&self) -> StepKind {
+        match self {
+            Self::Begin(_) => StepKind::Begin,
+            Self::Complete(_) => StepKind::Complete,
+            Self::Delay(_) => StepKind::Delay,
+            Self::Crash(_) => StepKind::Crash,
+            Self::Restart(_) => StepKind::Restart,
+            Self::CancelGracefully(_) => StepKind::CancelGracefully,
+            Self::Panic(_) => StepKind::Panic,
+            Self::PowerLoss(_) => StepKind::PowerLoss,
         }
     }
 

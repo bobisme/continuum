@@ -30,7 +30,7 @@ use std::collections::BTreeSet;
 use continuum_effects_network::lab::JOURNAL_HEADER_BYTES;
 use continuum_effects_network::profile::{
     ASSUMPTIONS, CANCELLATION_CONTRACT, HostQualification, IndependenceClaim, PROFILE_NAME,
-    PROFILE_VERSION,
+    PROFILE_NAME_V0, PROFILE_VERSION,
 };
 use continuum_effects_network::refusal::{Bound, ConfigRefusal, Malformed, NotEnabled};
 use continuum_effects_network::step::{
@@ -40,8 +40,9 @@ use continuum_effects_network::step::{
 /// The retained-bytes budget of every configuration that is not testing the budget.
 const RETAINED: u64 = MAX_RETAINED_CAP;
 use continuum_effects_network::{
-    ADVERSARIAL_V0, EnvelopeId, Event, FaultSwitches, FidelityClass, Journal, Network,
-    NetworkConfig, NodeId, NodeSet, Payload, Refusal, RefusalClass, Semantic, Step, Support, run,
+    ADVERSARIAL_V1, EnvelopeId, Event, FaultSwitches, FidelityClass, Journal, Network,
+    NetworkConfig, NodeId, NodeSet, PROFILES, Payload, Refusal, RefusalClass, Semantic, Step,
+    Support, run,
 };
 
 // --- an independent reference model ------------------------------------------------------
@@ -1308,7 +1309,8 @@ fn honesty_the_profile_matches_the_replicated_register_scenario() {
             .trim_matches('"')
             .to_owned()
     };
-    assert_eq!(value(network, "profile"), PROFILE_NAME);
+    // The scenario names the frozen `-v0`, which the pack still declares.
+    assert_eq!(value(network, "profile"), PROFILE_NAME_V0);
     let cfg = NetworkConfig::replicated_register_scenario(4, 64, RETAINED).unwrap();
     assert_eq!(
         value(network, "max_in_flight"),
@@ -1336,10 +1338,15 @@ fn honesty_the_profile_matches_the_replicated_register_scenario() {
 /// shows that proof is live.
 #[test]
 fn profile_declares_host_qualification_none() {
-    assert_eq!(ADVERSARIAL_V0.host, HostQualification::None);
-    assert_eq!(ADVERSARIAL_V0.class, FidelityClass::AdversarialEnvelope);
-    assert_ne!(ADVERSARIAL_V0.class, FidelityClass::PlatformQualified);
-    assert_eq!(ADVERSARIAL_V0.independence, IndependenceClaim::AllDependent);
+    // Both declared profiles, the frozen `-v0` and the current `-v1`, claim no host.
+    assert_eq!(ADVERSARIAL_V1.host, HostQualification::None);
+    for profile in PROFILES {
+        assert_eq!(profile.host, HostQualification::None, "{}", profile.name);
+        assert_ne!(profile.class, FidelityClass::PlatformQualified);
+    }
+    assert_eq!(ADVERSARIAL_V1.class, FidelityClass::AdversarialEnvelope);
+    assert_ne!(ADVERSARIAL_V1.class, FidelityClass::PlatformQualified);
+    assert_eq!(ADVERSARIAL_V1.independence, IndependenceClaim::AllDependent);
 }
 
 /// `pr15-impl01-hon-04`. The profile's canonical bytes are pinned together with its
@@ -1349,15 +1356,15 @@ fn profile_declares_host_qualification_none() {
 /// deliberate re-pin without a bump is caught only by review.
 #[test]
 fn honesty_the_profile_bytes_are_pinned_to_its_version() {
-    let bytes = ADVERSARIAL_V0.canonical_bytes();
+    let bytes = ADVERSARIAL_V1.canonical_bytes();
     let fingerprint = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
     });
-    assert_eq!(PROFILE_VERSION.to_string(), "0.1.0");
+    assert_eq!(PROFILE_VERSION.to_string(), "1.0.0");
     assert_eq!(
         (PROFILE_VERSION.to_string(), fingerprint),
-        ("0.1.0".to_owned(), PINNED_FINGERPRINT),
-        "network/adversarial-v0 changed: bump PROFILE_VERSION, then re-pin"
+        ("1.0.0".to_owned(), PINNED_FINGERPRINT),
+        "network/adversarial-v1 changed: a content change needs a new profile name (RFC 0002 correction 1)"
     );
     let journal: Journal = run(
         NetworkConfig::new(2, 1, 1, ALL_FAULTS, 0, RETAINED).unwrap(),
@@ -1394,7 +1401,7 @@ fn honesty_the_journal_encoding_is_pinned_byte_for_byte() {
     assert_eq!(hex, PINNED_JOURNAL_HEX, "the journal wire form changed");
 }
 
-const PINNED_JOURNAL_HEX: &str = "636f6e74696e75756d2d6e6574776f726b2d6a6f75726e616c00000000166e6574776f726b2f616476657273617269616c2d763000000001000003000000040000000407000000010000000010000000000000080100000000000200000002616204000000000200000000000203000000000100000001020100000000050000000106000000000000000507";
+const PINNED_JOURNAL_HEX: &str = "636f6e74696e75756d2d6e6574776f726b2d6a6f75726e616c00000000166e6574776f726b2f616476657273617269616c2d763100010000000003000000040000000407000000010000000010000000000000080100000000000200000002616204000000000200000000000203000000000100000001020100000000050000000106000000000000000507";
 
 /// `pr15-impl01-bnd-03`. A network driven step by step, without `run`, stops at the
 /// same `MAX_STEPS` bound, so every journal it produces replays.
@@ -1415,7 +1422,7 @@ fn boundary_a_directly_driven_network_stops_at_max_steps_and_its_journal_replays
     assert_eq!(journal.replay().unwrap(), journal);
 }
 
-const PINNED_FINGERPRINT: u64 = 6_176_911_479_697_058_609;
+const PINNED_FINGERPRINT: u64 = 13_799_255_423_715_173_705;
 
 /// `pr15-impl01-bnd-04`. The retained-bytes budget bounds the whole journal, is
 /// charged before anything is pushed, and holds for clone, replay and encode.

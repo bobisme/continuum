@@ -13,9 +13,12 @@
 //!
 //! # What is here (PR-15 / IMPL-03, bn-2fk3)
 //!
-//! One fidelity profile, [`profile::APPEND_LOG_V0`] — `storage/append-log-v0` at
-//! version 0.1.0, class `adversarial-envelope`, the name the replicated-register
-//! scenario and Intent Contract already cite — and one Lab handler,
+//! Two fidelity profiles over the same rows, class `adversarial-envelope`: the frozen
+//! [`profile::APPEND_LOG_V0`] — `storage/append-log-v0` at version 0.1.0, the name the
+//! replicated-register scenario and Intent Contract already cite, byte for byte as
+//! published — and the current [`profile::APPEND_LOG_V1`] — `storage/append-log-v1` at
+//! 1.0.0, which adds the declared unsupported cases and their assumptions (bn-1oj6; a
+//! profile's name identifies its content, RFC 0002 correction 1) — and one Lab handler,
 //! [`lab::Storage`], that implements exactly the profile's modelled rows:
 //!
 //! | Modelled | Step | Event |
@@ -39,7 +42,7 @@
 //! profile row is their declaration. A write over a torn tail is the program's fault,
 //! the replicated register's M07, and is refused as [`Refusal::ProgramFault`], a
 //! verdict against the program rather than an invalid choice log.
-//! The profile states six assumptions ([`profile::ASSUMPTIONS`]).
+//! The profile states nine assumptions ([`profile::ASSUMPTIONS`]).
 //!
 //! # Composition with the process pack
 //!
@@ -49,6 +52,19 @@
 //! pack keeps the same epochs and fences a sync ticket by the same (node, epoch) rule.
 //! Across a crash the node's log keeps every stable record intact and a prefix of its
 //! volatile suffix, possibly ending in one torn record, and loses the rest.
+//!
+//! # Declared unsupported cases (PR-15 / IMPL-04, bn-1oj6)
+//!
+//! [`profile::UNSUPPORTED`] is the machine-readable, versioned enumeration of what the
+//! profile does not model: one [`profile::UnsupportedCase`] per unsupported row, part of
+//! the profile's canonical bytes. Each names the host behaviour, the
+//! [`profile::Request`] by which a caller could ask for it — a step or no operation —
+//! and the [`profile::Reliance`] that says what a verdict gives a program that depends
+//! on it: a stated assumption (`no-medium-corruption`, `durable-log-is-a-prefix`,
+//! `honest-flush`, `durable-log-entry`, `no-device-profile`, `detected-tear`). At the
+//! step bound every step is refused as `BoundReached(Steps)` first. [`profile::UnsupportedCase::refusal`] is
+//! the refusal a caller gets, and `tests/pr15_impl04_unsupported.rs` holds the Lab
+//! handler to it.
 //!
 //! # What is not here
 //!
@@ -116,6 +132,11 @@ pub mod refusal;
 pub mod step;
 
 pub use lab::{Journal, Storage, run};
-pub use profile::{APPEND_LOG_V0, FidelityClass, FidelityProfile, Semantic, Support};
+pub use profile::{
+    APPEND_LOG_V0, APPEND_LOG_V1, FidelityClass, FidelityProfile, PROFILES, Reliance, Request,
+    Semantic, Support, UNSUPPORTED, UnsupportedCase,
+};
 pub use refusal::{Refusal, RefusalClass, RunRefusal};
-pub use step::{Entry, Epoch, Event, NodeId, NodeSet, Step, StorageConfig, TicketId, Value};
+pub use step::{
+    Entry, Epoch, Event, NodeId, NodeSet, Step, StepKind, StorageConfig, TicketId, Value,
+};

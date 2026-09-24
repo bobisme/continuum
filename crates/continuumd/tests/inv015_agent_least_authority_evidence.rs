@@ -13,7 +13,7 @@
 //! | alter evidence status | `daemon/evidence.rs` — [`Promotion`] has private fields and no public constructor, so producer code (`daemon/observe.rs`, a *different module*) can name the type and never build one; `observe.ingest`'s wire shape declares no status field, so an append lands at the lattice's bottom as a property of the request's *type* | `daemon_evidence.rs`: `a_producers_append_lands_at_the_lattices_bottom`, `the_producers_request_body_has_no_field_that_could_name_a_status`, `the_status_written_is_what_the_checker_established_not_what_the_caller_named`, `no_operation_in_either_family_removes_or_edits_an_appended_node` — cited via [`status_authority`], plus this file's own registry-grain sweep [`privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status`] |
 //! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; cryptographic signing (plan §18.6, bn-1hape): the daemon holds the key, installed only by the deployment, and signs only inside `evidence.link` after the service gate; no wire type carries key material — [`receipt_authority::positive_only_the_daemon_holds_the_receipt_key_and_only_a_service_check_signs`] |
 //! | access ungranted production traces | `daemon/admission.rs` — R-4: `observe.ingest` requires `DataGrant::ProductionTrace` beyond its `execute` level, decided by [`required_grant`] *before* any family runs; the denial is the zero-bit [`Denied`] (X1) and precedes the index (X3), so a refused caller learns nothing (X2) | live here: [`trace_grant::positive_exactly_one_operation_requires_a_data_grant_and_it_is_the_production_trace`], [`trace_grant::positive_a_denial_carries_zero_bits`]; cited: `the_production_trace_grant_is_required_beyond_the_execute_level`, `every_admission_failure_is_one_byte_identical_answer`, `a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does` |
-//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-time`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-effects-network` grew its Lab pack at bn-3ohe, `continuum-effects-process` its Lab pack at bn-3mmf, and `continuum-effects-storage` its Lab pack at bn-2fk3, and each is audited like Forge — a recorded public inventory, no host effect by the compiler (`#![no_std]` and a live compiler lane), no dependencies, and no route from a connection into it; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
+//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-effects-network` grew its Lab pack at bn-3ohe, `continuum-effects-process` its Lab pack at bn-3mmf, `continuum-effects-storage` its Lab pack at bn-2fk3, and `continuum-effects-time` its declared `time/unmodelled-v0` profile, with no operation, at bn-1oj6, and each is audited like Forge — a recorded public inventory, no host effect by the compiler (`#![no_std]` and a live compiler lane), no dependencies, and no route from a connection into it; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
 //!
 //! Cross-cutting, because "no ambient authority" is a property of the *admission
 //! predicate* rather than of any one clause: the `@privileged` set is exactly the five
@@ -185,6 +185,10 @@ const EFFECTS_PROCESS_MANIFEST: &str = include_str!("../../continuum-effects-pro
 /// `continuum-effects-storage`'s manifest — the same posture: bn-2fk3 landed the
 /// `storage/append-log-v0` Lab pack there.
 const EFFECTS_STORAGE_MANIFEST: &str = include_str!("../../continuum-effects-storage/Cargo.toml");
+
+/// `continuum-effects-time`'s manifest — the same posture: bn-1oj6 landed the
+/// `time/unmodelled-v0` declared profile there.
+const EFFECTS_TIME_MANIFEST: &str = include_str!("../../continuum-effects-time/Cargo.toml");
 
 /// `continuumd`'s own manifest — the other end of the same edge: whether the daemon
 /// links Forge at all.
@@ -394,6 +398,27 @@ const EFFECTS_STORAGE_NO_STD_LANE: &str =
 /// The name of the storage lane's test.
 const STORAGE_NO_STD_LANE_TEST: &str =
     "fn the_compiler_refuses_a_host_facility_in_the_storage_pack()";
+
+/// Every source file of `continuum-effects-time`, walked rather than listed — the same
+/// device as [`effects_network_sources`] (bn-1oj6).
+fn effects_time_sources() -> Vec<(PathBuf, String)> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../continuum-effects-time/src");
+    let mut sources = Vec::new();
+    rust_sources(&root, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "the walk found no continuum-effects-time source; the crate moved and this \
+         sweep is reporting nothing rather than checking something"
+    );
+    sources
+}
+
+/// The time pack's compiler lane (bn-1oj6), the network lane applied to that crate.
+const EFFECTS_TIME_NO_STD_LANE: &str =
+    include_str!("../../continuum-effects-time/tests/pr15_no_std_lane.rs");
+
+/// The name of the time lane's test.
+const TIME_NO_STD_LANE_TEST: &str = "fn the_compiler_refuses_a_host_facility_in_the_time_pack()";
 
 // The shared token lexer and structure rules (cr-35ujnx): one Rust file for this
 // audit and the three pack lanes, the twin of `tools/governance/rust_lexer.py`.
@@ -1125,14 +1150,15 @@ mod no_widening {
         ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
         EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, EFFECTS_PROCESS_LIB,
         EFFECTS_PROCESS_MANIFEST, EFFECTS_PROCESS_NO_STD_LANE, EFFECTS_STORAGE_LIB,
-        EFFECTS_STORAGE_MANIFEST, EFFECTS_STORAGE_NO_STD_LANE, EFFECTS_TIME_LIB, FORGE_MANIFEST,
-        NETWORK_NO_STD_LANE_TEST, NON_FILESYSTEM_FACILITIES, PROCESS_NO_STD_LANE_TEST,
-        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST, SIGNER_ADMINISTRATION,
-        SIGNING_SOURCE_FACILITIES, STORAGE_NO_STD_LANE_TEST, administrative_callers,
+        EFFECTS_STORAGE_MANIFEST, EFFECTS_STORAGE_NO_STD_LANE, EFFECTS_TIME_LIB,
+        EFFECTS_TIME_MANIFEST, EFFECTS_TIME_NO_STD_LANE, FORGE_MANIFEST, NETWORK_NO_STD_LANE_TEST,
+        NON_FILESYSTEM_FACILITIES, PROCESS_NO_STD_LANE_TEST, PROOF_CLIENT_LIB, PUBLICATION,
+        SECURITY_LIB, SECURITY_MANIFEST, SIGNER_ADMINISTRATION, SIGNING_SOURCE_FACILITIES,
+        STORAGE_NO_STD_LANE_TEST, TIME_NO_STD_LANE_TEST, administrative_callers,
         continuumd_sources, declared_dependencies, effects_network_sources,
-        effects_process_sources, effects_storage_sources, forge_sources, host_effect_lines,
-        is_signing_source, no_std_unconditional, pin, pub_items, real_pack_problem,
-        security_sources, unexempted_callers,
+        effects_process_sources, effects_storage_sources, effects_time_sources, forge_sources,
+        host_effect_lines, is_signing_source, no_std_unconditional, pin, pub_items,
+        real_pack_problem, security_sources, unexempted_callers,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -1223,15 +1249,15 @@ mod no_widening {
     /// [`boundary_effects_process_grew_a_lab_pack_and_it_reaches_no_host_effect`].
     /// `continuum-effects-storage` left when bn-2fk3 landed its Lab pack, and is
     /// re-established in
-    /// [`boundary_effects_storage_grew_a_lab_pack_and_it_reaches_no_host_effect`]. The
-    /// two rows below keep the original, stricter form because their substance
-    /// genuinely has not arrived.
+    /// [`boundary_effects_storage_grew_a_lab_pack_and_it_reaches_no_host_effect`].
+    /// `continuum-effects-time` left when bn-1oj6 landed its declared profile, and is
+    /// re-established in
+    /// [`boundary_effects_time_grew_a_declared_profile_and_it_reaches_no_host_effect`].
+    /// The row below keeps the original, stricter form because its substance genuinely
+    /// has not arrived.
     #[test]
     fn boundary_the_host_effect_surface_has_not_arrived_and_its_crates_are_scaffolds() {
-        let scaffolds = [
-            ("continuum-effects-time", EFFECTS_TIME_LIB),
-            ("continuum-proof-client", PROOF_CLIENT_LIB),
-        ];
+        let scaffolds = [("continuum-proof-client", PROOF_CLIENT_LIB)];
         for (name, source) in scaffolds {
             let items = pub_items(source);
             assert!(
@@ -1667,11 +1693,15 @@ mod no_widening {
 
     /// `continuum-effects-network`'s recorded public surface, sorted — every `pub` item
     /// across every source file of the crate, as `pub_items` reads them (bn-3ohe).
-    const EFFECTS_NETWORK_PUBLIC_SURFACE: [&str; 105] = [
+    const EFFECTS_NETWORK_PUBLIC_SURFACE: [&str; 128] = [
+        "pub assumptions: &'static [(&'static str, &'static str)],",
         "pub class: FidelityClass,",
         "pub const ADVERSARIAL_V0: FidelityProfile = FidelityProfile {",
+        "pub const ADVERSARIAL_V1: FidelityProfile = FidelityProfile {",
+        "pub const ALL: [Self; 13] = [",
         "pub const ALL: [Self; 19] = [",
-        "pub const ASSUMPTIONS: [(&str, &str); 2] = [",
+        "pub const ASSUMPTIONS: [(&str, &str); 5] = [",
+        "pub const ASSUMPTIONS_V0: &[(&str, &str)] = ASSUMPTIONS.as_slice().split_at(2).0;",
         "pub const CANCELLATION_CONTRACT: [(&str, &str); 8] = [",
         "pub const JOURNAL_HEADER_BYTES: u64 =",
         "pub const MAX_IN_FLIGHT_CAP: u32 = 1 << 16;",
@@ -1679,9 +1709,14 @@ mod no_widening {
         "pub const MAX_PAYLOAD_CAP: u32 = 1 << 16;",
         "pub const MAX_RETAINED_CAP: u64 = 1 << 28;",
         "pub const MAX_STEPS: usize = 1 << 20;",
-        "pub const PROFILE_NAME: &str = \"network/adversarial-v0\";",
+        "pub const PROFILES: [FidelityProfile; 2] = [ADVERSARIAL_V0, ADVERSARIAL_V1];",
+        "pub const PROFILE_NAME: &str = \"network/adversarial-v1\";",
+        "pub const PROFILE_NAME_V0: &str = \"network/adversarial-v0\";",
         "pub const PROFILE_VERSION: ProfileVersion = ProfileVersion {",
+        "pub const PROFILE_VERSION_V0: ProfileVersion = ProfileVersion {",
+        "pub const UNSUPPORTED: [UnsupportedCase; 13] = [",
         "pub const fn all(n: u8) -> Self {",
+        "pub const fn as_str(self) -> &'static str {",
         "pub const fn as_str(self) -> &'static str {",
         "pub const fn bits_valid(self, n: u8) -> bool {",
         "pub const fn chooser(&self) -> Chooser {",
@@ -1692,6 +1727,7 @@ mod no_widening {
         "pub const fn faults(&self) -> FaultSwitches {",
         "pub const fn in_flight_total(&self) -> u32 {",
         "pub const fn inconclusive_reason(&self) -> Option<&'static str> {",
+        "pub const fn kind(&self) -> StepKind {",
         "pub const fn max_in_flight(&self) -> u32 {",
         "pub const fn max_partitions(&self) -> u32 {",
         "pub const fn max_payload_bytes(&self) -> u32 {",
@@ -1701,11 +1737,13 @@ mod no_widening {
         "pub const fn nodes(&self) -> u8 {",
         "pub const fn partition(&self) -> Option<NodeSet> {",
         "pub const fn partitions_used(&self) -> u32 {",
+        "pub const fn refusal(&self) -> Option<Refusal> {",
         "pub const fn replicated_register_scenario(",
         "pub const fn retained_bytes(&self) -> u64 {",
         "pub const fn retained_bytes(&self) -> u64 {",
         "pub const fn statement(self) -> &'static str {",
         "pub const fn support(self) -> Support {",
+        "pub const fn token(self) -> &'static str {",
         "pub const fn token(self) -> &'static str {",
         "pub const fn unsupported_semantic(&self) -> Option<Semantic> {",
         "pub duplication: bool,",
@@ -1720,9 +1758,13 @@ mod no_widening {
         "pub enum NotEnabled {",
         "pub enum Refusal {",
         "pub enum RefusalClass {",
+        "pub enum Reliance {",
+        "pub enum Request {",
         "pub enum Semantic {",
         "pub enum Step {",
+        "pub enum StepKind {",
         "pub enum Support {",
+        "pub enum When {",
         "pub fn apply(&mut self, step: &Step) -> Result<&Event, Refusal> {",
         "pub fn canonical_bytes(&self) -> Vec<u8> {",
         "pub fn check(&self, step: &Step) -> Result<(), Refusal> {",
@@ -1741,7 +1783,9 @@ mod no_widening {
         "pub fn run(config: NetworkConfig, steps: &[Step]) -> Result<Journal, RunRefusal> {",
         "pub fn sent_count(&self) -> usize {",
         "pub fn step(&self) -> Step {",
+        "pub fn unsupported_case(self) -> Option<UnsupportedCase> {",
         "pub host: HostQualification,",
+        "pub host_behaviour: &'static str,",
         "pub independence: IndependenceClaim,",
         "pub index: usize,",
         "pub loss: bool,",
@@ -1754,7 +1798,10 @@ mod no_widening {
         "pub name: &'static str,",
         "pub patch: u16,",
         "pub refusal: Refusal,",
+        "pub reliance: Reliance,",
         "pub reordering: bool,",
+        "pub request: Request,",
+        "pub semantic: Semantic,",
         "pub struct EnvelopeId(pub u32);",
         "pub struct FaultSwitches {",
         "pub struct FidelityProfile {",
@@ -1766,10 +1813,12 @@ mod no_widening {
         "pub struct Payload(pub Vec<u8>);",
         "pub struct ProfileVersion {",
         "pub struct RunRefusal {",
+        "pub struct UnsupportedCase {",
+        "pub unsupported: Option<&'static [UnsupportedCase]>,",
         "pub use lab::{Journal, Network, run};",
-        "pub use profile::{ADVERSARIAL_V0, FidelityClass, FidelityProfile, Semantic, Support};",
+        "pub use profile::{",
         "pub use refusal::{Refusal, RefusalClass, RunRefusal};",
-        "pub use step::{EnvelopeId, Event, FaultSwitches, NetworkConfig, NodeId, NodeSet, Payload, Step};",
+        "pub use step::{",
         "pub version: ProfileVersion,",
         "pub(crate) fn put_str(out: &mut Vec<u8>, text: &str) {",
         "pub(crate) fn u32_len(len: usize) -> u32 {",
@@ -1777,22 +1826,31 @@ mod no_widening {
 
     /// `continuum-effects-process`'s recorded public surface, sorted — every `pub` item
     /// across every source file of the crate, as `pub_items` reads them (bn-3mmf).
-    const EFFECTS_PROCESS_PUBLIC_SURFACE: [&str; 101] = [
+    const EFFECTS_PROCESS_PUBLIC_SURFACE: [&str; 122] = [
+        "pub assumptions: &'static [(&'static str, &'static str)],",
         "pub class: FidelityClass,",
         "pub const ALL: [Self; 11] = [",
-        "pub const ASSUMPTIONS: [(&str, &str); 3] = [",
+        "pub const ALL: [Self; 8] = [",
+        "pub const ASSUMPTIONS: [(&str, &str); 5] = [",
+        "pub const ASSUMPTIONS_V0: &[(&str, &str)] = ASSUMPTIONS.as_slice().split_at(3).0;",
         "pub const CANCELLATION_CONTRACT: [(&str, &str); 8] = [",
         "pub const COMPOSITION: [(&str, &str); 3] = [",
         "pub const CRASH_RESTART_V0: FidelityProfile = FidelityProfile {",
+        "pub const CRASH_RESTART_V1: FidelityProfile = FidelityProfile {",
         "pub const JOURNAL_HEADER_BYTES: u64 =",
         "pub const MAX_CRASHES_CAP: u32 = 1 << 16;",
         "pub const MAX_NODES: u8 = 64;",
         "pub const MAX_PENDING_CAP: u32 = 1 << 16;",
         "pub const MAX_RETAINED_CAP: u64 = 1 << 28;",
         "pub const MAX_STEPS: usize = 1 << 20;",
-        "pub const PROFILE_NAME: &str = \"process/crash-restart-v0\";",
+        "pub const PROFILES: [FidelityProfile; 2] = [CRASH_RESTART_V0, CRASH_RESTART_V1];",
+        "pub const PROFILE_NAME: &str = \"process/crash-restart-v1\";",
+        "pub const PROFILE_NAME_V0: &str = \"process/crash-restart-v0\";",
         "pub const PROFILE_VERSION: ProfileVersion = ProfileVersion {",
+        "pub const PROFILE_VERSION_V0: ProfileVersion = ProfileVersion {",
+        "pub const UNSUPPORTED: [UnsupportedCase; 5] = [",
         "pub const fn all(n: u8) -> Self {",
+        "pub const fn as_str(self) -> &'static str {",
         "pub const fn as_str(self) -> &'static str {",
         "pub const fn chooser(&self) -> Chooser {",
         "pub const fn class(&self) -> RefusalClass {",
@@ -1802,12 +1860,14 @@ mod no_widening {
         "pub const fn crashes(&self) -> u32 {",
         "pub const fn inconclusive_reason(&self) -> Option<&'static str> {",
         "pub const fn is_up(&self, node: NodeId) -> bool {",
+        "pub const fn kind(&self) -> StepKind {",
         "pub const fn max_crashes(&self) -> u32 {",
         "pub const fn max_pending(&self) -> u32 {",
         "pub const fn max_retained_bytes(&self) -> u64 {",
         "pub const fn new(",
         "pub const fn new(config: ProcessConfig) -> Self {",
         "pub const fn nodes(&self) -> u8 {",
+        "pub const fn refusal(&self) -> Option<Refusal> {",
         "pub const fn replicated_register_scenario(",
         "pub const fn restart(&self) -> bool {",
         "pub const fn retained_bytes(&self) -> u64 {",
@@ -1831,8 +1891,11 @@ mod no_widening {
         "pub enum NotEnabled {",
         "pub enum Refusal {",
         "pub enum RefusalClass {",
+        "pub enum Reliance {",
+        "pub enum Request {",
         "pub enum Semantic {",
         "pub enum Step {",
+        "pub enum StepKind {",
         "pub enum Support {",
         "pub fn apply(&mut self, step: &Step) -> Result<&Event, Refusal> {",
         "pub fn canonical_bytes(&self) -> Vec<u8> {",
@@ -1850,7 +1913,9 @@ mod no_widening {
         "pub fn run(config: ProcessConfig, steps: &[Step]) -> Result<Journal, RunRefusal> {",
         "pub fn ticket(&self, ticket: TicketId) -> Option<(NodeId, Epoch)> {",
         "pub fn ticket_count(&self) -> usize {",
+        "pub fn unsupported_case(self) -> Option<UnsupportedCase> {",
         "pub host: HostQualification,",
+        "pub host_behaviour: &'static str,",
         "pub independence: IndependenceClaim,",
         "pub index: usize,",
         "pub major: u16,",
@@ -1862,6 +1927,9 @@ mod no_widening {
         "pub name: &'static str,",
         "pub patch: u16,",
         "pub refusal: Refusal,",
+        "pub reliance: Reliance,",
+        "pub request: Request,",
+        "pub semantic: Semantic,",
         "pub struct Epoch(pub u32);",
         "pub struct FidelityProfile {",
         "pub struct Journal {",
@@ -1872,10 +1940,12 @@ mod no_widening {
         "pub struct ProfileVersion {",
         "pub struct RunRefusal {",
         "pub struct TicketId(pub u32);",
+        "pub struct UnsupportedCase {",
+        "pub unsupported: Option<&'static [UnsupportedCase]>,",
         "pub use lab::{Journal, Process, run};",
-        "pub use profile::{CRASH_RESTART_V0, FidelityClass, FidelityProfile, Semantic, Support};",
+        "pub use profile::{",
         "pub use refusal::{Refusal, RefusalClass, RunRefusal};",
-        "pub use step::{Epoch, Event, NodeId, NodeSet, ProcessConfig, Step, TicketId};",
+        "pub use step::{Epoch, Event, NodeId, NodeSet, ProcessConfig, Step, StepKind, TicketId};",
         "pub version: ProfileVersion,",
         "pub(crate) fn put_str(out: &mut Vec<u8>, text: &str) {",
         "pub(crate) fn u32_len(len: usize) -> u32 {",
@@ -2086,11 +2156,15 @@ mod no_widening {
 
     /// `continuum-effects-storage`'s recorded public surface, sorted — every `pub` item
     /// across every source file of the crate, as `pub_items` reads them (bn-2fk3).
-    const EFFECTS_STORAGE_PUBLIC_SURFACE: [&str; 110] = [
+    const EFFECTS_STORAGE_PUBLIC_SURFACE: [&str; 131] = [
+        "pub assumptions: &'static [(&'static str, &'static str)],",
         "pub class: FidelityClass,",
+        "pub const ALL: [Self; 11] = [",
         "pub const ALL: [Self; 17] = [",
         "pub const APPEND_LOG_V0: FidelityProfile = FidelityProfile {",
-        "pub const ASSUMPTIONS: [(&str, &str); 6] = [",
+        "pub const APPEND_LOG_V1: FidelityProfile = FidelityProfile {",
+        "pub const ASSUMPTIONS: [(&str, &str); 9] = [",
+        "pub const ASSUMPTIONS_V0: &[(&str, &str)] = ASSUMPTIONS.as_slice().split_at(6).0;",
         "pub const CANCELLATION_CONTRACT: [(&str, &str); 8] = [",
         "pub const COMPOSITION: [(&str, &str); 3] = [",
         "pub const JOURNAL_HEADER_BYTES: u64 =",
@@ -2099,9 +2173,14 @@ mod no_widening {
         "pub const MAX_PENDING_CAP: u32 = 1 << 16;",
         "pub const MAX_RETAINED_CAP: u64 = 1 << 28;",
         "pub const MAX_STEPS: usize = 1 << 20;",
-        "pub const PROFILE_NAME: &str = \"storage/append-log-v0\";",
+        "pub const PROFILES: [FidelityProfile; 2] = [APPEND_LOG_V0, APPEND_LOG_V1];",
+        "pub const PROFILE_NAME: &str = \"storage/append-log-v1\";",
+        "pub const PROFILE_NAME_V0: &str = \"storage/append-log-v0\";",
         "pub const PROFILE_VERSION: ProfileVersion = ProfileVersion {",
+        "pub const PROFILE_VERSION_V0: ProfileVersion = ProfileVersion {",
+        "pub const UNSUPPORTED: [UnsupportedCase; 6] = [",
         "pub const fn all(n: u8) -> Self {",
+        "pub const fn as_str(self) -> &'static str {",
         "pub const fn as_str(self) -> &'static str {",
         "pub const fn chooser(&self) -> Chooser {",
         "pub const fn class(&self) -> RefusalClass {",
@@ -2111,12 +2190,14 @@ mod no_widening {
         "pub const fn crashes(&self) -> u32 {",
         "pub const fn inconclusive_reason(&self) -> Option<&'static str> {",
         "pub const fn is_up(&self, node: NodeId) -> bool {",
+        "pub const fn kind(&self) -> StepKind {",
         "pub const fn max_crashes(&self) -> u32 {",
         "pub const fn max_pending(&self) -> u32 {",
         "pub const fn max_retained_bytes(&self) -> u64 {",
         "pub const fn max_steps(&self) -> u32 {",
         "pub const fn new(",
         "pub const fn nodes(&self) -> u8 {",
+        "pub const fn refusal(&self) -> Option<Refusal> {",
         "pub const fn replicated_register_scenario(",
         "pub const fn restart(&self) -> bool {",
         "pub const fn retained_bytes(&self) -> u64 {",
@@ -2145,8 +2226,11 @@ mod no_widening {
         "pub enum ProgramFault {",
         "pub enum Refusal {",
         "pub enum RefusalClass {",
+        "pub enum Reliance {",
+        "pub enum Request {",
         "pub enum Semantic {",
         "pub enum Step {",
+        "pub enum StepKind {",
         "pub enum Support {",
         "pub fn apply(&mut self, step: &Step) -> Result<&Event, Refusal> {",
         "pub fn canonical_bytes(&self) -> Vec<u8> {",
@@ -2167,7 +2251,9 @@ mod no_widening {
         "pub fn stable_len(&self, node: NodeId) -> Option<u32> {",
         "pub fn ticket(&self, ticket: TicketId) -> Option<(NodeId, Epoch, u32, bool)> {",
         "pub fn ticket_count(&self) -> usize {",
+        "pub fn unsupported_case(self) -> Option<UnsupportedCase> {",
         "pub host: HostQualification,",
+        "pub host_behaviour: &'static str,",
         "pub independence: IndependenceClaim,",
         "pub index: usize,",
         "pub major: u16,",
@@ -2179,6 +2265,9 @@ mod no_widening {
         "pub name: &'static str,",
         "pub patch: u16,",
         "pub refusal: Refusal,",
+        "pub reliance: Reliance,",
+        "pub request: Request,",
+        "pub semantic: Semantic,",
         "pub struct Epoch(pub u32);",
         "pub struct FidelityProfile {",
         "pub struct Journal {",
@@ -2189,11 +2278,13 @@ mod no_widening {
         "pub struct Storage {",
         "pub struct StorageConfig {",
         "pub struct TicketId(pub u32);",
+        "pub struct UnsupportedCase {",
         "pub struct Value(pub u32);",
+        "pub unsupported: Option<&'static [UnsupportedCase]>,",
         "pub use lab::{Journal, Storage, run};",
-        "pub use profile::{APPEND_LOG_V0, FidelityClass, FidelityProfile, Semantic, Support};",
+        "pub use profile::{",
         "pub use refusal::{Refusal, RefusalClass, RunRefusal};",
-        "pub use step::{Entry, Epoch, Event, NodeId, NodeSet, Step, StorageConfig, TicketId, Value};",
+        "pub use step::{",
         "pub version: ProfileVersion,",
         "pub(crate) fn put_str(out: &mut Vec<u8>, text: &str) {",
         "pub(crate) fn u32_len(len: usize) -> u32 {",
@@ -2288,6 +2379,140 @@ mod no_widening {
         pin(
             "continuum-effects-storage/src/lib.rs",
             EFFECTS_STORAGE_LIB,
+            &[
+                "**No host semantics** (docs/09 T06)",
+                "This crate has no dependencies.",
+            ],
+        );
+    }
+
+    /// `continuum-effects-time`'s recorded public surface, sorted — every `pub` item across
+    /// every source file of the crate, as `pub_items` reads them (bn-1oj6). It is declared
+    /// data only: constants, types, and pure accessors over them; no item takes a request.
+    const EFFECTS_TIME_PUBLIC_SURFACE: [&str; 35] = [
+        "pub class: FidelityClass,",
+        "pub const ALL: [Self; 7] = [",
+        "pub const PROFILE_NAME: &str = \"time/unmodelled-v0\";",
+        "pub const PROFILE_VERSION: ProfileVersion = ProfileVersion {",
+        "pub const UNMODELLED_V0: FidelityProfile = FidelityProfile {",
+        "pub const UNSUPPORTED: [UnsupportedCase; 7] = [",
+        "pub const fn as_str(self) -> &'static str {",
+        "pub const fn statement(self) -> &'static str {",
+        "pub const fn support(self) -> Support {",
+        "pub const fn token(self) -> &'static str {",
+        "pub enum FidelityClass {",
+        "pub enum HostQualification {",
+        "pub enum Operations {",
+        "pub enum Reliance {",
+        "pub enum Request {",
+        "pub enum Semantic {",
+        "pub enum Support {",
+        "pub fn canonical_bytes(&self) -> Vec<u8> {",
+        "pub fn unsupported_case(self) -> Option<UnsupportedCase> {",
+        "pub host: HostQualification,",
+        "pub host_behaviour: &'static str,",
+        "pub major: u16,",
+        "pub minor: u16,",
+        "pub mod profile;",
+        "pub name: &'static str,",
+        "pub operations: Operations,",
+        "pub patch: u16,",
+        "pub reliance: Reliance,",
+        "pub request: Request,",
+        "pub semantic: Semantic,",
+        "pub struct FidelityProfile {",
+        "pub struct ProfileVersion {",
+        "pub struct UnsupportedCase {",
+        "pub use profile::{",
+        "pub version: ProfileVersion,",
+    ];
+
+    /// `continuum-effects-time` stopped being a zero-pub-item scaffold when bn-1oj6
+    /// landed the `time/unmodelled-v0` declared profile (PR-15 / IMPL-04): every clock
+    /// semantic RFC 0002 names, each declared unsupported, with no operation. The
+    /// property the scaffold sweep guards is re-established against the surface that
+    /// now exists, with the same four legs as the other packs:
+    ///
+    /// 1. the audited surface is exactly [`EFFECTS_TIME_PUBLIC_SURFACE`];
+    /// 2. no host effect is possible, by the compiler: the crate is `#![no_std]`
+    ///    unconditionally, and its compiler lane `tests/pr15_no_std_lane.rs` exists and
+    ///    is not ignored;
+    /// 3. no declared dependency and no build script;
+    /// 4. it is unreachable from an agent connection: `continuumd` does not declare it,
+    ///    and no `continuumd` source names it.
+    ///
+    /// A time pack is where "read the clock" would land; any leg turning red means it has
+    /// acquired authority the docs/49 audit has never examined.
+    #[test]
+    fn boundary_effects_time_grew_a_declared_profile_and_it_reaches_no_host_effect() {
+        // 1. The audited surface, exactly.
+        let mut items: Vec<String> = effects_time_sources()
+            .iter()
+            .flat_map(|(_, text)| {
+                pub_items(text)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<String>>()
+            })
+            .collect();
+        items.sort();
+        let audited: Vec<String> = EFFECTS_TIME_PUBLIC_SURFACE
+            .iter()
+            .map(|it| (*it).to_owned())
+            .collect();
+        assert_eq!(
+            items, audited,
+            "continuum-effects-time's public surface is not the one INV-015 audited; \
+             record the new items here and re-derive this test's four legs against them"
+        );
+
+        // 2. No host effect, by the compiler rather than by a source scan.
+        if let Err(why) = no_std_unconditional(
+            &effects_time_sources(),
+            EFFECTS_TIME_MANIFEST,
+            EFFECTS_TIME_NO_STD_LANE,
+            TIME_NO_STD_LANE_TEST,
+        ) {
+            panic!("continuum-effects-time is not provably free of host effects: {why}");
+        }
+
+        // 3. No declared dependency, no build script, no build dependency.
+        assert_eq!(
+            real_pack_problem("continuum-effects-time"),
+            Ok(()),
+            "continuum-effects-time gained a dependency or a build script; re-derive what \
+             it can reach"
+        );
+        assert!(
+            !std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../continuum-effects-time/build.rs")
+                .exists(),
+            "continuum-effects-time grew a build.rs"
+        );
+
+        // 4. Unreachable from an agent connection.
+        assert!(
+            !CONTINUUMD_MANIFEST.contains("continuum-effects-time"),
+            "continuumd now declares continuum-effects-time"
+        );
+        for (path, text) in continuumd_sources() {
+            let callers: Vec<&str> = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_effects_time"))
+                .collect();
+            assert!(
+                callers.is_empty(),
+                "{} names continuum_effects_time: {callers:?}",
+                path.display()
+            );
+        }
+
+        // And the crate still declares the contract this file holds it to.
+        pin(
+            "continuum-effects-time/src/lib.rs",
+            EFFECTS_TIME_LIB,
             &[
                 "**No host semantics** (docs/09 T06)",
                 "This crate has no dependencies.",
@@ -2568,10 +2793,10 @@ mod mutants {
     use std::collections::BTreeSet;
 
     use super::{
-        ADMISSION, CAPABILITY, DOCS_49, EFFECTS_TIME_LIB, EVIDENCE, FORGE_MANIFEST,
-        NON_FILESYSTEM_FACILITIES, SECURITY_MANIFEST, administrative_callers,
-        declared_dependencies, forge_sources, host_effect_lines, is_signing_source,
-        isolation_bullets, missing_pin, pub_items, security_sources, unexempted_callers,
+        ADMISSION, CAPABILITY, DOCS_49, EVIDENCE, FORGE_MANIFEST, NON_FILESYSTEM_FACILITIES,
+        PROOF_CLIENT_LIB, SECURITY_MANIFEST, administrative_callers, declared_dependencies,
+        forge_sources, host_effect_lines, is_signing_source, isolation_bullets, missing_pin,
+        pub_items, security_sources, unexempted_callers,
     };
     use crate::privileged_perimeter::{PRIVILEGED, privileged_names};
     use std::path::Path;
@@ -2676,10 +2901,10 @@ mod mutants {
     #[test]
     fn negative_the_scaffold_sweep_detects_a_grown_crate() {
         assert!(
-            pub_items(EFFECTS_TIME_LIB).is_empty(),
+            pub_items(PROOF_CLIENT_LIB).is_empty(),
             "the real scaffold is clean"
         );
-        let grown = format!("{EFFECTS_TIME_LIB}\npub fn spawn_worker() {{}}\n");
+        let grown = format!("{PROOF_CLIENT_LIB}\npub fn spawn_worker() {{}}\n");
         assert_eq!(pub_items(&grown), vec!["pub fn spawn_worker() {}"]);
     }
 

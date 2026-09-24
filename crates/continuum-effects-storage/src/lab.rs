@@ -62,7 +62,7 @@
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
-use crate::profile::{APPEND_LOG_V0, Semantic, put_str, u32_len};
+use crate::profile::{APPEND_LOG_V1, Semantic, put_str, u32_len};
 use crate::refusal::{Bound, Malformed, NotEnabled, ProgramFault, Refusal, RunRefusal};
 use crate::step::{
     Entry, Epoch, Event, MAX_STEPS, NodeId, NodeSet, Step, StorageConfig, TicketId, Value,
@@ -753,13 +753,18 @@ fn put_ticket(out: &mut Vec<u8>, tag: u8, ticket: TicketId, node: NodeId, epoch:
     out.extend_from_slice(&upto.to_be_bytes());
 }
 
+/// The journal's canonical bytes. The header names the current profile,
+/// [`crate::profile::APPEND_LOG_V1`]. This handler implements the rows every entry of
+/// [`crate::profile::PROFILES`] shares, and the profiles differ only in what they
+/// declare about the host, so a journal is equally a run under the frozen `-v0`; a
+/// consumer that cites `-v0` reads the rows, not the header's name.
 fn encode(config: &StorageConfig, events: &[Event], retained: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(usize::try_from(retained).unwrap_or(0));
     out.extend_from_slice(JOURNAL_MAGIC);
-    put_str(&mut out, APPEND_LOG_V0.name);
-    out.extend_from_slice(&APPEND_LOG_V0.version.major.to_be_bytes());
-    out.extend_from_slice(&APPEND_LOG_V0.version.minor.to_be_bytes());
-    out.extend_from_slice(&APPEND_LOG_V0.version.patch.to_be_bytes());
+    put_str(&mut out, APPEND_LOG_V1.name);
+    out.extend_from_slice(&APPEND_LOG_V1.version.major.to_be_bytes());
+    out.extend_from_slice(&APPEND_LOG_V1.version.minor.to_be_bytes());
+    out.extend_from_slice(&APPEND_LOG_V1.version.patch.to_be_bytes());
     out.push(config.nodes());
     out.extend_from_slice(&config.max_crashes().to_be_bytes());
     out.push(u8::from(config.restart()));

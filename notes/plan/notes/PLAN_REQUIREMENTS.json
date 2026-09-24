@@ -2171,8 +2171,8 @@
         "line": 407,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "declared unsupported cases."
+      "status": "satisfied",
+      "summary": "declared unsupported cases (delivered: bn-1oj6 \u2014 every current, -v1, effect-pack fidelity profile now carries UNSUPPORTED, a machine-readable, versioned enumeration of the host behaviours it does not model, part of the profile's canonical bytes: one UnsupportedCase per unsupported row, with the host behaviour in RFC 0002's and docs/17's terms, a typed Request \u2014 a StepKind, a step in a typed state, or NoOperation \u2014 and a typed Reliance that says what a verdict gives a program that depends on it: Assumed of a stated assumption, Subsumed by a modelled row, Owner, a sibling profile or composition row, or OutsidePack; UnsupportedCase::refusal is the INV-008 Unsupported refusal a caller gets, never a success or a modelled event in its place. network/adversarial-v1 1.0.0 declares 13 cases: six steps and one step in a state, the second Partition while a partition is active and the budget remains, which the scenario's budget of one makes unreachable, and six with no operation; bounded delay, one-way and overlapping cuts and recall are subsumed by unbounded delay up to the exploration bounds, connection epochs, half-open, backpressure and reset rest on the new connectionless-send assumption, framing on the new atomic-payload, service discovery on the new fixed-addressing, because a send to a stale address satisfies no-forgery (cr-37bshu), corruption and forgery on network-no-forgery, and endpoint crash is the process profile's. process/crash-restart-v1 1.0.0 declares 5: graceful cancellation and panic rest on the new node-level-lifecycle assumption, power loss on the new power-loss-as-crashes, the program's own partial cleanup is subsumed by a fail-stop crash and node-level supervisor decisions by the restart choice. storage/append-log-v1 1.0.0 declares 6: sector corruption, write reordering, a lying fsync, directory durability, a device profile such as a full device, and an undetected tear rest on no-medium-corruption, durable-log-is-a-prefix, honest-flush, durable-log-entry, no-device-profile and detected-tear, three of them new. crates/continuum-effects-time stops being a scaffold: time/unmodelled-v0 0.1.0 declares each of RFC 0002's seven clock semantics unsupported with no operation and OutsidePack, leap seconds, skew between nodes and a monotonic clock that goes backwards among them, and says operations-none in its canonical bytes so its adversarial-envelope class cannot be read as covering a clock; the crate is #![nostd] with the network pack's compiler lane, and INV-015 audits it with the same four legs. Evidence: tests/pr15impl04unsupported.rs in the network, process and storage packs under artifact ids pr15-impl04-{hon,pos,neg,bnd}-NN \u2014 the table is total over the unsupported rows with every reliance pinned; each requestable case through check, apply and run is exactly its declared refusal and changes nothing; one test per case with a modelled neighbour that still works and the edge between them; and the one declared exception, the step bound, where every step is BoundReached(Steps), inconclusive; tests/pr15impl04time.rs under pr15-impl04-time-hon-NN; profile fingerprints and journal wire forms re-pinned with the version. A profile's name identifies its canonical bytes (RFC 0002 correction 1, docs/12 \u00a74, cr-37bshu): the IMPL-04 content is published under the new -v1 names, each pack keeps its -v0 0.1.0 byte for byte beside it on the one Lab handler, which journals under -v1, and a registry test, pr15-impl04-hon-03, pins every (name, fingerprint) pair, the -v0 fingerprints being the ones pinned before bn-1oj6; the replicated-register contract keeps naming -v0, so its meaning did not move, and crates/continuum-semantic-diff/tests/pr15impl04profilerevision.rs under pr15-impl04-rev-NN adopts -v1 by a library-path revision \u2014 assemble classifies the addition as exactly faults[network/adversarial-v1]:added and faults[storage/append-log-v1]:added, the verdict under the fixture's no-removal is allow on both acceptance paths as RFC 0037's verb table computes, W8 resolves the revision against the packs and refuses it, typed, against a snapshot whose packs predate -v1, a swap of -v0 for -v1 is removed plus added and block, trusting -v1 too fails closed to trustboundaries unknown and review, and a -v9 name is refused by W8. Narrowing: the no-operation evidence is compiler-level for totality \u2014 exhaustive destructuring matches over every step, configuration argument, reader entry and storage refusal with no wildcard \u2014 but that a pack has no other input-taking entry point is the INV-015 inventory's lexical claim; the lead's examples that RFC 0002 and docs/17 do not name, TLS beyond authentication, zombie reaping and environment inheritance, are not declared; the revision is library-level, because the daemon's intent.proposerevision classifies nothing today, as INV-001's evidence pins; and RFC 0031 classifies an added profile by membership only, so a profile whose declared assumptions are a superset is an ordinary added fault record, not an assumption strengthening, which is a gap in the RFCs as written; a structured pin in the contract remains a possible hardening, bn-1eld5)"
     },
     {
       "category": "pr-exit",
@@ -10382,7 +10382,7 @@
       "coverage": "leaf",
       "id": "GOV-5-01",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10393,7 +10393,7 @@
       "coverage": "leaf",
       "id": "GOV-5-02",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10404,7 +10404,7 @@
       "coverage": "leaf",
       "id": "GOV-5-03",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10415,7 +10415,7 @@
       "coverage": "leaf",
       "id": "GOV-5-04",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10426,7 +10426,7 @@
       "coverage": "leaf",
       "id": "GOV-5-05",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10437,7 +10437,7 @@
       "coverage": "leaf",
       "id": "GOV-5-06",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10448,7 +10448,7 @@
       "coverage": "leaf",
       "id": "GOV-5-07",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10459,7 +10459,7 @@
       "coverage": "leaf",
       "id": "GOV-5-08",
       "source": {
-        "line": 210,
+        "line": 219,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10470,7 +10470,7 @@
       "coverage": "leaf",
       "id": "GOV-7-01",
       "source": {
-        "line": 235,
+        "line": 244,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10481,7 +10481,7 @@
       "coverage": "leaf",
       "id": "GOV-7-02",
       "source": {
-        "line": 235,
+        "line": 244,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10492,7 +10492,7 @@
       "coverage": "leaf",
       "id": "GOV-7-03",
       "source": {
-        "line": 235,
+        "line": 244,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10503,7 +10503,7 @@
       "coverage": "leaf",
       "id": "GOV-7-04",
       "source": {
-        "line": 235,
+        "line": 244,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10514,7 +10514,7 @@
       "coverage": "leaf",
       "id": "GOV-7-05",
       "source": {
-        "line": 235,
+        "line": 244,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10525,7 +10525,7 @@
       "coverage": "leaf",
       "id": "GOV-7-06",
       "source": {
-        "line": 235,
+        "line": 244,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10536,7 +10536,7 @@
       "coverage": "leaf",
       "id": "GOV-7-07",
       "source": {
-        "line": 235,
+        "line": 244,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10547,7 +10547,7 @@
       "coverage": "leaf",
       "id": "GOV-8-01",
       "source": {
-        "line": 249,
+        "line": 258,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10558,7 +10558,7 @@
       "coverage": "leaf",
       "id": "GOV-8-02",
       "source": {
-        "line": 249,
+        "line": 258,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10569,7 +10569,7 @@
       "coverage": "leaf",
       "id": "GOV-8-03",
       "source": {
-        "line": 249,
+        "line": 258,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10580,7 +10580,7 @@
       "coverage": "leaf",
       "id": "GOV-8-04",
       "source": {
-        "line": 249,
+        "line": 258,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10591,7 +10591,7 @@
       "coverage": "leaf",
       "id": "GOV-8-05",
       "source": {
-        "line": 249,
+        "line": 258,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10602,7 +10602,7 @@
       "coverage": "leaf",
       "id": "GOV-9-01",
       "source": {
-        "line": 261,
+        "line": 270,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10613,7 +10613,7 @@
       "coverage": "leaf",
       "id": "GOV-9-02",
       "source": {
-        "line": 261,
+        "line": 270,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10624,7 +10624,7 @@
       "coverage": "leaf",
       "id": "GOV-9-03",
       "source": {
-        "line": 261,
+        "line": 270,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10635,7 +10635,7 @@
       "coverage": "leaf",
       "id": "GOV-9-04",
       "source": {
-        "line": 261,
+        "line": 270,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10646,7 +10646,7 @@
       "coverage": "leaf",
       "id": "GOV-9-05",
       "source": {
-        "line": 261,
+        "line": 270,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10657,7 +10657,7 @@
       "coverage": "leaf",
       "id": "GOV-9-06",
       "source": {
-        "line": 261,
+        "line": 270,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10668,7 +10668,7 @@
       "coverage": "leaf",
       "id": "GOV-9-07",
       "source": {
-        "line": 261,
+        "line": 270,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10679,7 +10679,7 @@
       "coverage": "leaf",
       "id": "GOV-11-01",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10690,7 +10690,7 @@
       "coverage": "leaf",
       "id": "GOV-11-02",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10701,7 +10701,7 @@
       "coverage": "leaf",
       "id": "GOV-11-03",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10712,7 +10712,7 @@
       "coverage": "leaf",
       "id": "GOV-11-04",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10723,7 +10723,7 @@
       "coverage": "leaf",
       "id": "GOV-11-05",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10734,7 +10734,7 @@
       "coverage": "leaf",
       "id": "GOV-11-06",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10745,7 +10745,7 @@
       "coverage": "leaf",
       "id": "GOV-11-07",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",
@@ -10756,7 +10756,7 @@
       "coverage": "leaf",
       "id": "GOV-11-08",
       "source": {
-        "line": 283,
+        "line": 292,
         "path": "docs/12_GOVERNANCE_AND_ENGINEERING.md"
       },
       "status": "active",

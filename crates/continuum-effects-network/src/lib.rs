@@ -10,10 +10,13 @@
 //!
 //! # What is here (PR-15 / IMPL-01, bn-3ohe)
 //!
-//! One fidelity profile, [`profile::ADVERSARIAL_V0`] — `network/adversarial-v0` at
-//! version 0.1.0, class `adversarial-envelope`, the name
+//! Two fidelity profiles over the same rows, class `adversarial-envelope`: the frozen
+//! [`profile::ADVERSARIAL_V0`] — `network/adversarial-v0` at version 0.1.0, the name
 //! `replicated_register.scenario.toml` and the replicated-register Intent Contract
-//! already use — and one Lab handler, [`lab::Network`], that implements exactly the
+//! already use, byte for byte as published — and the current
+//! [`profile::ADVERSARIAL_V1`] — `network/adversarial-v1` at 1.0.0, which adds the
+//! declared unsupported cases and their assumptions (bn-1oj6; a profile's name
+//! identifies its content, RFC 0002 correction 1) — and one Lab handler, [`lab::Network`], that implements exactly the
 //! profile's modelled rows:
 //!
 //! | Modelled | Step | Event |
@@ -32,8 +35,24 @@
 //! delay, connection epochs, half-open, backpressure, discovery and framing — have no
 //! step at all, so the handler cannot be asked for them; the profile row is their
 //! declaration.
-//! The profile states two assumptions ([`profile::ASSUMPTIONS`]): no forgery, and no
-//! eventual delivery.
+//! The profile states five assumptions ([`profile::ASSUMPTIONS`]): no forgery, no
+//! eventual delivery, a connectionless send, an atomic payload, and fixed addressing.
+//!
+//! # Declared unsupported cases (PR-15 / IMPL-04, bn-1oj6)
+//!
+//! [`profile::UNSUPPORTED`] is the machine-readable, versioned enumeration of what the
+//! profile does not model: one [`profile::UnsupportedCase`] per unsupported row, part of
+//! the profile's canonical bytes. Each names the host behaviour, the
+//! [`profile::Request`] by which a caller could ask for it — a step, a step in a named
+//! state (a second `Partition` while one is active), or no operation — and the
+//! [`profile::Reliance`] that says what a verdict gives a program that depends on it: a
+//! stated assumption (`network-no-forgery`, `connectionless-send`, `atomic-payload`,
+//! `fixed-addressing`),
+//! a modelled row that already covers it (unbounded delay covers a delay bound,
+//! one-way and overlapping cuts and recall, up to the exploration bounds), or the
+//! process profile, which owns endpoint crash. At the step bound every step is
+//! refused as `BoundReached(Steps)` first. [`profile::UnsupportedCase::refusal`] is the refusal a caller
+//! gets, and `tests/pr15_impl04_unsupported.rs` holds the Lab handler to it.
 //!
 //! # What is not here
 //!
@@ -97,6 +116,11 @@ pub mod refusal;
 pub mod step;
 
 pub use lab::{Journal, Network, run};
-pub use profile::{ADVERSARIAL_V0, FidelityClass, FidelityProfile, Semantic, Support};
+pub use profile::{
+    ADVERSARIAL_V0, ADVERSARIAL_V1, FidelityClass, FidelityProfile, PROFILES, Reliance, Request,
+    Semantic, Support, UNSUPPORTED, UnsupportedCase, When,
+};
 pub use refusal::{Refusal, RefusalClass, RunRefusal};
-pub use step::{EnvelopeId, Event, FaultSwitches, NetworkConfig, NodeId, NodeSet, Payload, Step};
+pub use step::{
+    EnvelopeId, Event, FaultSwitches, NetworkConfig, NodeId, NodeSet, Payload, Step, StepKind,
+};

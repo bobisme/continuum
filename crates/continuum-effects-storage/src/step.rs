@@ -334,6 +334,69 @@ pub enum Step {
     FalseFlush(TicketId),
 }
 
+/// The kind of a [`Step`], without its arguments: the name a declared
+/// [`crate::profile::UnsupportedCase`] uses for the step that asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StepKind {
+    /// [`Step::Submit`].
+    Submit,
+    /// [`Step::Sync`].
+    Sync,
+    /// [`Step::Persist`].
+    Persist,
+    /// [`Step::Ack`].
+    Ack,
+    /// [`Step::Delay`].
+    Delay,
+    /// [`Step::Crash`].
+    Crash,
+    /// [`Step::Restart`].
+    Restart,
+    /// [`Step::Truncate`].
+    Truncate,
+    /// [`Step::Corrupt`].
+    Corrupt,
+    /// [`Step::Reorder`].
+    Reorder,
+    /// [`Step::FalseFlush`].
+    FalseFlush,
+}
+
+impl StepKind {
+    /// Every kind, in [`Step`]'s declaration order.
+    pub const ALL: [Self; 11] = [
+        Self::Submit,
+        Self::Sync,
+        Self::Persist,
+        Self::Ack,
+        Self::Delay,
+        Self::Crash,
+        Self::Restart,
+        Self::Truncate,
+        Self::Corrupt,
+        Self::Reorder,
+        Self::FalseFlush,
+    ];
+
+    /// The step's name, as [`Step`] spells its variant.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Submit => "Submit",
+            Self::Sync => "Sync",
+            Self::Persist => "Persist",
+            Self::Ack => "Ack",
+            Self::Delay => "Delay",
+            Self::Crash => "Crash",
+            Self::Restart => "Restart",
+            Self::Truncate => "Truncate",
+            Self::Corrupt => "Corrupt",
+            Self::Reorder => "Reorder",
+            Self::FalseFlush => "FalseFlush",
+        }
+    }
+}
+
 /// Who makes a step's choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Chooser {
@@ -358,6 +421,24 @@ impl Step {
             | Self::Corrupt { .. }
             | Self::Reorder(_)
             | Self::FalseFlush(_) => Chooser::Adversary,
+        }
+    }
+
+    /// The step's kind.
+    #[must_use]
+    pub const fn kind(&self) -> StepKind {
+        match self {
+            Self::Submit { .. } => StepKind::Submit,
+            Self::Sync(_) => StepKind::Sync,
+            Self::Persist(_) => StepKind::Persist,
+            Self::Ack(_) => StepKind::Ack,
+            Self::Delay(_) => StepKind::Delay,
+            Self::Crash { .. } => StepKind::Crash,
+            Self::Restart(_) => StepKind::Restart,
+            Self::Truncate(_) => StepKind::Truncate,
+            Self::Corrupt { .. } => StepKind::Corrupt,
+            Self::Reorder(_) => StepKind::Reorder,
+            Self::FalseFlush(_) => StepKind::FalseFlush,
         }
     }
 

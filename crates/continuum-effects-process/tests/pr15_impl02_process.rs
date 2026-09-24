@@ -41,7 +41,7 @@ use continuum_effects_process::step::{
     MAX_CRASHES_CAP, MAX_PENDING_CAP, MAX_RETAINED_CAP, MAX_STEPS,
 };
 use continuum_effects_process::{
-    CRASH_RESTART_V0, Epoch, Event, FidelityClass, Journal, NodeId, NodeSet, Process,
+    CRASH_RESTART_V1, Epoch, Event, FidelityClass, Journal, NodeId, NodeSet, PROFILES, Process,
     ProcessConfig, Refusal, RefusalClass, Semantic, Step, Support, TicketId, run,
 };
 
@@ -1427,7 +1427,13 @@ fn honesty_the_profile_covers_every_rfc_0002_and_docs_17_process_semantic() {
     );
     assert_eq!(
         ASSUMPTIONS.map(|(id, _)| id),
-        ["fail-stop", "no-eventual-restart", "no-failure-detection"]
+        [
+            "fail-stop",
+            "no-eventual-restart",
+            "no-failure-detection",
+            "power-loss-as-crashes",
+            "node-level-lifecycle"
+        ]
     );
     assert_eq!(CANCELLATION_CONTRACT.len(), 8);
 }
@@ -1462,11 +1468,16 @@ fn honesty_the_scenario_helper_matches_the_replicated_register_scenario_and_cont
 /// shows that proof is live.
 #[test]
 fn profile_declares_host_qualification_none() {
-    assert_eq!(CRASH_RESTART_V0.host, HostQualification::None);
-    assert_eq!(CRASH_RESTART_V0.class, FidelityClass::AdversarialEnvelope);
-    assert_ne!(CRASH_RESTART_V0.class, FidelityClass::PlatformQualified);
+    // Both declared profiles, the frozen `-v0` and the current `-v1`, claim no host.
+    assert_eq!(CRASH_RESTART_V1.host, HostQualification::None);
+    for profile in PROFILES {
+        assert_eq!(profile.host, HostQualification::None, "{}", profile.name);
+        assert_ne!(profile.class, FidelityClass::PlatformQualified);
+    }
+    assert_eq!(CRASH_RESTART_V1.class, FidelityClass::AdversarialEnvelope);
+    assert_ne!(CRASH_RESTART_V1.class, FidelityClass::PlatformQualified);
     assert_eq!(
-        CRASH_RESTART_V0.independence,
+        CRASH_RESTART_V1.independence,
         IndependenceClaim::AllDependent
     );
 }
@@ -1478,21 +1489,21 @@ fn profile_declares_host_qualification_none() {
 /// edit, but a deliberate re-pin without a bump is caught only by review.
 #[test]
 fn honesty_the_profile_bytes_are_pinned_to_its_version() {
-    let bytes = CRASH_RESTART_V0.canonical_bytes();
+    let bytes = CRASH_RESTART_V1.canonical_bytes();
     let fingerprint = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
     });
     assert_eq!(
         (PROFILE_VERSION.to_string(), fingerprint),
-        ("0.1.0".to_owned(), PINNED_FINGERPRINT),
-        "process/crash-restart-v0 changed: bump PROFILE_VERSION, then re-pin"
+        ("1.0.0".to_owned(), PINNED_FINGERPRINT),
+        "process/crash-restart-v1 changed: a content change needs a new profile name (RFC 0002 correction 1)"
     );
     let journal: Journal = run(config(1, 0, false, 1), &[Step::Begin(NodeId(0))]).unwrap();
     let name = PROFILE_NAME.as_bytes();
     assert!(journal.encode().windows(name.len()).any(|w| w == name));
 }
 
-const PINNED_FINGERPRINT: u64 = 18_224_978_510_953_362_894;
+const PINNED_FINGERPRINT: u64 = 366_640_240_911_873_674;
 
 /// `pr15-impl02-hon-05`. The journal's wire form is pinned byte for byte, so a change
 /// to tags, field order, widths or endianness fails here rather than passing every
@@ -1518,7 +1529,7 @@ fn honesty_the_journal_encoding_is_pinned_byte_for_byte() {
     assert_eq!(hex, PINNED_JOURNAL_HEX, "the journal wire form changed");
 }
 
-const PINNED_JOURNAL_HEX: &str = "636f6e74696e75756d2d70726f636573732d6a6f75726e616c000000001870726f636573732f63726173682d726573746172742d7630000000010000020000000201000000040000000010000000000000070100000000000000000001000000010100000000020000000101000000000600000000000000000004000000000005000000000103000000000000000000";
+const PINNED_JOURNAL_HEX: &str = "636f6e74696e75756d2d70726f636573732d6a6f75726e616c000000001870726f636573732f63726173682d726573746172742d7631000100000000020000000201000000040000000010000000000000070100000000000000000001000000010100000000020000000101000000000600000000000000000004000000000005000000000103000000000000000000";
 
 /// `pr15-impl02-hon-06`. The coordination with the network pack, read from its source
 /// rather than linked (a dev-dependency would be a new dependency edge): its
@@ -1542,7 +1553,9 @@ fn honesty_the_network_pack_defers_crash_semantics_here_and_this_profile_states_
             "the network profile no longer says: {promise}"
         );
     }
-    assert!(NETWORK_PROFILE.contains("pub const PROFILE_NAME: &str = \"network/adversarial-v0\";"));
+    assert!(
+        NETWORK_PROFILE.contains("pub const PROFILE_NAME_V0: &str = \"network/adversarial-v0\";")
+    );
     let (pack, statement) = COMPOSITION[0];
     assert_eq!(pack, "network/adversarial-v0");
     for claim in [

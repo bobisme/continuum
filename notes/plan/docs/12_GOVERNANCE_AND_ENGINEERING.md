@@ -186,6 +186,15 @@ the full obligation applies, as it does for an empty reason or a record that
 names neither the tests nor the form. When a host path lands, the pack stops
 being `no_std` and the obligation applies in full.
 
+A pack profile's name identifies its canonical bytes (RFC 0002 correction 1, bn-1oj6,
+cr-37bshu). A pack change that alters those bytes publishes a new profile under a new
+name and keeps the old profile byte for byte, so the version bump a pack change
+requires is a new name, never an edit of a published one. Each pack's registry test
+(the time pack's version test, for its one profile) pins every (name, fingerprint)
+pair it declares, so a content change under a published name fails it; editing a
+registry entry or removing a published profile is refused in review. An Intent
+Contract moves to a new profile only by an intent revision that adds its name.
+
 ### Kernel changes
 
 Require:

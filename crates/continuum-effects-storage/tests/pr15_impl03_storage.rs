@@ -35,7 +35,7 @@ use std::collections::BTreeSet;
 use continuum_effects_storage::lab::JOURNAL_HEADER_BYTES;
 use continuum_effects_storage::profile::{
     ASSUMPTIONS, CANCELLATION_CONTRACT, COMPOSITION, HostQualification, IndependenceClaim,
-    PROFILE_NAME, PROFILE_VERSION,
+    PROFILE_NAME, PROFILE_NAME_V0, PROFILE_VERSION,
 };
 use continuum_effects_storage::refusal::{
     Bound, ConfigRefusal, Malformed, NotEnabled, ProgramFault,
@@ -44,8 +44,9 @@ use continuum_effects_storage::step::{
     MAX_CRASHES_CAP, MAX_PENDING_CAP, MAX_RETAINED_CAP, MAX_STEPS,
 };
 use continuum_effects_storage::{
-    APPEND_LOG_V0, Entry, Epoch, Event, FidelityClass, Journal, NodeId, NodeSet, Refusal,
-    RefusalClass, Semantic, Step, Storage, StorageConfig, Support, TicketId, Value, run,
+    APPEND_LOG_V0, APPEND_LOG_V1, Entry, Epoch, Event, FidelityClass, Journal, NodeId, NodeSet,
+    PROFILES, Refusal, RefusalClass, Semantic, Step, Storage, StorageConfig, Support, TicketId,
+    Value, run,
 };
 
 /// The retained-bytes budget of every configuration that is not testing the budget.
@@ -2216,6 +2217,9 @@ fn honesty_the_profile_covers_every_rfc_0002_and_docs_17_storage_semantic() {
             "detected-tear",
             "durable-truncation",
             "no-eventual-flush",
+            "no-medium-corruption",
+            "no-device-profile",
+            "durable-log-entry",
         ]
     );
     assert_eq!(CANCELLATION_CONTRACT.len(), 8);
@@ -2245,7 +2249,9 @@ fn honesty_the_profile_is_the_one_the_scenario_contract_and_manifest_cite() {
             .unwrap_or_else(|| panic!("{key}"))
             .trim()
     };
-    assert_eq!(value("profile = "), format!("\"{PROFILE_NAME}\""));
+    // The scenario, the contract and the manifest name the frozen `-v0`, which the
+    // pack still declares, byte for byte.
+    assert_eq!(value("profile = "), format!("\"{PROFILE_NAME_V0}\""));
     let cfg = StorageConfig::replicated_register_scenario(3, 8, RETAINED).unwrap();
     assert_eq!(
         value("allow_volatile_suffix_loss = "),
@@ -2259,13 +2265,13 @@ fn honesty_the_profile_is_the_one_the_scenario_contract_and_manifest_cite() {
     assert_eq!(max_crashes, cfg.max_crashes().to_string());
     assert!(cfg.restart());
     // The Intent Contract.
-    assert!(json_strings(CONTRACT, "\"profiles\"").contains(&PROFILE_NAME));
-    assert!(json_strings(CONTRACT, "\"trusted\"").contains(&PROFILE_NAME));
+    assert!(json_strings(CONTRACT, "\"profiles\"").contains(&PROFILE_NAME_V0));
+    assert!(json_strings(CONTRACT, "\"trusted\"").contains(&PROFILE_NAME_V0));
     assert!(CONTRACT.contains("durable_log_is_a_prefix_of_appended"));
     assert!(CONTRACT.contains("\"id\":\"DurableLogIsAPrefix\""));
     assert!(ASSUMPTIONS[1].1.contains("DurableLogIsAPrefix"));
     // The manifest example.
-    assert!(MANIFEST.contains(&format!("\"id\": \"{PROFILE_NAME}\"")));
+    assert!(MANIFEST.contains(&format!("\"id\": \"{PROFILE_NAME_V0}\"")));
     assert!(MANIFEST.contains(&format!("\"class\": \"{}\"", APPEND_LOG_V0.class.as_str())));
     for assumption in json_strings(MANIFEST, "\"assumptions\"") {
         assert!(
@@ -2294,10 +2300,15 @@ fn honesty_the_profile_is_the_one_the_scenario_contract_and_manifest_cite() {
 /// shows that proof is live.
 #[test]
 fn profile_declares_host_qualification_none() {
-    assert_eq!(APPEND_LOG_V0.host, HostQualification::None);
-    assert_eq!(APPEND_LOG_V0.class, FidelityClass::AdversarialEnvelope);
-    assert_ne!(APPEND_LOG_V0.class, FidelityClass::PlatformQualified);
-    assert_eq!(APPEND_LOG_V0.independence, IndependenceClaim::AllDependent);
+    // Both declared profiles, the frozen `-v0` and the current `-v1`, claim no host.
+    assert_eq!(APPEND_LOG_V1.host, HostQualification::None);
+    for profile in PROFILES {
+        assert_eq!(profile.host, HostQualification::None, "{}", profile.name);
+        assert_ne!(profile.class, FidelityClass::PlatformQualified);
+    }
+    assert_eq!(APPEND_LOG_V1.class, FidelityClass::AdversarialEnvelope);
+    assert_ne!(APPEND_LOG_V1.class, FidelityClass::PlatformQualified);
+    assert_eq!(APPEND_LOG_V1.independence, IndependenceClaim::AllDependent);
 }
 
 /// `pr15-impl03-hon-04`. The profile's canonical bytes are pinned together with its
@@ -2307,14 +2318,14 @@ fn profile_declares_host_qualification_none() {
 /// edit, but a deliberate re-pin without a bump is caught only by review.
 #[test]
 fn honesty_the_profile_bytes_are_pinned_to_its_version() {
-    let bytes = APPEND_LOG_V0.canonical_bytes();
+    let bytes = APPEND_LOG_V1.canonical_bytes();
     let fingerprint = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
     });
     assert_eq!(
         (PROFILE_VERSION.to_string(), fingerprint),
-        ("0.1.0".to_owned(), PINNED_FINGERPRINT),
-        "storage/append-log-v0 changed: bump PROFILE_VERSION, then re-pin"
+        ("1.0.0".to_owned(), PINNED_FINGERPRINT),
+        "storage/append-log-v1 changed: a content change needs a new profile name (RFC 0002 correction 1)"
     );
     let journal: Journal = run(
         config(1, 0, false, false, false, 1),
@@ -2325,7 +2336,7 @@ fn honesty_the_profile_bytes_are_pinned_to_its_version() {
     assert!(journal.encode().windows(name.len()).any(|w| w == name));
 }
 
-const PINNED_FINGERPRINT: u64 = 2_455_172_717_111_530_958;
+const PINNED_FINGERPRINT: u64 = 11_729_929_152_830_614_249;
 
 /// `pr15-impl03-hon-05`. The journal's wire form is pinned byte for byte, so a change
 /// to tags, field order, widths or endianness fails here rather than passing every
@@ -2377,7 +2388,7 @@ fn honesty_the_journal_encoding_is_pinned_byte_for_byte() {
     assert_eq!(hex, PINNED_JOURNAL_HEX, "the journal wire form changed");
 }
 
-const PINNED_JOURNAL_HEX: &str = "636f6e74696e75756d2d73746f726167652d6a6f75726e616c000000001573746f726167652f617070656e642d6c6f672d76300000000100000200000002010101000000040010000000000000100000000000000c01000000000000000000000000a1020000000000000000000000000103000000000000000000000000010600000000000000000000000001040000000000000000000000000101000000000000000001000000b20200000001010000000000000000070000000000000000000100000001080000000001090000000001000000010701000000000000000000000000000500000001010000000000000000";
+const PINNED_JOURNAL_HEX: &str = "636f6e74696e75756d2d73746f726167652d6a6f75726e616c000000001573746f726167652f617070656e642d6c6f672d76310001000000000200000002010101000000040010000000000000100000000000000c01000000000000000000000000a1020000000000000000000000000103000000000000000000000000010600000000000000000000000001040000000000000000000000000101000000000000000001000000b20200000001010000000000000000070000000000000000000100000001080000000001090000000001000000010701000000000000000000000000000500000001010000000000000000";
 
 /// `pr15-impl03-hon-06`. The composition with the process pack, read from its source
 /// rather than linked (a dev-dependency would be a new dependency edge). Its `storage`
@@ -2406,7 +2417,7 @@ fn honesty_the_process_pack_defers_storage_here_and_this_profile_composes_with_i
         );
     }
     assert!(
-        PROCESS_PROFILE.contains("pub const PROFILE_NAME: &str = \"process/crash-restart-v0\";")
+        PROCESS_PROFILE.contains("pub const PROFILE_NAME_V0: &str = \"process/crash-restart-v0\";")
     );
     assert_eq!(
         COMPOSITION.map(|(pack, _)| pack),
