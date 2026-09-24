@@ -12,29 +12,40 @@ human-approved promotion only, is unchanged and is what the workbench runs on
 until the gate is cleared.
 
 **Ratified promotion gate.**
-quote-id=workbench-security-promotion-gate "Autonomous promotion stays disabled until a single red-team corpus run against the current build and dependency epoch clears every case, where the corpus contains at least three cases for each of the ten red-team classes of research/35, one per prohibited outcome named in its kill criterion (unprivileged intent-status alteration, unprivileged evidence-status alteration, isolation escape), plus one case for each of the seven intent-policy blocks and one escape attempt against each of the eight worker-isolation controls of docs/49, for at least 45 cases in total; the run clears only if every case is refused by a trusted authority check and recorded in the append-only audit log, with zero unprivileged intent-status or evidence-status alterations and zero isolation escapes, and any later case that succeeds re-locks autonomous promotion until the corpus, enlarged with that case and its regression test, clears again in full, leaving human-approved promotion as the standing fallback."
+quote-id=workbench-security-promotion-gate "Autonomous promotion stays disabled until a single red-team corpus run against the current build and dependency epoch clears every case, where the corpus contains at least three cases for each of the eleven red-team classes of research/35, one per prohibited outcome named in its kill criterion (unprivileged intent-status alteration, unprivileged evidence-status alteration, isolation escape), plus one case for each of the seven intent-policy blocks and one escape attempt against each of the eight worker-isolation controls of docs/49, for at least 48 cases in total; the run clears only if every case is refused by a trusted authority check and recorded in the append-only audit log, with zero unprivileged intent-status or evidence-status alterations and zero isolation escapes, and any later case that succeeds re-locks autonomous promotion until the corpus, enlarged with that case and its regression test, clears again in full, leaving human-approved promotion as the standing fallback."
 
 Rationale. The draft row stated the right condition (no known unprivileged
 path may alter intent or evidence status or escape isolation) but nothing
 falsifiable: *no known path* is discharged by not looking. The gate above
 turns it into a corpus with a fixed size and a pass bar, and every number is
 counted from structure this dossier already commits to rather than invented.
-The ten classes are the ten bullets of the Red-team corpus list below, taken
-one-for-one, so the corpus cannot silently drop a class; the three cases per
-class are the three prohibited outcomes named in this note's own Kill criteria
-sentence (alter intent status, alter evidence status, escape isolation), which
-forces each attack class to be pushed toward each end state it could reach
-instead of being retired after one representative probe. The seven additional
-intent cases are the seven policy blocks of docs/49 (bound contraction,
-property weakening, assumption strengthening, fault removal, observer
-coarsening, assurance downgrade, opaque-boundary expansion) and the eight
-escape attempts are the eight worker-isolation controls of docs/49 (pinned
-image/toolchain, read-only input mount, no ambient credentials, resource
-limits, disabled network, output size/schema limits, hard kill, audit trace);
-those two lists are the enumerations the architecture claims to enforce, so a
-corpus that does not touch each entry has not tested the claim. Thirty plus
-seven plus eight is the floor of 45, and *at least* is deliberate: the corpus
-grows and never shrinks.
+The eleven classes are the eleven bullets of the Red-team corpus list below,
+taken one-for-one, so the corpus cannot silently drop a class; the three cases
+per class are the three prohibited outcomes named in this note's own Kill
+criteria sentence (alter intent status, alter evidence status, escape
+isolation), which forces each attack class to be pushed toward each end state
+it could reach instead of being retired after one representative probe. The
+seven additional intent cases are the seven policy blocks of docs/49 (bound
+contraction, property weakening, assumption strengthening, fault removal,
+observer coarsening, assurance downgrade, opaque-boundary expansion) and the
+eight escape attempts are the eight worker-isolation controls of docs/49
+(pinned image/toolchain, read-only input mount, no ambient credentials,
+resource limits, disabled network, output size/schema limits, hard kill,
+audit trace); those two lists are the enumerations the architecture claims to
+enforce, so a corpus that does not touch each entry has not tested the claim.
+Thirty-three plus seven plus eight is the floor of 48, and *at least* is
+deliberate: the corpus grows and never shrinks.
+
+The eleventh class, forged or unattested signing lineage, was added for the
+signing wire the daemon gained at protocol 3.8 (bn-3glnv): a chain of signer
+links an agent-readable bundle carries can claim a rotation or a revocation
+its concerned keys never signed, and a signer with no prior standing can claim
+an already-known lineage as its own (bn-1uspo). The class's floor of three
+cases is carried by the generic corpus at protocol 3.2, on operations that
+predate the signing wire, because a `Case` names no protocol version and the
+six signing-wire operations themselves are refused below 3.8 by the codec, not
+by the capability check this gate is about; `crates/continuumd/tests/daemon_signing.rs`
+drives the six operations directly, at 3.8, against the real daemon.
 
 Refused *and* logged is a conjunction because docs/49 requires the adapter to
 log attempted privileged operations and plan §18.5 requires every privileged
@@ -120,7 +131,8 @@ Even a fully compromised model cannot promote evidence without authority.
 - hidden benchmark exfiltration;
 - malicious domain pack;
 - production trace secret leakage;
-- resource-exhaustion synthesis grammar.
+- resource-exhaustion synthesis grammar;
+- forged or unattested signing lineage.
 
 ## Kill criteria
 

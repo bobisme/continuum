@@ -16,6 +16,7 @@
 //! | revocation travels inside the bundle, attested by the keys it concerns | `a_revocation_carried_by_a_bundle_is_adopted_and_a_stale_bundle_cannot_resurrect_the_key`, `a_known_signer_learns_its_attested_rotation_and_revocation`, `a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature`, `a_link_about_this_daemons_own_key_is_never_adopted`, `a_retired_key_adopts_no_facts`, `link_order_and_replay_do_not_change_what_is_adopted`, `a_loss_recovery_never_travels`, `a_bundle_whose_own_signature_fails_adopts_no_link`, `an_import_refused_for_quota_adopts_nothing`, `a_full_registry_can_still_revoke`, `a_held_key_revocation_always_leaves_room_for_its_replacement`, `a_bundle_that_rotates_one_key_twice_is_refused_whole`, `an_unpinned_successor_is_never_introduced`, `every_order_of_a_rotation_chain_gives_the_same_standing_and_facts`, `a_prelearned_first_key_ends_rotated_and_fails_ci_acceptance`, `a_cycle_or_a_shared_successor_is_refused_whole`, `an_install_that_would_leave_a_compromise_unrecoverable_is_refused` |
 //! | identity collisions resolve by exact bytes (cr-2unxyh) | `an_import_whose_contract_collides_with_a_held_one_is_refused_before_anything_changes`, `accept_never_takes_a_signature_over_one_body_for_another_under_the_same_identity`, `a_bundle_identity_that_names_other_bytes_is_refused_on_import_and_export`, `a_receipt_node_identity_that_names_another_receipt_is_refused_before_signing`, `a_receipt_node_keeps_its_first_bytes_and_its_first_signature`, `staging_never_overwrites_content_under_a_colliding_commitment` |
 //! | bounded, whole-or-nothing parsing | `truncated_extended_or_oversize_bundles_are_refused_whole`, `a_bundle_whose_contract_is_not_its_declared_identity_is_refused`, `import_is_idempotent_and_never_raises_status` |
+//! | research/35 injection-corpus vector: forged or unattested signing lineage (bn-1uspo) | `every_signing_wire_operation_refuses_or_answers_typed_for_an_unprivileged_reader`, `the_signing_wires_refusal_does_not_move_with_a_hostile_corpus_payload` |
 
 use std::collections::BTreeMap;
 
@@ -4288,5 +4289,288 @@ fn a_signed_local_acceptance_names_only_the_admitted_principal_at_the_daemons_ti
     assert_eq!(
         world.daemon.state().intent(&proposal).expect("held").status,
         RegistryStatus::Proposed
+    );
+}
+
+// =============================================================================================
+// research/35 injection-corpus vector: forged or unattested signing lineage (bn-1uspo)
+// =============================================================================================
+//
+// `continuum_security::injection::RedTeamClass::ForgedSigningLineage` is research/35's
+// eleventh red-team class. Three of its cases already run inside the generic G2 corpus
+// (`g2_injection_corpus_evidence.rs`) at protocol 3.2, planted on operations that predate the
+// signing wire (`intent.accept`, `intent.reject`, `intent.lock`, `evidence.link`,
+// `observe.ingest`, `task.resume`, `proof.attempt`), because the corpus's own `Case` type is
+// deliberately protocol-version-agnostic while that file's shared runner fixes protocol 3.2 —
+// and the six signing-wire operations this vector is named for are refused below 3.8 by the
+// codec, not by a capability, which would make the wrong mechanism look like the one under
+// test (see `the_signing_wire_is_refused_below_protocol_3_8` above). The two tests below drive
+// every one of `signing.mint`, `signing.rotate`, `signing.revoke`, `signing.sign_pack`,
+// `signing.registry`, `signing.verify` and `intent.import_bundle` at 3.8, against the real
+// daemon, the way every other test in this file does: this is that vector's other half.
+//
+// The seven concrete attacks bn-1uspo named for this vector are already exhaustively covered,
+// above, by real tests against the real daemon:
+//
+// | Attack | Discharged by |
+// |---|---|
+// | forged or unattested lineage link | `a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature` |
+// | a first-contact signer claiming a known lineage | the same test's `known == false` arm |
+// | rotation cycles and tails into cycles | `a_cycle_or_a_shared_successor_is_refused_whole` |
+// | oversize frames and link lists past the bound | `truncated_extended_or_oversize_bundles_are_refused_whole`; the link-count bound itself is `daemon::signing::tests::the_topology_check_is_bounded_at_the_link_bound` |
+// | colliding content identities | `an_import_whose_contract_collides_with_a_held_one_is_refused_before_anything_changes` |
+// | a fabricated acceptance-chain token | `a_record_is_accepted_only_as_its_chain_signed_it`, `an_acceptance_by_a_rotated_or_revoked_signer_does_not_vouch` |
+// | key material that must never echo in an error | `no_answer_fault_or_debug_output_carries_key_material` |
+//
+// What neither the table above nor the G2 corpus could yet show is the sixth vector property
+// this whole file is about: that every one of the seven operations bn-1uspo named is itself
+// refused (or, for the two reads, answers typed and inert) for a caller with no signing
+// privilege, and that none of them moves the registry.
+
+/// The payload of one of this vector's corpus cases, by id.
+fn signing_lineage_payload(id: &str) -> &'static str {
+    continuum_security::injection::case(id)
+        .unwrap_or_else(|| panic!("the corpus holds {id}"))
+        .payload
+}
+
+#[test]
+fn every_signing_wire_operation_refuses_or_answers_typed_for_an_unprivileged_reader() {
+    let mut world = with_entropy(200);
+    let (signer, _) = world.mint(&[SignedArtifactKind::Receipt, SignedArtifactKind::DomainPack]);
+    let before = world.daemon.state().signing().registry().clone();
+    let before_records = world.records();
+
+    let guessed_proposal =
+        IntentHandle::new(&format!("in_{}", "0".repeat(64))).expect("a well-formed in_ handle");
+
+    let privileged: Vec<(&str, Arguments)> = vec![
+        (
+            "signing.mint",
+            Arguments::SigningMint(SigningMintRequest {
+                kinds: vec![SignedArtifactKind::Receipt],
+            }),
+        ),
+        (
+            "signing.rotate",
+            Arguments::SigningRotate(SigningRotateRequest {
+                signer: signer.clone(),
+            }),
+        ),
+        (
+            "signing.revoke",
+            Arguments::SigningRevoke(SigningRevokeRequest {
+                signer: signer.clone(),
+                reason: RevocationReason::Compromised,
+            }),
+        ),
+        (
+            "signing.sign_pack",
+            Arguments::SigningSignPack(SigningSignPackRequest {
+                pack: signing_lineage_payload("forged-signing-lineage/isolation-escape")
+                    .as_bytes()
+                    .to_vec(),
+            }),
+        ),
+        (
+            "intent.import_bundle",
+            Arguments::IntentImportBundle(IntentImportBundleRequest {
+                content: signing_lineage_payload("forged-signing-lineage/evidence-status")
+                    .as_bytes()
+                    .to_vec(),
+            }),
+        ),
+        (
+            "intent.accept",
+            Arguments::IntentAccept(IntentAcceptRequest {
+                proposal: guessed_proposal,
+                acceptance: acceptance(
+                    READER.0,
+                    signing_lineage_payload("forged-signing-lineage/intent-status"),
+                    ACCEPTED_AT,
+                ),
+                bundle: Optional::Absent,
+            }),
+        ),
+    ];
+    for (operation, arguments) in privileged {
+        let outcome = world.call(READER, arguments);
+        assert_eq!(
+            outcome.error_code(),
+            Some(ErrorCode::CapabilityDenied),
+            "{operation}: an unprivileged reader reached a privileged signing-wire operation"
+        );
+    }
+
+    // Not `@privileged`: a reader is admitted to both reads, and gets a typed, inert answer —
+    // never a crash, never key material, never a forged verification.
+    let registry_read = world.call(
+        READER,
+        Arguments::SigningRegistry(SigningRegistryRequest {}),
+    );
+    assert_eq!(registry_read.error_code(), None);
+
+    let verified = world.verify(
+        SignedArtifactKind::Receipt,
+        signing_lineage_payload("forged-signing-lineage/evidence-status").as_bytes(),
+        None,
+    );
+    assert_ne!(
+        verified,
+        SignatureOutcome::Verified,
+        "hostile bytes with no real signature must never verify"
+    );
+
+    assert_eq!(
+        world.daemon.state().signing().registry(),
+        &before,
+        "no signing-wire attempt above moved the registry"
+    );
+    assert_eq!(
+        world.records(),
+        before_records,
+        "no signing-wire attempt above appended an audit record"
+    );
+}
+
+#[test]
+fn the_signing_wires_refusal_does_not_move_with_a_hostile_corpus_payload() {
+    // The G2 corpus's differential claim
+    // (`enforcement::a_hostile_payload_and_its_benign_twin_get_byte_identical_answers`),
+    // applied to the operations that predate the corpus's own `Case` type being able to name
+    // them: a hostile payload straight from this vector, and an ordinary benign one, must get
+    // the identical answer for a caller with no signing privilege — proving the refusal is the
+    // capability check, not a read of the bytes.
+    const BENIGN: &str = "an ordinary caller-supplied value";
+
+    // `signing.mint` (`kinds`, a closed enum list), `signing.rotate` (`signer`, a handle)
+    // and `signing.revoke` (`signer` and `reason`, a closed enum) declare no field the
+    // corpus's string payload could ever occupy — stated explicitly (cr-21ahx9) rather than
+    // silently building a request that ignores `bytes`, which would make the differential
+    // below compare two byte-identical requests and call the agreement a finding about
+    // content. Each is still checked, once, for the refusal a privileged operation
+    // requires; neither is a carrier and neither counts toward `compared`.
+    let signer = SignerHandle::new(&format!("signer_{}", "0".repeat(64))).expect("name");
+    for (operation, arguments) in [
+        (
+            "signing.mint",
+            Arguments::SigningMint(SigningMintRequest {
+                kinds: vec![SignedArtifactKind::Receipt],
+            }),
+        ),
+        (
+            "signing.rotate",
+            Arguments::SigningRotate(SigningRotateRequest {
+                signer: signer.clone(),
+            }),
+        ),
+        (
+            "signing.revoke",
+            Arguments::SigningRevoke(SigningRevokeRequest {
+                signer,
+                reason: RevocationReason::Compromised,
+            }),
+        ),
+    ] {
+        let mut world = with_entropy(210);
+        let before = world.daemon.state().signing().registry().clone();
+        let outcome = world.call(READER, arguments);
+        assert_eq!(
+            outcome.error_code(),
+            Some(ErrorCode::CapabilityDenied),
+            "{operation}: has no payload carrier, but must still be refused"
+        );
+        assert_eq!(
+            world.daemon.state().signing().registry(),
+            &before,
+            "{operation}: a refused attempt moved the registry"
+        );
+    }
+
+    // The three operations a `String`/`Bytes` field actually reaches.
+    fn carrying_requests(bytes: &str) -> Vec<Arguments> {
+        vec![
+            Arguments::SigningSignPack(SigningSignPackRequest {
+                pack: bytes.as_bytes().to_vec(),
+            }),
+            Arguments::SigningVerify(SigningVerifyRequest {
+                kind: SignedArtifactKind::Receipt,
+                artifact: bytes.as_bytes().to_vec(),
+                signature: Optional::Absent,
+            }),
+            Arguments::IntentImportBundle(IntentImportBundleRequest {
+                content: bytes.as_bytes().to_vec(),
+            }),
+        ]
+    }
+
+    let hostile_payloads = [
+        signing_lineage_payload("forged-signing-lineage/intent-status"),
+        signing_lineage_payload("forged-signing-lineage/evidence-status"),
+        signing_lineage_payload("forged-signing-lineage/isolation-escape"),
+    ];
+    let mut compared = 0;
+    for hostile in hostile_payloads {
+        let hostile_requests = carrying_requests(hostile);
+        let benign_requests = carrying_requests(BENIGN);
+        for (hostile_args, benign_args) in hostile_requests.into_iter().zip(benign_requests) {
+            let operation = hostile_args.operation().to_owned();
+            let privileged = registry::operation(&operation)
+                .expect("declared")
+                .has(Annotation::Privileged);
+
+            let mut hostile_world = with_entropy(210);
+            let hostile_before = hostile_world.daemon.state().signing().registry().clone();
+            let hostile_outcome = hostile_world.call(READER, hostile_args);
+
+            let mut benign_world = with_entropy(210);
+            let benign_outcome = benign_world.call(READER, benign_args);
+
+            if privileged {
+                assert_eq!(
+                    hostile_outcome.error_code(),
+                    benign_outcome.error_code(),
+                    "{operation}: the refusal moved with the payload"
+                );
+                assert_eq!(
+                    hostile_outcome.error_code(),
+                    Some(ErrorCode::CapabilityDenied),
+                    "{operation}"
+                );
+                assert_eq!(
+                    hostile_world.daemon.state().signing().registry(),
+                    &hostile_before,
+                    "{operation}: a refused attempt moved the registry"
+                );
+            } else {
+                // `signing.verify`: open to an unscoped reader (not `@privileged`), so
+                // "byte-identical answers" is checked against the whole typed response —
+                // `outcome`, `signer` and `successor` together — not just the wire status,
+                // which stays `Ok` either way and would hide a content-sensitive verdict
+                // (cr-21ahx9).
+                assert_eq!(hostile_outcome.error_code(), None, "{operation}");
+                assert_eq!(benign_outcome.error_code(), None, "{operation}");
+                let Payload::SigningVerify(hostile_verified) = hostile_outcome.payload else {
+                    panic!("{operation}: no verify payload");
+                };
+                let Payload::SigningVerify(benign_verified) = benign_outcome.payload else {
+                    panic!("{operation}: no verify payload");
+                };
+                assert_eq!(
+                    hostile_verified, benign_verified,
+                    "{operation}: the typed answer moved with the payload"
+                );
+                assert_ne!(
+                    hostile_verified.outcome,
+                    SignatureOutcome::Verified,
+                    "hostile bytes with no real signature must never verify"
+                );
+            }
+            compared += 1;
+        }
+    }
+    assert_eq!(
+        compared, 9,
+        "three hostile payloads over three payload-bearing operations"
     );
 }

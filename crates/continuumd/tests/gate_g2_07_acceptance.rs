@@ -35,8 +35,8 @@
 //!    at column zero, and it recovers the *authority ladder itself* from the IDL's
 //!    `enum AuthorityLevel` declaration order rather than from any Rust type.
 //! 2. **The admission decision is predicted before it is observed.** [`predict`] computes,
-//!    from the IDL text alone, whether each of the 45 corpus cases is admitted for each of
-//!    five principals — a 225-cell matrix — and
+//!    from the IDL text alone, whether each of the 48 corpus cases is admitted for each of
+//!    five principals — a 240-cell matrix — and
 //!    [`the_admission_matrix_is_predicted_from_the_idl_alone`] then confirms every cell at
 //!    the wire. The delivering suite reads the ledger and asserts a property of what it
 //!    finds; this file states what the ledger must contain before running anything.
@@ -76,13 +76,13 @@
 //!
 //! **F2 — under the delivering suite's default principal, most of the corpus never reaches a
 //! handler.** `cap_agent` sits at `propose`. Sixteen of the nineteen operations the corpus
-//! drives at require more than that, so of the 45 cases exactly **8** are admitted, **26**
+//! drives at require more than that, so of the 48 cases exactly **8** are admitted, **29**
 //! are denied at T1 on the level ladder, and **11** never reach admission at all. Five of the
 //! delivering suite's tests run `AGENT` alone — including its content-blindness differential
-//! — so those comparisons are, for 37 of 45 cases, between two refusals produced before any
-//! handler read a byte. The privilege bit is the operative term for exactly **10** of the 225
+//! — so those comparisons are, for 40 of 48 cases, between two refusals produced before any
+//! handler read a byte. The privilege bit is the operative term for exactly **11** of the 240
 //! decisions in this file's matrix, and
-//! [`the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_five_cases`]
+//! [`the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_eight_cases`]
 //! derives that accounting mechanically rather than asserting it.
 //!
 //! **F3 — repaired (bn-2a7q9).** The delivering suite's headline claim used to be
@@ -1353,13 +1353,16 @@ fn the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_de
 
     // The gap is bounded by the reason for it. The two repair operations have no family in
     // this process, so neither is reachable today. The six protocol 3.8 operations
-    // (bn-3glnv) have landed and the ratified corpus predates them: its case identities are
-    // `<vector>/<outcome>` and unique, so it cannot grow without a new research/35 vector.
-    // Until it has one, each is driven at by `g2_injection_corpus_evidence.rs`'s own
-    // `SIGNING_WIRE_PROBES`, whose privilege-bit experiment runs over them exactly as over a
-    // corpus case. This assertion is the tripwire in both halves: a repair family landing,
-    // or a landed privileged operation no probe names, goes red before anything else
-    // notices.
+    // (bn-3glnv) have landed, and research/35 now names a vector for the signing wire —
+    // `RedTeamClass::ForgedSigningLineage` (bn-1uspo) — but its three cases are planted on
+    // operations that predate the signing wire, because a `Case` names no protocol version
+    // and these six are refused below 3.8 by the codec rather than by the capability check
+    // the corpus measures; `daemon_signing.rs` drives them directly at 3.8 instead (see its
+    // "research/35 injection-corpus vector" section). Here, each is still driven at by
+    // `g2_injection_corpus_evidence.rs`'s own `SIGNING_WIRE_PROBES`, whose privilege-bit
+    // experiment runs over them exactly as over a corpus case. This assertion is the
+    // tripwire in both halves: a repair family landing, or a landed privileged operation no
+    // probe names, goes red before anything else notices.
     let delivering = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/g2_injection_corpus_evidence.rs"
@@ -1397,7 +1400,7 @@ fn the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_de
 
 #[test]
 fn the_admission_matrix_is_predicted_from_the_idl_alone() {
-    // The centrepiece. Forty-five cases at five rungs is 225 decisions, and every one of them
+    // The centrepiece. Forty-eight cases at five rungs is 240 decisions, and every one of them
     // is computed from the normative text *before* the daemon is asked. A daemon whose
     // admission carried any term the IDL does not declare — a payload term above all — would
     // disagree in at least one cell.
@@ -1472,10 +1475,11 @@ fn no_privileged_operation_is_admitted_at_any_rung_of_the_ladder() {
         .iter()
         .filter(|decision| declared[&decision.operation].is_privileged())
         .collect();
-    // Ten privileged attempts per rung — five `intent.accept`, three `intent.lock`, two
-    // `intent.reject` — stated exactly, so a corpus that stopped attempting them would fail
-    // here rather than pass vacuously.
-    assert_eq!(privileged.len(), 10 * LADDER.len());
+    // Eleven privileged attempts per rung — six `intent.accept` (the sixth is the signing
+    // wire's own vector, bn-1uspo), three `intent.lock`, two `intent.reject` — stated
+    // exactly, so a corpus that stopped attempting them would fail here rather than pass
+    // vacuously.
+    assert_eq!(privileged.len(), 11 * LADDER.len());
 
     for decision in privileged {
         assert_eq!(
@@ -1533,9 +1537,9 @@ fn the_refusal_at_the_top_rung_is_the_privilege_bit_alone() {
             admitted += 1;
         }
     }
-    assert_eq!(denied, 10, "the ten privileged attempts");
-    assert_eq!(admitted, 24, "every other landed attempt");
-    assert_eq!(admitted + denied, 34, "the corpus's landed cases");
+    assert_eq!(denied, 11, "the eleven privileged attempts");
+    assert_eq!(admitted, 26, "every other landed attempt");
+    assert_eq!(admitted + denied, 37, "the corpus's landed cases");
 }
 
 #[test]
@@ -1563,9 +1567,9 @@ fn the_admission_ledger_does_not_move_with_the_payload() {
         "the admission decision moved with the payload: {moved:#?}"
     );
 
-    // The differential has a domain, and F4 is what bounds it: nine of the thirty-four landed
-    // cases carry no payload into their body at all, so for those the two runs are the same
-    // request and the comparison is trivially true. Stated rather than hidden.
+    // The differential has a domain, and F4 is what bounds it: nine of the thirty-seven
+    // landed cases carry no payload into their body at all, so for those the two runs are
+    // the same request and the comparison is trivially true. Stated rather than hidden.
     let carrying = CASES
         .iter()
         .filter(|case| is_landed(case.operation) && payload_reaches_the_body(case.operation))
@@ -1574,9 +1578,9 @@ fn the_admission_ledger_does_not_move_with_the_payload() {
         .iter()
         .filter(|case| is_landed(case.operation) && !payload_reaches_the_body(case.operation))
         .count();
-    assert_eq!(carrying, 25);
+    assert_eq!(carrying, 28);
     assert_eq!(inert, 9);
-    assert_eq!(carrying + inert, 34);
+    assert_eq!(carrying + inert, 37);
 }
 
 // =====================================================================================
@@ -1584,7 +1588,7 @@ fn the_admission_ledger_does_not_move_with_the_payload() {
 // =====================================================================================
 
 #[test]
-fn the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_five_cases() {
+fn the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_eight_cases() {
     // F2. `cap_agent` — the delivering suite's default runner, and the only principal five of
     // its tests use — sits at `propose`. This derives, mechanically, how much of the corpus
     // that principal can actually put in front of a handler, and attributes every refusal it
@@ -1607,13 +1611,13 @@ fn the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_
         .filter(|decision| decision.admitted.is_none())
         .collect();
     assert_eq!(admitted.len(), 8);
-    assert_eq!(denied.len(), 26);
+    assert_eq!(denied.len(), 29);
     assert_eq!(never.len(), 11);
 
     // Attribution. A case denied at `propose` whose operation is *not* privileged was refused
     // by the ladder, because the top rung admits it — which the previous test established by
-    // exhibiting the admission. Sixteen of the twenty-six refusals are of that kind, and the
-    // remaining ten are the privilege bit.
+    // exhibiting the admission. Eighteen of the twenty-nine refusals are of that kind, and
+    // the remaining eleven are the privilege bit.
     let by_ladder = denied
         .iter()
         .filter(|decision| !declared[&decision.operation].is_privileged())
@@ -1622,8 +1626,8 @@ fn the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_
         .iter()
         .filter(|decision| declared[&decision.operation].is_privileged())
         .count();
-    assert_eq!(by_ladder, 16);
-    assert_eq!(by_privilege, 10);
+    assert_eq!(by_ladder, 18);
+    assert_eq!(by_privilege, 11);
 
     // The same fact from the IDL rather than from the run: sixteen of the nineteen operations
     // the corpus drives at are above `propose`.
@@ -1638,16 +1642,16 @@ fn the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_
         .collect();
     assert_eq!(above.len(), 16);
 
-    // So of the 225 decisions in the matrix, the privilege bit is the operative term for
-    // exactly fifty — ten cases at each of five rungs — and for the other 175 the answer is
-    // decided by the ladder or by the absence of a family.
+    // So of the 240 decisions in the matrix, the privilege bit is the operative term for
+    // exactly fifty-five — eleven cases at each of five rungs — and for the other 185 the
+    // answer is decided by the ladder or by the absence of a family.
     assert_eq!(
         CASES
             .iter()
             .filter(|case| declared[case.operation].is_privileged())
             .count()
             * LADDER.len(),
-        50
+        55
     );
 }
 
@@ -1711,8 +1715,8 @@ fn the_corpus_moves_no_status_a_privileged_reader_can_see_on_the_wire() {
             .iter()
             .filter(|decision| decision.admitted == Some(true))
             .count(),
-        24,
-        "twenty-four payloads must actually reach a handler, or this comparison is about \
+        26,
+        "twenty-six payloads must actually reach a handler, or this comparison is about \
          nothing"
     );
     let after = wire_view(&mut fixture);
@@ -1811,8 +1815,8 @@ fn a_predictor_that_ignores_the_privilege_bit_disagrees_with_the_daemon() {
     }
     // Exactly the privileged attempts at rungs whose level would otherwise admit them:
     // `intent.accept`, `intent.reject` and `intent.lock` are at `revise_intent`, so the two
-    // top rungs would admit all ten each.
-    assert_eq!(disagreements, 20);
+    // top rungs would admit all eleven each.
+    assert_eq!(disagreements, 22);
 }
 
 #[test]
@@ -1854,7 +1858,7 @@ fn every_corpus_operation_is_one_the_normative_idl_declares() {
             case.operation
         );
     }
-    assert_eq!(CASES.len(), 45);
+    assert_eq!(CASES.len(), 48);
 }
 
 // =====================================================================================
@@ -1899,12 +1903,12 @@ fn surface_census(cases: &[continuum_security::injection::Case]) -> BTreeSet<Art
 #[test]
 fn the_corpus_is_exactly_the_taxonomy_the_ratified_promotion_gate_enumerates() {
     // §24.5's `workbench-security-promotion-gate` quote fixes the shape of the corpus, not
-    // just its size: "at least three cases for each of the ten red-team classes of
+    // just its size: "at least three cases for each of the eleven red-team classes of
     // research/35, one per prohibited outcome named in its kill criterion … plus one case for
     // each of the seven intent-policy blocks and one escape attempt against each of the eight
-    // worker-isolation controls of docs/49, for at least 45 cases in total".
+    // worker-isolation controls of docs/49, for at least 48 cases in total".
     //
-    // Derived from the enums rather than from the number 45, so a class added to research/35
+    // Derived from the enums rather than from the number 48, so a class added to research/35
     // moves the floor here without an edit.
     use continuum_security::injection::{
         IntentPolicyBlock, IsolationControl, ProhibitedOutcome, RedTeamClass, Vector,
@@ -1913,7 +1917,7 @@ fn the_corpus_is_exactly_the_taxonomy_the_ratified_promotion_gate_enumerates() {
     let floor = RedTeamClass::ALL.len() * ProhibitedOutcome::ALL.len()
         + IntentPolicyBlock::ALL.len()
         + IsolationControl::ALL.len();
-    assert_eq!(floor, 45);
+    assert_eq!(floor, 48);
     assert!(
         CASES.len() >= floor,
         "the corpus is below the ratified floor"
@@ -2146,14 +2150,14 @@ fn the_corpus_uses_two_of_six_spellings_and_never_the_other_four() {
     assert_eq!(census["a JSON document"].len(), 16);
     assert_eq!(census["an opaque run of 24 characters or more"].len(), 5);
     // No payload is both, so the two present spellings account for 21 distinct cases and the
-    // remaining 24 are plain prose.
+    // remaining 27 are plain prose.
     let structured: BTreeSet<&str> = census["a JSON document"]
         .iter()
         .chain(&census["an opaque run of 24 characters or more"])
         .copied()
         .collect();
     assert_eq!(structured.len(), 21);
-    assert_eq!(CASES.len() - structured.len(), 24);
+    assert_eq!(CASES.len() - structured.len(), 27);
 }
 
 #[test]
@@ -2165,7 +2169,7 @@ fn the_clauses_of_the_ratified_promotion_gate_this_evidence_leaves_open() {
     // distance between G2-07 and the promotion gate, and it is what the verdict has to say.
     const CLAUSES: &[(&str, bool)] = &[
         (
-            "the corpus holds at least 45 cases in the ratified taxonomy",
+            "the corpus holds at least 48 cases in the ratified taxonomy",
             true,
         ),
         ("every case is refused", true),
@@ -2175,7 +2179,7 @@ fn the_clauses_of_the_ratified_promotion_gate_this_evidence_leaves_open() {
         // isolation cases are refused as protocol requests and nothing is shown about an
         // escape. Refusal at the wire is not the same fact as a control that holds.
         ("zero isolation escapes, shown against a real worker", false),
-        // "refused by a trusted authority check" is stronger than "refused". Eleven of the 45
+        // "refused by a trusted authority check" is stronger than "refused". Eleven of the 48
         // are refused by the codec, before any authority check runs.
         ("every case refused *by a trusted authority check*", false),
         // "recorded in the append-only audit log": the same eleven leave no admission record,
@@ -2688,7 +2692,7 @@ fn no_fresh_vector_admits_a_privileged_operation() {
     // Every one of the thirteen reaches admission and is refused *there*. Nothing is refused
     // earlier, so no refusal in this leg is an accident of shape — the strongest form of
     // non-vacuity this file can state, and stronger than the delivered corpus manages, where
-    // eleven of 45 never reach the gate at all.
+    // eleven of 48 never reach the gate at all.
     //
     // Twelve of the thirteen isolate the privilege bit, on the argument Leg 5 makes: at this
     // rung every other term of the predicate is positively satisfied. The thirteenth,

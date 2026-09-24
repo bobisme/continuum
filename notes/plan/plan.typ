@@ -2928,12 +2928,12 @@ validator checks register↔note quote identity. Until then a row is
     "Autonomous promotion stays disabled until a single red-team corpus
     run against the current build and dependency epoch clears every
     case, where the corpus contains at least three cases for each of the
-    ten red-team classes of research/35, one per prohibited outcome
+    eleven red-team classes of research/35, one per prohibited outcome
     named in its kill criterion (unprivileged intent-status alteration,
     unprivileged evidence-status alteration, isolation escape), plus one
     case for each of the seven intent-policy blocks and one escape
     attempt against each of the eight worker-isolation controls of
-    docs/49, for at least 45 cases in total; the run clears only if
+    docs/49, for at least 48 cases in total; the run clears only if
     every case is refused by a trusted authority check and recorded in
     the append-only audit log, with zero unprivileged intent-status or
     evidence-status alterations and zero isolation escapes, and any

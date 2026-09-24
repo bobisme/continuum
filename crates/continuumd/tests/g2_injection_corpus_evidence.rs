@@ -1675,8 +1675,10 @@ fn the_corpus_drives_at_every_privileged_operation_this_daemon_serves() {
 #[test]
 fn the_corpus_is_carried_whole_into_this_suite() {
     // The counts the ratified sentence fixes, restated here from the corpus itself rather
-    // than written down, so a case dropped upstream fails this file too.
-    assert!(CASES.len() >= 45);
+    // than written down, so a case dropped upstream fails this file too. Eleven classes at
+    // three apiece is 33, not 30: the eleventh class is `ForgedSigningLineage` (bn-1uspo),
+    // the signing wire's own vector.
+    assert!(CASES.len() >= 48);
     assert_eq!(policy_block_cases().count(), 7);
     assert_eq!(isolation_cases().count(), 8);
     assert_eq!(
@@ -1684,7 +1686,7 @@ fn the_corpus_is_carried_whole_into_this_suite() {
             .iter()
             .filter(|case| matches!(case.vector, Vector::RedTeam(_)))
             .count(),
-        30
+        33
     );
     // Every readable artifact class is represented, read through the corpus's own classifier
     // so the two files cannot disagree about what "agent-readable" means.

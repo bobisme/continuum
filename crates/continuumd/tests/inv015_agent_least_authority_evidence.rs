@@ -1338,7 +1338,7 @@ mod no_widening {
     /// the examination being redone.
     const SECURITY_PUBLIC_SURFACE: [&str; 64] = [
         "pub carrier: &'static str,",
-        "pub const ALL: [Self; 10] = [",
+        "pub const ALL: [Self; 11] = [",
         "pub const ALL: [Self; 3] = [",
         "pub const ALL: [Self; 7] = [",
         "pub const ALL: [Self; 8] = [",

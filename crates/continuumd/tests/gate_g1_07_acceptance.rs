@@ -27,7 +27,7 @@
 //! |---|---|---|
 //! | `inv015_agent_least_authority_evidence.rs` | source-text pins and registry-grain sweeps over the `@privileged` perimeter | nothing here reads a `src/` file as text; every claim is a *dispatch* or a call of `admission::admit` |
 //! | `dx12_falsification.rs` | four swarm roles attacking *intent stability* through the intent-authority channels | the axis here is not intent: it is the **handle channel**, over every operation shape this build can decode |
-//! | `g2_injection_corpus_evidence.rs` | forty-five hostile *payloads* through the byte wire, privileged operations only | the payload is held constant and the **handle** is varied; the sweep is over all thirty decodable operations, not the five privileged ones |
+//! | `g2_injection_corpus_evidence.rs` | forty-eight hostile *payloads* through the byte wire, privileged operations only | the payload is held constant and the **handle** is varied; the sweep is over all thirty decodable operations, not the five privileged ones |
 //!
 //! The property under test is a *two-sided independence*, and testing only one side proves
 //! nothing. A daemon that denied everything would pass a possession-without-authority
