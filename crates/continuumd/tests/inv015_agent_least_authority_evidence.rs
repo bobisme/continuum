@@ -13,7 +13,7 @@
 //! | alter evidence status | `daemon/evidence.rs` — [`Promotion`] has private fields and no public constructor, so producer code (`daemon/observe.rs`, a *different module*) can name the type and never build one; `observe.ingest`'s wire shape declares no status field, so an append lands at the lattice's bottom as a property of the request's *type* | `daemon_evidence.rs`: `a_producers_append_lands_at_the_lattices_bottom`, `the_producers_request_body_has_no_field_that_could_name_a_status`, `the_status_written_is_what_the_checker_established_not_what_the_caller_named`, `no_operation_in_either_family_removes_or_edits_an_appended_node` — cited via [`status_authority`], plus this file's own registry-grain sweep [`privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status`] |
 //! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; cryptographic signing (plan §18.6, bn-1hape): the daemon holds the key, installed only by the deployment, and signs only inside `evidence.link` after the service gate; no wire type carries key material — [`receipt_authority::positive_only_the_daemon_holds_the_receipt_key_and_only_a_service_check_signs`] |
 //! | access ungranted production traces | `daemon/admission.rs` — R-4: `observe.ingest` requires `DataGrant::ProductionTrace` beyond its `execute` level, decided by [`required_grant`] *before* any family runs; the denial is the zero-bit [`Denied`] (X1) and precedes the index (X3), so a refused caller learns nothing (X2) | live here: [`trace_grant::positive_exactly_one_operation_requires_a_data_grant_and_it_is_the_production_trace`], [`trace_grant::positive_a_denial_carries_zero_bits`]; cited: `the_production_trace_grant_is_required_beyond_the_execute_level`, `every_admission_failure_is_one_byte_identical_answer`, `a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does` |
-//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-*`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
+//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-{process,storage,time}`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-effects-network` grew its Lab pack at bn-3ohe and is audited like Forge — a recorded public inventory, zero host-effect facilities, no dependencies, and no route from a connection into it; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
 //!
 //! Cross-cutting, because "no ambient authority" is a property of the *admission
 //! predicate* rather than of any one clause: the `@privileged` set is exactly the five
@@ -173,6 +173,11 @@ const FORGE_MANIFEST: &str = include_str!("../../continuum-forge/Cargo.toml");
 /// dependency set rather than its emptiness.
 const SECURITY_MANIFEST: &str = include_str!("../../continuum-security/Cargo.toml");
 
+/// `continuum-effects-network`'s manifest — the same posture as [`FORGE_MANIFEST`]:
+/// bn-3ohe landed the `network/adversarial-v0` Lab pack there, so what is swept about
+/// the crate is its declared dependency set rather than its emptiness.
+const EFFECTS_NETWORK_MANIFEST: &str = include_str!("../../continuum-effects-network/Cargo.toml");
+
 /// `continuumd`'s own manifest — the other end of the same edge: whether the daemon
 /// links Forge at all.
 const CONTINUUMD_MANIFEST: &str = include_str!("../Cargo.toml");
@@ -314,6 +319,158 @@ fn security_sources() -> Vec<(PathBuf, String)> {
          reporting nothing rather than checking something"
     );
     sources
+}
+
+/// Every source file of `continuum-effects-network`, walked rather than listed — the
+/// same device as [`forge_sources`].
+fn effects_network_sources() -> Vec<(PathBuf, String)> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../continuum-effects-network/src");
+    let mut sources = Vec::new();
+    rust_sources(&root, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "the walk found no continuum-effects-network source; the crate moved and this \
+         sweep is reporting nothing rather than checking something"
+    );
+    sources
+}
+
+/// The network pack's compiler lane (bn-3ohe, cr-1dl1d7).
+const EFFECTS_NETWORK_NO_STD_LANE: &str =
+    include_str!("../../continuum-effects-network/tests/pr15_no_std_lane.rs");
+
+/// The name of the lane's test.
+const NO_STD_LANE_TEST: &str = "fn the_compiler_refuses_a_host_facility_in_the_network_pack()";
+
+/// Whether a crate's sources, manifest and compiler lane make "links no `std`" a
+/// compiler fact for every build (bn-3ohe, cr-1dl1d7). The structure rules close every
+/// way a build other than the lane's could differ: `#![no_std]` is the crate root's
+/// first item; `src/` has no block comment, no `cfg`, `cfg_attr`, macro definition,
+/// `include!`, `#[path]`, `asm!` or raw token, and exactly one `extern crate`, which is
+/// `alloc`; the manifest has only `[package]` (no `build`, no `links`) and
+/// `[lints] workspace = true`. The lane then runs the compiler: it must be a live
+/// `#[test]` (no `#[ignore]`, `should_panic` or `cfg`) that plants a `std` use and
+/// demands the unresolved-`std` error. The structure is checked here; the lane is
+/// what actually runs the compiler.
+fn no_std_unconditional(
+    sources: &[(PathBuf, String)],
+    manifest: &str,
+    lane: &str,
+) -> Result<(), String> {
+    let code = |text: &str| -> Vec<String> {
+        text.lines()
+            .map(|line| line.find("//").map_or(line, |at| &line[..at]))
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let words = |line: &str| -> Vec<String> {
+        line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let raw_token = |line: &str| -> bool {
+        let bytes = line.as_bytes();
+        bytes.windows(2).enumerate().any(|(at, pair)| {
+            pair[0] == b'r'
+                && (pair[1] == b'#' || pair[1] == b'"')
+                && (at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_'))
+        })
+    };
+    let lib = sources
+        .iter()
+        .find(|(path, _)| path.ends_with("lib.rs"))
+        .ok_or("no lib.rs")?;
+    if code(&lib.1).first().map(String::as_str) != Some("#![no_std]") {
+        return Err("`#![no_std]` is not the crate root's first item".to_owned());
+    }
+    let banned = [
+        "cfg",
+        "cfg_attr",
+        "macro_rules",
+        "include",
+        "include_str",
+        "include_bytes",
+        "path",
+        "asm",
+        "global_asm",
+    ];
+    let mut externs = 0;
+    for (path, text) in sources {
+        if text.contains("/*") {
+            return Err(format!("{} has a block comment", path.display()));
+        }
+        for line in code(text) {
+            let w = words(&line);
+            if let Some(word) = banned.iter().find(|b| w.iter().any(|x| x == *b)) {
+                return Err(format!("{} uses `{word}`: {line}", path.display()));
+            }
+            if raw_token(&line) {
+                return Err(format!("{} has a raw token: {line}", path.display()));
+            }
+            if w.windows(2)
+                .any(|pair| pair[0] == "extern" && pair[1] == "crate")
+            {
+                externs += 1;
+                if !path.ends_with("lib.rs") || line != "extern crate alloc;" {
+                    return Err(format!(
+                        "{} links a crate other than alloc: {line}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+    }
+    if externs != 1 {
+        return Err(format!(
+            "{externs} extern crate declarations, not exactly one"
+        ));
+    }
+    let mut section = "";
+    for line in manifest
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        if line.starts_with('[') {
+            section = match line {
+                "[package]" => "package",
+                "[lints]" => "lints",
+                other => return Err(format!("the manifest has a `{other}` table")),
+            };
+            continue;
+        }
+        let key = line.split('=').next().unwrap_or("").trim();
+        if section.is_empty()
+            || (section == "package" && (key == "build" || key == "links"))
+            || (section == "lints" && line != "workspace = true")
+        {
+            return Err(format!("the manifest's {section} section has `{line}`"));
+        }
+    }
+    if !manifest.contains("[lints]\nworkspace = true") {
+        return Err("the manifest does not inherit the workspace lints".to_owned());
+    }
+    let at = lane
+        .find(NO_STD_LANE_TEST)
+        .ok_or("the compiler lane test is missing")?;
+    let attrs = &lane[..at];
+    let attrs = &attrs[attrs.rfind("\n\n").unwrap_or(0)..];
+    if !attrs.contains("#[test]")
+        || ["ignore", "should_panic", "cfg"]
+            .iter()
+            .any(|a| attrs.contains(a))
+    {
+        return Err("the compiler lane test is not a live `#[test]`".to_owned());
+    }
+    let body = &lane[at..];
+    if !(body.contains("std::net::UdpSocket") && body.contains("E0433") && body.contains("release"))
+    {
+        return Err("the compiler lane no longer plants a std use in both profiles".to_owned());
+    }
+    Ok(())
 }
 
 /// The std surfaces through which a crate could reach the machine. A crate whose code
@@ -881,11 +1038,13 @@ mod no_widening {
 
     use super::{
         ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
-        EFFECTS_PROCESS_LIB, EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_MANIFEST,
-        NON_FILESYSTEM_FACILITIES, PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST,
-        SIGNER_ADMINISTRATION, SIGNING_SOURCE_FACILITIES, administrative_callers,
-        continuumd_sources, declared_dependencies, forge_sources, host_effect_lines,
-        is_signing_source, pin, pub_items, security_sources, unexempted_callers,
+        EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, EFFECTS_PROCESS_LIB,
+        EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_MANIFEST, NON_FILESYSTEM_FACILITIES,
+        PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST, SIGNER_ADMINISTRATION,
+        SIGNING_SOURCE_FACILITIES, administrative_callers, continuumd_sources,
+        declared_dependencies, effects_network_sources, forge_sources, host_effect_lines,
+        is_signing_source, no_std_unconditional, pin, pub_items, security_sources,
+        unexempted_callers,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -967,13 +1126,15 @@ mod no_widening {
     ///
     /// `continuum-security` left on the same terms when bn-ymw landed the plan §18.1
     /// prompt-injection corpus in it, and is re-established the same way, in
-    /// [`boundary_security_grew_an_injection_corpus_and_it_reaches_no_host_effect`]. The
-    /// five rows below keep the original, stricter form because their substance genuinely
+    /// [`boundary_security_grew_an_injection_corpus_and_it_reaches_no_host_effect`].
+    /// `continuum-effects-network` left when bn-3ohe landed its Lab pack, and is
+    /// re-established in
+    /// [`boundary_effects_network_grew_a_lab_pack_and_it_reaches_no_host_effect`]. The
+    /// four rows below keep the original, stricter form because their substance genuinely
     /// has not arrived.
     #[test]
     fn boundary_the_host_effect_surface_has_not_arrived_and_its_crates_are_scaffolds() {
         let scaffolds = [
-            ("continuum-effects-network", EFFECTS_NETWORK_LIB),
             ("continuum-effects-process", EFFECTS_PROCESS_LIB),
             ("continuum-effects-storage", EFFECTS_STORAGE_LIB),
             ("continuum-effects-time", EFFECTS_TIME_LIB),
@@ -1373,6 +1534,219 @@ mod no_widening {
             "continuum-security/src/lib.rs",
             SECURITY_LIB,
             &["INV-015 — agent least authority."],
+        );
+    }
+
+    /// `continuum-effects-network`'s recorded public surface, sorted — every `pub` item
+    /// across every source file of the crate, as `pub_items` reads them (bn-3ohe).
+    const EFFECTS_NETWORK_PUBLIC_SURFACE: [&str; 105] = [
+        "pub class: FidelityClass,",
+        "pub const ADVERSARIAL_V0: FidelityProfile = FidelityProfile {",
+        "pub const ALL: [Self; 19] = [",
+        "pub const ASSUMPTIONS: [(&str, &str); 2] = [",
+        "pub const CANCELLATION_CONTRACT: [(&str, &str); 8] = [",
+        "pub const JOURNAL_HEADER_BYTES: u64 =",
+        "pub const MAX_IN_FLIGHT_CAP: u32 = 1 << 16;",
+        "pub const MAX_NODES: u8 = 64;",
+        "pub const MAX_PAYLOAD_CAP: u32 = 1 << 16;",
+        "pub const MAX_RETAINED_CAP: u64 = 1 << 28;",
+        "pub const MAX_STEPS: usize = 1 << 20;",
+        "pub const PROFILE_NAME: &str = \"network/adversarial-v0\";",
+        "pub const PROFILE_VERSION: ProfileVersion = ProfileVersion {",
+        "pub const fn all(n: u8) -> Self {",
+        "pub const fn as_str(self) -> &'static str {",
+        "pub const fn bits_valid(self, n: u8) -> bool {",
+        "pub const fn chooser(&self) -> Chooser {",
+        "pub const fn class(&self) -> RefusalClass {",
+        "pub const fn config(&self) -> &NetworkConfig {",
+        "pub const fn config(&self) -> &NetworkConfig {",
+        "pub const fn contains(self, node: NodeId) -> bool {",
+        "pub const fn faults(&self) -> FaultSwitches {",
+        "pub const fn in_flight_total(&self) -> u32 {",
+        "pub const fn inconclusive_reason(&self) -> Option<&'static str> {",
+        "pub const fn max_in_flight(&self) -> u32 {",
+        "pub const fn max_partitions(&self) -> u32 {",
+        "pub const fn max_payload_bytes(&self) -> u32 {",
+        "pub const fn max_retained_bytes(&self) -> u64 {",
+        "pub const fn new(",
+        "pub const fn new(config: NetworkConfig) -> Self {",
+        "pub const fn nodes(&self) -> u8 {",
+        "pub const fn partition(&self) -> Option<NodeSet> {",
+        "pub const fn partitions_used(&self) -> u32 {",
+        "pub const fn replicated_register_scenario(",
+        "pub const fn retained_bytes(&self) -> u64 {",
+        "pub const fn retained_bytes(&self) -> u64 {",
+        "pub const fn statement(self) -> &'static str {",
+        "pub const fn support(self) -> Support {",
+        "pub const fn token(self) -> &'static str {",
+        "pub const fn unsupported_semantic(&self) -> Option<Semantic> {",
+        "pub duplication: bool,",
+        "pub enum Bound {",
+        "pub enum Chooser {",
+        "pub enum ConfigRefusal {",
+        "pub enum Event {",
+        "pub enum FidelityClass {",
+        "pub enum HostQualification {",
+        "pub enum IndependenceClaim {",
+        "pub enum Malformed {",
+        "pub enum NotEnabled {",
+        "pub enum Refusal {",
+        "pub enum RefusalClass {",
+        "pub enum Semantic {",
+        "pub enum Step {",
+        "pub enum Support {",
+        "pub fn apply(&mut self, step: &Step) -> Result<&Event, Refusal> {",
+        "pub fn canonical_bytes(&self) -> Vec<u8> {",
+        "pub fn check(&self, step: &Step) -> Result<(), Refusal> {",
+        "pub fn choice_log(&self) -> impl Iterator<Item = Step> + '_ {",
+        "pub fn copies(&self, envelope: EnvelopeId) -> u32 {",
+        "pub fn enabled_choices(&self) -> Vec<Step> {",
+        "pub fn encode(&self) -> Vec<u8> {",
+        "pub fn encode(&self) -> Vec<u8> {",
+        "pub fn envelope(&self, envelope: EnvelopeId) -> Option<(NodeId, NodeId, &Payload)> {",
+        "pub fn events(&self) -> &[Event] {",
+        "pub fn events(&self) -> &[Event] {",
+        "pub fn in_flight(&self) -> impl Iterator<Item = (EnvelopeId, u32)> + '_ {",
+        "pub fn into_journal(self) -> Journal {",
+        "pub fn of(nodes: &[u8]) -> Option<Self> {",
+        "pub fn replay(&self) -> Result<Self, RunRefusal> {",
+        "pub fn run(config: NetworkConfig, steps: &[Step]) -> Result<Journal, RunRefusal> {",
+        "pub fn sent_count(&self) -> usize {",
+        "pub fn step(&self) -> Step {",
+        "pub host: HostQualification,",
+        "pub independence: IndependenceClaim,",
+        "pub index: usize,",
+        "pub loss: bool,",
+        "pub major: u16,",
+        "pub minor: u16,",
+        "pub mod lab;",
+        "pub mod profile;",
+        "pub mod refusal;",
+        "pub mod step;",
+        "pub name: &'static str,",
+        "pub patch: u16,",
+        "pub refusal: Refusal,",
+        "pub reordering: bool,",
+        "pub struct EnvelopeId(pub u32);",
+        "pub struct FaultSwitches {",
+        "pub struct FidelityProfile {",
+        "pub struct Journal {",
+        "pub struct Network {",
+        "pub struct NetworkConfig {",
+        "pub struct NodeId(pub u8);",
+        "pub struct NodeSet(pub u64);",
+        "pub struct Payload(pub Vec<u8>);",
+        "pub struct ProfileVersion {",
+        "pub struct RunRefusal {",
+        "pub use lab::{Journal, Network, run};",
+        "pub use profile::{ADVERSARIAL_V0, FidelityClass, FidelityProfile, Semantic, Support};",
+        "pub use refusal::{Refusal, RefusalClass, RunRefusal};",
+        "pub use step::{EnvelopeId, Event, FaultSwitches, NetworkConfig, NodeId, NodeSet, Payload, Step};",
+        "pub version: ProfileVersion,",
+        "pub(crate) fn put_str(out: &mut Vec<u8>, text: &str) {",
+        "pub(crate) fn u32_len(len: usize) -> u32 {",
+    ];
+
+    /// `continuum-effects-network` stopped being a zero-pub-item scaffold when bn-3ohe
+    /// landed the `network/adversarial-v0` Lab pack (PR-15 / IMPL-01). The property the
+    /// scaffold sweep guards — no crate on that list can execute a host effect on an
+    /// agent's behalf — is re-established here against the surface that now exists,
+    /// with the Forge audit's four legs:
+    ///
+    /// 1. the audited surface is exactly [`EFFECTS_NETWORK_PUBLIC_SURFACE`];
+    /// 2. no host effect is possible, by the compiler: the crate is `#![no_std]`
+    ///    unconditionally (no `cfg_attr`, no features, no `extern crate std`), and its
+    ///    compiler lane `tests/pr15_no_std_lane.rs` — a copy with a planted
+    ///    `use std::net::UdpSocket;` must not compile — exists and is not ignored;
+    /// 3. no declared dependency, so it cannot reach an effect through a neighbour;
+    /// 4. it is unreachable from an agent connection: `continuumd` does not declare it,
+    ///    and no `continuumd` source names it.
+    ///
+    /// Any leg turning red means the network pack has acquired authority the docs/49
+    /// audit below has never examined — a production handler with a real socket is
+    /// exactly that — and the audit must be redone before the change lands.
+    #[test]
+    fn boundary_effects_network_grew_a_lab_pack_and_it_reaches_no_host_effect() {
+        // 1. The audited surface, exactly.
+        let mut items: Vec<String> = effects_network_sources()
+            .iter()
+            .flat_map(|(_, text)| {
+                pub_items(text)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<String>>()
+            })
+            .collect();
+        items.sort();
+        let audited: Vec<String> = EFFECTS_NETWORK_PUBLIC_SURFACE
+            .iter()
+            .map(|it| (*it).to_owned())
+            .collect();
+        assert_eq!(
+            items, audited,
+            "continuum-effects-network's public surface is not the one INV-015 audited; \
+             record the new items here and re-derive this test's four legs against them"
+        );
+
+        // 2. No host effect, by the compiler rather than by a source scan (bn-3ohe,
+        // cr-1dl1d7: a substring scan misses `use std::{os::unix::net::UnixDatagram as
+        // U}`). The crate is `#![no_std]` unconditionally, so it links only `core` and
+        // `alloc`, and `unsafe_code` is forbidden, so there is no FFI route. The live
+        // proof is the pack's own compiler lane, which must exist and not be ignored;
+        // the structure below is what keeps that lane meaningful.
+        if let Err(why) = no_std_unconditional(
+            &effects_network_sources(),
+            EFFECTS_NETWORK_MANIFEST,
+            EFFECTS_NETWORK_NO_STD_LANE,
+        ) {
+            panic!("continuum-effects-network is not provably free of host effects: {why}");
+        }
+
+        // 3. No declared dependency.
+        assert!(
+            declared_dependencies(EFFECTS_NETWORK_MANIFEST).is_empty(),
+            "continuum-effects-network gained a dependency; re-derive what it can reach"
+        );
+        // No build script and no build dependency either: build-time code runs on the
+        // host, and `declared_dependencies` reads only `[dependencies]`.
+        assert!(
+            !EFFECTS_NETWORK_MANIFEST.contains("build"),
+            "continuum-effects-network declares a build script or build dependency"
+        );
+        assert!(
+            !std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../continuum-effects-network/build.rs")
+                .exists(),
+            "continuum-effects-network grew a build.rs"
+        );
+
+        // 4. Unreachable from an agent connection.
+        assert!(
+            !CONTINUUMD_MANIFEST.contains("continuum-effects-network"),
+            "continuumd now declares continuum-effects-network"
+        );
+        for (path, text) in continuumd_sources() {
+            let callers: Vec<&str> = text
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| line.contains("continuum_effects_network"))
+                .collect();
+            assert!(
+                callers.is_empty(),
+                "{} names continuum_effects_network: {callers:?}",
+                path.display()
+            );
+        }
+
+        // And the crate still declares the contract this file holds it to.
+        pin(
+            "continuum-effects-network/src/lib.rs",
+            EFFECTS_NETWORK_LIB,
+            &[
+                "**No host semantics** (docs/09 T06)",
+                "This crate has no dependencies.",
+            ],
         );
     }
 }
@@ -1885,5 +2259,151 @@ mod mutants {
                 .count(),
             1
         );
+    }
+}
+
+// --- the no_std leg can fail -----------------------------------------------------------------
+
+mod no_std_leg_mutants {
+    use std::path::PathBuf;
+
+    use super::{
+        EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE, effects_network_sources,
+        no_std_unconditional,
+    };
+
+    /// A named doctored copy: sources, manifest, lane.
+    type Mutant = (&'static str, Vec<(PathBuf, String)>, String, String);
+
+    fn with_lib(edit: impl Fn(&str) -> String) -> Vec<(PathBuf, String)> {
+        effects_network_sources()
+            .into_iter()
+            .map(|(path, text)| {
+                if path.ends_with("lib.rs") {
+                    let edited = edit(&text);
+                    (path, edited)
+                } else {
+                    (path, text)
+                }
+            })
+            .collect()
+    }
+
+    /// Each way to make `no_std` conditional, or to reach std anyway, or to switch the
+    /// lane off, fails the leg; the real crate passes it.
+    #[test]
+    fn negative_the_no_std_leg_detects_each_way_around_it() {
+        let real = effects_network_sources();
+        assert_eq!(
+            no_std_unconditional(&real, EFFECTS_NETWORK_MANIFEST, EFFECTS_NETWORK_NO_STD_LANE),
+            Ok(())
+        );
+        let mutants: Vec<Mutant> = vec![
+            (
+                "no_std removed, left as a string decoy",
+                with_lib(|t| {
+                    t.replacen("\n#![no_std]\n", "\nconst _D: &str = \"#![no_std]\";\n", 1)
+                }),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "cfg_attr(no_std)",
+                with_lib(|t| {
+                    t.replacen("\n#![no_std]\n", "\n#![cfg_attr(not(test), no_std)]\n", 1)
+                }),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "extern crate std",
+                with_lib(|t| {
+                    t.replace(
+                        "extern crate alloc;",
+                        "extern crate alloc;\nextern crate std;",
+                    )
+                }),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "a std feature",
+                real.clone(),
+                format!("{EFFECTS_NETWORK_MANIFEST}\n[features]\nstd = []\n"),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "a raw-string decoy",
+                with_lib(|t| {
+                    t.replacen(
+                        "\n#![no_std]\n",
+                        "\nconst _D: &str = r\"\n#![no_std]\n\";\n",
+                        1,
+                    )
+                }),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "no_std in a nested module",
+                with_lib(|t| t.replacen("\n#![no_std]\n", "\nmod m {\n#![no_std]\n}\n", 1)),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "extern crate r#std under a cfg",
+                with_lib(|t| {
+                    t.replacen(
+                        "extern crate alloc;",
+                        "extern crate alloc;\n#[cfg(not(debug_assertions))]\nextern crate r#std;",
+                        1,
+                    )
+                }),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "extern crate through a macro",
+                with_lib(|t| {
+                    format!(
+                        "{t}\nmacro_rules! k {{ ($c:ident) => {{ extern crate $c; }} }}\nk!(std);\n"
+                    )
+                }),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "a target dependency",
+                real.clone(),
+                format!(
+                    "{EFFECTS_NETWORK_MANIFEST}\n[target.'cfg(windows)'.dependencies]\nx = \"1\"\n"
+                ),
+                EFFECTS_NETWORK_NO_STD_LANE.to_owned(),
+            ),
+            (
+                "the lane inverted",
+                real.clone(),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.replacen("#[test]", "#[test]\n#[should_panic]", 1),
+            ),
+            (
+                "the lane ignored",
+                real.clone(),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                EFFECTS_NETWORK_NO_STD_LANE.replace("#[test]", "#[test]\n#[ignore]"),
+            ),
+            (
+                "the lane gone",
+                real.clone(),
+                EFFECTS_NETWORK_MANIFEST.to_owned(),
+                String::new(),
+            ),
+        ];
+        for (name, sources, manifest, lane) in mutants {
+            assert!(
+                no_std_unconditional(&sources, &manifest, &lane).is_err(),
+                "{name} passed the no_std leg"
+            );
+        }
     }
 }

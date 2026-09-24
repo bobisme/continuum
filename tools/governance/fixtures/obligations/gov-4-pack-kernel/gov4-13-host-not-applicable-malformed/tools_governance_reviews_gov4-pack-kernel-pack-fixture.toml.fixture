@@ -1,0 +1,28 @@
+[change]
+bone = "bn-4x90"
+author = "fixture-author"
+summary = "fixture: a network pack change with host/Lab, fault coverage, independence review and a version bump"
+
+[pack]
+covers = ["crates/continuum-effects-network/src/gov4_fixture_13_18.rs"]
+
+fault_coverage_tests = [
+  { test = "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs::crash_mid_write", fault = "crash" },
+  { test = "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs::partitions_both_ways", fault = "partition" },
+]
+
+[pack.host_conformance]
+status = "waived"
+reason = "the network pack has no production handler, so there is nothing to compare"
+profile_test = "crates/continuum-effects-network/tests/pr15_impl01_network.rs::profile_declares_host_qualification_none"
+no_std_lane_test = "crates/continuum-effects-network/tests/pr15_no_std_lane.rs::the_compiler_refuses_a_host_facility_in_the_network_pack"
+
+[pack.independence_review]
+reviewer = "continuum-security"
+review = "seal-rev-001"
+verdict = "approved"
+
+[pack.version_bump]
+from = "0.3.0"
+to = "0.4.0"
+note = "continuum-effects-network widened its contract for this fixture change; consumers must re-pin"

@@ -1,0 +1,43 @@
+[change]
+bone = "bn-3ohe"
+author = "continuum-dev"
+summary = "PR-15/IMPL-01: the network/adversarial-v0 fidelity profile and its deterministic Lab handler for delivery, drop, duplicate, delay and partition"
+
+[pack]
+covers = ["crates/continuum-effects-network/src/"]
+
+fault_coverage_tests = [
+  { test = "crates/continuum-effects-network/tests/pr15_impl01_network.rs::fault_delay_holds_an_envelope_with_no_bound_and_no_other_effect", fault = "delay" },
+  { test = "crates/continuum-effects-network/tests/pr15_impl01_network.rs::fault_duplicate_adds_copies_that_share_the_envelope_ordinal", fault = "duplicate" },
+  { test = "crates/continuum-effects-network/tests/pr15_impl01_network.rs::fault_partition_blocks_both_ways_until_heal", fault = "partition" },
+]
+
+# GOV-4-13: no host path exists. The crate is #![no_std]; the lane test runs the
+# compiler on the dev and release host builds and demands the unresolved-std error
+# for a planted std use, and the structure rules keep those the only builds. The
+# profile test asserts HostQualification::None. The obligation applies in full once
+# a production handler lands.
+#
+# Profile version: 0.1.0 is unchanged although its statements and the journal header
+# changed in this bone. 0.1.0 has never been on main (first committed at 8555faa8 in
+# this workspace), so no consumer pins an earlier 0.1.0; the fingerprint and journal
+# hex were re-pinned with that reasoning.
+[pack.host_conformance]
+status = "not-applicable"
+reason = "continuum-effects-network is no_std and declares network/adversarial-v0 with HostQualification::None: there is no production handler and no host path, so there is nothing for the Lab handler to conform to"
+profile_test = "crates/continuum-effects-network/tests/pr15_impl01_network.rs::profile_declares_host_qualification_none"
+no_std_lane_test = "crates/continuum-effects-network/tests/pr15_no_std_lane.rs::the_compiler_refuses_a_host_facility_in_the_network_pack"
+
+[pack.fidelity_profile]
+profile = "adversarial-envelope"
+note = "continuum-effects-network declares network/adversarial-v0 0.1.0: it permits every behaviour its modelled rows do not forbid, makes no host claim, and refuses every unmodelled network semantic as Unsupported"
+
+[pack.version_bump]
+from = "0.0.0"
+to = "0.1.0"
+note = "continuum-effects-network goes from a scaffold with no contract to network/adversarial-v0 0.1.0; the first profile version, so no consumer pins an earlier one"
+
+[pack.independence_review]
+reviewer = "continuum-security"
+review = "cr-1dl1d7"
+verdict = "approved"

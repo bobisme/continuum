@@ -169,6 +169,39 @@ C_HL_RESOLVES = "host-lab-test-resolves"
 C_HL_EXERCISES = "host-lab-test-exercises-the-change"
 C_HL_FRESH = "host-lab-test-is-fresh"
 C_HL_BOTH = "host-lab-test-names-both-paths"
+C_HL_NA_FORM = "host-lab-not-applicable-well-formed"
+C_HL_NA_REASON = "host-lab-not-applicable-reason"
+C_HL_NA_NOSTD = "host-lab-not-applicable-crate-is-no-std"
+C_HL_NA_TEST = "host-lab-not-applicable-tests-resolve"
+
+# The lead's not-applicable form for GOV-4-13 (bn-3ohe, cr-1dl1d7): a pack that can
+# perform no host effect and whose profile claims no host semantics (docs/09 T06) has
+# no host path to conform. No lexical scan carries that claim. The absence of host
+# effects is the compiler's: the crate is `#![no_std]` unconditionally (no
+# `cfg_attr`, no `extern crate std`, no `[features]`), so it links only `core` and
+# `alloc`, and `unsafe_code` is forbidden workspace-wide. The pack's own compiler lane
+# test shows that proof is live. The value `host == HostQualification::None` is a
+# named Rust test's to assert. This check verifies the structure and that both
+# tests exist, live in the pack crate, and are not ignored.
+HOST_NA_STATUS = "not-applicable"
+HOST_NA_KEYS = {"status", "reason", "profile_test", "no_std_lane_test"}
+NO_STD_ATTR = "#![no_std]"
+NO_STD_BANNED_WORDS = (
+    "cfg", "cfg_attr", "macro_rules", "include", "include_str", "include_bytes", "path", "asm", "global_asm",
+)
+RAW_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])r[#\"]")
+EXTERN_CRATE_RE = re.compile(r"\bextern\s+crate\b")
+WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+# The profile test must assert the declared profile's host qualification exactly.
+PROFILE_ASSERT_RE = re.compile(
+    r"assert_eq!\(\s*[A-Z][A-Z0-9_]*\s*\.\s*host\s*,\s*HostQualification\s*::\s*None\s*\)"
+)
+HOST_DECL_RE = re.compile(r"\bhost\s*:\s*HostQualification\s*::\s*(\w+)")
+# What identifies a compiler lane: it plants a `std` use, demands the unresolved-`std`
+# error, and checks the release profile too.
+LANE_MARKERS = ("std::net::UdpSocket", "E0433", "release")
+# Attributes that make a named test evidence of nothing.
+DEAD_TEST_ATTR_RE = re.compile(r"\b(should_panic|cfg|cfg_attr|ignore)\b")
 
 R_FAULT = "fault-coverage"
 C_FC_NAMED = "fault-coverage-tests-named"
@@ -244,12 +277,154 @@ def fault_vocabulary(ctx: Context) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _code_lines(text: str) -> list[str]:
+    out = []
+    for line in text.splitlines():
+        at = line.find("//")
+        line = (line if at < 0 else line[:at]).strip()
+        if line:
+            out.append(line)
+    return out
+
+
+def no_std_problem(ctx: Context, crate: str) -> str | None:
+    """Why some build of `crate` could link `std`, or `None` when none can.
+
+    The same structure rules the pack's compiler lane and the INV-015 audit enforce:
+    `#![no_std]` is the crate root's first item; `src/` has no block comment, no `cfg`,
+    `cfg_attr`, macro definition, `include!`, `#[path]`, `asm!` or raw token, and
+    exactly one `extern crate`, which is `alloc` in `lib.rs`; the manifest has only
+    `[package]` (no `build`, no `links`) and `[lints] workspace = true`, and there is
+    no `build.rs`. They make the lane's dev and release host builds the only builds;
+    the lane runs the compiler on them."""
+    lib = ctx.head.read_text(f"crates/{crate}/src/lib.rs")
+    if lib is None:
+        return f"crates/{crate}/src/lib.rs does not exist"
+    lib_lines = _code_lines(lib)
+    if not lib_lines or lib_lines[0] != NO_STD_ATTR:
+        return f"crates/{crate}/src/lib.rs does not open with `{NO_STD_ATTR}` as the crate root's first item"
+    externs = 0
+    for rel in ctx.head.glob(f"crates/{crate}/src/**/*.rs"):
+        text = ctx.head.read_text(rel) or ""
+        if "/*" in text:
+            return f"{rel} has a block comment"
+        for line in _code_lines(text):
+            words = set(WORD_RE.findall(line))
+            banned = sorted(words.intersection(NO_STD_BANNED_WORDS))
+            if banned:
+                return f"{rel} uses `{banned[0]}`: {line}"
+            if RAW_TOKEN_RE.search(line):
+                return f"{rel} has a raw identifier or string: {line}"
+            if EXTERN_CRATE_RE.search(line):
+                externs += 1
+                if not rel.endswith("/src/lib.rs") or line != "extern crate alloc;":
+                    return f"{rel} links a crate other than `alloc`: {line}"
+    if externs != 1:
+        return f"crates/{crate}/src has {externs} `extern crate` declarations, not exactly `extern crate alloc;`"
+    if ctx.head.exists(f"crates/{crate}/build.rs"):
+        return f"crates/{crate}/build.rs exists"
+    manifest = ctx.head.read_toml(f"crates/{crate}/Cargo.toml")
+    if manifest is None:
+        return f"crates/{crate}/Cargo.toml does not parse"
+    extra = sorted(set(manifest) - {"package", "lints"})
+    if extra:
+        return f"crates/{crate}/Cargo.toml has `{extra[0]}`; only `[package]` and `[lints]` are allowed"
+    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    if "build" in package or "links" in package:
+        return f"crates/{crate}/Cargo.toml sets `build` or `links`"
+    if manifest.get("lints") != {"workspace": True}:
+        return f"crates/{crate}/Cargo.toml does not take exactly `[lints] workspace = true`"
+    return None
+
+
+def _live_test(ctx: Context, ref: object, crates: set[str]) -> tuple[object | None, str | None]:
+    """A named evidence test: resolves, lives in a changed pack crate, and carries no
+    attribute that makes it evidence of nothing (`should_panic`, `cfg`, `cfg_attr`)."""
+    test, problem = resolve_test(ctx, ref)
+    if test is None:
+        return None, problem
+    if ctx.crate_of(test.path) not in crates:
+        return None, f"{test.path} is not in a changed pack crate {sorted(crates)}"
+    attrs = policy.strip_rust_comments(test.attrs)
+    if DEAD_TEST_ATTR_RE.search(attrs):
+        return None, f"`fn {test.name}` carries `should_panic`, `cfg` or `ignore`, so it proves nothing"
+    return test, None
+
+
+def _host_not_applicable(ctx: Context, rec, table: dict, crates: set[str]) -> list[Finding]:
+    """Validate `[pack.host_conformance]`. Fail closed: the form holds only when every
+    changed pack crate is unconditionally `no_std`, and the record names a live profile
+    test asserting `HostQualification::None` and a live compiler lane test, both in a
+    changed pack crate."""
+    out: list[Finding] = []
+    form = table.get("host_conformance")
+    if (
+        not isinstance(form, dict)
+        or form.get("status") != HOST_NA_STATUS
+        or set(form) - HOST_NA_KEYS
+        or "host_lab_conformance_tests" in table
+    ):
+        return [Finding(
+            R_HOST_LAB, C_HL_NA_FORM,
+            f"{rec.path}: `[pack.host_conformance]` takes exactly `status = \"{HOST_NA_STATUS}\"`, `reason`, "
+            "`profile_test` and `no_std_lane_test`, and must not be combined with `host_lab_conformance_tests`",
+        )]
+    reason = form.get("reason")
+    text = normalize(reason) if isinstance(reason, str) else ""
+    if len(text) < NOTE_MIN_LOCAL:
+        out.append(Finding(
+            R_HOST_LAB, C_HL_NA_REASON,
+            f"{rec.path}: `pack.host_conformance.reason` must be at least {NOTE_MIN_LOCAL} characters; "
+            "not-applicable is a claim, and a claim carries its reason",
+        ))
+    for crate in sorted(crates):
+        problem = no_std_problem(ctx, crate)
+        if problem is not None:
+            out.append(Finding(
+                R_HOST_LAB, C_HL_NA_NOSTD,
+                f"{rec.path}: host/Lab conformance is not-applicable only for a pack the compiler proves "
+                f"free of host effects: {problem}; the GOV-4-13 obligation applies in full",
+            ))
+    declared: list[str] = []
+    for crate in sorted(crates):
+        for rel in ctx.head.glob(f"crates/{crate}/src/**/*.rs"):
+            declared.extend(HOST_DECL_RE.findall(policy.strip_rust_comments(ctx.head.read_text(rel) or "")))
+    if not declared or any(q != "None" for q in declared):
+        out.append(Finding(
+            R_HOST_LAB, C_HL_NA_TEST,
+            f"{rec.path}: the pack's profiles declare host qualifications {declared or 'none at all'}; "
+            "not-applicable needs every declared profile to say `HostQualification::None`",
+        ))
+    profile, problem = _live_test(ctx, form.get("profile_test"), crates)
+    if profile is None:
+        out.append(Finding(R_HOST_LAB, C_HL_NA_TEST, f"{rec.path}: `pack.host_conformance.profile_test`: {problem}"))
+    elif not PROFILE_ASSERT_RE.search(policy.strip_rust_comments(profile.body)):
+        out.append(Finding(
+            R_HOST_LAB, C_HL_NA_TEST,
+            f"{rec.path}: `pack.host_conformance.profile_test` {profile.name} does not assert "
+            "`assert_eq!(<PROFILE>.host, HostQualification::None)`",
+        ))
+    lane, problem = _live_test(ctx, form.get("no_std_lane_test"), crates)
+    if lane is None:
+        out.append(Finding(R_HOST_LAB, C_HL_NA_TEST, f"{rec.path}: `pack.host_conformance.no_std_lane_test`: {problem}"))
+    elif not all(marker in lane.body for marker in LANE_MARKERS):
+        out.append(Finding(
+            R_HOST_LAB, C_HL_NA_TEST,
+            f"{rec.path}: `pack.host_conformance.no_std_lane_test` {lane.name} is not a compiler lane: it must "
+            f"plant a `std` use and demand the unresolved-`std` error in both profiles {list(LANE_MARKERS)}",
+        ))
+    return out
+
+
 def rule_host_lab(ctx: Context) -> list[Finding]:
     out: list[Finding] = []
     for rec, table, covered in pack_records(ctx):
         if not covered:
             continue
         crates = _crates(ctx, covered)
+        if "host_conformance" in table:
+            out.extend(_host_not_applicable(ctx, rec, table, crates))
+            continue
         entries = table.get("host_lab_conformance_tests")
         if not isinstance(entries, list) or not entries or not all(isinstance(e, str) for e in entries):
             out.append(Finding(
@@ -630,15 +805,27 @@ SET = ObligationSet(
     requirements=REQUIREMENTS,
     evidence="tools/governance/evidence/gov-4-pack-kernel.json",
     record_keys={
-        "pack": ("host_lab_conformance_tests", "fault_coverage_tests", "independence_review", "version_bump"),
+        "pack": (
+            "host_lab_conformance_tests",
+            "host_conformance",
+            "fault_coverage_tests",
+            "independence_review",
+            "version_bump",
+        ),
         "kernel": ("covers", "reviewers", "fuzz_corpus"),
     },
     rules=(
         Rule(
-            R_HOST_LAB, ("GOV-4-13",), (C_HL_NAMED, C_HL_RESOLVES, C_HL_EXERCISES, C_HL_FRESH, C_HL_BOTH), DELTA,
+            R_HOST_LAB, ("GOV-4-13",),
+            (C_HL_NAMED, C_HL_RESOLVES, C_HL_EXERCISES, C_HL_FRESH, C_HL_BOTH, C_HL_NA_FORM, C_HL_NA_REASON,
+             C_HL_NA_NOSTD, C_HL_NA_TEST), DELTA,
             "`pack.host_lab_conformance_tests` names at least one test that resolves, reaches the change, is "
             "new or changed, and names both `host` and `lab` in its doc comment or body (RFC 0002 \"Pack "
-            "qualification\": differential testing across production/Lab paths).",
+            "qualification\": differential testing across production/Lab paths). Or, only for a pack that is "
+            "unconditionally `#![no_std]` (no `cfg_attr`, no `extern crate std`, no `[features]`), "
+            "`[pack.host_conformance]` states `status = \"not-applicable\"` with a reason, a live "
+            "`profile_test` in the pack that asserts `HostQualification::None`, and a live "
+            "`no_std_lane_test` in the pack (docs/09 T06); anything less gets the full obligation.",
             _TEST_BOUNDARY + " `host`/`lab` are checked as literal words, not as a cross-implementation "
             "comparison like GOV-4-03/GOV-4-08's oracle/subject pairs — no host crate distinct from the pack "
             "exists in the workspace to name.",

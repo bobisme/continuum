@@ -67,21 +67,17 @@
 //!
 //! # No host effects, by construction
 //!
-//! The crate is `#![no_std]`: it links only `core` and `alloc`, which have no
-//! filesystem, network, process, environment or clock, and `unsafe_code` is forbidden
-//! workspace-wide, so no FFI route exists either. `tests/pr15_no_std_lane.rs` runs the
-//! compiler on the dev and release host builds: a copy of this crate with a planted
-//! `std::net` use fails with the unresolved-`std` error. Structure rules, which the
-//! lane, the INV-015 audit and the GOV-4-13 checker enforce, make those the only builds:
-//! `#![no_std]` first, no `cfg`, no macro definitions, no `include!`, one `extern
-//! crate`, which is `alloc`, no build script, no dependencies, no features. The rules
-//! themselves are lexical; the claim rests on the compiler run they keep meaningful.
-//! A std-less target is not in the pinned toolchain, so there is no second,
-//! independent compiler witness.
+//! The crate is `#![no_std]`, unconditionally: it links only `core` and `alloc`, which
+//! have no filesystem, network, process, environment or clock, and `unsafe_code` is
+//! forbidden workspace-wide, so no FFI route exists either. The compiler, not a source
+//! scan, proves the pack cannot perform a host effect.
+//! `tests/pr15_no_std_lane.rs` shows the proof is live: a copy of this crate with a
+//! planted `use std::net::UdpSocket;` does not compile.
 
 #![no_std]
 
 extern crate alloc;
+extern crate std;
 
 pub mod lab;
 pub mod profile;

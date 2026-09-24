@@ -47,11 +47,31 @@
       },
       "own_violating_fixtures": [
         "gov4-13-18-vocabulary-lab-gone",
+        "gov4-13-host-conformance-absent-still-fails",
         "gov4-13-host-lab-test-did-not-move",
         "gov4-13-host-lab-test-does-not-exist",
         "gov4-13-host-lab-test-names-neither",
         "gov4-13-host-lab-test-unrelated-crate",
-        "gov4-13-host-lab-tests-missing"
+        "gov4-13-host-lab-tests-missing",
+        "gov4-13-host-not-applicable-build-script",
+        "gov4-13-host-not-applicable-cfg-attr-no-std",
+        "gov4-13-host-not-applicable-extern-crate-std",
+        "gov4-13-host-not-applicable-lane-missing",
+        "gov4-13-host-not-applicable-lane-not-a-lane",
+        "gov4-13-host-not-applicable-lane-should-panic",
+        "gov4-13-host-not-applicable-malformed",
+        "gov4-13-host-not-applicable-nested-module-no-std",
+        "gov4-13-host-not-applicable-profile-declares-a-host",
+        "gov4-13-host-not-applicable-profile-test-asserts-nothing",
+        "gov4-13-host-not-applicable-profile-test-ignored",
+        "gov4-13-host-not-applicable-profile-test-missing",
+        "gov4-13-host-not-applicable-profile-test-wrong-crate",
+        "gov4-13-host-not-applicable-raw-extern-std",
+        "gov4-13-host-not-applicable-raw-string-decoy",
+        "gov4-13-host-not-applicable-reason-missing",
+        "gov4-13-host-not-applicable-std-feature",
+        "gov4-13-host-not-applicable-string-decoy-without-no-std",
+        "gov4-13-host-not-applicable-target-dependency"
       ],
       "rules": [
         {
@@ -61,10 +81,41 @@
             "host-lab-test-resolves",
             "host-lab-test-exercises-the-change",
             "host-lab-test-is-fresh",
-            "host-lab-test-names-both-paths"
+            "host-lab-test-names-both-paths",
+            "host-lab-not-applicable-well-formed",
+            "host-lab-not-applicable-reason",
+            "host-lab-not-applicable-crate-is-no-std",
+            "host-lab-not-applicable-tests-resolve"
           ],
-          "enforces": "`pack.host_lab_conformance_tests` names at least one test that resolves, reaches the change, is new or changed, and names both `host` and `lab` in its doc comment or body (RFC 0002 \"Pack qualification\": differential testing across production/Lab paths).",
+          "enforces": "`pack.host_lab_conformance_tests` names at least one test that resolves, reaches the change, is new or changed, and names both `host` and `lab` in its doc comment or body (RFC 0002 \"Pack qualification\": differential testing across production/Lab paths). Or, only for a pack that is unconditionally `#![no_std]` (no `cfg_attr`, no `extern crate std`, no `[features]`), `[pack.host_conformance]` states `status = \"not-applicable\"` with a reason, a live `profile_test` in the pack that asserts `HostQualification::None`, and a live `no_std_lane_test` in the pack (docs/09 T06); anything less gets the full obligation.",
           "fixtures_proven_caught": {
+            "host-lab-not-applicable-crate-is-no-std": [
+              "gov4-13-host-not-applicable-build-script",
+              "gov4-13-host-not-applicable-cfg-attr-no-std",
+              "gov4-13-host-not-applicable-extern-crate-std",
+              "gov4-13-host-not-applicable-nested-module-no-std",
+              "gov4-13-host-not-applicable-raw-extern-std",
+              "gov4-13-host-not-applicable-raw-string-decoy",
+              "gov4-13-host-not-applicable-std-feature",
+              "gov4-13-host-not-applicable-string-decoy-without-no-std",
+              "gov4-13-host-not-applicable-target-dependency"
+            ],
+            "host-lab-not-applicable-reason": [
+              "gov4-13-host-not-applicable-reason-missing"
+            ],
+            "host-lab-not-applicable-tests-resolve": [
+              "gov4-13-host-not-applicable-lane-missing",
+              "gov4-13-host-not-applicable-lane-not-a-lane",
+              "gov4-13-host-not-applicable-lane-should-panic",
+              "gov4-13-host-not-applicable-profile-declares-a-host",
+              "gov4-13-host-not-applicable-profile-test-asserts-nothing",
+              "gov4-13-host-not-applicable-profile-test-ignored",
+              "gov4-13-host-not-applicable-profile-test-missing",
+              "gov4-13-host-not-applicable-profile-test-wrong-crate"
+            ],
+            "host-lab-not-applicable-well-formed": [
+              "gov4-13-host-not-applicable-malformed"
+            ],
             "host-lab-test-exercises-the-change": [
               "gov4-13-host-lab-test-unrelated-crate"
             ],
@@ -78,6 +129,7 @@
               "gov4-13-host-lab-test-does-not-exist"
             ],
             "host-lab-tests-named": [
+              "gov4-13-host-conformance-absent-still-fails",
               "gov4-13-host-lab-tests-missing"
             ]
           },
@@ -541,6 +593,7 @@
   },
   "self_test": {
     "clean": [
+      "gov4-13-host-not-applicable-no-std-pack-is-clean",
       "gov4-kernel-17-18-complete-record-is-clean",
       "gov4-pack-13-18-complete-record-is-clean"
     ],
@@ -548,7 +601,7 @@
       "gov4-pack-kernel-before-the-set-landed"
     ],
     "failures": [],
-    "fixtures": 34,
+    "fixtures": 55,
     "status": "pass",
     "violating_by_check": {
       "fault-coverage-breadth": [
@@ -590,6 +643,33 @@
       "gov4-13-18-vocabulary-present": [
         "gov4-13-18-vocabulary-lab-gone"
       ],
+      "host-lab-not-applicable-crate-is-no-std": [
+        "gov4-13-host-not-applicable-build-script",
+        "gov4-13-host-not-applicable-cfg-attr-no-std",
+        "gov4-13-host-not-applicable-extern-crate-std",
+        "gov4-13-host-not-applicable-nested-module-no-std",
+        "gov4-13-host-not-applicable-raw-extern-std",
+        "gov4-13-host-not-applicable-raw-string-decoy",
+        "gov4-13-host-not-applicable-std-feature",
+        "gov4-13-host-not-applicable-string-decoy-without-no-std",
+        "gov4-13-host-not-applicable-target-dependency"
+      ],
+      "host-lab-not-applicable-reason": [
+        "gov4-13-host-not-applicable-reason-missing"
+      ],
+      "host-lab-not-applicable-tests-resolve": [
+        "gov4-13-host-not-applicable-lane-missing",
+        "gov4-13-host-not-applicable-lane-not-a-lane",
+        "gov4-13-host-not-applicable-lane-should-panic",
+        "gov4-13-host-not-applicable-profile-declares-a-host",
+        "gov4-13-host-not-applicable-profile-test-asserts-nothing",
+        "gov4-13-host-not-applicable-profile-test-ignored",
+        "gov4-13-host-not-applicable-profile-test-missing",
+        "gov4-13-host-not-applicable-profile-test-wrong-crate"
+      ],
+      "host-lab-not-applicable-well-formed": [
+        "gov4-13-host-not-applicable-malformed"
+      ],
       "host-lab-test-exercises-the-change": [
         "gov4-13-host-lab-test-unrelated-crate"
       ],
@@ -603,6 +683,7 @@
         "gov4-13-host-lab-test-does-not-exist"
       ],
       "host-lab-tests-named": [
+        "gov4-13-host-conformance-absent-still-fails",
         "gov4-13-host-lab-tests-missing"
       ],
       "independence-review-approved": [
@@ -646,11 +727,31 @@
     "violating_by_requirement": {
       "GOV-4-13": [
         "gov4-13-18-vocabulary-lab-gone",
+        "gov4-13-host-conformance-absent-still-fails",
         "gov4-13-host-lab-test-did-not-move",
         "gov4-13-host-lab-test-does-not-exist",
         "gov4-13-host-lab-test-names-neither",
         "gov4-13-host-lab-test-unrelated-crate",
-        "gov4-13-host-lab-tests-missing"
+        "gov4-13-host-lab-tests-missing",
+        "gov4-13-host-not-applicable-build-script",
+        "gov4-13-host-not-applicable-cfg-attr-no-std",
+        "gov4-13-host-not-applicable-extern-crate-std",
+        "gov4-13-host-not-applicable-lane-missing",
+        "gov4-13-host-not-applicable-lane-not-a-lane",
+        "gov4-13-host-not-applicable-lane-should-panic",
+        "gov4-13-host-not-applicable-malformed",
+        "gov4-13-host-not-applicable-nested-module-no-std",
+        "gov4-13-host-not-applicable-profile-declares-a-host",
+        "gov4-13-host-not-applicable-profile-test-asserts-nothing",
+        "gov4-13-host-not-applicable-profile-test-ignored",
+        "gov4-13-host-not-applicable-profile-test-missing",
+        "gov4-13-host-not-applicable-profile-test-wrong-crate",
+        "gov4-13-host-not-applicable-raw-extern-std",
+        "gov4-13-host-not-applicable-raw-string-decoy",
+        "gov4-13-host-not-applicable-reason-missing",
+        "gov4-13-host-not-applicable-std-feature",
+        "gov4-13-host-not-applicable-string-decoy-without-no-std",
+        "gov4-13-host-not-applicable-target-dependency"
       ],
       "GOV-4-14": [
         "gov4-14-fault-coverage-breadth",

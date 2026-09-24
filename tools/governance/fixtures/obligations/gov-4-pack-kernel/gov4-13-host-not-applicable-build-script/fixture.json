@@ -1,0 +1,15 @@
+{
+  "base": {},
+  "check": "host-lab-not-applicable-crate-is-no-std",
+  "description": "The pack gains a `build.rs`, which could emit cfgs the lane never sees.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture",
+    "crates/continuum-effects-network/build.rs": "crates_continuum-effects-network_build.rs.fixture"
+  },
+  "id": "gov4-13-host-not-applicable-build-script",
+  "requirement": "GOV-4-13",
+  "rule": "host-lab-conformance"
+}

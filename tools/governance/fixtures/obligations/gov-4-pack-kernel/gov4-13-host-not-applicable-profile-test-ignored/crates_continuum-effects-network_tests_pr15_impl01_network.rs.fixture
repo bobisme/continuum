@@ -1,0 +1,7 @@
+//! Fixture: the profile test, ignored.
+
+#[test]
+#[ignore]
+fn profile_declares_host_qualification_none() {
+    assert_eq!(ADVERSARIAL_V0.host, HostQualification::None);
+}

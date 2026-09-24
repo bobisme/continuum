@@ -145,6 +145,28 @@ delivered, for the same reason GOV-4-06's security review is not: Seal keeps
 review state outside the repository, so no committed artifact lets a checker
 confirm the named review exists, covers this change, and approved it.
 
+Host/Lab conformance is deferred, not delivered, for a pack while no host path
+exists (lead rulings, bn-3ohe and cr-1dl1d7). Such a pack's record may state
+`[pack.host_conformance]` with `status = "not-applicable"`, a reason, a
+`profile_test` and a `no_std_lane_test`, in place of host/Lab tests. The claim
+that the pack performs no host effect rests on a compiler run, not on a source
+scan. The pack must be `#![no_std]`, so it links only `core` and `alloc` and, with
+`unsafe_code` forbidden, has no FFI route. Its lane test, run by `just check`,
+compiles the dev and release host builds of a copy of the pack and demands the
+unresolved-`std` error for a planted `std` use. The checker's own gate is
+structural and lexical. It keeps the lane's builds the only builds: `#![no_std]`
+as the crate root's first item; no `cfg`, `cfg_attr`, macro definition,
+`include!`, `#[path]`, `asm!` or raw token in `src/`; exactly one `extern crate`,
+which is `alloc`; no `build.rs`; and a manifest with only `[package]` and
+`[lints] workspace = true`. Both named tests must be live, in the pack, and not
+`should_panic`, `cfg`-gated or ignored. The lane test must plant the `std` use and
+check both profiles, and the profile test must `assert_eq!` the declared profile's
+`host` to `HostQualification::None`, which every profile the pack declares must
+also say (the docs/09 T06 claim of no host semantics). Any gap fails closed and
+the full obligation applies, as it does for an empty reason or a record that
+names neither the tests nor the form. When a host path lands, the pack stops
+being `no_std` and the obligation applies in full.
+
 ### Kernel changes
 
 Require:

@@ -1,0 +1,4 @@
+#[test]
+fn the_compiler_refuses_a_host_facility_in_the_network_pack() {
+    assert!(true);
+}

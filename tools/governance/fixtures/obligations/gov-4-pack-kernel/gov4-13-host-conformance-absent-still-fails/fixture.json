@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "host-lab-tests-named",
+  "description": "A pack whose real profile declares `HostQualification::None` but whose record names neither host/Lab tests nor the not-applicable form: the obligation still applies.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture"
+  },
+  "id": "gov4-13-host-conformance-absent-still-fails",
+  "requirement": "GOV-4-13",
+  "rule": "host-lab-conformance"
+}

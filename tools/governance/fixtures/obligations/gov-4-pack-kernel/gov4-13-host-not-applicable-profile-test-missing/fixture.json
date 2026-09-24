@@ -1,0 +1,14 @@
+{
+  "base": {},
+  "check": "host-lab-not-applicable-tests-resolve",
+  "description": "The not-applicable form names no profile test.",
+  "expect": "violation",
+  "head": {
+    "crates/continuum-effects-network/src/gov4_fixture_13_18.rs": "crates_continuum-effects-network_src_gov4_fixture_13_18.rs.fixture",
+    "crates/continuum-effects-network/tests/gov4_fixture_13_18.rs": "crates_continuum-effects-network_tests_gov4_fixture_13_18.rs.fixture",
+    "tools/governance/reviews/gov4-pack-kernel-pack-fixture.toml": "tools_governance_reviews_gov4-pack-kernel-pack-fixture.toml.fixture"
+  },
+  "id": "gov4-13-host-not-applicable-profile-test-missing",
+  "requirement": "GOV-4-13",
+  "rule": "host-lab-conformance"
+}
