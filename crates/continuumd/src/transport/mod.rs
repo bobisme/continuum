@@ -347,6 +347,14 @@ pub fn encode_arguments_in<D: Document>(
         Arguments::ContextExpand(body) => codec::to_opaque_in::<D, _>(body),
         Arguments::WhiteboardCompile(body) => codec::to_opaque_in::<D, _>(body),
         Arguments::WorkspaceCreateByReference(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentExportBundle(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::IntentImportBundle(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::SigningMint(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::SigningRotate(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::SigningRevoke(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::SigningRegistry(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::SigningVerify(body) => codec::to_opaque_in::<D, _>(body),
+        Arguments::SigningSignPack(body) => codec::to_opaque_in::<D, _>(body),
     }
 }
 

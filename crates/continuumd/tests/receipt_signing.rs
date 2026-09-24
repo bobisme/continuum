@@ -214,7 +214,7 @@ fn keystore_signer(name: &str) -> ReceiptSigner {
         )
         .expect("the local key is minted on first use");
     let (registry, signer) = opened.into_parts();
-    ReceiptSigner::new(registry, signer)
+    ReceiptSigner::new(registry, signer).expect("installable")
 }
 
 #[test]
@@ -351,7 +351,9 @@ fn a_revoked_signing_identity_refuses_the_link_rather_than_publishing_unsigned()
         .expect("reopens")
         .into_parts()
         .1;
-    let mut world = world(Some(ReceiptSigner::new(registry, key)));
+    let mut world = world(Some(
+        ReceiptSigner::new(registry, key).expect("installable"),
+    ));
     let subject = subject(&mut world);
     let outcome = link(&mut world, &subject);
     assert_eq!(

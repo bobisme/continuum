@@ -1160,6 +1160,8 @@ const TERMINAL_RS: &str = "continuumd/src/daemon/terminal.rs";
 const RECOVERY_RS: &str = "continuumd/src/daemon/recovery.rs";
 const CONTEXT_RS: &str = "continuumd/src/daemon/context.rs";
 const VERIFICATION_RS: &str = "continuumd/src/daemon/verification.rs";
+const SIGNING_RS: &str = "continuumd/src/daemon/signing.rs";
+const BUNDLE_RS: &str = "continuumd/src/daemon/bundle.rs";
 const ENVELOPE_RS: &str = "continuumd/src/protocol/envelope.rs";
 const WIRE_TASK_RS: &str = "continuumd/src/protocol/task.rs";
 
@@ -1293,6 +1295,47 @@ const BARE_HANDLE_FIELDS: &[(&str, &str, &str, &str)] = &[
         "DaemonState",
         "receipt_signatures",
         "key: a receipt node identity; the publication is `EvidenceNode::publication`",
+    ),
+    (
+        STATE_RS,
+        "DaemonState",
+        "receipt_contents",
+        "key: a receipt node identity; the bytes it was first linked over, compared before a relink signs; the publication is `EvidenceNode::publication`",
+    ),
+    // The signing authority (protocol 3.8, bn-3glnv). Neither a signer nor a held bundle
+    // is a store artifact: both live in daemon state, and nothing here says a publication
+    // happened.
+    (
+        SIGNING_RS,
+        "SigningAuthority",
+        "index",
+        "key: a signer's name, which is not content the store holds",
+    ),
+    (
+        SIGNING_RS,
+        "SigningAuthority",
+        "ambiguous",
+        "a signer name that names two keys and is never resolved; not content the store holds",
+    ),
+    (
+        SIGNING_RS,
+        "SigningAuthority",
+        "bundles",
+        "key: a held intent bundle, kept in daemon state and never published to the store",
+    ),
+    (
+        SIGNING_RS,
+        "SigningAuthority",
+        "imported",
+        "an imported proposal's intent and the held bundle that entered it: lookup keys, \
+         neither a store publication",
+    ),
+    (
+        BUNDLE_RS,
+        "BundleContract",
+        "intent",
+        "a contract identity a bundle declares, recomputed on import; it names an intent \
+         the volatile registry holds, not a publication",
     ),
     (
         TASK_RS,

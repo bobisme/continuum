@@ -10,7 +10,7 @@
 use super::operations::{
     benchmark::*, context::*, correspondence::*, debug::*, evidence::*, failure::*, forge::*,
     intent::*, model::*, observe::*, program::*, proof::*, query::*, refinement::*, repair::*,
-    task::*, verification::*, whiteboard::*, workspace::*,
+    signing::*, task::*, verification::*, whiteboard::*, workspace::*,
 };
 use super::prelude::*;
 use super::spec::{
@@ -19,13 +19,16 @@ use super::spec::{
 
 /// The IDL document version this registry transcribes (`protocol.idl_version`).
 ///
-/// `"1.15"` as of bn-28kv4, which adds `CapabilityDescriptor.instances` and
+/// `"1.16"` as of bn-3glnv, which adds the signing wire (eight operations, three
+/// enums, one alias, one optional field, and three rules, 51 -> 54) and raises
+/// [`PROTOCOL_VERSION`] to `"3.8"`. `"1.15"` (bn-28kv4) added
+/// `CapabilityDescriptor.instances` and
 /// `rule capability.instance_scope` (50 -> 51 rules) and raises
 /// [`PROTOCOL_VERSION`] to `"3.7"`. `"1.14"` (bn-ah1k8, five rules that declare
 /// the domains of six `String` leaves, 45 -> 50), `"1.13"` (bn-3ncfp, `rule
 /// artifact_class.spelling`, 44 -> 45) and `"1.12"` (bn-12plt, doc comments
 /// only) moved no declaration, so they left the protocol at `"3.6"`.
-pub const IDL_VERSION: &str = "1.15";
+pub const IDL_VERSION: &str = "1.16";
 
 /// The protocol version this registry defines (`protocol.version`).
 ///
@@ -143,7 +146,20 @@ pub const IDL_VERSION: &str = "1.15";
 /// `CapabilityDescriptor::as_reported_at` keeps the field off a connection
 /// negotiated below 3.7. Counts: 75 operations, 47 named structs, rules
 /// 50 -> 51 (`capability.instance_scope`).
-pub const PROTOCOL_VERSION: &str = "3.7";
+///
+/// The 3.7 -> 3.8 bump covers IDL 1.16 (bn-3glnv) and puts plan §18.6's signing
+/// identities on the wire. It adds eight **operations** — `signing.mint`,
+/// `signing.rotate`, `signing.revoke`, `signing.registry`, `signing.verify`, and
+/// `signing.sign_pack` in a 20th namespace, and `intent.export_bundle` and
+/// `intent.import_bundle` — one `optional` field, `EvidenceGetResponse.signature`,
+/// three enums, one alias (`SignerHandle`), and three rules (`signing.identities`,
+/// `signing.verification`, `intent.bundles`). Adding an operation and adding an
+/// optional field are the first two changes `rule versioning.compatible_change`
+/// names, so the bump is a minor and [`MAJORS_SERVED`] is untouched. The daemon
+/// serves the new operations only on a connection negotiated at 3.8 or later, and
+/// keeps the new field off an older one. Counts: 83 operations in 20 namespaces,
+/// 47 named structs, 37 enums, 10 aliases, rules 51 -> 54.
+pub const PROTOCOL_VERSION: &str = "3.8";
 
 /// The protocol majors a conforming daemon serves concurrently: N and N-1
 /// (`protocol.majors_served`).
@@ -159,8 +175,9 @@ pub const ENCODINGS: &[Encoding] = &[Encoding::CanonicalJson, Encoding::Canonica
 /// the first operation ever added to this protocol (bn-3sypm); 74 as of 3.5,
 /// when `whiteboard.compile` became the second (bn-1as8e); 75 as of 3.6, when
 /// `workspace.create_by_reference` became the third and the first to enter an
-/// existing namespace (bn-3of5h).
-pub const OPERATION_COUNT: usize = 75;
+/// existing namespace (bn-3of5h); 83 as of 3.8, when the signing wire added six
+/// operations in a 20th namespace, `signing`, and two to `intent` (bn-3glnv).
+pub const OPERATION_COUNT: usize = 83;
 
 /// Every operation the IDL declares, in its declaration order.
 pub const OPERATIONS: &[OperationSpec] = &[
@@ -298,6 +315,34 @@ pub const OPERATIONS: &[OperationSpec] = &[
         verdict: Some("StructuralVerdictValue"),
         events: None,
         errors: &[ErrorCode::IntentMutationDenied, ErrorCode::MalformedRequest],
+    },
+    OperationSpec {
+        name: "intent.export_bundle",
+        authority: AuthorityLevel::ReviseIntent,
+        annotations: &[
+            Annotation::Mutation,
+            Annotation::Privileged,
+            Annotation::AuditRecorded,
+        ],
+        request: StructSpec::of::<IntentExportBundleRequest>(),
+        response: StructSpec::of::<IntentExportBundleResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::PolicyGateFailed],
+    },
+    OperationSpec {
+        name: "intent.import_bundle",
+        authority: AuthorityLevel::ReviseIntent,
+        annotations: &[
+            Annotation::Mutation,
+            Annotation::Privileged,
+            Annotation::AuditRecorded,
+        ],
+        request: StructSpec::of::<IntentImportBundleRequest>(),
+        response: StructSpec::of::<IntentImportBundleResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::IntentMutationDenied],
     },
     OperationSpec {
         name: "verification.start",
@@ -1056,6 +1101,82 @@ pub const OPERATIONS: &[OperationSpec] = &[
         errors: &[ErrorCode::InsufficientEvidence],
     },
     OperationSpec {
+        name: "signing.mint",
+        authority: AuthorityLevel::ReviseIntent,
+        annotations: &[
+            Annotation::Mutation,
+            Annotation::Privileged,
+            Annotation::AuditRecorded,
+        ],
+        request: StructSpec::of::<SigningMintRequest>(),
+        response: StructSpec::of::<SigningMintResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::PolicyGateFailed],
+    },
+    OperationSpec {
+        name: "signing.rotate",
+        authority: AuthorityLevel::ReviseIntent,
+        annotations: &[
+            Annotation::Mutation,
+            Annotation::Privileged,
+            Annotation::AuditRecorded,
+        ],
+        request: StructSpec::of::<SigningRotateRequest>(),
+        response: StructSpec::of::<SigningRotateResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::PolicyGateFailed],
+    },
+    OperationSpec {
+        name: "signing.revoke",
+        authority: AuthorityLevel::ReviseIntent,
+        annotations: &[
+            Annotation::Mutation,
+            Annotation::Privileged,
+            Annotation::AuditRecorded,
+        ],
+        request: StructSpec::of::<SigningRevokeRequest>(),
+        response: StructSpec::of::<SigningRevokeResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::PolicyGateFailed],
+    },
+    OperationSpec {
+        name: "signing.registry",
+        authority: AuthorityLevel::Read,
+        annotations: &[Annotation::Readonly],
+        request: StructSpec::of::<SigningRegistryRequest>(),
+        response: StructSpec::of::<SigningRegistryResponse>(),
+        verdict: None,
+        events: None,
+        errors: &[],
+    },
+    OperationSpec {
+        name: "signing.verify",
+        authority: AuthorityLevel::Read,
+        annotations: &[Annotation::Readonly],
+        request: StructSpec::of::<SigningVerifyRequest>(),
+        response: StructSpec::of::<SigningVerifyResponse>(),
+        verdict: None,
+        events: None,
+        errors: &[],
+    },
+    OperationSpec {
+        name: "signing.sign_pack",
+        authority: AuthorityLevel::ReviseIntent,
+        annotations: &[
+            Annotation::Mutation,
+            Annotation::Privileged,
+            Annotation::AuditRecorded,
+        ],
+        request: StructSpec::of::<SigningSignPackRequest>(),
+        response: StructSpec::of::<SigningSignPackResponse>(),
+        verdict: Some("StructuralVerdictValue"),
+        events: None,
+        errors: &[ErrorCode::PolicyGateFailed],
+    },
+    OperationSpec {
         name: "query.explain_reuse",
         authority: AuthorityLevel::Read,
         annotations: &[Annotation::Readonly, Annotation::Paginated],
@@ -1177,6 +1298,9 @@ pub const ENUMS: &[EnumSpec] = &[
     EnumSpec::of::<ExplorationStrategy>(),
     EnumSpec::of::<ExplanationLevel>(),
     EnumSpec::of::<GateProfile>(),
+    EnumSpec::of::<SignedArtifactKind>(),
+    EnumSpec::of::<RevocationReason>(),
+    EnumSpec::of::<SignatureOutcome>(),
 ];
 
 /// Every union the IDL declares, in its declaration order.
@@ -1255,7 +1379,34 @@ pub const ALIASES: &[AliasSpec] = &[
         base: "String",
         pattern: Some("^[A-Za-z0-9_-]+$"),
     },
+    AliasSpec {
+        name: "SignerHandle",
+        base: "String",
+        pattern: Some("^signer_[0-9a-f]{64}$"),
+    },
 ];
+
+/// The protocol version that first declares `operation`, for the operations a daemon must
+/// refuse on a connection negotiated below it (bn-3glnv): the eight of the signing wire,
+/// `@since("3.8")`. `None` for every operation declared before 3.8: this gate is 3.8's,
+/// and it does not change how an earlier `@since` operation is served. The list is kept by
+/// hand and checked against the IDL's `@since("3.8")` operations by
+/// `daemon_signing::the_version_gate_is_exactly_the_idls_3_8_operations`.
+#[must_use]
+pub fn introduced_at(operation: &str) -> Option<ProtocolVersion> {
+    matches!(
+        operation,
+        "signing.mint"
+            | "signing.rotate"
+            | "signing.revoke"
+            | "signing.registry"
+            | "signing.verify"
+            | "signing.sign_pack"
+            | "intent.export_bundle"
+            | "intent.import_bundle"
+    )
+    .then(|| ProtocolVersion::new(3, 8))
+}
 
 /// Look an operation up by its wire name.
 #[must_use]

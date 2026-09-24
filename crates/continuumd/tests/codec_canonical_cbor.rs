@@ -41,12 +41,12 @@
 //! # Coverage of the registry, and the honest boundary of it
 //!
 //! The bone this file answers owes "the conforming-daemon golden set", and the registry is
-//! 75 operations as of protocol 3.6. Two devices carry that between them and they cover
+//! 83 operations as of protocol 3.8. Two devices carry that between them and they cover
 //! different things:
 //!
 //! - the **literal** vectors are exchanges and per-namespace bodies — bytes a second
 //!   implementation can be tested against directly;
-//! - the **registry sweep** is mechanical: every one of the 75 operations' request and
+//! - the **registry sweep** is mechanical: every one of the 83 operations' request and
 //!   response structs, and every named struct besides, is decoded from a document
 //!   synthesized out of its own `FieldSpec` list and re-encoded, in both encodings, with
 //!   the field sequences compared across them. It is not a literal byte sequence and does
@@ -532,6 +532,11 @@ fn type_value<D: Document>(ty: &str, depth: usize) -> D {
         "Commitment" | "PageToken" => return D::from_text("c1"),
         "OperationName" => return D::from_text("workspace.create"),
         "AuditCorrelationId" => return D::from_text("a1"),
+        "SignerHandle" => {
+            return D::from_text(
+                "signer_0000000000000000000000000000000000000000000000000000000000000000",
+            );
+        }
         _ => {}
     }
     if let Some(handle) = HANDLES.iter().find(|handle| handle.name == ty) {
@@ -555,7 +560,7 @@ fn type_value<D: Document>(ty: &str, depth: usize) -> D {
     panic!("no registry table declares the type `{ty}`");
 }
 
-/// Every struct the registry declares: the 75 operations' request and response bodies and
+/// Every struct the registry declares: the 83 operations' request and response bodies and
 /// every named struct, each named for the failure message.
 fn every_declared_struct() -> Vec<(String, &'static StructSpec)> {
     let mut out = Vec::new();
@@ -627,7 +632,7 @@ fn pair<T: ProtocolValue, U: ProtocolValue>(
     )
 }
 
-/// The first operation of each of the IDL's 19 namespaces, in registry order.
+/// The first operation of each of the IDL's 20 namespaces, in registry order.
 fn first_operation_per_namespace() -> Vec<(&'static str, &'static StructSpec)> {
     let mut seen: Vec<&'static str> = Vec::new();
     let mut out = Vec::new();
@@ -774,6 +779,11 @@ const GOLDEN: &[(&str, &str, &str)] = &[
         "whiteboard.compile.body",
         r#"{"note":{}}"#,
         "a1646e6f7465a0",
+    ),
+    (
+        "signing.mint.body",
+        r#"{"kinds":["receipt"]}"#,
+        "a1656b696e6473816772656365697074",
     ),
     (
         "query.explain_reuse.body",
@@ -1001,7 +1011,7 @@ fn every_registry_struct_round_trips_in_both_encodings() {
         );
         swept += 1;
     }
-    assert_eq!(OPERATIONS.len(), OPERATION_COUNT, "the registry is 75 rows");
+    assert_eq!(OPERATIONS.len(), OPERATION_COUNT, "the registry is 83 rows");
     assert_eq!(
         swept,
         OPERATION_COUNT * 2 + NAMED_STRUCTS.len(),
@@ -1068,11 +1078,12 @@ fn every_operation_the_families_serve_round_trips_through_the_codec() {
     // 3.5, which grew the registry rather than the landed set alone. bn-3of5h moved it
     // once more and the other way round: `workspace.create_by_reference` grows the
     // registry *and* the landed set in one step, because the `workspace` family serves it
-    // the day it is declared — 30/45. A count that moves when a family lands is the point:
-    // it forces the landing to be visible in a file nobody editing a family would
-    // otherwise open.
-    assert_eq!(served, 30, "the operations the landed families serve");
-    assert_eq!(unserved, OPERATION_COUNT - 30);
+    // the day it is declared — 30/45. bn-3glnv did the same eight times at protocol 3.8:
+    // the six `signing` operations and the two bundle operations are served the day they
+    // are declared — 38/45. A count that moves when a family lands is the point: it forces
+    // the landing to be visible in a file nobody editing a family would otherwise open.
+    assert_eq!(served, 38, "the operations the landed families serve");
+    assert_eq!(unserved, OPERATION_COUNT - 38);
 }
 
 #[test]

@@ -265,11 +265,12 @@ fn registry_mutations() -> BTreeSet<String> {
         .collect()
 }
 
-/// The count the IDL's own revision note fixes for protocol 3.6 / IDL 1.11.
-const DECLARED_MUTATIONS: usize = 47;
+/// The count the IDL's own revision note fixes: 47 at protocol 3.6 / IDL 1.11, 53 at
+/// protocol 3.8 / IDL 1.16, which added six mutations (bn-3glnv).
+const DECLARED_MUTATIONS: usize = 53;
 
 /// The count the IDL's own revision note fixes for the whole registry.
-const DECLARED_OPERATIONS: usize = 75;
+const DECLARED_OPERATIONS: usize = 83;
 
 #[test]
 fn instrument_the_idl_and_the_registry_declare_the_same_forty_seven_mutations() {
@@ -382,11 +383,32 @@ fn scope_twenty_nine_mutations_are_unreachable_and_therefore_unprobed() {
         DECLARED_MUTATIONS,
         "the partition is total"
     );
+    // Protocol 3.8 (bn-3glnv) added six mutations. This rig negotiates 3.1, where they are
+    // not declared: each is refused before admission and before the ledger, exactly as an
+    // unshaped operation is, so they are unreachable here. Their idempotency is measured at
+    // 3.8 in `daemon_signing.rs` (`a_replayed_rotation_does_not_rotate_twice`).
     assert_eq!(reachable.len(), 18, "eighteen mutations are reachable");
     assert_eq!(
         unreachable.len(),
-        29,
-        "twenty-nine are not, and their idempotency is unprobed rather than passed"
+        35,
+        "thirty-five are not, and their idempotency is unprobed here rather than passed"
+    );
+    let too_new: BTreeSet<&str> = unreachable
+        .iter()
+        .map(String::as_str)
+        .filter(|name| registry::introduced_at(name).is_some_and(|since| since > version()))
+        .collect();
+    assert_eq!(
+        too_new,
+        BTreeSet::from([
+            "intent.export_bundle",
+            "intent.import_bundle",
+            "signing.mint",
+            "signing.revoke",
+            "signing.rotate",
+            "signing.sign_pack",
+        ]),
+        "the six protocol 3.8 mutations, refused at this rig's version"
     );
 
     // The unreachable set is exactly the eleven namespaces this daemon serves no family for.
@@ -402,7 +424,10 @@ fn scope_twenty_nine_mutations_are_unreachable_and_therefore_unprobed() {
     ]
     .into_iter()
     .collect();
-    for name in &unreachable {
+    for name in unreachable
+        .iter()
+        .filter(|name| !too_new.contains(name.as_str()))
+    {
         let namespace = name.split_once('.').expect("a `namespace.verb` name").0;
         assert!(
             !served.contains(namespace),

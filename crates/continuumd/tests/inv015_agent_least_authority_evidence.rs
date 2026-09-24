@@ -13,11 +13,12 @@
 //! | alter evidence status | `daemon/evidence.rs` — [`Promotion`] has private fields and no public constructor, so producer code (`daemon/observe.rs`, a *different module*) can name the type and never build one; `observe.ingest`'s wire shape declares no status field, so an append lands at the lattice's bottom as a property of the request's *type* | `daemon_evidence.rs`: `a_producers_append_lands_at_the_lattices_bottom`, `the_producers_request_body_has_no_field_that_could_name_a_status`, `the_status_written_is_what_the_checker_established_not_what_the_caller_named`, `no_operation_in_either_family_removes_or_edits_an_appended_node` — cited via [`status_authority`], plus this file's own registry-grain sweep [`privileged_perimeter::positive_no_mutation_request_admits_a_caller_supplied_status`] |
 //! | sign receipts | `evidence.link` — the checker is the *admitted capability's* actor (there is no checker request field), the actor must be a `service:` scheme, and self-certification is refused before the receipt is read (RFC 0038 D3) | `daemon_evidence.rs`: `only_a_service_actor_may_append_a_check_edge`, `a_checker_may_not_record_a_check_of_its_own_production` — cited via [`receipt_authority`]; cryptographic signing (plan §18.6, bn-1hape): the daemon holds the key, installed only by the deployment, and signs only inside `evidence.link` after the service gate; no wire type carries key material — [`receipt_authority::positive_only_the_daemon_holds_the_receipt_key_and_only_a_service_check_signs`] |
 //! | access ungranted production traces | `daemon/admission.rs` — R-4: `observe.ingest` requires `DataGrant::ProductionTrace` beyond its `execute` level, decided by [`required_grant`] *before* any family runs; the denial is the zero-bit [`Denied`] (X1) and precedes the index (X3), so a refused caller learns nothing (X2) | live here: [`trace_grant::positive_exactly_one_operation_requires_a_data_grant_and_it_is_the_production_trace`], [`trace_grant::positive_a_denial_carries_zero_bits`]; cited: `the_production_trace_grant_is_required_beyond_the_execute_level`, `every_admission_failure_is_one_byte_identical_answer`, `a_promotion_of_a_claim_that_does_not_exist_is_byte_identical_to_one_that_does` |
-//! | execute unrestricted host effects | structurally: the 75-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-*`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
+//! | execute unrestricted host effects | structurally: the 83-operation registry has **no host-execution verb and no `capability` namespace** (RFC 0026 correction 20: "no operation in this protocol can widen the authority of the connection that invokes it"); `ReferenceStore::mint`/`revoke` have no wire caller (swept live over every `continuumd` source); every remaining host-effect crate (`continuum-effects-*`, `continuum-proof-client`, `continuum-security`) is a zero-pub-item scaffold, pinned to go red when the substance arrives; `continuum-forge` grew its first public surface at bn-1dsih and is audited rather than grandfathered — a recorded public inventory, zero host-effect facilities named in its code, one verifier-side dependency, and no route from a connection into it: the declared `forge.*` vocabulary has no registered family and answers `UnsupportedSemanticFeature`, the daemon does not link the crate, and no `continuumd` source names it | live here: [`privileged_perimeter::positive_the_namespace_set_is_closed_and_contains_no_capability_namespace`], [`no_widening`] |
 //!
 //! Cross-cutting, because "no ambient authority" is a property of the *admission
 //! predicate* rather than of any one clause: the `@privileged` set is exactly the five
-//! governance verbs and nothing else ([`privileged_perimeter`]), every one of them is
+//! governance verbs and, from protocol 3.8, the six signing-wire writes, and nothing else
+//! ([`privileged_perimeter`]), every one of them is
 //! `@audit_recorded` (docs/49: "logs attempted privileged operations"), an absent
 //! capability profile is the fail-closed reading ("grants nothing rather than
 //! everything"), and delegation only narrows — all pinned against the sources that
@@ -82,8 +83,10 @@
 //!    docs/09, bn-1hape). `evidence.link` signs each receipt it publishes with a key the
 //!    deployment installs through `Builder::receipt_signer` and the daemon holds; the
 //!    keystore and OS entropy live in `continuum-security`, which the daemon neither links
-//!    nor names. The daemon still stores an acceptance signature "verbatim as supplied"
-//!    and verifies none (bn-3glnv) — swept live.
+//!    nor names. An acceptance signature is the end of an RFC 0037 A1 signature chain
+//!    the daemon verifies before a bundle acceptance and signs itself on a local one
+//!    (bn-3glnv, cr-2unxyh); a caller's text is recorded verbatim only when no key
+//!    signs — swept live.
 //! 4. **The §18.4 capture-time contract has no producer**: salted payload commitments,
 //!    per-artifact encryption, and the retention clock are unimplemented ("salted"
 //!    appears in no `continuumd` source). The *redaction* half is live and cited
@@ -229,6 +232,40 @@ fn administrative_callers(source: &str) -> Vec<&str> {
         .filter(|line| !line.trim_start().starts_with("//"))
         .filter(|line| line.contains(".mint(") || line.contains(".revoke("))
         .collect()
+}
+
+/// The exact `.mint(`/`.revoke(` call sites protocol 3.8's signer administration makes, in
+/// `daemon/signing.rs` alone (bn-3glnv). Each is a call on the signing authority's own
+/// `SigningRegistry` — the line above it is `.registry` — and a signer is not a capability,
+/// so none is the capability-administration surface this sweep guards. Any other
+/// `.mint(`/`.revoke(` in that file, and any at all elsewhere, still reports.
+const SIGNER_ADMINISTRATION: [&str; 2] =
+    [".mint(&actor, entropy)", ".revoke(&named, &actor, reason)"];
+
+/// The administrative callers in `source` that are not the signer-administration sites,
+/// for `daemon/signing.rs`; exactly [`administrative_callers`] for every other file.
+fn unexempted_callers<'a>(path: &Path, source: &'a str) -> Vec<&'a str> {
+    let callers = administrative_callers(source);
+    if !path.ends_with("src/daemon/signing.rs") {
+        return callers;
+    }
+    // Judged by each caller's own line index, so a second identical call elsewhere is not
+    // exempted by the first one's `.registry` line.
+    let lines: Vec<&str> = source.lines().collect();
+    let unexempted: Vec<&str> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| callers.contains(line))
+        .filter(|(at, line)| {
+            let exempt = SIGNER_ADMINISTRATION.contains(&line.trim())
+                && at
+                    .checked_sub(1)
+                    .is_some_and(|above| lines[above].trim() == ".registry");
+            !exempt
+        })
+        .map(|(_, line)| *line)
+        .collect();
+    unexempted
 }
 
 /// All `.rs` sources under `dir`, recursively — a real directory walk (the inv003
@@ -478,13 +515,26 @@ mod privileged_perimeter {
         names.collect()
     }
 
-    /// The five operations plan §18.5 and RFC 0027 make privileged.
-    pub(super) const PRIVILEGED: [&str; 5] = [
+    /// The operations plan §18.5 and RFC 0027 make privileged: the five governance verbs,
+    /// and from protocol 3.8 (bn-3glnv) the six signing-wire writes. Re-audited for the
+    /// latter: minting, rotating, and revoking a signer, signing a domain pack, and exporting
+    /// or importing an intent bundle change which signatures the deployment trusts or speak
+    /// for it, so each is `@privileged @audit_recorded` at `revise-intent`, and each also
+    /// needs a grant with no scope list (`rule signing.identities`). None of them mints,
+    /// widens, or revokes a *capability*: the signer registry is not the capability registry,
+    /// and no wire operation reaches `ReferenceStore::mint` or `ReferenceStore::revoke`.
+    pub(super) const PRIVILEGED: [&str; 11] = [
         "intent.accept",
+        "intent.export_bundle",
+        "intent.import_bundle",
         "intent.lock",
         "intent.reject",
         "repair.promote",
         "repair.reject",
+        "signing.mint",
+        "signing.revoke",
+        "signing.rotate",
+        "signing.sign_pack",
     ];
 
     #[test]
@@ -680,7 +730,7 @@ mod receipt_authority {
             "daemon/state.rs",
             STATE,
             &[
-                "the acceptance signature, verbatim as supplied",
+                "the RFC 0037 A1 signature chain, oldest first",
                 "fn record_receipt_signature(",
             ],
         );
@@ -833,9 +883,9 @@ mod no_widening {
         ADMISSION, CAPABILITY, CONTINUUMD_MANIFEST, DAEMON_OPERATIONS_TESTS, EFFECTS_NETWORK_LIB,
         EFFECTS_PROCESS_LIB, EFFECTS_STORAGE_LIB, EFFECTS_TIME_LIB, FORGE_MANIFEST,
         NON_FILESYSTEM_FACILITIES, PROOF_CLIENT_LIB, PUBLICATION, SECURITY_LIB, SECURITY_MANIFEST,
-        SIGNING_SOURCE_FACILITIES, administrative_callers, continuumd_sources,
-        declared_dependencies, forge_sources, host_effect_lines, is_signing_source, pin, pub_items,
-        security_sources,
+        SIGNER_ADMINISTRATION, SIGNING_SOURCE_FACILITIES, administrative_callers,
+        continuumd_sources, declared_dependencies, forge_sources, host_effect_lines,
+        is_signing_source, pin, pub_items, security_sources, unexempted_callers,
     };
 
     /// Correction 20's property, stated and then swept: capability administration is
@@ -859,14 +909,23 @@ mod no_widening {
             PUBLICATION,
             &["and it may not mint", "INV-015's least authority"],
         );
+        let mut signer_sites = 0;
         for (path, text) in continuumd_sources() {
-            let callers = administrative_callers(&text);
+            let callers = unexempted_callers(&path, &text);
             assert!(
                 callers.is_empty(),
                 "{} calls the administrative surface: {callers:?}",
                 path.display()
             );
+            if path.ends_with("src/daemon/signing.rs") {
+                signer_sites += administrative_callers(&text).len();
+            }
         }
+        assert_eq!(
+            signer_sites,
+            SIGNER_ADMINISTRATION.len(),
+            "the signer-administration sites moved; re-audit the exemption"
+        );
     }
 
     /// "Privilege is never acquired by default": an absent profile grants nothing, an
@@ -1593,9 +1652,10 @@ mod mutants {
         ADMISSION, CAPABILITY, DOCS_49, EFFECTS_PROCESS_LIB, EVIDENCE, FORGE_MANIFEST,
         NON_FILESYSTEM_FACILITIES, SECURITY_MANIFEST, administrative_callers,
         declared_dependencies, forge_sources, host_effect_lines, is_signing_source,
-        isolation_bullets, missing_pin, pub_items, security_sources,
+        isolation_bullets, missing_pin, pub_items, security_sources, unexempted_callers,
     };
     use crate::privileged_perimeter::{PRIVILEGED, privileged_names};
+    use std::path::Path;
 
     /// Dropping one bullet from a copy of docs/49 must break the extraction count, and
     /// an unrelated document must extract nothing.
@@ -1674,6 +1734,22 @@ mod mutants {
         assert_eq!(administrative_callers(planted).len(), 1);
         let commented = "// a comment saying store.mint( is out of band\n";
         assert!(administrative_callers(commented).is_empty());
+        // The signer-administration exemption (protocol 3.8) is exactly that wide: only the
+        // two pinned lines, only on a `.registry` receiver, and only in `daemon/signing.rs`.
+        let signing = Path::new("crates/continuumd/src/daemon/signing.rs");
+        let signer = "    let key = authority\n        .registry\n        .mint(&actor, entropy)\n        .map_err(entropy_fault)?;\n";
+        assert!(unexempted_callers(signing, signer).is_empty());
+        assert_eq!(
+            unexempted_callers(Path::new("src/daemon/other.rs"), signer).len(),
+            1
+        );
+        let other_receiver = "    let key = authority\n        .grants\n        .mint(&actor, entropy)\n        .map_err(entropy_fault)?;\n";
+        assert_eq!(unexempted_callers(signing, other_receiver).len(), 1);
+        let other_call = "    authority\n        .registry\n        .revoke(&cap);\n";
+        assert_eq!(unexempted_callers(signing, other_call).len(), 1);
+        // A second identical call on another receiver is judged by its own line.
+        let twice = format!("{signer}    grants\n        .mint(&actor, entropy)\n");
+        assert_eq!(unexempted_callers(signing, &twice).len(), 1);
     }
 
     /// A scaffold that grows a public item is detected by the same scanner the

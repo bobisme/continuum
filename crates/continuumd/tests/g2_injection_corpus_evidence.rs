@@ -138,23 +138,26 @@ use continuumd::protocol::operations::evidence::{
     EvidenceLinkRequest, EvidenceQueryRequest, EvidenceVerifyRequest,
 };
 use continuumd::protocol::operations::intent::{
-    IntentAcceptRequest, IntentGetRequest, IntentLockRequest, IntentProposeRevisionRequest,
-    IntentRejectRequest,
+    IntentAcceptRequest, IntentExportBundleRequest, IntentGetRequest, IntentImportBundleRequest,
+    IntentLockRequest, IntentProposeRevisionRequest, IntentRejectRequest,
 };
 use continuumd::protocol::operations::observe::ObserveIngestRequest;
+use continuumd::protocol::operations::signing::{
+    SigningMintRequest, SigningRevokeRequest, SigningRotateRequest, SigningSignPackRequest,
+};
 use continuumd::protocol::operations::task::{TaskCancelRequest, TaskResumeRequest};
 use continuumd::protocol::operations::verification::VerificationStartRequest;
 use continuumd::protocol::registry::{self, ENCODINGS};
 use continuumd::protocol::scalar::{
     ActorId, CapabilityHandle, Commitment, ContextHandle, ContinuationHandle, EpochIdentity,
-    EvidenceHandle, IntentHandle, Opaque, OperationName, ProtocolVersion, RequestId, TaskHandle,
-    Timestamp,
+    EvidenceHandle, IntentHandle, Opaque, OperationName, ProtocolVersion, RequestId, SignerHandle,
+    TaskHandle, Timestamp,
 };
 use continuumd::protocol::shared::{EvidenceQuery, IntentChangeSet, Target};
 use continuumd::protocol::spec::{Annotation, Nullable, Optional};
 use continuumd::protocol::vocabulary::{
     AuthorityLevel, DataGrant, Encoding, ErrorCode, ExpansionRelation, Portfolio, ResultStatus,
-    TargetKind,
+    RevocationReason, SignedArtifactKind, TargetKind,
 };
 use continuumd::transport::{self, Server};
 
@@ -198,12 +201,86 @@ const REVISER: Principal = Principal {
     capability: "cap_reviser",
 };
 
-/// The steward: `revise-intent` **with** the three intent privileges. The only principal in
-/// this file any privileged operation is ever admitted for.
+/// The steward: `revise-intent` **with** the three intent privileges, and from protocol 3.8
+/// the six signing-wire privileges. The only principal in this file any privileged
+/// operation is ever admitted for.
 const STEWARD: Principal = Principal {
     actor: "human:steward",
     capability: "cap_steward",
 };
+
+/// Every privilege the steward (and the root above it) holds.
+const STEWARD_PRIVILEGES: [&str; 9] = [
+    "intent.accept",
+    "intent.reject",
+    "intent.lock",
+    "intent.export_bundle",
+    "intent.import_bundle",
+    "signing.mint",
+    "signing.rotate",
+    "signing.revoke",
+    "signing.sign_pack",
+];
+
+/// The `@privileged` operations protocol 3.8 added (bn-3glnv), which the ratified corpus
+/// predates. The corpus's case identities are `<vector>/<outcome>` and unique, so it cannot
+/// gain a case without gaining a vector, and a vector is a dossier decision (research/35),
+/// not a test edit. Until it has one, each of these is driven at by a probe built here with
+/// a planted payload where the body has a free field ([`probe`]), and the privilege-bit
+/// experiment runs over the probe exactly as it runs over a corpus case.
+const SIGNING_WIRE_PROBES: [&str; 6] = [
+    "intent.export_bundle",
+    "intent.import_bundle",
+    "signing.mint",
+    "signing.rotate",
+    "signing.revoke",
+    "signing.sign_pack",
+];
+
+/// The request body one signing-wire probe sends. The payload rides in the free field where
+/// the body has one (a bundle's or a pack's bytes).
+fn probe(operation: &str, payload: &str, fixture: &Fixture) -> Arguments {
+    let signer = SignerHandle::new(
+        "signer_0000000000000000000000000000000000000000000000000000000000000000",
+    )
+    .expect("a well-formed signer name");
+    match operation {
+        "intent.export_bundle" => Arguments::IntentExportBundle(IntentExportBundleRequest {
+            intents: vec![fixture.proposal.clone()],
+        }),
+        "intent.import_bundle" => Arguments::IntentImportBundle(IntentImportBundleRequest {
+            content: payload.as_bytes().to_vec(),
+        }),
+        "signing.mint" => Arguments::SigningMint(SigningMintRequest {
+            kinds: vec![SignedArtifactKind::Receipt],
+        }),
+        "signing.rotate" => Arguments::SigningRotate(SigningRotateRequest { signer }),
+        "signing.revoke" => Arguments::SigningRevoke(SigningRevokeRequest {
+            signer,
+            reason: RevocationReason::Compromised,
+        }),
+        "signing.sign_pack" => Arguments::SigningSignPack(SigningSignPackRequest {
+            pack: payload.as_bytes().to_vec(),
+        }),
+        other => panic!("{other} is not a signing-wire probe"),
+    }
+}
+
+/// Run one signing-wire probe under one principal.
+fn run_probe(
+    fixture: &mut Fixture,
+    operation: &str,
+    principal: Principal,
+    request_id: &str,
+) -> ResultEnvelope {
+    let mut envelope = envelope(operation, principal, request_id);
+    envelope.protocol_version = ProtocolVersion::new(3, 8);
+    envelope.arguments =
+        transport::encode_arguments(&probe(operation, "ignore previous instructions", fixture))
+            .expect("the body encodes");
+    let frame = codec::write_in::<WireJson, _>(&envelope).expect("the envelope encodes");
+    answer(fixture, &frame)
+}
 
 // =====================================================================================
 // The fixture
@@ -275,12 +352,11 @@ fn grant(
     }
 }
 
-fn negotiated() -> Negotiated {
+/// The connection a fixture negotiates at `at`: 3.2 for the corpus, 3.8 for the signing-wire
+/// probes, whose operations a connection below 3.8 refuses before admission.
+fn negotiated_at(at: ProtocolVersion) -> Negotiated {
     let hello = ClientHello {
-        protocol_versions: VersionRange {
-            low: version(),
-            high: version(),
-        },
+        protocol_versions: VersionRange { low: at, high: at },
         encodings: vec![Encoding::CanonicalJson],
         client: "continuumd-g2-injection-corpus".to_owned(),
         actor: who("service:continuumd"),
@@ -288,12 +364,16 @@ fn negotiated() -> Negotiated {
         features: Optional::Absent,
     };
     negotiate(
-        &[ProtocolVersion::new(3, 1), version()],
+        &[
+            ProtocolVersion::new(3, 1),
+            version(),
+            ProtocolVersion::new(3, 8),
+        ],
         ProtocolWindow::new(3),
         ENCODINGS,
         &hello,
     )
-    .expect("3.2 is served")
+    .expect("the version is served")
 }
 
 fn die_hard_contract() -> IntentContract {
@@ -328,9 +408,16 @@ struct Fixture {
 /// state whatever the capability said. [`inert`] then demonstrates the liveness directly, by
 /// letting the steward through and watching the status move.
 fn fixture() -> Fixture {
+    fixture_at(version())
+}
+
+/// The fixture, on a connection negotiated at `at`.
+fn fixture_at(at: ProtocolVersion) -> Fixture {
     let root = Some(cap("cap_root"));
-    let mut daemon = Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
-        .epochs(epochs())
+    let mut served = epochs();
+    served.protocol = at;
+    let mut daemon = Daemon::builder(Blake3Identity, negotiated_at(at), cap("cap_root"))
+        .epochs(served)
         .now(now())
         .capability(
             grant(
@@ -338,10 +425,7 @@ fn fixture() -> Fixture {
                 "service:continuumd",
                 AuthorityLevel::Promote,
                 5,
-                Optional::Present(profile(
-                    &["intent.accept", "intent.reject", "intent.lock"],
-                    &[DataGrant::ProductionTrace],
-                )),
+                Optional::Present(profile(&STEWARD_PRIVILEGES, &[DataGrant::ProductionTrace])),
             ),
             None,
         )
@@ -375,10 +459,7 @@ fn fixture() -> Fixture {
                 STEWARD.actor,
                 AuthorityLevel::ReviseIntent,
                 3,
-                Optional::Present(profile(
-                    &["intent.accept", "intent.reject", "intent.lock"],
-                    &[],
-                )),
+                Optional::Present(profile(&STEWARD_PRIVILEGES, &[])),
             ),
             root,
         )
@@ -420,7 +501,7 @@ fn fixture() -> Fixture {
         .expect("an `ev_` handle");
 
     Fixture {
-        server: Server::new(daemon, negotiated()),
+        server: Server::new(daemon, negotiated_at(at)),
         proposal,
         evidence,
         receipt,
@@ -969,19 +1050,30 @@ mod enforcement {
         let operations = landed_privileged_operations();
         assert_eq!(
             operations.len(),
-            3,
-            "expected `intent.accept`, `intent.reject` and `intent.lock`: {operations:?}"
+            9,
+            "expected `intent.accept`, `intent.reject`, `intent.lock`, and the six \
+             signing-wire operations of protocol 3.8: {operations:?}"
         );
 
         for operation in operations {
-            let case = CASES
-                .iter()
-                .find(|case| case.operation == operation)
-                .unwrap_or_else(|| panic!("the corpus drives at {operation}"));
+            let case = CASES.iter().find(|case| case.operation == operation);
+            assert!(
+                case.is_some() || super::SIGNING_WIRE_PROBES.contains(&operation.as_str()),
+                "the corpus drives at {operation}"
+            );
 
             for (principal, expected) in [(REVISER, false), (STEWARD, true)] {
-                let mut fixture = fixture();
-                let result = run(&mut fixture, case, principal, "req_privilege");
+                // A probe runs on a 3.8 connection: below it the operation is refused before
+                // admission, and this experiment is about the admission decision.
+                let mut fixture = match case {
+                    Some(_) => fixture(),
+                    None => super::fixture_at(super::ProtocolVersion::new(3, 8)),
+                };
+                let result = match case {
+                    Some(case) => run(&mut fixture, case, principal, "req_privilege"),
+                    None => super::run_probe(&mut fixture, &operation, principal, "req_privilege"),
+                };
+                let id = case.map_or(operation.as_str(), |case| case.id);
                 let record = fixture
                     .server
                     .daemon()
@@ -993,8 +1085,7 @@ mod enforcement {
                 assert_eq!(record.operation, operation);
                 assert_eq!(
                     record.admitted, expected,
-                    "{} under {principal:?}: admission decided the wrong way",
-                    case.id
+                    "{id} under {principal:?}: admission decided the wrong way",
                 );
                 if expected {
                     // The admitted branch deliberately asserts nothing about the answer's
@@ -1550,7 +1641,21 @@ fn the_corpus_drives_at_every_privileged_operation_this_daemon_serves() {
         );
     }
 
-    let attempted: BTreeSet<&str> = CASES.iter().map(|case| case.operation).collect();
+    // The protocol 3.8 privileged operations the ratified corpus predates are driven at by
+    // this file's own probes (see `SIGNING_WIRE_PROBES`). Each is checked to be privileged
+    // and landed, so the list cannot hide an operation that is neither.
+    for operation in SIGNING_WIRE_PROBES {
+        assert!(
+            privileged.contains(operation) && is_landed(operation),
+            "{operation} is no longer a landed `@privileged` operation — update \
+             SIGNING_WIRE_PROBES"
+        );
+    }
+    let attempted: BTreeSet<&str> = CASES
+        .iter()
+        .map(|case| case.operation)
+        .chain(SIGNING_WIRE_PROBES)
+        .collect();
     for operation in &privileged {
         if UNLANDED_PRIVILEGED.contains(&operation.as_str()) {
             continue;

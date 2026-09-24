@@ -89,6 +89,37 @@ pub fn required_grant(operation: &str) -> Option<DataGrant> {
     }
 }
 
+/// Whether `operation` acts on the deployment as a whole, and so requires an unscoped
+/// grant (protocol 3.8, `rule signing.identities`).
+///
+/// A signer identity is not an artifact of any plan §4.4 class and has no handle a scope
+/// list could name: the `signing` operations mint, rotate, and revoke the deployment's own
+/// identities, sign as the deployment, and read its registry, which names every signer and
+/// the actor of every audit record. The two bundle operations sign as the deployment and
+/// carry that registry, or adopt records into it. None of that is inside a part of the
+/// deployment, so a grant scoped to a part — any non-empty `snapshots`, `intents`,
+/// `artifact_classes`, or `instances` list — does not reach it. The test runs on the
+/// presenting grant; the delegation chain above it already narrows (D4), so an unscoped
+/// grant stands only under unscoped parents.
+#[must_use]
+pub fn requires_unscoped_grant(operation: &str) -> bool {
+    operation.starts_with("signing.")
+        || matches!(operation, "intent.export_bundle" | "intent.import_bundle")
+}
+
+/// Whether `descriptor` carries no scope restriction at all: every scope list is empty,
+/// which RFC 0027 reads as "unrestricted within the level".
+#[must_use]
+pub fn is_unscoped(descriptor: &CapabilityDescriptor) -> bool {
+    descriptor.snapshots.is_empty()
+        && descriptor.intents.is_empty()
+        && descriptor.artifact_classes.is_empty()
+        && descriptor
+            .instances
+            .value()
+            .is_none_or(|instances| instances.is_empty())
+}
+
 /// Decide T1–T4 for one request.
 ///
 /// `connection` is the capability the handshake settled on; the request may present a
@@ -174,6 +205,12 @@ pub fn admit<'state>(
         .iter()
         .all(|named| claimed_class(named) && scope.admits(named))
     {
+        return Err(Denied);
+    }
+
+    // T2, 3.8: an operation on the deployment as a whole needs a grant scoped to no part of
+    // it (`rule signing.identities`).
+    if requires_unscoped_grant(spec.name) && !is_unscoped(descriptor) {
         return Err(Denied);
     }
 

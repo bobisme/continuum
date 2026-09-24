@@ -162,7 +162,8 @@ impl RegistryStatus {
 pub struct Acceptance {
     /// `accepted_by` — the principal that accepted.
     pub accepted_by: String,
-    /// `signature` — the acceptance signature, verbatim as supplied.
+    /// `signature` — the acceptance signature: the last element of `chain` when there is
+    /// one (RFC 0037 A1), otherwise the caller's text, verbatim.
     pub signature: String,
     /// `timestamp` — the caller-supplied acceptance time. There is no clock here.
     pub timestamp: String,
@@ -170,6 +171,10 @@ pub struct Acceptance {
     /// the daemon, never taken from the caller: plan §5.4 makes this the record *the
     /// daemon* produced.
     pub audit_record: String,
+    /// `chain` — the RFC 0037 A1 signature chain, oldest first; empty when the acceptance
+    /// was recorded without one (below protocol 3.8, or with no key allowed to sign an
+    /// acceptance). Such a record never passes another daemon's CI acceptance check.
+    pub chain: Vec<super::acceptance::ChainElement>,
 }
 
 /// One Intent Contract as the registry holds it.
@@ -511,6 +516,10 @@ pub struct DaemonState {
     context_packs: BTreeMap<ContextHandle, super::context::ContextPackRecord>,
     compile_sources: BTreeMap<String, super::context::ContextCompileSource>,
     receipt_signatures: BTreeMap<EvidenceHandle, continuum_evidence::signing::ArtifactSignature>,
+    /// The exact bytes each receipt node was first linked over (cr-2unxyh): a relink is
+    /// compared with them before anything is signed or published.
+    receipt_contents: BTreeMap<EvidenceHandle, Vec<u8>>,
+    signing: super::signing::SigningAuthority,
 }
 
 impl DaemonState {
@@ -653,6 +662,15 @@ impl DaemonState {
         content: Vec<u8>,
     ) -> Result<Commitment, ServiceError> {
         let commitment = Self::commit_of(identifier, &path, &content)?;
+        // A commitment names one (path, content) record. Staging the same record again is
+        // idempotent; a byte-different record under a colliding commitment is refused,
+        // never written over what the commitment already names (ADR-0013, cr-2unxyh).
+        if let Some(held) = self.content.get(&commitment) {
+            if held.path != path || held.content != content {
+                return Err(ServiceError::Collision);
+            }
+            return Ok(commitment);
+        }
         self.content
             .insert(commitment.clone(), StagedFile { path, content });
         Ok(commitment)
@@ -698,18 +716,45 @@ impl DaemonState {
     // --- receipt signatures (plan §18.6, bn-1hape) -------------------------------------
 
     /// Record the signature `evidence.link` made over a receipt it published.
+    ///
+    /// A node's signature is never replaced: a second signature, by a rotated key or over a
+    /// relink, is dropped, and the first one keeps verifying over the node's exact bytes.
     pub(crate) fn record_receipt_signature(
         &mut self,
         receipt: EvidenceHandle,
         signature: continuum_evidence::signing::ArtifactSignature,
     ) {
-        self.receipt_signatures.insert(receipt, signature);
+        self.receipt_signatures.entry(receipt).or_insert(signature);
+    }
+
+    /// The exact receipt bytes a receipt node was first linked over, if `evidence.link`
+    /// recorded them.
+    #[must_use]
+    pub fn receipt_content(&self, receipt: &EvidenceHandle) -> Option<&[u8]> {
+        self.receipt_contents.get(receipt).map(Vec::as_slice)
+    }
+
+    /// Record the exact bytes a receipt node was first linked over. Never replaced.
+    pub(crate) fn record_receipt_content(&mut self, receipt: EvidenceHandle, content: Vec<u8>) {
+        self.receipt_contents.entry(receipt).or_insert(content);
+    }
+
+    /// The deployment's signing authority: registry, held key, local policy, and held
+    /// intent bundles (plan §18.6, protocol 3.8, bn-3glnv).
+    #[must_use]
+    pub const fn signing(&self) -> &super::signing::SigningAuthority {
+        &self.signing
+    }
+
+    pub(crate) fn signing_mut(&mut self) -> &mut super::signing::SigningAuthority {
+        &mut self.signing
     }
 
     /// The signature over a published receipt, when the deployment signs receipts.
     ///
     /// It signs [`signed_receipt_identity`](super::evidence::signed_receipt_identity) of the
-    /// receipt's staged content. No wire operation returns it at protocol 3.6 (bn-3glnv).
+    /// receipt's staged content. From protocol 3.8 `evidence.get` returns it beside the
+    /// receipt node (`EvidenceGetResponse.signature`, bn-3glnv).
     #[must_use]
     pub fn receipt_signature(
         &self,

@@ -714,3 +714,61 @@ protocol_enum! {
         default => Default,
     }
 }
+
+protocol_enum! {
+    /// The artifact kinds that are signed (protocol 3.8, `rule
+    /// signing.identities`): plan §18.6's three, and the RFC 0037 A1 intent
+    /// acceptance statement. The kind is inside every signed message, so a
+    /// signature over one kind never verifies as another.
+    closed enum SignedArtifactKind {
+        /// Wire token `receipt`.
+        receipt => Receipt,
+        /// Wire token `intent-bundle`.
+        intent_bundle = "intent-bundle" => IntentBundle,
+        /// Wire token `domain-pack`.
+        domain_pack = "domain-pack" => DomainPack,
+        /// Wire token `intent-acceptance`.
+        intent_acceptance = "intent-acceptance" => IntentAcceptance,
+    }
+}
+
+protocol_enum! {
+    /// Why a signer identity is revoked (protocol 3.8).
+    closed enum RevocationReason {
+        /// Wire token `compromised`. The secret key is, or may be, known to
+        /// someone else.
+        compromised => Compromised,
+        /// Wire token `key-lost`. The secret key is lost; when it is the
+        /// daemon's held key, a successor is minted and linked (docs/09 §10).
+        key_lost = "key-lost" => KeyLost,
+    }
+}
+
+protocol_enum! {
+    /// The typed outcome of a signature check (protocol 3.8, `rule
+    /// signing.verification`). Exactly one member is `verified`; every other
+    /// member is typed unverified provenance, never a pass (INV-008).
+    closed enum SignatureOutcome {
+        /// Wire token `verified`.
+        verified => Verified,
+        /// Wire token `unsigned`. No signature accompanied the artifact.
+        unsigned => Unsigned,
+        /// Wire token `malformed`. The signature record's bytes are malformed.
+        malformed => Malformed,
+        /// Wire token `kind-mismatch`. The signature claims another kind.
+        kind_mismatch = "kind-mismatch" => KindMismatch,
+        /// Wire token `signature-mismatch`. Tampered, forged, or wrong key.
+        signature_mismatch = "signature-mismatch" => SignatureMismatch,
+        /// Wire token `standing-stale`. The registry that would vouch for the
+        /// signer is not the authoritative one.
+        standing_stale = "standing-stale" => StandingStale,
+        /// Wire token `standing-unknown`. The registry holds no standing for
+        /// the signer.
+        standing_unknown = "standing-unknown" => StandingUnknown,
+        /// Wire token `signer-revoked`.
+        signer_revoked = "signer-revoked" => SignerRevoked,
+        /// Wire token `signer-not-allowed`. Local policy does not allow the
+        /// signer for the kind.
+        signer_not_allowed = "signer-not-allowed" => SignerNotAllowed,
+    }
+}

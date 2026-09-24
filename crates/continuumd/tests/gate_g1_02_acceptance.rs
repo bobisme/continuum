@@ -55,24 +55,25 @@
 //!
 //! | | |
 //! |---|---|
-//! | operations swept | 75, and asserted equal to plan §10.2's registry |
-//! | bodies swept | 152 — a request and a response per operation, plus both envelopes |
-//! | leaf fields classified | 666 ([`LEAVES`]) |
-//! | distinct declaration sites | 410 ([`SITES`]) |
-//! | explicit typed handles (19 declared classes) | 206 ([`HANDLE_LEAVES`]) |
+//! | operations swept | 83, and asserted equal to plan §10.2's registry |
+//! | bodies swept | 168 — a request and a response per operation, plus both envelopes; one is declared empty |
+//! | leaf fields classified | 702 ([`LEAVES`]) |
+//! | distinct declaration sites | 446 ([`SITES`]) |
+//! | explicit typed handles (19 declared classes) | 210 ([`HANDLE_LEAVES`]) |
+//! | signer names (`SignerHandle`, a content identity, protocol 3.8) | 11 ([`SIGNER_NAME_LEAVES`]) |
 //! | class-agnostic `ArtifactHandle`s | 12 ([`ARTIFACT_HANDLE_LEAVES`]) |
 //! | content commitments | 21 ([`COMMITMENT_LEAVES`]) |
-//! | **resource-naming leaves, all of them handles or commitments** | **239** |
+//! | **resource-naming leaves, all of them handles or content identities** | **254** |
 //! | `String` leaves — the class every finding lives in | 119 ([`STRING_LEAVES`]) |
-//! | `Opaque`/`Bytes` leaves | 33 ([`INLINE_LEAVES`]) |
+//! | `Opaque`/`Bytes` leaves | 48 ([`INLINE_LEAVES`]) |
 //! | adjudicated `String` sites | 66 |
-//! | adjudicated `Opaque`/`Bytes` sites | 31 |
+//! | adjudicated `Opaque`/`Bytes` sites | 46 |
 //! | `String` sites whose domain a named IDL rule declares | 5 sites, 6 leaves ([`DECLARED_DOMAINS`]) |
 //! | **findings** | **0** — the 6 leaves over 5 sites pinned before bn-ah1k8 are paid by it |
 //!
 //! # Verdict
 //!
-//! **SATISFIED-AT-NARROWER-SCOPE.** Every daemon-held resource that any of the 75
+//! **SATISFIED-AT-NARROWER-SCOPE.** Every daemon-held resource that any of the 83
 //! operations consumes or returns is named by an explicit typed handle or by a content
 //! commitment, or by a string whose grammar, meaning, and refusal a named IDL rule declares,
 //! with a stated boundary on inbound content. The scope statements are not softened:
@@ -85,8 +86,8 @@
 //! | 4 | **FINDING, paid (bn-ah1k8)**: `benchmark.run` named its benchmark task by `task_id: String` and its graders by `graders: list<String>`, with no handle class and no declared domain; `Target.id` under `benchmark_task` had the same gap. `rule benchmark.task_identity` now fixes the task name's grammar, meaning, and refusal, and states why a content handle is refused (it would be a function of the bundle's hidden half, an existence oracle). `rule benchmark.graders` closes the grader vocabulary to RFC 0034's seven grader-order stages | [`no_leaf_names_a_resource_without_a_handle_or_a_declared_domain`], [`every_declared_domain_is_a_rule_that_cites_its_site`] |
 //! | 5 | **FINDING, paid (bn-ah1k8)**: `query.explain_invalidation`'s `edges: list<String>` named nothing. `rule query.invalidation_edges` spells each edge `<handle>:<reason>` over a sibling `ArtifactHandle`, so the artifact is named by its handle, and states why an index record has no class of its own | same |
 //! | 6 | **FINDING (weak), paid (bn-ah1k8)**: `EvidenceQuery.claim_id` had two readings and `QueryExplainReuseResponse.reasons` had no doc. `rule evidence.claim_identity` fixes the first reading (a claim identity, never a property identifier); `rule query.reuse_reasons` keys `reasons` by sibling handles and closes its values | same |
-//! | 7 | 8 request-position leaves carry an inbound document by value (`Opaque`/`Bytes`); three of them name documents that have a `schemas/` artifact shape and no handle class (`whiteboard.compile.note`, `forge.create.sketch`, `intent.propose_revision.changes.changes`) | [`inbound_documents_travel_by_value_and_this_is_the_whole_list`] |
-//! | 8 | The live probes reach **30 of 75** operations: the other 45 have no `Arguments` variant in this build and are refused by the codec before a payload is read | [`the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which`] |
+//! | 7 | 12 request-position leaves carry an inbound document by value (8 until protocol 3.8 added a bundle, a pack, and a signed artifact with its signature) (`Opaque`/`Bytes`); three of them name documents that have a `schemas/` artifact shape and no handle class (`whiteboard.compile.note`, `forge.create.sketch`, `intent.propose_revision.changes.changes`) | [`inbound_documents_travel_by_value_and_this_is_the_whole_list`] |
+//! | 8 | The live probes reach **38 of 83** operations (30 of 75 until protocol 3.8): the other 45 have no `Arguments` variant in this build and are refused by the codec before a payload is read | [`the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which`] |
 //! | 9 | `ResultEnvelope.next_operations` — the typed discovery surface — is declared and **never populated** by this daemon | [`the_typed_discovery_surface_is_declared_and_unpopulated`] |
 //!
 //! Findings 4, 5 and 6 were **not** failures of the criterion as this file reads it: none of
@@ -691,6 +692,11 @@ enum Class {
     /// `PageToken`, `AuditCorrelationId` — typed identifiers of things that are not
     /// resources.
     TypedIdentifier,
+    /// `SignerHandle` — a signer's name, the BLAKE3 content identity of its canonical record
+    /// (ADR-0054 D5, `rule signing.identities`, protocol 3.8). A signer is held by the daemon
+    /// and is not a plan §4.4 artifact class, so it has no handle class; its name is a content
+    /// identity on the same footing as a `Commitment`, and names the signer as a handle would.
+    SignerName,
     /// `Opaque` or `Bytes`.
     Inline,
     /// `Bool`, `U32`, `U64`, `Timestamp`, `DurationMs`, `ByteCount`, or an enum member.
@@ -765,6 +771,9 @@ impl Vocabulary {
         }
         if base == "Commitment" {
             return Some(Class::Commitment);
+        }
+        if base == "SignerHandle" {
+            return Some(Class::SignerName);
         }
         if base == "String" {
             return Some(Class::PlainString);
@@ -1245,6 +1254,73 @@ const INLINE_SITES: &[(&str, &str, Naming)] = &[
     ),
     ("RepairApplyRequest", "changes", Naming::InboundDocument),
     ("WhiteboardCompileRequest", "note", Naming::InboundDocument),
+    // --- protocol 3.8, the signing wire (bn-3glnv) ---------------------------------------
+    // A bundle, a pack, or an artifact and its signature travel in; the daemon holds none
+    // of them yet. Everything that travels out sits beside the bundle handle or the signer
+    // name it is about.
+    (
+        "IntentImportBundleRequest",
+        "content",
+        Naming::InboundDocument,
+    ),
+    ("SigningSignPackRequest", "pack", Naming::InboundDocument),
+    ("SigningVerifyRequest", "artifact", Naming::InboundDocument),
+    ("SigningVerifyRequest", "signature", Naming::InboundDocument),
+    (
+        "EvidenceGetResponse",
+        "signature",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "IntentExportBundleResponse",
+        "content",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningMintResponse",
+        "registry_head",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningMintResponse",
+        "public_key",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningRegistryResponse",
+        "allowed",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningRegistryResponse",
+        "registry_head",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningRegistryResponse",
+        "log",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningRevokeResponse",
+        "registry_head",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningRotateResponse",
+        "registry_head",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningRotateResponse",
+        "public_key",
+        Naming::ContentBesideAHandle,
+    ),
+    (
+        "SigningSignPackResponse",
+        "signature",
+        Naming::ContentBesideAHandle,
+    ),
     // --- the encoding seam ---------------------------------------------------------------
     ("Error", "data", Naming::EncodedTypedBody),
     ("NextOperation", "arguments", Naming::EncodedTypedBody),
@@ -1311,12 +1387,16 @@ fn undeclared_domains(source: &str) -> Vec<String> {
 
 // --- the counts this file pins, so a protocol edit is visible here ------------------------
 
-/// Leaf fields the sweep classifies, over 152 bodies.
-const LEAVES: usize = 666;
+/// Leaf fields the sweep classifies, over 168 bodies. 666 until protocol 3.8 (bn-3glnv),
+/// whose eight operations and one field add 36: 15 inline, 11 signer names, 4 handles, and 6
+/// scalars.
+const LEAVES: usize = 702;
 /// Distinct `(declaring struct, field)` sites among those leaves.
-const SITES: usize = 410;
+const SITES: usize = 446;
 /// Leaves whose declared type is one of the 19 handle classes.
-const HANDLE_LEAVES: usize = 206;
+const HANDLE_LEAVES: usize = 210;
+/// Leaves whose declared type is `SignerHandle`, a signer's content-identity name (3.8).
+const SIGNER_NAME_LEAVES: usize = 11;
 /// Leaves whose declared type is the class-agnostic `ArtifactHandle`.
 const ARTIFACT_HANDLE_LEAVES: usize = 12;
 /// Leaves whose declared type is `Commitment`.
@@ -1325,7 +1405,7 @@ const COMMITMENT_LEAVES: usize = 21;
 /// class every finding lives in, and the denominator the six of them are six of.
 const STRING_LEAVES: usize = 119;
 /// Leaves whose declared type is `Opaque` or `Bytes`.
-const INLINE_LEAVES: usize = 33;
+const INLINE_LEAVES: usize = 48;
 
 // =========================================================================================
 // 4. The IDL sweep — tests
@@ -1342,20 +1422,20 @@ fn the_reader_recovers_the_whole_document() {
         document.operation_keywords,
         "the reader parsed fewer operations than the file declares"
     );
-    assert_eq!(document.operations.len(), 75, "operations");
+    assert_eq!(document.operations.len(), 83, "operations");
     assert_eq!(document.handles.len(), 19, "declared handle classes");
     assert_eq!(document.structs.len(), 47, "named structs");
     assert_eq!(document.unions.len(), 2, "unions");
     assert_eq!(document.scalars.len(), 9, "scalars");
-    assert_eq!(document.aliases.len(), 9, "aliases");
-    assert_eq!(document.enums.len(), 34, "enums");
+    assert_eq!(document.aliases.len(), 10, "aliases");
+    assert_eq!(document.enums.len(), 37, "enums");
 
     let names: BTreeSet<&str> = document
         .operations
         .iter()
         .map(|operation| operation.name.as_str())
         .collect();
-    assert_eq!(names.len(), 75, "no operation is declared twice");
+    assert_eq!(names.len(), 83, "no operation is declared twice");
 }
 
 /// The independent completeness anchor: plan §10.2's own registry.
@@ -1401,7 +1481,7 @@ fn the_sweep_is_exhaustive_over_the_registry() {
         .into_iter()
         .map(|operation| operation.name)
         .collect();
-    assert_eq!(registry.len(), 75, "plan §10.2 lists 75 operations");
+    assert_eq!(registry.len(), 83, "plan §10.2 lists 83 operations");
     assert_eq!(
         registry, idl,
         "plan §10.2 and the IDL declare different operation registries"
@@ -1424,17 +1504,34 @@ fn every_body_of_every_operation_is_swept() {
         document.operations.len(),
         "every operation contributed at least one leaf"
     );
+    // One body is declared empty: `signing.registry`'s request (protocol 3.8), which reads a
+    // deployment singleton and names nothing. An empty body contributes no leaf by
+    // construction, so it is required to be *declared* empty — an inline body with no field —
+    // rather than excused by name; a reader that dropped a body's fields would still fail.
+    let mut empty_bodies = Vec::new();
     for operation in &document.operations {
-        for direction in ["request", "response"] {
-            assert!(
-                leaves
-                    .iter()
-                    .any(|leaf| leaf.operation == operation.name && leaf.direction == direction),
-                "{} {direction} contributed no leaf",
-                operation.name
-            );
+        for (direction, body) in [
+            ("request", &operation.request),
+            ("response", &operation.response),
+        ] {
+            let contributed = leaves
+                .iter()
+                .any(|leaf| leaf.operation == operation.name && leaf.direction == direction);
+            if !contributed {
+                assert!(
+                    matches!(body, reader::Body::Inline(fields) if fields.is_empty()),
+                    "{} {direction} contributed no leaf",
+                    operation.name
+                );
+                empty_bodies.push(format!("{} {direction}", operation.name));
+            }
         }
     }
+    assert_eq!(
+        empty_bodies,
+        ["signing.registry request"],
+        "the empty bodies moved"
+    );
     assert!(
         leaves.iter().any(|leaf| leaf.operation == "<envelope>"),
         "both envelopes are swept"
@@ -1456,11 +1553,13 @@ fn the_resource_naming_types_are_the_handle_vocabulary() {
     assert_eq!(count(Class::Commitment), COMMITMENT_LEAVES);
     assert_eq!(count(Class::PlainString), STRING_LEAVES);
     assert_eq!(count(Class::Inline), INLINE_LEAVES);
-    // 239 of 666 leaves name a resource, and every one of them does it with a handle or a
-    // content identity. That is the criterion's positive half as a number.
+    assert_eq!(count(Class::SignerName), SIGNER_NAME_LEAVES);
+    // 254 of 702 leaves name a resource, and every one of them does it with a handle or a
+    // content identity. That is the criterion's positive half as a number. It was 239 of
+    // 666 until protocol 3.8 added four handles and eleven signer names.
     assert_eq!(
-        HANDLE_LEAVES + ARTIFACT_HANDLE_LEAVES + COMMITMENT_LEAVES,
-        239
+        HANDLE_LEAVES + ARTIFACT_HANDLE_LEAVES + COMMITMENT_LEAVES + SIGNER_NAME_LEAVES,
+        254
     );
     // Every handle-typed leaf names one of the 19 declared classes; none is a bare string
     // that happens to look like a handle.
@@ -1510,7 +1609,7 @@ fn every_string_and_inline_site_is_adjudicated() {
         unadjudicated.join("\n  ")
     );
     assert_eq!(string_sites.len(), 66, "adjudicated `String` sites");
-    assert_eq!(inline_sites.len(), 31, "adjudicated `Opaque`/`Bytes` sites");
+    assert_eq!(inline_sites.len(), 46, "adjudicated `Opaque`/`Bytes` sites");
     assert_eq!(STRING_SITES.len(), string_sites.len(), "no dead table rows");
     assert_eq!(INLINE_SITES.len(), inline_sites.len(), "no dead table rows");
 }
@@ -1634,7 +1733,7 @@ fn the_response_direction_returns_handles_wherever_it_mints_or_moves_a_resource(
                 && leaf.direction == direction
                 && matches!(
                     leaf.class,
-                    Class::Handle | Class::ArtifactHandle | Class::Commitment
+                    Class::Handle | Class::ArtifactHandle | Class::Commitment | Class::SignerName
                 )
         })
     };
@@ -1689,7 +1788,7 @@ fn inline_content_never_travels_without_a_handle_in_the_same_call() {
             other.operation == leaf.operation
                 && matches!(
                     other.class,
-                    Class::Handle | Class::ArtifactHandle | Class::Commitment
+                    Class::Handle | Class::ArtifactHandle | Class::Commitment | Class::SignerName
                 )
         });
         if !named {
@@ -1722,9 +1821,13 @@ fn inbound_documents_travel_by_value_and_this_is_the_whole_list() {
         [
             "forge.create sketch",
             "intent.accept acceptance",
+            "intent.import_bundle content",
             "intent.propose_revision changes.changes",
             "program.run configuration",
             "repair.apply changes",
+            "signing.sign_pack pack",
+            "signing.verify artifact",
+            "signing.verify signature",
             "whiteboard.compile note",
             "workspace.create overlay.content",
             "workspace.fork overlay.content",
@@ -1774,7 +1877,7 @@ fn the_request_envelope_names_its_scope_and_declares_its_absences() {
         .filter(|item| {
             matches!(
                 vocabulary.classify(&item.ty),
-                Some(Class::Handle | Class::ArtifactHandle | Class::Commitment)
+                Some(Class::Handle | Class::ArtifactHandle | Class::Commitment | Class::SignerName)
             )
         })
         .map(|item| item.name.as_str())
@@ -1893,7 +1996,7 @@ fn the_sweep_flags_an_inline_blob_with_no_handle_in_its_call() {
         leaf.operation == "observe.classify"
             && matches!(
                 leaf.class,
-                Class::Handle | Class::ArtifactHandle | Class::Commitment
+                Class::Handle | Class::ArtifactHandle | Class::Commitment | Class::SignerName
             )
     });
     assert!(
@@ -1925,7 +2028,7 @@ fn the_sweep_flags_a_mutation_that_returns_no_handle() {
             && leaf.direction == "response"
             && matches!(
                 leaf.class,
-                Class::Handle | Class::ArtifactHandle | Class::Commitment
+                Class::Handle | Class::ArtifactHandle | Class::Commitment | Class::SignerName
             )
     });
     let seal = document
@@ -1952,9 +2055,9 @@ fn a_removed_operation_breaks_the_registry_cross_check() {
         .expect("the declaration is terminated");
     let mutated = format!("{}{}", &source[..start], &source[end..]);
     let document = reader::parse(&mutated);
-    assert_eq!(document.operations.len(), 74);
+    assert_eq!(document.operations.len(), 82);
     assert_eq!(
-        document.operation_keywords, 74,
+        document.operation_keywords, 82,
         "both counting methods see the removal"
     );
     let names: Vec<&str> = document
@@ -2880,11 +2983,15 @@ fn a_handle_of_the_wrong_class_cannot_be_constructed_at_all() {
     assert!(continuumd::protocol::scalar::ArtifactHandle::new("notahandle").is_err());
 }
 
-/// The live surface, counted. The IDL sweep is 75/75; this is what the probes can reach.
+/// The live surface, counted. The IDL sweep is 83/83; this is what the probes can reach.
+///
+/// The name records the count this campaign pinned at protocol 3.6 (30 of 75). Protocol 3.8
+/// (bn-3glnv) grew the registry and the landed set together by eight, to 38 of 83, and the
+/// name is kept because governance evidence cites it.
 #[test]
 fn the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which() {
     let document = document();
-    assert_eq!(document.operations.len(), 75);
+    assert_eq!(document.operations.len(), 83);
     let served: BTreeSet<&str> = [
         "workspace.create",
         "workspace.create_by_reference",
@@ -2916,10 +3023,18 @@ fn the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which() {
         "context.compile",
         "context.expand",
         "whiteboard.compile",
+        "intent.export_bundle",
+        "intent.import_bundle",
+        "signing.mint",
+        "signing.rotate",
+        "signing.revoke",
+        "signing.registry",
+        "signing.verify",
+        "signing.sign_pack",
     ]
     .into_iter()
     .collect();
-    assert_eq!(served.len(), 30, "operations with a decoded request body");
+    assert_eq!(served.len(), 38, "operations with a decoded request body");
     for operation in &served {
         assert!(
             document

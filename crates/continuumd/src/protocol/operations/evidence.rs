@@ -27,6 +27,11 @@ protocol_struct! {
         edge: Opaque nullable;
         /// IDL `redacted: Redacted optional`.
         redacted: Redacted optional;
+        /// The canonical signature record over a receipt node the daemon signed
+        /// (`@since("3.8")`, `rule signing.verification`). Absent for every other
+        /// node, for an edge, for an unsigned receipt, and on a connection
+        /// negotiated below 3.8.
+        signature: Bytes optional;
     }
 }
 

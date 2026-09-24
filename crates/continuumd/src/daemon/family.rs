@@ -28,7 +28,7 @@
 //! # What a family may assume when `handle` is called
 //!
 //! - the request named this connection's negotiated protocol version;
-//! - the operation is one of the registry's 75 and `Call::spec` is its entry;
+//! - the operation is one of the registry's 83 and `Call::spec` is its entry;
 //! - the arguments are the shape that operation declares;
 //! - admission T1–T4 passed for this actor, this capability, and every handle
 //!   [`OperationFamily::scope`] reported — so no family re-checks authority, and none may
@@ -63,13 +63,19 @@ use crate::protocol::operations::evidence::{
 };
 use crate::protocol::operations::intent::{
     IntentAcceptRequest, IntentAcceptResponse, IntentDiffRequest, IntentDiffResponse,
-    IntentGetRequest, IntentGetResponse, IntentLockRequest, IntentLockResponse,
+    IntentExportBundleRequest, IntentExportBundleResponse, IntentGetRequest, IntentGetResponse,
+    IntentImportBundleRequest, IntentImportBundleResponse, IntentLockRequest, IntentLockResponse,
     IntentProposeRevisionRequest, IntentProposeRevisionResponse, IntentRejectRequest,
     IntentRejectResponse,
 };
 use crate::protocol::operations::observe::{
     ObserveClassifyRequest, ObserveClassifyResponse, ObserveIngestRequest, ObserveIngestResponse,
     ObserveResultRequest,
+};
+use crate::protocol::operations::signing::{
+    SigningMintRequest, SigningMintResponse, SigningRegistryRequest, SigningRegistryResponse,
+    SigningRevokeRequest, SigningRevokeResponse, SigningRotateRequest, SigningRotateResponse,
+    SigningSignPackRequest, SigningSignPackResponse, SigningVerifyRequest, SigningVerifyResponse,
 };
 use crate::protocol::operations::task::{
     TaskCancelRequest, TaskCancelResponse, TaskResumeRequest, TaskResumeResponse,
@@ -177,6 +183,22 @@ pub enum Arguments {
     WhiteboardCompile(WhiteboardCompileRequest),
     /// `workspace.create_by_reference`.
     WorkspaceCreateByReference(WorkspaceCreateByReferenceRequest),
+    /// `intent.export_bundle` (3.8).
+    IntentExportBundle(IntentExportBundleRequest),
+    /// `intent.import_bundle` (3.8).
+    IntentImportBundle(IntentImportBundleRequest),
+    /// `signing.mint` (3.8).
+    SigningMint(SigningMintRequest),
+    /// `signing.rotate` (3.8).
+    SigningRotate(SigningRotateRequest),
+    /// `signing.revoke` (3.8).
+    SigningRevoke(SigningRevokeRequest),
+    /// `signing.registry` (3.8).
+    SigningRegistry(SigningRegistryRequest),
+    /// `signing.verify` (3.8).
+    SigningVerify(SigningVerifyRequest),
+    /// `signing.sign_pack` (3.8).
+    SigningSignPack(SigningSignPackRequest),
 }
 
 impl Arguments {
@@ -214,6 +236,14 @@ impl Arguments {
             Self::ContextExpand(_) => "context.expand",
             Self::WhiteboardCompile(_) => "whiteboard.compile",
             Self::WorkspaceCreateByReference(_) => "workspace.create_by_reference",
+            Self::IntentExportBundle(_) => "intent.export_bundle",
+            Self::IntentImportBundle(_) => "intent.import_bundle",
+            Self::SigningMint(_) => "signing.mint",
+            Self::SigningRotate(_) => "signing.rotate",
+            Self::SigningRevoke(_) => "signing.revoke",
+            Self::SigningRegistry(_) => "signing.registry",
+            Self::SigningVerify(_) => "signing.verify",
+            Self::SigningSignPack(_) => "signing.sign_pack",
         }
     }
 }
@@ -295,6 +325,22 @@ pub enum Payload {
     WhiteboardCompile(WhiteboardCompileResponse),
     /// `workspace.create_by_reference`.
     WorkspaceCreateByReference(WorkspaceCreateByReferenceResponse),
+    /// `intent.export_bundle` (3.8).
+    IntentExportBundle(IntentExportBundleResponse),
+    /// `intent.import_bundle` (3.8).
+    IntentImportBundle(IntentImportBundleResponse),
+    /// `signing.mint` (3.8).
+    SigningMint(SigningMintResponse),
+    /// `signing.rotate` (3.8).
+    SigningRotate(SigningRotateResponse),
+    /// `signing.revoke` (3.8).
+    SigningRevoke(SigningRevokeResponse),
+    /// `signing.registry` (3.8).
+    SigningRegistry(SigningRegistryResponse),
+    /// `signing.verify` (3.8).
+    SigningVerify(SigningVerifyResponse),
+    /// `signing.sign_pack` (3.8).
+    SigningSignPack(SigningSignPackResponse),
 }
 
 impl Payload {
@@ -334,6 +380,14 @@ impl Payload {
             Self::ContextExpand(_) => Some("context.expand"),
             Self::WhiteboardCompile(_) => Some("whiteboard.compile"),
             Self::WorkspaceCreateByReference(_) => Some("workspace.create_by_reference"),
+            Self::IntentExportBundle(_) => Some("intent.export_bundle"),
+            Self::IntentImportBundle(_) => Some("intent.import_bundle"),
+            Self::SigningMint(_) => Some("signing.mint"),
+            Self::SigningRotate(_) => Some("signing.rotate"),
+            Self::SigningRevoke(_) => Some("signing.revoke"),
+            Self::SigningRegistry(_) => Some("signing.registry"),
+            Self::SigningVerify(_) => Some("signing.verify"),
+            Self::SigningSignPack(_) => Some("signing.sign_pack"),
         }
     }
 }

@@ -950,7 +950,7 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     let document = document();
     // The IDL's §10 header states the registry's size in prose; if the parser silently
     // dropped a declaration, every comparison below would pass vacuously for it.
-    assert_eq!(document.operations.len(), 75, "operations");
+    assert_eq!(document.operations.len(), 83, "operations");
     assert_eq!(document.scalars.len(), 9, "scalars");
     assert_eq!(document.handles.len(), 19, "handles");
     // Protocol 3.1 (IDL 1.2) adds one alias (`AuditCorrelationId`), one enum
@@ -1050,17 +1050,25 @@ fn the_idl_parses_to_the_shape_its_header_declares() {
     // Protocol 3.7 (IDL 1.15, bn-28kv4) adds one `optional` field,
     // `CapabilityDescriptor.instances`, and one rule, `capability.instance_scope`:
     // 50 -> 51. A field is not one of these five counts, so only the rule count moves.
-    assert_eq!(document.aliases.len(), 9, "aliases");
-    assert_eq!(document.enums.len(), 34, "enums");
+    //
+    // Protocol 3.8 (IDL 1.16, bn-3glnv) is the signing wire: eight operations, 75 -> 83,
+    // six of them in a **20th** namespace, `signing`, and two in `intent`; one alias,
+    // `SignerHandle`, 9 -> 10; three enums, `SignedArtifactKind`, `RevocationReason`, and
+    // `SignatureOutcome`, 34 -> 37; and three rules, `signing.identities`,
+    // `signing.verification`, and `intent.bundles`, 51 -> 54. Its one `optional` field,
+    // `EvidenceGetResponse.signature`, moves none of these counts. No named struct is added:
+    // every new body is anonymous.
+    assert_eq!(document.aliases.len(), 10, "aliases");
+    assert_eq!(document.enums.len(), 37, "enums");
     assert_eq!(document.structs.len(), 47, "structs");
     assert_eq!(document.unions.len(), 2, "unions");
-    assert_eq!(document.rules.len(), 51, "rules");
+    assert_eq!(document.rules.len(), 54, "rules");
     let namespaces: std::collections::BTreeSet<&str> = document
         .operations
         .iter()
         .map(|operation| operation.namespace.as_str())
         .collect();
-    assert_eq!(namespaces.len(), 19, "namespaces");
+    assert_eq!(namespaces.len(), 20, "namespaces");
 }
 
 #[test]
@@ -1078,7 +1086,7 @@ fn the_operation_set_is_exactly_the_idl_registry() {
         .map(|operation| operation.name.as_str())
         .collect();
     assert_eq!(mine, theirs);
-    assert_eq!(OPERATION_COUNT, 75);
+    assert_eq!(OPERATION_COUNT, 83);
 }
 
 #[test]
@@ -1386,12 +1394,12 @@ fn a_removed_operation_is_reported() {
     mutated.push_str(&source[end..]);
 
     let document = idl::parse(&mutated);
-    assert_eq!(document.operations.len(), 74);
+    assert_eq!(document.operations.len(), 82);
     let found = all_mismatches(&document);
     assert!(
         found
             .iter()
-            .any(|item| item.contains("workspace.seal") || item.contains("74")),
+            .any(|item| item.contains("workspace.seal") || item.contains("82")),
         "removing an operation must be reported, got {found:?}"
     );
 }

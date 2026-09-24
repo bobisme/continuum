@@ -3,13 +3,13 @@
     "accepted_by": "user:maintainer-1",
     "audit_record": "audit_accept_in_ack_v1",
     "capability": "revise-intent",
-    "signature": "ssh-ed25519:acceptance-signature-placeholder",
+    "signature": "ed25519:6d21c3de47abc6c52db5e11748a2839471af0a8da8dd6595d18535bc38c378e4e406d5b13354411f6aa028aec27e0d1ab6cfbacd1bfd04e0cf58a503b2b57c1b",
     "timestamp": "2026-07-24T21:00:00Z"
   },
   "chain": [
     {
       "scope": "bundle:inb_demo1",
-      "signature": "ssh-ed25519:bundle-signature-placeholder",
+      "signature": "ed25519:f438c7e451f5027ce93fab1b394be7582c9f0af2fe4be8b494b1b60610f2fe44a4f831b237be6f2e12c7997bf26b9a94832ea3cc8679b8fd77d361ae65a4ed9b",
       "signer": "user:maintainer-1"
     }
   ],

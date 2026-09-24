@@ -133,7 +133,7 @@
   "schema_epoch": 1,
   "semantic_diff": "diff_demo1",
   "semantic_epoch": "sem-3",
-  "signature": "ssh-ed25519:promotion-signature-placeholder",
+  "signature": "ed25519:0a0789490d872a8ded4677cbc8669fda454ebd9d0dd087a7f893ce1dd084edfef68b10f46f0979ac11798d5ac56549af3683ea112eec1d3f393558620c0fc70f",
   "unknowns": [
     "production storage profile assumed (contractual)"
   ]

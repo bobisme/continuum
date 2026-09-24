@@ -142,7 +142,7 @@ const INVENTORY: &[Artifact] = &[
     // --- the authority ---------------------------------------------------------------
     Artifact {
         path: IDL,
-        role: "the normative wire contract: 75 operations, 47 structs, 34 enums, 51 rules",
+        role: "the normative wire contract: 83 operations, 47 structs, 37 enums, 54 rules",
         provenance: Provenance::Normative,
     },
     Artifact {
@@ -468,7 +468,9 @@ mod blindness {
             .lines()
             .filter(|line| line.contains("@since(\"") && !line.trim_start().starts_with("//"))
             .count();
-        assert_eq!(sites, 15, "declaration sites carrying @since");
+        // 15 until protocol 3.8 (bn-3glnv) dated thirteen more: eight operations, three
+        // enums, the `SignerHandle` alias, and `EvidenceGetResponse.signature`.
+        assert_eq!(sites, 28, "declaration sites carrying @since");
 
         // None of the seven spec types carries a field to compare them against. This is
         // structural, not a gap in a comparison: there is nothing on the shipped side to
@@ -523,7 +525,8 @@ mod blindness {
             "and stores nothing from it on the Field"
         );
         // The IDL really does carry field-level annotations, so the hole has content:
-        // four fields declare `@since`, and every pattern-constrained alias member of a
+        // five fields declare `@since` (four until protocol 3.8 added
+        // `EvidenceGetResponse.signature`), and every pattern-constrained alias member of a
         // struct relies on the alias declaration for its constraint.
         let idl = read(IDL);
         let annotated_fields = idl
@@ -536,19 +539,19 @@ mod blindness {
                     && trimmed.ends_with(';')
             })
             .count();
-        assert_eq!(annotated_fields, 4, "fields carrying an annotation");
+        assert_eq!(annotated_fields, 5, "fields carrying an annotation");
     }
 
     #[test]
     fn rule_bodies_are_dropped_except_the_one_rule_leg_one_reads_by_hand() {
-        // The parser skips `"""` blocks, so the 51 rules' normative bodies are compared
+        // The parser skips `"""` blocks, so the 54 rules' normative bodies are compared
         // against nothing. Leg one reaches back into the raw text for exactly one of
-        // them — `errors.common` — which is the measure of the hole: 50 rule bodies,
+        // them — `errors.common` — which is the measure of the hole: 53 rule bodies,
         // including `encoding.opaque_payloads` and `conformance.registry_agreement`
         // themselves, are unchecked prose as far as both checkers are concerned.
         let idl = read(IDL);
         let rules = idl.lines().filter(|line| line.starts_with("rule ")).count();
-        assert_eq!(rules, 51, "rules the IDL declares");
+        assert_eq!(rules, 54, "rules the IDL declares");
 
         let conformance = read(CHECKERS[0]);
         assert!(conformance.contains("dropping comments and `\"\"\"` blocks"));
@@ -728,18 +731,19 @@ fn every_operation_a_shipped_client_spells_is_declared() {
     let mapping = argument_variants();
     let declared: BTreeSet<&str> = OPERATIONS.iter().map(|spec| spec.name).collect();
 
-    // The typed argument family itself: 30 of the registry's 75 operations have a
-    // constructible request. The other 45 are reachable only as a name, which is the
+    // The typed argument family itself: 38 of the registry's 83 operations have a
+    // constructible request (30 of 75 until protocol 3.8 added eight, each with its body).
+    // The other 45 are reachable only as a name, which is the
     // accounting `rule errors.unsupported_surface` describes and not a client defect —
     // but it is the ceiling on what any client can spell today, so it is measured here.
-    assert_eq!(mapping.len(), 30, "constructible request families");
+    assert_eq!(mapping.len(), 38, "constructible request families");
     for name in mapping.values() {
         assert!(
             declared.contains(name.as_str()),
             "the Arguments family spells {name:?}, which the protocol does not declare"
         );
     }
-    assert_eq!(OPERATIONS.len(), 75);
+    assert_eq!(OPERATIONS.len(), 83);
 
     for (crate_name, source_dir, expected) in [
         ("continuum-mcp", "crates/continuum-mcp/src", 9usize),

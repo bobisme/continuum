@@ -157,6 +157,38 @@ protocol continuum.native {
   /// independently of the protocol version it defines.
   ///
   /// Revisions:
+  ///   1.16 — the signing wire (bn-3glnv); `version` "3.8". Plan §18.6's
+  ///         signing identities reach the wire: identities "are minted
+  ///         through audited daemon operations", and these are they. A
+  ///         20th namespace, `signing`, adds six operations —
+  ///         `signing.mint`, `signing.rotate`, and `signing.revoke`
+  ///         administer the deployment's signer identities,
+  ///         `signing.registry` reads the audit log that carries every
+  ///         revocation record, `signing.verify` returns typed provenance
+  ///         for a signature, and `signing.sign_pack` signs a domain pack.
+  ///         `intent` gains `intent.export_bundle` and
+  ///         `intent.import_bundle`, so a signed intent bundle (plan
+  ///         §4.2.1) can be produced, held, and distributed with its
+  ///         revocation records inside it, and `intent.accept` naming a
+  ///         bundle is now the fail-closed CI acceptance check over a
+  ///         bundle the daemon holds rather than a refusal of every named
+  ///         bundle. `EvidenceGetResponse` gains `signature: Bytes
+  ///         optional @since("3.8")`, the receipt's signature record.
+  ///         Three enums arrive (`SignedArtifactKind`, `RevocationReason`,
+  ///         `SignatureOutcome`), one alias (`SignerHandle`), and three
+  ///         rules (`signing.identities`, `signing.verification`,
+  ///         `intent.bundles`), 51 → 54.
+  ///
+  ///         **Why a minor.** Adding an operation and adding an
+  ///         `optional` field are the first two of
+  ///         `rule versioning.compatible_change`'s five changes, and each
+  ///         MUST raise the minor. No existing declaration moves: no
+  ///         field changes presence or type, no enum gains a member, and
+  ///         no error code is minted. The new operations are served only
+  ///         on a connection negotiated at 3.8 or later, and the new field
+  ///         is not emitted below 3.8, so a 3.0–3.7 client sees no
+  ///         change. `intent.accept`'s `bundle` field is unchanged; what
+  ///         changes is that a held bundle can now verify.
   ///   1.15 — the general instance scope (bn-28kv4); `version` "3.7".
   ///         `CapabilityDescriptor` gains `instances: list<ArtifactHandle>
   ///         optional @since("3.7")`, and `rule capability.instance_scope`
@@ -734,8 +766,17 @@ protocol continuum.native {
   ///         bump was deferred to the sweep rather than taken silently.
   ///         It is taken once, at 1.2, and covers both revisions.
   ///   1.0 — first normative definition of protocol 3.0.
-  idl_version = "1.15";
+  idl_version = "1.16";
   /// The protocol version this document defines.
+  ///
+  /// 3.8 is the single minor bump for IDL 1.16 (bn-3glnv), and it is the
+  /// fourth that adds operations: eight, six of them in a 20th namespace,
+  /// `signing`, and two in `intent`, with one `optional` field beside
+  /// them. Both are compatible changes, so the major window `[3, 2]` is
+  /// untouched. The daemon serves the eight operations only on a
+  /// connection negotiated at 3.8 or later and emits
+  /// `EvidenceGetResponse.signature` only there, so a 3.0–3.7 client sees
+  /// no change.
   ///
   /// 3.7 is the single minor bump for IDL 1.15 (bn-28kv4), and it is the
   /// first since 3.2 that adds a field rather than an operation:
@@ -892,7 +933,7 @@ protocol continuum.native {
   /// and the F13 discipline is now mechanically enforced rather than
   /// remembered: the dossier validator parses all three sources and
   /// fails closed on any disagreement, preferring none.
-  version = "3.7";
+  version = "3.8";
   /// Protocol majors a conforming daemon serves concurrently: N, N−1.
   majors_served = [3, 2];
   /// Wire encodings; exactly one is negotiated per connection.
@@ -1242,6 +1283,17 @@ alias OperationName = String @pattern("^[a-z]+\\.[a-z_]+$");
 /// through the audit surface, not through the protocol.
 /// `rule audit.correlation` fixes how it is derived.
 alias AuditCorrelationId = String @pattern("^[A-Za-z0-9_-]+$") @since("3.1");
+
+/// The text name of a signer identity: `signer_` and the 64-digit
+/// lowercase BLAKE3 digest of the signer's canonical record (ADR-0054 D5).
+///
+/// Not a handle and not a plan §4.4 artifact class: a signer is a public
+/// key, administered by the `signing` operations and never stored in the
+/// content-addressed store, and no scope list can name one. The name
+/// never decides sameness; a daemon resolves it to the exact identity it
+/// holds, and a name it does not hold is refused. See
+/// `rule signing.identities`.
+alias SignerHandle = String @pattern("^signer_[0-9a-f]{64}$") @since("3.8");
 
 
 // ---------------------------------------------------------------------
@@ -2480,7 +2532,9 @@ rule capability.instance_scope {
   created or forked snapshot, a locked successor intent, an ingested
   or linked evidence node or edge, a compiled or expanded pack, a
   started task, the continuation a start or a resume parks under, the
-  lineage head a recovery offer names — is decided the same way
+  lineage head a recovery offer names, an exported or imported `inb_`
+  and each `in_` an import enters with its predecessor (3.8) — is
+  decided the same way
   before it is written, published, or returned, whether or not it is
   already held, so the answer does not say which (X2). A handle whose
   identity the run itself determines, such as a parked continuation,
@@ -3328,7 +3382,7 @@ struct EvidenceQuery {
 // =====================================================================
 // 10. Operations
 //
-// The complete plan §10.2 registry: 75 operations in 19 namespaces.
+// The complete plan §10.2 registry: 83 operations in 20 namespaces.
 // Each operation's `authority` clause mirrors RFC 0027's registry table
 // exactly; a generator MUST fail if the two disagree.
 // =====================================================================
@@ -3549,7 +3603,9 @@ operation intent.accept {
     /// The signed intent bundle the acceptance record came from, when
     /// the proposal was imported rather than authored locally. CI fails
     /// closed with `AcceptanceChainInvalid` when the referenced bundle
-    /// is absent or its chain does not verify (plan §4.2.1).
+    /// is absent or its chain does not verify (plan §4.2.1). From 3.8
+    /// a bundle the daemon holds is checked, and `rule intent.bundles`
+    /// says what "verifies" means.
     bundle: IntentBundleHandle optional;
   };
   response {
@@ -3594,6 +3650,59 @@ operation intent.lock {
   };
   verdict StructuralVerdictValue;
   errors [IntentMutationDenied, MalformedRequest];
+}
+
+/// Export the named contracts, with their registry records, as one
+/// signed intent bundle (plan §4.2.1): the body carries the contracts,
+/// the local allowed-signers set, and the signing registry's audit log
+/// — the revocation records a verifier needs — and is signed with the
+/// daemon's held key as kind `intent-bundle`. The daemon holds the
+/// bundle under its `inb_` identity. `PolicyGateFailed` when the daemon
+/// holds no active key. See `rule intent.bundles`.
+@mutation @privileged @audit_recorded
+@since("3.8")
+operation intent.export_bundle {
+  authority revise_intent;
+  request {
+    /// The contracts to export: at least one, at most the bundle bound.
+    intents: list<IntentHandle> required;
+  };
+  response {
+    bundle: IntentBundleHandle required;
+    /// The signed bundle, in the form `rule intent.bundles` fixes.
+    content: Bytes required;
+  };
+  verdict StructuralVerdictValue;
+  errors [PolicyGateFailed];
+}
+
+/// Import a signed intent bundle (RFC 0037 I1–I6). Every layer, every
+/// contract, and every contract's lineage is validated before anything
+/// changes, and then the bundle is verified. A bundle that does not
+/// verify changes nothing and is not held. One that verifies has the
+/// standing facts it carries adopted, is held, and enters each contract
+/// the registry does not hold at `proposed`, never higher. Import never
+/// accepts: `intent.accept` naming the bundle does. See
+/// `rule intent.bundles`.
+@mutation @privileged @audit_recorded
+@since("3.8")
+operation intent.import_bundle {
+  authority revise_intent;
+  request {
+    /// A signed bundle, in the form `rule intent.bundles` fixes.
+    content: Bytes required;
+  };
+  response {
+    bundle: IntentBundleHandle required;
+    /// The bundle signature's typed provenance under local policy.
+    outcome: SignatureOutcome required;
+    /// The contracts this import entered into the registry.
+    imported: list<IntentHandle> required;
+    /// The standing facts this import adopted.
+    adopted: U32 required;
+  };
+  verdict StructuralVerdictValue;
+  errors [IntentMutationDenied];
 }
 
 // --- verification ----------------------------------------------------
@@ -4681,6 +4790,11 @@ operation evidence.get {
     node: Opaque nullable;
     edge: Opaque nullable;
     redacted: Redacted optional;
+    /// The canonical signature record (ADR-0054 D4) the daemon made over
+    /// a receipt node it published. Absent for every other node, for an
+    /// edge, and for an unsigned receipt; never emitted on a connection
+    /// negotiated below 3.8. See `rule signing.verification`.
+    signature: Bytes optional @since("3.8");
   };
   errors [EpochUnsupported];
 }
@@ -4845,6 +4959,431 @@ operation whiteboard.compile {
   };
   verdict StructuralVerdictValue;
   errors [InsufficientEvidence];
+}
+
+// --- signing (plan §18.6, ADR-0054) ----------------------------------
+
+/// The artifact kinds that are signed: plan §18.6's three, and the RFC
+/// 0037 A1 intent acceptance statement (`rule intent.bundles`). The kind
+/// is inside every signed message, so a signature over one kind never
+/// verifies as another (ADR-0054 D4).
+@since("3.8")
+enum SignedArtifactKind {
+  receipt,
+  intent_bundle = "intent-bundle",
+  domain_pack = "domain-pack",
+  intent_acceptance = "intent-acceptance",
+}
+
+/// Why a signer identity is revoked.
+@since("3.8")
+enum RevocationReason {
+  /// The secret key is, or may be, known to someone else.
+  compromised,
+  /// The secret key is lost. When it is the daemon's held key, a
+  /// successor is minted and linked to it (docs/09 §10).
+  key_lost = "key-lost",
+}
+
+/// The typed outcome of a signature check. Exactly one member,
+/// `verified`, is a pass; every other member is typed unverified
+/// provenance (INV-008). See `rule signing.verification`.
+@since("3.8")
+enum SignatureOutcome {
+  verified,
+  /// No signature accompanied the artifact.
+  unsigned,
+  /// The signature record's bytes are malformed or over their bound.
+  malformed,
+  /// The signature claims another kind.
+  kind_mismatch = "kind-mismatch",
+  /// The signature does not verify: tampered, forged, or wrong key.
+  signature_mismatch = "signature-mismatch",
+  /// The registry that would vouch for the signer is not current.
+  standing_stale = "standing-stale",
+  /// The registry holds no standing for the signer.
+  standing_unknown = "standing-unknown",
+  /// The signer is revoked.
+  signer_revoked = "signer-revoked",
+  /// Local policy does not allow the signer for the kind.
+  signer_not_allowed = "signer-not-allowed",
+}
+
+rule signing.identities {
+  """
+  A deployment's signing authority is one signing registry — every
+  signer's standing (`active`, `rotated`, or `revoked`) and the
+  append-only audit log of every mint, rotation, revocation, and
+  supersession, each with the admitted actor — at most one key the
+  daemon holds, and a local allowed-signers policy naming which signer
+  may sign which `SignedArtifactKind`. The daemon holds the key; no
+  operation in this file carries a secret, and a key MUST NOT appear in
+  any response, error `detail`, or log.
+
+  Authority. The six `signing` operations, `intent.export_bundle`, and
+  `intent.import_bundle` act on the deployment as a whole, so each is
+  admitted only for a capability whose `snapshots`, `intents`,
+  `artifact_classes`, and `instances` are all empty: a grant scoped to
+  any part of the deployment is `CapabilityDenied`, decided at
+  admission with every other T2 test. `signing.mint`, `signing.rotate`,
+  `signing.revoke`, `signing.sign_pack`, and the two bundle operations
+  are also `@privileged` (T3). Each of the eight is served only on a
+  connection negotiated at 3.8 or later: below it the request is
+  `MalformedRequest`, decided before admission and before the
+  idempotency ledger, so the answer does not depend on the grant and no
+  key recorded at 3.8 replays on an older connection. A replay under
+  `rule idempotency.replay` returns the recorded outcome and does not
+  mint, rotate, or revoke again.
+
+  Mint draws a key from the deployment's key-entropy capability and
+  from nothing else (INV-005); a daemon without one refuses with
+  `UnsupportedSemanticFeature`. It is refused with `PolicyGateFailed`
+  while the daemon holds an active key, and the new signer is allowed
+  exactly the `kinds` the request names — at least one, each once. The
+  held key signs only a kind local policy allows it: a receipt, a
+  bundle, or a pack it may not sign is refused, never signed. Rotate
+  retires the held key for a fresh successor, which inherits the
+  retired key's kinds; it needs possession, so a signer other than the
+  held one is `PolicyGateFailed`. A rotated signer's signatures still
+  verify, as rotated (plan §4.6); it never signs again. Revoke applies
+  to any signer the registry knows; `key-lost` on the held key also
+  mints a linked successor. A revoked held key stays held, so every
+  later signing refuses rather than publishing unsigned, until a mint
+  replaces it. A signer name the registry does not hold, and a
+  transition its standing does not admit, are `PolicyGateFailed`. The
+  registry only grows: nothing un-revokes, un-rotates, reorders, or
+  truncates it. Its bound is 4096 records, of which the last 64 are
+  kept for revocations: a mint, a rotation, or an adopted fact other
+  than a revocation that would reach them is `QuotaExhausted`, and a
+  revocation is refused only at the bound itself.
+
+  `signing.registry` returns every signer the registry knows, the audit
+  log record by record as each record's canonical encoding (ADR-0013),
+  the BLAKE3 digest of the log (`registry_head`), and the local
+  allowed-signers set.
+  """
+}
+
+rule signing.verification {
+  """
+  A signature is the canonical `ArtifactSignature` record of ADR-0054
+  D4, carried as `Bytes`. It signs the artifact's bytes wrapped as one
+  canonical `Bytes` value: for a receipt, the receipt's content; for an
+  intent bundle, the bundle body's bytes (`rule intent.bundles`); for a
+  domain pack, the pack's bytes.
+
+  Verification is total and never fails open. It runs in a fixed order
+  — presence, wire form, kind, Ed25519 strict verification, registry
+  currency, known standing, revocation, allowed set — and returns
+  `verified` only when every check passes. The registry is checked
+  against its authoritative head, which the daemon refreshes on every
+  change to it. An unknown signer is `standing-unknown` and a registry
+  that is not the authority's `standing-stale`; neither is ever read as
+  active. `signing.verify` reports the outcome, and the signer (and a
+  rotated signer's successor) only when it is `verified`. An artifact
+  over the signed-artifact bound (1 MiB) is `MalformedRequest`, refused
+  before it is hashed; a signature record over 512 bytes is `malformed`,
+  refused before it is decoded.
+
+  `evidence.get` returns the signature over a receipt node the daemon
+  published and signed. `evidence.link` signs before it publishes; a
+  daemon whose held key is not active, or not allowed to sign receipts,
+  publishes nothing, and one that holds no key publishes the receipt
+  unsigned, which verifies as `unsigned`.
+  """
+}
+
+rule intent.bundles {
+  """
+  Form. A frame list is a big-endian `u32` count, then per item a
+  big-endian `u32` length and that many bytes. A signed intent bundle
+  is at most 4 MiB and is the frame list `body, signature`. The body is
+  the frame list `domain, allowed_signers, contracts, links`,
+  where `domain` is the bytes `continuum.intent-bundle.v1` and the other
+  three are frame lists: at most 256 allowed-signers entries of at most
+  512 B, each one signer and its kinds as a canonical value; at most 64
+  contract entries of at most 256 KiB, each the frame list `in_ handle,
+  contract JSON, record JSON` (the handle at most 256 B, the record at
+  most 8 KiB), in strictly ascending handle order; and at most 4096
+  signer links of at most 512 B, each one key-attested transition as a
+  canonical value. A reader checks the length of the whole bundle
+  before reading it, each count against its bound or its exact arity
+  and against the bytes left before it allocates, and each item's
+  length before it touches the item. No general decoder runs on
+  anything larger than one allowed-signers entry or one signer link,
+  and each of those MUST re-encode to exactly its input. Anything else —
+  truncation, trailing bytes, a wrong arity or domain, a bound exceeded
+  — is `MalformedRequest`, never a partial bundle. The `inb_` identity
+  is derived from the whole signed bundle.
+
+  Signature and standing. The signature is kind `intent-bundle` over the
+  body. It verifies under local policy narrowed by the set the bundle
+  pins — a bundle can narrow which signers count, never widen it (RFC
+  0037 A3) — against the local registry with the bundle's standing
+  facts applied.
+
+  Signer links. A standing change travels only as a signer link: a
+  transition with the signature of every key it concerns, each over the
+  canonical record `{domain: "continuum.signer-link.v1", event, signer}`.
+  A rotation `from → to` carries the signatures of both keys; a
+  revocation of `k` as compromised carries `k`'s. Nothing else travels:
+  a bundle's own signer asserts nothing about any other key, and a loss
+  recovery never travels, because a lost key cannot sign — a peer learns
+  of a loss only from its own operator. Before any fact is applied, the
+  bundle's signature must authenticate its body as its claimed signer
+  S; a bundle that does not adopts nothing. An authentic bundle carrying
+  any link one of its keys did not sign, a key with two successors or
+  two predecessors, a rotation cycle, or a key revoked twice, is
+  refused as `MalformedRequest` with nothing changed; the topology is
+  checked in one pass bounded by the link count, before any edge is
+  followed, so no input can make it loop. Facts are then
+  applied to a copy of the registry, each on the word of the keys it
+  concerns: S, when local policy pins it and it is unknown, is minted;
+  an attested rotation is recorded when each of `from` and `to` is
+  active, or unknown and pinned (then minted first), so adoption is
+  bounded by the pinned set; an attested revocation is recorded when its
+  key is known and not revoked, or unknown and pinned (then minted
+  first). A known and an unseen
+  predecessor are treated alike: the link's signatures decide. A fact
+  about any of the daemon's own keys (every signer of its installed
+  registry and every key it minted) is skipped. Rotations are applied
+  before revocations, each to a fixed point, so within one bundle the
+  carried order does not change the result; across bundles the first
+  attested transition of a key wins, and a replayed link is a no-op. An applied fact
+  is recorded as a new audit record whose actor is the importing
+  principal. The copy is kept only if the bundle then verifies with an
+  active signer and the import succeeds whole.
+
+  `signing.rotate` makes the rotation link, and the retiring key signs
+  its own compromise revocation at the same moment and is then wiped;
+  `signing.revoke` as `compromised` publishes that link for a retired
+  key, or has the held key sign one before it is revoked. The daemon's
+  own links are never dropped: an export that cannot carry them all is
+  `QuotaExhausted`. A
+  bundle can introduce a new lineage of contracts — lineage protection
+  is per `supersedes` chain, not by content or name. Adopted mints and
+  rotations stop 64 records short of the 4096-record bound; adopted
+  revocations, and local revocations of any signer but the held key,
+  stop 4 short. Only the held key may use those last records, and every
+  operation that makes an active held key leaves one of them for its
+  revocation: `signing.mint` replacing a revoked key needs two records,
+  a loss recovery four. So an active held key can always be revoked, and
+  its replacement is refused only when the new key could not in turn be
+  revoked. A loss recovery with no room left falls back to a plain
+  revocation. A deployment's registry and key are installed only when
+  a compromise of the key is recoverable: at most 4096 records, and,
+  when the key is active, three left — its revocation, a replacement
+  mint, and the replacement's own revocation. While the held key is
+  active no operation leaves fewer (ordinary facts stop 64 short, other
+  revocations 4 short), so every installable deployment can revoke its
+  key and mint a revocable replacement.
+
+  `intent.export_bundle` signs with the held key the named contracts,
+  their records, the local allowed-signers entries that are active and
+  allowed `intent-bundle`, and the signer links the daemon made or
+  adopted. More such entries
+  than a bundle carries is `QuotaExhausted`.
+
+  `intent.import_bundle` recomputes every contract's `in_*` from its
+  bytes and refuses a bundle whose declared identity disagrees (I5),
+  checks each against W1–W10 (I4; with no snapshot to resolve against,
+  a domain-pack profile or correspondence map a contract names fails),
+  and refuses a record that does not name its contract or is `accepted`
+  without its acceptance block. A contract whose record names a
+  predecessor must find it held locally or exported by the same bundle,
+  and MUST NOT change any field the predecessor's policy does not mark
+  `unlocked`, nor weaken the policy itself: `IntentMutationDenied`, and
+  nothing changes. Only then is the bundle verified, and nothing changes
+  while it is. A bundle that does not verify changes nothing: no fact is
+  adopted, no contract enters, and the bundle is not held. A verified
+  bundle the daemon has no room to hold is `QuotaExhausted`, and nothing
+  changes either. A bundle that verifies is held, has its facts adopted
+  when its signer is active (a retired key's signature verifies, but it
+  vouches for no new fact), and enters each contract the registry does not hold
+  at `proposed`, whatever its record says (I2); a held contract is left
+  as it is (I6). A handle is never taken to name the same content
+  because it exists: an `inb_` already held, or an `in_` already in the
+  registry, that names byte-different content is an identity collision
+  (ADR-0013) and is `PublicationAborted`, not retryable, before any fact
+  is adopted, any contract enters, or any bundle is held; the same
+  bytes again are the idempotent case. Export refuses the same way. An
+  `evidence.link` whose receipt-node identity already names a node about
+  another receipt or profile is refused the same way, before anything is
+  signed; a receipt node keeps the exact bytes it was first linked over,
+  a relink over other bytes is refused before it is signed, a node's
+  signature is never replaced, and staging never overwrites a record
+  under a colliding commitment. Import is idempotent (I1). A proposal an import entered
+  reaches protection only through `intent.accept` naming a bundle: a
+  local acceptance of it is `AcceptanceChainInvalid`, and `intent.lock`
+  on it is `IntentMutationDenied`.
+
+  `intent.accept` naming a bundle is the plan §4.2.1 CI acceptance
+  check, and fails closed: it is `AcceptanceChainInvalid` unless the
+  connection is at 3.8 or later, the bundle is held, its signature
+  passes the fail-closed verification against the local registry with
+  its facts applied, its signer is active (a retired key's old
+  signatures verify, but it vouches for no new acceptance), and it
+  exports the proposal — under its handle, with exactly the local
+  contract's canonical bytes — with an `accepted` record whose `accepted_by`,
+  `signature`, and `timestamp` are the ones the request presents and
+  whose `supersedes` is the local record's — and that predecessor, if
+  any, is this daemon's accepted lineage head (A2) — and the record's
+  acceptance chain verifies. There is no partial credit (A4). An
+  accepted revision supersedes its predecessor, and records the chain.
+
+  Acceptance chain (RFC 0037 A1–A4). Each element of a record's
+  `chain` is `{signer, signature, scope}`: the signer's `signer_`
+  handle, the lowercase hex of an encoded signature record of kind
+  `intent-acceptance`, and `revise-intent`. Element k signs the
+  canonical record `{accepted_by, base, capability: "revise-intent",
+  domain: "continuum.intent-acceptance.v1", intent, previous,
+  timestamp}`, where `base` is the predecessor's `in_*` or `genesis`
+  and `previous` the bytes of element k−1's signature record (empty
+  for the first). The acceptance block's `signature` is the last
+  element's. A verifier rebuilds the record from the local proposal,
+  the local predecessor, and the presented principal and time, and
+  checks the elements in order: each signer known to its registry
+  (with the bundle's attested facts applied), active — a rotated or
+  revoked signer does not vouch, as nothing dates its signature before
+  its retirement — and allowed `intent-acceptance` by local policy
+  alone; at most four elements. A local `intent.accept` at 3.8 by a
+  daemon whose held key local policy allows `intent-acceptance` signs
+  the first element: the request's `accepted_by` MUST be the admitted
+  actor and its `timestamp` the daemon's own time reading, else
+  `AcceptanceChainInvalid`; the request's `signature` text is replaced
+  by the element's; and a held key that is no longer active refuses
+  the acceptance (`UnsupportedSemanticFeature`) rather than record it
+  unsigned. The key vouches that its daemon admitted that principal,
+  holding `revise-intent`, at that time. A daemon with no such key,
+  or a connection below 3.8, records the caller's text and no chain,
+  and no other daemon's CI acceptance check honors that record.
+  """
+}
+
+/// Mint a signer identity and hold its key: the deployment's key when
+/// it holds no active one (plan §18.6, the solo-developer default). The
+/// mint is an audit record. See `rule signing.identities`.
+@mutation @privileged @audit_recorded
+@since("3.8")
+operation signing.mint {
+  authority revise_intent;
+  request {
+    /// The kinds local policy allows the new signer; at least one.
+    kinds: list<SignedArtifactKind> required;
+  };
+  response {
+    signer: SignerHandle required;
+    /// The 32-byte Ed25519 public key.
+    public_key: Bytes required;
+    /// The registry head's BLAKE3 digest after the mint.
+    registry_head: Bytes required;
+  };
+  verdict StructuralVerdictValue;
+  errors [PolicyGateFailed];
+}
+
+/// Retire the held key for a fresh successor. The retired signer's
+/// signatures still verify, as rotated. See `rule signing.identities`.
+@mutation @privileged @audit_recorded
+@since("3.8")
+operation signing.rotate {
+  authority revise_intent;
+  request {
+    signer: SignerHandle required;
+  };
+  response {
+    retired: SignerHandle required;
+    successor: SignerHandle required;
+    /// The successor's 32-byte Ed25519 public key.
+    public_key: Bytes required;
+    registry_head: Bytes required;
+  };
+  verdict StructuralVerdictValue;
+  errors [PolicyGateFailed];
+}
+
+/// Revoke a signer. Its signatures verify as `signer-revoked` from now
+/// on. `key-lost` on the held key mints a linked successor (docs/09
+/// §10). See `rule signing.identities`.
+@mutation @privileged @audit_recorded
+@since("3.8")
+operation signing.revoke {
+  authority revise_intent;
+  request {
+    signer: SignerHandle required;
+    reason: RevocationReason required;
+  };
+  response {
+    signer: SignerHandle required;
+    /// The successor a `key-lost` revocation of the held key minted.
+    successor: SignerHandle nullable;
+    registry_head: Bytes required;
+  };
+  verdict StructuralVerdictValue;
+  errors [PolicyGateFailed];
+}
+
+/// Read the signing registry: every audit record, the head digest, and
+/// the local allowed-signers set. See `rule signing.identities`.
+@readonly
+@since("3.8")
+operation signing.registry {
+  authority read;
+  request {
+  };
+  response {
+    /// Every signer the registry holds standing for, in name order.
+    signers: list<SignerHandle> required;
+    /// Each audit record's canonical encoding, oldest first.
+    log: list<Bytes> required;
+    /// The registry head's BLAKE3 digest.
+    registry_head: Bytes required;
+    /// Each allowed-signers entry's canonical encoding, in signer order.
+    allowed: list<Bytes> required;
+  };
+  errors [];
+}
+
+/// Verify a signature over an artifact's bytes under the daemon's
+/// registry and local policy. See `rule signing.verification`.
+@readonly
+@since("3.8")
+operation signing.verify {
+  authority read;
+  request {
+    kind: SignedArtifactKind required;
+    /// The artifact's bytes, exactly as they were signed.
+    artifact: Bytes required;
+    /// The canonical signature record; absent is `unsigned`.
+    signature: Bytes optional;
+  };
+  response {
+    outcome: SignatureOutcome required;
+    /// Present exactly when `outcome` is `verified`.
+    signer: SignerHandle optional;
+    /// Present exactly when a verified signer is rotated.
+    successor: SignerHandle optional;
+  };
+  errors [];
+}
+
+/// Sign a domain pack's bytes with the held key, as kind `domain-pack`
+/// (docs/09 T07). `PolicyGateFailed` when the daemon holds no active
+/// key. See `rule signing.verification`.
+@mutation @privileged @audit_recorded
+@since("3.8")
+operation signing.sign_pack {
+  authority revise_intent;
+  request {
+    pack: Bytes required;
+  };
+  response {
+    /// The canonical signature record over the pack.
+    signature: Bytes required;
+    signer: SignerHandle required;
+  };
+  verdict StructuralVerdictValue;
+  errors [PolicyGateFailed];
 }
 
 // --- query (RFC 0030) ------------------------------------------------

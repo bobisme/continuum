@@ -35,7 +35,7 @@
 //! | # | Step | Source of the rule | Failure |
 //! |---|---|---|---|
 //! | 1 | the request names the connection's negotiated version | RFC 0026, "Version window and negotiation" | `ProtocolVersionUnsupported` |
-//! | 2 | the operation is one of the registry's 72 | plan §10.2 registry | `MalformedRequest` |
+//! | 2 | the operation is one of the registry's 83 | plan §10.2 registry | `MalformedRequest` |
 //! | 3 | the arguments are that operation's declared shape | the IDL's `request` body | `MalformedRequest` |
 //! | 4 | the family declares the handles the arguments name | RFC 0027 T2 | — |
 //! | 5 | admission T1–T4 | RFC 0027, "The admission predicate" | `CapabilityDenied` |
@@ -76,8 +76,10 @@
 //! report, or the error-code union check. It writes a namespace, a pure scope claim, and a
 //! handler. See [`family`] for the four-step seam.
 
+pub mod acceptance;
 pub mod admission;
 pub mod budget;
+pub mod bundle;
 pub mod capability;
 pub mod context;
 pub mod continuation;
@@ -93,6 +95,7 @@ pub mod provisioning;
 pub mod recovery;
 pub mod region;
 pub mod result;
+pub mod signing;
 pub mod state;
 pub mod task;
 pub mod terminal;
@@ -131,6 +134,9 @@ pub enum ServiceError {
     Identity,
     /// A handle did not cross between the wire spelling and the store's.
     Handle,
+    /// The identity already names byte-different content (ADR-0013): refused, never
+    /// overwritten.
+    Collision,
 }
 
 impl fmt::Display for ServiceError {
@@ -138,6 +144,7 @@ impl fmt::Display for ServiceError {
         f.write_str(match self {
             Self::Identity => "no content identity could be derived",
             Self::Handle => "a handle is not well-formed for its artifact class",
+            Self::Collision => "the identity already names byte-different content",
         })
     }
 }
@@ -152,16 +159,18 @@ pub struct Services {
     connection: CapabilityHandle,
     epochs: EpochSet,
     now: Option<Timestamp>,
-    receipt_signer: Option<ReceiptSigner>,
 }
 
-/// The daemon's receipt-signing identity (plan §18.6, ADR-0054, bn-1hape).
+/// The daemon's signing identity as a deployment supplies it (plan §18.6, ADR-0054,
+/// bn-1hape, bn-3glnv).
 ///
-/// A deployment that supplies one ([`Builder::receipt_signer`]) has every receipt
-/// `evidence.link` publishes signed over its canonical bytes through
+/// A deployment that supplies one ([`Builder::receipt_signer`]) installs it as the held key
+/// of the daemon's [`SigningAuthority`](signing::SigningAuthority): every receipt
+/// `evidence.link` publishes is signed over its canonical bytes through
 /// [`SigningRegistry::sign`](continuum_evidence::signing::SigningRegistry::sign), before the
-/// receipt is published. The signature is held in [`DaemonState::receipt_signature`]; it has
-/// no wire spelling at protocol 3.6 (bn-3glnv). The keypair normally comes from
+/// receipt is published, and the same key signs the bundles `intent.export_bundle` writes
+/// and the packs `signing.sign_pack` signs. `signing.rotate` and `signing.revoke` change it
+/// in place. The keypair normally comes from
 /// `continuum_security::keystore::LocalKeystore`, the solo-developer key minted on first use.
 /// The daemon holds the key; agents never do (INV-015, RFC 0032 "Signing").
 pub struct ReceiptSigner {
@@ -169,14 +178,47 @@ pub struct ReceiptSigner {
     signer: continuum_evidence::signing::LocalSigner,
 }
 
+/// Why a registry and key cannot be installed as the deployment's signing identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallRefusal {
+    /// The registry holds no standing for the key.
+    UnknownSigner,
+    /// The registry holds more records than the daemon's bound.
+    RecordBound,
+    /// The key is active and the registry lacks the records to recover from its
+    /// compromise: its revocation, a replacement mint, and that replacement's own
+    /// revocation (bn-3glnv, cr-2unxyh).
+    NoRoomToRecover,
+}
+
 impl ReceiptSigner {
     /// A receipt signer from a registry and a signer it holds standing for.
-    #[must_use]
-    pub const fn new(
+    ///
+    /// # Errors
+    ///
+    /// [`InstallRefusal`] when the registry does not know the key, holds more than
+    /// [`MAX_AUDIT_RECORDS`](bundle::MAX_AUDIT_RECORDS) records, or holds the key active
+    /// with fewer than [`RECOVERY_RECORDS`](signing::RECOVERY_RECORDS) records left — the
+    /// reserve every daemon operation keeps while the held key is active, checked here for
+    /// a registry built outside the daemon. So every installable registry can revoke its
+    /// held key and mint a revocable replacement.
+    pub fn new(
         registry: continuum_evidence::signing::SigningRegistry,
         signer: continuum_evidence::signing::LocalSigner,
-    ) -> Self {
-        Self { registry, signer }
+    ) -> Result<Self, InstallRefusal> {
+        let records = registry.audit_log().len();
+        let standing = registry
+            .standing(signer.identity())
+            .ok_or(InstallRefusal::UnknownSigner)?;
+        if records > bundle::MAX_AUDIT_RECORDS {
+            return Err(InstallRefusal::RecordBound);
+        }
+        if *standing == continuum_evidence::signing::SignerStanding::Active
+            && records.saturating_add(signing::RECOVERY_RECORDS) > bundle::MAX_AUDIT_RECORDS
+        {
+            return Err(InstallRefusal::NoRoomToRecover);
+        }
+        Ok(Self { registry, signer })
     }
 
     /// The registry whose standing governs this signer.
@@ -191,18 +233,13 @@ impl ReceiptSigner {
         self.signer.identity()
     }
 
-    pub(crate) fn sign_receipt(
-        &self,
-        artifact: &continuum_value::identity::ContentIdentity,
-    ) -> Result<
-        continuum_evidence::signing::ArtifactSignature,
-        continuum_evidence::signing::SignRefusal,
-    > {
-        self.registry.sign(
-            &self.signer,
-            continuum_evidence::signing::SignedArtifactKind::Receipt,
-            artifact,
-        )
+    fn into_parts(
+        self,
+    ) -> (
+        continuum_evidence::signing::SigningRegistry,
+        continuum_evidence::signing::LocalSigner,
+    ) {
+        (self.registry, self.signer)
     }
 }
 
@@ -223,7 +260,6 @@ impl fmt::Debug for Services {
             .field("connection", &self.connection)
             .field("epochs", &self.epochs)
             .field("now", &self.now)
-            .field("receipt_signer", &self.receipt_signer)
             .finish_non_exhaustive()
     }
 }
@@ -263,12 +299,6 @@ impl Services {
     #[must_use]
     pub const fn now(&self) -> Option<&Timestamp> {
         self.now.as_ref()
-    }
-
-    /// The deployment's receipt-signing identity, when it supplied one.
-    #[must_use]
-    pub const fn receipt_signer(&self) -> Option<&ReceiptSigner> {
-        self.receipt_signer.as_ref()
     }
 }
 
@@ -366,7 +396,6 @@ impl Daemon {
                 connection,
                 epochs: result::unpinned(protocol),
                 now: None,
-                receipt_signer: None,
             },
             store_identifier: Box::new(identifier),
             state: DaemonState::new(),
@@ -594,6 +623,24 @@ impl Daemon {
                 false,
             ));
         };
+        //    An operation `@since` a version later than the negotiated one is not declared at
+        //    that version: refused here, before admission and before the idempotency ledger,
+        //    so the answer does not depend on the grant and no key recorded on a newer
+        //    connection replays on an older one (`rule signing.identities`).
+        if registry::introduced_at(spec.name)
+            .is_some_and(|since| services.negotiated.protocol_version() < since)
+        {
+            return Ok(raise(
+                services,
+                envelope,
+                Fault::new(
+                    ErrorCode::MalformedRequest,
+                    "the request names an operation this protocol version does not declare",
+                ),
+                &audit,
+                false,
+            ));
+        }
         let audit_required = obligation::audit_required(spec);
 
         kill(injector, CrashPoint::BeforeShapeCheck)?;
@@ -1162,7 +1209,33 @@ impl Builder {
     /// reads as `UnverifiedReason::Unsigned`.
     #[must_use]
     pub fn receipt_signer(mut self, signer: ReceiptSigner) -> Self {
-        self.services.receipt_signer = Some(signer);
+        let (registry, key) = signer.into_parts();
+        self.state.signing_mut().install(registry, key);
+        self
+    }
+
+    /// Add signers to the local allowed-signers policy (plan §18.6's organizational
+    /// deployment, RFC 0037 A3). Local policy, not a bundle, decides which signers count;
+    /// a bundle's pinned set only narrows it (bn-3glnv).
+    #[must_use]
+    pub fn allowed_signers(
+        mut self,
+        allowed: &continuum_evidence::signing::AllowedSigners,
+    ) -> Self {
+        self.state.signing_mut().allow(allowed);
+        self
+    }
+
+    /// Supply the key-entropy capability `signing.mint`, `signing.rotate`, and a `key-lost`
+    /// `signing.revoke` draw a new key from (INV-005, ADR-0003). A daemon without one
+    /// refuses to mint with `UnsupportedSemanticFeature`; it never falls back to another
+    /// source (bn-3glnv).
+    #[must_use]
+    pub fn key_entropy(
+        mut self,
+        entropy: Box<dyn continuum_evidence::signing::KeyEntropy + Send + Sync>,
+    ) -> Self {
+        self.state.signing_mut().set_entropy(entropy);
         self
     }
 

@@ -368,6 +368,16 @@ const SERVED_NON_PUBLISHERS: &[&str] = &[
     "context.compile",
     "context.expand",
     "whiteboard.compile",
+    // Protocol 3.8 (bn-3glnv). A signed bundle and the signing registry are daemon state,
+    // not store artifacts: nothing here reaches `store.publish(` or `store.stage(`, which the
+    // write-site scan above would otherwise report. Each validates everything before it
+    // changes anything, so a refusal leaves no partial state.
+    "intent.export_bundle",
+    "intent.import_bundle",
+    "signing.mint",
+    "signing.rotate",
+    "signing.revoke",
+    "signing.sign_pack",
 ];
 
 /// The four spellings by which control reaches the store's write surface.
@@ -491,7 +501,7 @@ fn the_mutation_surface_is_partitioned_by_the_census() {
         .collect();
     assert_eq!(
         mutations.len(),
-        47,
+        53,
         "the registry's `@mutation` count, read from the registry and not transcribed"
     );
 
@@ -504,8 +514,9 @@ fn the_mutation_surface_is_partitioned_by_the_census() {
     );
     assert_eq!(
         publishers.len() + non_publishers.len(),
-        18,
-        "eighteen of the forty-seven mutations are served by this build"
+        24,
+        "twenty-four of the fifty-three mutations are served by this build (eighteen of \
+         forty-seven until protocol 3.8 added six served non-publishers)"
     );
     assert_eq!(
         publishers.len(),
@@ -521,8 +532,8 @@ fn the_mutation_surface_is_partitioned_by_the_census() {
     );
     assert_eq!(
         OPERATION_COUNT - publishers.len(),
-        66,
-        "sixty-six of the seventy-five registered operations publish nothing here"
+        74,
+        "seventy-four of the eighty-three registered operations publish nothing here"
     );
 }
 

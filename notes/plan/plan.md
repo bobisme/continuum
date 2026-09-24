@@ -1226,7 +1226,8 @@ The Agent–Computer Interface follows these rules:
 
 ```text
 workspace.create / create_by_reference / fork / diff / seal
-intent.get / diff / propose_revision / accept / reject / lock
+intent.get / diff / propose_revision / accept / reject / lock / export_bundle /
+  import_bundle
 verification.start / result / await
 model.check / explore / compare
 program.extract / run / replay
@@ -1244,6 +1245,7 @@ benchmark.run
 task.status / cancel / resume / subscribe / update_budget
 evidence.get / query / verify / subscribe / link
 whiteboard.compile
+signing.mint / rotate / revoke / registry / verify / sign_pack
 query.explain_reuse / explain_invalidation / clean_compare
 ```
 
@@ -2840,7 +2842,7 @@ projections, and the docs/35/40/41/42/45 corrections) are recorded in
 `plan.review.5.md` Appendix B, not re-listed as debt.
 
 - SD-01 (paid, `schemas/continuumd-native-protocol.idl`): RFC 0026's
-  normative IDL file — all 75 §10.2 operations, envelopes, handshake;
+  normative IDL file — all 83 §10.2 operations, envelopes, handshake;
 - SD-07 (paid, PR 0): `schemas/intent-contract.schema.json` — a
   structured property-AST expression form with canonical
   normalization, replacing the bare `expression` string;

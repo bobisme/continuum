@@ -817,3 +817,262 @@ fn restore_rederives_only_a_minted_key() {
         Err(RestoreError::UnknownSigner)
     ));
 }
+
+/// Metamorphic relation (bn-3glnv): **serialization round trip** (docs/19 §3). The entry
+/// codec a bundle carries the pinned set in reads back the same set, entry by entry, and
+/// refuses a repeated or out-of-order signer, so the framed wire form and the in-memory set
+/// are one value.
+#[test]
+fn an_allowed_signers_set_round_trips_one_entry_at_a_time() {
+    let mut registry = SigningRegistry::new();
+    let mut entropy = FixedEntropy::new(30);
+    let a = registry.mint(&actor(), &mut entropy).expect("mint");
+    let b = registry.mint(&actor(), &mut entropy).expect("mint");
+    let allowed = AllowedSigners::new()
+        .allow(a.identity().clone(), [SignedArtifactKind::Receipt])
+        .allow(
+            b.identity().clone(),
+            [
+                SignedArtifactKind::IntentBundle,
+                SignedArtifactKind::DomainPack,
+            ],
+        );
+    let entries: Vec<Vec<u8>> = allowed
+        .iter()
+        .map(|(signer, kinds)| AllowedSigners::entry_value(signer, kinds).encode())
+        .collect();
+    let back =
+        AllowedSigners::from_entries(entries.iter().map(|bytes| {
+            AllowedSigners::entry_from_value(&Value::decode(bytes).expect("canonical"))
+        }))
+        .expect("in order");
+    assert_eq!(back, allowed);
+    assert_eq!(back.len(), 2);
+    let reversed =
+        AllowedSigners::from_entries(entries.iter().rev().map(|bytes| {
+            AllowedSigners::entry_from_value(&Value::decode(bytes).expect("canonical"))
+        }));
+    assert!(reversed.is_err(), "out of canonical order is refused");
+    let repeated =
+        AllowedSigners::from_entries([entries[0].clone(), entries[0].clone()].iter().map(
+            |bytes| AllowedSigners::entry_from_value(&Value::decode(bytes).expect("canonical")),
+        ));
+    assert!(repeated.is_err(), "a repeated signer is refused");
+}
+
+/// Reference (bn-3glnv): intersection is commutative and only narrows. A bundle's pinned
+/// set is intersected with local policy; swapping the operands changes
+/// nothing, and the result permits a (signer, kind) pair exactly when both operands do,
+/// so a bundle can never widen which signers count (RFC 0037 A3).
+#[test]
+fn intersecting_allowed_signers_is_commutative_and_never_widens() {
+    let mut registry = SigningRegistry::new();
+    let mut entropy = FixedEntropy::new(40);
+    let keys: Vec<SignerIdentity> = (0..3)
+        .map(|_| {
+            registry
+                .mint(&actor(), &mut entropy)
+                .expect("mint")
+                .identity()
+                .clone()
+        })
+        .collect();
+    let local = AllowedSigners::new()
+        .allow(keys[0].clone(), SignedArtifactKind::ALL)
+        .allow(keys[1].clone(), [SignedArtifactKind::Receipt]);
+    let pinned = AllowedSigners::new()
+        .allow(keys[0].clone(), [SignedArtifactKind::IntentBundle])
+        .allow(keys[1].clone(), [SignedArtifactKind::DomainPack])
+        .allow(keys[2].clone(), SignedArtifactKind::ALL);
+    let both = local.intersection(&pinned);
+    assert_eq!(both, pinned.intersection(&local));
+    for key in &keys {
+        for kind in SignedArtifactKind::ALL {
+            assert_eq!(
+                both.permits(key, kind),
+                local.permits(key, kind) && pinned.permits(key, kind)
+            );
+        }
+    }
+    assert_eq!(both.len(), 1, "a signer left with no kind is dropped");
+    assert!(AllowedSigners::new().intersection(&pinned).is_empty());
+}
+
+/// Reference (bn-3glnv): the head digest names a head. Two registries with the same log
+/// have the same digest, and one more record moves it.
+#[test]
+fn the_registry_head_digest_follows_the_log() {
+    let mut first = SigningRegistry::new();
+    let mut second = SigningRegistry::new();
+    let a = first
+        .mint(&actor(), &mut FixedEntropy::new(50))
+        .expect("mint");
+    let _ = second
+        .mint(&actor(), &mut FixedEntropy::new(50))
+        .expect("mint");
+    assert_eq!(first.head().digest(), second.head().digest());
+    first
+        .revoke(a.identity(), &actor(), RevocationReason::Compromised)
+        .expect("revoke");
+    assert_ne!(first.head().digest(), second.head().digest());
+    assert_eq!(first.signers().count(), 1);
+}
+
+/// Reference (bn-3glnv): an observed fact is appended only as a legal transition — a known
+/// signer cannot be minted again, a revoked one cannot be revoked or rotated, and a refused
+/// fact leaves the registry unchanged. A legal one is replayable like any other record.
+#[test]
+fn an_observed_fact_is_recorded_only_as_a_legal_transition() {
+    let mut registry = SigningRegistry::new();
+    let mut entropy = FixedEntropy::new(60);
+    let a = registry.mint(&actor(), &mut entropy).expect("mint");
+    let mut other = SigningRegistry::new();
+    let b = other
+        .mint(&actor(), &mut entropy)
+        .expect("mint")
+        .identity()
+        .clone();
+
+    assert!(matches!(
+        registry.record_observed(
+            &actor(),
+            SigningEvent::Minted {
+                signer: a.identity().clone()
+            }
+        ),
+        Err(ReplayError::IllegalTransition { .. })
+    ));
+    let before = registry.clone();
+    assert!(
+        registry
+            .record_observed(
+                &actor(),
+                SigningEvent::Revoked {
+                    signer: b.clone(),
+                    reason: RevocationReason::Compromised,
+                },
+            )
+            .is_err(),
+        "an unknown signer cannot be revoked"
+    );
+    assert_eq!(registry, before, "a refused fact changes nothing");
+
+    registry
+        .record_observed(&actor(), SigningEvent::Minted { signer: b.clone() })
+        .expect("a new signer");
+    registry
+        .record_observed(
+            &actor(),
+            SigningEvent::Revoked {
+                signer: b.clone(),
+                reason: RevocationReason::Compromised,
+            },
+        )
+        .expect("a known signer");
+    assert!(
+        registry
+            .record_observed(
+                &actor(),
+                SigningEvent::Rotated {
+                    from: b,
+                    to: a.identity().clone(),
+                },
+            )
+            .is_err(),
+        "a revoked signer is not rotated"
+    );
+    assert_eq!(
+        SigningRegistry::replay(&registry.audit_value()).expect("replays"),
+        registry
+    );
+}
+
+// --- key-attested signer links (bn-3glnv, cr-2unxyh) ----------------------------------------
+
+#[test]
+fn a_signer_link_is_attested_by_every_key_it_concerns_and_nothing_else() {
+    use continuum_evidence::signing::{LinkEvent, MAX_LINK_RECORD_LEN, SignerLink};
+    let mut registry = SigningRegistry::new();
+    let mut entropy = FixedEntropy::new(60);
+    let a = registry.mint(&actor(), &mut entropy).expect("mint");
+    let b = registry.mint(&actor(), &mut entropy).expect("mint");
+    let c = registry.mint(&actor(), &mut entropy).expect("mint");
+    let rotation = registry.attest_rotation(&a, &b).expect("active");
+    let revocation = registry.attest_revocation(&a).expect("active");
+    for link in [&rotation, &revocation] {
+        assert!(link.verify());
+        let bytes = link.encode();
+        assert!(bytes.len() <= MAX_LINK_RECORD_LEN);
+        let back = SignerLink::decode(&bytes).expect("canonical");
+        assert_eq!(&back, link, "a link round-trips through its wire bytes");
+        assert!(back.verify());
+    }
+    // A signature by the wrong key, a swapped order, a missing or extra one: refused.
+    let sigs = rotation.signatures().to_vec();
+    let other = registry
+        .attest_rotation(&c, &b)
+        .expect("active")
+        .signatures()[0];
+    for signatures in [
+        vec![other, sigs[1]],
+        vec![sigs[1], sigs[0]],
+        vec![sigs[0]],
+        vec![sigs[0], sigs[1], sigs[1]],
+    ] {
+        assert!(!SignerLink::from_parts(rotation.event().clone(), signatures).verify());
+    }
+    // The same signatures over another event: refused.
+    let retargeted = SignerLink::from_parts(
+        LinkEvent::Rotated {
+            from: a.identity().clone(),
+            to: c.identity().clone(),
+        },
+        sigs,
+    );
+    assert!(!retargeted.verify());
+    // A rotation to itself is never a link.
+    assert!(!registry.attest_rotation(&a, &a).expect("active").verify());
+    // A key that is not active attests nothing.
+    let mut retiring = SigningRegistry::new();
+    let old = retiring
+        .mint(&actor(), &mut FixedEntropy::new(80))
+        .expect("mint");
+    let attested = retiring
+        .rotate_attested(&old, &actor(), &mut FixedEntropy::new(81))
+        .expect("rotate");
+    assert!(attested.rotation.verify() && attested.revocation.verify());
+    assert!(retiring.attest_revocation(&old).is_err());
+    assert!(retiring.attest_rotation(&old, &attested.successor).is_err());
+    // Oversize input is refused before parsing; trailing bytes are refused.
+    assert_eq!(
+        SignerLink::decode(&vec![0u8; MAX_LINK_RECORD_LEN + 1]),
+        Err(WireError::TooLarge)
+    );
+    let mut trailing = revocation.encode();
+    trailing.push(0);
+    assert!(SignerLink::decode(&trailing).is_err());
+}
+
+#[test]
+fn a_link_signature_is_never_an_artifact_signature() {
+    let mut registry = SigningRegistry::new();
+    let a = registry
+        .mint(&actor(), &mut FixedEntropy::new(70))
+        .expect("mint");
+    let link = registry.attest_revocation(&a).expect("active");
+    // Domain separation: the link's signature, relabelled as a signature over the link's
+    // own bytes as any artifact kind, does not authenticate.
+    for kind in SignedArtifactKind::ALL {
+        let relabelled =
+            ArtifactSignature::from_parts(kind, a.identity().clone(), link.signatures()[0]);
+        let artifact = ContentIdentity::of(&Value::bytes(link.encode()));
+        assert!(!relabelled.authenticates(kind, &artifact));
+    }
+    // And a real artifact signature authenticates, with no standing consulted.
+    let artifact = artifact("pack");
+    let signed = registry
+        .sign(&a, SignedArtifactKind::DomainPack, &artifact)
+        .expect("sign");
+    assert!(signed.authenticates(SignedArtifactKind::DomainPack, &artifact));
+    assert!(!signed.authenticates(SignedArtifactKind::Receipt, &artifact));
+}

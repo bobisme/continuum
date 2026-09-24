@@ -1,0 +1,53 @@
+[change]
+bone = "bn-3glnv"
+author = "continuum-dev"
+summary = "The signing wire, protocol 3.8 on IDL 1.16 (plan 18.6, ADR-0054): daemon operations mint, rotate, and revoke signer identities under an unscoped privileged grant; receipts, intent bundles, and domain packs are signed and verified on production paths; intent.accept runs verify_for_ci_acceptance over a held bundle; revocation records travel inside the bundle; continuum-evidence gains the AllowedSigners entry codec and intersection, SigningRegistry::signers, RegistryHead::digest, and SigningRegistry::record_observed"
+
+[semantic]
+covers = [
+  "crates/continuum-evidence/src/signing.rs",
+]
+reference_tests = [
+  "crates/continuum-evidence/tests/signing_identities.rs::intersecting_allowed_signers_is_commutative_and_never_widens",
+  "crates/continuum-evidence/tests/signing_identities.rs::the_registry_head_digest_follows_the_log",
+  "crates/continuum-evidence/tests/signing_identities.rs::an_observed_fact_is_recorded_only_as_a_legal_transition",
+  "crates/continuumd/tests/daemon_signing.rs::an_exported_bundle_imports_and_its_chain_accepts_the_proposal",
+  "crates/continuumd/tests/daemon_signing.rs::accept_fails_closed_on_every_broken_chain",
+  "crates/continuumd/tests/daemon_signing.rs::a_revocation_carried_by_a_bundle_is_adopted_and_a_stale_bundle_cannot_resurrect_the_key",
+  "crates/continuumd/tests/daemon_signing.rs::a_retired_key_adopts_no_facts",
+  "crates/continuumd/tests/daemon_signing.rs::a_known_signer_learns_its_attested_rotation_and_revocation",
+  "crates/continuumd/tests/daemon_signing.rs::a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature",
+  "crates/continuumd/tests/daemon_signing.rs::a_held_key_revocation_always_leaves_room_for_its_replacement",
+  "crates/continuumd/tests/daemon_signing.rs::a_record_is_accepted_only_as_its_chain_signed_it",
+  "crates/continuumd/tests/daemon_signing.rs::every_order_of_a_rotation_chain_gives_the_same_standing_and_facts",
+  "crates/continuumd/tests/daemon_signing.rs::a_receipt_node_keeps_its_first_bytes_and_its_first_signature",
+  "crates/continuum-evidence/tests/signing_identities.rs::a_signer_link_is_attested_by_every_key_it_concerns_and_nothing_else",
+  "crates/continuumd/tests/daemon_signing.rs::accept_never_takes_a_signature_over_one_body_for_another_under_the_same_identity",
+  "crates/continuumd/tests/daemon_signing.rs::a_bundle_identity_that_names_other_bytes_is_refused_on_import_and_export",
+  "crates/continuumd/tests/daemon_signing.rs::an_import_refused_for_quota_adopts_nothing",
+  "crates/continuumd/tests/daemon_signing.rs::signing_verify_is_total_and_typed",
+  "crates/continuumd/tests/daemon_signing.rs::mint_rotate_revoke_move_the_registry_forward_only",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-evidence/tests/signing_identities.rs::an_allowed_signers_set_round_trips_one_entry_at_a_time", relation = "serialization round trip" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/daemon_signing.rs::the_daemons_bundle_signature_matches_the_library_signing_the_same_body", oracle = "continuum-evidence", subject = "continuumd" },
+]
+
+[semantic.claim_impact]
+claims = []
+reason = "no docs/18 claim row covers signing, signatures, or provenance verification; this change puts signature verification on production daemon paths and moves TEST-9-07 to enforced and docs/09 T04's signing control from a typed absence to a bound control, neither of which is a docs/18 claim row"
+
+[semantic.schemas]
+updated = []
+reason = "no JSON schema document changes; the wire change is the IDL, notes/plan/schemas/continuumd-native-protocol.idl, at protocol 3.8 on IDL 1.16 (eight operations, three enums, one alias, one optional field, three rules), and the two example instances replace their ssh-ed25519 placeholders with ed25519 tokens (ADR-0054 D4) without changing shape"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-evidence gains additive AllowedSigners::entry_value, entry_from_value, from_entries, iter, len, is_empty, kinds, and intersection, SigningRegistry::signers and record_observed (a learned standing fact appended as the next record, validated exactly as replay validates one), and RegistryHead::digest, and from_value now reads through entry_from_value with the same checks; no encoding, signature, or verdict changes, and every existing caller is unaffected"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-2unxyh"
+verdict = "approved"

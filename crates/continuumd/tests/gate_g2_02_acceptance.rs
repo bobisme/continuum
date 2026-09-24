@@ -543,12 +543,13 @@ fn the_human_text_named_fields_split_three_ways_and_this_is_the_split() {
             .filter(|field| field.carriage() == carriage)
             .count()
     };
-    assert_eq!(fields.len(), 23, "human-text-named fields in the IDL");
+    assert_eq!(fields.len(), 24, "human-text-named fields in the IDL");
     assert_eq!(
         counted(Carriage::Typed),
-        5,
+        6,
         "already a closed enum: RedactionReason, OmissionReason, two InconclusiveReasons, \
-         and TaskRecord.failed_reason, which is an ErrorCode"
+         TaskRecord.failed_reason, which is an ErrorCode, and from protocol 3.8 \
+         signing.revoke's `reason`, a RevocationReason"
     );
     assert_eq!(
         counted(Carriage::Document),
@@ -3466,8 +3467,9 @@ fn the_cli_reaches_nothing_the_typed_protocol_does_not() {
     );
     assert_eq!(
         registry.len() - cli.len(),
-        59,
-        "and fifty-nine registry operations have no CLI surface at all"
+        67,
+        "and sixty-seven registry operations have no CLI surface at all (fifty-nine until \
+         protocol 3.8 added eight)"
     );
 }
 
@@ -3490,10 +3492,10 @@ fn the_shipped_cli_binary_reaches_no_daemon_at_all() {
 
 #[test]
 fn the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which() {
-    // The 30 the codec can build a body for are the ones any of this file's evidence reaches.
-    // Naming the boundary is the INV-007 half of the verdict: forward closure is *evidenced*
-    // over 30 operations and *untested* over 45.
-    assert_eq!(OPERATIONS.len(), 75, "the registry's own count");
+    // The 38 the codec can build a body for are the ones any of this file's evidence reaches
+    // (30 of 75 until protocol 3.8 added eight). Naming the boundary is the INV-007 half of
+    // the verdict: forward closure is *evidenced* over 38 operations and *untested* over 45.
+    assert_eq!(OPERATIONS.len(), 83, "the registry's own count");
     let served: BTreeSet<&str> = [
         "workspace.create",
         "workspace.create_by_reference",
@@ -3525,10 +3527,18 @@ fn the_live_surface_is_thirty_of_the_seventy_five_and_this_is_which() {
         "context.compile",
         "context.expand",
         "whiteboard.compile",
+        "intent.export_bundle",
+        "intent.import_bundle",
+        "signing.mint",
+        "signing.rotate",
+        "signing.revoke",
+        "signing.registry",
+        "signing.verify",
+        "signing.sign_pack",
     ]
     .into_iter()
     .collect();
-    assert_eq!(served.len(), 30, "thirty have an `Arguments` variant");
+    assert_eq!(served.len(), 38, "thirty-eight have an `Arguments` variant");
     for name in &served {
         assert!(
             registry::operation(name).is_some(),

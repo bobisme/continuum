@@ -616,6 +616,8 @@ macro_rules! protocol_struct {
             fn encode<D: $crate::codec::Document>(
                 &self,
             ) -> ::core::result::Result<D, $crate::codec::CodecError> {
+                // A body with no fields (`signing.registry`'s request) inserts nothing.
+                #[allow(unused_mut)]
                 let mut into = ::std::collections::BTreeMap::new();
                 $($crate::__protocol_put!(
                     $mode, into, stringify!($member), &self.$member);)*
@@ -625,6 +627,8 @@ macro_rules! protocol_struct {
             fn decode<D: $crate::codec::Document>(
                 value: &D,
             ) -> ::core::result::Result<Self, $crate::codec::CodecError> {
+                // Checked even for a body with no fields: it must still be an object.
+                #[allow(unused_variables)]
                 let from = $crate::codec::object_of(value, stringify!($name))?;
                 // Unknown keys are ignored rather than rejected: "a daemon MUST ignore
                 // unknown `optional` request fields" (`rule envelope.unknown_fields`) is

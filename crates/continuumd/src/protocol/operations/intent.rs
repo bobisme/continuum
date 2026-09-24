@@ -1,4 +1,4 @@
-//! The `intent` namespace: request and response structs for its 6 operations.
+//! The `intent` namespace: request and response structs for its 8 operations.
 //!
 //! Each struct is the IDL's anonymous body under the generated-name rule of the
 //! IDL header: the operation name in PascalCase with the `Request`/`Response`
@@ -131,5 +131,45 @@ protocol_struct! {
         intent: IntentHandle required;
         /// IDL `policy: map<String,String> required`.
         policy: map<String,String> required;
+    }
+}
+
+protocol_struct! {
+    /// The `request` body of `intent.export_bundle` (protocol 3.8).
+    struct IntentExportBundleRequest {
+        /// The contracts to export. Non-empty, at most the bundle bound.
+        intents: list<IntentHandle> required;
+    }
+}
+
+protocol_struct! {
+    /// The `response` body of `intent.export_bundle` (protocol 3.8).
+    struct IntentExportBundleResponse {
+        /// The signed bundle's identity. The daemon holds it.
+        bundle: IntentBundleHandle required;
+        /// The signed bundle's bytes (`rule intent.bundles`).
+        content: Bytes required;
+    }
+}
+
+protocol_struct! {
+    /// The `request` body of `intent.import_bundle` (protocol 3.8).
+    struct IntentImportBundleRequest {
+        /// A signed bundle's bytes (`rule intent.bundles`).
+        content: Bytes required;
+    }
+}
+
+protocol_struct! {
+    /// The `response` body of `intent.import_bundle` (protocol 3.8).
+    struct IntentImportBundleResponse {
+        /// The bundle's identity. The daemon holds it.
+        bundle: IntentBundleHandle required;
+        /// The bundle signature's typed provenance under local policy.
+        outcome: SignatureOutcome required;
+        /// The contracts this import entered into the registry, at `proposed`.
+        imported: list<IntentHandle> required;
+        /// The standing facts the import adopted into the signing registry.
+        adopted: U32 required;
     }
 }

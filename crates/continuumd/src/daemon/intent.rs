@@ -1,4 +1,5 @@
-//! The `intent` family: `get`, `diff`, `propose_revision`, `accept`, `reject`, `lock`.
+//! The `intent` family: `get`, `diff`, `propose_revision`, `accept`, `reject`, `lock`, and,
+//! from protocol 3.8, `export_bundle` and `import_bundle` (bn-3glnv).
 //!
 //! # Where the privileged boundary actually is
 //!
@@ -64,29 +65,54 @@
 //! (ID2 excludes it), which is what lets the successor be named before it is stamped with
 //! its own name.
 //!
+//! # Bundles, and the one acceptance path that verifies a chain
+//!
+//! Plan §4.2.1's intent bundles arrive at protocol 3.8. `intent.export_bundle` signs the
+//! named contracts, their registry records, the local allowed-signers set, and the signing
+//! registry's audit log with the held key, and holds the result under its `inb_` identity.
+//! `intent.import_bundle` reads a bundle under the bounds of [`bundle`](super::bundle),
+//! recomputes every contract's `in_*` from its bytes (RFC 0037 I5), checks W1–W10 (I4) and
+//! each revision's lineage and protected fields, and only then verifies the bundle. A
+//! bundle that does not verify changes nothing. One that verifies has its standing facts
+//! adopted, is held, and enters the contracts the registry does not hold at `proposed` —
+//! never higher, whatever the bundle's records say (I2). Such a proposal is accepted only
+//! through a bundle.
+//!
+//! `intent.accept` naming a `bundle` is the plan §4.2.1 CI acceptance check. It fails closed
+//! with `AcceptanceChainInvalid` unless the bundle is held, its revocation records are a
+//! prefix of this registry's, its signature passes the library's fail-closed
+//! `verify_for_ci_acceptance` (ADR-0054), and it exports the proposal with the acceptance
+//! the request presents over the proposal's own lineage
+//! ([`SigningAuthority::check_acceptance_chain`]). An acceptance with no bundle is a local
+//! acceptance, recorded as before.
+//!
 //! [`PolicyVerb::is_weaker_or_equal`]: continuum_intent::change_policy::PolicyVerb::is_weaker_or_equal
+//! [`SigningAuthority::check_acceptance_chain`]: super::signing::SigningAuthority::check_acceptance_chain
 
 use std::collections::BTreeMap;
 
 use continuum_intent::canonical_json::Json;
 use continuum_intent::change_policy::{PolicyField, PolicyTable, PolicyVerb};
-use continuum_intent::contract::{ContractParts, IntentContract, IntentId};
+use continuum_intent::contract::{CheckEnvironment, ContractParts, IntentContract, IntentId};
 use continuum_workspace::artifact_path::ArtifactClass;
 use continuum_workspace::publication::ReferenceStore;
 
 use super::admission::Derived;
+use super::bundle::{BundleBody, BundleContract, decode_signed, encode_signed};
 use super::family::{Arguments, Call, Effect, Fault, OperationFamily, Payload, ScopeClaim};
+use super::signing::{AcceptanceClaim, require_signing_version};
 use super::state::{Acceptance, DaemonState, IntentRecord, RegistryStatus};
 use super::{Services, identity};
 use crate::protocol::envelope::{StructuralVerdictValue, Verdict};
 use crate::protocol::operations::intent::{
-    IntentAcceptRequest, IntentAcceptResponse, IntentGetRequest, IntentGetResponse,
-    IntentLockRequest, IntentLockResponse, IntentProposeRevisionRequest, IntentRejectRequest,
-    IntentRejectResponse,
+    IntentAcceptRequest, IntentAcceptResponse, IntentExportBundleRequest,
+    IntentExportBundleResponse, IntentGetRequest, IntentGetResponse, IntentImportBundleRequest,
+    IntentImportBundleResponse, IntentLockRequest, IntentLockResponse,
+    IntentProposeRevisionRequest, IntentRejectRequest, IntentRejectResponse,
 };
-use crate::protocol::scalar::{IntentHandle, Opaque, Timestamp};
+use crate::protocol::scalar::{IntentBundleHandle, IntentHandle, Opaque, Timestamp};
 use crate::protocol::spec::Nullable;
-use crate::protocol::vocabulary::{ErrorCode, StructuralOutcome};
+use crate::protocol::vocabulary::{ErrorCode, SignatureOutcome, StructuralOutcome};
 
 /// The `intent` namespace's six operations.
 #[derive(Debug, Clone, Copy, Default)]
@@ -109,11 +135,23 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("intent.accept", ErrorCode::CapabilityDenied),
     ("intent.accept", ErrorCode::AcceptanceChainInvalid),
     ("intent.accept", ErrorCode::IntentMutationDenied),
+    ("intent.accept", ErrorCode::UnsupportedSemanticFeature),
     ("intent.reject", ErrorCode::CapabilityDenied),
     ("intent.reject", ErrorCode::IntentMutationDenied),
     ("intent.lock", ErrorCode::CapabilityDenied),
     ("intent.lock", ErrorCode::IntentMutationDenied),
     ("intent.lock", ErrorCode::MalformedRequest),
+    ("intent.export_bundle", ErrorCode::CapabilityDenied),
+    ("intent.export_bundle", ErrorCode::MalformedRequest),
+    ("intent.export_bundle", ErrorCode::PolicyGateFailed),
+    ("intent.export_bundle", ErrorCode::QuotaExhausted),
+    ("intent.export_bundle", ErrorCode::PublicationAborted),
+    ("intent.import_bundle", ErrorCode::CapabilityDenied),
+    ("intent.import_bundle", ErrorCode::MalformedRequest),
+    ("intent.import_bundle", ErrorCode::QuotaExhausted),
+    ("intent.import_bundle", ErrorCode::IntentMutationDenied),
+    ("intent.import_bundle", ErrorCode::PublicationAborted),
+    ("intent.lock", ErrorCode::IntentMutationDenied),
 ];
 
 /// The `$id` of the governing schema, with the `v<schema_epoch>/` segment removed
@@ -163,6 +201,16 @@ impl OperationFamily for IntentFamily {
             },
             Arguments::IntentReject(request) => claim(vec![request.proposal.clone()], vec![intent]),
             Arguments::IntentLock(request) => claim(vec![request.intent.clone()], vec![intent]),
+            // Both bundle operations also need an unscoped grant, which admission decides
+            // by name (`admission::requires_unscoped_grant`).
+            Arguments::IntentExportBundle(request) => claim(
+                request.intents.clone(),
+                vec![intent, ArtifactClass::SignedIntentBundle.token()],
+            ),
+            Arguments::IntentImportBundle(_) => claim(
+                Vec::new(),
+                vec![intent, ArtifactClass::SignedIntentBundle.token()],
+            ),
             _ => ScopeClaim::default(),
         }
     }
@@ -178,9 +226,11 @@ impl OperationFamily for IntentFamily {
             Arguments::IntentGet(request) => get(call, request, state),
             Arguments::IntentDiff(_) => Err(unclassifiable()),
             Arguments::IntentProposeRevision(request) => propose_revision(request, state),
-            Arguments::IntentAccept(request) => accept(call, request, state),
+            Arguments::IntentAccept(request) => accept(call, request, state, services),
             Arguments::IntentReject(request) => reject(request, state),
             Arguments::IntentLock(request) => lock(call, request, state, services),
+            Arguments::IntentExportBundle(request) => export_bundle(call, request, state, services),
+            Arguments::IntentImportBundle(request) => import_bundle(call, request, state, services),
             // Unreachable: the dispatcher checked shape agreement before routing.
             _ => Err(Fault::new(
                 ErrorCode::MalformedRequest,
@@ -258,18 +308,19 @@ fn accept(
     call: &Call<'_>,
     request: &IntentAcceptRequest,
     state: &mut DaemonState,
+    services: &Services,
 ) -> Result<Effect, Fault> {
     // A bundle the daemon does not hold cannot have its chain verified, and plan §4.2.1
     // fails closed on exactly that: "CI fails closed with `AcceptanceChainInvalid` when the
-    // referenced bundle is absent or its chain does not verify". This daemon holds no
-    // bundles, so every named bundle is absent.
-    if !request.bundle.is_absent() {
-        return Err(Fault::new(
-            ErrorCode::AcceptanceChainInvalid,
-            "the acceptance names an intent bundle this daemon cannot verify a chain for",
-        ));
+    // referenced bundle is absent or its chain does not verify". Below 3.8 no bundle can
+    // verify, so a connection negotiated there keeps the 3.0–3.7 answer for every named
+    // bundle.
+    let bundle = request.bundle.value();
+    let legacy = services.negotiated().protocol_version() < super::signing::SIGNING_SINCE;
+    if bundle.is_some_and(|handle| legacy || state.signing().bundle(handle).is_none()) {
+        return Err(chain_invalid());
     }
-    let acceptance = decode_acceptance(&request.acceptance, call.audit.as_str())?;
+    let mut acceptance = decode_acceptance(&request.acceptance, call.audit.as_str())?;
 
     let record = state.intent(&request.proposal).ok_or_else(Fault::denied)?;
     lineage_scope(call, record)?;
@@ -280,6 +331,103 @@ fn accept(
         ));
     }
 
+    // The plan §4.2.1 CI acceptance check, failing closed (`rule intent.bundles`): the held
+    // bundle's signature chain, under this registry and local policy, through
+    // the library's fail-closed `verify_for_ci_acceptance`. Every failure is the one code.
+    let supersedes = record.supersedes.clone();
+    match bundle {
+        Some(bundle) => {
+            let local = record.contract.to_artifact_bytes();
+            let claim = AcceptanceClaim {
+                contract: &local,
+                accepted_by: &acceptance.accepted_by,
+                signature: &acceptance.signature,
+                timestamp: &acceptance.timestamp,
+                supersedes: supersedes.as_ref(),
+            };
+            let actor = super::signing::audit_actor(call)?;
+            let checked =
+                state
+                    .signing()
+                    .check_acceptance_chain(bundle, &request.proposal, &claim, &actor);
+            match checked {
+                Ok(chain) => acceptance.chain = chain,
+                Err(fault) => {
+                    if fault == super::signing::AcceptanceFault::IdentityCollision {
+                        state.signing_mut().note_identity_collision();
+                    }
+                    return Err(chain_invalid());
+                }
+            }
+            // A2 against this registry, not against the bundle: the predecessor the
+            // acceptance names must be the accepted head of a lineage this daemon holds,
+            // so a signed acceptance is never replayed onto a lineage that exists only in
+            // the bundle.
+            if let Some(predecessor) = &supersedes {
+                let head = state.intent(predecessor).is_some_and(|held| {
+                    held.status == RegistryStatus::Accepted && held.superseded_by.is_none()
+                });
+                if !head {
+                    return Err(chain_invalid());
+                }
+            }
+        }
+        // A proposal an import entered came from someone else's registry: it is accepted
+        // only through a bundle that verifies, never by a local acceptance.
+        None if state.signing().imported_from(&request.proposal).is_some() => {
+            return Err(chain_invalid());
+        }
+        // A local acceptance at 3.8 is signed by this daemon's key when local policy allows
+        // it to sign acceptances: the A1 statement over this record, which a peer verifies
+        // when it accepts through a bundle. The caller's `signature` text is then replaced
+        // by that signature, as nothing could verify the caller's text. Without such a key,
+        // or below 3.8, the caller's text is recorded as before, and the record carries no
+        // chain, so no other daemon's CI acceptance check will honor it.
+        //
+        // What the key signs is what this daemon admitted, never the caller's say-so: the
+        // principal must be the admitted actor, and the time this daemon's own reading.
+        // The key vouches that this daemon admitted that principal, holding the
+        // `revise-intent` privilege, at that time; a peer that allows the key for
+        // `intent-acceptance` trusts this daemon's admission (RFC 0037 A3).
+        None if !legacy && state.signing().signs_acceptances() => {
+            let admitted = acceptance.accepted_by == call.grant.actor.as_str()
+                && services
+                    .now()
+                    .is_some_and(|now| now.as_str() == acceptance.timestamp);
+            if !admitted {
+                return Err(Fault::new(
+                    ErrorCode::AcceptanceChainInvalid,
+                    "a signed acceptance names the admitted principal and this daemon's time",
+                ));
+            }
+            let statement = super::acceptance::Statement {
+                intent: &request.proposal,
+                base: supersedes.as_ref(),
+                accepted_by: &acceptance.accepted_by,
+                timestamp: &acceptance.timestamp,
+            };
+            let element = state.signing().sign_acceptance(&statement).map_err(|()| {
+                Fault::new(
+                    ErrorCode::UnsupportedSemanticFeature,
+                    "this daemon's acceptance-signing key is not active; nothing was accepted",
+                )
+            })?;
+            if let Some(element) = element {
+                acceptance.signature.clone_from(&element.signature);
+                acceptance.chain = vec![element];
+            }
+        }
+        None => {}
+    }
+
+    if bundle.is_some() {
+        if let Some(predecessor) = &supersedes {
+            if let Some(previous) = state.intent_mut(predecessor) {
+                previous.status = RegistryStatus::Superseded;
+                previous.superseded_by = Some(request.proposal.clone());
+            }
+        }
+    }
     let record = state
         .intent_mut(&request.proposal)
         .ok_or_else(Fault::denied)?;
@@ -307,6 +455,7 @@ fn reject(request: &IntentRejectRequest, state: &mut DaemonState) -> Result<Effe
         ));
     }
     state.drop_intent(&request.proposal);
+    state.signing_mut().forget_import(&request.proposal);
     Ok(Effect::new(
         Payload::IntentReject(IntentRejectResponse {
             proposal: request.proposal.clone(),
@@ -323,6 +472,16 @@ fn lock(
 ) -> Result<Effect, Fault> {
     let record = state.intent(&request.intent).ok_or_else(Fault::denied)?;
     lineage_scope(call, record)?;
+    // An imported proposal reaches protection only through `intent.accept` naming a bundle
+    // that verifies; a lock would mint an accepted successor around that check.
+    if record.status == RegistryStatus::Proposed
+        && state.signing().imported_from(&request.intent).is_some()
+    {
+        return Err(Fault::new(
+            ErrorCode::IntentMutationDenied,
+            "an imported proposal is protected only by an acceptance through its bundle",
+        ));
+    }
     let contract = record.contract.clone();
     let acceptance = record.acceptance.clone();
     let current = contract.policy().clone();
@@ -399,6 +558,487 @@ fn lock(
     ))
 }
 
+fn chain_invalid() -> Fault {
+    Fault::new(
+        ErrorCode::AcceptanceChainInvalid,
+        "the acceptance chain does not verify against this daemon's registry and policy",
+    )
+    .not_retryable()
+}
+
+// --- intent bundles (protocol 3.8, bn-3glnv) ----------------------------------------------
+
+/// A registry record a bundle carries, read for exactly what import and acceptance need.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BundleRecord {
+    status: RegistryStatus,
+    supersedes: Option<IntentHandle>,
+    acceptance: Option<(String, String, String)>,
+    chain: Vec<super::acceptance::ChainElement>,
+}
+
+impl BundleRecord {
+    /// Read a bundle's record for `intent` against
+    /// `schemas/intent-registry-record.schema.json`'s header and the fields import and
+    /// acceptance read. The bytes were bounded by the bundle decoder before this runs.
+    ///
+    /// # Errors
+    ///
+    /// `()` for any record that does not name `intent`, carries another schema header, an
+    /// unknown status, a malformed `supersedes`, or an `accepted` status without its
+    /// acceptance block (RFC 0037: such a bundle "is malformed and MUST be rejected").
+    pub(crate) fn parse(bytes: &[u8], intent: &IntentHandle) -> Result<Self, ()> {
+        let Ok(Json::Object(fields)) = Json::parse(bytes) else {
+            return Err(());
+        };
+        let text = |key: &str| match fields.get(key) {
+            Some(Json::String(value)) => Some(value.as_str()),
+            _ => None,
+        };
+        if text("schema_id") != Some(RECORD_SCHEMA_ID)
+            || fields.get("schema_epoch") != Some(&Json::Integer(RECORD_SCHEMA_EPOCH))
+            || text("intent") != Some(intent.as_str())
+        {
+            return Err(());
+        }
+        let status = match text("status") {
+            Some("proposed") => RegistryStatus::Proposed,
+            Some("accepted") => RegistryStatus::Accepted,
+            Some("superseded") => RegistryStatus::Superseded,
+            _ => return Err(()),
+        };
+        let supersedes = match fields.get("supersedes") {
+            None | Some(Json::Null) => None,
+            Some(Json::String(value)) => Some(IntentHandle::new(value).map_err(|_| ())?),
+            Some(_) => return Err(()),
+        };
+        let acceptance = match fields.get("acceptance") {
+            None => None,
+            Some(Json::Object(inner)) => {
+                let field = |key: &str| match inner.get(key) {
+                    Some(Json::String(value)) if !value.is_empty() => Ok(value.clone()),
+                    _ => Err(()),
+                };
+                if field("capability")? != ACCEPTANCE_CAPABILITY {
+                    return Err(());
+                }
+                Some((
+                    field("accepted_by")?,
+                    field("signature")?,
+                    field("timestamp")?,
+                ))
+            }
+            Some(_) => return Err(()),
+        };
+        if status == RegistryStatus::Accepted && acceptance.is_none() {
+            return Err(());
+        }
+        // The chain is read, bounded, and kept verbatim here; it is verified only when an
+        // acceptance names the bundle (RFC 0037 A3, `check_acceptance_chain`).
+        let chain = match fields.get("chain") {
+            None => Vec::new(),
+            Some(Json::Array(items)) if items.len() <= super::acceptance::MAX_CHAIN => items
+                .iter()
+                .map(|item| {
+                    let Json::Object(element) = item else {
+                        return Err(());
+                    };
+                    if element.len() != 3 {
+                        return Err(());
+                    }
+                    let field = |key: &str| match element.get(key) {
+                        Some(Json::String(value)) => Ok(value.clone()),
+                        _ => Err(()),
+                    };
+                    Ok(super::acceptance::ChainElement {
+                        signer: field("signer")?,
+                        signature: field("signature")?,
+                        scope: field("scope")?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ()>>()?,
+            Some(_) => return Err(()),
+        };
+        Ok(Self {
+            status,
+            supersedes,
+            acceptance,
+            chain,
+        })
+    }
+
+    /// The record's signature chain, oldest first.
+    pub(crate) fn chain(&self) -> &[super::acceptance::ChainElement] {
+        &self.chain
+    }
+
+    /// The acceptance block's `signature`, when there is one.
+    pub(crate) fn acceptance_signature(&self) -> Option<&str> {
+        self.acceptance
+            .as_ref()
+            .map(|(_, signature, _)| signature.as_str())
+    }
+
+    /// Whether this signed record accepts the contract exactly as `claim` presents it: status
+    /// `accepted`, the same principal, signature, and time, and the same lineage predecessor
+    /// as the local record (RFC 0037 A2: an acceptance replayed onto another base is refused).
+    pub(crate) fn accepts(&self, claim: &AcceptanceClaim<'_>) -> bool {
+        self.status == RegistryStatus::Accepted
+            && self.supersedes.as_ref() == claim.supersedes
+            && self.acceptance.as_ref().is_some_and(|(by, signature, at)| {
+                by == claim.accepted_by && signature == claim.signature && at == claim.timestamp
+            })
+    }
+}
+
+fn malformed_bundle() -> Fault {
+    Fault::new(
+        ErrorCode::MalformedRequest,
+        "the content is not a well-formed intent bundle within its bounds",
+    )
+    .not_retryable()
+}
+
+/// The refusal for a content-addressed handle that already names byte-different content
+/// (ADR-0013: collisions resolve by exact comparison). Deterministic, so not retryable.
+fn identity_collision() -> Fault {
+    Fault::new(
+        ErrorCode::PublicationAborted,
+        "an identity already names byte-different content; nothing changed",
+    )
+    .not_retryable()
+}
+
+fn bundle_handle(services: &Services, content: &[u8]) -> Result<IntentBundleHandle, Fault> {
+    let stored = services
+        .identifier()
+        .identify(ArtifactClass::SignedIntentBundle, content)
+        .map_err(|_| {
+            Fault::new(
+                ErrorCode::MalformedRequest,
+                "no content identity could be derived for the bundle",
+            )
+        })?;
+    identity::bundle_to_wire(&stored).map_err(|_| {
+        Fault::new(
+            ErrorCode::MalformedRequest,
+            "the derived bundle identity is not a well-formed bundle handle",
+        )
+    })
+}
+
+/// `intent.export_bundle`: sign the named contracts, their records, the local allowed set,
+/// and the registry's audit log with the held key; hold the bundle and return it.
+fn export_bundle(
+    call: &Call<'_>,
+    request: &IntentExportBundleRequest,
+    state: &mut DaemonState,
+    services: &Services,
+) -> Result<Effect, Fault> {
+    require_signing_version(services)?;
+    // Bounded before the set is built.
+    if request.intents.len() > super::bundle::MAX_BUNDLE_CONTRACTS {
+        return Err(Fault::new(
+            ErrorCode::MalformedRequest,
+            "an export names between one and the bundle bound of contracts",
+        )
+        .not_retryable());
+    }
+    let intents: std::collections::BTreeSet<&IntentHandle> = request.intents.iter().collect();
+    if intents.is_empty() {
+        return Err(Fault::new(
+            ErrorCode::MalformedRequest,
+            "an export names between one and the bundle bound of contracts",
+        )
+        .not_retryable());
+    }
+    // The cheap refusals first: a key that may sign bundles, and room to hold one.
+    let authority = state.signing();
+    if !authority.may_sign(continuum_evidence::signing::SignedArtifactKind::IntentBundle) {
+        return Err(super::signing::no_active_key().not_retryable());
+    }
+    if !authority.has_room_for_more() {
+        return Err(Fault::new(
+            ErrorCode::QuotaExhausted,
+            "this daemon holds its bound of intent bundles",
+        )
+        .not_retryable());
+    }
+    let pins = authority.export_pins();
+    if pins.len() > super::bundle::MAX_ALLOWED_SIGNERS {
+        return Err(Fault::new(
+            ErrorCode::QuotaExhausted,
+            "local policy pins more active bundle signers than a bundle carries",
+        )
+        .not_retryable());
+    }
+    let oversize = || {
+        Fault::new(
+            ErrorCode::MalformedRequest,
+            "the bundle would exceed a bundle bound; nothing was exported",
+        )
+        .not_retryable()
+    };
+    let mut contracts = Vec::with_capacity(intents.len());
+    for handle in intents {
+        let record = state.intent(handle).ok_or_else(Fault::denied)?;
+        lineage_scope(call, record)?;
+        let entry = BundleContract {
+            intent: handle.clone(),
+            contract: record.contract.to_artifact_bytes(),
+            record: registry_record(handle, record).to_canonical_bytes(),
+        };
+        if entry.contract.len() + entry.record.len() > super::bundle::MAX_CONTRACT_ENTRY_LEN - 64
+            || entry.record.len() > super::bundle::MAX_RECORD_JSON_LEN
+        {
+            return Err(oversize());
+        }
+        contracts.push(entry);
+    }
+    let authority = state.signing();
+    let body = BundleBody {
+        allowed: pins,
+        contracts,
+        links: authority.export_links()?,
+    };
+    let body_bytes = body.encode();
+    // Bounded before it is signed.
+    if body_bytes.len() > super::bundle::MAX_BUNDLE_LEN - 1024 {
+        return Err(oversize());
+    }
+    let signature = authority.sign_bundle(&body_bytes)?;
+    let content = encode_signed(&body_bytes, &signature.encode());
+    // What this daemon writes, it must be able to read back: an export over any bound is
+    // refused here rather than handed to an importer that would refuse it.
+    let signed = decode_signed(&content).map_err(|_| oversize())?;
+    let handle = bundle_handle(services, &content)?;
+    call.derived(Derived::Instance(handle.as_str()))?;
+    if state.signing().holds_other_bundle(&handle, &signed) {
+        state.signing_mut().note_identity_collision();
+        return Err(identity_collision());
+    }
+    if !state
+        .signing()
+        .has_room_for_bundle(&handle, signed.charged_len())
+    {
+        return Err(Fault::new(
+            ErrorCode::QuotaExhausted,
+            "this daemon holds its bound of intent bundles",
+        )
+        .not_retryable());
+    }
+    state.signing_mut().hold(handle.clone(), signed);
+    Ok(Effect::new(
+        Payload::IntentExportBundle(IntentExportBundleResponse {
+            bundle: handle,
+            content,
+        }),
+        structural(StructuralOutcome::Created),
+    ))
+}
+
+/// `intent.import_bundle`: validate every layer and every contract, and verify the bundle,
+/// before anything changes; then adopt the standing facts it carries, enter the contracts
+/// the registry does not hold at `proposed`, and hold it. A bundle that does not verify
+/// changes nothing and is not held. Idempotent (RFC 0037 I1).
+fn import_bundle(
+    call: &Call<'_>,
+    request: &IntentImportBundleRequest,
+    state: &mut DaemonState,
+    services: &Services,
+) -> Result<Effect, Fault> {
+    require_signing_version(services)?;
+    // Bounded before any byte is decoded (`decode_signed` checks the length first).
+    let signed = decode_signed(&request.content).map_err(|_| malformed_bundle())?;
+    // A bundle whose signature authenticates its body is then held to its links before
+    // anything else: a standing change is adopted only on the word of the keys it
+    // concerns, so a link one of them did not sign, or a key rotated twice, makes the
+    // bundle malformed. A bundle that does not authenticate adopts nothing anyway, and its
+    // typed outcome comes from verification below.
+    let authentic = continuum_evidence::signing::ArtifactSignature::decode(signed.signature())
+        .is_ok_and(|signature| {
+            signature.authenticates(
+                continuum_evidence::signing::SignedArtifactKind::IntentBundle,
+                &super::bundle::signed_bytes_identity(signed.body_bytes()),
+            )
+        });
+    if authentic && !super::signing::links_are_attested(&signed.body().links) {
+        state.signing_mut().note_unattested_link();
+        return Err(Fault::new(
+            ErrorCode::MalformedRequest,
+            "a carried signer link is not signed by every key it concerns; nothing changed",
+        )
+        .not_retryable());
+    }
+
+    // I4, I5: every contract parses, is well formed, and is the identity it claims to be.
+    // Each is read on its own, bounded by the entry bound the decoder already enforced.
+    let mut entries: Vec<(IntentHandle, IntentContract, BundleRecord)> =
+        Vec::with_capacity(signed.body().contracts.len());
+    for entry in &signed.body().contracts {
+        let contract = IntentContract::decode(&entry.contract).map_err(|_| malformed_bundle())?;
+        // One spelling per contract: the entry is the canonical bytes of what it decodes to,
+        // so comparing bytes below compares contracts.
+        if contract.to_artifact_bytes() != entry.contract {
+            return Err(malformed_bundle());
+        }
+        let recomputed = mint(&contract, services)?;
+        if recomputed != entry.intent {
+            return Err(malformed_bundle());
+        }
+        // I4: W1–W10 against what an import can supply — the `in_` this registry minted
+        // and nothing else. There is no snapshot here to resolve a domain-pack profile or a
+        // correspondence map against, so a contract naming one fails W8 and is refused:
+        // fail closed, never stored partially.
+        let environment = CheckEnvironment::new().with_minted_intent_id(entry.intent.as_str());
+        if !contract.check(&environment).is_well_formed() {
+            return Err(malformed_bundle());
+        }
+        let record =
+            BundleRecord::parse(&entry.record, &entry.intent).map_err(|_| malformed_bundle())?;
+        entries.push((entry.intent.clone(), contract, record));
+    }
+
+    let handle = bundle_handle(services, &request.content)?;
+    call.derived(Derived::Instance(handle.as_str()))?;
+    let actor = super::signing::audit_actor(call)?;
+
+    // A handle already held names these exact bytes, or the import is refused: an `inb_*`
+    // or `in_*` that names byte-different content is an identity collision (ADR-0013), and
+    // is refused before any fact is adopted, any contract enters, or any bundle is held.
+    // Re-importing the same bytes stays idempotent (I1, I6).
+    let collides = state.signing().holds_other_bundle(&handle, &signed)
+        || signed.body().contracts.iter().any(|entry| {
+            state
+                .intent(&entry.intent)
+                .is_some_and(|held| held.contract.to_artifact_bytes() != entry.contract)
+        });
+    if collides {
+        state.signing_mut().note_identity_collision();
+        return Err(identity_collision());
+    }
+
+    // The contracts this import would enter, each checked against its lineage before
+    // anything is written: the predecessor a record names is held here or exported by the
+    // same bundle, and no field its policy protects moves, nor does the policy weaken
+    // (INV-001, plan §5.4). The RFC 0031 classifier has not shipped, so any change to a
+    // field whose verb is not `unlocked` is refused rather than classified.
+    let mut fresh = Vec::new();
+    for (intent, contract, record) in &entries {
+        if state.intent(intent).is_some() {
+            continue;
+        }
+        call.derived(Derived::Intent(intent))?;
+        if let Some(predecessor) = &record.supersedes {
+            call.derived(Derived::Intent(predecessor))?;
+            let before = state
+                .intent(predecessor)
+                .map(|held| &held.contract)
+                .or_else(|| {
+                    entries
+                        .iter()
+                        .find(|(other, _, _)| other == predecessor)
+                        .map(|(_, other, _)| other)
+                })
+                .ok_or_else(malformed_bundle)?;
+            if !respects_predecessor(before, contract) {
+                return Err(Fault::new(
+                    ErrorCode::IntentMutationDenied,
+                    "an imported revision changes a field its predecessor's policy protects",
+                ));
+            }
+        }
+        fresh.push(intent.clone());
+    }
+
+    // Verify against the registry with the bundle's facts applied, changing nothing yet.
+    // An unverified bundle leaves the daemon exactly as it was.
+    let adoption = match state.signing().verify_bundle(&signed, &actor) {
+        Ok(adoption) => adoption,
+        Err(outcome) => {
+            return Ok(Effect::new(
+                Payload::IntentImportBundle(IntentImportBundleResponse {
+                    bundle: handle,
+                    outcome,
+                    imported: Vec::new(),
+                    adopted: 0,
+                }),
+                structural(StructuralOutcome::Unchanged),
+            ));
+        }
+    };
+    let outcome = SignatureOutcome::Verified;
+    let charged = signed.charged_len();
+    if !state.signing().has_room_for_bundle(&handle, charged) {
+        return Err(Fault::new(
+            ErrorCode::QuotaExhausted,
+            "this daemon holds its bound of intent bundles",
+        )
+        .not_retryable());
+    }
+
+    // Nothing below can fail: the facts are committed with everything else, or not at all.
+    let adopted = state.signing_mut().adopt(adoption);
+    for (intent, contract, record) in entries {
+        if fresh.contains(&intent) {
+            state
+                .signing_mut()
+                .record_import(intent.clone(), handle.clone());
+            state.put_intent(
+                intent,
+                IntentRecord {
+                    contract,
+                    // I2: import never raises protection status, whatever the record says.
+                    status: RegistryStatus::Proposed,
+                    supersedes: record.supersedes,
+                    superseded_by: None,
+                    acceptance: None,
+                },
+            );
+        }
+    }
+    let held = state.signing_mut().hold(handle.clone(), signed);
+    let changed = held || adopted > 0 || !fresh.is_empty();
+    Ok(Effect::new(
+        Payload::IntentImportBundle(IntentImportBundleResponse {
+            bundle: handle,
+            outcome,
+            imported: fresh,
+            adopted,
+        }),
+        structural(if changed {
+            StructuralOutcome::Created
+        } else {
+            StructuralOutcome::Unchanged
+        }),
+    ))
+}
+
+/// Whether `successor` keeps every field `predecessor`'s policy protects, and does not
+/// weaken the policy table itself. A field whose verb is anything but `unlocked` must be
+/// byte-identical in the two artifacts: the directional verbs (`no-removal`,
+/// `no-decrease`, …) need the RFC 0031 classifier, which has not shipped, so a change under
+/// one is refused rather than guessed at.
+fn respects_predecessor(predecessor: &IntentContract, successor: &IntentContract) -> bool {
+    let before = predecessor.artifact_json();
+    let after = successor.artifact_json();
+    PolicyField::ALL.into_iter().all(|field| {
+        let verb = predecessor.policy().verb(field);
+        verb.is_weaker_or_equal(successor.policy().verb(field))
+            && (verb == PolicyVerb::Unlocked
+                || json_at(&before, field.contract_path())
+                    == json_at(&after, field.contract_path()))
+    })
+}
+
+/// The member of `document` a dotted contract path names, or `None` when it is absent.
+fn json_at<'a>(document: &'a Json, path: &str) -> Option<&'a Json> {
+    path.split('.').try_fold(document, |node, key| match node {
+        Json::Object(fields) => fields.get(key),
+        _ => None,
+    })
+}
+
 /// The typed refusal both diff-shaped operations return.
 fn unclassifiable() -> Fault {
     Fault::new(
@@ -459,6 +1099,7 @@ fn decode_acceptance(acceptance: &Opaque, audit: &str) -> Result<Acceptance, Fau
         // Written by the daemon, never taken from the caller: plan §5.4 makes this the
         // record *the daemon* produced, and `rule audit.correlation` fixes its value.
         audit_record: audit.to_owned(),
+        chain: Vec::new(),
     })
 }
 
@@ -522,6 +1163,23 @@ fn registry_record(handle: &IntentHandle, record: &IntentRecord) -> Json {
             Json::String(acceptance.timestamp.clone()),
         );
         fields.insert("acceptance".to_owned(), Json::Object(inner));
+        if !acceptance.chain.is_empty() {
+            let chain = acceptance
+                .chain
+                .iter()
+                .map(|element| {
+                    Json::Object(BTreeMap::from([
+                        ("scope".to_owned(), Json::String(element.scope.clone())),
+                        (
+                            "signature".to_owned(),
+                            Json::String(element.signature.clone()),
+                        ),
+                        ("signer".to_owned(), Json::String(element.signer.clone())),
+                    ]))
+                })
+                .collect();
+            fields.insert("chain".to_owned(), Json::Array(chain));
+        }
     }
     Json::Object(fields)
 }

@@ -9,7 +9,7 @@
 //!
 //! # The architectural guard this file holds to a fact
 //!
-//! `continuumd` dispatches its 75 operations as *data*: [`registry::OPERATIONS`] is a table
+//! `continuumd` dispatches its 83 operations as *data*: [`registry::OPERATIONS`] is a table
 //! the daemon reads, never a program the wire writes, and
 //! [`Daemon::dispatch`](continuumd::daemon::Daemon::dispatch)'s eight steps — named in that
 //! function's own module documentation — key on exactly four things: the negotiated
@@ -54,9 +54,9 @@
 //!
 //! # The landed/unlanded boundary, and why it bounds leg 1's scope honestly
 //!
-//! Only 30 of the registry's 75 operations have a family wired up today:
+//! Only 38 of the registry's 83 operations have a family wired up today:
 //! `codec::operations::decode_arguments`'s own documentation states it plainly — "the 45 of
-//! the 75 whose families have not landed" answer `CodecError::UnknownOperation` — and that
+//! the 83 whose families have not landed" answer `CodecError::UnknownOperation` — and that
 //! function's match is on the operation *name* alone, never on the argument bytes, so an
 //! unlanded operation is inert for **any** payload, hostile or not, before a single byte of
 //! it is parsed. `structural_every_unlanded_operation_is_inert_for_any_payload_whatsoever`
@@ -410,6 +410,18 @@ mod structural {
         "ContextExpandRequest.anchor",
         "ContextCompileRequest.question",
         "ContextCompileRequest.guarantees",
+        // Protocol 3.8, the signing wire (bn-3glnv). All four are byte blobs, never text an
+        // agent or a tool description reads, and never interpolated into a `detail`: a fault
+        // over any of them is a static string. Each is bounded by length before any byte is
+        // read. A pack and a verify artifact are only hashed; a verify signature is decoded
+        // under ADR-0054's 512-byte bound; an imported bundle is decoded layer by layer
+        // under `rule intent.bundles`, and its contract bytes and records reach the registry
+        // only through `IntentContract::decode` and a closed-field record reader. The
+        // probes are in `tests/daemon_signing.rs`.
+        "IntentImportBundleRequest.content",
+        "SigningSignPackRequest.pack",
+        "SigningVerifyRequest.artifact",
+        "SigningVerifyRequest.signature",
     ];
 
     #[test]
@@ -499,10 +511,13 @@ mod structural {
         // alone, so both numbers moved together. The 30th is
         // `workspace.create_by_reference`, the 75th, at protocol 3.6 (bn-3of5h): it is
         // served the day it is declared, because it resolves its reference and then calls
-        // the `create` this family already had.
-        assert_eq!(OPERATION_COUNT, 75);
+        // the `create` this family already had. Protocol 3.8 (bn-3glnv) landed eight more
+        // with their families the day they were declared — the six `signing` operations
+        // and the two bundle operations — so the counts are 38 of 83. The test's name
+        // records the count before that.
+        assert_eq!(OPERATION_COUNT, 83);
         let landed = landed_operations();
-        assert_eq!(landed.len(), 30, "landed operations: {landed:?}");
+        assert_eq!(landed.len(), 38, "landed operations: {landed:?}");
         let expected: BTreeSet<&str> = [
             "workspace.create",
             "workspace.create_by_reference",
@@ -534,6 +549,14 @@ mod structural {
             "context.compile",
             "context.expand",
             "whiteboard.compile",
+            "intent.export_bundle",
+            "intent.import_bundle",
+            "signing.mint",
+            "signing.rotate",
+            "signing.revoke",
+            "signing.registry",
+            "signing.verify",
+            "signing.sign_pack",
         ]
         .into_iter()
         .collect();

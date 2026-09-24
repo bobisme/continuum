@@ -12,7 +12,7 @@
 //! >
 //! > — `notes/plan/schemas/continuumd-native-protocol.idl`, header
 //!
-//! This module is the Rust projection of that file: the 75 operations of 19 namespaces
+//! This module is the Rust projection of that file: the 83 operations of 20 namespaces
 //! with their request, response, verdict, and error declarations; the request and result
 //! envelopes; the connection handshake and the protocol-major N/N−1 window; and the
 //! closed and open vocabularies, including the complete plan §10.3 [`ErrorCode`]
@@ -91,8 +91,8 @@
 //! - [`handshake`] — IDL §7: `ClientHello`/`ServerWelcome` and version negotiation;
 //! - [`task`] — IDL §8: task records and stream events;
 //! - [`shared`] — IDL §9 plus `VerificationResult`;
-//! - [`operations`] — one module per IDL namespace, 19 in all;
-//! - [`registry`] — the 75 operations as data, and the protocol's identity constants.
+//! - [`operations`] — one module per IDL namespace, 20 in all;
+//! - [`registry`] — the 83 operations as data, and the protocol's identity constants.
 //!
 //! [`ErrorCode`]: vocabulary::ErrorCode
 

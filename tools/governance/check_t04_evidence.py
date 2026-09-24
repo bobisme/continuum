@@ -16,7 +16,8 @@ committed evidence file. A control that regresses between commits fails here
 too; this file's own gate is `evidence`, not `documentation`.
 
 T04 differs from T12 and R16 in one respect this file states rather than
-hides: **two of the six controls have no live producer today**, and this file
+hides: **one of the six controls has no live producer today** (two until bn-3glnv
+put signature verification on a production path), and this file
 records that as a typed absence (`status: "gap"`) rather than fabricating a
 citation or silently passing. A `gap` control is not a failure — INV-008's
 spirit ("inconclusive, typed, never a bare boolean") applies to governance
@@ -56,16 +57,17 @@ Control -> enforcement point map
         `carries`); `check_kernel_covenant.py` KCOV-09 (receipt-conformance)
         re-run for real.
 
-    optional signing/attestation                                       GAP
-        Attestation produced, verification absent. Since bn-1hape the
-        daemon's receipt producer (`evidence.link`) signs every receipt's
-        canonical bytes with the keystore's solo-developer key, minted on
-        first use from `OsEntropy` (`continuumd/tests/receipt_signing.rs`,
-        re-run here). But no production consumer verifies a signature
-        (bn-3glnv: daemon operations, wire form, `intent.accept`), and no
-        intent-bundle or domain-pack producer exists, so an adversary's
-        substitute is still not *rejected* by a signature check. See "Gap
-        controls" below.
+    optional signing/attestation                                       PASS
+        Produced and verified in production (bn-1hape, bn-3glnv, protocol
+        3.8). `evidence.link` signs every receipt's canonical bytes before
+        publishing (`continuumd/tests/receipt_signing.rs`, re-run here);
+        `intent.export_bundle` signs intent bundles and `signing.sign_pack`
+        domain packs with the daemon's held key; `signing.verify` returns
+        typed provenance; and `intent.accept` naming a bundle runs
+        `SignatureVerifier::verify_for_ci_acceptance` and refuses a forged,
+        tampered, revoked, unpinned, stale, or retired-key chain with
+        `AcceptanceChainInvalid` (`continuumd/tests/daemon_signing.rs`,
+        re-run here). `signing-production-scope` binds each call site.
 
     reject digest mismatch                                             PASS
         `continuum-workspace::publication`'s `AbortReason::IdentityCollision`
@@ -106,7 +108,7 @@ Control -> enforcement point map
 Gap controls
 ------------
 
-Two controls are typed absences, not failures:
+One control is a typed absence, not a failure (two until bn-3glnv):
 
 1. **"hash chain/Merkle root over events"** — no production-trace ingestion
    pipeline exists in this tree yet (Phase A is "Trust spine and ACI
@@ -123,21 +125,16 @@ Two controls are typed absences, not failures:
    `notes/plan/schemas` names a trace or event log, and no known
    producer-shaped identifier appears anywhere under `crates/*/src`.
 
-2. **"optional signing/attestation"** — docs/09 marks this control
-   *optional*. The signing library exists (`continuum-evidence::signing`,
-   ADR-0054, bn-2ee4c), and bn-1hape put its signing half on a production
-   path: `evidence.link` signs each receipt before publishing it. The
-   control stays a typed absence because nothing *checks* those signatures
-   in production, and a signature nobody verifies rejects no substitution.
-   `direct_checks`' `signing-production-scope` checks the exact scope
-   mechanically: the library is present; `continuumd/src/daemon/evidence.rs`
-   still signs before it publishes (a regression fails); no `src/` file
-   outside `continuum-evidence` names `SignatureVerifier` (when bn-3glnv adds
-   one, this check fails and the control needs a successor citation, not a
-   silent pass); and nothing signs `SignedArtifactKind::IntentBundle` or
-   `::DomainPack` outside `continuum-evidence`, because no such producer
-   exists on trunk. `signing-dependency-placement` keeps the crate pinned
-   exactly and out of the certificate checker (INV-004).
+"optional signing/attestation" was the second gap until bn-3glnv. It is now a
+`pass` control, and `direct_checks`' `signing-production-scope` binds it
+mechanically in the other direction: the library is present;
+`continuumd/src/daemon/evidence.rs` signs before it publishes; the production
+verifier lives in `continuumd/src/daemon/signing.rs` and nowhere else outside
+`continuum-evidence`, and it calls `verify_for_ci_acceptance`; `intent.accept`
+reaches it through `check_acceptance_chain`; and the bundle and pack producers
+sign their own kinds there. Removing any of these, or naming the verifier in an
+unbound file, fails the check. `signing-dependency-placement` keeps the crate
+pinned exactly and out of the certificate checker (INV-004).
 
 The two gap direct-checks and the placement check are exercised by `--self-test` the same way this
 file's other direct checks are: a synthetic fixture (an overlay file/line
@@ -315,6 +312,22 @@ RUST_DELEGATES: dict[str, RustGroup] = {
         ["--lib"],
         ["signing::tests::ed25519_matches_the_rfc_8032_test_vectors"],
     ),
+    "signing_production_verification": (
+        "continuumd",
+        ["--test", "daemon_signing"],
+        [
+            "an_exported_bundle_imports_and_its_chain_accepts_the_proposal",
+            "accept_fails_closed_on_every_broken_chain",
+            "a_revocation_carried_by_a_bundle_is_adopted_and_a_stale_bundle_cannot_resurrect_the_key",
+            "a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature",
+            "a_known_signer_learns_its_attested_rotation_and_revocation",
+            "a_record_is_accepted_only_as_its_chain_signed_it",
+            "the_ci_check_refuses_a_retired_signer",
+            "signing_verify_is_total_and_typed",
+            "a_receipt_signature_travels_on_evidence_get_and_verifies_over_the_wire",
+            "a_domain_pack_signed_over_the_wire_verifies_and_a_tampered_one_does_not",
+        ],
+    ),
     "signing_receipt_production": (
         "continuumd",
         ["--test", "receipt_signing"],
@@ -436,13 +449,26 @@ RECEIPT_SIGNING_SITE = "crates/continuumd/src/daemon/evidence.rs"
 RECEIPT_SIGN_PHRASE = ".sign_receipt(&signed_receipt_identity(&staged.content))"
 RECEIPT_PUBLISH_PHRASE = ".publish(ArtifactClass::Evidence, staged.content.clone(), &token)"
 VERIFIER_PATTERN = re.compile(r"\bSignatureVerifier\b")
-ABSENT_PRODUCER_PATTERN = re.compile(r"SignedArtifactKind::(IntentBundle|DomainPack)\b")
+# The production verifier and the bundle and pack producers (bn-3glnv), each bound by the
+# phrases that must still be present in its one file.
+VERIFIER_SITE = "crates/continuumd/src/daemon/signing.rs"
+VERIFIER_PHRASES: tuple[str, ...] = (
+    ".verify_for_ci_acceptance(",
+    "fn check_acceptance_chain(",
+    "SignatureVerifier::new(&self.allowed, &self.registry, &self.head)",
+    ".sign_as(Kind::IntentBundle, &signed_bytes_identity(body_bytes))",
+    ".sign_as(Kind::DomainPack, &signed_bytes_identity(&request.pack))",
+)
+ACCEPT_SITE = "crates/continuumd/src/daemon/intent.rs"
+ACCEPT_PHRASE = ".check_acceptance_chain(bundle, &request.proposal, &claim, &actor)"
 
 
 def rule_signing_production_scope(library_text: str | None, rust_sources: list[tuple[str, str]]) -> list[str]:
     """Returns hits (evidence the declared scope is NOT what the tree holds) — empty means:
-    the library is present, the receipt producer signs before publishing, no production
-    verifier exists, and no bundle or pack producer signs."""
+    the library is present, the receipt producer signs before publishing, the production
+    verifier and the bundle and pack producers are where they are bound, `intent.accept`
+    reaches the fail-closed check, and no other `src/` file outside `continuum-evidence`
+    names the verifier."""
     hits: list[str] = []
     if library_text is None:
         hits.append(f"{SIGNING_LIBRARY} is missing: the declared library is absent")
@@ -458,13 +484,21 @@ def rule_signing_production_scope(library_text: str | None, rust_sources: list[t
         sign_at, publish_at = site.find(RECEIPT_SIGN_PHRASE), site.find(RECEIPT_PUBLISH_PHRASE)
         if sign_at == -1 or publish_at == -1 or sign_at > publish_at:
             hits.append(f"{RECEIPT_SIGNING_SITE}: evidence.link no longer signs the receipt before publishing it")
+    verifier = sources.get(VERIFIER_SITE)
+    if verifier is None:
+        hits.append(f"{VERIFIER_SITE} is missing: the production verifier is gone")
+    else:
+        for phrase in VERIFIER_PHRASES:
+            if phrase not in verifier:
+                hits.append(f"{VERIFIER_SITE} no longer contains {phrase!r}")
+    accept = sources.get(ACCEPT_SITE)
+    if accept is None or ACCEPT_PHRASE not in accept:
+        hits.append(f"{ACCEPT_SITE}: intent.accept no longer runs the fail-closed chain check")
     for rel, text in rust_sources:
-        if rel.startswith("crates/continuum-evidence/") or "/src/" not in rel:
+        if rel.startswith("crates/continuum-evidence/") or "/src/" not in rel or rel == VERIFIER_SITE:
             continue
         if VERIFIER_PATTERN.search(text):
-            hits.append(f"{rel}: a production verifier exists; the verification gap is stale")
-        for match in ABSENT_PRODUCER_PATTERN.finditer(text):
-            hits.append(f"{rel}: signs {match.group(0)}; a producer exists and must be bound")
+            hits.append(f"{rel}: names SignatureVerifier outside the bound verifier; bind it")
     return hits
 
 
@@ -570,7 +604,8 @@ def direct_self_test() -> dict[str, object]:
     site = dict(real).get(RECEIPT_SIGNING_SITE, "")
     unsigned = [(rel, text.replace(RECEIPT_SIGN_PHRASE, ".unsigned()")) if rel == RECEIPT_SIGNING_SITE else (rel, text) for rel, text in real]
     verifier = real + [("crates/continuumd/src/fixture.rs", "use continuum_evidence::signing::SignatureVerifier;")]
-    bundle = real + [("crates/continuumd/src/fixture.rs", "sign(SignedArtifactKind::IntentBundle, x)")]
+    unchecked = [(rel, text.replace(ACCEPT_PHRASE, "Ok::<(), ()>(())")) if rel == ACCEPT_SITE else (rel, text) for rel, text in real]
+    open_verifier = [(rel, text.replace(".verify_for_ci_acceptance(", ".verify_encoded(")) if rel == VERIFIER_SITE else (rel, text) for rel, text in real]
     if rule_signing_production_scope(library, real):
         failures.append("the real tree already violates signing-production-scope")
     elif not site:
@@ -580,9 +615,11 @@ def direct_self_test() -> dict[str, object]:
     elif not rule_signing_production_scope(library, unsigned):
         failures.append("fixture: an evidence.link that no longer signs did not trip signing-production-scope")
     elif not rule_signing_production_scope(library, verifier):
-        failures.append("fixture: a synthetic production verifier did not trip signing-production-scope")
-    elif not rule_signing_production_scope(library, bundle):
-        failures.append("fixture: a synthetic intent-bundle producer did not trip signing-production-scope")
+        failures.append("fixture: an unbound verifier did not trip signing-production-scope")
+    elif not rule_signing_production_scope(library, unchecked):
+        failures.append("fixture: an intent.accept that skips the chain check did not trip signing-production-scope")
+    elif not rule_signing_production_scope(library, open_verifier):
+        failures.append("fixture: a verifier that no longer fails closed did not trip signing-production-scope")
     else:
         caught.append("signing-production-scope")
 
@@ -753,6 +790,38 @@ def build_controls(
                 boundaries.get("status", "unknown"),
             ),
         ],
+        "optional signing/attestation": [
+            Citation(
+                "tools/governance/check_t04_evidence.py signing-production-scope",
+                "receipts signed before publishing; bundles and packs signed by their producers; the production verifier bound; intent.accept runs the fail-closed chain check",
+                direct_status("signing-production-scope"),
+            ),
+            Citation(
+                "crates/continuumd/tests/daemon_signing.rs (nine tests)",
+                "a bundle's chain is verified in production: it accepts when intact and fails closed on an absent, forged, unpinned, revoked, stale, or retired-key chain; a pinned signer cannot rewrite the importer's own key; verification over the wire is total; receipts and packs verify, and tampered ones do not",
+                rust_status("signing_production_verification"),
+            ),
+            Citation(
+                "crates/continuumd/tests/receipt_signing.rs (four tests)",
+                "a receipt evidence.link produces carries a signature that verifies, a tampered receipt does not, an unsigned daemon says so, and a revoked identity refuses the link",
+                rust_status("signing_receipt_production"),
+            ),
+            Citation(
+                "crates/continuum-evidence/tests/signing_identities.rs (six tests) and signing::tests::ed25519_matches_the_rfc_8032_test_vectors",
+                "the primitive and the policies the production path calls round-trip, reject tampering, wrong keys and revoked signers, fail closed in CI mode, and match RFC 8032",
+                "pass" if rust_status("signing_attestation_library") == "pass" and rust_status("signing_attestation_primitive") == "pass" else "fail",
+            ),
+            Citation(
+                "tools/governance/check_t04_evidence.py signing-dependency-placement",
+                "ed25519-dalek pinned exactly at the root; no certificate-checker crate declares a signing crate (INV-004)",
+                direct_status("signing-dependency-placement"),
+            ),
+            Citation(
+                "tools/governance/check_code_policy.py GOV-1-07",
+                "the signing dependencies carry dependency-rationale entries and TCB classes",
+                rid_status(code_policy, "GOV-1-07"),
+            ),
+        ],
         "preserve redaction commitments": [
             Citation(
                 "notes/plan/schemas/redacted.schema.json",
@@ -787,46 +856,6 @@ def build_controls(
                     "artifact": "tools/governance/check_t04_evidence.py event-hash-chain-gap",
                     "checks": "no notes/plan/schemas file names a trace/event artifact; no known producer-shaped Rust identifier exists under crates/*/src",
                     "status": direct_status("event-hash-chain-gap"),
-                },
-            ],
-        },
-        "optional signing/attestation": {
-            "reason": (
-                "Attestation produced, verification absent. docs/09 marks this control "
-                "optional. Since bn-1hape, continuumd's evidence.link signs every "
-                "receipt's canonical bytes before publishing, with the keystore's "
-                "solo-developer key minted on first use from OsEntropy. No production "
-                "consumer verifies those signatures yet (bn-3glnv: daemon operations, "
-                "wire form, intent.accept's fail-closed check), and no intent-bundle or "
-                "domain-pack producer exists on trunk, so a substitute is not rejected by "
-                "a signature. Assurance does not depend on it: reject digest mismatch and "
-                "build identity above already deny an adversary a path to a forged pass."
-            ),
-            "absence_checks": [
-                {
-                    "artifact": "tools/governance/check_t04_evidence.py signing-production-scope",
-                    "checks": "the signing library is present; evidence.link signs each receipt before publishing it; no src/ outside continuum-evidence names SignatureVerifier; nothing signs IntentBundle or DomainPack outside continuum-evidence",
-                    "status": direct_status("signing-production-scope"),
-                },
-                {
-                    "artifact": "crates/continuumd/tests/receipt_signing.rs (four tests)",
-                    "checks": "the attestation half is real: a receipt evidence.link produces carries a signature that verifies, a tampered receipt does not, a daemon without a signer publishes unsigned, and a revoked identity refuses the link",
-                    "status": rust_status("signing_receipt_production"),
-                },
-                {
-                    "artifact": "tools/governance/check_t04_evidence.py signing-dependency-placement",
-                    "checks": "ed25519-dalek pinned exactly at the root; no certificate-checker crate declares a signing crate (INV-004)",
-                    "status": direct_status("signing-dependency-placement"),
-                },
-                {
-                    "artifact": "crates/continuum-evidence/tests/signing_identities.rs (six tests) and signing::tests::ed25519_matches_the_rfc_8032_test_vectors",
-                    "checks": "the library the gap names is real: it round-trips, rejects tampering, wrong keys and revoked signers, fails closed in CI mode, and matches RFC 8032",
-                    "status": "pass" if rust_status("signing_attestation_library") == "pass" and rust_status("signing_attestation_primitive") == "pass" else "fail",
-                },
-                {
-                    "artifact": "tools/governance/check_code_policy.py GOV-1-07",
-                    "checks": "the signing dependencies carry dependency-rationale entries and TCB classes",
-                    "status": rid_status(code_policy, "GOV-1-07"),
                 },
             ],
         },
@@ -889,12 +918,11 @@ def build_evidence(controls: dict[str, dict], direct_st: dict, py_st: dict, rust
             "status": "pass" if direct_st.get("status") == "pass" and py_st.get("status") == "pass" and rust_ok else "fail",
         },
         "boundary": (
-            "Two of six controls (hash chain/Merkle root over events; optional "
-            "signing/attestation, whose receipts are signed in production but "
-            "verified by no production consumer) are typed absences, not live enforcement — see the module "
-            "docstring's 'Gap controls' section. The other four are "
-            "bound to citations that are re-run, not merely read, on every "
-            "invocation."
+            "One of six controls (hash chain/Merkle root over events) is a typed "
+            "absence, not live enforcement — see the module docstring's 'Gap "
+            "controls' section. The other five, optional signing/attestation "
+            "among them since bn-3glnv, are bound to citations that are re-run, "
+            "not merely read, on every invocation."
         ),
         "status": overall,
     }

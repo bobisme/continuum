@@ -14,7 +14,7 @@
 //!
 //! | Type | Owns |
 //! |---|---|
-//! | [`SignedArtifactKind`] | the three signed artifact classes, and the domain separation between them |
+//! | [`SignedArtifactKind`] | the four signed artifact classes (three from plan §18.6, and the RFC 0037 A1 acceptance), and the domain separation between them |
 //! | [`SignerIdentity`] | a signer as a content-addressed value: the canonical record of scheme and public key |
 //! | [`Signature`], [`ArtifactSignature`] | the signature bytes, and the canonical wire record that carries them |
 //! | [`KeyEntropy`] | the only way entropy reaches key generation (INV-005, ADR-0003) |
@@ -67,13 +67,15 @@
 //!
 //! # What is not here
 //!
-//! The production signing path is outside this crate (bn-1hape): the operating-system
+//! The production signing and verifying paths are outside this crate. The operating-system
 //! entropy capability and the on-disk keystore are in `continuum-security`, a boundary
-//! crate, and `continuumd`'s `evidence.link` signs each receipt it publishes. No production
-//! path verifies yet: the daemon operations, the wire spelling of signatures,
-//! allowed-signers sets and the authoritative registry head, and `intent.accept`'s use of
-//! [`SignatureVerifier::verify_for_ci_acceptance`] are bn-3glnv (ADR-0054, "Follow-ups").
-//! The protocol is frozen at 3.6.
+//! crate (bn-1hape). `continuumd` holds the deployment's signing authority and serves it on
+//! the wire at protocol 3.8 (bn-3glnv): the `signing` operations mint, rotate, and revoke
+//! identities and sign domain packs; `evidence.link` signs each receipt it publishes;
+//! `intent.export_bundle` signs an intent bundle that carries this registry's audit log;
+//! `intent.import_bundle` applies the standing facts that log carries through
+//! [`SigningRegistry::record_observed`] when the bundle verifies; and `intent.accept` checks
+//! a held bundle through [`SignatureVerifier::verify_for_ci_acceptance`].
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -137,7 +139,8 @@ impl SignatureScheme {
     }
 }
 
-/// The three artifact kinds plan §18.6 says are signed.
+/// The artifact kinds that are signed: the three plan §18.6 names, and the intent
+/// acceptance statement RFC 0037 A1 requires (bn-3glnv, cr-2unxyh).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SignedArtifactKind {
     /// A receipt (plan §4.4 `receipt_*`, RFC 0032 promotion receipts).
@@ -146,11 +149,20 @@ pub enum SignedArtifactKind {
     IntentBundle,
     /// A domain pack (plan §7, docs/09 T07 "pack signature/provenance").
     DomainPack,
+    /// An intent acceptance statement (RFC 0037 A1): the canonical record of the accepted
+    /// `in_*`, its base or the genesis marker, the `revise-intent` capability, the accepting
+    /// principal, the timestamp, and the previous chain element.
+    IntentAcceptance,
 }
 
 impl SignedArtifactKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 3] = [Self::Receipt, Self::IntentBundle, Self::DomainPack];
+    pub const ALL: [Self; 4] = [
+        Self::Receipt,
+        Self::IntentBundle,
+        Self::DomainPack,
+        Self::IntentAcceptance,
+    ];
 
     /// The stable token, signed into every message.
     #[must_use]
@@ -159,6 +171,7 @@ impl SignedArtifactKind {
             Self::Receipt => "receipt",
             Self::IntentBundle => "intent-bundle",
             Self::DomainPack => "domain-pack",
+            Self::IntentAcceptance => "intent-acceptance",
         }
     }
 
@@ -585,6 +598,279 @@ impl ArtifactSignature {
     }
 }
 
+impl ArtifactSignature {
+    /// Whether this signature is its claimed signer's Ed25519 signature over `artifact` as
+    /// `kind` — the cryptographic check alone, with no standing and no policy. A caller
+    /// runs it before it lets anything the signed artifact carries change its state; the
+    /// verdict on the artifact is still [`SignatureVerifier`]'s (bn-3glnv, cr-2unxyh).
+    #[must_use]
+    pub fn authenticates(&self, kind: SignedArtifactKind, artifact: &ContentIdentity) -> bool {
+        self.kind == kind
+            && self
+                .signer
+                .verifying_key()
+                .verify_strict(
+                    &signing_message(kind, &self.signer, artifact),
+                    &ed25519_dalek::Signature::from_bytes(&self.signature.0),
+                )
+                .is_ok()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Key-attested signer links (bn-3glnv, cr-2unxyh).
+// ---------------------------------------------------------------------------
+
+/// The domain every signer-link attestation signs under. It differs from
+/// [`SIGNATURE_DOMAIN`], so an artifact signature is never an attestation, nor the reverse.
+pub const LINK_DOMAIN: &str = "continuum.signer-link.v1";
+
+/// The largest encoded [`SignerLink`], in bytes. Checked before any parsing.
+pub const MAX_LINK_RECORD_LEN: usize = 512;
+
+/// A standing transition the keys it concerns attest.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum LinkEvent {
+    /// `from` is retired in favour of `to`. Both keys sign.
+    Rotated {
+        /// The retiring key.
+        from: SignerIdentity,
+        /// Its successor.
+        to: SignerIdentity,
+    },
+    /// `signer` is revoked as compromised. The revoked key signs: anyone who holds a key
+    /// may disable it, and a thief gains nothing by doing so.
+    Revoked {
+        /// The revoked key.
+        signer: SignerIdentity,
+    },
+}
+
+impl LinkEvent {
+    fn to_value(&self) -> Value {
+        match self {
+            Self::Rotated { from, to } => record([
+                ("from", from.to_value()),
+                ("op", Value::text("rotate")),
+                ("to", to.to_value()),
+            ]),
+            Self::Revoked { signer } => record([
+                ("op", Value::text("revoke")),
+                (
+                    "reason",
+                    Value::text(RevocationReason::Compromised.as_str()),
+                ),
+                ("signer", signer.to_value()),
+            ]),
+        }
+    }
+
+    fn from_value(value: &Value) -> Result<Self, WireError> {
+        let signer_at = |key| SignerIdentity::from_value(field(value, key)?);
+        match text_field(value, "op")? {
+            "rotate" => {
+                exact_fields(value, &["from", "op", "to"])?;
+                Ok(Self::Rotated {
+                    from: signer_at("from")?,
+                    to: signer_at("to")?,
+                })
+            }
+            "revoke" => {
+                exact_fields(value, &["op", "reason", "signer"])?;
+                if text_field(value, "reason")? != RevocationReason::Compromised.as_str() {
+                    return Err(WireError::Shape("reason"));
+                }
+                Ok(Self::Revoked {
+                    signer: signer_at("signer")?,
+                })
+            }
+            _ => Err(WireError::Shape("op")),
+        }
+    }
+
+    /// The keys that must sign, in the order their signatures travel.
+    fn attesters(&self) -> Vec<&SignerIdentity> {
+        match self {
+            Self::Rotated { from, to } => vec![from, to],
+            Self::Revoked { signer } => vec![signer],
+        }
+    }
+
+    /// The audit event this transition records.
+    #[must_use]
+    pub fn to_event(&self) -> SigningEvent {
+        match self {
+            Self::Rotated { from, to } => SigningEvent::Rotated {
+                from: from.clone(),
+                to: to.clone(),
+            },
+            Self::Revoked { signer } => SigningEvent::Revoked {
+                signer: signer.clone(),
+                reason: RevocationReason::Compromised,
+            },
+        }
+    }
+}
+
+/// What [`SigningRegistry::rotate_attested`] returns.
+#[derive(Debug)]
+pub struct AttestedRotation {
+    /// The new key.
+    pub successor: LocalSigner,
+    /// The rotation, signed by the retired key and the successor.
+    pub rotation: SignerLink,
+    /// The retired key's own compromise revocation, signed before it retired: the holder
+    /// publishes it only if that key is later found compromised.
+    pub revocation: SignerLink,
+}
+
+/// A [`LinkEvent`] with the signature of every key it concerns: a rotation carries the
+/// retiring key's and the successor's, a revocation the revoked key's. Unlike an audit
+/// record, which is the recording registry's own word, a link proves that the holders of
+/// the keys made the transition, so another registry may adopt it (ADR-0054 follow-up 4).
+///
+/// Each key signs the canonical record `{domain: LINK_DOMAIN, event, signer}`. There is no
+/// link for loss recovery: a lost key cannot sign, so a peer learns of a loss only from its
+/// own operator.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SignerLink {
+    event: LinkEvent,
+    signatures: Vec<Signature>,
+}
+
+impl SignerLink {
+    fn message(event: &LinkEvent, signer: &SignerIdentity) -> Vec<u8> {
+        record([
+            ("domain", Value::text(LINK_DOMAIN)),
+            ("event", event.to_value()),
+            ("signer", signer.to_value()),
+        ])
+        .encode()
+    }
+
+    /// The rotation `from → to`, signed by both keys. Reached only through
+    /// [`SigningRegistry::attest_rotation`] and [`SigningRegistry::rotate_attested`], which
+    /// refuse a key that is not active.
+    fn rotation(from: &LocalSigner, to: &LocalSigner) -> Self {
+        let event = LinkEvent::Rotated {
+            from: from.identity().clone(),
+            to: to.identity().clone(),
+        };
+        let signatures = vec![
+            from.sign_message(&Self::message(&event, from.identity())),
+            to.sign_message(&Self::message(&event, to.identity())),
+        ];
+        Self { event, signatures }
+    }
+
+    /// The revocation of `key` as compromised, signed by `key` itself. Reached only
+    /// through [`SigningRegistry::attest_revocation`] and
+    /// [`SigningRegistry::rotate_attested`], which refuse a key that is not active.
+    fn revocation(key: &LocalSigner) -> Self {
+        let event = LinkEvent::Revoked {
+            signer: key.identity().clone(),
+        };
+        let signatures = vec![key.sign_message(&Self::message(&event, key.identity()))];
+        Self { event, signatures }
+    }
+
+    /// Assemble a link from parts, for a caller that received them separately. Nothing is
+    /// checked here; [`verify`](Self::verify) checks.
+    #[must_use]
+    pub const fn from_parts(event: LinkEvent, signatures: Vec<Signature>) -> Self {
+        Self { event, signatures }
+    }
+
+    /// The attested transition.
+    #[must_use]
+    pub const fn event(&self) -> &LinkEvent {
+        &self.event
+    }
+
+    /// The signatures, in [`LinkEvent`] attester order.
+    #[must_use]
+    pub fn signatures(&self) -> &[Signature] {
+        &self.signatures
+    }
+
+    /// Whether every key the transition concerns signed it, and a rotation names two
+    /// different keys. Total: never panics, never partially true.
+    #[must_use]
+    pub fn verify(&self) -> bool {
+        let attesters = self.event.attesters();
+        if let LinkEvent::Rotated { from, to } = &self.event {
+            if from == to {
+                return false;
+            }
+        }
+        attesters.len() == self.signatures.len()
+            && attesters
+                .iter()
+                .zip(&self.signatures)
+                .all(|(signer, signature)| {
+                    signer
+                        .verifying_key()
+                        .verify_strict(
+                            &Self::message(&self.event, signer),
+                            &ed25519_dalek::Signature::from_bytes(&signature.0),
+                        )
+                        .is_ok()
+                })
+    }
+
+    /// The canonical record.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        record([
+            ("event", self.event.to_value()),
+            (
+                "signatures",
+                Value::bytes(
+                    self.signatures
+                        .iter()
+                        .flat_map(|s| s.0)
+                        .collect::<Vec<u8>>(),
+                ),
+            ),
+        ])
+    }
+
+    /// The canonical wire bytes.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        self.to_value().encode()
+    }
+
+    /// Read the canonical wire bytes. The signatures are not checked here.
+    ///
+    /// # Errors
+    ///
+    /// [`WireError::TooLarge`] for more than [`MAX_LINK_RECORD_LEN`] bytes (checked before
+    /// any parsing), [`WireError::NotCanonical`] for bytes that are not a canonical value or
+    /// do not re-encode to themselves, otherwise a shape, key, or signature defect.
+    pub fn decode(bytes: &[u8]) -> Result<Self, WireError> {
+        if bytes.len() > MAX_LINK_RECORD_LEN {
+            return Err(WireError::TooLarge);
+        }
+        let value = Value::decode(bytes).map_err(WireError::NotCanonical)?;
+        exact_fields(&value, &["event", "signatures"])?;
+        let event = LinkEvent::from_value(field(&value, "event")?)?;
+        let raw = bytes_field(&value, "signatures")?;
+        if raw.len() != SIGNATURE_LEN * event.attesters().len() {
+            return Err(WireError::InvalidSignature);
+        }
+        let signatures = raw
+            .chunks_exact(SIGNATURE_LEN)
+            .map(Signature::from_bytes)
+            .collect::<Result<Vec<_>, _>>()?;
+        let link = Self { event, signatures };
+        if link.encode() != bytes {
+            return Err(WireError::Shape("not canonical"));
+        }
+        Ok(link)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Keys and entropy.
 // ---------------------------------------------------------------------------
@@ -623,8 +909,9 @@ impl core::error::Error for EntropyUnavailable {}
 /// A local signing key and the identity it signs as.
 ///
 /// The only way to obtain one is through [`SigningRegistry`]'s audited operations, and the
-/// only way to sign with one is [`SigningRegistry::sign`], which refuses a signer that is
-/// not in active standing. There is no `Clone` and no secret in `Debug`; the secret is
+/// only ways to sign with one are [`SigningRegistry::sign`] and the registry's
+/// attestations (`attest_rotation`, `attest_revocation`, `rotate_attested`), each of which
+/// refuses a signer that is not in active standing. There is no `Clone` and no secret in `Debug`; the secret is
 /// wiped on drop (`zeroize`).
 pub struct LocalSigner {
     key: SigningKey,
@@ -1065,6 +1352,80 @@ impl SigningRegistry {
         Ok(successor)
     }
 
+    /// Attest the rotation `from → to` with both keys, both active in this registry. Records
+    /// nothing: the attestation is what another registry adopts (bn-3glnv, cr-2unxyh).
+    ///
+    /// # Errors
+    ///
+    /// [`SignRefusal`] when either key is unknown here or not active.
+    pub fn attest_rotation(
+        &self,
+        from: &LocalSigner,
+        to: &LocalSigner,
+    ) -> Result<SignerLink, SignRefusal> {
+        self.may_attest(from.identity())?;
+        self.may_attest(to.identity())?;
+        Ok(SignerLink::rotation(from, to))
+    }
+
+    /// Attest `key`'s own revocation as compromised, while it is active here. Records
+    /// nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`SignRefusal`] when the key is unknown here or not active.
+    pub fn attest_revocation(&self, key: &LocalSigner) -> Result<SignerLink, SignRefusal> {
+        self.may_attest(key.identity())?;
+        Ok(SignerLink::revocation(key))
+    }
+
+    fn may_attest(&self, signer: &SignerIdentity) -> Result<(), SignRefusal> {
+        match self.standing.get(signer) {
+            None => Err(SignRefusal::UnknownSigner),
+            Some(SignerStanding::Active) => Ok(()),
+            Some(other) => Err(SignRefusal::NotActive(other.clone())),
+        }
+    }
+
+    /// [`rotate`](Self::rotate), and with it the two attestations a peer needs: the
+    /// rotation, signed by `current` and the successor while both are active, and
+    /// `current`'s own compromise revocation, signed now while it is active so that the
+    /// retired key can be wiped at once and its revocation published later.
+    ///
+    /// # Errors
+    ///
+    /// As [`rotate`](Self::rotate). Nothing is recorded on failure.
+    pub fn rotate_attested(
+        &mut self,
+        current: &LocalSigner,
+        actor: &ActorId,
+        entropy: &mut dyn KeyEntropy,
+    ) -> Result<AttestedRotation, StandingError> {
+        self.require_active(current.identity())?;
+        let revocation = SignerLink::revocation(current);
+        let successor = self.mint(actor, entropy).map_err(StandingError::Mint)?;
+        let rotation = SignerLink::rotation(current, &successor);
+        let record = self.record(
+            actor,
+            SigningEvent::Rotated {
+                from: current.identity().clone(),
+                to: successor.identity().clone(),
+            },
+        );
+        self.standing.insert(
+            current.identity().clone(),
+            SignerStanding::Rotated {
+                successor: successor.identity().clone(),
+                record,
+            },
+        );
+        Ok(AttestedRotation {
+            successor,
+            rotation,
+            revocation,
+        })
+    }
+
     fn require_active(&self, signer: &SignerIdentity) -> Result<(), StandingError> {
         match self.standing.get(signer) {
             None => Err(StandingError::UnknownSigner),
@@ -1107,6 +1468,11 @@ impl SigningRegistry {
     #[must_use]
     pub fn audit_log(&self) -> &[SigningAuditRecord] {
         &self.audit
+    }
+
+    /// Every signer this registry holds standing for, in identity order.
+    pub fn signers(&self) -> impl Iterator<Item = (&SignerIdentity, &SignerStanding)> {
+        self.standing.iter()
     }
 
     /// The content identity of this registry's whole audit log: what a verifier compares
@@ -1212,6 +1578,32 @@ impl SigningRegistry {
         Ok(())
     }
 
+    /// Record a standing fact this registry learned from outside rather than performed: a
+    /// pinned signer's mint, a rotation, or a revocation carried by a verified intent bundle
+    /// (bn-3glnv). The fact is appended as the next audit record, with `actor` as the
+    /// principal who adopted it, and it must be a legal transition exactly as
+    /// [`replay_record`](Self::replay_record) decides one — so it can only mint an unknown
+    /// signer, retire an active one, or revoke one not yet revoked. Nothing already recorded
+    /// changes. On an error the registry is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplayError::IllegalTransition`] when the fact is not a legal transition from the
+    /// current standing.
+    pub fn record_observed(
+        &mut self,
+        actor: &ActorId,
+        event: SigningEvent,
+    ) -> Result<u64, ReplayError> {
+        let sequence = u64::try_from(self.audit.len()).expect("a log fits in u64");
+        self.replay_record(SigningAuditRecord {
+            sequence,
+            actor: actor.clone(),
+            event,
+        })?;
+        Ok(sequence)
+    }
+
     /// Re-derive a key this registry already minted from its persisted seed. Not an audit
     /// event: restoring is reading a key back, not minting one. The seed is taken by value
     /// and wiped on every path.
@@ -1247,6 +1639,14 @@ impl RegistryHead {
     #[must_use]
     pub fn canonical_bytes(&self) -> &[u8] {
         self.0.canonical_bytes()
+    }
+
+    /// The BLAKE3 digest of the head: how the head is named on the wire (bn-3glnv). The
+    /// digest names a head and never decides sameness; [`SignatureVerifier::new`] compares
+    /// the exact canonical bytes.
+    #[must_use]
+    pub fn digest(&self) -> [u8; 32] {
+        *self.0.digest::<Blake3Hasher>().as_bytes()
     }
 }
 
@@ -1346,16 +1746,11 @@ impl AllowedSigners {
     /// The canonical value: a sequence of `{ kinds: Set(Text), signer }`, in signer order.
     #[must_use]
     pub fn to_value(&self) -> Value {
-        Value::seq(self.entries.iter().map(|(signer, kinds)| {
-            record([
-                (
-                    "kinds",
-                    Value::set(kinds.iter().map(|kind| Value::text(kind.as_str())))
-                        .expect("a set of text values is well-formed"),
-                ),
-                ("signer", signer.to_value()),
-            ])
-        }))
+        Value::seq(
+            self.entries
+                .iter()
+                .map(|(signer, kinds)| Self::entry_value(signer, kinds)),
+        )
         .expect("a sequence of records is well-formed")
     }
 
@@ -1369,30 +1764,112 @@ impl AllowedSigners {
         let Value::Seq(items) = value else {
             return Err(WireError::Shape("allowed-signers sequence"));
         };
-        let mut entries = BTreeMap::new();
+        Self::from_entries(items.iter().map(Self::entry_from_value))
+    }
+
+    /// One entry's canonical value, `{ kinds: Set(Text), signer }`: the element
+    /// [`to_value`](Self::to_value) emits, so a store can carry the set one bounded entry
+    /// at a time (bn-3glnv).
+    #[must_use]
+    pub fn entry_value(signer: &SignerIdentity, kinds: &BTreeSet<SignedArtifactKind>) -> Value {
+        record([
+            (
+                "kinds",
+                Value::set(kinds.iter().map(|kind| Value::text(kind.as_str())))
+                    .expect("a set of text values is well-formed"),
+            ),
+            ("signer", signer.to_value()),
+        ])
+    }
+
+    /// Read one entry from its canonical value.
+    ///
+    /// # Errors
+    ///
+    /// [`WireError`] on a wrong shape, an unknown kind, or an invalid key.
+    pub fn entry_from_value(
+        item: &Value,
+    ) -> Result<(SignerIdentity, BTreeSet<SignedArtifactKind>), WireError> {
+        exact_fields(item, &["kinds", "signer"])?;
+        let signer = SignerIdentity::from_value(field(item, "signer")?)?;
+        let Value::Set(kinds) = field(item, "kinds")? else {
+            return Err(WireError::Shape("kinds"));
+        };
+        let kinds = kinds
+            .iter()
+            .map(|kind| match kind {
+                Value::Text(text) => {
+                    SignedArtifactKind::from_token(text).ok_or(WireError::UnknownKind)
+                }
+                _ => Err(WireError::Shape("kind")),
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        Ok((signer, kinds))
+    }
+
+    /// Build a set from entries in strictly ascending signer order.
+    ///
+    /// # Errors
+    ///
+    /// The first entry's [`WireError`], or [`WireError::Shape`] on a repeated signer or
+    /// signers out of canonical order.
+    pub fn from_entries(
+        entries: impl IntoIterator<
+            Item = Result<(SignerIdentity, BTreeSet<SignedArtifactKind>), WireError>,
+        >,
+    ) -> Result<Self, WireError> {
+        let mut out = BTreeMap::new();
         let mut previous: Option<SignerIdentity> = None;
-        for item in items {
-            exact_fields(item, &["kinds", "signer"])?;
-            let signer = SignerIdentity::from_value(field(item, "signer")?)?;
+        for entry in entries {
+            let (signer, kinds) = entry?;
             if previous.as_ref().is_some_and(|p| p >= &signer) {
                 return Err(WireError::Shape("allowed signers out of canonical order"));
             }
-            let Value::Set(kinds) = field(item, "kinds")? else {
-                return Err(WireError::Shape("kinds"));
-            };
-            let kinds = kinds
-                .iter()
-                .map(|kind| match kind {
-                    Value::Text(text) => {
-                        SignedArtifactKind::from_token(text).ok_or(WireError::UnknownKind)
-                    }
-                    _ => Err(WireError::Shape("kind")),
-                })
-                .collect::<Result<BTreeSet<_>, _>>()?;
             previous = Some(signer.clone());
-            entries.insert(signer, kinds);
+            out.insert(signer, kinds);
         }
-        Ok(Self { entries })
+        Ok(Self { entries: out })
+    }
+
+    /// Every entry, in signer order.
+    pub fn iter(&self) -> impl Iterator<Item = (&SignerIdentity, &BTreeSet<SignedArtifactKind>)> {
+        self.entries.iter()
+    }
+
+    /// The number of signers the set names.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the set names no signer.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The kinds `signer` is allowed, if it is named.
+    #[must_use]
+    pub fn kinds(&self, signer: &SignerIdentity) -> Option<&BTreeSet<SignedArtifactKind>> {
+        self.entries.get(signer)
+    }
+
+    /// The set both sets permit: a signer is allowed a kind exactly when `self` and `other`
+    /// both allow it. Narrowing only; a signer left with no kind is dropped. This is how a
+    /// verifier reads a set an intent bundle pins: the bundle can narrow local policy and
+    /// never widen it (RFC 0037 A3, bn-3glnv).
+    #[must_use]
+    pub fn intersection(&self, other: &Self) -> Self {
+        let entries = self
+            .entries
+            .iter()
+            .filter_map(|(signer, kinds)| {
+                let theirs = other.entries.get(signer)?;
+                let both: BTreeSet<_> = kinds.intersection(theirs).copied().collect();
+                (!both.is_empty()).then(|| (signer.clone(), both))
+            })
+            .collect();
+        Self { entries }
     }
 
     /// The exact ADR-0013 identity an intent bundle pins.
@@ -1684,6 +2161,36 @@ impl<'a> SignatureVerifier<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Domain separation, at the byte level: a link message and an artifact signing
+    /// message are canonical records with different domains and different field sets, so
+    /// no signature over one is a signature over the other, whatever the inputs.
+    #[test]
+    fn a_link_message_is_never_an_artifact_signing_message() {
+        let key = LocalSigner::from_seed(Zeroizing::new([9; SEED_LEN])).expect("key");
+        let event = LinkEvent::Revoked {
+            signer: key.identity().clone(),
+        };
+        let link = Value::decode(&SignerLink::message(&event, key.identity())).expect("canonical");
+        let fields = |value: &Value| match value {
+            Value::Record(fields) => fields
+                .keys()
+                .map(|k| k.as_str().to_owned())
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        assert_eq!(text_field(&link, "domain").ok(), Some(LINK_DOMAIN));
+        for kind in SignedArtifactKind::ALL {
+            // Even an artifact whose bytes are the link message itself.
+            let artifact =
+                ContentIdentity::of(&Value::bytes(SignerLink::message(&event, key.identity())));
+            let message = Value::decode(&signing_message(kind, key.identity(), &artifact))
+                .expect("canonical");
+            assert_ne!(fields(&link), fields(&message));
+            assert_eq!(text_field(&message, "domain").ok(), Some(SIGNATURE_DOMAIN));
+            assert_ne!(LINK_DOMAIN, SIGNATURE_DOMAIN);
+        }
+    }
 
     fn seed(hex: &str) -> Zeroizing<[u8; SEED_LEN]> {
         Zeroizing::new(from_hex_exact::<SEED_LEN>(hex).expect("64 hex digits"))

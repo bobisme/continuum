@@ -53,7 +53,7 @@
 //! `daemon::family::Arguments` variant exists for `program.replay` (`family.rs`'s own
 //! 25-variant enum, one per operation whose family has landed), so
 //! `codec::operations::decode_arguments` cannot produce one: its own doc comment states
-//! plainly that this is one of "the 45 of the 75 whose families have not landed". `git grep`
+//! plainly that this is one of "the 45 of the 83 whose families have not landed". `git grep`
 //! confirms `ErrorCode::ReplayDiverged` is constructed nowhere in `src/` — only declared, in
 //! the vocabulary token table and this one registry row. This is PR 11 (Context Pack
 //! `ReplayPreserving`, `crates/continuum-context` — a PR-1/IMPL-01 scaffold today, see its

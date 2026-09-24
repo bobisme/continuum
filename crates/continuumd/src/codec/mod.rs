@@ -103,7 +103,8 @@ use json::{Json, JsonError};
 
 use crate::protocol::scalar::{
     ActorId, ArtifactHandle, AuditCorrelationId, ByteCount, Bytes, Commitment, DurationMs,
-    EpochIdentity, Opaque, OperationName, PageToken, ProtocolVersion, RequestId, Timestamp,
+    EpochIdentity, Opaque, OperationName, PageToken, ProtocolVersion, RequestId, SignerHandle,
+    Timestamp,
 };
 use crate::protocol::spec::{Nullable, Optional};
 use crate::protocol::vocabulary::{Encoding, ErrorCode};
@@ -1218,6 +1219,7 @@ string_value!(RequestId, "RequestId", new, as_str);
 string_value!(ActorId, "ActorId", new, as_str);
 string_value!(OperationName, "OperationName", new, as_str);
 string_value!(AuditCorrelationId, "AuditCorrelationId", new, as_str);
+string_value!(SignerHandle, "SignerHandle", new, as_str);
 string_value!(ArtifactHandle, "ArtifactHandle", new, as_str);
 string_value!(EpochIdentity, "EpochIdentity", new, as_str);
 

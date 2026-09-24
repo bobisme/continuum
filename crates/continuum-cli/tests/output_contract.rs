@@ -302,6 +302,7 @@ fn cases() -> Vec<Case> {
                         commitment: Commitment::new("blake3-256:withheld"),
                         original_class: "evidence".to_owned(),
                     }),
+                    signature: Optional::Absent,
                 }),
                 None,
             );
@@ -432,6 +433,7 @@ fn the_projection_check_reports_a_real_renderers_drift() {
             node: Nullable::Value(Opaque::from_bytes(br#"{"id":"node-42"}"#.to_vec())),
             edge: Nullable::Null,
             redacted: Optional::Absent,
+            signature: Optional::Absent,
         }),
         None,
     );

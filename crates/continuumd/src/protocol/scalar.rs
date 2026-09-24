@@ -416,7 +416,7 @@ impl OperationName {
     /// # Errors
     ///
     /// [`PatternMismatch`] when the text is not a well-formed name, and [`None`] through
-    /// the [`Option`] when it is well-formed but not one of the 75 declared operations.
+    /// the [`Option`] when it is well-formed but not one of the 83 declared operations.
     pub fn registered(text: &str) -> Result<Option<Self>, PatternMismatch> {
         let name = Self::new(text)?;
         Ok(crate::protocol::registry::operation(name.as_str()).map(|_| name))
@@ -467,6 +467,49 @@ impl AuditCorrelationId {
     }
 
     /// The identity's spelling.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A signer identity's text name, `@pattern("^signer_[0-9a-f]{64}$")`, `@since("3.8")`.
+///
+/// Not a handle and not a plan §4.4 artifact class: a signer is a public key, named by the
+/// BLAKE3 digest of its canonical record (ADR-0054 D5), and it is administered through the
+/// `signing` operations rather than stored in the content-addressed store. The name never
+/// decides sameness; the daemon resolves it to the exact identity it holds (`rule
+/// signing.identities`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SignerHandle(String);
+
+impl SignerHandle {
+    /// The pattern this alias declares.
+    pub const PATTERN: &'static str = "^signer_[0-9a-f]{64}$";
+
+    /// Parse a signer name.
+    ///
+    /// # Errors
+    ///
+    /// [`PatternMismatch`] unless the text is `signer_` followed by exactly 64 lowercase
+    /// hexadecimal digits. The length is checked before any character.
+    pub fn new(text: &str) -> Result<Self, PatternMismatch> {
+        let mismatch = PatternMismatch {
+            declared: "SignerHandle",
+            pattern: Self::PATTERN,
+        };
+        let digits = text.strip_prefix("signer_").ok_or(mismatch)?;
+        if digits.len() != 64
+            || !digits
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(mismatch);
+        }
+        Ok(Self(text.to_owned()))
+    }
+
+    /// The name's spelling.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0

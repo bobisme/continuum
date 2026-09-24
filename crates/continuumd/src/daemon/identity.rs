@@ -41,7 +41,7 @@ use continuum_workspace::publication::{
 
 use crate::protocol::scalar::{
     ActorId, AuditCorrelationId, CapabilityHandle, Commitment, ContinuationHandle, DiffHandle,
-    IntentHandle, RequestId, WorkspaceHandle,
+    IntentBundleHandle, IntentHandle, RequestId, WorkspaceHandle,
 };
 
 /// The production content identity: BLAKE3 over the canonical record, spelled as the
@@ -171,6 +171,19 @@ pub fn intent_to_store(handle: &IntentHandle) -> Result<ArtifactHandle, HandleMi
 /// [`HandleMismatch`] when the store handle is not of the intent-contract class.
 pub fn intent_to_wire(handle: &ArtifactHandle) -> Result<IntentHandle, HandleMismatch> {
     render(ArtifactClass::IntentContract, handle, IntentHandle::new)
+}
+
+/// The wire [`IntentBundleHandle`] a store handle names.
+///
+/// # Errors
+///
+/// [`HandleMismatch`] when the store handle is not of the signed-intent-bundle class.
+pub fn bundle_to_wire(handle: &ArtifactHandle) -> Result<IntentBundleHandle, HandleMismatch> {
+    render(
+        ArtifactClass::SignedIntentBundle,
+        handle,
+        IntentBundleHandle::new,
+    )
 }
 
 /// The wire [`DiffHandle`] a store handle names.

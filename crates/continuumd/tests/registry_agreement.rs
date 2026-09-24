@@ -91,7 +91,7 @@ fn the_authority_of_every_operation_equals_rfc_0027s_registry_row() {
         "## The operation authority registry",
         "| Operation | Authority | Annotations |",
     );
-    assert_eq!(rows.len(), 75, "RFC 0027 declares 75 rows");
+    assert_eq!(rows.len(), 83, "RFC 0027 declares 83 rows");
 
     let declared: BTreeMap<&str, &continuumd::protocol::spec::OperationSpec> =
         OPERATIONS.iter().map(|spec| (spec.name, spec)).collect();
@@ -184,7 +184,7 @@ fn the_authority_and_annotation_distribution_matches_rfc_0027() {
             checked += 1;
         }
         if authority == "total" {
-            assert_eq!(unbacktick(&row[1]).parse::<usize>().expect("a count"), 75);
+            assert_eq!(unbacktick(&row[1]).parse::<usize>().expect("a count"), 83);
         }
         if !annotation.is_empty() {
             let stated: usize = unbacktick(&row[3]).parse().expect("a count");
@@ -224,7 +224,7 @@ fn the_verdict_distribution_matches_rfc_0026() {
         };
         stated.insert(key, count);
     }
-    assert_eq!(stated.values().sum::<usize>(), 75);
+    assert_eq!(stated.values().sum::<usize>(), 83);
 
     let mut derived: BTreeMap<String, usize> = BTreeMap::new();
     for spec in OPERATIONS {
@@ -266,7 +266,20 @@ fn the_common_error_union_is_annotation_driven() {
         .filter(|spec| spec.errors.is_empty())
         .map(|spec| spec.name)
         .collect();
-    assert_eq!(empty, ["workspace.seal", "task.status", "task.subscribe"]);
+    //
+    // Protocol 3.8 (bn-3glnv) adds two more: the two `read` signing operations,
+    // `signing.registry` and `signing.verify`, whose answers are typed outcomes rather than
+    // errors.
+    assert_eq!(
+        empty,
+        [
+            "workspace.seal",
+            "task.status",
+            "task.subscribe",
+            "signing.registry",
+            "signing.verify",
+        ]
+    );
 
     let seal = continuumd::protocol::registry::operation("workspace.seal").expect("declared");
     assert!(seal.has(Annotation::Mutation), "workspace.seal mutates");

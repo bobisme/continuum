@@ -285,6 +285,24 @@ const SHAPED: &[&str] = &[
     "whiteboard.compile",
 ];
 
+/// The eight operations protocol 3.8 added (bn-3glnv, the signing wire). They have
+/// decodable bodies, and they are outside this campaign's census: this file measures the
+/// thirty operations it was written over, at protocol 3.1, and its decision-point matrix is
+/// pinned to them. What these eight add to authorization — every one needs a grant with no
+/// scope list, and six are `@privileged` — is decided in [`coverage`]'s
+/// `the_signing_wire_operations_require_an_unscoped_grant` here, and swept at 3.8 in
+/// `daemon_signing.rs`.
+const SIGNING_WIRE: &[&str] = &[
+    "intent.export_bundle",
+    "intent.import_bundle",
+    "signing.mint",
+    "signing.rotate",
+    "signing.revoke",
+    "signing.registry",
+    "signing.verify",
+    "signing.sign_pack",
+];
+
 /// The handle class the IDL declares as a class-agnostic alias rather than a
 /// [`registry::HANDLES`] member.
 ///
@@ -1323,7 +1341,7 @@ fn spec_of(operation: &str) -> &'static continuumd::protocol::spec::OperationSpe
 
 mod coverage {
     use super::{
-        Arguments, BTreeSet, CLASS_AGNOSTIC_HANDLE, Presence, SHAPED, StructSpec,
+        Arguments, BTreeSet, CLASS_AGNOSTIC_HANDLE, Presence, SHAPED, SIGNING_WIRE, StructSpec,
         TaskStatusRequest, fixture, name, probes, registry, spec_of,
     };
     use continuumd::daemon::OperationRequest;
@@ -1471,7 +1489,7 @@ mod coverage {
         });
         let mut probed = 0_usize;
         for spec in registry::OPERATIONS {
-            if shaped.contains(spec.name) {
+            if shaped.contains(spec.name) || SIGNING_WIRE.contains(&spec.name) {
                 continue;
             }
             probed += 1;
@@ -1497,8 +1515,99 @@ mod coverage {
         }
         assert_eq!(
             probed, 45,
-            "forty-five of the seventy-five operations are unshaped in this build"
+            "forty-five of the eighty-three operations are unshaped in this build; the other \
+             thirty-eight are the thirty this census probes and the eight of the signing wire"
         );
+        assert_eq!(
+            SHAPED.len() + SIGNING_WIRE.len() + probed,
+            registry::OPERATION_COUNT,
+            "the three sets partition the registry"
+        );
+    }
+
+    /// The eight protocol 3.8 operations are shaped, and each is refused at admission to a
+    /// grant with any scope list, and admitted, at admission, to the same grant without one
+    /// (`rule signing.identities`, RFC 0027 correction 34). Admission is called directly
+    /// with the family's own (empty) scope claim, so the decision is T2's alone.
+    #[test]
+    fn the_signing_wire_operations_require_an_unscoped_grant() {
+        use continuumd::daemon::admission;
+        use continuumd::daemon::family::ScopeClaim;
+        use continuumd::daemon::state::DaemonState;
+        use continuumd::protocol::handshake::CapabilityProfile;
+        use continuumd::protocol::scalar::{ArtifactHandle, OperationName};
+        use continuumd::protocol::spec::Optional;
+        use continuumd::protocol::vocabulary::AuthorityLevel;
+
+        let fixture = fixture();
+        let privileges: Vec<OperationName> = SIGNING_WIRE.iter().map(|op| name(op)).collect();
+        let unscoped = super::CapabilityDescriptor {
+            profile: Optional::Present(CapabilityProfile {
+                privileged_operations: privileges,
+                denied_operations: Vec::new(),
+                data_grants: Vec::new(),
+                cross_principal_sharing: false,
+            }),
+            ..super::descriptor(super::ROOT, AuthorityLevel::Promote, 5, Optional::Absent)
+        };
+        let scopes = [
+            super::CapabilityDescriptor {
+                snapshots: vec![fixture.handles.snapshot.clone()],
+                ..unscoped.clone()
+            },
+            super::CapabilityDescriptor {
+                intents: vec![fixture.handles.intent.clone()],
+                ..unscoped.clone()
+            },
+            super::CapabilityDescriptor {
+                artifact_classes: vec!["inb".to_owned()],
+                ..unscoped.clone()
+            },
+            super::CapabilityDescriptor {
+                instances: Optional::Present(vec![
+                    ArtifactHandle::new(fixture.handles.evidence.as_str()).expect("an ev_"),
+                ]),
+                ..unscoped.clone()
+            },
+        ];
+        for operation in SIGNING_WIRE {
+            let spec = spec_of(operation);
+            assert!(
+                admission::requires_unscoped_grant(operation),
+                "{operation} acts on the deployment as a whole"
+            );
+            let envelope = super::bare(operation, super::ROOT, "req_signing_wire");
+            let decide = |descriptor: &super::CapabilityDescriptor| {
+                let mut state = DaemonState::new();
+                state
+                    .register_capability(descriptor.clone(), None)
+                    .expect("the grant is well formed");
+                admission::admit(
+                    spec,
+                    &envelope,
+                    &ScopeClaim::default(),
+                    &state,
+                    &super::cap(super::ROOT.capability),
+                    Some(&super::now()),
+                )
+                .is_ok()
+            };
+            assert!(
+                decide(&unscoped),
+                "{operation}: the unscoped grant is admitted"
+            );
+            for scoped in &scopes {
+                assert!(
+                    !decide(scoped),
+                    "{operation}: a grant with a scope list is refused"
+                );
+            }
+        }
+        // The rule is scoped to these eight: every operation of this census still admits a
+        // scoped grant exactly as before.
+        for operation in SHAPED {
+            assert!(!admission::requires_unscoped_grant(operation));
+        }
     }
 }
 

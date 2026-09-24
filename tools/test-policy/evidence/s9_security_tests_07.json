@@ -11,7 +11,7 @@
   "module": "tools/test-policy/sections/s9_security_tests_07.py",
   "requirements": {
     "TEST-9-07": {
-      "absence": "Production *verification* of signatures is absent, and so are intent-bundle and domain-pack producers. Signing is live for receipts (bn-1hape): `evidence.link` signs each receipt's canonical bytes with the keystore's solo-developer key before publishing, and `_check_production_signing_paths` binds that path in the real source. But no `src/` outside `continuum-evidence` names `SignatureVerifier` (checked at run time), so no production consumer verifies a signature: the daemon operations, the wire form of signatures, allowed-signers sets and the authoritative registry head, and `intent.accept` checking a held bundle through `verify_for_ci_acceptance` are bn-3glnv (protocol 3.6 is frozen). The receipt signature is held in daemon state with no wire spelling. No intent-bundle or domain-pack producer exists on trunk \u2014 the daemon holds and exports no bundles, and the `continuum-effects-*` packs are declared-data stubs \u2014 so nothing signs those kinds (checked: no `SignedArtifactKind::IntentBundle` or `::DomainPack` outside `continuum-evidence`). `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
+      "absence": "Outside this obligation, stated so it is not read as covered. The daemon is sans-IO: a key `signing.mint`, `signing.rotate`, or a `key-lost` `signing.revoke` draws lives in daemon memory, and persisting it through `LocalKeystore` \u2014 with a deployment launcher that builds a daemon from the keystore \u2014 is a follow-up. A verifier that never received a bundle carrying a revocation cannot know of it; adoption is monotone, so once any bundle carries it the revocation is never unlearned. The ratified injection corpus predates the six privileged signing-wire operations, which `g2_injection_corpus_evidence.rs` drives with its own probes until research/35 gains a vector for them. `check.rs`'s `envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that the certificate checker cannot recompute a relabeled digest; that is by design (INV-004), and the certificate checker does not link the signature crate.",
       "boundaries": [
         "`_check_publication_attest` ports `PublishedName::names`/`Published::attest` (`publication.rs`: `fn names(&self, handle: &ArtifactHandle) -> bool { self == handle }`) as plain equality on (class, identity) \u2014 the real predicate needs no hash to state, so the port is exact, not approximate. `_check_identity_outcome` ports the store's convergence/collision/distinctness trichotomy structurally (same content implies same identity; different content sharing a claimed identity is a collision that must abort; different content with different identity stands as two artifacts) \u2014 this is the property the real `ContentIdentifier::identify` doc contract states ('a pure function \u2026 two calls with equal arguments \u2026 must return equal handles', INV-005/INV-006) and that `an_identity_collision_aborts_rather_than_conflating_two_artifacts` and `distinct_artifacts_never_share_identity` corroborate; it is independent of which hash algorithm the real `ContentIdentifier` fixture uses; this module never computes one. `_check_digest_token` ports `Digest256::from_token` (`identity.rs`) as a length-and-character-class check, drift-tied by extracting `DIGEST_BITS` at run time and confirming the `DIGEST_LEN * 2`/`DIGEST_BITS / 8` arithmetic phrases are still present, so a change to the digest width is noticed, not just a change to the accept/reject outcome. What this cannot do: compute a real `blake3-256` digest, run `Value::encode`'s canonical-encoding rules, or exercise `ReferenceStore` concurrency itself (no cargo) \u2014 only the structural properties named above, which is what the named real Rust tests exercise for real.",
         "`_check_signature_verdict` ports `SignatureVerifier::check` (`signing.rs`) as its decision order over eight observable facts \u2014 present, well-formed, kind matches, authentic under the claimed key, registry current against the authoritative head, signer standing known, signer not revoked, signer allowed for the kind \u2014 and the two policies over it: `verify` (any failure is typed unverified provenance with the first failing reason) and `verify_for_ci_acceptance` (any failure is `AcceptanceChainInvalid`). The port is exact about order and outcome, and `_check_signing_drift` confirms at run time that the real `fn check` body still tests those facts in that order and that the real verifier still calls `verify_strict`. What it cannot do: compute an Ed25519 signature or a canonical encoding (no cargo). That is what the named Rust tests do for real, including the RFC 8032 \u00a77.1 known-answer vectors and a pinned envelope signature."
@@ -26,10 +26,10 @@
         "outcome_aborted": 2,
         "outcome_converged": 2,
         "outcome_distinct": 2,
-        "production_signing_callers": 2,
-        "production_signing_phrases_bound": 16,
-        "rust_tests_named": 57,
-        "rust_tests_present": 57,
+        "production_signing_callers": 4,
+        "production_signing_phrases_bound": 41,
+        "rust_tests_named": 112,
+        "rust_tests_present": 112,
         "signature_cases": 512,
         "signature_ci_rejected": 255,
         "signature_unverified": 255,
@@ -132,7 +132,7 @@
         "applied": 534,
         "detected": 534
       },
-      "registry_status": "active",
+      "registry_status": "satisfied",
       "rules": [
         "ci-acceptance-failed-open-detected",
         "digest-token-tamper-not-rejected-detected",
@@ -428,9 +428,284 @@
           "path": "crates/continuum-evidence/tests/signing_identities.rs",
           "present": true,
           "test": "an_allowed_signers_set_round_trips_through_its_canonical_value"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_exported_bundle_imports_and_its_chain_accepts_the_proposal"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "accept_fails_closed_on_every_broken_chain"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_importer_with_its_own_key_still_adopts_and_accepts"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_imported_proposal_is_accepted_only_through_a_verified_bundle"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_imported_revision_may_not_move_a_field_its_predecessor_protects"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_acceptance_needs_its_predecessor_accepted_here"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "the_ci_check_refuses_a_retired_signer"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_full_registry_can_still_revoke"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_mint_signs_only_the_kinds_it_names"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "the_signing_wire_is_refused_below_protocol_3_8"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_revocation_carried_by_a_bundle_is_adopted_and_a_stale_bundle_cannot_resurrect_the_key"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_retired_key_adopts_no_facts"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_known_signer_learns_its_attested_rotation_and_revocation"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_link_about_this_daemons_own_key_is_never_adopted"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "link_order_and_replay_do_not_change_what_is_adopted"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_loss_recovery_never_travels"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_bundle_whose_own_signature_fails_adopts_no_link"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_held_key_revocation_always_leaves_room_for_its_replacement"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_bundle_that_rotates_one_key_twice_is_refused_whole"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_unpinned_successor_is_never_introduced"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_record_is_accepted_only_as_its_chain_signed_it"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_acceptance_by_a_rotated_or_revoked_signer_does_not_vouch"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_local_acceptance_at_3_8_records_a_verifiable_chain"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_signed_local_acceptance_names_only_the_admitted_principal_at_the_daemons_time"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "every_order_of_a_rotation_chain_gives_the_same_standing_and_facts"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_prelearned_first_key_ends_rotated_and_fails_ci_acceptance"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_cycle_or_a_shared_successor_is_refused_whole"
+        },
+        {
+          "path": "crates/continuumd/src/daemon/signing.rs",
+          "present": true,
+          "test": "the_topology_check_is_bounded_at_the_link_bound"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_receipt_node_keeps_its_first_bytes_and_its_first_signature"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "staging_never_overwrites_content_under_a_colliding_commitment"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_install_that_would_leave_a_compromise_unrecoverable_is_refused"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_signer_link_is_attested_by_every_key_it_concerns_and_nothing_else"
+        },
+        {
+          "path": "crates/continuum-evidence/tests/signing_identities.rs",
+          "present": true,
+          "test": "a_link_signature_is_never_an_artifact_signature"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_import_whose_contract_collides_with_a_held_one_is_refused_before_anything_changes"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "accept_never_takes_a_signature_over_one_body_for_another_under_the_same_identity"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_bundle_identity_that_names_other_bytes_is_refused_on_import_and_export"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_receipt_node_identity_that_names_another_receipt_is_refused_before_signing"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_import_refused_for_quota_adopts_nothing"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "an_export_pins_only_the_active_bundle_signers"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "the_version_gate_is_exactly_the_idls_3_8_operations"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "truncated_extended_or_oversize_bundles_are_refused_whole"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_bundle_whose_contract_is_not_its_declared_identity_is_refused"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "import_is_idempotent_and_never_raises_status"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "signing_verify_is_total_and_typed"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_signer_allowed_for_one_kind_is_not_verified_for_another"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_receipt_signature_travels_on_evidence_get_and_verifies_over_the_wire"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_domain_pack_signed_over_the_wire_verifies_and_a_tampered_one_does_not"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "the_daemons_bundle_signature_matches_the_library_signing_the_same_body"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_revoked_held_key_refuses_to_sign_anything"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "mint_rotate_revoke_move_the_registry_forward_only"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "a_replayed_rotation_does_not_rotate_twice"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "every_signing_wire_operation_is_refused_to_a_scoped_grant"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "the_writes_are_refused_without_the_privilege"
+        },
+        {
+          "path": "crates/continuumd/tests/daemon_signing.rs",
+          "present": true,
+          "test": "no_answer_fault_or_debug_output_carries_key_material"
         }
       ],
-      "status": "partial",
+      "status": "enforced",
       "summary": "signature/provenance verification."
     }
   },

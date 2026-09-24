@@ -1,7 +1,7 @@
 {
   "artifact": "continuum.governance.evidence/t04",
   "authority": "notes/plan/docs/09_THREAT_MODEL.md T04 (Forged trace or artifact substitution)",
-  "boundary": "Two of six controls (hash chain/Merkle root over events; optional signing/attestation, whose receipts are signed in production but verified by no production consumer) are typed absences, not live enforcement \u2014 see the module docstring's 'Gap controls' section. The other four are bound to citations that are re-run, not merely read, on every invocation.",
+  "boundary": "One of six controls (hash chain/Merkle root over events) is a typed absence, not live enforcement \u2014 see the module docstring's 'Gap controls' section. The other five, optional signing/attestation among them since bn-3glnv, are bound to citations that are re-run, not merely read, on every invocation.",
   "controls": {
     "build identity": {
       "citations": [
@@ -53,36 +53,40 @@
       "type": "gap"
     },
     "optional signing/attestation": {
-      "absence_checks": [
+      "citations": [
         {
           "artifact": "tools/governance/check_t04_evidence.py signing-production-scope",
-          "checks": "the signing library is present; evidence.link signs each receipt before publishing it; no src/ outside continuum-evidence names SignatureVerifier; nothing signs IntentBundle or DomainPack outside continuum-evidence",
+          "enforces": "receipts signed before publishing; bundles and packs signed by their producers; the production verifier bound; intent.accept runs the fail-closed chain check",
+          "status": "pass"
+        },
+        {
+          "artifact": "crates/continuumd/tests/daemon_signing.rs (nine tests)",
+          "enforces": "a bundle's chain is verified in production: it accepts when intact and fails closed on an absent, forged, unpinned, revoked, stale, or retired-key chain; a pinned signer cannot rewrite the importer's own key; verification over the wire is total; receipts and packs verify, and tampered ones do not",
           "status": "pass"
         },
         {
           "artifact": "crates/continuumd/tests/receipt_signing.rs (four tests)",
-          "checks": "the attestation half is real: a receipt evidence.link produces carries a signature that verifies, a tampered receipt does not, a daemon without a signer publishes unsigned, and a revoked identity refuses the link",
-          "status": "pass"
-        },
-        {
-          "artifact": "tools/governance/check_t04_evidence.py signing-dependency-placement",
-          "checks": "ed25519-dalek pinned exactly at the root; no certificate-checker crate declares a signing crate (INV-004)",
+          "enforces": "a receipt evidence.link produces carries a signature that verifies, a tampered receipt does not, an unsigned daemon says so, and a revoked identity refuses the link",
           "status": "pass"
         },
         {
           "artifact": "crates/continuum-evidence/tests/signing_identities.rs (six tests) and signing::tests::ed25519_matches_the_rfc_8032_test_vectors",
-          "checks": "the library the gap names is real: it round-trips, rejects tampering, wrong keys and revoked signers, fails closed in CI mode, and matches RFC 8032",
+          "enforces": "the primitive and the policies the production path calls round-trip, reject tampering, wrong keys and revoked signers, fail closed in CI mode, and match RFC 8032",
+          "status": "pass"
+        },
+        {
+          "artifact": "tools/governance/check_t04_evidence.py signing-dependency-placement",
+          "enforces": "ed25519-dalek pinned exactly at the root; no certificate-checker crate declares a signing crate (INV-004)",
           "status": "pass"
         },
         {
           "artifact": "tools/governance/check_code_policy.py GOV-1-07",
-          "checks": "the signing dependencies carry dependency-rationale entries and TCB classes",
+          "enforces": "the signing dependencies carry dependency-rationale entries and TCB classes",
           "status": "pass"
         }
       ],
-      "reason": "Attestation produced, verification absent. docs/09 marks this control optional. Since bn-1hape, continuumd's evidence.link signs every receipt's canonical bytes before publishing, with the keystore's solo-developer key minted on first use from OsEntropy. No production consumer verifies those signatures yet (bn-3glnv: daemon operations, wire form, intent.accept's fail-closed check), and no intent-bundle or domain-pack producer exists on trunk, so a substitute is not rejected by a signature. Assurance does not depend on it: reject digest mismatch and build identity above already deny an adversary a path to a forged pass.",
       "status": "pass",
-      "type": "gap"
+      "type": "pass"
     },
     "preserve redaction commitments": {
       "citations": [
@@ -236,6 +240,25 @@
         "signing::tests::ed25519_matches_the_rfc_8032_test_vectors"
       ]
     },
+    "signing_production_verification": {
+      "args": [
+        "--test",
+        "daemon_signing"
+      ],
+      "package": "continuumd",
+      "tests": [
+        "an_exported_bundle_imports_and_its_chain_accepts_the_proposal",
+        "accept_fails_closed_on_every_broken_chain",
+        "a_revocation_carried_by_a_bundle_is_adopted_and_a_stale_bundle_cannot_resurrect_the_key",
+        "a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature",
+        "a_known_signer_learns_its_attested_rotation_and_revocation",
+        "a_record_is_accepted_only_as_its_chain_signed_it",
+        "the_ci_check_refuses_a_retired_signer",
+        "signing_verify_is_total_and_typed",
+        "a_receipt_signature_travels_on_evidence_get_and_verifies_over_the_wire",
+        "a_domain_pack_signed_over_the_wire_verifies_and_a_tampered_one_does_not"
+      ]
+    },
     "signing_receipt_production": {
       "args": [
         "--test",
@@ -300,7 +323,7 @@
       "content_addressed_manifests_workspace": {
         "package": "continuum-workspace",
         "status": "pass",
-        "tail": "running 1 test\ntest positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/pr3_exit_evidence.rs (target/debug/deps/pr3_exit_evidence-aedea73190106755)",
+        "tail": "running 1 test\ntest positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/pr3_exit_evidence.rs (target/debug/deps/pr3_exit_evidence-aedea73190106755)",
         "tests": [
           "positive_an_old_snapshot_remains_reproducible_after_the_working_tree_changes"
         ]
@@ -308,7 +331,7 @@
       "preserve_redaction_commitments": {
         "package": "continuumd",
         "status": "pass",
-        "tail": "running 2 tests\ntest verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction ... ok\ntest a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 63 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s\n     Running tests/daemon_evidence.rs (target/debug/deps/daemon_evidence-53ad8459b4299a6b)",
+        "tail": "test verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction ... ok\ntest a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 63 filtered out; finished in 0.00s\n\n   Compiling continuumd v0.0.0 (/home/bob/src/continuum/.maw/workspaces/bn-3glnv/crates/continuumd)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.43s\n     Running tests/daemon_evidence.rs (target/debug/deps/daemon_evidence-53ad8459b4299a6b)",
         "tests": [
           "a_redacted_reference_reads_back_as_the_typed_stub_and_names_its_omission",
           "verifying_over_a_redacted_reference_returns_the_structural_result_and_the_redaction"
@@ -343,7 +366,7 @@
       "signing_attestation_library": {
         "package": "continuum-evidence",
         "status": "pass",
-        "tail": "test signatures_are_deterministic_and_pinned ... ok\ntest sign_verify_round_trips_for_every_signed_kind_from_wire_bytes ... ok\ntest the_ci_acceptance_check_fails_closed_on_every_unverified_outcome ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.06s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s\n     Running tests/signing_identities.rs (target/debug/deps/signing_identities-f12d6e8c69ad11ac)",
+        "tail": "test signatures_are_deterministic_and_pinned ... ok\ntest the_ci_acceptance_check_fails_closed_on_every_unverified_outcome ... ok\ntest sign_verify_round_trips_for_every_signed_kind_from_wire_bytes ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.06s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/signing_identities.rs (target/debug/deps/signing_identities-f12d6e8c69ad11ac)",
         "tests": [
           "sign_verify_round_trips_for_every_signed_kind_from_wire_bytes",
           "a_tampered_payload_downgrades_to_signature_mismatch",
@@ -356,15 +379,32 @@
       "signing_attestation_primitive": {
         "package": "continuum-evidence",
         "status": "pass",
-        "tail": "running 1 test\ntest signing::tests::ed25519_matches_the_rfc_8032_test_vectors ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 182 filtered out; finished in 0.04s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s\n     Running unittests src/lib.rs (target/debug/deps/continuum_evidence-f014b54f40b5b51e)",
+        "tail": "running 1 test\ntest signing::tests::ed25519_matches_the_rfc_8032_test_vectors ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 183 filtered out; finished in 0.04s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running unittests src/lib.rs (target/debug/deps/continuum_evidence-f014b54f40b5b51e)",
         "tests": [
           "signing::tests::ed25519_matches_the_rfc_8032_test_vectors"
+        ]
+      },
+      "signing_production_verification": {
+        "package": "continuumd",
+        "status": "pass",
+        "tail": "test a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature ... ok\ntest a_known_signer_learns_its_attested_rotation_and_revocation ... ok\ntest a_record_is_accepted_only_as_its_chain_signed_it ... ok\n\ntest result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 0.49s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running tests/daemon_signing.rs (target/debug/deps/daemon_signing-311201f203aca440)",
+        "tests": [
+          "an_exported_bundle_imports_and_its_chain_accepts_the_proposal",
+          "accept_fails_closed_on_every_broken_chain",
+          "a_revocation_carried_by_a_bundle_is_adopted_and_a_stale_bundle_cannot_resurrect_the_key",
+          "a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature",
+          "a_known_signer_learns_its_attested_rotation_and_revocation",
+          "a_record_is_accepted_only_as_its_chain_signed_it",
+          "the_ci_check_refuses_a_retired_signer",
+          "signing_verify_is_total_and_typed",
+          "a_receipt_signature_travels_on_evidence_get_and_verifies_over_the_wire",
+          "a_domain_pack_signed_over_the_wire_verifies_and_a_tampered_one_does_not"
         ]
       },
       "signing_receipt_production": {
         "package": "continuumd",
         "status": "pass",
-        "tail": "test a_revoked_signing_identity_refuses_the_link_rather_than_publishing_unsigned ... ok\ntest a_receipt_evidence_link_produces_is_signed_and_verifies ... ok\ntest a_receipt_tampered_after_production_does_not_verify ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.04s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s\n     Running tests/receipt_signing.rs (target/debug/deps/receipt_signing-19824651666b51f6)",
+        "tail": "test a_receipt_evidence_link_produces_is_signed_and_verifies ... ok\ntest a_receipt_tampered_after_production_does_not_verify ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.04s\n\n   Compiling continuumd v0.0.0 (/home/bob/src/continuum/.maw/workspaces/bn-3glnv/crates/continuumd)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s\n     Running tests/receipt_signing.rs (target/debug/deps/receipt_signing-19824651666b51f6)",
         "tests": [
           "a_receipt_evidence_link_produces_is_signed_and_verifies",
           "a_receipt_tampered_after_production_does_not_verify",

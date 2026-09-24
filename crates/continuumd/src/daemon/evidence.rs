@@ -368,7 +368,7 @@ impl OperationFamily for EvidenceFamily {
         store: &ReferenceStore,
     ) -> Result<Effect, Fault> {
         match call.arguments {
-            Arguments::EvidenceGet(request) => get(call, request, state),
+            Arguments::EvidenceGet(request) => get(call, request, state, services),
             Arguments::EvidenceQuery(request) => query(request, state, call.grant),
             Arguments::EvidenceVerify(request) => self.verify(request, state, services),
             Arguments::EvidenceSubscribe(request) => subscribe(request, state, call.grant),
@@ -411,6 +411,7 @@ fn get(
     call: &Call<'_>,
     request: &EvidenceGetRequest,
     state: &DaemonState,
+    services: &Services,
 ) -> Result<Effect, Fault> {
     // One handle class names both halves of the graph (`^ev_[A-Za-z0-9_-]+$` is the pattern
     // of `node_id` *and* `edge_id`), so this operation resolves either. The edge arm is
@@ -426,6 +427,8 @@ fn get(
                 // A redaction is a property of content a *node* references; an edge
                 // references none.
                 redacted: Optional::Absent,
+                // Only a receipt node carries a signature.
+                signature: Optional::Absent,
             }),
             Nullable::Null,
         ));
@@ -486,6 +489,18 @@ fn get(
             // handles.
             edge: Nullable::Null,
             redacted,
+            // The signature the daemon made over a receipt node it published (3.8, bn-3glnv).
+            // A connection negotiated below 3.8 does not define the field and is not sent
+            // it (`rule versioning.compatible_change`).
+            signature: match state.receipt_signature(&request.evidence) {
+                Some(signature)
+                    if services.negotiated().protocol_version()
+                        >= super::signing::SIGNING_SINCE =>
+                {
+                    Optional::Present(signature.encode())
+                }
+                _ => Optional::Absent,
+            },
         }),
         // `evidence.get` declares no `verdict` clause, so its result carries none.
         Nullable::Null,
@@ -1653,6 +1668,20 @@ fn link(
     // so the answer does not say which (X2; `rule capability.instance_scope`, the
     // derived-handle clause; cr-3hcpn4).
     call.derived(Derived::Instance(receipt_handle.as_str()))?;
+    // The identity names (receipt, profile). A held node under it that is about another
+    // receipt or profile is an identity collision (ADR-0013): refused before anything is
+    // signed or published, so a receipt signature is never filed under a node about other
+    // content (cr-2unxyh).
+    if state.evidence(&receipt_handle).is_some_and(|held| {
+        held.artifact != request.receipt || held.tool != *request.checker_profile
+    }) {
+        state.signing_mut().note_identity_collision();
+        return Err(Fault::new(
+            ErrorCode::PublicationAborted,
+            "an identity already names byte-different content; nothing changed",
+        )
+        .not_retryable());
+    }
     if let Some(held) = state.evidence(&receipt_handle) {
         // The identity is a function of (content, profile) and nothing else, so it can
         // already name a node of another kind. RFC 0038 D1 says what a check edge may point
@@ -1684,20 +1713,37 @@ fn link(
     //     ADR-0054, bn-1hape). A deployment with a signing identity that is no longer active
     //     publishes nothing rather than an unsigned receipt; one with none publishes
     //     unsigned, which a verifier reads as typed `Unsigned` provenance.
-    let signature = match services.receipt_signer() {
-        None => None,
-        Some(signer) => Some(
-            signer
+    //
+    //     A receipt node keeps the exact bytes it was first linked over. A relink is compared
+    //     with them before anything is signed or published: byte-different content under the
+    //     node's identity is a collision (cr-2unxyh). A node whose bytes were never recorded
+    //     is not signed again, since nothing could say what the signature would cover.
+    let node_exists = state.evidence(&receipt_handle).is_some();
+    let known = state.receipt_content(&receipt_handle).map(<[u8]>::to_vec);
+    if known.as_ref().is_some_and(|bytes| *bytes != staged.content) {
+        state.signing_mut().note_identity_collision();
+        return Err(Fault::new(
+            ErrorCode::PublicationAborted,
+            "an identity already names byte-different content; nothing changed",
+        )
+        .not_retryable());
+    }
+    let may_sign = !node_exists || known.is_some();
+    let signature = may_sign
+        .then(|| {
+            state
+                .signing()
                 .sign_receipt(&signed_receipt_identity(&staged.content))
-                .map_err(|_| {
-                    Fault::new(
-                        ErrorCode::UnsupportedSemanticFeature,
-                        "this daemon's receipt-signing identity is not active; nothing was \
-                         published",
-                    )
-                })?,
-        ),
-    };
+        })
+        .flatten()
+        .transpose()
+        .map_err(|_| {
+            Fault::new(
+                ErrorCode::UnsupportedSemanticFeature,
+                "this daemon's receipt-signing identity is not active or not allowed to sign \
+                 receipts; nothing was published",
+            )
+        })?;
 
     // 7. Publish the receipt under the caller's own capability, so the store decides and
     //    audits the write against the identity the wire presented (ADR-0037).
@@ -1748,6 +1794,9 @@ fn link(
         publication: Some(Published::of(&receipt)),
     };
     let (_, node_appended) = state.append_evidence(receipt_handle.clone(), receipt_node);
+    if !node_exists {
+        state.record_receipt_content(receipt_handle.clone(), staged.content.clone());
+    }
     if let Some(signature) = signature {
         state.record_receipt_signature(receipt_handle.clone(), signature);
     }
@@ -1816,9 +1865,7 @@ fn link(
 /// function, so the two cannot disagree about what was signed.
 #[must_use]
 pub fn signed_receipt_identity(content: &[u8]) -> continuum_value::identity::ContentIdentity {
-    continuum_value::identity::ContentIdentity::of(&continuum_value::value::Value::bytes(
-        content.to_vec(),
-    ))
+    super::bundle::signed_bytes_identity(content)
 }
 
 /// One evidence edge as `schemas/evidence-graph-edge.schema.json` writes it.

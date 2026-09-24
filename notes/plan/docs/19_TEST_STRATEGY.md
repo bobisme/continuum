@@ -134,7 +134,7 @@ Benchmarks have confidence intervals, warm/cold distinctions, and hardware manif
 - path traversal in crashpacks; (delivered: bn-35hb — tools/test-policy/evidence/s9_security_tests.json)
 - solver sandboxing;
 - secret-redaction tests; (delivered: bn-35hb — tools/test-policy/evidence/s9_security_tests.json)
-- signature/provenance verification.
+- signature/provenance verification. (delivered: bn-3glnv — tools/test-policy/evidence/s9_security_tests_07.json)
 
 ## 10. Release gates
 

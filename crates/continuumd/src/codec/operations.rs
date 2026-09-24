@@ -35,7 +35,7 @@ use crate::codec::json::Json;
 use crate::codec::{CodecError, Document, from_opaque_in, to_opaque_in};
 use crate::daemon::family::{Arguments, ErrorData, Payload};
 use crate::protocol::operations::{
-    context, evidence, intent, observe, task, verification, whiteboard, workspace,
+    context, evidence, intent, observe, signing, task, verification, whiteboard, workspace,
 };
 use crate::protocol::scalar::Opaque;
 use crate::protocol::vocabulary::ErrorCode;
@@ -45,7 +45,7 @@ use crate::protocol::vocabulary::ErrorCode;
 /// # Errors
 ///
 /// [`CodecError::UnknownOperation`] when this daemon declares no request shape for the
-/// named operation — the 45 of the 75 whose families have not landed — and any decode
+/// named operation — the 45 of the 83 whose families have not landed — and any decode
 /// failure of the named struct otherwise.
 pub fn decode_arguments_in<D: Document>(
     operation: &str,
@@ -164,6 +164,37 @@ pub fn decode_arguments_in<D: Document>(
                 workspace::WorkspaceCreateByReferenceRequest,
             >(arguments)?)
         }
+        "intent.export_bundle" => Arguments::IntentExportBundle(from_opaque_in::<
+            D,
+            intent::IntentExportBundleRequest,
+        >(arguments)?),
+        "intent.import_bundle" => Arguments::IntentImportBundle(from_opaque_in::<
+            D,
+            intent::IntentImportBundleRequest,
+        >(arguments)?),
+        "signing.mint" => {
+            Arguments::SigningMint(from_opaque_in::<D, signing::SigningMintRequest>(arguments)?)
+        }
+        "signing.rotate" => Arguments::SigningRotate(from_opaque_in::<
+            D,
+            signing::SigningRotateRequest,
+        >(arguments)?),
+        "signing.revoke" => Arguments::SigningRevoke(from_opaque_in::<
+            D,
+            signing::SigningRevokeRequest,
+        >(arguments)?),
+        "signing.registry" => Arguments::SigningRegistry(from_opaque_in::<
+            D,
+            signing::SigningRegistryRequest,
+        >(arguments)?),
+        "signing.verify" => Arguments::SigningVerify(from_opaque_in::<
+            D,
+            signing::SigningVerifyRequest,
+        >(arguments)?),
+        "signing.sign_pack" => Arguments::SigningSignPack(from_opaque_in::<
+            D,
+            signing::SigningSignPackRequest,
+        >(arguments)?),
         _ => return Err(CodecError::UnknownOperation),
     })
 }
@@ -209,6 +240,14 @@ pub fn encode_payload_in<D: Document>(payload: &Payload) -> Result<Option<Opaque
         Payload::ContextExpand(body) => to_opaque_in::<D, _>(body)?,
         Payload::WhiteboardCompile(body) => to_opaque_in::<D, _>(body)?,
         Payload::WorkspaceCreateByReference(body) => to_opaque_in::<D, _>(body)?,
+        Payload::IntentExportBundle(body) => to_opaque_in::<D, _>(body)?,
+        Payload::IntentImportBundle(body) => to_opaque_in::<D, _>(body)?,
+        Payload::SigningMint(body) => to_opaque_in::<D, _>(body)?,
+        Payload::SigningRotate(body) => to_opaque_in::<D, _>(body)?,
+        Payload::SigningRevoke(body) => to_opaque_in::<D, _>(body)?,
+        Payload::SigningRegistry(body) => to_opaque_in::<D, _>(body)?,
+        Payload::SigningVerify(body) => to_opaque_in::<D, _>(body)?,
+        Payload::SigningSignPack(body) => to_opaque_in::<D, _>(body)?,
     }))
 }
 
@@ -260,6 +299,14 @@ pub fn decode_payload_in<D: Document>(
         "workspace.create_by_reference" => {
             Payload::WorkspaceCreateByReference(from_opaque_in::<D, _>(payload)?)
         }
+        "intent.export_bundle" => Payload::IntentExportBundle(from_opaque_in::<D, _>(payload)?),
+        "intent.import_bundle" => Payload::IntentImportBundle(from_opaque_in::<D, _>(payload)?),
+        "signing.mint" => Payload::SigningMint(from_opaque_in::<D, _>(payload)?),
+        "signing.rotate" => Payload::SigningRotate(from_opaque_in::<D, _>(payload)?),
+        "signing.revoke" => Payload::SigningRevoke(from_opaque_in::<D, _>(payload)?),
+        "signing.registry" => Payload::SigningRegistry(from_opaque_in::<D, _>(payload)?),
+        "signing.verify" => Payload::SigningVerify(from_opaque_in::<D, _>(payload)?),
+        "signing.sign_pack" => Payload::SigningSignPack(from_opaque_in::<D, _>(payload)?),
         _ => return Err(CodecError::UnknownOperation),
     })
 }

@@ -1251,12 +1251,13 @@ fn refuses_with_no_effect(
 // D — the census
 // =========================================================================================
 
-/// The eight namespaces this build serves.
+/// The nine namespaces this build serves (eight until protocol 3.8 added `signing`).
 const SERVED_NAMESPACES: &[&str] = &[
     "context",
     "evidence",
     "intent",
     "observe",
+    "signing",
     "task",
     "verification",
     "whiteboard",
@@ -1354,14 +1355,18 @@ fn census_the_servable_surface_is_thirty_operations_in_eight_families() {
     // The bound every count in this file is stated against. `Arguments` is a closed enum
     // with one variant per servable operation, so the arithmetic is a fact about the build
     // rather than about this table.
+    //
+    // Thirty of seventy-five in eight families until protocol 3.8 (bn-3glnv), which added
+    // eight servable operations — two in `intent` and a ninth family, `signing` — none of
+    // which carries a world-view: a signer, a bundle, and a pack are not snapshot state.
     let served = servable();
     assert_eq!(
         served.len(),
-        30,
-        "the eight registered families serve thirty of the registry's {} operations",
+        38,
+        "the nine registered families serve thirty-eight of the registry's {} operations",
         registry::OPERATION_COUNT
     );
-    assert_eq!(registry::OPERATION_COUNT, 75);
+    assert_eq!(registry::OPERATION_COUNT, 83);
 
     // And the census's own denominator: how many of all seventy-five declare a carrier.
     // The census's own denominator, derived rather than described: which of all
@@ -1386,7 +1391,7 @@ fn census_the_servable_surface_is_thirty_operations_in_eight_families() {
             "task.resume",
             "evidence.verify",
         ],
-        "nine of the seventy-five declare a request-side carrier"
+        "nine of the eighty-three declare a request-side carrier"
     );
     let unservable: Vec<&&str> = with_carriers
         .iter()

@@ -8,7 +8,7 @@ editing a line of the sibling module, `tsys.py`, or the `Justfile`.
 docs/19 §9's seventh bullet names two things in one phrase. Searched independently in
 `crates/`:
 
-1. **Cryptographic signatures — receipts signed in production; verification not yet.**
+1. **Cryptographic signatures — signed and verified on production daemon paths.**
    bn-2ee4c (ADR-0054) added `continuum-evidence::signing`: Ed25519 (`ed25519-dalek`
    `=2.2.0`, strict verification) over a canonical envelope that binds the artifact's
    ADR-0013 canonical bytes, the kind, and the signer. Its `SignatureVerifier` is total
@@ -21,16 +21,23 @@ docs/19 §9's seventh bullet names two things in one phrase. Searched independen
    - `continuumd`'s `evidence.link`, the daemon's one receipt producer, signs the
      receipt's canonical bytes through `SigningRegistry::sign` (`ReceiptSigner`) before
      publishing, and refuses to publish when its identity is not active.
-   `_check_production_signing_paths` binds those call sites in the real source.
-   **Still absent**, and checked absent by the same function: (a) any production
-   *verifier* — no `src/` outside `continuum-evidence` names `SignatureVerifier`; the
-   daemon operations, wire form, and `intent.accept`'s `verify_for_ci_acceptance` are
-   bn-3glnv (protocol 3.6 is frozen); (b) intent-bundle and domain-pack producers — none
-   exists on trunk (the daemon holds no bundles and exports none; the
-   `continuum-effects-*` packs are declared-data stubs), so nothing names
-   `SignedArtifactKind::IntentBundle` or `::DomainPack` outside `continuum-evidence`.
-   Signing without a production verifier is not yet "signature verification", so this
-   ID stays `partial`.
+   bn-3glnv (protocol 3.8) put the *verifying* half on production paths too:
+   - `continuumd`'s `SigningAuthority` (`daemon/signing.rs`) is the one production holder
+     of `SignatureVerifier`: `signing.verify` returns typed provenance for a receipt, a
+     bundle body, or a domain pack; `intent.import_bundle` verifies a bundle and applies
+     the standing facts it carries — never one that could widen trust, never one about
+     the daemon's own key — only when it verifies under them; and `intent.accept` naming
+     a bundle calls `check_acceptance_chain`, which calls `verify_for_ci_acceptance`,
+     fails closed, and refuses a retired signer;
+   - the bundle and pack producers sign their own kinds there
+     (`intent.export_bundle`, `signing.sign_pack`), and `evidence.get` returns a
+     receipt's signature.
+   `_check_production_signing_paths` binds every one of those call sites in the real
+   source, and fails if the verifier appears in an unbound `src/` file. The named Rust
+   tests in `crates/continuumd/tests/daemon_signing.rs` drive each path through
+   `Daemon::dispatch`. What stays out of scope is stated in `ABSENCE`, and none of it is
+   verification: keys minted over the wire are not yet persisted, and no deployment
+   launcher builds a daemon from the keystore.
 2. **Content-addressed provenance — real, landed, non-stub.** Two production
    mechanisms bind an artifact's claimed identity to its actual bytes and reject a
    forged, tampered, or substituted claim:
@@ -48,10 +55,11 @@ docs/19 §9's seventh bullet names two things in one phrase. Searched independen
    Both are drift-tied below to their real, committed source, and both are
    corroborated by real, non-`#[ignore]`d Rust `#[test]` functions.
 
-TEST-9-07 is `partial` until bn-3glnv puts verification on a production path;
-`_check_production_signing_paths` below keeps both the bound signing path and the
-absent verification path checked, so the status can neither regress nor silently
-outlive the absence.
+TEST-9-07 is `enforced` as of bn-3glnv: the evidence names real Rust tests that
+exercise the production verification path, `_rust_test_present` checks each exists and
+is not ignored, and the Python port of the decision order is drift-tied to `fn check`.
+`_check_production_signing_paths` keeps the production signing and verifying paths
+bound, so the status cannot outlive them.
 
 Certificate wire-form checking (INV-004) was also searched:
 `crates/continuum-engine-reference/src/certificate.rs` writes the certificate and
@@ -102,6 +110,8 @@ ENTROPY_ISOLATION_PATH = ROOT / "crates/continuum-security/tests/entropy_isolati
 KEYSTORE_TESTS_PATH = ROOT / "crates/continuum-security/tests/keystore.rs"
 KEYSTORE_RS_PATH = ROOT / "crates/continuum-security/src/keystore.rs"
 RECEIPT_SIGNING_PATH = ROOT / "crates/continuumd/tests/receipt_signing.rs"
+DAEMON_SIGNING_RS_PATH = ROOT / "crates/continuumd/src/daemon/signing.rs"
+DAEMON_SIGNING_PATH = ROOT / "crates/continuumd/tests/daemon_signing.rs"
 CARGO_TOML_PATHS = sorted((ROOT / "crates").glob("*/Cargo.toml")) + [ROOT / "Cargo.toml"]
 
 OBLIGATIONS = {
@@ -120,7 +130,7 @@ RULES: dict[str, str] = {
 }
 
 STATUS: dict[str, str] = {
-    "TEST-9-07": "partial",
+    "TEST-9-07": "enforced",
 }
 
 _BOUNDARY_07 = (
@@ -162,19 +172,15 @@ _BOUNDARY_07_SIGNATURE = (
     "RFC 8032 §7.1 known-answer vectors and a pinned envelope signature."
 )
 _ABSENCE_07 = (
-    "Production *verification* of signatures is absent, and so are intent-bundle and "
-    "domain-pack producers. Signing is live for receipts (bn-1hape): `evidence.link` signs "
-    "each receipt's canonical bytes with the keystore's solo-developer key before "
-    "publishing, and `_check_production_signing_paths` binds that path in the real source. "
-    "But no `src/` outside `continuum-evidence` names `SignatureVerifier` (checked at run "
-    "time), so no production consumer verifies a signature: the daemon operations, the "
-    "wire form of signatures, allowed-signers sets and the authoritative registry head, and "
-    "`intent.accept` checking a held bundle through `verify_for_ci_acceptance` are bn-3glnv "
-    "(protocol 3.6 is frozen). The receipt signature is held in daemon state with no wire "
-    "spelling. No intent-bundle or domain-pack producer exists on trunk — the daemon holds "
-    "and exports no bundles, and the `continuum-effects-*` packs are declared-data stubs — "
-    "so nothing signs those kinds (checked: no `SignedArtifactKind::IntentBundle` or "
-    "`::DomainPack` outside `continuum-evidence`). `check.rs`'s "
+    "Outside this obligation, stated so it is not read as covered. The daemon is sans-IO: "
+    "a key `signing.mint`, `signing.rotate`, or a `key-lost` `signing.revoke` draws lives "
+    "in daemon memory, and persisting it through `LocalKeystore` — with a deployment "
+    "launcher that builds a daemon from the keystore — is a follow-up. A verifier that "
+    "never received a bundle carrying a revocation cannot know of it; adoption is "
+    "monotone, so once any bundle carries it the revocation is never unlearned. The "
+    "ratified injection corpus predates the six privileged signing-wire operations, which "
+    "`g2_injection_corpus_evidence.rs` drives with its own probes until research/35 gains "
+    "a vector for them. `check.rs`'s "
     "`envelope_digests_are_carried_labels_not_facts_the_kernel_can_check` still states that "
     "the certificate checker cannot recompute a relabeled digest; that is by design "
     "(INV-004), and the certificate checker does not link the signature crate."
@@ -245,6 +251,63 @@ RUST_TESTS: list[tuple[Path, str]] = [
     (SIGNING_TESTS_PATH, "the_local_key_is_minted_on_first_use_once_and_audited"),
     (SIGNING_TESTS_PATH, "a_lost_key_is_revoked_and_superseded_through_linked_audit_records"),
     (SIGNING_TESTS_PATH, "an_allowed_signers_set_round_trips_through_its_canonical_value"),
+    # The production verification path (bn-3glnv, protocol 3.8), driven through
+    # `Daemon::dispatch`.
+    (DAEMON_SIGNING_PATH, "an_exported_bundle_imports_and_its_chain_accepts_the_proposal"),
+    (DAEMON_SIGNING_PATH, "accept_fails_closed_on_every_broken_chain"),
+    (DAEMON_SIGNING_PATH, "an_importer_with_its_own_key_still_adopts_and_accepts"),
+    (DAEMON_SIGNING_PATH, "an_imported_proposal_is_accepted_only_through_a_verified_bundle"),
+    (DAEMON_SIGNING_PATH, "an_imported_revision_may_not_move_a_field_its_predecessor_protects"),
+    (DAEMON_SIGNING_PATH, "an_acceptance_needs_its_predecessor_accepted_here"),
+    (DAEMON_SIGNING_PATH, "the_ci_check_refuses_a_retired_signer"),
+    (DAEMON_SIGNING_PATH, "a_full_registry_can_still_revoke"),
+    (DAEMON_SIGNING_PATH, "a_mint_signs_only_the_kinds_it_names"),
+    (DAEMON_SIGNING_PATH, "the_signing_wire_is_refused_below_protocol_3_8"),
+    (DAEMON_SIGNING_PATH, "a_revocation_carried_by_a_bundle_is_adopted_and_a_stale_bundle_cannot_resurrect_the_key"),
+    (DAEMON_SIGNING_PATH, "a_retired_key_adopts_no_facts"),
+    (DAEMON_SIGNING_PATH, "a_known_signer_learns_its_attested_rotation_and_revocation"),
+    (DAEMON_SIGNING_PATH, "a_signer_cannot_claim_a_known_or_unseen_pinned_key_without_its_signature"),
+    (DAEMON_SIGNING_PATH, "a_link_about_this_daemons_own_key_is_never_adopted"),
+    (DAEMON_SIGNING_PATH, "link_order_and_replay_do_not_change_what_is_adopted"),
+    (DAEMON_SIGNING_PATH, "a_loss_recovery_never_travels"),
+    (DAEMON_SIGNING_PATH, "a_bundle_whose_own_signature_fails_adopts_no_link"),
+    (DAEMON_SIGNING_PATH, "a_held_key_revocation_always_leaves_room_for_its_replacement"),
+    (DAEMON_SIGNING_PATH, "a_bundle_that_rotates_one_key_twice_is_refused_whole"),
+    (DAEMON_SIGNING_PATH, "an_unpinned_successor_is_never_introduced"),
+    (DAEMON_SIGNING_PATH, "a_record_is_accepted_only_as_its_chain_signed_it"),
+    (DAEMON_SIGNING_PATH, "an_acceptance_by_a_rotated_or_revoked_signer_does_not_vouch"),
+    (DAEMON_SIGNING_PATH, "a_local_acceptance_at_3_8_records_a_verifiable_chain"),
+    (DAEMON_SIGNING_PATH, "a_signed_local_acceptance_names_only_the_admitted_principal_at_the_daemons_time"),
+    (DAEMON_SIGNING_PATH, "every_order_of_a_rotation_chain_gives_the_same_standing_and_facts"),
+    (DAEMON_SIGNING_PATH, "a_prelearned_first_key_ends_rotated_and_fails_ci_acceptance"),
+    (DAEMON_SIGNING_PATH, "a_cycle_or_a_shared_successor_is_refused_whole"),
+    (DAEMON_SIGNING_RS_PATH, "the_topology_check_is_bounded_at_the_link_bound"),
+    (DAEMON_SIGNING_PATH, "a_receipt_node_keeps_its_first_bytes_and_its_first_signature"),
+    (DAEMON_SIGNING_PATH, "staging_never_overwrites_content_under_a_colliding_commitment"),
+    (DAEMON_SIGNING_PATH, "an_install_that_would_leave_a_compromise_unrecoverable_is_refused"),
+    (SIGNING_TESTS_PATH, "a_signer_link_is_attested_by_every_key_it_concerns_and_nothing_else"),
+    (SIGNING_TESTS_PATH, "a_link_signature_is_never_an_artifact_signature"),
+    (DAEMON_SIGNING_PATH, "an_import_whose_contract_collides_with_a_held_one_is_refused_before_anything_changes"),
+    (DAEMON_SIGNING_PATH, "accept_never_takes_a_signature_over_one_body_for_another_under_the_same_identity"),
+    (DAEMON_SIGNING_PATH, "a_bundle_identity_that_names_other_bytes_is_refused_on_import_and_export"),
+    (DAEMON_SIGNING_PATH, "a_receipt_node_identity_that_names_another_receipt_is_refused_before_signing"),
+    (DAEMON_SIGNING_PATH, "an_import_refused_for_quota_adopts_nothing"),
+    (DAEMON_SIGNING_PATH, "an_export_pins_only_the_active_bundle_signers"),
+    (DAEMON_SIGNING_PATH, "the_version_gate_is_exactly_the_idls_3_8_operations"),
+    (DAEMON_SIGNING_PATH, "truncated_extended_or_oversize_bundles_are_refused_whole"),
+    (DAEMON_SIGNING_PATH, "a_bundle_whose_contract_is_not_its_declared_identity_is_refused"),
+    (DAEMON_SIGNING_PATH, "import_is_idempotent_and_never_raises_status"),
+    (DAEMON_SIGNING_PATH, "signing_verify_is_total_and_typed"),
+    (DAEMON_SIGNING_PATH, "a_signer_allowed_for_one_kind_is_not_verified_for_another"),
+    (DAEMON_SIGNING_PATH, "a_receipt_signature_travels_on_evidence_get_and_verifies_over_the_wire"),
+    (DAEMON_SIGNING_PATH, "a_domain_pack_signed_over_the_wire_verifies_and_a_tampered_one_does_not"),
+    (DAEMON_SIGNING_PATH, "the_daemons_bundle_signature_matches_the_library_signing_the_same_body"),
+    (DAEMON_SIGNING_PATH, "a_revoked_held_key_refuses_to_sign_anything"),
+    (DAEMON_SIGNING_PATH, "mint_rotate_revoke_move_the_registry_forward_only"),
+    (DAEMON_SIGNING_PATH, "a_replayed_rotation_does_not_rotate_twice"),
+    (DAEMON_SIGNING_PATH, "every_signing_wire_operation_is_refused_to_a_scoped_grant"),
+    (DAEMON_SIGNING_PATH, "the_writes_are_refused_without_the_privilege"),
+    (DAEMON_SIGNING_PATH, "no_answer_fault_or_debug_output_carries_key_material"),
 ]
 
 
@@ -385,8 +448,18 @@ _SIGNATURE_STEPS: list[tuple[str, str, str]] = [
     ("allowed", "UnverifiedReason::SignerNotAllowed", "signer-not-allowed"),
 ]
 _FACTS = [fact for fact, _, _ in _SIGNATURE_STEPS]
-_SIGNING_API_RE = re.compile(r"\b(SigningRegistry|SignatureVerifier|LocalKeyring|ReceiptSigner|LocalSigner)\b")
-# The production call sites bn-1hape added, each bound by phrases that must still be present.
+# `Arguments::SigningRegistry` and `Payload::SigningRegistry` — declared, matched as
+# `Self::…`, and constructed — are the protocol 3.8 wire variants of `signing.registry`,
+# which carry no key and no registry; they are not the library type and are not callers
+# of it. The guards bind to the `SigningRegistry` branch alone, so `Self::LocalSigner` and
+# the other names still count.
+_SIGNING_API_RE = re.compile(
+    r"\b(?:(?<!Arguments::)(?<!Payload::)(?<!Self::)"
+    r"SigningRegistry(?!\((?:SigningRegistryRequest|SigningRegistryResponse)\))"
+    r"|SignatureVerifier|LocalKeyring|ReceiptSigner|LocalSigner)\b"
+)
+# The production call sites bn-1hape and bn-3glnv added, each bound by phrases that must
+# still be present.
 _SIGNING_PATHS: dict[str, list[str]] = {
     "crates/continuum-security/src/entropy.rs": [
         "impl KeyEntropy for OsEntropy",
@@ -405,8 +478,40 @@ _SIGNING_PATHS: dict[str, list[str]] = {
         ".replay_record(parsed)",
     ],
     "crates/continuumd/src/daemon/mod.rs": [
-        "self.registry.sign(",
-        "continuum_evidence::signing::SignedArtifactKind::Receipt",
+        "pub fn receipt_signer(mut self, signer: ReceiptSigner)",
+        "self.state.signing_mut().install(registry, key)",
+    ],
+    # bn-3glnv: the signing authority — the one production verifier outside
+    # `continuum-evidence`, and the receipt, bundle, and pack signers.
+    "crates/continuumd/src/daemon/signing.rs": [
+        "self.sign_as(Kind::Receipt, artifact)",
+        ".sign_as(Kind::IntentBundle, &signed_bytes_identity(body_bytes))",
+        ".sign_as(Kind::DomainPack, &signed_bytes_identity(&request.pack))",
+        "if !self.allowed.permits(key.identity(), kind) {",
+        "SignatureVerifier::new(&self.allowed, &self.registry, &self.head)",
+        ".verify_for_ci_acceptance(",
+        "fn check_acceptance_chain(",
+        "if verified.standing() != &VerifiedStanding::Active {",
+        "Provenance::Unverified(_) => return Err(outcome_of(&provenance)),",
+        "fn with_carried_facts(",
+        "verify_acceptance_chain(",
+        ".map_err(AcceptanceFault::Chain)?;",
+        "if !signature.authenticates(Kind::IntentBundle, &body)",
+        "|| !links_are_attested(&bundle.body().links)",
+        ".rotate_attested(current, &actor, entropy)",
+        ".and_then(|key| authority.registry.attest_revocation(key).ok())",
+        "authority.room(4, Reserve::HeldKey)?;",
+        "if entry.contract != claim.contract {",
+        "fn holds_other_bundle(",
+    ],
+    # cr-2unxyh: the RFC 0037 A1 acceptance chain — the statement each element signs and
+    # the in-order check; its verifier is `signing.rs`'s.
+    "crates/continuumd/src/daemon/acceptance.rs": [
+        "pub const ACCEPTANCE_DOMAIN: &str = \"continuum.intent-acceptance.v1\";",
+        "(name(\"previous\"), Value::bytes(previous.to_vec())),",
+        "match verify(&statement.identity(&previous), &signature) {",
+        "Provenance::Verified(_) => return Err(ChainFault::Retired),",
+        "return Err(ChainFault::NotLast);",
     ],
     "crates/continuumd/src/daemon/state.rs": ["fn record_receipt_signature("],
     "crates/continuumd/src/daemon/evidence.rs": [
@@ -415,18 +520,19 @@ _SIGNING_PATHS: dict[str, list[str]] = {
     ],
 }
 _SIGN_BEFORE_PUBLISH = (".sign_receipt(&signed_receipt_identity(&staged.content))", ".publish(ArtifactClass::Evidence, staged.content.clone(), &token)")
-_ABSENT_VERIFIER_RE = re.compile(r"\bSignatureVerifier\b")
-_ABSENT_KINDS_RE = re.compile(r"SignedArtifactKind::(IntentBundle|DomainPack)\b")
+_VERIFIER_RE = re.compile(r"\bSignatureVerifier\b")
+_VERIFIER_HOME = "crates/continuumd/src/daemon/signing.rs"
+# `intent.accept` reaches the fail-closed check (bn-3glnv).
+_ACCEPT_SITE = ("crates/continuumd/src/daemon/intent.rs", ".check_acceptance_chain(bundle, &request.proposal, &claim, &actor)")
 
 
 def _check_production_signing_paths() -> tuple[dict[str, int], list[str]]:
-    """Binds the real production signing path and keeps the still-absent halves checked.
+    """Binds the real production signing and verifying paths.
 
-    Bound: every phrase in `_SIGNING_PATHS` is present, and `evidence.link` signs before
-    it publishes. Allowed callers: a `src/` file outside `continuum-evidence` that names the
-    signing API must be one of `_SIGNING_PATHS`. Absent (a hit is a stale absence, not a
-    pass): no production `SignatureVerifier` (bn-3glnv), and no intent-bundle or
-    domain-pack signing (no producer on trunk)."""
+    Bound: every phrase in `_SIGNING_PATHS` is present, `evidence.link` signs before it
+    publishes, and `intent.accept` calls the fail-closed chain check. Allowed callers: a
+    `src/` file outside `continuum-evidence` that names the signing API must be one of
+    `_SIGNING_PATHS`, and only `_VERIFIER_HOME` may name `SignatureVerifier`."""
     counts = {"bound_phrases": 0, "production_callers": 0}
     problems: list[str] = []
     for rel, phrases in _SIGNING_PATHS.items():
@@ -444,6 +550,11 @@ def _check_production_signing_paths() -> tuple[dict[str, int], list[str]]:
     sign_at, publish_at = (evidence_text.find(p) for p in _SIGN_BEFORE_PUBLISH)
     if sign_at == -1 or publish_at == -1 or sign_at > publish_at:
         problems.append("evidence.link no longer signs the receipt before it publishes it")
+    accept_rel, accept_phrase = _ACCEPT_SITE
+    if accept_phrase not in (ROOT / accept_rel).read_text(encoding="utf-8"):
+        problems.append("intent.accept no longer runs the fail-closed chain check")
+    else:
+        counts["bound_phrases"] += 1
     for path in sorted((ROOT / "crates").glob("*/src/**/*.rs")):
         rel = path.relative_to(ROOT).as_posix()
         if rel.startswith("crates/continuum-evidence/"):
@@ -453,13 +564,8 @@ def _check_production_signing_paths() -> tuple[dict[str, int], list[str]]:
             counts["production_callers"] += 1
             if rel not in _SIGNING_PATHS:
                 problems.append(f"{rel} calls the signing library outside the bound paths; bind it here")
-        if _ABSENT_VERIFIER_RE.search(text):
-            problems.append(
-                f"{rel} names SignatureVerifier: production verification is no longer absent — "
-                "re-derive TEST-9-07 from that path (bn-3glnv) instead of this absence"
-            )
-        for m in _ABSENT_KINDS_RE.finditer(text):
-            problems.append(f"{rel} signs {m.group(0)}: a producer now exists — bind it here")
+        if _VERIFIER_RE.search(text) and rel != _VERIFIER_HOME:
+            problems.append(f"{rel} names SignatureVerifier outside {_VERIFIER_HOME}; bind it here")
     return counts, problems
 
 

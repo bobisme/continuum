@@ -1888,6 +1888,7 @@ fn the_protocol_declares_no_enumeration_over_the_workflow_classes() {
     assert_eq!(
         handle_free,
         [
+            "intent.import_bundle",
             "verification.start",
             "program.extract",
             "program.run",
@@ -1900,10 +1901,21 @@ fn the_protocol_declares_no_enumeration_over_the_workflow_classes() {
             "evidence.query",
             "evidence.subscribe",
             "whiteboard.compile",
+            "signing.mint",
+            "signing.rotate",
+            "signing.revoke",
+            "signing.registry",
+            "signing.verify",
+            "signing.sign_pack",
         ],
-        "the cold-start surface at the *request-body* level, out of 75 operations"
+        "the cold-start surface at the *request-body* level, out of 83 operations"
     );
-    assert_eq!(OPERATIONS.len(), 75);
+    assert_eq!(OPERATIONS.len(), 83);
+    // Protocol 3.8 (bn-3glnv) added seven handle-free requests. None enumerates a workflow
+    // class: `intent.import_bundle` supplies its own bundle, five `signing` operations name
+    // a signer, a kind, a pack, or an artifact the caller supplies, and `signing.registry`
+    // lists signers — deployment identities, not tasks, workspaces, intents, or
+    // continuations. All seven need an unscoped grant (`rule signing.identities`).
 
     // None of the twelve *enumerates* the classes a mid-workflow agent needs to find again.
     // Eleven of them create or supply their own subject — `verification.start` takes the

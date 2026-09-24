@@ -91,8 +91,9 @@ documentation makes that a boundary contract, so it is not changed.
   `{ kind, signature: Bytes(64), signer: <signer record> }`. A verifier decodes it and
   checks it from those bytes alone. Malformed bytes are a typed outcome.
 - **A signature token**, for the schemas' string fields, is `ed25519:` followed by 128
-  lowercase hexadecimal digits. The `ssh-ed25519:` prefix in the schema example files is a
-  placeholder. It is not an SSH signature format, and this ADR does not adopt one.
+  lowercase hexadecimal digits. The `ssh-ed25519:` prefix the schema example files carried
+  was a placeholder, not an SSH signature format, and this ADR does not adopt one. bn-3glnv
+  replaced those placeholders with `ed25519:` tokens.
 
 ### D5 — a signer identity is a content-addressed value
 
@@ -163,17 +164,14 @@ revocation are all keyed by the exact identity.
   cr-3e3t1j). Production verification is bn-3glnv.
 - `continuum-evidence` gains its first external edge. The crate documentation and
   `dependency-rationale.toml` record it, classed `trusted-checking-base`.
-- Nothing in the wire changes. The protocol stays at 3.6. `continuumd`'s `intent.accept`
-  still refuses every named bundle with `AcceptanceChainInvalid`, because the daemon holds
-  no bundles.
+- Nothing in the wire changed at this ADR; the protocol stayed at 3.6, and `intent.accept`
+  refused every named bundle. Protocol 3.8 (bn-3glnv) is the wire change: see "Revision:
+  the signing wire".
 
 ### Follow-ups (named, not done here)
 
-1. **Wire and daemon exposure (bn-3glnv).** Audited daemon operations for mint, rotate,
-   revoke, and supersede; the wire spelling of signature records, allowed-signers sets, and
-   the authoritative `RegistryHead`; and
-   `intent.accept` verifying a held bundle's chain through `verify_for_ci_acceptance`. This
-   needs an RFC 0026/0037 revision and a protocol version, which the 3.6 freeze excludes.
+1. **Wire and daemon exposure — done (bn-3glnv, protocol 3.8).** See "Revision:
+   the signing wire" below.
 2. **An operating-system `KeyEntropy` source and an on-disk keystore — done (bn-1hape).**
    `OsEntropy` and `LocalKeystore` in `continuum-security`. Persisting later rotations and
    revocations to the keystore belongs with the daemon operations of follow-up 1.
@@ -183,9 +181,79 @@ revocation are all keyed by the exact identity.
    receipts (`repair.promote` is not served), intent-bundle export, and domain-pack
    publication have no producer on trunk, and sign when they land. No deployment launcher
    on trunk builds a daemon from the keystore; that wiring is follow-up 1.
-4. **Distributed revocation.** Revocation and rotation records are local audit records
-   today. Distributing them inside the intent bundle, signed, is RFC 0037's open question on
-   revocation and expiry.
+4. **Distributed revocation — done (bn-3glnv).** The intent bundle carries the exporter's
+   key-attested signer links inside its signed body: a rotation signed by both keys, a
+   compromise revocation signed by the revoked key. An importer adopts a standing change
+   only on the word of the keys it concerns, after the bundle's own signature and every
+   link verify, and commits it only when the bundle verifies with an active signer (RFC
+   0037 correction 20).
+
+## Revision: the signing wire (bn-3glnv, protocol 3.8)
+
+Follow-ups 1 and 4 landed as protocol 3.8 on IDL 1.16 (RFC 0026 correction 54, RFC 0027
+correction 34, RFC 0037 corrections 19 and 20). What changed, and what it does to the
+decisions above:
+
+- **The daemon holds the authority.** `continuumd`'s `SigningAuthority` holds one
+  `SigningRegistry`, at most one held `LocalSigner`, the local `AllowedSigners` policy,
+  the key-entropy capability the deployment supplies, and the held intent bundles.
+  `signing.mint`, `signing.rotate`, and `signing.revoke` are the audited daemon operations
+  plan §18.6 names; `signing.registry` distributes the audit log and the head's BLAKE3
+  digest (`RegistryHead::digest`); `signing.verify` returns typed provenance;
+  `signing.sign_pack` signs a domain pack; `evidence.get` returns a receipt's signature.
+  Every signing operation needs an unscoped, and for the writes privileged, grant.
+- **The authoritative head (D6).** The daemon's own registry is authoritative for its own
+  deployment: it only grows, and the daemon refreshes its head on every change and builds
+  every verifier against that head. A bundle carries no audit log. A standing change
+  travels only as a `SignerLink`: a rotation signed by the retiring key and its successor,
+  or a compromise revocation signed by the revoked key, each over `{domain:
+  "continuum.signer-link.v1", event, signer}` — a domain distinct from D4's, so a link
+  signature is never an artifact signature. The importer checks every link and the
+  bundle's own signature (`ArtifactSignature::authenticates`) before it applies any fact,
+  and then applies a fact only on the word of the keys it concerns, known or unseen alike:
+  never on another signer's assertion, never about one of the daemon's own keys, and never
+  a loss recovery, which a lost key cannot sign — a peer learns of a loss only from its own
+  operator. At rotation the retiring key signs its own compromise revocation and is then
+  wiped, so "rotate, then revoke the old key" publishes a revocation the old key attested.
+  A rotation's successor is introduced only if local policy pins it, so adoption is bounded
+  by the pinned set. Adopted revocations stop four records short of the bound; only the
+  held key may use those, and every operation that makes an active held key leaves one for
+  its revocation, so an active held key can always be revoked; a registry built outside the
+  daemon is installed only with three records free while its key is active, so every
+  installed deployment can revoke its key and mint a revocable replacement. So
+  `Verified` still needs a standing this daemon recorded, an unknown signer stays
+  `StandingUnknown`, and a revocation learned once is never unlearned.
+- **What a bundle and a pack sign.** Receipts, bundle bodies, and domain packs are all
+  signed over their bytes wrapped as one canonical `Bytes` value (D4's `artifact` half),
+  through one function, `signed_bytes_identity`. The bundle's own layout is `rule
+  intent.bundles`.
+- **CI fails closed on a real path.** `intent.accept` naming a held bundle calls
+  `SignatureVerifier::verify_for_ci_acceptance` and answers `AcceptanceChainInvalid` on
+  every other outcome.
+- **Library additions.** `AllowedSigners` gains `entry_value`, `entry_from_value`,
+  `from_entries`, `iter`, `len`, `is_empty`, `kinds`, and `intersection`;
+  `SigningRegistry` gains `signers`; `record_observed`, which appends a standing fact
+  learned from outside as the next audit record, validated exactly as replay validates a
+  record; and `attest_rotation`, `attest_revocation`, and `rotate_attested`, the only ways
+  to make a link, each refusing a key that is not active; `RegistryHead` gains `digest`; `ArtifactSignature` gains `authenticates`, the
+  cryptographic check alone; and `SignerLink`, `LinkEvent`, and `LINK_DOMAIN` are the
+  key-attested transition. None changes an existing encoding or a decision above.
+- **A fourth signed kind: `intent-acceptance`.** RFC 0037 A1 requires an acceptance
+  signature over the accepted `in_*`, its base or a genesis marker, the capability, the
+  principal, and the time. It is a D4 signature of kind `intent-acceptance` over that
+  canonical record (which also names its own domain and the previous chain element), so a
+  signature of any other kind is never an acceptance. The kind token is additive: no
+  existing message changes. A key pinned only for `intent-bundle` no longer passes CI
+  acceptance; a deployment pins its acceptance keys for `intent-acceptance` too (RFC 0037
+  correction 21).
+- **Acceptance needs an active signer.** `verify_for_ci_acceptance` still reports a rotated
+  signer's signature as verified (plan §4.6). `intent.accept` additionally requires the
+  bundle's signer to be active, because a retired key vouches for no new acceptance.
+- **Still out of scope.** The daemon is sans-IO, so keys minted or rotated over the wire
+  live in daemon memory; persisting them through `LocalKeystore`, and a deployment
+  launcher that builds a daemon from the keystore, are a follow-up. The residual risk
+  under "Revocation is local" narrows but does not close: a verifier that never received
+  a bundle carrying a revocation cannot know of it.
 
 ## Alternatives considered
 
@@ -226,6 +294,14 @@ The threat-model controls it serves are docs/09 T04 ("optional signing/attestati
 - **Rotation cannot date a signature.** Without a trusted timestamp, a signature from a
   rotated key cannot be proven to predate the rotation. So compromise must be answered with
   revocation, not rotation, and the API names the two separately.
+- **Links and own keys do not survive a restart yet.** `continuumd` keeps its signer links
+  (own and adopted), the pre-signed revocations of its retired keys, and the set of its own
+  keys in memory; `install` rebuilds "own" from every signer of the installed registry. So
+  until they are persisted beside the registry (a follow-up with follow-up 2's keystore),
+  a restarted daemon exports no links made before the restart, cannot publish a retired
+  key's pre-signed revocation, and would treat previously adopted peer keys as its own.
+  Today the builder installs only the deployment's own registry, so the last does not yet
+  arise.
 - **Revocation is local.** A verifier whose registry lacks a revocation reports
   `StandingStale` against the authoritative head, never `Active`. But until the head is
   distributed (follow-up 1), a remote verifier cannot reach `Verified` at all. Follow-ups 1

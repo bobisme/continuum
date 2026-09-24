@@ -69,6 +69,10 @@
 //! the declared privileged surface, not 5/5.
 //! [`the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_declares`]
 //! pins it, names the two, and fails when either lands without a case. Tracked `bn-1n7hy`.
+//! Protocol 3.8 (bn-3glnv) widened the declared privileged surface to eleven: six landed
+//! signing-wire operations the ratified corpus predates. The corpus covers 3 of 11; the
+//! delivering suite drives the six with its own `SIGNING_WIRE_PROBES`, and the F1 test now
+//! requires each landed, corpus-uncovered privileged operation to be one of them.
 //!
 //! **F2 — under the delivering suite's default principal, most of the corpus never reaches a
 //! handler.** `cap_agent` sits at `propose`. Sixteen of the nineteen operations the corpus
@@ -161,7 +165,7 @@
 //! | the refusal is T3 and not the ladder | **SUPPORTED** | [`the_refusal_at_the_top_rung_is_the_privilege_bit_alone`] |
 //! | admission carries no payload term | **SUPPORTED** | [`the_admission_ledger_does_not_move_with_the_payload`] |
 //! | no status a privileged reader can see on the wire moves | **SUPPORTED** | [`the_corpus_moves_no_status_a_privileged_reader_can_see_on_the_wire`] |
-//! | coverage of the declared privileged surface | **PARTIAL — 3 of 5** (F1) | [`the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_declares`] |
+//! | coverage of the declared privileged surface | **PARTIAL — 3 of 11 by the corpus, 9 of 11 with the delivering suite's signing-wire probes** (F1) | [`the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_declares`] |
 //! | the privileged set is checked against the normative file, not the transcription | **SUPPORTED here, and now also in the delivering suite** (F3, repaired bn-2a7q9) | [`the_privileged_set_re_derived_from_the_idl_is_exactly_the_delivering_oracles_set`] |
 //! | the corpus is exactly §24.5's taxonomy, with no cell empty | **SUPPORTED** | [`the_corpus_is_exactly_the_taxonomy_the_ratified_promotion_gate_enumerates`] |
 //! | every agent-readable artifact class carries a case | **SUPPORTED** | [`the_corpus_declares_a_payload_in_every_agent_readable_artifact_class`] |
@@ -194,7 +198,7 @@
 //!    switch.
 //!
 //! Two further absences, stated because they bound what "the corpus cannot trigger a privileged
-//! operation" means here. The privileged surface is covered at 3 of 5 (F1). And every attempt
+//! operation" means here. The privileged surface is covered at 3 of 11 by the corpus (F1). And every attempt
 //! in this file, delivered or fresh, is a *protocol request*: an injection that reached an agent
 //! through a rendered artifact and changed what that agent chose to send is outside the reach of
 //! any test at this layer, and G2-07 is not evidence about it.
@@ -1127,10 +1131,16 @@ fn the_privileged_set_re_derived_from_the_idl_is_exactly_the_delivering_oracles_
         from_idl.iter().copied().collect::<Vec<_>>(),
         vec![
             "intent.accept",
+            "intent.export_bundle",
+            "intent.import_bundle",
             "intent.lock",
             "intent.reject",
             "repair.promote",
             "repair.reject",
+            "signing.mint",
+            "signing.revoke",
+            "signing.rotate",
+            "signing.sign_pack",
         ]
     );
 }
@@ -1204,9 +1214,10 @@ fn the_privileged_marker_is_a_genuine_restriction_of_the_operation_set() {
         .filter(|operation| operation.is_privileged())
         .collect();
 
-    // 1. Five of seventy-five. A strict, small minority.
-    assert_eq!(privileged.len(), 5);
-    assert_eq!(declared.len(), 75);
+    // 1. Eleven of eighty-three (five of seventy-five until protocol 3.8 added six). A strict,
+    //    small minority.
+    assert_eq!(privileged.len(), 11);
+    assert_eq!(declared.len(), 83);
 
     // 2. Privilege implies audit-recording — the IDL's own legend says "@privileged
     //    privileged operation; audit-recorded" — and the converse fails, so the two markers
@@ -1221,7 +1232,7 @@ fn the_privileged_marker_is_a_genuine_restriction_of_the_operation_set() {
         .values()
         .filter(|operation| operation.annotations.contains("audit_recorded"))
         .count();
-    assert_eq!(audit_recorded, 7);
+    assert_eq!(audit_recorded, 13);
 
     // 3. Every privileged operation is a `@mutation`. A privileged read would be a different
     //    kind of thing and the corpus would need a different probe for it.
@@ -1262,7 +1273,7 @@ fn the_scan_is_not_vacuous() {
         .filter(idl_scan::Declared::is_privileged)
         .map(|operation| operation.name)
         .collect();
-    assert_eq!(baseline.len(), 5);
+    assert_eq!(baseline.len(), 11);
 
     let stripped = source.replace(
         "@mutation @privileged @audit_recorded\noperation intent.accept {",
@@ -1275,7 +1286,7 @@ fn the_scan_is_not_vacuous() {
         .map(|operation| operation.name)
         .collect();
     assert!(
-        !after.contains("intent.accept") && after.len() == 4,
+        !after.contains("intent.accept") && after.len() == 10,
         "removing a marker did not move the derived set"
     );
 
@@ -1326,16 +1337,46 @@ fn the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_de
         covered,
         vec!["intent.accept", "intent.lock", "intent.reject"]
     );
-    assert_eq!(uncovered, vec!["repair.promote", "repair.reject"]);
+    assert_eq!(
+        uncovered,
+        vec![
+            "intent.export_bundle",
+            "intent.import_bundle",
+            "repair.promote",
+            "repair.reject",
+            "signing.mint",
+            "signing.revoke",
+            "signing.rotate",
+            "signing.sign_pack",
+        ]
+    );
 
-    // The gap is bounded by the reason for it: neither uncovered operation has a family in
-    // this process, so neither is reachable today. This assertion is the tripwire — the day a
-    // repair family lands, an uncovered privileged operation becomes a reachable one and this
-    // test goes red before anything else notices.
+    // The gap is bounded by the reason for it. The two repair operations have no family in
+    // this process, so neither is reachable today. The six protocol 3.8 operations
+    // (bn-3glnv) have landed and the ratified corpus predates them: its case identities are
+    // `<vector>/<outcome>` and unique, so it cannot grow without a new research/35 vector.
+    // Until it has one, each is driven at by `g2_injection_corpus_evidence.rs`'s own
+    // `SIGNING_WIRE_PROBES`, whose privilege-bit experiment runs over them exactly as over a
+    // corpus case. This assertion is the tripwire in both halves: a repair family landing,
+    // or a landed privileged operation no probe names, goes red before anything else
+    // notices.
+    let delivering = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/g2_injection_corpus_evidence.rs"
+    ))
+    .expect("the delivering suite is in the tree");
+    let probes_start = delivering
+        .find("const SIGNING_WIRE_PROBES")
+        .expect("the delivering suite declares its signing-wire probes");
+    let probes = &delivering[probes_start
+        ..probes_start
+            + delivering[probes_start..]
+                .find("];")
+                .expect("the probe list closes")];
     for operation in &uncovered {
         assert!(
-            !is_landed(operation),
-            "{operation} is privileged, landed, and no corpus case drives at it"
+            !is_landed(operation) || probes.contains(&format!("\"{operation}\"")),
+            "{operation} is privileged, landed, and neither a corpus case nor a probe drives at it"
         );
     }
 
