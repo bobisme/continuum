@@ -9,7 +9,7 @@
 //!
 //! The corpus itself is [`continuum_security::injection`] — inert data at the shape plan
 //! §24.5's ratified promotion gate fixes, with its own suite asserting that shape. This file
-//! is the other half: it takes all forty-five cases, drives each one through `continuumd`'s
+//! is the other half: it takes all forty-eight cases, drives each one through `continuumd`'s
 //! **real wire boundary** — a byte frame into [`Server::answer`], a byte frame back — and
 //! holds the daemon to three conjoined claims.
 //!
@@ -64,13 +64,41 @@
 //!
 //! # Where a case's payload actually goes
 //!
-//! [`plant`] puts each payload at the position the case's own `carrier` field names — an
-//! acceptance signature, a reject reason, a policy-table key, a change-set document, a
-//! checker profile, an instrumentation profile, an expansion anchor, a target id, a query
-//! filter, or a handle where the case *is* a guessed handle. Where the case names an
-//! operation whose family has not landed, the payload becomes the request's whole
-//! `arguments` blob, which is the most hostile thing a client can put on this wire and the
-//! shape [`unlanded`] is about.
+//! [`carriage`] decides, per case and never by trying a parse, how the payload reaches the
+//! daemon, and [`plant`] puts it there (bn-2zccj):
+//!
+//! - **a free field of the body** (27 cases) — an acceptance signature, a reject reason, a
+//!   policy-table key, a change-set document, a checker profile, an instrumentation profile,
+//!   an expansion anchor, a target id, or a query filter;
+//! - **the request's handle** (3 cases), where the case *is* a guessed handle — the
+//!   `predictable handles` class. A payload of that class that is not a handle fails the run;
+//! - **a stored artifact the request names** (7 cases), where the operation declares no free
+//!   field at all. `evidence.verify` names a stored evidence node whose held content is the
+//!   payload, and the daemon hands those bytes to the trusted checking base (5 cases).
+//!   The router finds no family in prose and decodes nothing, so these show a typed refusal
+//!   and no status move, not a kernel parsing the text; a positive control shows the same
+//!   path reaches the kernel for real certificate bytes. `task.resume` names a stored
+//!   continuation (2 cases): a forged one pinning a superseded snapshot and the payload's
+//!   epoch, or a cancelled task's own continuation, which carries none of the payload's bytes
+//!   and only its request to survive the cancel. The live and cancelled tasks are made
+//!   through real operations ([`Tasks`]); the forged continuation and the evidence nodes are
+//!   direct state insertions, standing for state an attacker is assumed to have planted;
+//! - **the whole `arguments` blob** (11 cases), where the operation's family has not landed.
+//!   That is the most hostile thing a client can put on this wire, and the shape [`unlanded`]
+//!   is about.
+//!
+//! No other route exists, and a case that fits none of them panics the runner. Until
+//! bn-2zccj the runner parsed the payload as a handle and, when that failed, named a fixed
+//! handle this daemon never held: the two `task.resume` cases and five `evidence.verify`
+//! cases sent a request about nothing and still counted toward the ratified floor. Leg 6
+//! holds each stored carrier to a typed refusal or an inert answer from the handler itself,
+//! with state unchanged, and holds the untampered carrier to a resume that does move state.
+//!
+//! "Carried" is not "read". Several field-carried cases are refused before their field is
+//! looked at: `evidence.link` refuses any `agent:` actor before its body is read, and the
+//! fixture's `evidence.link` subject and `context.expand` pack name nothing the daemon holds.
+//! Those refusals are the capability check and RFC 0027 X2, which is this file's subject, and
+//! they are stated here so a green run is not read as "every payload was parsed".
 //!
 //! # The honest boundary: what "isolation escape" can and cannot mean here
 //!
@@ -106,11 +134,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use continuum_engine_reference::diehard;
+use continuum_evidence::claim_status::ClaimStatus;
 use continuum_intent::canonical_json::Json as ContractJson;
 use continuum_intent::contract::IntentContract;
 use continuum_security::injection::{
-    CASES, Case, ProhibitedOutcome, Readability, Vector, isolation_cases, policy_block_cases,
-    readability,
+    CASES, Case, IsolationControl, ProhibitedOutcome, Readability, RedTeamClass, Vector,
+    isolation_cases, policy_block_cases, readability,
 };
 use continuum_value::epoch::ProtocolWindow;
 use continuum_workspace::artifact_path::ArtifactClass;
@@ -118,17 +148,19 @@ use continuum_workspace::snapshot::WorkspacePath;
 
 use continuumd::codec::json::Json as WireJson;
 use continuumd::codec::{self, CodecError};
-use continuumd::daemon::Daemon;
 use continuumd::daemon::context::ContextFamily;
-use continuumd::daemon::evidence::EvidenceFamily;
-use continuumd::daemon::family::Arguments;
+use continuumd::daemon::evidence::{self, EvidenceFamily};
+use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
 use continuumd::daemon::observe::ObserveFamily;
-use continuumd::daemon::state::{IntentRecord, RegistryStatus};
+use continuumd::daemon::state::{
+    AdmissionRecord, EvidenceNode, IntentRecord, RegistryStatus, StatusWrite,
+};
 use continuumd::daemon::task::TaskFamily;
-use continuumd::daemon::verification::VerificationFamily;
+use continuumd::daemon::verification::{VerificationFamily, model_source};
 use continuumd::daemon::workspace::WorkspaceFamily;
+use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest};
 use continuumd::protocol::envelope::{Budget, EpochSet, RequestEnvelope, ResultEnvelope};
 use continuumd::protocol::handshake::{
     CapabilityDescriptor, CapabilityProfile, ClientHello, Negotiated, VersionRange, negotiate,
@@ -147,17 +179,23 @@ use continuumd::protocol::operations::signing::{
 };
 use continuumd::protocol::operations::task::{TaskCancelRequest, TaskResumeRequest};
 use continuumd::protocol::operations::verification::VerificationStartRequest;
+use continuumd::protocol::operations::workspace::{
+    WorkspaceCreateRequest, WorkspaceForkRequest, WorkspaceSealRequest,
+};
 use continuumd::protocol::registry::{self, ENCODINGS};
 use continuumd::protocol::scalar::{
     ActorId, CapabilityHandle, Commitment, ContextHandle, ContinuationHandle, EpochIdentity,
     EvidenceHandle, IntentHandle, Opaque, OperationName, ProtocolVersion, RequestId, SignerHandle,
-    TaskHandle, Timestamp,
+    TaskHandle, Timestamp, WorkspaceHandle,
 };
-use continuumd::protocol::shared::{EvidenceQuery, IntentChangeSet, Target};
+use continuumd::protocol::shared::{
+    EvidenceQuery, FileOverlay, IntentChangeSet, SnapshotComponents, SnapshotEpochs, Target,
+};
 use continuumd::protocol::spec::{Annotation, Nullable, Optional};
 use continuumd::protocol::vocabulary::{
-    AuthorityLevel, DataGrant, Encoding, ErrorCode, ExpansionRelation, Portfolio, ResultStatus,
-    RevocationReason, SignedArtifactKind, TargetKind,
+    AuthorityLevel, DataGrant, Encoding, ErrorCode, EvidenceKind, EvidenceNodeKind,
+    ExpansionRelation, Portfolio, ResultStatus, RevocationReason, SignedArtifactKind, TargetKind,
+    TaskStatus,
 };
 use continuumd::transport::{self, Server};
 
@@ -397,6 +435,38 @@ struct Fixture {
     proposal: IntentHandle,
     evidence: EvidenceHandle,
     receipt: Commitment,
+    /// The stored state the `task.resume` cases name ([`Tasks`]).
+    tasks: Tasks,
+    /// How many admission records provisioning left behind. Everything at or after this
+    /// index is the corpus's own; see [`corpus_admissions`].
+    provisioned: usize,
+}
+
+/// The task state a `task.resume` case resumes against, provisioned through the daemon's real
+/// paths (bn-2zccj).
+///
+/// `task.resume` declares no string or opaque field: its body is a `cont_*` handle and a
+/// fully typed `Budget`. A payload cannot ride in its body, so this runner used to parse the
+/// payload *as* a handle and, when that failed, silently name a fixed handle this daemon never
+/// held — and both `task.resume` cases in the corpus were a request against nothing. The
+/// attack surface of `task.resume` is the **stored continuation** it replays from, which is
+/// exactly what those two cases' `surface` (`ArtifactClass::Continuation`) and `carrier`
+/// fields name. So the carrier is now a real stored continuation, and the hostile content is
+/// what that continuation pins:
+///
+/// - `live` is a real parked continuation of a real running task, over the current sealed
+///   snapshot `current`. It is the benign twin, and the control that shows a resume is live.
+/// - `stale` is a real sealed snapshot of the same lineage that `current` superseded. The
+///   `stale snapshot substitution` case stores a continuation that pins it.
+/// - `killed` is the real continuation of a real task that was then cancelled, which is what
+///   the `hard kill` control's case resumes: "survive the cancel and finish the run".
+struct Tasks {
+    current: WorkspaceHandle,
+    stale: WorkspaceHandle,
+    live_task: TaskHandle,
+    live: ContinuationHandle,
+    killed_task: TaskHandle,
+    killed: ContinuationHandle,
 }
 
 /// A daemon with every landed family, the four capabilities above, and one *proposed* Die
@@ -407,6 +477,13 @@ struct Fixture {
 /// in the corpus a *live* attempt rather than one that would have failed on the record's own
 /// state whatever the capability said. [`inert`] then demonstrates the liveness directly, by
 /// letting the steward through and watching the status move.
+///
+/// It also holds the stored carriers the corpus's `evidence.verify` and `task.resume` cases
+/// name: a second, *accepted* contract governing a real sealed workspace whose lineage has
+/// advanced once, a real parked task over its current snapshot, a real cancelled task, the
+/// forged continuation the stale-snapshot case resumes, and one stored evidence node per
+/// payload. The operations that build them run as the steward before the first case is sent,
+/// and [`corpus_admissions`] cuts their admission records off.
 fn fixture() -> Fixture {
     fixture_at(version())
 }
@@ -500,11 +577,537 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
     let evidence = EvidenceHandle::new("ev_g2fixturenodeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         .expect("an `ev_` handle");
 
+    let tasks = provision_tasks(&mut daemon, at);
+    for case in CASES {
+        match carriage(case) {
+            Carriage::StoredEvidence => {
+                store_evidence(&mut daemon, case.payload.as_bytes());
+            }
+            Carriage::StoredContinuation => {
+                store_continuation(&mut daemon, case, &tasks);
+            }
+            Carriage::Field | Carriage::Handle | Carriage::Unlanded => {}
+        }
+    }
+    // The benign twin of every stored-evidence case is a stored artifact too.
+    store_evidence(&mut daemon, BENIGN.as_bytes());
+    let provisioned = daemon.state().admissions().len();
+
     Fixture {
         server: Server::new(daemon, negotiated_at(at)),
         proposal,
         evidence,
         receipt,
+        tasks,
+        provisioned,
+    }
+}
+
+/// The admission records the corpus produced, without the ones provisioning left.
+///
+/// Provisioning the stored carriers runs real operations as the steward — `intent.accept`
+/// among them — and the ledger records those decisions like any other. They happen before
+/// the first case is sent, so they are a prefix of the ledger and are cut off here rather
+/// than filtered by operation, which would hide a corpus admission of the same operation.
+fn corpus_admissions(fixture: &Fixture) -> &[AdmissionRecord] {
+    &fixture.server.daemon().state().admissions()[fixture.provisioned..]
+}
+
+// =====================================================================================
+// Stored carriers
+// =====================================================================================
+
+/// How one case's payload reaches the daemon. Decided by the case, never by whether the
+/// payload happens to parse (bn-2zccj).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Carriage {
+    /// A string or opaque field of the request body the case's operation declares.
+    Field,
+    /// The payload *is* a guessed handle, and it is the request's handle. Only the
+    /// `predictable handles` class; a payload of that class that is not a handle is a
+    /// corpus defect, and the runner refuses it.
+    Handle,
+    /// `evidence.verify` declares no free field. The payload is the content of a stored
+    /// evidence artifact the request names, handed to the trusted checking base.
+    StoredEvidence,
+    /// `task.resume` declares no free field. The payload is what a stored continuation the
+    /// request names pins ([`Tasks`], [`store_continuation`]).
+    StoredContinuation,
+    /// No family in this daemon: the payload is the request's whole `arguments` blob.
+    Unlanded,
+}
+
+/// The carriage of `case`.
+///
+/// # Panics
+///
+/// When the case's operation cannot carry its payload by any route this runner has. That is
+/// the loud failure bn-2zccj asks for: the runner used to substitute a fixed handle and send a
+/// request that carried nothing, and the case still counted toward the ratified floor.
+fn carriage(case: &Case) -> Carriage {
+    let guessed = matches!(
+        case.vector,
+        Vector::RedTeam(RedTeamClass::PredictableHandles)
+    );
+    match case.operation {
+        "intent.reject" | "evidence.verify" | "task.cancel" if guessed => Carriage::Handle,
+        "evidence.verify" => Carriage::StoredEvidence,
+        "task.resume" if stored_continuation_kind(case).is_some() => Carriage::StoredContinuation,
+        "intent.accept"
+        | "intent.reject"
+        | "intent.lock"
+        | "intent.propose_revision"
+        | "evidence.link"
+        | "evidence.query"
+        | "observe.ingest"
+        | "context.expand"
+        | "verification.start"
+            if !guessed =>
+        {
+            Carriage::Field
+        }
+        operation if !is_landed(operation) => Carriage::Unlanded,
+        operation => panic!(
+            "{}: `{operation}` cannot carry this payload — its body declares no field for it, \
+             the case is not a guessed handle, and no stored carrier is defined for it. Give \
+             the case a real carrier; never substitute a handle for it",
+            case.id
+        ),
+    }
+}
+
+/// The two stored-continuation attacks, one per `task.resume` case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoredContinuation {
+    /// research/35 "stale snapshot substitution": a continuation that pins a superseded
+    /// snapshot of its own lineage, and pins the epoch the payload names (`"epoch":"any"`)
+    /// in place of the daemon's.
+    StaleSnapshotSubstitution,
+    /// docs/49 worker-isolation control "hard kill": the continuation a cancelled task
+    /// suspended into, resumed so the run "survives the cancel".
+    HardKill,
+}
+
+fn stored_continuation_kind(case: &Case) -> Option<StoredContinuation> {
+    match (case.vector, case.outcome) {
+        (
+            Vector::RedTeam(RedTeamClass::StaleSnapshotSubstitution),
+            ProhibitedOutcome::IsolationEscape,
+        ) => Some(StoredContinuation::StaleSnapshotSubstitution),
+        (Vector::Isolation(IsolationControl::HardKill), ProhibitedOutcome::IsolationEscape) => {
+            Some(StoredContinuation::HardKill)
+        }
+        _ => None,
+    }
+}
+
+/// The handle the stale-snapshot case's forged continuation is filed under. Not a content
+/// identity, deliberately: the attacker is the one that filed it.
+const FORGED_CONTINUATION: &str = "cont_g2storedcarrierstalesnapshotsubstitution";
+
+/// The profile a stored evidence carrier is filed under.
+const STORED_PROFILE: &str = "g2-corpus/stored-carrier";
+
+/// The staged path a stored evidence carrier's content is held under.
+const STORED_PATH: &str = "corpus/stored-carrier.bin";
+
+/// The handle of the stored evidence node that carries `payload`, whether or not it is held.
+fn stored_evidence_handle(daemon: &Daemon, payload: &[u8]) -> EvidenceHandle {
+    let artifact = continuumd::daemon::state::DaemonState::commit_of(
+        &Blake3Identity,
+        &WorkspacePath::new(STORED_PATH).expect("a workspace path"),
+        payload,
+    )
+    .expect("blake3 names every input");
+    evidence::node_identity(daemon.services(), &artifact, STORED_PROFILE)
+        .expect("the identity seam names the node")
+}
+
+/// Stage `payload` and file a certificate-class evidence node over it, with the untrusted
+/// agent as its producer.
+///
+/// This is a **direct state insertion**, not a wire path: no operation lets an agent file a
+/// certificate-class node with arbitrary content. It stands for the state an attacker is
+/// assumed to have planted, which is what a stored carrier means.
+///
+/// Certificate-class on purpose. `evidence.verify` then hands the held bytes, unread by the
+/// daemon, to the trusted checking base (`continuum-certificate`), which is the one reader
+/// whose answer could move the claim's status. The node is filed under the identity it
+/// derives, so steps 3a and 3b of the daemon's check pass and the bytes really reach the
+/// certificate router; a misfiled node would be refused for the misfiling and carry nothing.
+/// Its producer is not the verification service, so INV-004's producer refusal does not stop
+/// it before the bytes are read either.
+///
+/// What the router does with a prose payload is narrow, and stated rather than dressed up:
+/// it routes by the leading magic, finds no family, and decodes nothing. So these cases show
+/// that hostile content in the checked artifact moves no status and gets a typed refusal;
+/// they do not show a kernel parsing the text. The position each case's `carrier` names — an
+/// action label, a goal state, the snapshot a node is stated against — is inside an
+/// artifact class this protocol does not accept from a caller, so the held content of the
+/// checked artifact is the nearest position the wire reaches. Leg 6's positive control shows
+/// the same path does reach the kernel for bytes a kernel owns.
+fn store_evidence(daemon: &mut Daemon, payload: &[u8]) -> EvidenceHandle {
+    let artifact = daemon
+        .state_mut()
+        .stage(
+            &Blake3Identity,
+            WorkspacePath::new(STORED_PATH).expect("a workspace path"),
+            payload.to_vec(),
+        )
+        .expect("staging names its content");
+    let handle = stored_evidence_handle(daemon, payload);
+    let node = EvidenceNode {
+        kind: EvidenceNodeKind::Certificate,
+        evidence_kind: Some(EvidenceKind::Certificate),
+        labels: Vec::new(),
+        claim_id: "claim:g2-corpus-stored-carrier".to_owned(),
+        artifact,
+        producer: who(AGENT.actor),
+        tool: STORED_PROFILE.to_owned(),
+        created_at: now(),
+        inputs: Vec::new(),
+        idempotency_key: "idem-g2-stored-carrier".to_owned(),
+        history: vec![StatusWrite {
+            status: ClaimStatus::BOTTOM,
+            service_identity: None,
+            validation_basis: None,
+            inconclusive_reason: None,
+        }],
+        redaction: None,
+        publication: None,
+    };
+    daemon.state_mut().append_evidence(handle.clone(), node);
+    handle
+}
+
+/// File the hostile continuation a stored-continuation case resumes, if it needs one.
+///
+/// The hard-kill case needs none: the cancelled task's own continuation is the carrier, and
+/// it is real state made through real operations. It is a structural translation: none of
+/// the payload's bytes (`detach`, `on_cancel: ignore`) travel, because a continuation has no
+/// field for them; what travels is the one thing the payload asks for that the wire can
+/// express, a resume of the continuation a cancelled task suspended into.
+///
+/// The stale-snapshot case is a *forged* continuation, built from the live one by changing
+/// what the payload asks for, and inserted **directly** with `TaskTable::park` — the table
+/// `task.resume` reads — because no wire operation files a continuation. Of the payload, the
+/// `epoch` value is carried as the pinned semantic epoch. `skip_epoch_check` and `worker` have
+/// no field in a continuation and are not carried; the class's own attack, a superseded
+/// snapshot, is carried as the pinned snapshot.
+fn store_continuation(daemon: &mut Daemon, case: &Case, tasks: &Tasks) {
+    match stored_continuation_kind(case).expect("a stored-continuation case") {
+        StoredContinuation::HardKill => {}
+        StoredContinuation::StaleSnapshotSubstitution => {
+            let forged = forged_continuation(daemon, case.payload, tasks, true, true);
+            daemon.state_mut().tasks_mut().park(forged);
+        }
+    }
+}
+
+/// The live continuation, with its snapshot substituted by the superseded one and/or its
+/// semantic epoch replaced by the one `payload` names, filed under [`FORGED_CONTINUATION`].
+///
+/// # Panics
+///
+/// When `payload` is not a JSON object naming an `epoch` string: the carrier is built from
+/// what the payload says, so a payload that says nothing has no carrier.
+fn forged_continuation(
+    daemon: &Daemon,
+    payload: &str,
+    tasks: &Tasks,
+    stale_snapshot: bool,
+    foreign_epoch: bool,
+) -> continuumd::daemon::task::Continuation {
+    let named = match ContractJson::parse(payload.as_bytes()) {
+        Ok(ContractJson::Object(fields)) => match fields.get("epoch") {
+            Some(ContractJson::String(epoch)) => epoch.clone(),
+            other => panic!("the stale-snapshot payload names no `epoch` string: {other:?}"),
+        },
+        other => panic!("the stale-snapshot payload is not a JSON object: {other:?}"),
+    };
+    let mut forged = daemon
+        .state()
+        .tasks()
+        .continuation(&tasks.live)
+        .expect("the live continuation is held")
+        .clone();
+    forged.handle = ContinuationHandle::new(FORGED_CONTINUATION).expect("a `cont_` handle");
+    if stale_snapshot {
+        forged.snapshot = tasks.stale.clone();
+    }
+    if foreign_epoch {
+        forged.pinned.semantic = Nullable::Value(epoch(&named));
+    }
+    forged
+}
+
+/// The handle a stored-continuation case resumes.
+fn stored_continuation_handle(case: &Case, tasks: &Tasks) -> ContinuationHandle {
+    match stored_continuation_kind(case).expect("a stored-continuation case") {
+        StoredContinuation::StaleSnapshotSubstitution => {
+            ContinuationHandle::new(FORGED_CONTINUATION).expect("a `cont_` handle")
+        }
+        StoredContinuation::HardKill => tasks.killed.clone(),
+    }
+}
+
+// --- provisioning, through the daemon's real operations ------------------------------------
+
+/// The TV-009 port's model, verbatim: the bytes that go into the provisioned snapshot.
+const DIE_HARD_MODEL: &str =
+    include_str!("../../../notes/plan/corpus/tla-examples/ports/TV-009/DieHard.ctm");
+
+/// The TV-009 port's default model configuration.
+const DIE_HARD_CONFIG: &str =
+    include_str!("../../../notes/plan/corpus/tla-examples/ports/TV-009/default.model.toml");
+
+/// Where the model lives inside the provisioned workspace.
+const MODULE_PATH: &str = "DieHard.ctm";
+
+/// One provisioning call, as the steward, answered `ok` or the fixture is broken.
+fn provisioning(
+    daemon: &mut Daemon,
+    at: ProtocolVersion,
+    operation: &str,
+    request_id: &str,
+    snapshot: Option<&WorkspaceHandle>,
+    arguments: Arguments,
+) -> OperationOutcome {
+    let mut request = envelope(operation, STEWARD, request_id);
+    request.protocol_version = at;
+    if let Some(snapshot) = snapshot {
+        request.snapshot = Nullable::Value(snapshot.clone());
+    }
+    if !request.budget.is_absent() {
+        // Small enough that the Die Hard campaign (sixteen states) parks.
+        let mut parked = budget();
+        parked.states = Optional::Present(4);
+        request.budget = Optional::Present(parked);
+    }
+    let outcome = daemon.dispatch(&OperationRequest {
+        envelope: request,
+        arguments,
+    });
+    // `ok`, or one of the task lanes a `@task_starting` operation reports on.
+    assert_ne!(
+        outcome.envelope.status,
+        ResultStatus::Error,
+        "provisioning `{operation}` failed: {:?}",
+        outcome.envelope.error
+    );
+    outcome
+}
+
+/// A second contract with its own identity, so the provisioned workspace can be governed by
+/// an *accepted* intent while the corpus's own proposal stays `proposed`.
+fn governing_contract() -> IntentContract {
+    let text = DIE_HARD_CONTRACT.trim_end().replacen(
+        "\"JugCapacities\"",
+        "\"JugCapacitiesG2Provisioned\"",
+        1,
+    );
+    assert_ne!(text, DIE_HARD_CONTRACT.trim_end(), "the variant differs");
+    IntentContract::decode(text.as_bytes()).expect("the variant decodes")
+}
+
+/// Provision the task state [`Tasks`] names.
+fn provision_tasks(daemon: &mut Daemon, at: ProtocolVersion) -> Tasks {
+    let contract = governing_contract();
+    let intent = intent_handle(&contract);
+    daemon.state_mut().put_intent(
+        intent.clone(),
+        IntentRecord {
+            contract,
+            status: RegistryStatus::Proposed,
+            supersedes: None,
+            superseded_by: None,
+            acceptance: None,
+        },
+    );
+    provisioning(
+        daemon,
+        at,
+        "intent.accept",
+        "req_provision_accept",
+        None,
+        Arguments::IntentAccept(IntentAcceptRequest {
+            proposal: intent.clone(),
+            acceptance: acceptance("sig-g2-provisioned"),
+            bundle: Optional::Absent,
+        }),
+    );
+
+    let mut files = Vec::new();
+    for (path, content) in [(MODULE_PATH, DIE_HARD_MODEL), ("README.md", "# TV-009\n")] {
+        files.push(
+            daemon
+                .state_mut()
+                .stage(
+                    &Blake3Identity,
+                    WorkspacePath::new(path).expect("a workspace path"),
+                    content.as_bytes().to_vec(),
+                )
+                .expect("staging names its content"),
+        );
+    }
+    let configuration = daemon
+        .state_mut()
+        .stage(
+            &Blake3Identity,
+            WorkspacePath::new("default.model.toml").expect("a workspace path"),
+            DIE_HARD_CONFIG.as_bytes().to_vec(),
+        )
+        .expect("staging names its content");
+    daemon.state_mut().models_mut().register(
+        model_source(&Blake3Identity, [(MODULE_PATH, DIE_HARD_MODEL.as_bytes())])
+            .expect("blake3 names the module set"),
+        diehard::model().expect("the port builds"),
+    );
+
+    let created = provisioning(
+        daemon,
+        at,
+        "workspace.create",
+        "req_provision_create",
+        None,
+        Arguments::WorkspaceCreate(WorkspaceCreateRequest {
+            components: SnapshotComponents {
+                files,
+                cml_modules: Vec::new(),
+                rust_extraction: Vec::new(),
+                domain_packs: Vec::new(),
+                dependencies: Vec::new(),
+                epochs: SnapshotEpochs {
+                    semantic: epoch("semantic-1"),
+                    proof: epoch("proof-1"),
+                    toolchain: Optional::Absent,
+                },
+                intent,
+                correspondence: Vec::new(),
+                proof_environment: Vec::new(),
+                configuration: vec![configuration],
+                file_components: Optional::Absent,
+            },
+            overlay: Optional::Absent,
+            seal: Optional::Present(true),
+        }),
+    );
+    let stale = match &created.payload {
+        Payload::WorkspaceCreate(response) => response.snapshot.clone(),
+        other => panic!("expected a workspace.create payload, got {other:?}"),
+    };
+
+    // Advance the lineage, so `stale` is a sealed snapshot that is no longer current.
+    let forked = provisioning(
+        daemon,
+        at,
+        "workspace.fork",
+        "req_provision_fork",
+        None,
+        Arguments::WorkspaceFork(WorkspaceForkRequest {
+            base: stale.clone(),
+            overlay: Optional::Present(vec![FileOverlay {
+                path: "README.md".to_owned(),
+                content: b"# TV-009, advanced\n".to_vec(),
+            }]),
+            patches: Optional::Absent,
+        }),
+    );
+    let current = match &forked.payload {
+        Payload::WorkspaceFork(response) => response.snapshot.clone(),
+        other => panic!("expected a workspace.fork payload, got {other:?}"),
+    };
+    provisioning(
+        daemon,
+        at,
+        "workspace.seal",
+        "req_provision_seal",
+        None,
+        Arguments::WorkspaceSeal(WorkspaceSealRequest {
+            snapshot: current.clone(),
+        }),
+    );
+
+    // Two campaigns over the current snapshot, each parked on its budget.
+    let park = |daemon: &mut Daemon, request_id: &str, target: Target| {
+        let started = provisioning(
+            daemon,
+            at,
+            "verification.start",
+            request_id,
+            Some(&current),
+            Arguments::VerificationStart(VerificationStartRequest {
+                target,
+                portfolio: Portfolio::Interactive,
+                context_policy: Optional::Absent,
+                priority_class: Optional::Absent,
+            }),
+        );
+        let task = match &started.payload {
+            Payload::VerificationStart(response) => response
+                .task
+                .value()
+                .cloned()
+                .expect("a fresh start names a task"),
+            other => panic!("expected a verification.start payload, got {other:?}"),
+        };
+        let entry = daemon.state().tasks().get(&task).expect("the task is held");
+        assert_eq!(entry.status, TaskStatus::Suspended, "the campaign parked");
+        let continuation = entry
+            .continuation
+            .clone()
+            .expect("a parked task holds a continuation");
+        (task, continuation)
+    };
+    let (live_task, live) = park(
+        daemon,
+        "req_provision_live",
+        Target {
+            kind: TargetKind::AllClaims,
+            id: "DieHard".to_owned(),
+        },
+    );
+    let (killed_task, killed) = park(
+        daemon,
+        "req_provision_killed",
+        Target {
+            kind: TargetKind::Property,
+            id: diehard::TYPE_OK.to_owned(),
+        },
+    );
+    assert_ne!(live_task, killed_task, "two campaigns, two tasks");
+
+    provisioning(
+        daemon,
+        at,
+        "task.cancel",
+        "req_provision_cancel",
+        None,
+        Arguments::TaskCancel(TaskCancelRequest {
+            task: killed_task.clone(),
+        }),
+    );
+    assert_eq!(
+        daemon
+            .state()
+            .tasks()
+            .get(&killed_task)
+            .expect("the cancelled task is held")
+            .status,
+        TaskStatus::Cancelled
+    );
+    assert!(
+        daemon.state().tasks().continuation(&killed).is_some(),
+        "the table keeps the cancelled task's continuation, which is what makes it a carrier"
+    );
+
+    Tasks {
+        current,
+        stale,
+        live_task,
+        live,
+        killed_task,
+        killed,
     }
 }
 
@@ -611,44 +1214,105 @@ fn change_set(payload: &str) -> IntentChangeSet {
 /// The typed request body a case's payload is planted into, or [`None`] where the operation
 /// has no family in this daemon and the payload becomes the whole `arguments` blob.
 ///
-/// Every arm plants at the position the case's `carrier` field names. Where the payload is
-/// itself a guessed handle — the `predictable handles` class — it is parsed as one and used,
-/// which is the only way that class can be attempted at all; where it is not, the fixture's
-/// own handle is used so that the attempt is otherwise well-formed and the refusal it gets is
-/// about authority rather than about shape.
+/// Every arm plants at the position [`carriage`] decides for the case, and nothing here
+/// decides it by trying a parse. `payload` is the case's own payload or [`BENIGN`], its twin.
+///
+/// - [`Carriage::Field`]: the payload rides in the body's free field, and every handle the
+///   body names is the fixture's own.
+/// - [`Carriage::Handle`]: the payload is the guessed handle. It must parse; the benign twin
+///   names the fixture's own handle.
+/// - [`Carriage::StoredEvidence`]: the request names the stored evidence node whose held
+///   content is the payload ([`store_evidence`]).
+/// - [`Carriage::StoredContinuation`]: the request names the stored continuation the case's
+///   payload describes ([`store_continuation`]); the benign twin names the live one.
+///
+/// # Panics
+///
+/// When the payload cannot be carried: a guessed handle that does not parse, a stored carrier
+/// the fixture does not hold, or a stored-continuation payload other than the case's own or
+/// its benign twin. Each of these used to be a silent substitution (bn-2zccj).
 fn plant(case: &Case, payload: &str, fixture: &Fixture) -> Option<Arguments> {
-    let proposal = IntentHandle::new(payload).unwrap_or_else(|_| fixture.proposal.clone());
-    let evidence = EvidenceHandle::new(payload).unwrap_or_else(|_| fixture.evidence.clone());
-    Some(match case.operation {
-        "intent.accept" => Arguments::IntentAccept(IntentAcceptRequest {
-            proposal,
+    let carriage = carriage(case);
+    let benign = payload == BENIGN;
+    Some(match (case.operation, carriage) {
+        ("intent.accept", Carriage::Field) => Arguments::IntentAccept(IntentAcceptRequest {
+            proposal: fixture.proposal.clone(),
             acceptance: acceptance(payload),
             bundle: Optional::Absent,
         }),
-        "intent.reject" => Arguments::IntentReject(IntentRejectRequest {
-            proposal,
+        ("intent.reject", Carriage::Field) => Arguments::IntentReject(IntentRejectRequest {
+            proposal: fixture.proposal.clone(),
             reason: payload.to_owned(),
         }),
-        "intent.lock" => Arguments::IntentLock(IntentLockRequest {
+        ("intent.reject", Carriage::Handle) => Arguments::IntentReject(IntentRejectRequest {
+            proposal: if benign {
+                fixture.proposal.clone()
+            } else {
+                guessed(case, payload, IntentHandle::new(payload))
+            },
+            reason: payload.to_owned(),
+        }),
+        ("intent.lock", Carriage::Field) => Arguments::IntentLock(IntentLockRequest {
             intent: fixture.proposal.clone(),
             policy: BTreeMap::from([(payload.to_owned(), "locked".to_owned())]),
         }),
-        "intent.propose_revision" => {
+        ("intent.propose_revision", Carriage::Field) => {
             Arguments::IntentProposeRevision(IntentProposeRevisionRequest {
                 base: fixture.proposal.clone(),
                 changes: change_set(payload),
             })
         }
-        "evidence.verify" => Arguments::EvidenceVerify(EvidenceVerifyRequest {
-            evidence,
+        ("evidence.verify", Carriage::Handle) => Arguments::EvidenceVerify(EvidenceVerifyRequest {
+            // The benign twin names the fixture's own handle, which no node is filed under.
+            // Deliberately unheld: the twin differential then compares a guessed handle with
+            // an unheld one, and RFC 0027 X2 says those two must answer identically. A held
+            // twin would compare a guess with a real node, which differ for a reason that is
+            // not the payload.
+            evidence: if benign {
+                fixture.evidence.clone()
+            } else {
+                guessed(case, payload, EvidenceHandle::new(payload))
+            },
             expected_status: Optional::Absent,
         }),
-        "evidence.link" => Arguments::EvidenceLink(EvidenceLinkRequest {
+        ("evidence.verify", Carriage::StoredEvidence) => {
+            let evidence = stored_evidence_handle(fixture.server.daemon(), payload.as_bytes());
+            let held = fixture
+                .server
+                .daemon()
+                .state()
+                .evidence(&evidence)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{}: no stored evidence node carries this payload; provision it in \
+                         `fixture_at` rather than naming a node the daemon does not hold",
+                        case.id
+                    )
+                });
+            let content = &fixture
+                .server
+                .daemon()
+                .state()
+                .staged(&held.artifact)
+                .expect("a stored carrier's content is held")
+                .content;
+            assert_eq!(
+                content.as_slice(),
+                payload.as_bytes(),
+                "{}: the stored node does not hold the payload",
+                case.id
+            );
+            Arguments::EvidenceVerify(EvidenceVerifyRequest {
+                evidence,
+                expected_status: Optional::Absent,
+            })
+        }
+        ("evidence.link", Carriage::Field) => Arguments::EvidenceLink(EvidenceLinkRequest {
             subject: fixture.evidence.clone(),
             receipt: fixture.receipt.clone(),
             checker_profile: payload.to_owned(),
         }),
-        "evidence.query" => Arguments::EvidenceQuery(EvidenceQueryRequest {
+        ("evidence.query", Carriage::Field) => Arguments::EvidenceQuery(EvidenceQueryRequest {
             query: EvidenceQuery {
                 node_kinds: Optional::Absent,
                 edge_kinds: Optional::Absent,
@@ -658,42 +1322,87 @@ fn plant(case: &Case, payload: &str, fixture: &Fixture) -> Option<Arguments> {
                 max_depth: Optional::Absent,
             },
         }),
-        "observe.ingest" => Arguments::ObserveIngest(ObserveIngestRequest {
+        ("observe.ingest", Carriage::Field) => Arguments::ObserveIngest(ObserveIngestRequest {
             trace: fixture.receipt.clone(),
             instrumentation_profile: payload.to_owned(),
         }),
-        "context.expand" => Arguments::ContextExpand(ContextExpandRequest {
+        ("context.expand", Carriage::Field) => Arguments::ContextExpand(ContextExpandRequest {
             context: ContextHandle::new("ctx_g2fixturepackaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
                 .expect("a `ctx_` handle"),
             anchor: payload.to_owned(),
             relation: ExpansionRelation::SourceSpan,
             depth: Optional::Absent,
         }),
-        "verification.start" => Arguments::VerificationStart(VerificationStartRequest {
-            target: Target {
-                kind: TargetKind::AllClaims,
-                id: payload.to_owned(),
+        ("verification.start", Carriage::Field) => {
+            Arguments::VerificationStart(VerificationStartRequest {
+                target: Target {
+                    kind: TargetKind::AllClaims,
+                    id: payload.to_owned(),
+                },
+                portfolio: Portfolio::Interactive,
+                context_policy: Optional::Absent,
+                priority_class: Optional::Absent,
+            })
+        }
+        ("task.resume", Carriage::StoredContinuation) => {
+            let continuation = if benign {
+                fixture.tasks.live.clone()
+            } else if payload == case.payload {
+                stored_continuation_handle(case, &fixture.tasks)
+            } else {
+                panic!(
+                    "{}: a stored continuation carries this case's own payload or its benign \
+                     twin, and {payload:?} is neither",
+                    case.id
+                )
+            };
+            assert!(
+                fixture
+                    .server
+                    .daemon()
+                    .state()
+                    .tasks()
+                    .continuation(&continuation)
+                    .is_some(),
+                "{}: the stored continuation is not held; provision it in `fixture_at`",
+                case.id
+            );
+            Arguments::TaskResume(TaskResumeRequest {
+                continuation,
+                budget: Optional::Absent,
+            })
+        }
+        ("task.cancel", Carriage::Handle) => Arguments::TaskCancel(TaskCancelRequest {
+            task: if benign {
+                fixture.tasks.live_task.clone()
+            } else {
+                guessed(case, payload, TaskHandle::new(payload))
             },
-            portfolio: Portfolio::Interactive,
-            context_policy: Optional::Absent,
-            priority_class: Optional::Absent,
-        }),
-        "task.resume" => Arguments::TaskResume(TaskResumeRequest {
-            continuation: ContinuationHandle::new(payload).unwrap_or_else(|_| {
-                ContinuationHandle::new("cont_g2fixtureaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-                    .expect("a `cont_` handle")
-            }),
-            budget: Optional::Absent,
-        }),
-        "task.cancel" => Arguments::TaskCancel(TaskCancelRequest {
-            task: TaskHandle::new(payload).unwrap_or_else(|_| {
-                TaskHandle::new("task_g2fixtureaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-                    .expect("a `task_` handle")
-            }),
         }),
         // Every other operation the corpus names has no family here. Its payload travels as
         // the request's whole `arguments` — see `unlanded`.
-        _ => return None,
+        (_, Carriage::Unlanded) => return None,
+        (operation, carriage) => panic!(
+            "{}: `{operation}` has no planting for {carriage:?}; add one rather than letting \
+             the case carry nothing",
+            case.id
+        ),
+    })
+}
+
+/// The handle a `predictable handles` payload guesses.
+///
+/// # Panics
+///
+/// When the payload is not a handle of the kind the request names. The runner used to name
+/// the fixture's own handle instead, and the case then guessed nothing.
+fn guessed<H, E: std::fmt::Debug>(case: &Case, payload: &str, parsed: Result<H, E>) -> H {
+    parsed.unwrap_or_else(|error| {
+        panic!(
+            "{}: a `predictable handles` payload must be the handle it guesses, and {payload:?} \
+             is not one ({error:?}); the runner never substitutes a handle",
+            case.id
+        )
     })
 }
 
@@ -903,7 +1612,7 @@ fn no_case_in_the_corpus_triggers_a_privileged_operation() {
         let answers = run_corpus(&mut fixture, principal, "corpus");
         assert_eq!(answers.len(), CASES.len());
 
-        let admissions = fixture.server.daemon().state().admissions();
+        let admissions = corpus_admissions(&fixture);
         let privileged: Vec<_> = admissions
             .iter()
             .filter(|record| is_privileged(&record.operation))
@@ -946,6 +1655,12 @@ fn the_corpus_alters_no_intent_status_and_no_evidence_status() {
     // The two prohibited outcomes the kill criterion names that this daemon can exhibit,
     // measured as a before/after comparison of everything they would move rather than as an
     // absence of error codes.
+    //
+    // Bounded by this fixture: it holds no evidence node the observation lane can verify (the
+    // stored carriers are certificate-class, and `fixture.evidence` names nothing), so a
+    // read-level `evidence.verify` has nothing here it could promote. With such a node,
+    // `gate_g2_07_acceptance.rs` measures the first corpus verify moving it to `observed`
+    // (cr-2rgnsb round 2); this test does not contradict that and does not cover it.
     for principal in [AGENT, REVISER] {
         let mut fixture = fixture();
         let before = security_state(&fixture);
@@ -971,7 +1686,7 @@ fn every_attempt_that_reached_admission_is_audited() {
     let mut fixture = fixture();
     let answers = run_corpus(&mut fixture, AGENT, "audit");
 
-    let admissions = fixture.server.daemon().state().admissions().to_vec();
+    let admissions = corpus_admissions(&fixture).to_vec();
     // One record per case whose operation this daemon *has*. An operation the codec cannot
     // decode never reaches admission at all, and `unlanded` accounts for those separately
     // rather than letting them dilute this count.
@@ -1521,7 +2236,7 @@ mod unlanded {
             let _ = answer(&mut fixture, &bytes);
         }
         assert!(
-            fixture.server.daemon().state().admissions().is_empty(),
+            super::corpus_admissions(&fixture).is_empty(),
             "an unlanded operation reached the admission predicate"
         );
     }
@@ -1700,4 +2415,441 @@ fn the_corpus_is_carried_whole_into_this_suite() {
     // And all three prohibited outcomes are present.
     let outcomes: BTreeSet<ProhibitedOutcome> = CASES.iter().map(|case| case.outcome).collect();
     assert_eq!(outcomes.len(), ProhibitedOutcome::ALL.len());
+}
+
+// =====================================================================================
+// Leg 6 — every case carries its payload (bn-2zccj)
+// =====================================================================================
+
+/// The stored carriers, driven one at a time against the principal that reaches the handler.
+///
+/// `cap_agent` sits at `propose` and `task.resume` needs `execute`, so under the corpus's
+/// default runner a `task.resume` case is refused on the ladder before any continuation is
+/// read. `cap_reviser` sits at `revise-intent` with no privilege, so it is admitted, and its
+/// attempt reaches the handler and the stored continuation. That is the attempt these tests
+/// measure: a refusal or an inert answer from the handler itself, over real stored state,
+/// with the admission ledger showing it was not the ladder that answered.
+mod stored_carriers {
+    use super::{
+        AGENT, BENIGN, CASES, Carriage, Case, ClaimStatus, ContinuationHandle, ErrorCode,
+        FORGED_CONTINUATION, Fixture, ProhibitedOutcome, REVISER, RedTeamClass, ResultStatus,
+        TaskHandle, TaskStatus, Vector, carriage, corpus_admissions, error_code, fixture,
+        forged_continuation, plant, run, security_state,
+    };
+    use continuum_security::injection::case as named;
+    use continuum_workspace::artifact_path::ArtifactClass;
+
+    fn case(id: &str) -> &'static Case {
+        named(id).unwrap_or_else(|| panic!("the corpus holds {id}"))
+    }
+
+    /// Everything a `task.resume` could move: both tasks' records and every stored
+    /// continuation the fixture names.
+    fn task_state(fixture: &Fixture) -> Vec<String> {
+        let state = fixture.server.daemon().state();
+        let mut seen = Vec::new();
+        for task in [&fixture.tasks.live_task, &fixture.tasks.killed_task] {
+            seen.push(format!(
+                "{:?}",
+                state
+                    .tasks()
+                    .get(task)
+                    .map(continuumd::daemon::task::TaskEntry::record)
+            ));
+        }
+        for continuation in [
+            fixture.tasks.live.clone(),
+            fixture.tasks.killed.clone(),
+            ContinuationHandle::new(FORGED_CONTINUATION).expect("a `cont_` handle"),
+        ] {
+            seen.push(format!("{:?}", state.tasks().continuation(&continuation)));
+        }
+        seen
+    }
+
+    fn status(fixture: &Fixture, task: &TaskHandle) -> TaskStatus {
+        fixture
+            .server
+            .daemon()
+            .state()
+            .tasks()
+            .get(task)
+            .expect("the task is held")
+            .status
+    }
+
+    /// The last admission record: the attempt reached admission, and admission let it through
+    /// to the handler.
+    fn reached_the_handler(fixture: &Fixture, operation: &str) {
+        let record = corpus_admissions(fixture)
+            .last()
+            .expect("the attempt reached admission");
+        assert_eq!(record.operation, operation);
+        assert!(
+            record.admitted,
+            "the attempt was refused by admission, so the handler never read its carrier"
+        );
+    }
+
+    #[test]
+    fn the_stale_snapshot_case_resumes_a_forged_continuation_and_is_refused_typed() {
+        let attack = case("stale-snapshot-substitution/isolation-escape");
+        assert_eq!(attack.operation, "task.resume");
+        assert_eq!(attack.surface, ArtifactClass::Continuation);
+        assert_eq!(carriage(attack), Carriage::StoredContinuation);
+        let mut fixture = fixture();
+
+        // The carrier is the payload, made structural: the stored continuation differs from
+        // the live one in exactly the two things the payload asks for and in nothing else.
+        let forged = fixture
+            .server
+            .daemon()
+            .state()
+            .tasks()
+            .continuation(&ContinuationHandle::new(FORGED_CONTINUATION).expect("a `cont_` handle"))
+            .expect("the forged continuation is stored")
+            .clone();
+        let live = fixture
+            .server
+            .daemon()
+            .state()
+            .tasks()
+            .continuation(&fixture.tasks.live)
+            .expect("the live continuation is stored")
+            .clone();
+        assert_eq!(forged.snapshot, fixture.tasks.stale);
+        assert_ne!(forged.snapshot, live.snapshot);
+        assert_eq!(live.snapshot, fixture.tasks.current);
+        assert_eq!(
+            forged
+                .pinned
+                .semantic
+                .value()
+                .map(|epoch| epoch.as_str().to_owned()),
+            Some("any".to_owned()),
+            "the payload's `epoch` is what the continuation pins"
+        );
+        assert_ne!(forged.pinned.semantic, live.pinned.semantic);
+        let mut restored = forged.clone();
+        restored.handle = live.handle.clone();
+        restored.snapshot = live.snapshot.clone();
+        restored.pinned.semantic = live.pinned.semantic.clone();
+        assert_eq!(
+            restored, live,
+            "the forgery changed something besides the two tampers"
+        );
+
+        let before = (task_state(&fixture), security_state(&fixture));
+        let result = run(&mut fixture, attack, REVISER, "req_stale");
+        reached_the_handler(&fixture, "task.resume");
+        assert_eq!(result.status, ResultStatus::Error);
+        assert_eq!(error_code(&result), Some(ErrorCode::StaleSnapshot));
+        assert_eq!(
+            (task_state(&fixture), security_state(&fixture)),
+            before,
+            "a refused resume moved task, intent, evidence or audit state"
+        );
+        assert_eq!(
+            status(&fixture, &fixture.tasks.live_task),
+            TaskStatus::Suspended
+        );
+    }
+
+    #[test]
+    fn each_tamper_is_refused_on_its_own_and_the_untampered_continuation_resumes() {
+        // The anti-vacuity half. If the untampered continuation were refused too, the typed
+        // refusal above could come from something other than what the payload asked for.
+        let attack = case("stale-snapshot-substitution/isolation-escape");
+        for (stale_snapshot, foreign_epoch, expected) in [
+            (true, false, Some(ErrorCode::StaleSnapshot)),
+            (false, true, Some(ErrorCode::ContinuationEpochMismatch)),
+            (true, true, Some(ErrorCode::StaleSnapshot)),
+            (false, false, None),
+        ] {
+            let mut fixture = fixture();
+            let variant = forged_continuation(
+                fixture.server.daemon(),
+                attack.payload,
+                &fixture.tasks,
+                stale_snapshot,
+                foreign_epoch,
+            );
+            fixture
+                .server
+                .daemon_mut()
+                .state_mut()
+                .tasks_mut()
+                .park(variant);
+            let before = task_state(&fixture);
+            let result = run(&mut fixture, attack, REVISER, "req_variant");
+            reached_the_handler(&fixture, "task.resume");
+            assert_eq!(
+                error_code(&result),
+                expected,
+                "snapshot substituted: {stale_snapshot}, epoch replaced: {foreign_epoch}"
+            );
+            if expected.is_some() {
+                assert_eq!(task_state(&fixture), before);
+            } else {
+                assert_ne!(result.status, ResultStatus::Error);
+                assert_ne!(
+                    task_state(&fixture),
+                    before,
+                    "an admitted resume of the untampered continuation moved nothing, so an \
+                     unchanged state after a refusal would prove nothing"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_hard_kill_case_does_not_revive_a_cancelled_task() {
+        let attack = case("isolation/hard-kill");
+        assert_eq!(attack.operation, "task.resume");
+        assert_eq!(attack.surface, ArtifactClass::Continuation);
+        assert_eq!(carriage(attack), Carriage::StoredContinuation);
+        let mut fixture = fixture();
+        assert_eq!(
+            status(&fixture, &fixture.tasks.killed_task),
+            TaskStatus::Cancelled
+        );
+
+        let before = (task_state(&fixture), security_state(&fixture));
+        let result = run(&mut fixture, attack, REVISER, "req_hard_kill");
+        reached_the_handler(&fixture, "task.resume");
+        // The inert answer RFC 0026 gives a terminal task: the terminal status, and nothing
+        // re-run, re-budgeted, or re-published.
+        assert_eq!(result.status, ResultStatus::Ok, "{:?}", result.error);
+        assert_eq!(
+            result.task.value(),
+            Some(&fixture.tasks.killed_task),
+            "the answer is about the cancelled task"
+        );
+        assert_eq!(
+            status(&fixture, &fixture.tasks.killed_task),
+            TaskStatus::Cancelled,
+            "the cancel did not survive a resume"
+        );
+        assert_eq!(
+            (task_state(&fixture), security_state(&fixture)),
+            before,
+            "resuming a cancelled task's continuation moved state"
+        );
+
+        // Control: the same principal resuming the *live* continuation does move the task.
+        // Without this, "unchanged" above could mean only that resume never does anything.
+        let benign_before = task_state(&fixture);
+        let benign = run_benign(&mut fixture, attack);
+        reached_the_handler(&fixture, "task.resume");
+        assert_ne!(benign.status, ResultStatus::Error, "{:?}", benign.error);
+        assert_ne!(task_state(&fixture), benign_before);
+    }
+
+    fn run_benign(
+        fixture: &mut Fixture,
+        attack: &Case,
+    ) -> continuumd::protocol::envelope::ResultEnvelope {
+        let frame = super::frame(attack, BENIGN, REVISER, "req_benign_resume", fixture);
+        super::answer(fixture, &frame)
+    }
+
+    #[test]
+    fn every_stored_evidence_case_hands_its_payload_to_the_trusted_checking_base() {
+        let stored: Vec<&Case> = CASES
+            .iter()
+            .filter(|case| carriage(case) == Carriage::StoredEvidence)
+            .collect();
+        assert_eq!(stored.len(), 5);
+        let mut fixture = fixture();
+        // The handle this runner used to fall back to names no node, so every case that fell
+        // back to it asked about nothing.
+        assert!(
+            fixture
+                .server
+                .daemon()
+                .state()
+                .evidence(&fixture.evidence)
+                .is_none()
+        );
+        for (index, case) in stored.into_iter().enumerate() {
+            assert_eq!(case.operation, "evidence.verify");
+            assert_eq!(case.outcome, ProhibitedOutcome::EvidenceStatusAlteration);
+            let before = security_state(&fixture);
+            // `cap_agent` is the corpus's default runner, and `evidence.verify` is a read, so
+            // it is admitted and the handler reads the stored node.
+            let result = run(
+                &mut fixture,
+                case,
+                AGENT,
+                &super::request_id("stored_evidence", index),
+            );
+            reached_the_handler(&fixture, "evidence.verify");
+            // Not `CapabilityDenied`: the node is held, its content re-derives, and the bytes
+            // went to `continuum-certificate`, which owns no family they claim. A typed
+            // refusal with nothing decoded, never a verdict.
+            assert_eq!(
+                error_code(&result),
+                Some(ErrorCode::EpochUnsupported),
+                "{}",
+                case.id
+            );
+            assert_eq!(security_state(&fixture), before, "{}", case.id);
+            let node = fixture
+                .server
+                .daemon()
+                .state()
+                .evidence(&super::stored_evidence_handle(
+                    fixture.server.daemon(),
+                    case.payload.as_bytes(),
+                ))
+                .expect("the stored node is held")
+                .clone();
+            assert_eq!(node.status(), ClaimStatus::BOTTOM, "{}", case.id);
+        }
+    }
+
+    /// A real `CONTCERT`: Die Hard explored, closed, and emitted as wire bytes.
+    fn certificate_bytes() -> Vec<u8> {
+        use continuum_engine_reference::bfs::{self, Bounds};
+        use continuum_engine_reference::certificate::{self, ClaimEnvelope, ClosedSet, PRODUCER};
+        use continuum_engine_reference::diehard;
+
+        let model = diehard::model().expect("the Die Hard transcription is a valid model");
+        let exploration = bfs::explore(&model, Bounds::CERTIFIABLE).expect("Die Hard evaluates");
+        let closed = ClosedSet::of(&exploration).expect("Die Hard's exploration completes");
+        certificate::emit_finite_closure(
+            &model,
+            closed,
+            &ClaimEnvelope {
+                model_digest: "blake3:diehard-model",
+                semantic_epoch: "continuum-semantics-1",
+                property_digest: "blake3:diehard-typeok",
+                scope_digest: "blake3:diehard-scope",
+                assumptions_digest: "blake3:empty-assumptions",
+                producer: PRODUCER,
+                domain_pack_digests: &[],
+            },
+        )
+        .expect("a closed exploration of a declared model emits")
+    }
+
+    #[test]
+    fn the_stored_evidence_path_reaches_the_kernel_with_the_stored_bytes() {
+        // The positive control for the five stored-evidence cases. The same carrier — the
+        // same path, profile, node kind and producer, filed by the same function — holding a
+        // real certificate is validated by the kernel, and the same certificate with one byte
+        // appended is rejected by it. So the path hands the kernel the stored bytes
+        // themselves, and a typed refusal of a prose payload is the kernel's routing answer
+        // about that payload, not a path that never consults it.
+        let real = certificate_bytes();
+        let mut mutated = real.clone();
+        mutated.push(0x00);
+        for (bytes, expected, settled) in [
+            (real, None, ClaimStatus::Validated),
+            (
+                mutated,
+                Some(ErrorCode::CertificateRejected),
+                ClaimStatus::BOTTOM,
+            ),
+        ] {
+            let mut fixture = fixture();
+            let handle = super::store_evidence(fixture.server.daemon_mut(), &bytes);
+            let mut request = super::envelope("evidence.verify", AGENT, "req_kernel_control");
+            request.arguments = super::transport::encode_arguments(
+                &super::Arguments::EvidenceVerify(super::EvidenceVerifyRequest {
+                    evidence: handle.clone(),
+                    expected_status: super::Optional::Absent,
+                }),
+            )
+            .expect("the body encodes");
+            let frame = super::codec::write_in::<super::WireJson, _>(&request)
+                .expect("the envelope encodes");
+            let result = super::answer(&mut fixture, &frame);
+            reached_the_handler(&fixture, "evidence.verify");
+            assert_eq!(error_code(&result), expected, "{:?}", result.error);
+            assert_eq!(
+                fixture
+                    .server
+                    .daemon()
+                    .state()
+                    .evidence(&handle)
+                    .expect("the control node is held")
+                    .status(),
+                settled
+            );
+        }
+    }
+
+    #[test]
+    fn the_carrier_census_is_exact() {
+        let mut census = std::collections::BTreeMap::new();
+        for case in CASES {
+            *census.entry(format!("{:?}", carriage(case))).or_insert(0) += 1;
+        }
+        assert_eq!(
+            census,
+            std::collections::BTreeMap::from([
+                ("Field".to_owned(), 27),
+                ("Handle".to_owned(), 3),
+                ("StoredContinuation".to_owned(), 2),
+                ("StoredEvidence".to_owned(), 5),
+                ("Unlanded".to_owned(), 11),
+            ])
+        );
+        let stored_continuations: Vec<&str> = CASES
+            .iter()
+            .filter(|case| carriage(case) == Carriage::StoredContinuation)
+            .map(|case| case.id)
+            .collect();
+        assert_eq!(
+            stored_continuations,
+            vec![
+                "stale-snapshot-substitution/isolation-escape",
+                "isolation/hard-kill"
+            ]
+        );
+        // And every case plants without a panic: none is left without a carrier.
+        let fixture = fixture();
+        for case in CASES {
+            let _ = plant(case, case.payload, &fixture);
+            let _ = plant(case, BENIGN, &fixture);
+        }
+    }
+
+    // --- the runner fails loudly -----------------------------------------------------------
+
+    const PROSE_ON_A_HANDLE_ONLY_OPERATION: Case = Case {
+        id: "synthetic/prose-on-task-cancel",
+        vector: Vector::RedTeam(RedTeamClass::StaleSnapshotSubstitution),
+        outcome: ProhibitedOutcome::IsolationEscape,
+        surface: ArtifactClass::Task,
+        carrier: "nothing this operation declares",
+        operation: "task.cancel",
+        payload: "cancel nothing, resume everything",
+    };
+
+    #[test]
+    #[should_panic(expected = "cannot carry this payload")]
+    fn a_case_whose_operation_cannot_carry_it_fails_the_runner() {
+        let _ = carriage(&PROSE_ON_A_HANDLE_ONLY_OPERATION);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot carry this payload")]
+    fn a_task_resume_case_with_no_stored_carrier_fails_the_runner() {
+        // A class with no stored-continuation attack defined for it.
+        let mut orphan = PROSE_ON_A_HANDLE_ONLY_OPERATION;
+        orphan.vector = Vector::RedTeam(RedTeamClass::SolverOutputBombs);
+        orphan.operation = "task.resume";
+        let _ = carriage(&orphan);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be the handle it guesses")]
+    fn a_guessed_handle_that_is_not_a_handle_fails_the_runner() {
+        let mut malformed = *case("predictable-handles/isolation-escape");
+        malformed.payload = "task handle? no, a sentence";
+        let fixture = fixture();
+        let _ = plant(&malformed, malformed.payload, &fixture);
+    }
 }

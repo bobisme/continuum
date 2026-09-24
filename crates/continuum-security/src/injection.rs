@@ -7,7 +7,15 @@
 //! prohibited outcome it is pushing toward. Nothing here dispatches anything, opens
 //! anything, or decides anything. The corpus is the *question*; the answer is
 //! `crates/continuumd/tests/g2_injection_corpus_evidence.rs`, which runs every case through
-//! the real wire boundary and holds the daemon to refusing all of them.
+//! the real wire boundary and holds the daemon to triggering no privileged operation and
+//! moving no intent or evidence status *over its own fixture*. That fixture holds no evidence
+//! node the observation lane can verify; `gate_g2_07_acceptance.rs` seeds one, and there a
+//! corpus `evidence.verify` at `authority read` moves it from the bottom of the lattice to
+//! `observed`, so the ratified gate is open on its evidence-status clause as well. It does
+//! not hold the daemon to *refusing* every
+//! case, and the daemon does not: a few cases get an inert `ok` answer (an `evidence.query`
+//! page, the terminal status of a cancelled task), which changes nothing and is still not a
+//! refusal. See below.
 //!
 //! It lives in `continuum-security` rather than beside that test because plan §20 gives
 //! this crate "capability model, sandboxing […] context privacy, audit trail", because the
@@ -58,7 +66,13 @@
 //! to be bound to a current build and dependency epoch, requires *every* case to be refused
 //! by a trusted authority check **and** recorded in the append-only audit log, and re-locks
 //! on any later success — obligations that belong to the Phase B lane that owns autonomous
-//! promotion. This crate ships the corpus at the ratified shape so that lane starts from a
+//! promotion. The gate is open on its refusal and evidence-status clauses today, not only
+//! on those: a read-level `evidence.verify` of a verifiable observation node moves its
+//! status to `observed`, some cases
+//! are answered `ok` and inert rather than refused, and eleven are refused by the codec
+//! before any authority check runs. `gate_g2_07_acceptance.rs`'s
+//! `the_clauses_of_the_ratified_promotion_gate_this_evidence_leaves_open` derives each
+//! observable clause from a run rather than stating it. This crate ships the corpus at the ratified shape so that lane starts from a
 //! seed rather than from a blank file; the Phase A exit condition it is built for is
 //! narrower and is stated in the evidence suite that consumes it:
 //!
