@@ -36,7 +36,7 @@ use continuum_value::epoch::ProtocolWindow;
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
-use continuumd::daemon::state::{IntentRecord, RegistryStatus};
+use continuumd::daemon::state::{Acceptance, IntentRecord, RegistryStatus};
 use continuumd::daemon::workspace::WorkspaceFamily;
 use continuumd::daemon::{
     Daemon, OperationOutcome, OperationRequest, errors, identity, intent, workspace,
@@ -427,6 +427,9 @@ fn components(fixture: &Fixture) -> SnapshotComponents {
     }
 }
 
+/// A local acceptance naming the fixture's own admitted actor (`human:steward`) at
+/// [`NOW`], the fixture daemon's clock reading. A local `intent.accept` refuses any other
+/// `accepted_by` or `timestamp`, signed or not (RFC 0037 correction 23 extended, bn-342ek).
 fn acceptance_bytes() -> Opaque {
     let mut fields: BTreeMap<String, Json> = BTreeMap::new();
     for (key, value) in [
@@ -434,7 +437,7 @@ fn acceptance_bytes() -> Opaque {
         ("capability", "revise-intent"),
         ("signature", "sig-die-hard-v1"),
         ("audit_record", "supplied-by-the-caller-and-overwritten"),
-        ("timestamp", "2026-08-01T00:00:00.000Z"),
+        ("timestamp", NOW),
     ] {
         fields.insert(key.to_owned(), Json::String(value.to_owned()));
     }
@@ -1616,10 +1619,31 @@ fn a_lock_successor_names_the_lock_and_never_copies_the_predecessors_acceptance(
 #[test]
 fn a_lock_with_no_clock_reading_is_refused_and_changes_nothing() {
     // The successor's acceptance records the lock's own time; a deployment with no clock
-    // cannot, so it locks nothing rather than borrow the predecessor's time.
+    // cannot, so it locks nothing rather than borrow the predecessor's time. A local
+    // `intent.accept` now needs a clock for the same reason (RFC 0037 correction 23
+    // extended, bn-342ek), so this daemon could never reach an accepted head through the
+    // wire without one; the head is seeded directly, as a daemon that had a clock when it
+    // accepted, then lost it, would hold one.
     let mut fixture = unclocked_fixture();
-    let accepted = accept_intent(&mut fixture, "req_accept", "idem-accept");
-    assert_eq!(accepted.envelope.status, ResultStatus::Ok);
+    let intent = fixture.intent.clone();
+    fixture
+        .daemon
+        .state_mut()
+        .intent_mut(&intent)
+        .expect("held")
+        .acceptance = Some(Acceptance {
+        accepted_by: "human:steward".to_owned(),
+        signature: "unsigned".to_owned(),
+        timestamp: "2026-01-01T00:00:00.000Z".to_owned(),
+        audit_record: "seeded-accepted".to_owned(),
+        chain: Vec::new(),
+    });
+    fixture
+        .daemon
+        .state_mut()
+        .intent_mut(&intent)
+        .expect("held")
+        .status = RegistryStatus::Accepted;
     let before = registry(&fixture);
     let original = fixture.intent.clone();
     let outcome = lock_fairness(&mut fixture, &original, "req_unclocked");
@@ -1629,6 +1653,18 @@ fn a_lock_with_no_clock_reading_is_refused_and_changes_nothing() {
         before,
         "no successor, and the head stays the head"
     );
+}
+
+#[test]
+fn a_local_accept_with_no_clock_reading_is_refused_and_changes_nothing() {
+    // A local acceptance records this daemon's own time, so a deployment with no clock
+    // cannot honestly write one, signed or not; it fails closed the same way a lock does
+    // (RFC 0037 correction 23 extended, bn-342ek).
+    let mut fixture = unclocked_fixture();
+    let before = registry(&fixture);
+    let outcome = accept_intent(&mut fixture, "req_accept", "idem-accept");
+    assert_eq!(code(&outcome), ErrorCode::UnsupportedSemanticFeature);
+    assert_eq!(registry(&fixture), before, "nothing was accepted");
 }
 
 #[test]

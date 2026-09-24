@@ -593,7 +593,10 @@ fn accept_as(
         envelope: keyed(envelope("intent.accept", actor, capability, request), key),
         arguments: Arguments::IntentAccept(IntentAcceptRequest {
             proposal: proposal.clone(),
-            acceptance: acceptance_bytes(),
+            // A local acceptance is honest about who called: `accepted_by` names the same
+            // `actor` the envelope does, or a daemon holding a clock refuses it before any
+            // authority channel below gets to (RFC 0037 correction 23 extended, bn-342ek).
+            acceptance: acceptance_bytes(actor),
             bundle: Optional::Absent,
         }),
     })
@@ -663,12 +666,14 @@ fn propose_as(
     })
 }
 
-/// A valid acceptance record for this registry: `capability` is fixed to `revise-intent` by
-/// the schema, and `audit_record` is overwritten by the daemon (`rule audit.correlation`).
-fn acceptance_bytes() -> Opaque {
+/// A valid acceptance record for this registry, naming `by` as `accepted_by`: `capability`
+/// is fixed to `revise-intent` by the schema, and `audit_record` is overwritten by the
+/// daemon (`rule audit.correlation`). `timestamp` is this swarm's own clock reading — a
+/// local acceptance is refused otherwise (RFC 0037 correction 23 extended, bn-342ek).
+fn acceptance_bytes(by: &str) -> Opaque {
     let mut fields: BTreeMap<String, Json> = BTreeMap::new();
     for (key, value) in [
-        ("accepted_by", "service:reviewer"),
+        ("accepted_by", by),
         ("capability", "revise-intent"),
         ("signature", "sig-die-hard-v1"),
         ("audit_record", "supplied-by-the-caller-and-overwritten"),

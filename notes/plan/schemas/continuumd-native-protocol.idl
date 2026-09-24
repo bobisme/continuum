@@ -5250,13 +5250,35 @@ rule intent.bundles {
   daemon whose held key local policy allows `intent-acceptance` signs
   the first element: the request's `accepted_by` MUST be the admitted
   actor and its `timestamp` the daemon's own time reading, else
-  `AcceptanceChainInvalid`; the request's `signature` text is replaced
-  by the element's; and a held key that is no longer active refuses
-  the acceptance (`UnsupportedSemanticFeature`) rather than record it
+  `AcceptanceChainInvalid`, and a deployment with no clock reading
+  refuses the acceptance (`UnsupportedSemanticFeature`) rather than
+  record a time it cannot honestly attribute (RFC 0037 correction 23,
+  extended to this path by bn-342ek: before it, a missing clock read
+  as a mismatch and answered `AcceptanceChainInvalid`, naming the
+  wrong reason); the request's `signature` text is replaced by the
+  element's; and a held key that is no longer active refuses the
+  acceptance (`UnsupportedSemanticFeature`) rather than record it
   unsigned. The key vouches that its daemon admitted that principal,
   holding `revise-intent`, at that time. A daemon with no such key,
-  or a connection below 3.8, records the caller's text and no chain,
-  and no other daemon's CI acceptance check honors that record.
+  or a connection below 3.8, signs nothing, but is held to the
+  identical admission: the request's `accepted_by` MUST still be the
+  admitted actor and its `timestamp` the daemon's own time reading,
+  else `AcceptanceChainInvalid`, and a deployment with no clock
+  reading refuses the acceptance (`UnsupportedSemanticFeature`)
+  rather than record a time it cannot honestly attribute — the same
+  failure `intent.lock` gives for the same reason (RFC 0037
+  correction 23, extended to this path by bn-342ek). On a match the
+  caller's text is recorded with no chain, and no other daemon's CI
+  acceptance check honors that record.
+
+  `intent.lock`'s successor is accepted the same way, with no
+  request of its own: its acceptance block names the lock — the
+  admitted actor, this daemon's own time, and the lock's own audit
+  record — never the predecessor's, and is signed as the first
+  element the identical way when a held key allows it (RFC 0037
+  correction 23). So the acceptance block a registry record carries
+  is produced by either `intent.accept` or `intent.lock`, never by
+  any other operation.
   """
 }
 

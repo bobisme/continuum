@@ -40,7 +40,7 @@ use continuum_value::epoch::ProtocolWindow;
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::intent::IntentFamily;
-use continuumd::daemon::state::{IntentRecord, RegistryStatus};
+use continuumd::daemon::state::{Acceptance, IntentRecord, RegistryStatus};
 use continuumd::daemon::task::{
     Continuation, PinnedEpochs, TaskFamily, admissible_epochs, task_handle,
 };
@@ -1883,14 +1883,23 @@ fn clockless_fixture() -> Fixture {
 
     let contract = die_hard_contract();
     let intent = intent_handle(&contract);
+    // Seeded directly, already accepted: a local `intent.accept` now needs a clock (RFC
+    // 0037 correction 23 extended, bn-342ek), so this clockless daemon could never reach
+    // this state through the wire.
     daemon.state_mut().put_intent(
         intent.clone(),
         IntentRecord {
             contract,
-            status: RegistryStatus::Proposed,
+            status: RegistryStatus::Accepted,
             supersedes: None,
             superseded_by: None,
-            acceptance: None,
+            acceptance: Some(Acceptance {
+                accepted_by: "human:steward".to_owned(),
+                signature: "unsigned".to_owned(),
+                timestamp: "2026-01-01T00:00:00.000Z".to_owned(),
+                audit_record: "seeded-accepted".to_owned(),
+                chain: Vec::new(),
+            }),
         },
     );
     let mut files = Vec::new();
@@ -1910,23 +1919,6 @@ fn clockless_fixture() -> Fixture {
         die_hard_source(),
         diehard::model().expect("the port builds"),
     );
-    let accepted = daemon.dispatch(&OperationRequest {
-        envelope: keyed(
-            envelope(
-                "intent.accept",
-                "human:steward",
-                "cap_steward",
-                "req_accept",
-            ),
-            "idem-accept",
-        ),
-        arguments: Arguments::IntentAccept(IntentAcceptRequest {
-            proposal: intent.clone(),
-            acceptance: acceptance_bytes(),
-            bundle: Optional::Absent,
-        }),
-    });
-    assert_eq!(accepted.envelope.status, ResultStatus::Ok);
     let created = daemon.dispatch(&OperationRequest {
         envelope: keyed(
             envelope(

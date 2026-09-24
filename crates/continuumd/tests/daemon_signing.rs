@@ -4574,3 +4574,67 @@ fn the_signing_wires_refusal_does_not_move_with_a_hostile_corpus_payload() {
         "three hostile payloads over three payload-bearing operations"
     );
 }
+
+/// A daemon that signs no acceptances (no key held) still writes a registry fact naming
+/// who accepted and when, so it is held to the identical admission the signed path checks
+/// above: `accepted_by` a foreign principal, or `timestamp` other than this daemon's own
+/// clock, is `AcceptanceChainInvalid` with the registry unchanged, exactly as the signed
+/// arm answers. The control — the admitted actor at this daemon's time — is accepted, and
+/// its record carries the caller's `signature` verbatim and no chain, so no peer's CI
+/// acceptance check will ever honor it (RFC 0037 correction 23 extended, bn-342ek).
+#[test]
+fn an_unsigned_local_acceptance_names_only_the_admitted_principal_at_the_daemons_time() {
+    let mut world = with_entropy(10);
+    let proposal = intent_handle(&contract(None));
+    world.daemon.state_mut().put_intent(
+        proposal.clone(),
+        IntentRecord {
+            contract: contract(None),
+            status: RegistryStatus::Proposed,
+            supersedes: None,
+            superseded_by: None,
+            acceptance: None,
+        },
+    );
+    assert!(
+        world.daemon.state().signing().held().is_none(),
+        "no key is held, so this call takes the unsigned arm"
+    );
+    let accept_as = |world: &mut World, by: &str, at: &str| {
+        world.call(
+            STEWARD,
+            Arguments::IntentAccept(IntentAcceptRequest {
+                proposal: proposal.clone(),
+                acceptance: acceptance(by, CALLER_TEXT, at),
+                bundle: Optional::Absent,
+            }),
+        )
+    };
+    for (by, at) in [
+        ("human:ceo", ACCEPTED_AT),
+        (STEWARD.0, "2020-01-01T00:00:00.000Z"),
+    ] {
+        assert_eq!(
+            accept_as(&mut world, by, at).error_code(),
+            Some(ErrorCode::AcceptanceChainInvalid),
+            "{by} at {at}"
+        );
+        assert_eq!(
+            world.daemon.state().intent(&proposal).expect("held").status,
+            RegistryStatus::Proposed,
+            "{by} at {at}: a refused acceptance leaves the registry untouched"
+        );
+    }
+    let accepted = accept_as(&mut world, STEWARD.0, ACCEPTED_AT);
+    assert_eq!(accepted.error_code(), None, "{:?}", accepted.error_code());
+    let record = world.daemon.state().intent(&proposal).expect("held");
+    assert_eq!(record.status, RegistryStatus::Accepted);
+    let acceptance = record.acceptance.as_ref().expect("recorded");
+    assert_eq!(acceptance.accepted_by, STEWARD.0);
+    assert_eq!(acceptance.timestamp, ACCEPTED_AT);
+    assert_eq!(
+        acceptance.signature, CALLER_TEXT,
+        "unsigned: there is no key to replace the caller's text"
+    );
+    assert!(acceptance.chain.is_empty());
+}

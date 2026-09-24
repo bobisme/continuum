@@ -165,7 +165,10 @@ pub struct Acceptance {
     /// `signature` — the acceptance signature: the last element of `chain` when there is
     /// one (RFC 0037 A1), otherwise the caller's text, verbatim.
     pub signature: String,
-    /// `timestamp` — the caller-supplied acceptance time. There is no clock here.
+    /// `timestamp` — the acceptance time. A bundle acceptance carries the value its chain
+    /// verifies; every local acceptance — `intent.lock`'s successor, and `intent.accept`
+    /// with no bundle, signed or not — is held to this daemon's own clock reading, or is
+    /// refused before it is written (RFC 0037 correction 23, extended by bn-342ek).
     pub timestamp: String,
     /// `audit_record` — the audit-correlation identity of the accepting call. Written by
     /// the daemon, never taken from the caller: plan §5.4 makes this the record *the

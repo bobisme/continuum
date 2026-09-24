@@ -56,7 +56,7 @@
           "type": "string"
         },
         "audit_record": {
-          "description": "Audit-log record produced by intent.accept (plan §5.4).",
+          "description": "Audit-log record of the operation that produced this acceptance block: intent.accept (plan §5.4), or intent.lock for the successor it mints (RFC 0037 correction 23).",
           "type": "string"
         },
         "capability": {

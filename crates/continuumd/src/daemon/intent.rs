@@ -77,7 +77,11 @@
 //! the admitted actor, this daemon's time, and the lock's audit record — and never copies
 //! its predecessor's (RFC 0037 correction 23, bn-1mgcv). A daemon that signs acceptances
 //! signs that statement, so a peer's CI acceptance check verifies the lock actor honestly;
-//! one that does not records no chain, and no peer honors the record.
+//! one that does not records no chain, and no peer honors the record. A local
+//! `intent.accept` is held to the same admission, signed or not: `accepted_by` must be the
+//! admitted actor and `timestamp` this daemon's own clock, or the acceptance is refused
+//! before anything is written (correction 23 extended, bn-342ek) — closing the residual
+//! correction 23 stated, that an unsigned local acceptance recorded the caller's say-so.
 //!
 //! # Bundles, and the one acceptance path that verifies a chain
 //!
@@ -98,7 +102,9 @@
 //! `verify_for_ci_acceptance` (ADR-0054), and it exports the proposal with the acceptance
 //! the request presents over the proposal's own lineage
 //! ([`SigningAuthority::check_acceptance_chain`]). An acceptance with no bundle is a local
-//! acceptance, recorded as before.
+//! acceptance: signed or not, it is held to the same admission — `accepted_by` the actor
+//! this call admitted, `timestamp` this daemon's own clock reading — before it is written
+//! (RFC 0037 correction 23 extended, bn-342ek).
 //!
 //! [`PolicyVerb::is_weaker_or_equal`]: continuum_intent::change_policy::PolicyVerb::is_weaker_or_equal
 //! [`SigningAuthority::check_acceptance_chain`]: super::signing::SigningAuthority::check_acceptance_chain
@@ -318,6 +324,50 @@ fn propose_revision(
     Err(unclassifiable())
 }
 
+/// The admission a local acceptance — one `intent.accept` writes with no bundle — must
+/// meet before it is recorded, whether this daemon signs it or not: `accepted_by` must be
+/// the actor this call admitted, and `timestamp` this daemon's own clock reading, never the
+/// caller's unverified say-so (RFC 0037 A3; correction 23 named it for a lock successor and
+/// a signed acceptance, and this extends it to an unsigned one, bn-342ek). The signed path
+/// and the unsigned path share this one check, so neither can drift from the other.
+///
+/// # Errors
+///
+/// `UnsupportedSemanticFeature` when this deployment has no clock reading: an acceptance
+/// that cannot honestly record its own time is refused, and nothing is written — the same
+/// failure `intent.lock` already gives for the same reason (RFC 0037 correction 23). Before
+/// bn-342ek the signed path answered a clockless deployment with `AcceptanceChainInvalid`
+/// (its own admission check read a missing clock as a mismatch); sharing this one check
+/// moves that case onto the fail-closed code too, which is the more honest answer: the
+/// call was refused for want of a clock, not because the caller named the wrong principal
+/// or time.
+/// `AcceptanceChainInvalid` when `accepted_by` or `timestamp` disagrees with what this
+/// daemon can attribute the acceptance to — the code the signed path already declared for
+/// this before bn-342ek, and now the code every local acceptance shares.
+fn require_admitted_locally(
+    call: &Call<'_>,
+    services: &Services,
+    acceptance: &Acceptance,
+) -> Result<(), Fault> {
+    let now = services.now().ok_or_else(|| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "this deployment has no clock reading, and a local acceptance records its own \
+             time; nothing was accepted",
+        )
+    })?;
+    let admitted =
+        acceptance.accepted_by == call.grant.actor.as_str() && acceptance.timestamp == now.as_str();
+    if admitted {
+        Ok(())
+    } else {
+        Err(Fault::new(
+            ErrorCode::AcceptanceChainInvalid,
+            "a local acceptance names the admitted principal and this daemon's time",
+        ))
+    }
+}
+
 fn accept(
     call: &Call<'_>,
     request: &IntentAcceptRequest,
@@ -417,9 +467,7 @@ fn accept(
         // A local acceptance at 3.8 is signed by this daemon's key when local policy allows
         // it to sign acceptances: the A1 statement over this record, which a peer verifies
         // when it accepts through a bundle. The caller's `signature` text is then replaced
-        // by that signature, as nothing could verify the caller's text. Without such a key,
-        // or below 3.8, the caller's text is recorded as before, and the record carries no
-        // chain, so no other daemon's CI acceptance check will honor it.
+        // by that signature, as nothing could verify the caller's text.
         //
         // What the key signs is what this daemon admitted, never the caller's say-so: the
         // principal must be the admitted actor, and the time this daemon's own reading.
@@ -427,16 +475,7 @@ fn accept(
         // `revise-intent` privilege, at that time; a peer that allows the key for
         // `intent-acceptance` trusts this daemon's admission (RFC 0037 A3).
         None if !legacy && state.signing().signs_acceptances() => {
-            let admitted = acceptance.accepted_by == call.grant.actor.as_str()
-                && services
-                    .now()
-                    .is_some_and(|now| now.as_str() == acceptance.timestamp);
-            if !admitted {
-                return Err(Fault::new(
-                    ErrorCode::AcceptanceChainInvalid,
-                    "a signed acceptance names the admitted principal and this daemon's time",
-                ));
-            }
+            require_admitted_locally(call, services, &acceptance)?;
             let statement = super::acceptance::Statement {
                 intent: &request.proposal,
                 base: supersedes.as_ref(),
@@ -454,7 +493,16 @@ fn accept(
                 acceptance.chain = vec![element];
             }
         }
-        None => {}
+        // Without such a key, or below 3.8, this daemon signs nothing — but it still writes
+        // a registry fact naming who accepted and when, and that fact is this daemon's own
+        // to misattribute or not. It is held to the identical admission the signed arm
+        // above checks (RFC 0037 correction 23 extended, bn-342ek): the record carries no
+        // chain, so no peer's CI acceptance check will ever honor it, but this daemon's own
+        // registry does, and a caller does not get to name someone else, or another time,
+        // as the one this daemon admitted.
+        None => {
+            require_admitted_locally(call, services, &acceptance)?;
+        }
     }
 
     // Accepting a revision supersedes the head it revises, on either path, so a lineage
@@ -1266,8 +1314,11 @@ fn decode_acceptance(acceptance: &Opaque, audit: &str) -> Result<Acceptance, Fau
     let accepted_by = text("accepted_by").ok_or_else(invalid)?;
     let signature = text("signature").ok_or_else(invalid)?;
     let timestamp = text("timestamp").ok_or_else(invalid)?;
-    // The timestamp is the caller's — there is no clock here — but it is still held to the
-    // one spelling the protocol fixes, so a record cannot carry a time nothing can order.
+    // This function only decodes the wire shape — there is no clock here, and no admitted
+    // actor to compare against — so `accepted_by` and `timestamp` are read as presented,
+    // held to the one spelling the protocol fixes so a record cannot carry a time nothing
+    // can order. `accept` checks both against the call's admission before anything is
+    // written (`require_admitted_locally`, RFC 0037 correction 23 extended, bn-342ek).
     Timestamp::new(&timestamp).map_err(|_| invalid())?;
     Ok(Acceptance {
         accepted_by,
