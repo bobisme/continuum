@@ -79,12 +79,15 @@
 //!    Many of these operations are content-addressed, so a genuine second execution would
 //!    have produced the same artifact anyway.
 //!    [`control_a_fresh_key_re_executes_and_the_sweep_says_where_that_is_observable`] measures
-//!    it: **12 of the 18** have a detectable second execution — 5 answer differently and 7
-//!    move the world without answering differently — and for all 12 the same-key replay
+//!    it: **13 of the 18** have a detectable second execution — 6 answer differently and 7
+//!    move the world without answering differently — and for all 13 the same-key replay
 //!    produced the recorded outcome and moved nothing, so on those the ledger demonstrably
-//!    short-circuited. For the other **6** this instrument cannot tell a ledger hit from a
-//!    convergent re-run, and three of those six are lanes this deployment answers with a
-//!    typed refusal at all. Twelve, not eighteen, is what the ledger is shown to carry.
+//!    short-circuited. For the other **5** this instrument cannot tell a ledger hit from a
+//!    convergent re-run, and three of those five are lanes this deployment answers with a
+//!    typed refusal at all. Thirteen, not eighteen, is what the ledger is shown to carry.
+//!    (`intent.lock` joined the thirteen with bn-10mth: a lock starts only from the accepted
+//!    head of a lineage, so a genuine second lock of the contract the first one superseded
+//!    is refused, where it used to re-mint the same successor and converge.)
 //! 6. **Three of the eighteen probes drive a first call that is itself a typed refusal** —
 //!    `context.compile`, `context.expand`, `intent.propose_revision`. They still exercise the
 //!    ledger, because a refusal is recorded and replayed like any other outcome, but they
@@ -1988,14 +1991,16 @@ fn same_but_for_request_id(left: &OperationOutcome, right: &OperationOutcome) ->
     *left == normalized
 }
 
-/// The five operations whose *answer* changes when the second call really executes.
+/// The six operations whose *answer* changes when the second call really executes.
 ///
 /// Each is stateful in a way the answer reports: an accepted proposal cannot be accepted
 /// again, a cancelled task cannot be cancelled again, a lineage that has advanced answers a
-/// second fork from the old head differently, and `verification.start` reports a different
-/// lane once the first campaign has left `Created`.
+/// second fork from the old head differently, a superseded contract cannot be locked again
+/// (bn-10mth: only the accepted head of a lineage is lockable), and `verification.start`
+/// reports a different lane once the first campaign has left `Created`.
 const DISTINGUISHED_BY_ANSWER: &[&str] = &[
     "intent.accept",
+    "intent.lock",
     "intent.reject",
     "task.cancel",
     "verification.start",
@@ -2053,12 +2058,12 @@ fn control_a_fresh_key_re_executes_and_the_sweep_says_where_that_is_observable()
     let distinguishable: BTreeSet<&str> = by_answer.union(&by_world).copied().collect();
     assert_eq!(
         distinguishable.len(),
-        12,
-        "twelve of the eighteen have a detectable second execution"
+        13,
+        "thirteen of the eighteen have a detectable second execution"
     );
 
-    // The claim this whole file is for: for every one of those twelve, the *same-key* replay
-    // produced the recorded outcome and moved nothing. So on twelve operations the ledger
+    // The claim this whole file is for: for every one of those thirteen, the *same-key* replay
+    // produced the recorded outcome and moved nothing. So on thirteen operations the ledger
     // demonstrably short-circuited rather than re-ran, and the equality is evidence rather
     // than a coincidence of convergence.
     for probe in probes()
@@ -2074,7 +2079,7 @@ fn control_a_fresh_key_re_executes_and_the_sweep_says_where_that_is_observable()
         );
     }
 
-    // INV-007, the other half. For the remaining six a second execution is *not* detectable
+    // INV-007, the other half. For the remaining five a second execution is *not* detectable
     // by this instrument, so their same-key equality is consistent with a ledger hit and
     // equally consistent with a convergent re-run. That is an absence in this evidence, not
     // a property of the daemon, and it is named rather than counted as a pass.
@@ -2088,12 +2093,11 @@ fn control_a_fresh_key_re_executes_and_the_sweep_says_where_that_is_observable()
         BTreeSet::from([
             "context.compile",
             "context.expand",
-            "intent.lock",
             "intent.propose_revision",
             "task.resume",
             "whiteboard.compile",
         ]),
-        "six operations converge — three of them because this deployment answers them with a \
+        "five operations converge — three of them because this deployment answers them with a \
          typed refusal at all — so the ledger's contribution is unmeasured there"
     );
 }

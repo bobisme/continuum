@@ -65,6 +65,14 @@
 //! (ID2 excludes it), which is what lets the successor be named before it is stamped with
 //! its own name.
 //!
+//! A lock is never a road to protection (RFC 0037 correction 22, bn-10mth). It starts only
+//! from the accepted head of a lineage that carries its acceptance block, and it mints only
+//! an identity the registry does not hold; anything else is `IntentMutationDenied` with
+//! nothing changed. `intent.accept` of a revision — a proposal naming a predecessor —
+//! decides it first, on either path: the predecessor is the accepted head, and no field its
+//! policy protects moves (the stand-in for RFC 0031's unshipped classifier that import also
+//! applies). Accepting a revision supersedes the head, so a lineage keeps one.
+//!
 //! # Bundles, and the one acceptance path that verifies a chain
 //!
 //! Plan §4.2.1's intent bundles arrive at protocol 3.8. `intent.export_bundle` signs the
@@ -331,10 +339,35 @@ fn accept(
         ));
     }
 
+    // A proposal that names a predecessor is a revision, and a revision reaches protection
+    // only after its change set is decided against the predecessor's policy table (RFC 0037
+    // R4, P1–P6; bn-10mth). RFC 0031's classifier has not shipped, so the decision is the
+    // same stand-in import applies (correction 19): the predecessor is this registry's
+    // accepted lineage head, no field its policy does not mark `unlocked` moves, and the
+    // policy table does not weaken. Anything else is refused before anything is signed or
+    // written. A bundle acceptance answers "not the head" with its own A2 code below; a
+    // local acceptance of an imported proposal is refused by its own arm below.
+    let supersedes = record.supersedes.clone();
+    let imported = state.signing().imported_from(&request.proposal).is_some();
+    if let Some(predecessor) = &supersedes {
+        let held = state.intent(predecessor).filter(|held| accepted_head(held));
+        match held {
+            Some(held) if !respects_predecessor(&held.contract, &record.contract) => {
+                return Err(unclassified_revision());
+            }
+            None if bundle.is_none() && !imported => {
+                return Err(Fault::new(
+                    ErrorCode::IntentMutationDenied,
+                    "a revision is accepted only over its lineage's accepted head",
+                ));
+            }
+            _ => {}
+        }
+    }
+
     // The plan §4.2.1 CI acceptance check, failing closed (`rule intent.bundles`): the held
     // bundle's signature chain, under this registry and local policy, through
     // the library's fail-closed `verify_for_ci_acceptance`. Every failure is the one code.
-    let supersedes = record.supersedes.clone();
     match bundle {
         Some(bundle) => {
             let local = record.contract.to_artifact_bytes();
@@ -364,9 +397,7 @@ fn accept(
             // so a signed acceptance is never replayed onto a lineage that exists only in
             // the bundle.
             if let Some(predecessor) = &supersedes {
-                let head = state.intent(predecessor).is_some_and(|held| {
-                    held.status == RegistryStatus::Accepted && held.superseded_by.is_none()
-                });
+                let head = state.intent(predecessor).is_some_and(accepted_head);
                 if !head {
                     return Err(chain_invalid());
                 }
@@ -374,7 +405,7 @@ fn accept(
         }
         // A proposal an import entered came from someone else's registry: it is accepted
         // only through a bundle that verifies, never by a local acceptance.
-        None if state.signing().imported_from(&request.proposal).is_some() => {
+        None if imported => {
             return Err(chain_invalid());
         }
         // A local acceptance at 3.8 is signed by this daemon's key when local policy allows
@@ -420,12 +451,12 @@ fn accept(
         None => {}
     }
 
-    if bundle.is_some() {
-        if let Some(predecessor) = &supersedes {
-            if let Some(previous) = state.intent_mut(predecessor) {
-                previous.status = RegistryStatus::Superseded;
-                previous.superseded_by = Some(request.proposal.clone());
-            }
+    // Accepting a revision supersedes the head it revises, on either path, so a lineage
+    // keeps one accepted head (A2, RFC 0037 R6).
+    if let Some(predecessor) = &supersedes {
+        if let Some(previous) = state.intent_mut(predecessor) {
+            previous.status = RegistryStatus::Superseded;
+            previous.superseded_by = Some(request.proposal.clone());
         }
     }
     let record = state
@@ -472,14 +503,19 @@ fn lock(
 ) -> Result<Effect, Fault> {
     let record = state.intent(&request.intent).ok_or_else(Fault::denied)?;
     lineage_scope(call, record)?;
-    // An imported proposal reaches protection only through `intent.accept` naming a bundle
-    // that verifies; a lock would mint an accepted successor around that check.
-    if record.status == RegistryStatus::Proposed
-        && state.signing().imported_from(&request.intent).is_some()
-    {
+    // A lock edits the policy table of a contract that is *already* protected; it is never
+    // a way to reach protection (bn-10mth). RFC 0037: "The `proposed` → protected
+    // transition is performed only by the `intent.accept` operation", and a proposal is
+    // accepted only after RFC 0031's classifier has decided its change set and A1–A4 have
+    // run. So the one contract a lock may start from is the accepted head of a lineage that
+    // carries its acceptance block: not a proposal, local or imported (correction 19), whose
+    // successor would be accepted with no acceptance at all; and not a superseded record,
+    // whose successor would fork the lineage and copy an acceptance that no longer governs.
+    if !accepted_head(record) {
         return Err(Fault::new(
             ErrorCode::IntentMutationDenied,
-            "an imported proposal is protected only by an acceptance through its bundle",
+            "only the accepted head of a lineage can be locked; a proposal is protected only \
+             through intent.accept",
         ));
     }
     let contract = record.contract.clone();
@@ -525,11 +561,27 @@ fn lock(
 
     // ID3: a governance edit moves the identity, so the response names a successor.
     let successor = respell(&contract, table);
+    // The same lineage decision every other road to an accepted successor makes. A lock
+    // moves only verbs, so this holds by construction; it is checked, not assumed.
+    if !respects_predecessor(&contract, &successor) {
+        return Err(unclassified_revision());
+    }
     let handle = mint(&successor, services)?;
     // The successor's identity is a function of the edited contract, so it may be one this
     // daemon already holds, and `put_intent` below writes it. It is decided by the grant's
     // `intents` list first, held or not (X2; cr-3hcpn4).
     call.derived(Derived::Intent(&handle))?;
+    // The successor must be new. A held record under that identity is either the
+    // predecessor itself (an edit that changes nothing) or another record — a proposal
+    // among them — which the write below would overwrite as `accepted` with the
+    // predecessor's acceptance, around `intent.accept` (bn-10mth). Decided after the grant
+    // check above, so a refusal here says nothing about a handle outside the grant.
+    if state.intent(&handle).is_some() {
+        return Err(Fault::new(
+            ErrorCode::IntentMutationDenied,
+            "the lock's successor is already held; a lock mints a new contract or nothing",
+        ));
+    }
     let successor = respell_id(&successor, &handle)?;
     let policy = wire_policy(successor.policy());
     let predecessor = request.intent.clone();
@@ -556,6 +608,16 @@ fn lock(
         }),
         structural(StructuralOutcome::Locked),
     ))
+}
+
+/// Whether `record` is the accepted head of its lineage, holding the acceptance block that
+/// `intent.accept` recorded (RFC 0037, "the `proposed` → protected transition is performed
+/// only by the `intent.accept` operation"). It is what `intent.lock` may start from and what
+/// an accepted revision may supersede; a record without its acceptance block fails closed.
+fn accepted_head(record: &IntentRecord) -> bool {
+    record.status == RegistryStatus::Accepted
+        && record.superseded_by.is_none()
+        && record.acceptance.is_some()
 }
 
 fn chain_invalid() -> Fault {
@@ -1019,7 +1081,23 @@ fn import_bundle(
 /// byte-identical in the two artifacts: the directional verbs (`no-removal`,
 /// `no-decrease`, …) need the RFC 0031 classifier, which has not shipped, so a change under
 /// one is refused rather than guessed at.
+///
+/// The reviewer map must be *identical* (cr-crbbf2, RFC 0037 correction 22). It names who
+/// may discharge a `review` verb, so changing it is a governance edit, not a field edit:
+/// a revision that only swapped a principal would otherwise become the accepted head, and
+/// the next reviewer-gated revision would be approved by the principal it injected. No
+/// reviewed meta-governance amendment rule exists yet, so every difference is refused —
+/// a dormant entry for a field whose verb is not `review`, a swap, an addition, a removal,
+/// and a change that rides along with a policy tightening. An absent map and an empty one
+/// decode to the same value and the same identity (ID2), so they are not a difference.
+///
+/// The other keys of the ID2 preimage are covered too: the fifteen protected groups above,
+/// `policy` by the lattice order, and `schema_id`/`schema_epoch`, which decoding pins to
+/// constants. `intent_id` and `name` are outside the preimage and govern nothing.
 fn respects_predecessor(predecessor: &IntentContract, successor: &IntentContract) -> bool {
+    if predecessor.policy_reviewers() != successor.policy_reviewers() {
+        return false;
+    }
     let before = predecessor.artifact_json();
     let after = successor.artifact_json();
     PolicyField::ALL.into_iter().all(|field| {
@@ -1037,6 +1115,16 @@ fn json_at<'a>(document: &'a Json, path: &str) -> Option<&'a Json> {
         Json::Object(fields) => fields.get(key),
         _ => None,
     })
+}
+
+/// The refusal for a revision that moves a field its predecessor's policy protects,
+/// changes the reviewer map, or weakens the policy table: the one decision RFC 0031's unshipped classifier would have to
+/// make, refused rather than guessed (the same refusal import gives, correction 19).
+fn unclassified_revision() -> Fault {
+    Fault::new(
+        ErrorCode::IntentMutationDenied,
+        "a revision changes a field its predecessor's policy protects, or its reviewers",
+    )
 }
 
 /// The typed refusal both diff-shaped operations return.

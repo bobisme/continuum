@@ -345,6 +345,27 @@ impl World {
         handle
     }
 
+    /// Enter `contract` as a proposal revising `predecessor` and try the real local
+    /// `intent.accept`, leaving the proposal held whatever the answer.
+    fn accept_revision(
+        &mut self,
+        contract: &IntentContract,
+        predecessor: &IntentHandle,
+    ) -> Option<ErrorCode> {
+        let handle = intent_handle(contract);
+        self.daemon.state_mut().put_intent(
+            handle.clone(),
+            IntentRecord {
+                contract: contract.clone(),
+                status: RegistryStatus::Proposed,
+                supersedes: Some(predecessor.clone()),
+                superseded_by: None,
+                acceptance: None,
+            },
+        );
+        self.accept(&handle, None, CALLER_TEXT).error_code()
+    }
+
     fn export(&mut self, intents: Vec<IntentHandle>) -> (IntentBundleHandle, Vec<u8>) {
         let outcome = self.call(
             STEWARD,
@@ -1527,10 +1548,37 @@ fn an_imported_revision_may_not_move_a_field_its_predecessor_protects() {
     // Q is accepted; P supersedes it and changes `bounds`, whose verb is `no-decrease`. The
     // classifier that would decide the direction has not shipped, so the import refuses P
     // and enters nothing — not even Q.
+    //
+    // This daemon's own `intent.accept` refuses such a revision too (bn-10mth), so the
+    // exporter is a peer that skipped the decision: P is written `accepted` out of band,
+    // carrying Q's acceptance block, and the bundle still verifies.
     let mut exporter = with_entropy(10);
     let (_, identity) = exporter.mint(&[SignedArtifactKind::IntentBundle]);
     let q = exporter.put_accepted(&contract(None), None);
-    let p = exporter.put_accepted(&contract(Some(1)), Some(q.clone()));
+    let revised = contract(Some(1));
+    assert_eq!(
+        exporter.accept_revision(&revised, &q),
+        Some(ErrorCode::IntentMutationDenied),
+        "a revision moving a protected field is not accepted locally"
+    );
+    let p = intent_handle(&revised);
+    let acceptance = exporter
+        .daemon
+        .state()
+        .intent(&q)
+        .expect("held")
+        .acceptance
+        .clone();
+    exporter.daemon.state_mut().put_intent(
+        p.clone(),
+        IntentRecord {
+            contract: revised,
+            status: RegistryStatus::Accepted,
+            supersedes: Some(q.clone()),
+            superseded_by: None,
+            acceptance,
+        },
+    );
     let (_, content) = exporter.export(vec![q.clone(), p.clone()]);
     let mut importer = world(Setup {
         entropy: Some(100),
@@ -1542,6 +1590,140 @@ fn an_imported_revision_may_not_move_a_field_its_predecessor_protects() {
     assert!(importer.daemon.state().intent(&q).is_none());
     assert!(importer.daemon.state().intent(&p).is_none());
     assert_eq!(importer.records(), 0, "nothing was adopted either");
+}
+
+/// The Die Hard contract with a reviewer map, stamped with its own `in_` (W9).
+fn with_reviewers(reviewers: &str) -> IntentContract {
+    let text = DIE_HARD_CONTRACT.trim_end().replacen(
+        "\"policy_reviewers\":{}",
+        &format!("\"policy_reviewers\":{reviewers}"),
+        1,
+    );
+    let unstamped = IntentContract::decode(text.as_bytes()).expect("the variant decodes");
+    let handle = intent_handle(&unstamped);
+    IntentContract::decode(
+        text.replacen(
+            "\"intent_id\":\"in_die_hard_v1\"",
+            &format!("\"intent_id\":\"{}\"", handle.as_str()),
+            1,
+        )
+        .as_bytes(),
+    )
+    .expect("stamped")
+}
+
+/// An exporter holding Q accepted and P, a reviewer-only revision of Q, written `accepted`
+/// out of band — a peer that skipped the lineage decision. This daemon's own accept
+/// refuses P (cr-crbbf2).
+fn reviewer_injecting_exporter() -> (World, SignerIdentity, IntentHandle, IntentContract) {
+    let mut exporter = with_entropy(10);
+    let (_, identity) = exporter.mint(&[SignedArtifactKind::IntentBundle]);
+    let q = exporter.put_accepted(&contract(None), None);
+    let injected = with_reviewers("{\"scope\":[\"human:mallory\"]}");
+    assert_eq!(
+        exporter.accept_revision(&injected, &q),
+        Some(ErrorCode::IntentMutationDenied),
+        "a reviewer-only revision is not accepted locally"
+    );
+    let acceptance = exporter
+        .daemon
+        .state()
+        .intent(&q)
+        .expect("held")
+        .acceptance
+        .clone();
+    exporter.daemon.state_mut().put_intent(
+        intent_handle(&injected),
+        IntentRecord {
+            contract: injected.clone(),
+            status: RegistryStatus::Accepted,
+            supersedes: Some(q.clone()),
+            superseded_by: None,
+            acceptance,
+        },
+    );
+    (exporter, identity, q, injected)
+}
+
+#[test]
+fn an_imported_reviewer_only_revision_is_refused_and_enters_nothing() {
+    let (mut exporter, identity, q, injected) = reviewer_injecting_exporter();
+    let p = intent_handle(&injected);
+    let (_, content) = exporter.export(vec![q.clone(), p.clone()]);
+    let mut importer = world(Setup {
+        entropy: Some(100),
+        allowed: Some(AllowedSigners::new().allow(identity, BUNDLE_KINDS)),
+        ..Setup::default()
+    });
+    let refused = importer.import(content);
+    assert_eq!(refused.error_code(), Some(ErrorCode::IntentMutationDenied));
+    assert!(importer.daemon.state().intent(&q).is_none());
+    assert!(importer.daemon.state().intent(&p).is_none());
+    assert_eq!(importer.records(), 0, "nothing was adopted either");
+}
+
+#[test]
+fn a_verified_bundle_acceptance_of_a_reviewer_only_revision_is_refused() {
+    // The importer holds Q as its accepted head and P as a local proposal revising it, so
+    // import skips P (held, same bytes) and holds the verified bundle. The bundle accept
+    // then reaches the lineage decision, which refuses before the chain is even read: a
+    // chain failure would be `AcceptanceChainInvalid`.
+    let (mut exporter, identity, q, injected) = reviewer_injecting_exporter();
+    let p = intent_handle(&injected);
+    let (q_bundle, q_content) = {
+        // Q travels alone, exported before P exists in any bundle.
+        exporter.export(vec![q.clone()])
+    };
+    let (bundle, content) = exporter.export(vec![p.clone()]);
+    let mut importer = world(Setup {
+        entropy: Some(100),
+        allowed: Some(AllowedSigners::new().allow(identity, BUNDLE_KINDS)),
+        ..Setup::default()
+    });
+    let (outcome, _, _) = import_outcome(&importer.import(q_content));
+    assert_eq!(outcome, SignatureOutcome::Verified);
+    assert_eq!(
+        importer
+            .accept(&q, Some(&q_bundle), FROM_BUNDLE)
+            .error_code(),
+        None
+    );
+    importer.daemon.state_mut().put_intent(
+        p.clone(),
+        IntentRecord {
+            contract: injected,
+            status: RegistryStatus::Proposed,
+            supersedes: Some(q.clone()),
+            superseded_by: None,
+            acceptance: None,
+        },
+    );
+    let (outcome, _, entered) = import_outcome(&importer.import(content));
+    assert_eq!(outcome, SignatureOutcome::Verified);
+    assert_eq!(entered, 0, "P is already held");
+    let before: Vec<_> = importer
+        .daemon
+        .state()
+        .intents()
+        .map(|(handle, record)| (handle.clone(), record.clone()))
+        .collect();
+    let records = importer.records();
+    assert_eq!(
+        importer.accept(&p, Some(&bundle), FROM_BUNDLE).error_code(),
+        Some(ErrorCode::IntentMutationDenied)
+    );
+    let after: Vec<_> = importer
+        .daemon
+        .state()
+        .intents()
+        .map(|(handle, record)| (handle.clone(), record.clone()))
+        .collect();
+    assert_eq!(after, before, "the registry is unchanged");
+    assert_eq!(
+        importer.records(),
+        records,
+        "the signing registry is unchanged"
+    );
 }
 
 #[test]
@@ -1571,24 +1753,37 @@ fn an_acceptance_needs_its_predecessor_accepted_here() {
         )
         .expect("stamped")
     };
+    // Q is exported while it is the exporter's accepted head. Accepting P locally then
+    // supersedes Q there (bn-10mth: a lineage keeps one accepted head), so P travels in a
+    // second bundle; a bundle record that says `superseded` is not an acceptance.
+    let (q_bundle, q_content) = exporter.export(vec![q.clone()]);
     let p = exporter.put_accepted(&scoped, Some(q.clone()));
     assert_ne!(p, q);
-    let (bundle, content) = exporter.export(vec![q.clone(), p.clone()]);
+    assert_eq!(
+        exporter.daemon.state().intent(&q).expect("held").status,
+        RegistryStatus::Superseded
+    );
+    let (bundle, content) = exporter.export(vec![p.clone()]);
     let mut importer = world(Setup {
         entropy: Some(100),
         allowed: Some(AllowedSigners::new().allow(identity, BUNDLE_KINDS)),
         ..Setup::default()
     });
+    let (outcome, _, entered) = import_outcome(&importer.import(q_content));
+    assert_eq!(outcome, SignatureOutcome::Verified);
+    assert_eq!(entered, 1);
     let (outcome, _, entered) = import_outcome(&importer.import(content));
     assert_eq!(outcome, SignatureOutcome::Verified);
-    assert_eq!(entered, 2);
+    assert_eq!(entered, 1);
     // P first: its predecessor is only proposed here.
     assert_eq!(
         importer.accept(&p, Some(&bundle), FROM_BUNDLE).error_code(),
         Some(ErrorCode::AcceptanceChainInvalid)
     );
     assert_eq!(
-        importer.accept(&q, Some(&bundle), FROM_BUNDLE).error_code(),
+        importer
+            .accept(&q, Some(&q_bundle), FROM_BUNDLE)
+            .error_code(),
         None
     );
     assert_eq!(

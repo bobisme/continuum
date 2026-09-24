@@ -1135,6 +1135,418 @@ fn an_intent_lock_that_weakens_a_field_is_denied() {
     );
 }
 
+// --- bn-10mth: a lock never reaches protection --------------------------------------------
+//
+// RFC 0037: "The `proposed` → protected transition is performed only by the
+// `intent.accept` operation", after RFC 0031's classifier has decided the change set and
+// A1–A4 have run. `intent.lock` mints an *accepted* successor (ID3), so a lock that started
+// from anything but the accepted head of a lineage, or that wrote over a record it did not
+// mint, would be a second road to protection. Each test below reaches one such start and
+// asserts the typed refusal and an unchanged registry.
+
+/// Lock `intent` so that `fairness` is `locked`, under one request id and key.
+fn lock_fairness(fixture: &mut Fixture, intent: &IntentHandle, key: &str) -> OperationOutcome {
+    lock_with(fixture, intent, fairness_locked(), key)
+}
+
+fn fairness_locked() -> BTreeMap<String, String> {
+    BTreeMap::from([(
+        PolicyField::Fairness.wire().to_owned(),
+        PolicyVerb::Locked.wire().to_owned(),
+    )])
+}
+
+fn lock_with(
+    fixture: &mut Fixture,
+    intent: &IntentHandle,
+    policy: BTreeMap<String, String>,
+    key: &str,
+) -> OperationOutcome {
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: keyed(
+            envelope("intent.lock", "human:steward", "cap_steward", key),
+            key,
+        ),
+        arguments: Arguments::IntentLock(IntentLockRequest {
+            intent: intent.clone(),
+            policy,
+        }),
+    })
+}
+
+/// The whole registry, for "nothing moved" assertions.
+fn registry(fixture: &Fixture) -> Vec<(IntentHandle, IntentRecord)> {
+    fixture
+        .daemon
+        .state()
+        .intents()
+        .map(|(handle, record)| (handle.clone(), record.clone()))
+        .collect()
+}
+
+#[test]
+fn an_intent_lock_on_a_local_proposal_is_refused_and_mints_nothing() {
+    // The fixture holds the Die Hard contract as a *local* proposal: nothing imported it, no
+    // classifier decided it, and `intent.accept` has not run.
+    let mut fixture = fixture();
+    let proposal = fixture.intent.clone();
+    let before = registry(&fixture);
+
+    let outcome = lock_fairness(&mut fixture, &proposal, "req_lock_proposal");
+    assert_eq!(code(&outcome), ErrorCode::IntentMutationDenied);
+    assert_eq!(
+        registry(&fixture),
+        before,
+        "no successor is minted and the proposal stays proposed"
+    );
+    assert!(
+        fixture
+            .daemon
+            .state()
+            .intents()
+            .all(|(_, record)| record.status != RegistryStatus::Accepted),
+        "nothing in the registry is accepted without intent.accept"
+    );
+
+    // The same lock succeeds once `intent.accept` has run: the guard is about the start,
+    // not about the edit.
+    accept_intent(&mut fixture, "req_accept", "idem-accept");
+    let outcome = lock_fairness(&mut fixture, &proposal, "req_lock_accepted");
+    assert_eq!(outcome.envelope.status, ResultStatus::Ok);
+}
+
+#[test]
+fn an_intent_lock_on_a_superseded_contract_is_refused_and_does_not_fork_the_lineage() {
+    let mut fixture = fixture();
+    accept_intent(&mut fixture, "req_accept", "idem-accept");
+    let original = fixture.intent.clone();
+    let head = match &lock_fairness(&mut fixture, &original, "req_first").payload {
+        Payload::IntentLock(response) => response.intent.clone(),
+        other => panic!("unexpected payload {other:?}"),
+    };
+    let before = registry(&fixture);
+
+    // A tighter edit of the superseded predecessor would mint a second accepted head that
+    // copies an acceptance which no longer governs.
+    let mut policy = fairness_locked();
+    policy.insert(
+        PolicyField::Scope.wire().to_owned(),
+        PolicyVerb::Locked.wire().to_owned(),
+    );
+    let outcome = lock_with(&mut fixture, &original, policy, "req_fork");
+    assert_eq!(code(&outcome), ErrorCode::IntentMutationDenied);
+    assert_eq!(registry(&fixture), before, "the lineage is unchanged");
+    let heads: Vec<_> = fixture
+        .daemon
+        .state()
+        .intents()
+        .filter(|(_, record)| {
+            record.status == RegistryStatus::Accepted && record.superseded_by.is_none()
+        })
+        .map(|(handle, _)| handle.clone())
+        .collect();
+    assert_eq!(heads, vec![head], "one accepted head");
+}
+
+#[test]
+fn an_intent_lock_whose_successor_is_a_held_proposal_is_refused() {
+    // Learn the successor a fairness lock mints, and its contract bytes, on a scratch
+    // daemon.
+    let mut scratch = fixture();
+    accept_intent(&mut scratch, "req_accept", "idem-accept");
+    let original = scratch.intent.clone();
+    let successor = match &lock_fairness(&mut scratch, &original, "req_learn").payload {
+        Payload::IntentLock(response) => response.intent.clone(),
+        other => panic!("unexpected payload {other:?}"),
+    };
+    let contract = scratch
+        .daemon
+        .state()
+        .intent(&successor)
+        .expect("minted")
+        .contract
+        .clone();
+
+    // The real daemon holds that exact contract as a proposal nobody accepted. The lock's
+    // write would overwrite it as `accepted`, with the predecessor's acceptance.
+    let mut fixture = fixture();
+    accept_intent(&mut fixture, "req_accept", "idem-accept");
+    fixture.daemon.state_mut().put_intent(
+        successor.clone(),
+        IntentRecord {
+            contract,
+            status: RegistryStatus::Proposed,
+            supersedes: None,
+            superseded_by: None,
+            acceptance: None,
+        },
+    );
+    let before = registry(&fixture);
+
+    let outcome = lock_fairness(&mut fixture, &original, "req_collide");
+    assert_eq!(code(&outcome), ErrorCode::IntentMutationDenied);
+    assert_eq!(registry(&fixture), before, "the proposal stays proposed");
+}
+
+#[test]
+fn an_intent_lock_that_changes_nothing_is_refused_rather_than_superseding_itself() {
+    let mut fixture = fixture();
+    accept_intent(&mut fixture, "req_accept", "idem-accept");
+    let before = registry(&fixture);
+
+    // An empty edit names the predecessor's own identity (ID2): writing it would make the
+    // record supersede itself.
+    let original = fixture.intent.clone();
+    let outcome = lock_with(&mut fixture, &original, BTreeMap::new(), "req_noop");
+    assert_eq!(code(&outcome), ErrorCode::IntentMutationDenied);
+    assert_eq!(registry(&fixture), before);
+}
+
+/// Seed `contract` as a local proposal that names `predecessor`, out of band: no wire
+/// operation creates a local revision today (`intent.propose_revision` always refuses).
+fn seed_revision(
+    fixture: &mut Fixture,
+    contract: IntentContract,
+    predecessor: &IntentHandle,
+) -> IntentHandle {
+    let handle = intent_handle(&contract);
+    fixture.daemon.state_mut().put_intent(
+        handle.clone(),
+        IntentRecord {
+            contract,
+            status: RegistryStatus::Proposed,
+            supersedes: Some(predecessor.clone()),
+            superseded_by: None,
+            acceptance: None,
+        },
+    );
+    handle
+}
+
+fn accept_proposal(fixture: &mut Fixture, proposal: &IntentHandle, key: &str) -> OperationOutcome {
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: keyed(
+            envelope("intent.accept", "human:steward", "cap_steward", key),
+            key,
+        ),
+        arguments: Arguments::IntentAccept(IntentAcceptRequest {
+            proposal: proposal.clone(),
+            acceptance: acceptance_bytes(),
+            bundle: Optional::Absent,
+        }),
+    })
+}
+
+#[test]
+fn a_local_acceptance_of_a_revision_that_moves_a_protected_field_is_refused() {
+    // The revision changes `bounds`, whose verb in the Die Hard contract is not `unlocked`.
+    // No classifier has decided that change, so it may not reach protection.
+    let mut fixture = fixture();
+    accept_intent(&mut fixture, "req_accept", "idem-accept");
+    let text = DIE_HARD_CONTRACT
+        .trim_end()
+        .replacen("\"faults\":0", "\"faults\":1", 1);
+    assert_ne!(
+        text,
+        DIE_HARD_CONTRACT.trim_end(),
+        "the variant moves a bound"
+    );
+    let variant = IntentContract::decode(text.as_bytes()).expect("the variant decodes");
+    let predecessor = fixture.intent.clone();
+    let revision = seed_revision(&mut fixture, variant, &predecessor);
+    let before = registry(&fixture);
+
+    let outcome = accept_proposal(&mut fixture, &revision, "req_rev");
+    assert_eq!(code(&outcome), ErrorCode::IntentMutationDenied);
+    assert_eq!(registry(&fixture), before, "the revision stays proposed");
+}
+
+#[test]
+fn a_local_acceptance_of_a_revision_needs_the_accepted_head_and_supersedes_it() {
+    // A policy-only revision (ID3) moves no field, so the stand-in decision admits it; but
+    // only over the lineage's accepted head, and accepting it supersedes that head.
+    let mut scratch = fixture();
+    accept_intent(&mut scratch, "req_accept", "idem-accept");
+    let original = scratch.intent.clone();
+    let successor = match &lock_fairness(&mut scratch, &original, "req_learn").payload {
+        Payload::IntentLock(response) => response.intent.clone(),
+        other => panic!("unexpected payload {other:?}"),
+    };
+    let contract = scratch
+        .daemon
+        .state()
+        .intent(&successor)
+        .expect("minted")
+        .contract
+        .clone();
+
+    // Over a predecessor that is only proposed: refused, nothing moves.
+    let mut fixture = fixture();
+    let predecessor = fixture.intent.clone();
+    let revision = seed_revision(&mut fixture, contract, &predecessor);
+    let before = registry(&fixture);
+    let outcome = accept_proposal(&mut fixture, &revision, "req_early");
+    assert_eq!(code(&outcome), ErrorCode::IntentMutationDenied);
+    assert_eq!(registry(&fixture), before);
+
+    // Over the accepted head: accepted, and the head is superseded — one head remains.
+    accept_intent(&mut fixture, "req_accept", "idem-accept");
+    let outcome = accept_proposal(&mut fixture, &revision, "req_late");
+    assert_eq!(outcome.envelope.status, ResultStatus::Ok);
+    let state = fixture.daemon.state();
+    let head = state.intent(&predecessor).expect("held");
+    assert_eq!(head.status, RegistryStatus::Superseded);
+    assert_eq!(head.superseded_by.as_ref(), Some(&revision));
+    let heads = state
+        .intents()
+        .filter(|(_, record)| {
+            record.status == RegistryStatus::Accepted && record.superseded_by.is_none()
+        })
+        .count();
+    assert_eq!(heads, 1);
+}
+
+// --- cr-crbbf2: the reviewer map is governance, and a revision may not move it ------------
+
+/// The Die Hard contract with `scope`'s verb and the reviewer map respelled.
+fn reviewed_variant(scope_verb: &str, reviewers: &str) -> IntentContract {
+    let text = DIE_HARD_CONTRACT
+        .trim_end()
+        .replacen(
+            "\"scope\":\"unlocked\"",
+            &format!("\"scope\":\"{scope_verb}\""),
+            1,
+        )
+        .replacen(
+            "\"policy_reviewers\":{}",
+            &format!("\"policy_reviewers\":{reviewers}"),
+            1,
+        );
+    IntentContract::decode(text.as_bytes()).expect("the variant decodes")
+}
+
+/// Hold `predecessor` as the accepted head, then try a local acceptance of `successor` as
+/// its revision. Returns the refusal, with the registry before and after.
+fn accept_revision_over(
+    predecessor: IntentContract,
+    successor: IntentContract,
+) -> (Option<ErrorCode>, bool) {
+    let mut fixture = fixture();
+    let head = intent_handle(&predecessor);
+    fixture.daemon.state_mut().put_intent(
+        head.clone(),
+        IntentRecord {
+            contract: predecessor,
+            status: RegistryStatus::Proposed,
+            supersedes: None,
+            superseded_by: None,
+            acceptance: None,
+        },
+    );
+    let accepted = accept_proposal(&mut fixture, &head, "req_head");
+    assert_eq!(
+        accepted.envelope.status,
+        ResultStatus::Ok,
+        "the head is accepted"
+    );
+    let revision = seed_revision(&mut fixture, successor, &head);
+    let before = registry(&fixture);
+    let outcome = accept_proposal(&mut fixture, &revision, "req_revision");
+    (outcome.error_code(), registry(&fixture) == before)
+}
+
+#[test]
+fn a_revision_that_changes_only_the_reviewer_map_is_refused_in_every_shape() {
+    let base = || reviewed_variant("unlocked", "{}");
+    let reviewed = |who: &str| reviewed_variant("review", &format!("{{\"scope\":[\"{who}\"]}}"));
+    let cases: [(&str, IntentContract, IntentContract); 5] = [
+        // A dormant entry: `scope` is `unlocked`, so no verb reads the list today, but a
+        // later tightening to `review` would.
+        (
+            "dormant entry added",
+            base(),
+            reviewed_variant("unlocked", "{\"scope\":[\"human:mallory\"]}"),
+        ),
+        (
+            "principal swapped",
+            reviewed("human:alice"),
+            reviewed("human:mallory"),
+        ),
+        (
+            "principal added",
+            reviewed("human:alice"),
+            reviewed_variant("review", "{\"scope\":[\"human:alice\",\"human:mallory\"]}"),
+        ),
+        (
+            "dormant entry removed",
+            reviewed_variant("unlocked", "{\"scope\":[\"human:alice\"]}"),
+            base(),
+        ),
+        // A tightening alone is admissible; carrying a reviewer change with it is not.
+        (
+            "tightening with reviewers",
+            base(),
+            reviewed("human:mallory"),
+        ),
+    ];
+    // Every case is decided, then all are asserted, so a guard that caught only some of
+    // them names the ones it missed.
+    let mut admitted = Vec::new();
+    for (name, predecessor, successor) in cases {
+        assert_ne!(
+            intent_handle(&predecessor),
+            intent_handle(&successor),
+            "{name}: the reviewer map is in the preimage"
+        );
+        let (refused, unchanged) = accept_revision_over(predecessor, successor);
+        if refused != Some(ErrorCode::IntentMutationDenied) || !unchanged {
+            admitted.push(name);
+        }
+    }
+    assert!(admitted.is_empty(), "admitted: {admitted:?}");
+}
+
+#[test]
+fn an_absent_reviewer_map_and_an_empty_one_are_one_contract() {
+    // Not a revision at all: ID2 puts the map in the preimage "even when the document
+    // omits it", so there is no successor to refuse.
+    let text = DIE_HARD_CONTRACT
+        .trim_end()
+        .replacen(",\"policy_reviewers\":{}", "", 1);
+    assert_ne!(text, DIE_HARD_CONTRACT.trim_end());
+    let absent = IntentContract::decode(text.as_bytes()).expect("the map is optional");
+    assert_eq!(intent_handle(&absent), intent_handle(&die_hard_contract()));
+}
+
+#[test]
+fn the_control_a_tightening_with_the_same_reviewers_is_accepted() {
+    // The guard is about the reviewer map, not about tightening: the same edit with the
+    // map untouched still reaches protection.
+    let predecessor = reviewed_variant("unlocked", "{\"scope\":[\"human:alice\"]}");
+    let successor = reviewed_variant("review", "{\"scope\":[\"human:alice\"]}");
+    let (refused, unchanged) = accept_revision_over(predecessor, successor);
+    assert_eq!(refused, None);
+    assert!(!unchanged);
+}
+
+#[test]
+fn an_intent_lock_on_an_accepted_record_without_its_acceptance_is_refused() {
+    // Partial state, fail closed: `accepted` without the block `intent.accept` writes is not
+    // protection a lock can build on.
+    let mut fixture = fixture();
+    fixture
+        .daemon
+        .state_mut()
+        .intent_mut(&fixture.intent.clone())
+        .expect("held")
+        .status = RegistryStatus::Accepted;
+    let before = registry(&fixture);
+    let original = fixture.intent.clone();
+    let outcome = lock_fairness(&mut fixture, &original, "req_bare");
+    assert_eq!(code(&outcome), ErrorCode::IntentMutationDenied);
+    assert_eq!(registry(&fixture), before);
+}
+
 #[test]
 fn an_intent_lock_naming_a_verb_outside_the_closed_set_is_malformed() {
     let mut fixture = fixture();
