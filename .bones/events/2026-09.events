@@ -730,3 +730,8 @@
 1790226175213672	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy0xU		item.assign	bn-28oa	{"action":"assign","agent":"continuum-dev"}	blake3:O3sslW5KvoqgCj-klxBJ992cZOFiiDv9SrLxP8QUKU0
 1790226561037495	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1BU		item.move	bn-1mgcv	{"state":"done"}	blake3:wcwDiJ3WZbqLBNFR_X3yYv22NIPwPKacCsaPRP_HSq8
 1790226576949532	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1RU		item.move	bn-3ohe	{"state":"done"}	blake3:himzDkg0V7fU1NbLpTT-IpkxAdSbf1g1iTaDOXl2xjk
+1790226785275830	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1hU		item.move	bn-3mmf	{"state":"doing"}	blake3:ai0pox4knpjrTLSKjHMjIcduPHqkienuWii64SRBQnY
+1790226785289590	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy1xU		item.assign	bn-3mmf	{"action":"assign","agent":"continuum-dev"}	blake3:Aq_xdWtZt1hQk5TfLUBknaV50PYVvBS0Foc0HnZfSrY
+1790226785726013	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy2BU		item.move	bn-342ek	{"state":"doing"}	blake3:HArhgRdrJCck4g-oJJDZM8__0vB5BKG_h3OYLyQ3ULA
+1790226785738891	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy2RU		item.assign	bn-342ek	{"action":"assign","agent":"continuum-dev"}	blake3:egyDZjgIlkP4IlDFEPZ6_FGL1PaZy1La3JyjiOqfQrs
+1790227340611149	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy2hU		item.move	bn-1uspo	{"state":"done"}	blake3:rEHVnJAQmeD7RkQkrKVaWDWZ9lfOpwih8RhU5ZpFJrA
