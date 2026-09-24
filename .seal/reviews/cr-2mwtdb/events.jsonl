@@ -5,3 +5,4 @@
 {"ts":"2026-09-24T04:53:49.403333445Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-2mwtdb","vote":"lgtm","reason":"Full persisted range reviewed. No security blocker found. The risk:critical human gate remains separate.","target_commit":"3f65b2bbb0450b06c516b3d94a801a34eef367ba"}}
 {"ts":"2026-09-24T04:53:49.438501718Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-2mwtdb","target_commit":"3f65b2bbb0450b06c516b3d94a801a34eef367ba"}}
 {"ts":"2026-09-24T04:54:05.724656041Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-zhiip5","reason":"Risk review completed with no finding."}}
+{"ts":"2026-09-24T05:09:21.013932417Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-2mwtdb","final_commit":"8b6137a5"}}
