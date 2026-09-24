@@ -51,8 +51,9 @@
 //!
 //! A trace is accepted when every step is enabled in turn and the end state meets the
 //! end conditions ([`Model::finish`]). The verdict is typed ([`Verdict`]): accepted,
-//! rejected at a position for a named [`Fault`], malformed bytes, or a family the model
-//! does not cover (INV-008: never a bare boolean).
+//! rejected at a position for a named [`Fault`], unsupported at a crash the model gives
+//! no fail-stop semantics (judgement ends there: RFC 0026 correction 61), or malformed
+//! bytes (INV-008: never a bare boolean).
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -955,7 +956,9 @@ pub enum Fault {
     /// A crash stopped a set of tasks other than its subtree's live ones (bn-20d8u).
     CrashSet { region: u32, model: Vec<u32> },
     /// A crash of a task with no fail-stop semantics here: in a cancellation, under a
-    /// budget deadline, or holding a channel (bn-20d8u).
+    /// budget deadline, or holding a channel (bn-20d8u). The step is not enabled, but the
+    /// trace is not at fault: [`judge_steps`] types it as [`Verdict::Unsupported`], and
+    /// judges nothing after it (RFC 0026 correction 61, bn-1id0n).
     CrashUnsupported(u32),
     /// A step other than an owed fence while a crash still owes one: what a crashed
     /// task held is fenced right after its crash (bn-20d8u).
@@ -1048,6 +1051,15 @@ pub enum Verdict {
     Accepted { steps: usize },
     /// The step at `at` is not enabled (or, with `at == len`, the end conditions fail).
     Rejected { at: usize, fault: Fault },
+    /// The step at `at` is a crash of `task`, which has no fail-stop semantics here: in a
+    /// cancellation, under a budget deadline, or holding a channel
+    /// ([`Fault::CrashUnsupported`]). INV-008 unsupported semantics: neither an
+    /// acceptance nor a rejection. Judgement ends at it, and no later step and no end
+    /// condition is judged, because each is judged against a state the crash's
+    /// unmodelled effect decides (RFC 0026 correction 61, bn-1id0n). A crash step that
+    /// is not enabled for a reason of its own (its region's phase, a due timer, its
+    /// stopped set) is a [`Self::Rejected`]: those guards come first.
+    Unsupported { at: usize, task: u32 },
     /// The bytes are not a canonical journal.
     Malformed(WireFault),
 }
@@ -3176,8 +3188,12 @@ impl Model {
 pub fn judge_steps(alphabet: &Alphabet, steps: &[Step]) -> Verdict {
     let mut model = Model::new(alphabet.clone());
     for (at, step) in steps.iter().enumerate() {
-        if let Err(fault) = model.step(step) {
-            return Verdict::Rejected { at, fault };
+        match model.step(step) {
+            Ok(()) => {}
+            // Not a fault of the trace: the model has no rule for what comes after, so
+            // judgement ends here (RFC 0026 correction 61).
+            Err(Fault::CrashUnsupported(task)) => return Verdict::Unsupported { at, task },
+            Err(fault) => return Verdict::Rejected { at, fault },
         }
     }
     match model.finish() {

@@ -543,6 +543,13 @@ fn crashed_reason() -> FailureReason {
 ///    acknowledged), under a budget deadline, or holding a channel's receiver or a
 ///    blocked send has no crash semantics here: [`LiftStop::Unsupported`] of the family
 ///    that shows it, never a conformance. The binding refuses those crashes too.
+///    Judgement ends at it: the lift judges no later event, because the crash's effect
+///    on that task decides what is legal later (RFC 0026 correction 61, bn-1id0n). The
+///    checks in items 1 and 2 turn on no such effect and run first, so a violation of
+///    theirs outranks the unsupported crash. The cancellation case is a guard that no
+///    journal reaches: a crash inside a task's own cancellation is refused before this
+///    lift runs, and a region's cancellation reaches its whole subtree, which item 1
+///    refuses.
 /// 4. Each stopped worker takes the calculus's crash step, `Crash` with the reason
 ///    `crashed` (RFC 0026 correction 59, bn-fxxf2), from wherever it is, parked
 ///    included: it discards what it staged, which publishes nothing, and no step the

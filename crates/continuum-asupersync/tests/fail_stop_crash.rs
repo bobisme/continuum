@@ -28,6 +28,8 @@
 //! | every prefix: one cut inside a crash (fences owed, or the crashed subtree not finalized) never conforms, and the model agrees | [`a_journal_cut_inside_a_crash_does_not_conform`] |
 //! | the scripted source's crash report journals the same stopped set as the binding | [`the_scripted_source_reports_the_same_crash`] |
 //! | a crash may not fence a timer already due, or crash a subtree under cancellation (pre-review) | [`a_crash_does_not_launder_a_late_timer_or_a_cancellation`] |
+//! | an unsupported crash ends judgement at its event (RFC 0026 correction 61, bn-1id0n): the lift's `Inconclusive(Unsupported)` and the model's `Unsupported` at the crash, whether a genuine violation, no violation, or events whose legality turns on the crash's effect follow; a violation at the crash event outranks it | [`an_unsupported_crash_ends_judgement_at_its_event`] |
+//! | every time-observing crash journal of the corpus, with a far deadline declared for a stopped task, is unsupported at the crash in the lift and the model alike; the deletions and swaps of a sample get one verdict and one unsupported position from both | [`an_unsupported_crash_in_a_real_journal_ends_judgement_in_both`] |
 //! | the calculus's own crash step (RFC 0026 correction 59, bn-fxxf2): every corpus journal, replayed on a fresh calculus through its public operations, is a legal step sequence and reaches the lift's calculus state; a calculus without the crash step refuses every journal that crashes a parked worker | [`every_lifted_crash_is_a_legal_calculus_step_sequence`] |
 //! | on the mutation corpus (the perturbations, deletions and swaps above) the lift conforms to nothing the calculus replay refuses, and the replay refuses each mutant the lift refuses as a calculus fault, at the same event and for the same fault | [`on_the_mutation_corpus_the_calculus_and_the_lift_agree_on_the_calculus_steps`] |
 
@@ -41,6 +43,9 @@ use std::collections::BTreeMap;
 use continuum_asupersync::binding::{BindingConfig, BindingRefusal, Program, SubstrateOp, run};
 use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::family::cancellation::CancellationEvent;
+use continuum_asupersync::family::channel::{
+    ChannelEvent, ChannelOrdinal, MessageOrdinal, MessageSet,
+};
 use continuum_asupersync::family::effect::{
     AbortCause, EffectEvent, ReservationLabel, ReservationOrdinal,
 };
@@ -1060,6 +1065,7 @@ fn deletions_and_swaps_of_crash_journals_get_one_verdict() {
     let (corpus, _) = corpus();
     let mut compared = 0_usize;
     let mut rejected_by_both = 0_usize;
+    let mut unsupported = 0_usize;
     let mut disagreements = Vec::new();
     for entry in corpus.iter().filter(|e| has_crash(&e.journal)).step_by(11) {
         let b = bodies(&entry.journal);
@@ -1075,9 +1081,31 @@ fn deletions_and_swaps_of_crash_journals_get_one_verdict() {
             }
         }
         for (what, variant) in variants {
-            let by_model = judge(&entry.config, &variant).is_accepted();
+            let verdict = judge(&entry.config, &variant);
+            let by_model = verdict.is_accepted();
             let by_lift = lift_accepts(&variant);
             compared += 1;
+            // An unsupported crash ends judgement in both, at the same event (RFC 0026
+            // correction 61).
+            let model_unsupported = match verdict {
+                Verdict::Unsupported { at, .. } => Some(at as u64),
+                _ => None,
+            };
+            let lift_unsupported = match lift(&variant) {
+                LiftVerdict::Inconclusive {
+                    seq,
+                    reason: InconclusiveReason::Unsupported,
+                    ..
+                } => Some(seq),
+                _ => None,
+            };
+            if model_unsupported != lift_unsupported {
+                disagreements.push(format!(
+                    "{} log {} {what}: model unsupported at {model_unsupported:?}, lift at {lift_unsupported:?}",
+                    entry.name, entry.log
+                ));
+            }
+            unsupported += usize::from(lift_unsupported.is_some());
             match (by_model, by_lift) {
                 (false, false) => rejected_by_both += 1,
                 (true, true) => {}
@@ -1091,7 +1119,9 @@ fn deletions_and_swaps_of_crash_journals_get_one_verdict() {
             }
         }
     }
-    eprintln!("compared {compared}, rejected by both {rejected_by_both}");
+    eprintln!(
+        "compared {compared}, rejected by both {rejected_by_both}, unsupported crash {unsupported}"
+    );
     assert!(
         disagreements.is_empty(),
         "{} disagreements:\n{}",
@@ -1104,6 +1134,10 @@ fn deletions_and_swaps_of_crash_journals_get_one_verdict() {
             .join("\n")
     );
     assert!(compared > 5_000, "{compared}");
+    // No deletion or swap of a binding journal makes a crash unsupported: the typed
+    // agreement above is exercised by the spliced journals of
+    // `an_unsupported_crash_in_a_real_journal_ends_judgement_in_both`.
+    assert_eq!(unsupported, 0);
     assert!(
         rejected_by_both > compared / 3,
         "{rejected_by_both} of {compared}"
@@ -1358,6 +1392,534 @@ fn a_crash_does_not_launder_a_late_timer_or_a_cancellation() {
     let journal = rebuild(control);
     assert!(lift_accepts(&journal), "{:?}", lift(&journal));
     assert!(judge(&BindingConfig::new(0), &journal).is_accepted());
+}
+
+// --- an unsupported crash ends judgement (RFC 0026 correction 61, bn-1id0n) ---------
+
+/// The lift's verdict is `Inconclusive(Unsupported)` at `seq`, of `family`.
+fn unsupported_at(verdict: &LiftVerdict, seq: u64, family: Family) -> bool {
+    matches!(
+        verdict,
+        LiftVerdict::Inconclusive {
+            seq: s,
+            family: f,
+            reason: InconclusiveReason::Unsupported,
+        } if *s == seq && *f == family
+    )
+}
+
+/// `r1` holds `t0`; `t1` in the root. With `deadline`, `t0` runs under a budget deadline,
+/// which the crash of `r1` at the returned position has no fail-stop semantics for.
+/// Then `r1` drains and finalizes, and `t1` completes.
+fn deadline_crash(deadline: bool) -> (Vec<EventBody>, usize) {
+    use continuum_asupersync::family::time::VirtualInstant;
+    let lc = |e| EventBody::Lifecycle(e);
+    let (t0, t1) = (TaskOrdinal(0), TaskOrdinal(1));
+    let (r0, r1) = (RegionOrdinal(0), RegionOrdinal(1));
+    let mut events = vec![
+        lc(LifecycleEvent::RegionOpened {
+            region: r1,
+            parent: r0,
+        }),
+        lc(LifecycleEvent::TaskSpawned {
+            task: t0,
+            region: r1,
+            resumability: Resumability::Resumable,
+        }),
+    ];
+    if deadline {
+        events.push(EventBody::Time(TimeEvent::Deadline {
+            task: t0,
+            at: VirtualInstant(10),
+        }));
+    }
+    events.extend([
+        lc(LifecycleEvent::TaskStepped {
+            task: t0,
+            step: TaskStep::Begin,
+        }),
+        lc(LifecycleEvent::TaskSpawned {
+            task: t1,
+            region: r0,
+            resumability: Resumability::Resumable,
+        }),
+        lc(LifecycleEvent::TaskStepped {
+            task: t1,
+            step: TaskStep::Begin,
+        }),
+    ]);
+    let crash = events.len();
+    events.extend([
+        lc(LifecycleEvent::RegionCrashed {
+            region: r1,
+            fenced: TaskSet::new([t0]),
+        }),
+        lc(LifecycleEvent::RegionDrained {
+            region: r1,
+            cancelled: TaskSet::default(),
+        }),
+        lc(LifecycleEvent::RegionFinalized { region: r1 }),
+        lc(LifecycleEvent::TaskStepped {
+            task: t1,
+            step: TaskStep::Complete,
+        }),
+    ]);
+    (events, crash)
+}
+
+/// RFC 0026 correction 61: a crash the lift gives no fail-stop semantics ends judgement
+/// at its own event. The lift reports `Inconclusive(Unsupported)` there, and the A7
+/// model `Unsupported` at the same position, whatever follows: (a) a genuine violation
+/// that holds under any effect of the crash, (b) no violation, or (c) events whose
+/// legality turns on the crash's effect. It is never a conformance and never a later
+/// violation. A violation at the crash event itself, or before it, outranks it, and (d)
+/// a crash of a task in a cancellation is such a violation, never unsupported.
+#[test]
+fn an_unsupported_crash_ends_judgement_at_its_event() {
+    let time = BindingConfig::new(0).observing(Family::Time);
+
+    // (b) No violation after the crash. Expected: Inconclusive(Unsupported, Time) at the
+    // crash, never Conforms. Control: without the deadline the same journal conforms,
+    // so the crash's unsupported case alone stops judgement.
+    let (clean, crash) = deadline_crash(true);
+    let journal = rebuild(clean.clone());
+    assert!(
+        unsupported_at(&lift(&journal), crash as u64, Family::Time),
+        "{:?}",
+        lift(&journal)
+    );
+    assert_eq!(
+        judge(&time, &journal),
+        Verdict::Unsupported { at: crash, task: 0 }
+    );
+    let (control, _) = deadline_crash(false);
+    let control = rebuild(control);
+    assert!(lift_accepts(&control), "{:?}", lift(&control));
+    assert!(judge(&time, &control).is_accepted());
+
+    // (a) A genuine later violation: `t1`, outside the crashed subtree, completes twice.
+    // It is a violation under any effect of the crash, and still not reported: the
+    // verdict is the crash's Inconclusive(Unsupported), never Violates and never
+    // Conforms (correction 61 item 4: ending costs precision, not soundness). Control:
+    // without the deadline the same step is the violation, at its own event.
+    let complete_t1 = EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+        task: TaskOrdinal(1),
+        step: TaskStep::Complete,
+    });
+    let mut violating = clean;
+    violating.push(complete_t1.clone());
+    let journal = rebuild(violating.clone());
+    assert!(
+        unsupported_at(&lift(&journal), crash as u64, Family::Time),
+        "{:?}",
+        lift(&journal)
+    );
+    assert_eq!(
+        judge(&time, &journal),
+        Verdict::Unsupported { at: crash, task: 0 }
+    );
+    let (mut control, _) = deadline_crash(false);
+    control.push(complete_t1);
+    let at = control.len() - 1;
+    let control = rebuild(control);
+    assert!(
+        matches!(lift(&control), LiftVerdict::Violates { seq, .. } if seq == at as u64),
+        "{:?}",
+        lift(&control)
+    );
+    assert!(
+        matches!(judge(&time, &control), Verdict::Rejected { at: a, .. } if a == at),
+        "{:?}",
+        judge(&time, &control)
+    );
+
+    // A violation at the crash event itself outranks its unsupported case: a stopped set
+    // that misses `t0` is CrashOutcome, checked before the deadline.
+    let mut misreported = violating;
+    misreported[crash] = EventBody::Lifecycle(LifecycleEvent::RegionCrashed {
+        region: RegionOrdinal(1),
+        fenced: TaskSet::default(),
+    });
+    let journal = rebuild(misreported);
+    assert!(
+        matches!(
+            lift(&journal),
+            LiftVerdict::Violates {
+                seq,
+                reason: Nonconformance::CrashOutcome { .. },
+            } if seq == crash as u64
+        ),
+        "{:?}",
+        lift(&journal)
+    );
+    assert!(
+        matches!(
+            judge(&time, &journal),
+            Verdict::Rejected { at, fault: Fault::CrashSet { .. } } if at == crash
+        ),
+        "{:?}",
+        judge(&time, &journal)
+    );
+
+    // (c) Events whose legality turns on the crash's effect. `t0` in `r1` holds channel
+    // 0's receiver, and `t1` in the root sends on it. The binding refuses this crash, so
+    // no journal spells its effect. If the receiver goes with the crash, the channel
+    // closes: `receiver-gone`, then `t1`'s `send-closed`, is the run, and a send that is
+    // queued is not. If it outlives the crash in the withdrawn future (correction 58 item
+    // 1), a queued send is the run, and a `send-closed` with no `receiver-gone` is
+    // illegal. The lift judges neither: each suffix is Inconclusive(Unsupported,
+    // Channel) at the crash, and the model's Unsupported at the same position.
+    let chan = BindingConfig::new(0).observing(Family::Channel);
+    let lc = |e| EventBody::Lifecycle(e);
+    let (t0, t1) = (TaskOrdinal(0), TaskOrdinal(1));
+    let (c0, m0) = (ChannelOrdinal(0), MessageOrdinal(0));
+    let prefix = vec![
+        lc(LifecycleEvent::RegionOpened {
+            region: RegionOrdinal(1),
+            parent: RegionOrdinal(0),
+        }),
+        lc(LifecycleEvent::TaskSpawned {
+            task: t0,
+            region: RegionOrdinal(1),
+            resumability: Resumability::Resumable,
+        }),
+        lc(LifecycleEvent::TaskStepped {
+            task: t0,
+            step: TaskStep::Begin,
+        }),
+        lc(LifecycleEvent::TaskSpawned {
+            task: t1,
+            region: RegionOrdinal(0),
+            resumability: Resumability::Resumable,
+        }),
+        lc(LifecycleEvent::TaskStepped {
+            task: t1,
+            step: TaskStep::Begin,
+        }),
+        EventBody::Channel(ChannelEvent::Opened {
+            channel: c0,
+            capacity: 1,
+            receiver: t0,
+        }),
+    ];
+    // The prefix before the crash conforms: nothing before it stops judgement.
+    let before = rebuild(prefix.clone());
+    assert!(lift_accepts(&before), "{:?}", lift(&before));
+    assert!(judge(&chan, &before).is_accepted());
+    let crash = prefix.len();
+    let teardown = [
+        lc(LifecycleEvent::RegionCrashed {
+            region: RegionOrdinal(1),
+            fenced: TaskSet::new([t0]),
+        }),
+        lc(LifecycleEvent::RegionDrained {
+            region: RegionOrdinal(1),
+            cancelled: TaskSet::default(),
+        }),
+        lc(LifecycleEvent::RegionFinalized {
+            region: RegionOrdinal(1),
+        }),
+    ];
+    let receiver_dropped = [
+        EventBody::Channel(ChannelEvent::ReceiverGone {
+            channel: c0,
+            discarded: MessageSet::new([]),
+        }),
+        EventBody::Channel(ChannelEvent::SendClosed {
+            channel: c0,
+            message: m0,
+            sender: t1,
+        }),
+    ];
+    let receiver_kept = [EventBody::Channel(ChannelEvent::Sent {
+        channel: c0,
+        message: m0,
+        sender: t1,
+    })];
+    let closed_unannounced = [EventBody::Channel(ChannelEvent::SendClosed {
+        channel: c0,
+        message: m0,
+        sender: t1,
+    })];
+    for (name, suffix) in [
+        ("receiver dropped", &receiver_dropped[..]),
+        ("receiver kept", &receiver_kept[..]),
+        ("closed, unannounced", &closed_unannounced[..]),
+        ("nothing after the teardown", &[][..]),
+    ] {
+        let journal = rebuild(
+            prefix
+                .iter()
+                .chain(&teardown)
+                .chain(suffix)
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+        assert!(
+            unsupported_at(&lift(&journal), crash as u64, Family::Channel),
+            "{name}: {:?}",
+            lift(&journal)
+        );
+        assert_eq!(
+            judge(&chan, &journal),
+            Verdict::Unsupported { at: crash, task: 0 },
+            "{name}"
+        );
+    }
+    // Control for correction 61 item 3: a receiving task that ends with its receiver
+    // still there, and no `receiver-gone`, is a violation under the lift's channel
+    // rules. A continuation from a supported crash, which ends `t0` the same way, would
+    // report it for the "receiver kept" reading, which is a run.
+    let ended = rebuild(
+        prefix
+            .iter()
+            .cloned()
+            .chain([lc(LifecycleEvent::TaskStepped {
+                task: t0,
+                step: TaskStep::Complete,
+            })])
+            .chain(receiver_kept.iter().cloned())
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        matches!(
+            lift(&ended),
+            LiftVerdict::Violates {
+                seq: 7,
+                reason: Nonconformance::Channel(
+                    continuum_asupersync::family::channel::ChannelFault::ReceiverOutlivesTask {
+                        channel: 0
+                    }
+                ),
+            }
+        ),
+        "{:?}",
+        lift(&ended)
+    );
+    assert!(
+        matches!(
+            judge(&chan, &ended),
+            Verdict::Rejected {
+                at: 6,
+                fault: Fault::ChannelOutlivesTask { task: 0 }
+            }
+        ),
+        "{:?}",
+        judge(&chan, &ended)
+    );
+
+    // (d) The cancellation case of correction 58 item 3 is not reached as unsupported.
+    // A crash inside a task's own cancellation interrupts it, and a crash of a region
+    // under cancellation finds it cancelling. Both are violations at the crash event,
+    // found by checks that run before the unsupported one (correction 61 item 1).
+    let own = vec![
+        lc(LifecycleEvent::RegionOpened {
+            region: RegionOrdinal(1),
+            parent: RegionOrdinal(0),
+        }),
+        lc(LifecycleEvent::TaskSpawned {
+            task: t0,
+            region: RegionOrdinal(1),
+            resumability: Resumability::Resumable,
+        }),
+        lc(LifecycleEvent::TaskStepped {
+            task: t0,
+            step: TaskStep::Begin,
+        }),
+        lc(LifecycleEvent::TaskStepped {
+            task: t0,
+            step: TaskStep::CancelRequested,
+        }),
+        lc(LifecycleEvent::RegionCrashed {
+            region: RegionOrdinal(1),
+            fenced: TaskSet::new([t0]),
+        }),
+    ];
+    // Lifecycle only: with time observed, a task's own request is its deadline's and
+    // needs a declared deadline first.
+    let lifecycle = BindingConfig::new(0);
+    {
+        let config = &lifecycle;
+        let journal = rebuild(own.clone());
+        assert!(
+            matches!(
+                lift(&journal),
+                LiftVerdict::Violates {
+                    seq: 4,
+                    reason: Nonconformance::Cancellation(
+                        continuum_asupersync::family::cancellation::CancellationFault::InterruptedOwnCancel { .. }
+                    ),
+                }
+            ),
+            "{:?}",
+            lift(&journal)
+        );
+        assert!(
+            matches!(
+                judge(config, &journal),
+                Verdict::Rejected {
+                    at: 4,
+                    fault: Fault::OwnCancellationInterrupted(0)
+                }
+            ),
+            "{:?}",
+            judge(config, &journal)
+        );
+    }
+    let mut region = own;
+    region[3] = lc(LifecycleEvent::RegionCancelRequested {
+        region: RegionOrdinal(1),
+    });
+    let journal = rebuild(region);
+    assert!(
+        matches!(
+            lift(&journal),
+            LiftVerdict::Violates {
+                seq: 4,
+                reason: Nonconformance::CrashedRegionState { region: 1, .. },
+            }
+        ),
+        "{:?}",
+        lift(&journal)
+    );
+    assert!(
+        matches!(
+            judge(&lifecycle, &journal),
+            Verdict::Rejected {
+                at: 4,
+                fault: Fault::RegionPhase(1)
+            }
+        ),
+        "{:?}",
+        judge(&lifecycle, &journal)
+    );
+}
+
+/// A real crash journal with a far budget deadline declared for one task the crash
+/// stops, right after that task's spawn: the same run, except that the crash has no
+/// fail-stop semantics. `None` if the crash stops no task.
+fn with_deadline_on_a_stopped_task(journal: &Journal) -> Option<(Journal, usize)> {
+    use continuum_asupersync::family::time::VirtualInstant;
+    let mut b = bodies(journal);
+    let at = crash_at(journal)?;
+    let EventBody::Lifecycle(LifecycleEvent::RegionCrashed { fenced, .. }) = &b[at] else {
+        unreachable!()
+    };
+    let task = *fenced.as_slice().last()?;
+    let spawn = b.iter().position(|e| {
+        matches!(e, EventBody::Lifecycle(LifecycleEvent::TaskSpawned { task: t, .. }) if *t == task)
+    })?;
+    b.insert(
+        spawn + 1,
+        EventBody::Time(TimeEvent::Deadline {
+            task,
+            at: VirtualInstant(1_000_000),
+        }),
+    );
+    Some((rebuild(b), at + 1))
+}
+
+/// RFC 0026 correction 61 over real journals: each crash journal of the corpus that
+/// observes time, with a far deadline declared for one stopped task, is
+/// `Inconclusive(Unsupported, Time)` at the crash in the lift and `Unsupported` at the
+/// same position in the A7 model; everything after the crash (its fences, drains,
+/// finalizes and settles, and the rest of the run) goes unjudged. Every single-event
+/// deletion and adjacent swap of a sample of them gets one verdict from both, and one
+/// typed unsupported position.
+#[test]
+fn an_unsupported_crash_in_a_real_journal_ends_judgement_in_both() {
+    let (corpus, _) = corpus();
+    let mut spliced = 0_usize;
+    let mut skipped = 0_usize;
+    let mut compared = 0_usize;
+    let mut unsupported = 0_usize;
+    let mut disagreements = Vec::new();
+    for entry in corpus
+        .iter()
+        .filter(|e| e.config.families.contains(Family::Time) && has_crash(&e.journal))
+    {
+        let Some((journal, crash)) = with_deadline_on_a_stopped_task(&entry.journal) else {
+            skipped += 1;
+            continue;
+        };
+        spliced += 1;
+        assert!(
+            unsupported_at(&lift(&journal), crash as u64, Family::Time),
+            "{} log {}: {:?}",
+            entry.name,
+            entry.log,
+            lift(&journal)
+        );
+        assert!(
+            matches!(judge(&entry.config, &journal), Verdict::Unsupported { at, .. } if at == crash),
+            "{} log {}: {:?}",
+            entry.name,
+            entry.log,
+            judge(&entry.config, &journal)
+        );
+        if spliced % 13 != 0 {
+            continue;
+        }
+        let b = bodies(&journal);
+        for i in 0..b.len() {
+            let mut variants = vec![{
+                let mut deleted = b.clone();
+                deleted.remove(i);
+                (format!("delete {i}"), deleted)
+            }];
+            if i + 1 < b.len() && b[i] != b[i + 1] {
+                let mut swapped = b.clone();
+                swapped.swap(i, i + 1);
+                variants.push((format!("swap {i}"), swapped));
+            }
+            for (what, variant) in variants {
+                let variant = rebuild(variant);
+                let by_model = judge(&entry.config, &variant);
+                let by_lift = lift(&variant);
+                let model_unsupported = match by_model {
+                    Verdict::Unsupported { at, .. } => Some(at as u64),
+                    _ => None,
+                };
+                let lift_unsupported = match by_lift {
+                    LiftVerdict::Inconclusive {
+                        seq,
+                        reason: InconclusiveReason::Unsupported,
+                        ..
+                    } => Some(seq),
+                    _ => None,
+                };
+                compared += 1;
+                unsupported += usize::from(lift_unsupported.is_some());
+                if by_model.is_accepted() != matches!(by_lift, LiftVerdict::Conforms(_))
+                    || model_unsupported != lift_unsupported
+                {
+                    disagreements.push(format!(
+                        "{} log {} {what}: model {by_model:?}, lift {by_lift:?}",
+                        entry.name, entry.log
+                    ));
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{spliced} spliced, {skipped} with no stopped task, {compared} variants compared, {unsupported} unsupported"
+    );
+    assert!(
+        disagreements.is_empty(),
+        "{} disagreements:\n{}",
+        disagreements.len(),
+        disagreements
+            .iter()
+            .take(20)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    // RFC 0026 correction 61's evidence cites these counts.
+    assert_eq!(
+        (spliced, skipped, compared, unsupported),
+        (976, 0, 5_939, 2_378)
+    );
 }
 
 // --- the calculus crash step against the lift (RFC 0026 correction 59, bn-fxxf2) ------

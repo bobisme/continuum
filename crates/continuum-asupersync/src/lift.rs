@@ -36,6 +36,19 @@
 //!
 //! [`LiftVerdict`] is conforms, violates (at a sequence number, with a typed reason), or
 //! inconclusive (an event of a family with no lift yet: unsupported semantics).
+//!
+//! # Where judgement ends
+//!
+//! Events are judged in order, each against the state the events before it left, so
+//! judgement ends at the first event that is a violation or that the lift cannot judge,
+//! for example a fail-stop crash the lift gives no semantics ([`LiftStop::Unsupported`]).
+//! A later event is not judged after an unsupported crash, because its legality turns on the
+//! crash's effect, which the lift does not model, and a check made from any one guess
+//! of that effect can report a violation the real effect does not make. At the crash
+//! event itself, each check that does not turn on that effect runs first, so a
+//! violation there outranks the unsupported crash. The whole-journal checks after the
+//! last event are different: they all read one final state, so each runs whatever an
+//! earlier one found (RFC 0026 corrections 57 and 60, bn-1id0n).
 
 use core::fmt;
 use std::collections::BTreeSet;
@@ -352,6 +365,8 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
                     reason,
                 };
             }
+            // Judgement ends here: every later event is judged against a state this
+            // event's unmodelled effect decides (RFC 0026 correction 61).
             Err(LiftStop::Unsupported(family)) => {
                 return LiftVerdict::Inconclusive {
                     seq: event.seq(),
