@@ -917,8 +917,114 @@ fn first_requested_alone(j: &Journal) -> Option<TaskOrdinal> {
     })
 }
 
+/// The first cancellation phase `requested` a region's cancellation reported, and where
+/// it sits: the task is then requested and has not acknowledged.
+fn first_region_request(j: &Journal) -> Option<(usize, TaskOrdinal)> {
+    bodies(j)
+        .into_iter()
+        .enumerate()
+        .find_map(|(at, b)| match b {
+            EventBody::Cancellation(CancellationEvent::Requested { task, cause })
+                if cause != CancelCause::Deadline =>
+            {
+                Some((at, task))
+            }
+            _ => None,
+        })
+}
+
+/// `event` inserted right after the first region-requested phase, for its task.
+fn insert_after_region_request(
+    j: &Journal,
+    event: impl Fn(&[EventBody], TaskOrdinal) -> EventBody,
+) -> Option<Journal> {
+    let (at, task) = first_region_request(j)?;
+    let mut b = bodies(j);
+    let forged = event(&b[..=at], task);
+    b.insert(at + 1, forged);
+    Some(rebuild(b))
+}
+
+#[allow(clippy::too_many_lines)]
 fn mutants() -> Vec<Mutant> {
     vec![
+        // RFC 0026 correction 55 (bn-28hup): a requested task's next step is its
+        // acknowledgement. Three of its steps, each placed between its `requested` and
+        // its `acknowledged`: its own lifecycle step, its own work in another family,
+        // and a receipt.
+        (
+            "a requested task parks before it acknowledges",
+            |j| {
+                insert_after_region_request(j, |_, task| {
+                    EventBody::Lifecycle(LifecycleEvent::TaskStepped {
+                        task,
+                        step: TaskStep::Suspend,
+                    })
+                })
+            },
+            |f| matches!(f, Fault::Unobserved(_)),
+        ),
+        (
+            "a requested task arms a timer before it acknowledges",
+            |j| {
+                insert_after_region_request(j, |prefix, task| {
+                    let timers = prefix
+                        .iter()
+                        .filter(|e| matches!(e, EventBody::Time(TimeEvent::Scheduled { .. })))
+                        .count();
+                    let now = prefix
+                        .iter()
+                        .rev()
+                        .find_map(|e| match e {
+                            EventBody::Time(TimeEvent::Advanced { to, .. }) => Some(to.0),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    EventBody::Time(TimeEvent::Scheduled {
+                        timer: continuum_asupersync::family::time::TimerOrdinal(
+                            u32::try_from(timers).unwrap(),
+                        ),
+                        task,
+                        at: VirtualInstant(now),
+                        deadline: VirtualInstant(now + 1),
+                    })
+                })
+            },
+            |f| matches!(f, Fault::Unobserved(_)),
+        ),
+        (
+            "a requested task is handed an obligation before it acknowledges",
+            |j| {
+                let (_, task) = first_region_request(j)?;
+                // An obligation held, at that point, by a task no request reached.
+                let (at, _) = first_region_request(j)?;
+                let b = bodies(j);
+                let region_of = |t: TaskOrdinal| {
+                    b.iter().find_map(|e| match e {
+                        EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
+                            task, region, ..
+                        }) if *task == t => Some(*region),
+                        _ => None,
+                    })
+                };
+                let obligation = b[..at].iter().find_map(|e| match e {
+                    EventBody::Obligation(ObligationEvent::Opened {
+                        obligation, holder, ..
+                    }) if *holder != task => Some(*obligation),
+                    _ => None,
+                })?;
+                let region = region_of(task)?;
+                insert_after_region_request(j, |_, task| {
+                    EventBody::Obligation(ObligationEvent::Transferred {
+                        obligation,
+                        holder: task,
+                        region,
+                    })
+                })
+            },
+            // The giver may be a requested task too, whose `requested` comes later.
+            |f| matches!(f, Fault::Unobserved(_) | Fault::UnreportedRequest(_)),
+        ),
         (
             "a deadline declared one event after its task's spawn",
             |j| {
@@ -986,14 +1092,16 @@ fn mutants() -> Vec<Mutant> {
                 Some(rebuild(b))
             },
             // The next step of the task's cleanup is refused: its completion, or the
-            // effect abort that precedes it. Inside a task's own (deadline)
-            // cancellation, a cleanup step before the acknowledgement is not a step of
-            // that cancellation.
+            // effect abort, aborted discharge or receiver's drop that precedes it
+            // (the last two by RFC 0026 correction 55's observation rule). Inside a
+            // task's own (deadline) cancellation, a cleanup step before the
+            // acknowledgement is not a step of that cancellation.
             |f| {
                 matches!(
                     f,
                     Fault::CancelPhase(_)
                         | Fault::TaskPhase(_)
+                        | Fault::Unobserved(_)
                         | Fault::OwnCancellationInterrupted(_)
                 )
             },
@@ -1502,7 +1610,7 @@ fn perturbed_journals_are_rejected_by_the_conformance_model() {
             "{name}: no base journal has the event it perturbs"
         );
     }
-    assert_eq!(mutants().len(), 24, "docs/18 C023 cites this count");
+    assert_eq!(mutants().len(), 27, "docs/18 C023 cites this count");
     assert!(rejected >= mutants().len());
     // Since bn-1i050 the lift rejects every mutant the model rejects.
     assert!(admitted_by_lift.is_empty(), "{admitted_by_lift:?}");
@@ -2448,10 +2556,16 @@ fn late_family_events_and_interleavings_do_not_hide_a_violation() {
             drained(1, &[]),
             finalized(1),
         ],
+        // Before RFC 0026 correction 55 the lifecycle family's `OutOfOrder`; the
+        // observation rule now refuses it first, as it does every step of a requested
+        // task that has not acknowledged.
         |n| {
             matches!(
                 n,
-                Nonconformance::Cancellation(CancellationFault::OutOfOrder { .. })
+                Nonconformance::Cancellation(CancellationFault::BeforeAcknowledgement {
+                    task: 0,
+                    event: "complete"
+                })
             )
         },
     ));
@@ -3304,8 +3418,11 @@ fn round_six_pre_review_journals_are_rejected() {
 /// region request reaches `t0` and `t1`; `t1` is fully phased and drained, `t0` has no
 /// phase and ends by `complete` or `fail`, from created or running, under its own
 /// region's request or an ancestor's. Each is `UnreportedRequest` in the lift and in
-/// the model. Controls: the same journals without the cancellation family, and `t0`
-/// ending before the request, conform in both.
+/// the model. Without the cancellation family the same journals are refused too, since
+/// RFC 0026 correction 55 (bn-28hup): `t0` ends before it observed the request, which
+/// is `BeforeAcknowledgement` in the lift and `Unobserved` in the model under every
+/// projection. Controls: `t0` ending before the request conforms in both, with the
+/// cancellation family and without it.
 #[test]
 fn a_region_request_needs_phases_for_every_task_it_reaches() {
     use continuum_asupersync::family::cancellation::CancellationFault;
@@ -3389,14 +3506,44 @@ fn a_region_request_needs_phases_for_every_task_it_reaches() {
                     );
                     let journal = rebuild(b.iter().cloned());
                     let control = rebuild(without.iter().cloned());
-                    assert!(
-                        lift_accepts(&control) && judge_carried(&without, &control).is_accepted(),
-                        "{name} without phases: {:?} / {}\n{}",
-                        lift(&control),
-                        judge_carried(&without, &control),
-                        control.render()
-                    );
-                    controls += 1;
+                    if before {
+                        assert!(
+                            lift_accepts(&control)
+                                && judge_carried(&without, &control).is_accepted(),
+                            "{name} without phases: {:?} / {}\n{}",
+                            lift(&control),
+                            judge_carried(&without, &control),
+                            control.render()
+                        );
+                        controls += 1;
+                    } else {
+                        assert!(
+                            matches!(
+                                lift(&control),
+                                LiftVerdict::Violates {
+                                    reason: Nonconformance::Cancellation(
+                                        CancellationFault::BeforeAcknowledgement { task: 0, .. }
+                                    ),
+                                    ..
+                                }
+                            ),
+                            "{name} without phases: {:?}\n{}",
+                            lift(&control),
+                            control.render()
+                        );
+                        assert!(
+                            matches!(
+                                judge_carried(&without, &control),
+                                Verdict::Rejected {
+                                    fault: Fault::Unobserved(0),
+                                    ..
+                                }
+                            ),
+                            "{name} without phases: {}",
+                            judge_carried(&without, &control)
+                        );
+                        violations += 1;
+                    }
                     if before {
                         assert!(
                             lift_accepts(&journal) && judge_carried(&b, &journal).is_accepted(),
@@ -3438,7 +3585,7 @@ fn a_region_request_needs_phases_for_every_task_it_reaches() {
             }
         }
     }
-    assert_eq!((violations, controls), (6, 18));
+    assert_eq!((violations, controls), (12, 12));
 }
 
 /// Codex cr-3pu5cu round 7 (th-18a2iz): a task's own region cancelled after the clock
@@ -3882,4 +4029,666 @@ fn the_two_encoding_versions_are_two_grammars() {
     let old = as_v1(&bytes);
     assert_eq!(Journal::decode(&old).unwrap(), journal);
     assert_eq!(model::read(&old).unwrap(), model::read(&bytes).unwrap());
+}
+
+// --- a requested task acknowledges before it does anything (bn-28hup) ---------------
+
+/// The window runs: `t0` in `r1` holds a lease `o0` and the receiver of `c0`, where one
+/// message waits; `t1` in the root holds a lease and the receiver of `c1`. Each case
+/// adds `pre` ops, then `x`, one or two ops of `t0` (or one that hands `t0`
+/// something), then cancels `r1`.
+fn window_base() -> Vec<SubstrateOp> {
+    vec![
+        open(ROOT, R[1]),
+        spawn(R[1], T[1]),
+        spawn(ROOT, T[2]),
+        begin(T[1]),
+        begin(T[2]),
+        acquire(T[1], 1, ObligationKind::Lease),
+        acquire(T[2], 3, ObligationKind::Lease),
+        SubstrateOp::OpenChannel {
+            channel: C1,
+            capacity: 2,
+            receiver: T[1],
+        },
+        SubstrateOp::OpenChannel {
+            channel: C2,
+            capacity: 2,
+            receiver: T[2],
+        },
+        send(T[2], C1),
+    ]
+}
+
+/// One window case: its name, the ops before it, and the ops whose events move.
+type WindowCase = (&'static str, Vec<SubstrateOp>, Vec<SubstrateOp>);
+
+fn window_cases() -> Vec<WindowCase> {
+    let label = ReservationLabel;
+    vec![
+        ("t0 reserves", vec![], vec![reserve(T[1], 10)]),
+        ("t0 commits", vec![reserve(T[1], 10)], vec![commit(10)]),
+        (
+            "t0 aborts on purpose",
+            vec![reserve(T[1], 10)],
+            vec![SubstrateOp::Abort {
+                reservation: label(10),
+            }],
+        ),
+        (
+            "t0 opens an obligation",
+            vec![],
+            vec![acquire(T[1], 11, ObligationKind::Lease)],
+        ),
+        ("t0 discharges its lease committed", vec![], vec![commit(1)]),
+        (
+            "t0 discharges its lease aborted",
+            vec![],
+            vec![SubstrateOp::Abort {
+                reservation: label(1),
+            }],
+        ),
+        (
+            "t0 hands its lease to t1",
+            vec![],
+            vec![SubstrateOp::Transfer {
+                reservation: label(1),
+                to: T[2],
+            }],
+        ),
+        (
+            "t1 hands its lease to t0",
+            vec![],
+            vec![SubstrateOp::Transfer {
+                reservation: label(3),
+                to: T[1],
+            }],
+        ),
+        (
+            "t0 sleeps",
+            vec![],
+            vec![SubstrateOp::Sleep {
+                task: T[1],
+                nanos: 10,
+            }],
+        ),
+        (
+            "t0's timer fires",
+            vec![SubstrateOp::Sleep {
+                task: T[1],
+                nanos: 10,
+            }],
+            vec![SubstrateOp::Advance { nanos: 10 }],
+        ),
+        ("t0 receives", vec![], vec![recv(C1)]),
+        ("t0 waits to receive", vec![recv(C1)], vec![recv(C1)]),
+        ("t0 sends", vec![], vec![send(T[1], C2)]),
+        (
+            "a channel is opened to t0",
+            vec![],
+            vec![SubstrateOp::OpenChannel {
+                channel: ChannelLabel(3),
+                capacity: 1,
+                receiver: T[1],
+            }],
+        ),
+        (
+            "t0 resumes and parks",
+            vec![],
+            vec![SubstrateOp::Continue { task: T[1] }],
+        ),
+        (
+            "t0 completes",
+            vec![commit(1)],
+            vec![SubstrateOp::Finish { task: T[1] }],
+        ),
+    ]
+}
+
+/// An event of a window case's moved block that is `t0`'s own work, or hands `t0`
+/// something: refused in `t0`'s window under every projection (RFC 0026 correction 55
+/// items 1-2). Written here from the correction and the cases, not from the lift's
+/// classification: in [`window_cases`] every reservation, every discharge and every
+/// hand-off a block carries is `t0`'s or goes to `t0`, and `c0` is `t0`'s channel.
+fn acts_or_receives(body: &EventBody) -> bool {
+    let t0 = TaskOrdinal(0);
+    match body {
+        EventBody::Lifecycle(LifecycleEvent::TaskStepped { task, step }) => {
+            *task == t0
+                && matches!(
+                    step,
+                    TaskStep::Begin
+                        | TaskStep::Resume
+                        | TaskStep::Suspend
+                        | TaskStep::Complete
+                        | TaskStep::Fail(_)
+                )
+        }
+        EventBody::Effect(EffectEvent::Reserved { task, .. }) => *task == t0,
+        EventBody::Effect(EffectEvent::Aborted { cause, .. }) => *cause == AbortCause::Explicit,
+        EventBody::Effect(EffectEvent::Committed { .. })
+        | EventBody::Time(TimeEvent::Fired { .. })
+        | EventBody::Obligation(
+            ObligationEvent::Transferred { .. }
+            | ObligationEvent::Discharged {
+                how: Discharge::Committed,
+                ..
+            },
+        ) => true,
+        EventBody::Time(TimeEvent::Scheduled { task, .. })
+        | EventBody::Obligation(ObligationEvent::Opened { holder: task, .. })
+        | EventBody::Channel(
+            ChannelEvent::Opened { receiver: task, .. }
+            | ChannelEvent::Sent { sender: task, .. }
+            | ChannelEvent::SendBlocked { sender: task, .. }
+            | ChannelEvent::SendClosed { sender: task, .. },
+        ) => *task == t0,
+        EventBody::Channel(
+            ChannelEvent::Received { channel, .. }
+            | ChannelEvent::RecvBlocked { channel }
+            | ChannelEvent::RecvClosed { channel },
+        ) => channel.0 == 0,
+        _ => false,
+    }
+}
+
+/// An event that is `t0`'s cleanup or end, which only the cancellation family can
+/// place against the acknowledgement (RFC 0026 correction 55 item 3).
+fn cleans_up_or_ends(body: &EventBody) -> bool {
+    matches!(
+        body,
+        EventBody::Obligation(
+            ObligationEvent::Discharged {
+                how: Discharge::Aborted,
+                ..
+            } | ObligationEvent::Leaked { .. }
+        ) | EventBody::Channel(ChannelEvent::ReceiverGone { .. })
+    )
+}
+
+/// RFC 0026 correction 55 (bn-28hup): between a region's cancel request reaching a task
+/// and the task's acknowledgement, the task takes no step, in every family and every
+/// projection. Sixteen real runs, each a `t0` step (or a hand-off to `t0`) just before
+/// `r1`'s cancellation, under all 32 projections: the real journal is accepted by the
+/// lift and the model (the step outside the window). The same journal with the step's
+/// events moved into `t0`'s window — right after the region's request, right after
+/// `t0`'s `requested`, and right before its `acknowledged` — is refused by both, at the
+/// same event, the lift as `BeforeAcknowledgement` (or `UnreportedRequest` before the
+/// `requested` phase) and the model as `Unobserved` (or `UnreportedRequest`). A moved
+/// block that is only another task's steps (`t1`'s poll that hands `t0` its lease,
+/// under a projection without the obligation family) is accepted by both: `t1` may act
+/// while `t0` has not acknowledged; so is a clock advance, which is not `t0`'s, before
+/// `t0`'s timer fires (the fire is refused: the `Sleep` future traces it in `t0`'s own
+/// poll). [`every_family_is_held_to_the_acknowledgement`] places single forged events of
+/// every family. Before this rule, the lift admitted a
+/// moved reserve, commit, abort, open, discharge, hand-off, send, receive, receipt and
+/// lifecycle step, and refused a moved timer only when the projection reported
+/// phases: measured once when this test was written (not re-run by it), with the lift's
+/// rule turned off, 432 of the 480 blocks placed right after the region's request
+/// lifted as `Conforms`.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_requested_task_acknowledges_before_it_does_anything() {
+    use continuum_asupersync::family::cancellation::CancellationFault;
+    let is_region_request = |b: &EventBody| {
+        matches!(
+            b,
+            EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { .. })
+        )
+    };
+    let is_requested = |b: &EventBody| {
+        matches!(
+            b,
+            EventBody::Cancellation(CancellationEvent::Requested {
+                task: TaskOrdinal(0),
+                ..
+            })
+        )
+    };
+    let is_ack = |b: &EventBody| {
+        matches!(
+            b,
+            EventBody::Cancellation(CancellationEvent::Acknowledged {
+                task: TaskOrdinal(0)
+            })
+        )
+    };
+    let mut controls = 0_usize;
+    let mut refused = 0_usize;
+    let mut admitted = 0_usize;
+    let mut refused_families = BTreeSet::new();
+    let mut cases_refused = BTreeSet::new();
+    for (name, pre, x) in window_cases() {
+        let mut before: Vec<SubstrateOp> = window_base();
+        before.extend(pre.iter().cloned());
+        let mut whole = before.clone();
+        whole.extend(x.iter().cloned());
+        whole.push(SubstrateOp::Cancel { region: R[1] });
+        for config in every_projection() {
+            let prefix = run(
+                &[before.clone()],
+                &ChoiceLog::new(vec![0; before.len()]),
+                &config,
+            )
+            .unwrap_or_else(|r| panic!("{name} {:?}: {r}", config.families));
+            let journal = run(
+                &[whole.clone()],
+                &ChoiceLog::new(vec![0; whole.len()]),
+                &config,
+            )
+            .unwrap_or_else(|r| panic!("{name} {:?}: {r}", config.families));
+            // Outside the window: the real journal.
+            assert!(
+                lift_accepts(&journal) && judge(&config, &journal).is_accepted(),
+                "{name} {:?}: {:?} / {}\n{}",
+                config.families,
+                lift(&journal),
+                judge(&config, &journal),
+                journal.render()
+            );
+            controls += 1;
+            let all = bodies(&journal);
+            let from = prefix.events().len();
+            let request = all
+                .iter()
+                .position(is_region_request)
+                .expect("r1's request");
+            assert_eq!(bodies(&prefix), all[..from], "{name}: the prefix is shared");
+            let block: Vec<EventBody> = all[from..request].to_vec();
+            if block.is_empty() {
+                continue; // this projection carries none of the step's events
+            }
+            // What the journal carries, which is what the lift reads (a run whose `t0`
+            // ended before the request carries no phase even when observed).
+            let phases = all.iter().any(|b| b.family() == Family::Cancellation);
+            let mut rest = all.clone();
+            rest.drain(from..request);
+            let request = rest.iter().position(is_region_request).unwrap();
+            let mut points = vec![request + 1];
+            if let Some(at) = rest.iter().position(is_requested) {
+                points.push(at + 1);
+            }
+            if let Some(at) = rest.iter().position(is_ack) {
+                points.push(at);
+            }
+            points.sort_unstable();
+            points.dedup();
+            let refusable = block.iter().any(acts_or_receives)
+                || (phases && block.iter().any(cleans_up_or_ends));
+            for at in points {
+                let mut b = rest.clone();
+                b.splice(at..at, block.iter().cloned());
+                let variant = rebuild(b.iter().cloned());
+                let lifted = lift(&variant);
+                let verdict = judge_carried(&b, &variant);
+                let place = format!("{name} at {at} {:?}", config.families);
+                if !refusable {
+                    assert!(
+                        matches!(lifted, LiftVerdict::Conforms(_)) && verdict.is_accepted(),
+                        "{place}: {lifted:?} / {verdict}\n{}",
+                        variant.render()
+                    );
+                    admitted += 1;
+                    continue;
+                }
+                let (seq, unreported) = match lifted {
+                    LiftVerdict::Violates {
+                        seq,
+                        reason:
+                            Nonconformance::Cancellation(CancellationFault::BeforeAcknowledgement {
+                                task: 0,
+                                ..
+                            }),
+                    } => (seq, false),
+                    LiftVerdict::Violates {
+                        seq,
+                        reason:
+                            Nonconformance::Cancellation(CancellationFault::UnreportedRequest {
+                                task: 0,
+                                ..
+                            }),
+                    } => (seq, true),
+                    other => panic!("{place}: {other:?}\n{}", variant.render()),
+                };
+                let seq = usize::try_from(seq).unwrap();
+                assert!(
+                    (at..at + block.len()).contains(&seq),
+                    "{place}: refused at {seq}\n{}",
+                    variant.render()
+                );
+                let expected = if unreported {
+                    Fault::UnreportedRequest(0)
+                } else {
+                    Fault::Unobserved(0)
+                };
+                assert_eq!(
+                    verdict,
+                    Verdict::Rejected {
+                        at: seq,
+                        fault: expected
+                    },
+                    "{place}\n{}",
+                    variant.render()
+                );
+                // `UnreportedRequest` exactly where the phases are carried and `t0`'s
+                // `requested` has not come yet.
+                assert_eq!(
+                    unreported,
+                    phases && !b[..seq].iter().any(is_requested),
+                    "{place}"
+                );
+                refused_families.insert(b[seq].family().to_string());
+                cases_refused.insert(name);
+                refused += 1;
+            }
+        }
+    }
+    eprintln!(
+        "controls {controls}, refused {refused}, admitted {admitted}, families {refused_families:?}"
+    );
+    assert_eq!(refused_families.len(), 5, "{refused_families:?}");
+    assert_eq!(
+        cases_refused.len(),
+        window_cases().len(),
+        "{cases_refused:?}"
+    );
+    assert_eq!((controls, refused, admitted), (512, 704, 24));
+}
+
+/// One forged event for [`every_family_is_held_to_the_acknowledgement`], built from the
+/// base journal: its name, whether only a journal that reports phases can refuse it
+/// (a cleanup or an end), and the event.
+type WindowAttack = (&'static str, bool, EventBody);
+
+#[allow(clippy::too_many_lines)]
+fn window_attacks(base: &[EventBody]) -> Vec<WindowAttack> {
+    let t = TaskOrdinal;
+    let o = ObligationOrdinal;
+    let c = continuum_asupersync::family::channel::ChannelOrdinal;
+    let e = continuum_asupersync::family::effect::ReservationOrdinal;
+    let lease_of = |holder: u32| {
+        base.iter().find_map(|b| match b {
+            EventBody::Obligation(ObligationEvent::Opened {
+                obligation,
+                kind: ObligationKind::Lease,
+                holder: h,
+                ..
+            }) if h.0 == holder => Some(*obligation),
+            _ => None,
+        })
+    };
+    let opened = |b: &EventBody| matches!(b, EventBody::Obligation(ObligationEvent::Opened { .. }));
+    let o_next = o(u32::try_from(base.iter().filter(|b| opened(b)).count()).unwrap());
+    let e_next = e(u32::try_from(
+        base.iter()
+            .filter(|b| matches!(b, EventBody::Effect(EffectEvent::Reserved { .. })))
+            .count(),
+    )
+    .unwrap());
+    let (o0, o1) = (lease_of(0).unwrap_or(o(0)), lease_of(1).unwrap_or(o(1)));
+    let fail = continuum_task::region::worker::FailureReason::new("boom").unwrap();
+    let lc = |step| EventBody::Lifecycle(LifecycleEvent::TaskStepped { task: t(0), step });
+    vec![
+        ("t0 begins", false, lc(TaskStep::Begin)),
+        ("t0 resumes", false, lc(TaskStep::Resume)),
+        ("t0 completes", false, lc(TaskStep::Complete)),
+        ("t0 fails", false, lc(TaskStep::Fail(fail))),
+        (
+            "t0 reserves",
+            false,
+            EventBody::Effect(EffectEvent::Reserved {
+                reservation: e_next,
+                task: t(0),
+            }),
+        ),
+        (
+            "t0 commits e0",
+            false,
+            EventBody::Effect(EffectEvent::Committed { reservation: e(0) }),
+        ),
+        (
+            "t0 aborts e0 on purpose",
+            false,
+            EventBody::Effect(EffectEvent::Aborted {
+                reservation: e(0),
+                cause: AbortCause::Explicit,
+            }),
+        ),
+        (
+            "t0 opens a lease",
+            false,
+            EventBody::Obligation(ObligationEvent::Opened {
+                obligation: o_next,
+                kind: ObligationKind::Lease,
+                holder: t(0),
+                region: RegionOrdinal(1),
+            }),
+        ),
+        (
+            "t0 discharges its lease committed",
+            false,
+            EventBody::Obligation(ObligationEvent::Discharged {
+                obligation: o0,
+                how: Discharge::Committed,
+            }),
+        ),
+        (
+            "t0 hands its lease to t1",
+            false,
+            EventBody::Obligation(ObligationEvent::Transferred {
+                obligation: o0,
+                holder: t(1),
+                region: RegionOrdinal(0),
+            }),
+        ),
+        (
+            "t1 hands its lease to t0",
+            false,
+            EventBody::Obligation(ObligationEvent::Transferred {
+                obligation: o1,
+                holder: t(0),
+                region: RegionOrdinal(1),
+            }),
+        ),
+        (
+            "t0 arms a timer",
+            false,
+            EventBody::Time(TimeEvent::Scheduled {
+                timer: continuum_asupersync::family::time::TimerOrdinal(0),
+                task: t(0),
+                at: VirtualInstant(0),
+                deadline: VirtualInstant(10),
+            }),
+        ),
+        (
+            "t0 sends on c1",
+            false,
+            EventBody::Channel(ChannelEvent::Sent {
+                channel: c(1),
+                message: MessageOrdinal(1),
+                sender: t(0),
+            }),
+        ),
+        (
+            "t0's send waits on c1",
+            false,
+            EventBody::Channel(ChannelEvent::SendBlocked {
+                channel: c(1),
+                message: MessageOrdinal(1),
+                sender: t(0),
+            }),
+        ),
+        (
+            "t0's send finds c1 closed",
+            false,
+            EventBody::Channel(ChannelEvent::SendClosed {
+                channel: c(1),
+                message: MessageOrdinal(1),
+                sender: t(0),
+            }),
+        ),
+        (
+            "t0's receive finds c0 closed",
+            false,
+            EventBody::Channel(ChannelEvent::RecvClosed { channel: c(0) }),
+        ),
+        (
+            "t0 receives m0",
+            false,
+            EventBody::Channel(ChannelEvent::Received {
+                channel: c(0),
+                message: MessageOrdinal(0),
+            }),
+        ),
+        (
+            "t0 is handed a new channel's receiver",
+            false,
+            EventBody::Channel(ChannelEvent::Opened {
+                channel: c(2),
+                capacity: 1,
+                receiver: t(0),
+            }),
+        ),
+        (
+            "t0 discharges its lease aborted",
+            true,
+            EventBody::Obligation(ObligationEvent::Discharged {
+                obligation: o0,
+                how: Discharge::Aborted,
+            }),
+        ),
+        (
+            "t0 leaks its lease",
+            true,
+            EventBody::Obligation(ObligationEvent::Leaked { obligation: o0 }),
+        ),
+        (
+            "t0's receiver goes",
+            true,
+            EventBody::Channel(ChannelEvent::ReceiverGone {
+                channel: c(0),
+                discarded: MessageSet::new([MessageOrdinal(0)]),
+            }),
+        ),
+    ]
+}
+
+/// RFC 0026 correction 55 (bn-28hup), one forged event at a time: a real run in which
+/// `t0` (in `r1`) holds a reservation `e0`, a lease and a channel's receiver with one
+/// message queued, next to `t1` in the root, and `r1` is cancelled. For each of the 32
+/// projections, each forged event of a family the projection carries is placed in
+/// `t0`'s window (right after the region's request, right after `t0`'s `requested`,
+/// right before its `acknowledged`): its own work in the five families other than the
+/// cancellation family (whose phases are the window), a receipt of an
+/// obligation or of a channel's receiver, and, where the journal reports phases, its
+/// cleanup or end. Each is refused by the lift (`BeforeAcknowledgement`, or
+/// `UnreportedRequest` before the `requested` phase) and by the model (`Unobserved` or
+/// `UnreportedRequest`), at the forged event, 576 placements. The real journal is
+/// accepted by both. Measured once for the first 17 attacks, with the lift's rule
+/// turned off: 36 of their 456 placements lifted as `Conforms` (a hand-off out of `t0`
+/// and a send by `t0`), and the rest were refused only later, by a rule that is not
+/// about the window, so the fault and its position are asserted.
+#[test]
+fn every_family_is_held_to_the_acknowledgement() {
+    use continuum_asupersync::family::cancellation::CancellationFault;
+    let mut program = window_base();
+    program.push(reserve(T[1], 10));
+    program.push(SubstrateOp::Cancel { region: R[1] });
+    let log = ChoiceLog::new(vec![0; program.len()]);
+    let mut placed = 0_usize;
+    let mut families = BTreeSet::new();
+    for config in every_projection() {
+        let journal = run(&[program.clone()], &log, &config).unwrap();
+        assert!(
+            lift_accepts(&journal) && judge(&config, &journal).is_accepted(),
+            "{:?}: {:?} / {}
+{}",
+            config.families,
+            lift(&journal),
+            judge(&config, &journal),
+            journal.render()
+        );
+        let base = bodies(&journal);
+        let phases = base.iter().any(|b| b.family() == Family::Cancellation);
+        let request = base
+            .iter()
+            .position(|b| {
+                matches!(
+                    b,
+                    EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { .. })
+                )
+            })
+            .unwrap();
+        let mut points = vec![request + 1];
+        for (i, b) in base.iter().enumerate() {
+            match b {
+                EventBody::Cancellation(CancellationEvent::Requested {
+                    task: TaskOrdinal(0),
+                    ..
+                }) => points.push(i + 1),
+                EventBody::Cancellation(CancellationEvent::Acknowledged {
+                    task: TaskOrdinal(0),
+                }) => points.push(i),
+                _ => {}
+            }
+        }
+        points.sort_unstable();
+        points.dedup();
+        for (name, needs_phases, event) in window_attacks(&base) {
+            if !config.families.contains(event.family()) || (needs_phases && !phases) {
+                continue;
+            }
+            for &at in &points {
+                let mut b = base.clone();
+                b.insert(at, event.clone());
+                let variant = rebuild(b.iter().cloned());
+                let place = format!("{name} at {at} {:?}", config.families);
+                let unreported = phases
+                    && !b[..at].iter().any(|e| {
+                        matches!(
+                            e,
+                            EventBody::Cancellation(CancellationEvent::Requested {
+                                task: TaskOrdinal(0),
+                                ..
+                            })
+                        )
+                    });
+                let seq = u64::try_from(at).unwrap();
+                match lift(&variant) {
+                    LiftVerdict::Violates {
+                        seq: s,
+                        reason:
+                            Nonconformance::Cancellation(CancellationFault::BeforeAcknowledgement {
+                                task: 0,
+                                ..
+                            }),
+                    } if s == seq && !unreported => {}
+                    LiftVerdict::Violates {
+                        seq: s,
+                        reason:
+                            Nonconformance::Cancellation(CancellationFault::UnreportedRequest {
+                                task: 0,
+                                ..
+                            }),
+                    } if s == seq && unreported => {}
+                    other => panic!("{place}: {other:?}\n{}", variant.render()),
+                }
+                let fault = if unreported {
+                    Fault::UnreportedRequest(0)
+                } else {
+                    Fault::Unobserved(0)
+                };
+                assert_eq!(
+                    judge(&config, &variant),
+                    Verdict::Rejected { at, fault },
+                    "{place}"
+                );
+                families.insert(event.family().to_string());
+                placed += 1;
+            }
+        }
+    }
+    // Every family but the cancellation family, whose phases are the window itself.
+    assert_eq!(families.len(), 5, "{families:?}");
+    assert_eq!(placed, 576);
 }

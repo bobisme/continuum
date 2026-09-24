@@ -709,6 +709,21 @@ pub(crate) fn cleanup_of(cx: &LiftContext, event: &ObligationEvent) -> Option<u3
     }
 }
 
+/// The holder of the obligation an aborted discharge or a leak names. `None` for every
+/// other event, and for an obligation the lift does not know.
+pub(crate) fn holder_of(cx: &LiftContext, body: &crate::family::EventBody) -> Option<u32> {
+    match body {
+        crate::family::EventBody::Obligation(
+            ObligationEvent::Discharged { obligation, .. } | ObligationEvent::Leaked { obligation },
+        ) => cx
+            .obligation
+            .entries
+            .get(&obligation.0)
+            .map(|entry| entry.holder),
+        _ => None,
+    }
+}
+
 /// A task that completes as cancelled holds no open obligation (docs/02 §7
 /// `obligations == ∅ → Cancelled`); one it holds is [`LedgerFault::HolderTerminal`].
 pub(crate) fn check_none_held(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {

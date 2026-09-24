@@ -236,6 +236,38 @@ impl EventBody {
         }
     }
 
+    /// The task whose own work this event is, if it is any task's: a `begin`, `resume`,
+    /// `suspend`, `complete` or `fail`; a reserve, commit or explicit abort; an
+    /// obligation open, committed discharge or hand-off (by the giving holder); a timer
+    /// scheduled or fired (the fire is traced in the sleeper's own poll); a send or a
+    /// receive. Each is part of a poll of that task, and a bound
+    /// task's poll starts with `Cx::checkpoint`. Cleanup steps, receipts, and events
+    /// that name no acting task are `None`. One classification for every rule that
+    /// turns on "the task acts" (RFC 0026 corrections 53 item 6 and 55).
+    pub(crate) fn own_work_of(&self, cx: &LiftContext) -> Option<u32> {
+        use lifecycle::{LifecycleEvent, TaskStep};
+        match self {
+            Self::Lifecycle(LifecycleEvent::TaskStepped {
+                task,
+                step:
+                    TaskStep::Begin
+                    | TaskStep::Resume
+                    | TaskStep::Suspend
+                    | TaskStep::Complete
+                    | TaskStep::Fail(_),
+            }) => Some(task.0),
+            Self::Lifecycle(_) | Self::Cancellation(_) => None,
+            Self::Effect(event) => effect::actor_of(cx, event),
+            Self::Obligation(event) => obligation::actor_of(cx, event),
+            Self::Time(time::TimeEvent::Scheduled { task, .. }) => Some(task.0),
+            // A fire is traced by the `Sleep` future inside its task's own poll, which
+            // starts with `Cx::checkpoint` (bn-28hup, pre-review pass).
+            Self::Time(time::TimeEvent::Fired { timer, .. }) => time::task_of(cx, timer.0),
+            Self::Time(_) => None,
+            Self::Channel(event) => channel::actor_of(cx, event),
+        }
+    }
+
     pub(crate) fn lift(&self, cx: &mut LiftContext) -> Result<(), LiftStop> {
         // A task's own cancellation is one run of that task's events, whatever family
         // an event belongs to (RFC 0026 correction 53 item 6; cr-3pu5cu round 6).
@@ -243,6 +275,10 @@ impl EventBody {
         // A task's own work is a poll, which meets a passed deadline first (RFC 0026
         // correction 53 item 6).
         time::check_actor_deadline(self, cx)?;
+        // A task whose cancellation was requested and not yet acknowledged takes no
+        // step: a bound task's next poll observes the request first (RFC 0026
+        // correction 55; bn-28hup).
+        cancellation::check_before_acknowledgement(self, cx)?;
         match self {
             Self::Lifecycle(event) => lifecycle::lift(event, cx),
             Self::Effect(event) => effect::lift(event, cx),

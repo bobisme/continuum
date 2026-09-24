@@ -437,10 +437,20 @@ fn oracle_schedule(scripts: &[Script], log: &ChoiceLog) -> Option<Schedule> {
 
 /// Differential: the journal path (record → encode → decode → lift) against the direct
 /// path (`Schedule::run` on a fresh `RegionTree`), at every interleaving of two programs.
+///
+/// One disagreement is named, and it goes one way only: RFC 0026 correction 55
+/// (bn-28hup). The calculus lets a worker a region's cancellation reached act until it
+/// acknowledges (correction 53 item 1); a bound task acknowledges at the checkpoint
+/// that starts its next poll, so the lift refuses the worker's step there
+/// (`BeforeAcknowledgement`). Each such run is checked: the calculus admitted every
+/// step before it, and at that step the worker's calculus phase is `requested`.
 #[test]
 fn the_lift_agrees_with_the_region_calculus_at_every_interleaving() {
+    use continuum_asupersync::family::cancellation::CancellationFault;
+    use continuum_task::region::worker::CancelPhase;
     let mut conforming = 0;
     let mut violating = 0;
+    let mut narrowed = 0;
     let mut unrecordable = 0;
     for scripts in [three_actors(0), racing_teardown()] {
         for log in ChoiceLog::enumerate(&lengths(&scripts)) {
@@ -486,6 +496,35 @@ fn the_lift_agrees_with_the_region_calculus_at_every_interleaving() {
                         run.finalizations().iter().map(|f| f.render()).collect();
                     assert_eq!(lifted, direct, "log {log}");
                 }
+                (
+                    LiftVerdict::Violates {
+                        seq,
+                        reason:
+                            Nonconformance::Cancellation(CancellationFault::BeforeAcknowledgement {
+                                task,
+                                ..
+                            }),
+                    },
+                    fault,
+                ) => {
+                    narrowed += 1;
+                    let at = usize::try_from(seq).unwrap();
+                    assert!(fault.is_none_or(|index| index >= at), "log {log}");
+                    let mut prefix = RegionTree::new();
+                    let _ = Schedule::new(schedule.steps()[..at].to_vec()).run(&mut prefix);
+                    assert_eq!(
+                        prefix.cancel_phase(WorkerId::at(task)).unwrap(),
+                        CancelPhase::Requested,
+                        "log {log}"
+                    );
+                    assert!(
+                        matches!(
+                            schedule.steps()[at],
+                            Step::Advance { worker, .. } if worker == WorkerId::at(task)
+                        ),
+                        "log {log}"
+                    );
+                }
                 (LiftVerdict::Violates { seq, reason }, Some(index)) => {
                     violating += 1;
                     assert_eq!(seq, u64::try_from(index).unwrap(), "log {log}");
@@ -499,6 +538,7 @@ fn the_lift_agrees_with_the_region_calculus_at_every_interleaving() {
     // Anti-vacuity: the space reaches all three dispositions.
     assert!(conforming > 50, "conforming runs: {conforming}");
     assert!(violating > 50, "violating runs: {violating}");
+    assert_eq!(narrowed, 532, "RFC 0026 correction 55 cites this count");
     assert!(unrecordable > 50, "unrecordable runs: {unrecordable}");
 }
 

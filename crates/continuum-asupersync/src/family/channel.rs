@@ -722,6 +722,14 @@ pub(crate) fn cleanup_of(cx: &LiftContext, event: &ChannelEvent) -> Option<u32> 
     }
 }
 
+/// The task that holds `channel`'s receiver, if the lift knows the channel.
+pub(crate) fn receiver_of(cx: &LiftContext, channel: u32) -> Option<u32> {
+    cx.channel
+        .channels
+        .get(&channel)
+        .map(|model| model.receiver)
+}
+
 /// A task that completes as cancelled holds no channel's receiver and no blocked
 /// send.
 pub(crate) fn check_none_held(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {

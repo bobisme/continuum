@@ -32,7 +32,10 @@
 //!    at the current instant;
 //! 2. a timer is scheduled once, by a running task whose cancellation has not begun and
 //!    that sleeps on no other timer, with a deadline after the instant it was
-//!    scheduled (bn-1i050);
+//!    scheduled (bn-1i050). "Not begun" is read from the calculus, not from the
+//!    reported phases, so it holds in every projection: a task a request reached and
+//!    that has not acknowledged is refused before this family's lift (RFC 0026
+//!    correction 55; asupersync 0.5.0's `Sleep` observes the request at its first poll);
 //! 3. it fires or is cancelled exactly once; it fires only at or after its deadline;
 //!    it is cancelled only while a cancellation is requested for its task (by its
 //!    region or its own deadline; bn-36wy3) and the task is live, and after the task's acknowledgement when the journal reports its
@@ -831,28 +834,10 @@ pub(crate) fn check_cancel_not_raced(cx: &LiftContext, region: u32) -> Result<()
 /// are the cancellation's own and are not checked here. A journal without this family
 /// shows no clock.
 pub(crate) fn check_actor_deadline(body: &EventBody, cx: &LiftContext) -> Result<(), LiftStop> {
-    use crate::family::lifecycle::{LifecycleEvent, TaskStep};
     if !cx.time.present || cx.time.deadlines.is_empty() {
         return Ok(());
     }
-    let actor = match body {
-        EventBody::Lifecycle(LifecycleEvent::TaskStepped {
-            task,
-            step:
-                TaskStep::Begin
-                | TaskStep::Resume
-                | TaskStep::Suspend
-                | TaskStep::Complete
-                | TaskStep::Fail(_),
-        }) => Some(task.0),
-        EventBody::Lifecycle(_) | EventBody::Cancellation(_) => None,
-        EventBody::Effect(event) => crate::family::effect::actor_of(cx, event),
-        EventBody::Obligation(event) => crate::family::obligation::actor_of(cx, event),
-        EventBody::Time(TimeEvent::Scheduled { task, .. }) => Some(task.0),
-        EventBody::Time(_) => None,
-        EventBody::Channel(event) => crate::family::channel::actor_of(cx, event),
-    };
-    match actor {
+    match body.own_work_of(cx) {
         Some(task) => check_deadline_not_due(cx, task),
         None => Ok(()),
     }
@@ -872,6 +857,11 @@ pub(crate) fn check_deadline_not_due(cx: &LiftContext, task: u32) -> Result<(), 
         }
         _ => Ok(()),
     }
+}
+
+/// The task that armed `timer`, if the lift knows the timer.
+pub(crate) fn task_of(cx: &LiftContext, timer: u32) -> Option<u32> {
+    cx.time.timers.get(&timer).map(|entry| entry.task)
 }
 
 /// The first timer `task` sleeps on (scheduled, not fired or cancelled), if any.

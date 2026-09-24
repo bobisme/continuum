@@ -120,7 +120,7 @@ states from docs/02 §7's per-task `request(cancel_reason)` and docs/02 §5's cl
 The model accepts each one, and the lift agrees. At 31650 journal
 positions, the model's generated next steps include the step the substrate took,
 and the model's guard admits each generated step. A run that leaks an obligation
-is rejected by the model at its region's close. Twenty-four curated perturbations
+is rejected by the model at its region's close. Twenty-seven curated perturbations
 of real journals are rejected by the model, each for its own fault, and by the lift.
 Over 25277 single-event deletions and adjacent swaps, the model and the lift give
 the same verdict in both directions, with no exception. Since bn-j1a50 the lift runs
@@ -129,7 +129,12 @@ bn-36wy3, 33 of those perturbations were a pinned exception: an obligation trans
 between a cancel request and the holder's acknowledgement, which the model admitted
 and the calculus refused, because the calculus decided "cancelling" per region at
 the request. RFC 0026 correction 53 gave the calculus the per-task acknowledgement,
-and the pinned count is now zero; the pin stays as the regression guard.
+and the pinned count is now zero; the pin stays as the regression guard. RFC
+0026 correction 55 (bn-28hup) gave both paths one rule for the window between a
+cancellation request and the task's acknowledgement. Before it, the lift refused a
+timer there and admitted a reserve, and the model refused both but admitted a
+commit or a hand-off. Now neither admits any step of the task there, under every
+projection.
 
 That agreement is the result of two repairs. When bn-ujpz0 landed, the lift accepted
 666 of 19345 perturbations that the model rejected, in seven classes. Examples are a

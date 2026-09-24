@@ -821,6 +821,13 @@ pub enum Fault {
     CancelRaced(u32),
     /// A budget deadline not declared right after its task's spawn.
     DeadlineNotAtSpawn(u32),
+    /// A step of a task whose cancellation was requested and not yet observed: its own
+    /// work, a receipt, or (when the alphabet observes phases) its cleanup or its end.
+    /// asupersync 0.5.0 lets a task observe a request only at `Cx::checkpoint`, which
+    /// every poll of a bound task calls first, so a requested task's next step is its
+    /// observation (docs/02 §7 `request(cancel_reason) → Cancelling`: there is no
+    /// working state between; RFC 0026 correction 55, bn-28hup).
+    Unobserved(u32),
     /// A step names an entity that does not exist.
     Unknown(&'static str, u32),
     /// Work entering a region that does not accept it.
@@ -1252,7 +1259,7 @@ impl Model {
     }
     /// The task whose own work `step` is, if it is any task's: a lifecycle step of a
     /// poll, a reserve, commit or explicit abort, an obligation open, committed discharge
-    /// or hand-off (by its holder), a timer armed, a send or a receive. Cleanup steps and
+    /// or hand-off (by its holder), a timer armed or fired, a send or a receive. Cleanup steps and
     /// steps that name no acting task are `None`.
     fn actor(&self, step: &Step) -> Option<u32> {
         match step {
@@ -1263,6 +1270,8 @@ impl Model {
             | Step::Fail { task, .. }
             | Step::Reserve { task, .. }
             | Step::Scheduled { task, .. } => Some(*task),
+            // The sleeper's own poll traces its timer's fire.
+            Step::Fired { timer, .. } => self.timers.get(*timer as usize).map(|k| k.task),
             Step::Commit { reservation }
             | Step::Abort {
                 reservation,
@@ -1286,6 +1295,62 @@ impl Model {
             }
             _ => None,
         }
+    }
+    /// docs/02 §7 `Active ─ request(cancel_reason) → Cancelling`: a request takes the
+    /// task out of `Active` at once, and the substrate lets the task observe it at its
+    /// next checkpoint, which starts its next poll. So a task whose cancellation was
+    /// requested (by its region, or by its own deadline) and not yet observed (no
+    /// acknowledgement, no cleanup step, not terminal) is waiting to observe it, and
+    /// takes no step in the meantime (RFC 0026 correction 55, bn-28hup).
+    fn unobserved(&self, t: u32) -> bool {
+        self.tasks.get(t as usize).is_some_and(|task| {
+            !task.phase.is_terminal()
+                && !self.cancelling(t)
+                && (task.region_requested
+                    || task.requested_alone
+                    || matches!(task.cancel, CancelPhase::Requested(_)))
+        })
+    }
+    /// The task that `step` hands something to: the new holder of a hand-off, or the
+    /// receiver of a new channel.
+    fn recipient(step: &Step) -> Option<u32> {
+        match step {
+            Step::Transferred { holder, .. } => Some(*holder),
+            Step::ChannelOpened { receiver, .. } => Some(*receiver),
+            _ => None,
+        }
+    }
+    /// The task whose cleanup or end `step` is, among the steps no other rule of the
+    /// model holds to the observation: an aborted discharge or a leak (its holder), a
+    /// receiver's drop (its task).
+    fn ending(&self, step: &Step) -> Option<u32> {
+        match step {
+            Step::Discharged {
+                obligation,
+                committed: false,
+            }
+            | Step::Leaked { obligation } => {
+                self.obligations.get(*obligation as usize).map(|o| o.holder)
+            }
+            Step::ReceiverGone { channel, .. } => {
+                self.channels.get(*channel as usize).map(|c| c.receiver)
+            }
+            _ => None,
+        }
+    }
+    /// Whether `step` is a step of a task that has not observed its requested
+    /// cancellation ([`Self::unobserved`]): its own work or a receipt under every
+    /// alphabet, and its cleanup or end when the alphabet observes phases.
+    fn before_observation(&self, step: &Step) -> Option<u32> {
+        let ending = if self.alphabet.has(FamilyTag::Cancellation) {
+            self.ending(step)
+        } else {
+            None
+        };
+        [self.actor(step), Self::recipient(step), ending]
+            .into_iter()
+            .flatten()
+            .find(|t| self.unobserved(*t))
     }
     /// The run observes the clock, and it has reached `t`'s budget deadline: a poll of
     /// `t` now is its deadline's cancellation, never a `begin` or `resume` (asupersync
@@ -1377,6 +1442,18 @@ impl Model {
             if self.deadline_reached(t) {
                 return Err(Fault::Deadline(t));
             }
+        }
+        // A requested task observes its cancellation before it does anything else.
+        if let Some(t) = self.before_observation(step) {
+            let task = &self.tasks[t as usize];
+            let unreported = self.alphabet.has(FamilyTag::Cancellation)
+                && task.cancel == CancelPhase::None
+                && !task.requested_alone;
+            return Err(if unreported {
+                Fault::UnreportedRequest(t)
+            } else {
+                Fault::Unobserved(t)
+            });
         }
         match step {
             // plan §4.1 / docs/02 §7: work enters only an open region.
@@ -2714,6 +2791,17 @@ impl Model {
                 _ => None,
             };
             actor.is_none_or(|t| !self.deadline_reached(t))
+        });
+        // No step of a task that has not observed its requested cancellation.
+        out.retain(|pattern| {
+            let task = match pattern {
+                Pattern::Exact(step) => return self.before_observation(step).is_none(),
+                Pattern::Fail { task } | Pattern::Scheduled { task, .. } => *task,
+                Pattern::Opened { holder, .. } => *holder,
+                Pattern::ChannelOpened { receiver, .. } => *receiver,
+                _ => return true,
+            };
+            !self.unobserved(task)
         });
         // While a task's own cancellation is open, only that cancellation's own steps
         // are enabled (RFC 0026 correction 53 item 6; cr-3pu5cu). No free pattern is one.

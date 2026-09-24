@@ -37,7 +37,11 @@
 //! each reservation to its own machine:
 //!
 //! 1. a reservation is `Reserved` once, by the task that then holds it, and the
-//!    calculus must admit the `ReserveSlot` step (the task is running);
+//!    calculus must admit the `ReserveSlot` step (the task is running). A task whose
+//!    cancellation was requested and not yet acknowledged neither reserves, commits nor
+//!    aborts on purpose (RFC 0026 correction 55, checked before this family's lift:
+//!    asupersync 0.5.0 refuses a reservation in a `Closing` region, and a bound task's
+//!    poll acknowledges first);
 //! 2. it resolves exactly once: a second resolution, a commit after an abort or an
 //!    abort after a commit is a fault;
 //! 3. a commit is the calculus's `CommitSlot` step;

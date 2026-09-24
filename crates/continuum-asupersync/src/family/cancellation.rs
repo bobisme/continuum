@@ -71,7 +71,15 @@
 //!    own steps: its phases, its cleanup (after its acknowledgement and before its
 //!    completion, when the journal reports phases) or its own `cancel`
 //!    ([`CancellationFault::InterruptedOwnCancel`], checked before each event's own
-//!    family lift; RFC 0026 correction 53 item 6, cr-3pu5cu round 6).
+//!    family lift; RFC 0026 correction 53 item 6, cr-3pu5cu round 6);
+//! 6. between a request reaching a task (its region's, or its own) and the task's
+//!    acknowledgement, the task takes no step in any family: none of its own work and
+//!    no receipt, in every projection, and, when the journal reports phases, none of
+//!    its cleanup or its end ([`CancellationFault::BeforeAcknowledgement`], checked
+//!    before each event's own family lift; RFC 0026 correction 55, bn-28hup). A bound
+//!    task's every poll starts with `Cx::checkpoint`, so its first act after a request
+//!    is the acknowledgement. The calculus still admits such a step (correction 53
+//!    item 1): this is the binding's narrowing, made here.
 //!
 //! # Identity
 //!
@@ -352,13 +360,26 @@ pub enum CancellationFault {
     },
     /// A region's cancellation request reached the task while it was live (the calculus
     /// records it on the worker), the journal carries this family, and it reports no
-    /// phase for the task: the task then ended some other way (`complete`, `fail`), or
-    /// the journal lost its phases. The binding journals a `requested` phase for every
-    /// substrate `CancelRequest` (cr-3pu5cu round 6).
+    /// phase for the task: the task then acted or ended some other way (`complete`,
+    /// `fail`, any step [`check_before_acknowledgement`] refuses), or the journal lost
+    /// its phases. The binding journals a `requested` phase for every substrate
+    /// `CancelRequest` (cr-3pu5cu round 6; RFC 0026 correction 55).
     UnreportedRequest {
         /// The task.
         task: u32,
         /// The step that ended the task, or `end` at the end of the journal.
+        event: &'static str,
+    },
+    /// The task's cancellation was requested (by its region, or by its own deadline),
+    /// it has not acknowledged the request, and the event is a step of the task: its
+    /// own work, a receipt of an obligation or a channel's receiver, or (when the
+    /// journal reports phases) its cleanup or its end. A bound task's every poll starts
+    /// with `Cx::checkpoint`, so the first thing a requested task does is acknowledge
+    /// (RFC 0026 correction 55; bn-28hup).
+    BeforeAcknowledgement {
+        /// The task.
+        task: u32,
+        /// The event's token within its family.
         event: &'static str,
     },
     /// A model drain cancelled the task, but the journal carries cancellation phases and
@@ -414,6 +435,10 @@ impl fmt::Display for CancellationFault {
             Self::UnreportedRequest { task, event } => write!(
                 f,
                 "a region's cancellation reached t{task}, but the journal reports no phase for it before {event}"
+            ),
+            Self::BeforeAcknowledgement { task, event } => write!(
+                f,
+                "t{task}'s cancellation was requested and it has not acknowledged it, so {event} cannot come now"
             ),
             Self::DrainedBeforeCancelled { task, phase } => write!(
                 f,
@@ -732,6 +757,91 @@ pub(crate) fn check_own_cancel_admits(
         task,
         event: body.token(),
     }))
+}
+
+/// Between a cancellation request reaching a task and the task's acknowledgement, the
+/// task takes no step (RFC 0026 correction 55; bn-28hup).
+///
+/// asupersync 0.5.0 lets a run observe a request only at `Cx::checkpoint`, and every
+/// future a bound task polls (its gate, a sleep, a channel reserve or receive) calls it
+/// first. So once a request reaches a task, the task's next poll acknowledges it, and
+/// nothing of the task's comes between. The substrate refuses much of it by itself as
+/// well: a cancelled region is `Closing`, so it admits no obligation (a reserve, an
+/// open, a send permit); a hand-off to a cancel-requested task is `DestinationCancelled`;
+/// and a sleep, a channel reserve and a receive each observe the request before they
+/// act. The rule, for the task whose calculus phase is `requested`:
+///
+/// 1. none of its own work ([`EventBody::own_work_of`]: a lifecycle `begin`, `resume`,
+///    `suspend`, `complete` or `fail`; a reserve, commit or explicit abort; an
+///    obligation open, committed discharge or hand-off; a timer scheduled or fired; a
+///    send or a receive), in every projection;
+/// 2. no receipt: an obligation handed to it, or a channel's receiver handed to it, in
+///    every projection;
+/// 3. when the journal carries this family, none of its cleanup or its end either (an
+///    aborted discharge, a leak, a receiver's drop; the other cleanup steps are refused
+///    by their own families' `OutsideCancelling`). Without this family the
+///    acknowledgement is not observed, so a cleanup step is admitted there as standing
+///    for it, as before.
+///
+/// The window's start is always visible: a region's request is lifecycle, which every
+/// projection keeps, and the calculus records it on each live worker. So items 1 and
+/// 2 need no phase and are decided in every projection. The calculus itself still
+/// admits a requested worker's steps (correction 53 item 1): this is the binding's
+/// narrowing, made by the lift. When the journal reports phases and none for the task
+/// yet, the fault is [`CancellationFault::UnreportedRequest`] (its `requested` is
+/// missing), otherwise [`CancellationFault::BeforeAcknowledgement`].
+pub(crate) fn check_before_acknowledgement(
+    body: &EventBody,
+    cx: &LiftContext,
+) -> Result<(), LiftStop> {
+    use crate::family::channel::ChannelEvent;
+    use crate::family::obligation::{Discharge, ObligationEvent};
+    let own = body.own_work_of(cx);
+    let receipt = match body {
+        EventBody::Obligation(ObligationEvent::Transferred { holder, .. }) => Some(holder.0),
+        EventBody::Channel(ChannelEvent::Opened { receiver, .. }) => Some(receiver.0),
+        _ => None,
+    };
+    let end = if cx.cancellation.present {
+        match body {
+            EventBody::Obligation(
+                ObligationEvent::Discharged {
+                    how: Discharge::Aborted,
+                    ..
+                }
+                | ObligationEvent::Leaked { .. },
+            ) => crate::family::obligation::holder_of(cx, body),
+            EventBody::Channel(ChannelEvent::ReceiverGone { channel, .. }) => {
+                crate::family::channel::receiver_of(cx, channel.0)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    for task in [own, receipt, end].into_iter().flatten() {
+        // An unknown or terminal task is the family's own fault, reported by its lift:
+        // the calculus keeps a drained worker's phase `requested`.
+        let worker = WorkerId::at(task);
+        if cx.tree.cancel_phase(worker).ok()
+            != Some(continuum_task::region::worker::CancelPhase::Requested)
+            || cx
+                .tree
+                .worker_state(worker)
+                .map_or(true, |s| s.is_terminal())
+        {
+            continue;
+        }
+        let event = body.token();
+        return Err(fault(
+            if cx.cancellation.present && !cx.cancellation.phases.contains_key(&task) {
+                CancellationFault::UnreportedRequest { task, event }
+            } else {
+                CancellationFault::BeforeAcknowledgement { task, event }
+            },
+        ));
+    }
+    Ok(())
 }
 
 /// A lifecycle `complete` or `fail` of a task whose cancellation the journal reported:
