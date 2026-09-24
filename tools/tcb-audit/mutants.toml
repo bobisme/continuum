@@ -95,6 +95,115 @@ replace = """    pub fn position(&self, state: &[i64]) -> Option<u32> {"""
 expect = "survives"
 reason = "Every vector the decoder hands to `position` is read with the table's own arity, so no wire input reaches the guard. It is defence in depth. The kernel's own unit test of `position` kills this mutant, but the lane runs only the C018 target."
 
+# --- checker: continuum-kernel-core, wire epoch 2 (bn-35y4f) --------------------
+
+[[mutant]]
+id = "core-v2-relation-compare-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "the carried relation equals the model's re-derived relation"
+find = "if carried != derived.as_slice() {"
+replace = "if false && carried != derived.as_slice() {"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-successor-lookup-ignored"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "Post(S) ⊆ S under the model's relation: a derived successor must be in the table"
+find = """                None => Err(Rejection::SuccessorNotInTable {
+                    state: index,
+                    action,
+                }),"""
+replace = """                None => Ok(()),"""
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-initial-rule-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "Init(M) ⊆ S"
+find = "        if table.position(state).is_none() {"
+replace = "        if false && table.position(state).is_none() {"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-invariant-rule-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "S ⊆ P for an invariant of the carried model"
+find = """                    Some(Ok(false)) | None => {
+                        return Verdict::Rejected(Rejection::InvariantViolated { state: index });
+                    }"""
+replace = """                    Some(Ok(false)) | None => {}"""
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-precharge-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "resource bound: evaluation work is charged before evaluation"
+find = "    if work.is_none() || needed > MAX_EVALUATION_WORK {"
+replace = "    if false && (work.is_none() || needed > MAX_EVALUATION_WORK) {"
+expect = "survives"
+reason = "No certificate of the C018 corpus comes near the evaluation budget, so turning the charge off changes no verdict the lane observes. The kernel's unit test `evaluation_work_is_charged_before_any_evaluation` kills this mutant; the lane runs only the C018 target."
+
+[[mutant]]
+id = "core-v2-update-domain-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/model.rs"
+targets = "the model's relation is defined: an update stays in its variable's domain"
+find = "                    if !admits {"
+replace = "                    if false && !admits {"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-and-short-circuits"
+side = "checker"
+file = "crates/continuum-kernel-core/src/model.rs"
+targets = "semantics: a connective evaluates both operands"
+find = """            Node::And(a, b) => {
+                let (a, b) = (
+                    self.boolean(a, state, inner)?,
+                    self.boolean(b, state, inner)?,
+                );
+                Ok(a & b)
+            }"""
+replace = """            Node::And(a, b) => Ok(self.boolean(a, state, inner)? && self.boolean(b, state, inner)?),"""
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-add-wraps"
+side = "checker"
+file = "crates/continuum-kernel-core/src/model.rs"
+targets = "semantics: arithmetic is checked, never wrapping"
+find = """            Node::Add(a, b) => self
+                .integer(a, state, inner)?
+                .checked_add(self.integer(b, state, inner)?)
+                .ok_or(Fault::Overflow),"""
+replace = """            Node::Add(a, b) => Ok(self
+                .integer(a, state, inner)?
+                .wrapping_add(self.integer(b, state, inner)?)),"""
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-frame-rule-broken"
+side = "checker"
+file = "crates/continuum-kernel-core/src/model.rs"
+targets = "semantics: an unassigned variable keeps its value"
+find = "                scratch.extend_from_slice(state);"
+replace = "                scratch.resize(state.len(), 0);"
+expect = "killed"
+
+[[mutant]]
+id = "core-v2-target-range-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/wire.rs"
+targets = "decode: every carried target index is range-checked"
+find = "                if target >= table.len() {"
+replace = "                if false && target >= table.len() {"
+expect = "killed"
+
 # --- checker: continuum-kernel-sat ---------------------------------------------
 
 [[mutant]]
@@ -294,7 +403,8 @@ file = "crates/continuum-engine-reference/src/bfs.rs"
 targets = "search: every discovered state is kept"
 find = "        for (target, action) in discovered {"
 replace = "        for (target, action) in discovered.into_iter().skip(1) {"
-expect = "caught"
+expect = "refused"
+reason = "The wire-epoch-2 emitter names each target by its index in the explored set, so a successor missing from the set is its own NotClosed error before any bytes exist. The kernel would reject the same set with successor-not-in-table: its re-derivation locates every successor itself (bn-35y4f)."
 
 [[mutant]]
 id = "bfs-stops-at-depth-two"
@@ -303,7 +413,8 @@ file = "crates/continuum-engine-reference/src/bfs.rs"
 targets = "search: the walk runs until the queue is empty"
 find = "    while let Some((here, depth)) = queue.pop_front() {"
 replace = "    while let Some((here, depth)) = queue.pop_front().filter(|(_, d)| *d < 2) {"
-expect = "caught"
+expect = "refused"
+reason = "The wire-epoch-2 emitter names each target by its index in the explored set, so a successor missing from the set is its own NotClosed error before any bytes exist. The kernel would reject the same set with successor-not-in-table: its re-derivation locates every successor itself (bn-35y4f)."
 
 # --- producer: continuum-engine-reference (emitter) -----------------------------
 
@@ -324,20 +435,10 @@ side = "producer"
 file = "crates/continuum-engine-reference/src/certificate.rs"
 targets = "emission: a transition names its own action"
 find = """            out.u16(action_index(step, action_count)?);
-            out.state(step.target());"""
+            out.u32(target_index(states, step, index)?);"""
 replace = """            out.u16(action_index(step, action_count)?.saturating_add(1));
-            out.state(step.target());"""
+            out.u32(target_index(states, step, index)?);"""
 expect = "caught"
-
-[[mutant]]
-id = "emit-drops-first-initial-state"
-side = "producer"
-file = "crates/continuum-engine-reference/src/certificate.rs"
-targets = "emission: every initial state of the model is written"
-find = "    let initial = model.initial_states();"
-replace = "    let initial = model.initial_states().get(1..).filter(|rest| !rest.is_empty()).unwrap_or(model.initial_states());"
-expect = "missed"
-reason = "The kernel checks Init ⊆ S for the initial states the certificate carries. Whether they are all of the model's is certificate-model-correspondence, a trusted component."
 
 [[mutant]]
 id = "emit-drops-first-transition-of-each-row"
@@ -347,28 +448,54 @@ targets = "emission: every successor of a state is written"
 find = "        let width = count_u32(Field::TransitionCount, row.len(), 0, MAX_STATES)?;"
 replace = """        let row: Vec<Step> = row.into_iter().skip(1).collect();
         let width = count_u32(Field::TransitionCount, row.len(), 0, MAX_STATES)?;"""
-expect = "missed"
-reason = "A sub-relation of a closed relation is still closed. The kernel checks closure under the carried rows, not that they are the model's rows (certificate-model-correspondence)."
-
-[[mutant]]
-id = "emit-widens-the-domain"
-side = "producer"
-file = "crates/continuum-engine-reference/src/certificate.rs"
-targets = "emission: the declared domain is the model's"
-find = "        out.i64(variable.domain().hi());"
-replace = "        out.i64(variable.domain().hi().saturating_add(1));"
-expect = "missed"
-reason = "The property P is the carried domain. A wider P is an easier S ⊆ P, and the binding of P to the property digest is envelope-digest-binding, a trusted component."
+expect = "caught"
 
 [[mutant]]
 id = "emit-retargets-to-the-first-state"
 side = "producer"
 file = "crates/continuum-engine-reference/src/certificate.rs"
 targets = "emission: a transition names its own target"
-find = "            out.state(step.target());"
-replace = "            out.state(states.first().unwrap_or(step.target()));"
+find = "            out.u32(target_index(states, step, index)?);"
+replace = "            out.u32(target_index(states, step, index).map(|_| 0)?);"
+expect = "caught"
+
+# --- producer: continuum-model-core (the canonical model encoding) ---------------
+#
+# At wire epoch 2 the emitter writes no initial states and no domain of its own: both
+# are part of the carried model, written by `Model::identity`. bn-2npu's
+# emit-drops-first-initial-state and emit-widens-the-domain therefore move here.
+
+[[mutant]]
+id = "identity-drops-first-initial-state"
+side = "producer"
+file = "crates/continuum-model-core/src/identity.rs"
+targets = "encoding: every initial state of the model is written"
+find = """        count(&mut out, self.initial_states().len());
+        for state in self.initial_states() {"""
+replace = """        let skip = usize::from(self.initial_states().len() > 1);
+        count(&mut out, self.initial_states().len() - skip);
+        for state in self.initial_states().iter().skip(skip) {"""
 expect = "missed"
-reason = "Every table state is a member, so a wrong target inside the table keeps the set closed. Target fidelity is certificate-model-correspondence."
+reason = "The kernel checks Init(M) ⊆ S for the model the certificate carries. The encoding is that model's identity (ADR-0013), so an encoder that drops content defines another model, consistently, and the certificate is true of it. Whether the carried model is the caller's is envelope-digest-binding, a trusted component: a caller comparing identities with the same encoder cannot see this."
+
+[[mutant]]
+id = "identity-widens-the-domain"
+side = "producer"
+file = "crates/continuum-model-core/src/identity.rs"
+targets = "encoding: the declared domain is the model's"
+find = "            out.extend_from_slice(&variable.domain().hi().to_be_bytes());"
+replace = "            out.extend_from_slice(&variable.domain().hi().saturating_add(1).to_be_bytes());"
+expect = "missed"
+reason = "As identity-drops-first-initial-state: the carried model has a wider domain, every reachable state and every update stay inside it, and the certificate is true of the carried model. The binding of the carried model to the caller's is envelope-digest-binding."
+
+[[mutant]]
+id = "identity-writes-sub-as-add"
+side = "producer"
+file = "crates/continuum-model-core/src/identity.rs"
+targets = "encoding: an operator is written as itself"
+find = "                ArithOp::Sub => 1,"
+replace = "                ArithOp::Sub => 0,"
+expect = "caught"
 
 # --- producer: continuum-model-core (the successor evaluator) --------------------
 
@@ -379,8 +506,7 @@ file = "crates/continuum-model-core/src/model.rs"
 targets = "evaluation: every action is tried"
 find = "        for action in 0..self.actions.len() {"
 replace = "        for action in 0..self.actions.len().saturating_sub(1) {"
-expect = "missed"
-reason = "Search and emission share the evaluator, so the wrong relation is explored and certified consistently. The kernel never sees the model."
+expect = "caught"
 
 [[mutant]]
 id = "eval-update-off-by-one"
@@ -389,8 +515,7 @@ file = "crates/continuum-model-core/src/model.rs"
 targets = "evaluation: an update writes the value it computed"
 find = "                *slot = value;"
 replace = "                *slot = if value > 0 { value - 1 } else { value };"
-expect = "missed"
-reason = "A consistent evaluator bug yields a closed, in-domain, wrong relation. The kernel checks the carried relation, not the model's."
+expect = "caught"
 
 [[mutant]]
 id = "eval-frame-rule-broken"
@@ -399,8 +524,7 @@ file = "crates/continuum-model-core/src/model.rs"
 targets = "evaluation: unassigned variables keep their value"
 find = "            let mut values = state.values.clone();"
 replace = "            let mut values = vec![0; state.values.len()];"
-expect = "missed"
-reason = "As eval-update-off-by-one: the explorer and the emitter agree on a wrong relation."
+expect = "caught"
 
 [[mutant]]
 id = "eval-guards-ignored"
@@ -410,4 +534,4 @@ targets = "evaluation: a disabled action has no successor"
 find = "        if !self.is_enabled(action, state)? {"
 replace = "        if false && !self.is_enabled(action, state)? {"
 expect = "refused"
-reason = "`inc` at `x = 4` leaves the domain, and the evaluator reports UpdateOutOfDomain before any certificate exists. A guard bug that stays inside the domain would be missed like the other evaluator mutants."
+reason = "`inc` at `x = 4` leaves the domain, and the evaluator reports UpdateOutOfDomain before any certificate exists. A guard bug that stays inside the domain is caught at wire epoch 2: the kernel evaluates every guard of the carried model itself (bn-35y4f)."

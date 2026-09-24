@@ -6,7 +6,7 @@
   "substitute": {
     "crates/continuum-kernel-core/src/receipt.rs": [
       {
-        "find": "pub const WIRE_EPOCH_ID: &str = \"continuum-kernel-core/CONTCERT/1\";",
+        "find": "pub const WIRE_EPOCH_ID: &str = \"continuum-kernel-core/CONTCERT/2\";",
         "replace": "pub const WIRE_EPOCH_ID: &str = \"1\";"
       }
     ]

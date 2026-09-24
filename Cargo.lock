@@ -348,6 +348,7 @@ dependencies = [
  "continuum-cml-syntax",
  "continuum-engine-reference",
  "continuum-intent",
+ "continuum-kernel-core",
  "continuum-model-core",
 ]
 

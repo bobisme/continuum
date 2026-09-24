@@ -132,8 +132,13 @@ impl Bytes {
 
     /// Header plus the eight-field RFC 0005 envelope every family shares.
     fn header(&mut self, magic: &[u8; 8], kind: u16, model: &str) {
+        self.header_at(magic, 1, kind, model);
+    }
+
+    /// As [`Self::header`], at wire epoch `epoch`.
+    fn header_at(&mut self, magic: &[u8; 8], epoch: u16, kind: u16, model: &str) {
         self.0.extend_from_slice(magic);
-        self.u16(1); // wire epoch
+        self.u16(epoch); // wire epoch
         self.u16(kind);
         self.token(model);
         self.token("continuum-semantics-1");
@@ -141,7 +146,7 @@ impl Bytes {
         self.token("blake3:c018-scope");
         self.token("blake3:empty-assumptions");
         self.token("c018-hand-encoder/0");
-        self.u16(1); // schema epoch
+        self.u16(epoch); // schema epoch
         self.u16(0); // no domain packs
     }
 
@@ -203,6 +208,125 @@ impl CoreSpec {
             out.states(&self.initial);
             out.actions(&self.actions);
             out.rows(&self.rows);
+        }
+        out.0
+    }
+}
+
+// --- wire epoch 2: the model section (continuum-model/1) and the model-bound body ----
+
+/// Model-section expression bytes, written from the grammar in
+/// `continuum-model-core/src/identity.rs`'s documentation.
+mod expr {
+    pub fn int(value: i64) -> Vec<u8> {
+        let mut out = vec![0x01];
+        out.extend_from_slice(&value.to_be_bytes());
+        out
+    }
+
+    pub fn var(name: &str) -> Vec<u8> {
+        let mut out = vec![0x02];
+        out.extend_from_slice(&(name.len() as u64).to_be_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out
+    }
+
+    pub fn add(a: &[u8], b: &[u8]) -> Vec<u8> {
+        [&[0x03, 0][..], a, b].concat()
+    }
+
+    /// `cmp`: 0 eq, 1 ne, 2 lt, 3 le, 4 gt, 5 ge.
+    pub fn compare(op: u8, a: &[u8], b: &[u8]) -> Vec<u8> {
+        [&[0x11, op][..], a, b].concat()
+    }
+
+    pub fn within(a: &[u8], lo: i64, hi: i64) -> Vec<u8> {
+        [&[0x16][..], a, &lo.to_be_bytes(), &hi.to_be_bytes()].concat()
+    }
+}
+
+/// One action: name, guard bytes, outcomes of `(variable, value bytes)`.
+type ModelAction = (&'static str, Vec<u8>, Vec<Vec<(&'static str, Vec<u8>)>>);
+
+#[derive(Clone)]
+struct ModelSpec {
+    variables: Vec<(&'static str, i64, i64)>,
+    actions: Vec<ModelAction>,
+    initial: Vec<Vec<i64>>,
+    predicates: Vec<(&'static str, Vec<u8>)>,
+}
+
+impl ModelSpec {
+    fn encode(&self) -> Vec<u8> {
+        let mut out = Bytes::default();
+        let name = |out: &mut Bytes, text: &str| {
+            out.u64(text.len() as u64);
+            out.0.extend_from_slice(text.as_bytes());
+        };
+        out.0.extend_from_slice(b"continuum-model/1");
+        out.u64(self.variables.len() as u64);
+        for (variable, lo, hi) in &self.variables {
+            name(&mut out, variable);
+            out.i64(*lo);
+            out.i64(*hi);
+        }
+        out.u64(self.actions.len() as u64);
+        for (action, guard, outcomes) in &self.actions {
+            name(&mut out, action);
+            out.0.extend_from_slice(guard);
+            out.u64(outcomes.len() as u64);
+            for outcome in outcomes {
+                out.u64(outcome.len() as u64);
+                for (variable, value) in outcome {
+                    name(&mut out, variable);
+                    out.0.extend_from_slice(value);
+                }
+            }
+        }
+        out.u64(self.initial.len() as u64);
+        for state in &self.initial {
+            out.u64(state.len() as u64);
+            out.state(state);
+        }
+        out.u64(self.predicates.len() as u64);
+        for (predicate, body) in &self.predicates {
+            name(&mut out, predicate);
+            out.0.extend_from_slice(body);
+        }
+        out.0
+    }
+}
+
+/// `CONTCERT` at wire epoch 2: kind 1 finite closure over a carried model.
+#[derive(Clone)]
+struct ModelClosureSpec {
+    model: ModelSpec,
+    invariant: Option<&'static str>,
+    states: Vec<Vec<i64>>,
+    rows: Vec<Vec<(u16, u32)>>,
+}
+
+impl ModelClosureSpec {
+    fn encode(&self) -> Vec<u8> {
+        let mut out = Bytes::default();
+        out.header_at(b"CONTCERT", 2, 1, "blake3:c018-counter");
+        let model = self.model.encode();
+        out.len32(model.len());
+        out.0.extend_from_slice(&model);
+        match self.invariant {
+            Some(name) => {
+                out.u16(2);
+                out.token(name);
+            }
+            None => out.u16(1),
+        }
+        out.states(&self.states);
+        for row in &self.rows {
+            out.len32(row.len());
+            for (action, target) in row {
+                out.u16(*action);
+                out.u32(*target);
+            }
         }
         out.0
     }
@@ -355,6 +479,49 @@ fn core_state_type() -> CoreSpec {
     }
 }
 
+/// The counter of [`core_closure`] as a model: `inc` while `x < 2`, `reset` at
+/// `x = 2`. `Small` (`x in 0..2`) holds on the reachable set; `NotTwo` does not. `y`
+/// is `1` and no action assigns it, so the frame rule is observable.
+fn counter_model() -> ModelSpec {
+    let x = || expr::var("x");
+    ModelSpec {
+        variables: vec![("x", 0, 3), ("y", 0, 1)],
+        actions: vec![
+            (
+                "inc",
+                expr::compare(2, &x(), &expr::int(2)),
+                vec![vec![("x", expr::add(&x(), &expr::int(1)))]],
+            ),
+            (
+                "reset",
+                expr::compare(0, &x(), &expr::int(2)),
+                vec![vec![("x", expr::int(0))]],
+            ),
+        ],
+        initial: vec![vec![0, 1]],
+        predicates: vec![
+            ("NotTwo", expr::compare(1, &x(), &expr::int(2))),
+            ("Small", expr::within(&x(), 0, 2)),
+        ],
+    }
+}
+
+fn core_model_closure() -> ModelClosureSpec {
+    ModelClosureSpec {
+        model: counter_model(),
+        invariant: None,
+        states: vec![vec![0, 1], vec![1, 1], vec![2, 1]],
+        rows: vec![vec![(0, 1)], vec![(0, 2)], vec![(1, 0)]],
+    }
+}
+
+fn core_model_invariant() -> ModelClosureSpec {
+    ModelClosureSpec {
+        invariant: Some("Small"),
+        ..core_model_closure()
+    }
+}
+
 /// `(x1 ∨ x2)(¬x1 ∨ x2)(x1 ∨ ¬x2)(¬x1 ∨ ¬x2)`: derive `(x2)`, delete clause 1, then
 /// derive the empty clause from `(x2)`, clause 3 and clause 4.
 fn sat_lrat() -> SatSpec {
@@ -479,6 +646,8 @@ fn greens() -> Vec<(&'static str, Vec<u8>)> {
     vec![
         ("core/finite-closure", core_closure().encode()),
         ("core/state-type", core_state_type().encode()),
+        ("core/model-closure", core_model_closure().encode()),
+        ("core/model-invariant", core_model_invariant().encode()),
         ("sat/lrat", sat_lrat().encode()),
         ("smt/smt-proof", smt_proof().encode()),
         ("temporal/ranking", temporal_ranking().encode()),
@@ -592,6 +761,107 @@ fn lies() -> Vec<Lie> {
         "core-fc/undeclared-action",
         "every transition names a declared action",
         "unknown-action",
+        c.encode(),
+    ));
+
+    // Finite closure at wire epoch 2: the carried relation is the carried model's
+    // (bn-35y4f). Each lie is a producer fault bn-2npu found the epoch-1 kernel missing,
+    // or one the model-bound rules add.
+    let mut c = core_model_closure();
+    c.rows[1].clear();
+    out.push(lie(
+        "core-mc/drop-transition",
+        "the carried relation is the model's: a closed sub-relation",
+        "relation-mismatch",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.rows[2] = vec![(1, 1)];
+    out.push(lie(
+        "core-mc/retarget-inside-table",
+        "the carried relation is the model's: a target inside the table",
+        "relation-mismatch",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.model.actions[1].2 = vec![vec![("x", expr::int(1))]];
+    out.push(lie(
+        "core-mc/rows-from-another-evaluator",
+        "the carried relation is the model's: reset writes 1, the rows say 0",
+        "relation-mismatch",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.model.initial = vec![vec![0, 1], vec![3, 1]];
+    out.push(lie(
+        "core-mc/model-initial-outside-table",
+        "Init(M) ⊆ S",
+        "initial-state-not-in-table",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.states.pop();
+    c.rows = vec![vec![(0, 1)], vec![(0, 0)]];
+    out.push(lie(
+        "core-mc/successor-outside-table",
+        "Post(S) ⊆ S under the model's relation",
+        "successor-not-in-table",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.states.push(vec![4, 1]);
+    c.rows.push(Vec::new());
+    out.push(lie(
+        "core-mc/state-outside-domain",
+        "S ⊆ Dom(M)",
+        "property-violated",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.model.actions[0].2 = vec![vec![("x", expr::add(&expr::var("x"), &expr::int(9)))]];
+    out.push(lie(
+        "core-mc/update-leaves-domain",
+        "the model's relation is defined: an update leaves the domain",
+        "update-outside-domain",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.model.actions[0].1 = expr::compare(
+        4,
+        &expr::add(
+            &expr::add(&expr::var("x"), &expr::int(i64::MAX)),
+            &expr::int(9),
+        ),
+        &expr::int(0),
+    );
+    out.push(lie(
+        "core-mc/guard-overflows",
+        "the model's relation is defined: checked arithmetic",
+        "evaluation-overflow",
+        c.encode(),
+    ));
+    let mut c = core_model_closure();
+    c.model.actions[0].1 = [
+        &[0x13, 0x10, 0][..],
+        &expr::compare(
+            4,
+            &expr::add(&expr::int(i64::MAX), &expr::int(1)),
+            &expr::int(0),
+        ),
+    ]
+    .concat();
+    out.push(lie(
+        "core-mc/dead-operand-overflows",
+        "the model's relation is defined: connectives do not short-circuit",
+        "evaluation-overflow",
+        c.encode(),
+    ));
+    let mut c = core_model_invariant();
+    c.invariant = Some("NotTwo");
+    out.push(lie(
+        "core-mc/invariant-false",
+        "S ⊆ P for an invariant of the model",
+        "invariant-violated",
         c.encode(),
     ));
 
@@ -864,6 +1134,273 @@ fn in_domain(bounds: &[(i64, i64)], state: &[i64]) -> bool {
             .all(|(value, (lo, hi))| lo <= value && value <= hi)
 }
 
+/// The oracle's reading of a carried model: a tree per expression, names resolved by
+/// linear scan. A third reading of the grammar, after the model core's and the
+/// kernel's, sharing neither's code.
+enum Tree {
+    Int(i64),
+    Var(usize),
+    Arith(u8, Box<Tree>, Box<Tree>),
+    Pick(bool, Box<Tree>, Box<Tree>),
+    Bool(bool),
+    Compare(u8, Box<Tree>, Box<Tree>),
+    Not(Box<Tree>),
+    Join(u8, Box<Tree>, Box<Tree>),
+    Within(Box<Tree>, i64, i64),
+}
+
+/// One action as the oracle reads it: its guard and its outcomes.
+type OracleAction = (Tree, Vec<Vec<(usize, Tree)>>);
+
+struct OracleModel {
+    bounds: Vec<(i64, i64)>,
+    actions: Vec<OracleAction>,
+    initial: Vec<Vec<i64>>,
+    predicates: Vec<(String, Tree)>,
+}
+
+struct Cursor<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+
+impl Cursor<'_> {
+    fn take(&mut self, n: usize) -> Result<&[u8], String> {
+        let out = self
+            .bytes
+            .get(self.at..self.at + n)
+            .ok_or("model section truncated")?;
+        self.at += n;
+        Ok(out)
+    }
+
+    fn u8(&mut self) -> Result<u8, String> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u64(&mut self) -> Result<u64, String> {
+        Ok(u64::from_be_bytes(
+            self.take(8)?.try_into().expect("8 bytes"),
+        ))
+    }
+
+    fn i64(&mut self) -> Result<i64, String> {
+        Ok(i64::from_be_bytes(
+            self.take(8)?.try_into().expect("8 bytes"),
+        ))
+    }
+
+    fn name(&mut self) -> Result<String, String> {
+        let len = usize::try_from(self.u64()?).map_err(|e| e.to_string())?;
+        Ok(String::from_utf8_lossy(self.take(len)?).into_owned())
+    }
+
+    fn int(&mut self, names: &[String]) -> Result<Tree, String> {
+        Ok(match self.u8()? {
+            0x01 => Tree::Int(self.i64()?),
+            0x02 => {
+                let name = self.name()?;
+                Tree::Var(names.iter().position(|n| *n == name).ok_or("unbound")?)
+            }
+            0x03 => {
+                let op = self.u8()?;
+                Tree::Arith(op, Box::new(self.int(names)?), Box::new(self.int(names)?))
+            }
+            op @ (0x04 | 0x05) => Tree::Pick(
+                op == 0x05,
+                Box::new(self.int(names)?),
+                Box::new(self.int(names)?),
+            ),
+            other => return Err(format!("int opcode {other:#04x}")),
+        })
+    }
+
+    fn boolean(&mut self, names: &[String]) -> Result<Tree, String> {
+        Ok(match self.u8()? {
+            0x10 => Tree::Bool(self.u8()? == 1),
+            0x11 => {
+                let op = self.u8()?;
+                Tree::Compare(op, Box::new(self.int(names)?), Box::new(self.int(names)?))
+            }
+            0x12 => Tree::Not(Box::new(self.boolean(names)?)),
+            op @ 0x13..=0x15 => Tree::Join(
+                op,
+                Box::new(self.boolean(names)?),
+                Box::new(self.boolean(names)?),
+            ),
+            0x16 => {
+                let inner = self.int(names)?;
+                Tree::Within(Box::new(inner), self.i64()?, self.i64()?)
+            }
+            other => return Err(format!("bool opcode {other:#04x}")),
+        })
+    }
+}
+
+fn read_model(bytes: &[u8]) -> Result<OracleModel, String> {
+    let mut c = Cursor { bytes, at: 17 };
+    let mut names = Vec::new();
+    let mut bounds = Vec::new();
+    for _ in 0..c.u64()? {
+        names.push(c.name()?);
+        bounds.push((c.i64()?, c.i64()?));
+    }
+    let mut actions = Vec::new();
+    for _ in 0..c.u64()? {
+        c.name()?;
+        let guard = c.boolean(&names)?;
+        let mut outcomes = Vec::new();
+        for _ in 0..c.u64()? {
+            let mut outcome = Vec::new();
+            for _ in 0..c.u64()? {
+                let name = c.name()?;
+                let index = names.iter().position(|n| *n == name).ok_or("unbound")?;
+                outcome.push((index, c.int(&names)?));
+            }
+            outcomes.push(outcome);
+        }
+        actions.push((guard, outcomes));
+    }
+    let mut initial = Vec::new();
+    for _ in 0..c.u64()? {
+        let mut state = Vec::new();
+        for _ in 0..c.u64()? {
+            state.push(c.i64()?);
+        }
+        initial.push(state);
+    }
+    let mut predicates = Vec::new();
+    for _ in 0..c.u64()? {
+        let name = c.name()?;
+        predicates.push((name, c.boolean(&names)?));
+    }
+    Ok(OracleModel {
+        bounds,
+        actions,
+        initial,
+        predicates,
+    })
+}
+
+/// `None` is an arithmetic overflow. Connectives evaluate both sides.
+fn eval_int(tree: &Tree, state: &[i64]) -> Option<i64> {
+    match tree {
+        Tree::Int(v) => Some(*v),
+        Tree::Var(i) => state.get(*i).copied(),
+        Tree::Arith(op, a, b) => {
+            let (a, b) = (eval_int(a, state)?, eval_int(b, state)?);
+            match op {
+                0 => a.checked_add(b),
+                1 => a.checked_sub(b),
+                _ => a.checked_mul(b),
+            }
+        }
+        Tree::Pick(max, a, b) => {
+            let (a, b) = (eval_int(a, state)?, eval_int(b, state)?);
+            Some(if *max { a.max(b) } else { a.min(b) })
+        }
+        _ => None,
+    }
+}
+
+fn eval_bool(tree: &Tree, state: &[i64]) -> Option<bool> {
+    match tree {
+        Tree::Bool(v) => Some(*v),
+        Tree::Compare(op, a, b) => {
+            let (a, b) = (eval_int(a, state)?, eval_int(b, state)?);
+            Some(match op {
+                0 => a == b,
+                1 => a != b,
+                2 => a < b,
+                3 => a <= b,
+                4 => a > b,
+                _ => a >= b,
+            })
+        }
+        Tree::Not(a) => Some(!eval_bool(a, state)?),
+        Tree::Join(op, a, b) => {
+            let (a, b) = (eval_bool(a, state), eval_bool(b, state));
+            let (a, b) = (a?, b?);
+            Some(match op {
+                0x13 => a && b,
+                0x14 => a || b,
+                _ => !a || b,
+            })
+        }
+        Tree::Within(a, lo, hi) => {
+            let v = eval_int(a, state)?;
+            Some(*lo <= v && v <= *hi)
+        }
+        _ => None,
+    }
+}
+
+/// The wire-epoch-2 claim: S ⊆ Dom(M), Init(M) ⊆ S, every row the model's row, and the
+/// invariant at every state.
+fn oracle_model_closure(body: &kcore::wire::ModelClosureBody) -> Result<bool, String> {
+    let model = read_model(body.model_identity())?;
+    let states: Vec<Vec<i64>> = (0..body.table().len())
+        .map(|i| body.table().state(i).expect("index below len").to_vec())
+        .collect();
+    let index_of = |s: &[i64]| states.iter().position(|t| t.as_slice() == s);
+    if !states.iter().all(|s| in_domain(&model.bounds, s)) {
+        return Ok(false);
+    }
+    if !model.initial.iter().all(|s| index_of(s).is_some()) {
+        return Ok(false);
+    }
+    for (i, state) in states.iter().enumerate() {
+        let mut derived: Vec<(u16, u32)> = Vec::new();
+        for (a, (guard, outcomes)) in model.actions.iter().enumerate() {
+            let Some(enabled) = eval_bool(guard, state) else {
+                return Ok(false);
+            };
+            if !enabled {
+                continue;
+            }
+            for outcome in outcomes {
+                let mut next = state.clone();
+                for (v, value) in outcome {
+                    let Some(value) = eval_int(value, state) else {
+                        return Ok(false);
+                    };
+                    let (lo, hi) = model.bounds[*v];
+                    if value < lo || value > hi {
+                        return Ok(false);
+                    }
+                    next[*v] = value;
+                }
+                let Some(target) = index_of(&next) else {
+                    return Ok(false);
+                };
+                derived.push((
+                    u16::try_from(a).expect("few actions"),
+                    u32::try_from(target).expect("few states"),
+                ));
+            }
+        }
+        derived.sort_unstable();
+        derived.dedup();
+        let carried = body
+            .row(u32::try_from(i).expect("few states"))
+            .unwrap_or(&[]);
+        if carried != derived.as_slice() {
+            return Ok(false);
+        }
+    }
+    if let Some(name) = body.invariant() {
+        let Some((_, predicate)) = model.predicates.iter().find(|(n, _)| n == name.as_str()) else {
+            return Ok(false);
+        };
+        for state in &states {
+            if eval_bool(predicate, state) != Some(true) {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 fn oracle_core(bytes: &[u8]) -> Result<bool, String> {
     let certificate = kcore::wire::decode(bytes).map_err(|e| format!("{e:?}"))?;
     let table = |t: &kcore::wire::StateTable| -> Vec<Vec<i64>> {
@@ -872,6 +1409,7 @@ fn oracle_core(bytes: &[u8]) -> Result<bool, String> {
             .collect()
     };
     match certificate.body() {
+        kcore::wire::Body::ModelClosure(body) => oracle_model_closure(body),
         kcore::wire::Body::StateType(body) => {
             let bounds: Vec<(i64, i64)> = body
                 .domain()
@@ -1332,7 +1870,7 @@ fn every_lie_is_a_false_claim_so_the_corpus_is_not_vacuous() {
         }
     }
     let false_claims = lies().iter().filter(|l| l.kind == "false-claim").count();
-    assert!(false_claims >= 15, "the corpus keeps its false-claim core");
+    assert!(false_claims >= 24, "the corpus keeps its false-claim core");
 }
 
 #[test]
@@ -1537,6 +2075,17 @@ fn the_committed_corpus_replays_with_its_recorded_verdicts() {
         CORPUS.contains("lie:tmp-scc/reachable-dead-end | rejected:progress-deadlock | "),
         "the bn-2npu regression input is in the corpus"
     );
+    // The bn-35y4f inputs: the producer faults bn-2npu found the epoch-1 kernel
+    // missing, as epoch-2 certificates the kernel must reject.
+    for line in [
+        "lie:core-mc/drop-transition | rejected:relation-mismatch | ",
+        "lie:core-mc/retarget-inside-table | rejected:relation-mismatch | ",
+        "lie:core-mc/rows-from-another-evaluator | rejected:relation-mismatch | ",
+        "green:core/model-closure | verified | ",
+        "green:core/model-invariant | verified | ",
+    ] {
+        assert!(CORPUS.contains(line), "the corpus carries {line:?}");
+    }
     assert!(
         rendered == CORPUS,
         "the committed corpus drifted from the generator; the rendered corpus is at {}",

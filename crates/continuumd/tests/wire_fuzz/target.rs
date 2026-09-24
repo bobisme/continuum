@@ -697,6 +697,17 @@ const CERTIFICATE_LANDINGS: &[&str] = &[
     "cert::core::rejected::unknown-action",
     "cert::core::rejected::closure-failure",
     "cert::core::rejected::property-violated",
+    // Wire epoch 2 (bn-35y4f): the model section and the model-bound checks.
+    "cert::core::rejected::bad-model-tag",
+    "cert::core::rejected::model-trailing-bytes",
+    "cert::core::rejected::unknown-opcode",
+    "cert::core::rejected::unresolved-name",
+    "cert::core::rejected::target-out-of-range",
+    "cert::core::rejected::evaluation-overflow",
+    "cert::core::rejected::update-outside-domain",
+    "cert::core::rejected::successor-not-in-table",
+    "cert::core::rejected::relation-mismatch",
+    "cert::core::rejected::invariant-violated",
     "cert::sat::verified",
     "cert::sat::rejected",
     "cert::sat::unsupported",
@@ -763,8 +774,10 @@ impl Target for CertificateWire {
 /// a second time.
 pub const CORE_MAGIC: [u8; 8] = core_wire::MAGIC;
 
-/// The wire epoch kernel-core implements.
-pub const CORE_WIRE_EPOCH: u16 = core_wire::WIRE_EPOCH;
+/// The wire epoch the certificate seeds are written at: the legacy epoch 1, the only
+/// epoch that defines the state-type family the seeds use (bn-35y4f). Epoch 2 is
+/// reached by mutation of the epoch field.
+pub const CORE_WIRE_EPOCH: u16 = core_wire::LEGACY_WIRE_EPOCH;
 
 /// The largest state count kernel-core admits.
 pub const CORE_MAX_STATES: u32 = core_wire::MAX_STATES;

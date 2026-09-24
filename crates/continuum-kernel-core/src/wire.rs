@@ -45,7 +45,7 @@
 //!
 //! header       := magic:8 wire_epoch:u16 kind:u16
 //! magic        := "CONTCERT"
-//! wire_epoch   := 1                                  -- WIRE_EPOCH
+//! wire_epoch   := 1 | 2                              -- LEGACY_WIRE_EPOCH, WIRE_EPOCH
 //! kind         := 1 finite-closure | 2 state-type    -- CertificateKind::code
 //!
 //! envelope     := model_digest:token                 -- RFC 0005 "model hash"
@@ -63,6 +63,7 @@
 //! table        := state_count:u32 state*
 //! state        := i64 * variable_count
 //!
+//! -- wire epoch 1 (model-free; decoded for the ADR-0018 two-epoch window)
 //! body(2)      := domain table
 //! body(1)      := domain table
 //!                 property_class:u16
@@ -71,11 +72,29 @@
 //!                 row * state_count
 //! row          := transition_count:u32 transition*
 //! transition   := action:u16 state
+//!
+//! -- wire epoch 2 (model-bound; bn-35y4f, RFC 0005 correction 1)
+//! body(1)      := model_len:u32 model                -- continuum-model/1, see crate::model
+//!                 property
+//!                 table                              -- arity = the model's variable count
+//!                 row2 * state_count
+//! property     := 1                                  -- state-domain
+//!               | 2 predicate:token                  -- invariant: a predicate of the model
+//! row2         := transition_count:u32 transition2*
+//! transition2  := action:u16 target:u32              -- indices, each range-checked
 //! ```
 //!
-//! Integers are big-endian; `i64` is two's complement. Nothing nests, so the format
-//! has no recursion for RFC 0005's "cycle/recursion bounds" to bound and the decoder
-//! cannot overflow a stack.
+//! Epoch 2 defines only the finite-closure family; kind 2 at epoch 2 is
+//! [`Feature::CertificateKind`]. Its state domain, initial states and action names
+//! are the carried model's, not separate sections, so they cannot disagree with it.
+//! Its transitions name their targets by table index: the closure obligation no
+//! longer needs a carried vector to be located, because the kernel re-derives every
+//! successor from the model and locates *that* in the table (`crate::check`).
+//!
+//! Integers are big-endian; `i64` is two's complement. Outside the epoch-2 model
+//! section nothing nests. Inside it, expressions recurse, and both the decoder and
+//! the evaluator bound that recursion at [`MAX_EXPRESSION_DEPTH`] frames, so neither
+//! can overflow a stack (RFC 0005 "cycle/recursion bounds").
 //!
 //! # Canonicity
 //!
@@ -93,7 +112,10 @@
 //! unique, and it makes a state's index in the table a total function of the table's
 //! contents, which is what lets [`StateTable::position`] be a binary search rather
 //! than a scan. Trailing bytes are rejected for the same reason. Every count has a
-//! declared maximum, and the byte string itself has [`MAX_CERTIFICATE_BYTES`].
+//! declared maximum, and the byte string itself has [`MAX_CERTIFICATE_BYTES`]. The
+//! epoch-2 model section's outcome and predicate counts are bounded by its bytes
+//! ([`MAX_MODEL_BYTES`]) and its node arena by [`MAX_EXPRESSION_NODES`]: no count
+//! reserves memory before its bytes are read.
 //!
 //! # Malformed input is data, not an event
 //!
@@ -104,16 +126,50 @@
 //! through [`Reader`] and returns a typed [`Rejection`]; the crate-level lints in
 //! `lib.rs` make a regression a compile error rather than a review question.
 
-use crate::verdict::{CertificateKind, Feature, Field, Rejection, TokenFault};
+use crate::model::Model;
+use crate::verdict::{
+    CertificateKind, Feature, Field, PropertyClass, Rejection, Resource, TokenFault,
+};
 
 /// The eight bytes every certificate begins with.
 pub const MAGIC: [u8; 8] = *b"CONTCERT";
 
-/// The wire epoch this build implements.
+/// The newest wire epoch this build implements, and the one producers write: the
+/// model-bound epoch (bn-35y4f).
 ///
-/// A certificate declaring any other epoch is [`Feature::WireEpoch`], never a
-/// rejection: the artifact may be valid under a contract this build does not know.
-pub const WIRE_EPOCH: u16 = 1;
+/// A certificate declaring an epoch other than this one or [`LEGACY_WIRE_EPOCH`] is
+/// [`Feature::WireEpoch`], never a rejection: the artifact may be valid under a
+/// contract this build does not know.
+pub const WIRE_EPOCH: u16 = 2;
+
+/// The model-free wire epoch, still decoded in the ADR-0018 two-epoch window.
+///
+/// A claim checked from it keeps `certificate-model-correspondence` among its
+/// trusted components, so the assurance difference is visible in every verdict.
+pub const LEGACY_WIRE_EPOCH: u16 = 1;
+
+/// The largest model section a wire-epoch-2 certificate may carry (16 MiB).
+///
+/// A larger model is [`Feature::ResourceBound`]: a checker limit, not a fault.
+pub const MAX_MODEL_BYTES: u32 = 1 << 24;
+
+/// The deepest expression the carried model may nest, counting a leaf at the root as
+/// depth 1. The model layer's own bound (`continuum-model-core` `MAX_EXPR_DEPTH`).
+pub const MAX_EXPRESSION_DEPTH: usize = 32;
+
+/// The most expression nodes the carried model may hold in total.
+pub const MAX_EXPRESSION_NODES: u32 = 1 << 20;
+
+/// The most evaluation work one wire-epoch-2 check may perform, in the units of
+/// `crate::check`'s precharge: one per expression node, one per state component
+/// copied or compared, and a binary search per successor lookup.
+///
+/// The work is computed from the decoded sizes and charged *before* the first
+/// evaluation; a certificate over the bound is [`Feature::ResourceBound`].
+///
+/// Measured (release build, bn-35y4f): a certificate just under the bound checks in
+/// about 15 s; the durable register's claim-A certificate checks in about 0.22 s.
+pub const MAX_EVALUATION_WORK: u64 = 1 << 33;
 
 /// The largest certificate byte string the kernel will look at (64 MiB).
 pub const MAX_CERTIFICATE_BYTES: usize = 1 << 26;
@@ -255,18 +311,24 @@ impl<'a> Reader<'a> {
             });
         }
         let bytes = self.take(field, len)?;
-        for (offset, byte) in bytes.iter().enumerate() {
-            if !byte.is_ascii_graphic() {
-                return Err(Rejection::MalformedToken {
-                    field,
-                    fault: TokenFault::NonPrintable {
-                        offset,
-                        byte: *byte,
-                    },
-                });
-            }
-        }
-        Ok(Token(bytes.to_vec()))
+        Token::from_bytes(field, bytes)
+    }
+
+    /// Read one big-endian `u64` (the model section's count width).
+    ///
+    /// # Errors
+    ///
+    /// [`Rejection::Truncated`] when fewer than eight bytes remain.
+    pub(crate) fn u64(&mut self, field: Field) -> Result<u64, Rejection> {
+        let bytes = self.take(field, 8)?;
+        let mut buf = [0_u8; 8];
+        buf.copy_from_slice(bytes);
+        Ok(u64::from_be_bytes(buf))
+    }
+
+    /// How many bytes have been consumed.
+    pub(crate) const fn offset(&self) -> usize {
+        self.offset
     }
 
     /// Read a count and check it against the format's declared range.
@@ -314,6 +376,36 @@ impl<'a> Reader<'a> {
 pub struct Token(Vec<u8>);
 
 impl Token {
+    /// Validate `bytes` as a token's contents: printable ASCII only. The length rules
+    /// are the caller's, because the certificate and the model section prefix a
+    /// token with lengths of different widths.
+    pub(crate) fn from_bytes(field: Field, bytes: &[u8]) -> Result<Self, Rejection> {
+        if bytes.is_empty() {
+            return Err(Rejection::MalformedToken {
+                field,
+                fault: TokenFault::Empty,
+            });
+        }
+        if bytes.len() > MAX_TOKEN_BYTES {
+            return Err(Rejection::MalformedToken {
+                field,
+                fault: TokenFault::TooLong { found: bytes.len() },
+            });
+        }
+        for (offset, byte) in bytes.iter().enumerate() {
+            if !byte.is_ascii_graphic() {
+                return Err(Rejection::MalformedToken {
+                    field,
+                    fault: TokenFault::NonPrintable {
+                        offset,
+                        byte: *byte,
+                    },
+                });
+            }
+        }
+        Ok(Self(bytes.to_vec()))
+    }
+
     /// The token's bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
@@ -462,6 +554,11 @@ pub struct Variable {
 }
 
 impl Variable {
+    /// A declared variable. Crate-internal: only a decoder builds one.
+    pub(crate) const fn new(name: Token, lo: i64, hi: i64) -> Self {
+        Self { name, lo, hi }
+    }
+
     /// The variable's name.
     #[must_use]
     pub const fn name(&self) -> &Token {
@@ -843,6 +940,175 @@ impl StateTypeBody {
     }
 }
 
+/// The decoded body of a wire-epoch-2 finite-closure certificate: the model it is
+/// about, the property, the canonical state table, and one successor row per table
+/// state with targets named by table index.
+///
+/// Every index was range-checked at decode: an action index against the model's
+/// actions and a target index against the table. Each row is strictly ascending by
+/// `(action, target)`, which, because the table is strictly ascending, is the order
+/// of `(action, target vector)` a wire-epoch-1 row is written in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelClosureBody {
+    model: Model,
+    property: PropertyClass,
+    predicate: Option<usize>,
+    table: StateTable,
+    entries: Vec<(u16, u32)>,
+    ends: Vec<u32>,
+}
+
+impl ModelClosureBody {
+    /// The canonical state table.
+    #[must_use]
+    pub const fn table(&self) -> &StateTable {
+        &self.table
+    }
+
+    /// The property class the certificate declares.
+    #[must_use]
+    pub const fn property(&self) -> PropertyClass {
+        self.property
+    }
+
+    /// The carried model's canonical encoding (`continuum-model/1`), byte for byte.
+    ///
+    /// This is the model's identity (ADR-0013). A caller binds the certificate to
+    /// its own model by comparing these bytes with that model's identity.
+    #[must_use]
+    pub fn model_identity(&self) -> &[u8] {
+        self.model.identity()
+    }
+
+    /// How many transitions the rows carry in total.
+    #[must_use]
+    pub fn transition_count(&self) -> u64 {
+        u64::try_from(self.entries.len()).unwrap_or(u64::MAX)
+    }
+
+    /// The invariant's predicate name, for [`PropertyClass::Invariant`].
+    #[must_use]
+    pub fn invariant(&self) -> Option<&Token> {
+        self.predicate
+            .and_then(|index| self.model.predicate_name(index))
+    }
+
+    pub(crate) const fn model(&self) -> &Model {
+        &self.model
+    }
+
+    pub(crate) const fn predicate(&self) -> Option<usize> {
+        self.predicate
+    }
+
+    /// The carried successor row of table state `index`: `(action, target)` pairs,
+    /// strictly ascending, every index range-checked at decode. `None` past the table.
+    #[must_use]
+    pub fn row(&self, index: u32) -> Option<&[(u16, u32)]> {
+        let position = usize::try_from(index).ok()?;
+        let end = usize::try_from(*self.ends.get(position)?).ok()?;
+        let start = match position.checked_sub(1) {
+            Some(previous) => usize::try_from(*self.ends.get(previous)?).ok()?,
+            None => 0,
+        };
+        self.entries.get(start..end)
+    }
+
+    fn decode(reader: &mut Reader<'_>) -> Result<Self, DecodeFailure> {
+        let len = reader.u32(Field::ModelLength)?;
+        let section = reader.take(
+            Field::ModelLength,
+            usize::try_from(len).unwrap_or(usize::MAX),
+        )?;
+        if len > MAX_MODEL_BYTES {
+            return Err(DecodeFailure::Unsupported(Feature::ResourceBound {
+                resource: Resource::ModelBytes,
+                needed: u64::from(len),
+                limit: u64::from(MAX_MODEL_BYTES),
+            }));
+        }
+        let model = crate::model::decode(section)?;
+
+        let class_code = reader.u16(Field::PropertyClassCode)?;
+        let (property, predicate) = match PropertyClass::from_code(class_code) {
+            Some(PropertyClass::StateDomain) => (PropertyClass::StateDomain, None),
+            Some(PropertyClass::Invariant) => {
+                let name = reader.token(Field::PropertyPredicate)?;
+                let index = model
+                    .predicate_index(&name)
+                    .ok_or(Rejection::UnresolvedName {
+                        field: Field::PropertyPredicate,
+                    })?;
+                (PropertyClass::Invariant, Some(index))
+            }
+            None => {
+                return Err(DecodeFailure::Unsupported(Feature::PropertyClass {
+                    found: class_code,
+                }));
+            }
+        };
+
+        let table = StateTable::decode(reader, model.variables().len())?;
+        let action_count = model.action_count();
+        let mut entries: Vec<(u16, u32)> = Vec::new();
+        let mut ends: Vec<u32> = Vec::new();
+        let mut total: u64 = 0;
+        for state in 0..table.len() {
+            let count = reader.counted_u32(Field::TransitionCount, 0, MAX_STATES)?;
+            total = total.saturating_add(u64::from(count));
+            if total > MAX_TRANSITIONS {
+                return Err(Rejection::CountOutOfRange {
+                    field: Field::TransitionCount,
+                    found: total,
+                    min: 0,
+                    max: MAX_TRANSITIONS,
+                }
+                .into());
+            }
+            let mut previous: Option<(u16, u32)> = None;
+            for entry in 0..count {
+                let action = reader.u16(Field::TransitionAction)?;
+                let target = reader.u32(Field::TransitionTarget)?;
+                if usize::from(action) >= action_count {
+                    return Err(Rejection::UnknownAction {
+                        state,
+                        entry,
+                        action,
+                    }
+                    .into());
+                }
+                if target >= table.len() {
+                    return Err(Rejection::TargetOutOfRange {
+                        state,
+                        entry,
+                        target,
+                    }
+                    .into());
+                }
+                if previous.is_some_and(|before| before >= (action, target)) {
+                    return Err(Rejection::NotStrictlyAscending {
+                        field: Field::TransitionAction,
+                        index: entry,
+                    }
+                    .into());
+                }
+                previous = Some((action, target));
+                entries.push((action, target));
+            }
+            ends.push(u32::try_from(entries.len()).unwrap_or(u32::MAX));
+        }
+
+        Ok(Self {
+            model,
+            property,
+            predicate,
+            table,
+            entries,
+            ends,
+        })
+    }
+}
+
 /// A decoded certificate: the envelope plus one family body.
 ///
 /// Inert data. It carries no behaviour, no reference to a producer, and no way to be
@@ -871,7 +1137,7 @@ impl Certificate {
     #[must_use]
     pub const fn kind(&self) -> CertificateKind {
         match self.body {
-            Body::FiniteClosure(_) => CertificateKind::FiniteClosure,
+            Body::FiniteClosure(_) | Body::ModelClosure(_) => CertificateKind::FiniteClosure,
             Body::StateType(_) => CertificateKind::StateType,
         }
     }
@@ -880,8 +1146,10 @@ impl Certificate {
 /// The family-specific half of a decoded certificate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Body {
-    /// A closed-reachable-set certificate.
+    /// A wire-epoch-1 closed-reachable-set certificate, carrying its own relation.
     FiniteClosure(FiniteClosureBody),
+    /// A wire-epoch-2 closed-reachable-set certificate, carrying its model.
+    ModelClosure(ModelClosureBody),
     /// A state-typing certificate.
     StateType(StateTypeBody),
 }
@@ -912,7 +1180,7 @@ pub fn decode(bytes: &[u8]) -> Result<Certificate, DecodeFailure> {
         return Err(DecodeFailure::Rejected(Rejection::BadMagic));
     }
     let epoch = reader.u16(Field::WireEpoch)?;
-    if epoch != WIRE_EPOCH {
+    if epoch != WIRE_EPOCH && epoch != LEGACY_WIRE_EPOCH {
         return Err(DecodeFailure::Unsupported(Feature::WireEpoch {
             found: epoch,
         }));
@@ -924,8 +1192,17 @@ pub fn decode(bytes: &[u8]) -> Result<Certificate, DecodeFailure> {
         }));
     };
 
+    if epoch == WIRE_EPOCH && kind != CertificateKind::FiniteClosure {
+        return Err(DecodeFailure::Unsupported(Feature::CertificateKind {
+            found: kind_code,
+        }));
+    }
+
     let envelope = Envelope::decode(&mut reader, epoch)?;
     let body = match kind {
+        CertificateKind::FiniteClosure if epoch == WIRE_EPOCH => {
+            Body::ModelClosure(ModelClosureBody::decode(&mut reader)?)
+        }
         CertificateKind::FiniteClosure => {
             Body::FiniteClosure(FiniteClosureBody::decode(&mut reader)?)
         }
@@ -1063,7 +1340,7 @@ mod tests {
         let bytes = closure_bytes();
         let certificate = decode(&bytes).expect("green finite-closure certificate decodes");
         assert_eq!(certificate.kind(), CertificateKind::FiniteClosure);
-        assert_eq!(certificate.envelope().schema_epoch(), WIRE_EPOCH);
+        assert_eq!(certificate.envelope().schema_epoch(), LEGACY_WIRE_EPOCH);
         assert_eq!(
             certificate.envelope().model_digest().as_str(),
             "blake3:diehard-model"

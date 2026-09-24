@@ -54,7 +54,10 @@
 //!   docs/03 §6.1's "Closed finite state space": `Init ⊆ S`, `Post(S) ⊆ S`,
 //!   `S ⊆ P`. The formal statement, and the theorem that these three conjuncts imply
 //!   safety at every reachable state, is `ClosureCertificate` in
-//!   `lean/Continuum/Certificate.lean` (RFC 0012 rung T0).
+//!   `lean/Continuum/Certificate.lean` (RFC 0012 rung T0). At wire epoch 2 the
+//!   certificate carries its model, and the kernel re-derives the initial states,
+//!   the domain and every successor row from it with its own decoder and evaluator
+//!   (`model`, crate-private; RFC 0005 correction 1, bn-35y4f).
 //! - [`verdict::CertificateKind::StateType`] — every state of the certificate's table
 //!   lies in the declared state domain (docs/16 PO-MOD-003); composed with a closure
 //!   certificate over the same table this is the "finite closure safety for DieHard
@@ -117,6 +120,7 @@
 )]
 
 pub mod check;
+mod model;
 pub mod receipt;
 pub mod verdict;
 pub mod wire;
@@ -127,5 +131,6 @@ mod fixture;
 pub use check::check_certificate;
 pub use receipt::{Receipt, ReceiptError, Seam, SeamField, receipt};
 pub use verdict::{
-    CertificateKind, CheckedClaim, Feature, Field, PropertyClass, Rejection, TokenFault, Verdict,
+    CertificateKind, CheckedClaim, Feature, Field, PropertyClass, Rejection, Resource, TokenFault,
+    Verdict,
 };

@@ -1152,7 +1152,7 @@ fn a_certificate_naming_a_contract_the_kernel_does_not_implement_is_typed_inconc
     let mut other_epoch = certificate_bytes();
     *other_epoch
         .get_mut(9)
-        .expect("the epoch is inside the header") = 2;
+        .expect("the epoch is inside the header") = 3; // the engine writes epoch 2 (bn-35y4f)
     assert!(matches!(
         continuum_certificate::check_certificate(&other_epoch),
         Outcome::Checked(KernelVerdict::Core(

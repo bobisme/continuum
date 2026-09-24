@@ -24,6 +24,9 @@ continuum-intent = { path = "../continuum-intent" }
 # (`tools/check_crate_boundaries.py:37-39`).
 [dev-dependencies]
 continuum-engine-reference = { path = "../continuum-engine-reference" }
+# The claim-A certificate test checks the engine's wire-epoch-2 bytes with the kernel
+# (bn-35y4f). Dev position only; the kernel links nothing back.
+continuum-kernel-core = { path = "../continuum-kernel-core" }
 
 [lints]
 workspace = true

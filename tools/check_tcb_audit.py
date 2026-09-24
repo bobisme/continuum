@@ -166,6 +166,9 @@ CHECKER_TEST = "crates/continuum-certificate/tests/c018_checker_mutation.rs"
 CHECKER_GOLDEN = "crates/continuum-certificate/tests/golden/c018_checker_ledger.txt"
 CHECKER_CORPUS = "crates/continuum-certificate/tests/c018-corpus/cases.txt"
 PRODUCER_TEST = "crates/continuum-engine-reference/tests/c018_producer_corpus.rs"
+# One probe line per (model, property) of the producer corpus: three models for their
+# state domains, plus three model invariants (bn-35y4f).
+PRODUCER_PROBES = 6
 
 # Test name -> the kill class a failure of it proves.
 KILL_CLASS = {
@@ -1182,7 +1185,7 @@ def validate_record(
     else:
         if control.get("checker") != "passed" or control.get("producer") != "passed":
             out.append(f"{tag} the lane's unmutated control did not pass: {control}")
-        if not isinstance(control.get("producer_lines"), list) or len(control.get("producer_lines")) != 3:
+        if not isinstance(control.get("producer_lines"), list) or len(control.get("producer_lines")) != PRODUCER_PROBES:
             out.append(f"{tag} the control does not record one probe line per corpus model")
         compiled = control.get("tcb02_fixtures_compile")
         if compiled != {fid: True for fid in fixtures}:
@@ -1423,7 +1426,7 @@ def run_lane(mutants: list[dict]) -> tuple[list[dict], dict, list[str]]:
         if status != "passed":
             failures.append(f"lane control: the unmutated checker target did not pass ({status} {failed} {detail})")
         pstatus, baseline, pdetail = run_producer(work)
-        if pstatus != "passed" or len(baseline) != 3:
+        if pstatus != "passed" or len(baseline) != PRODUCER_PROBES:
             failures.append(f"lane control: the unmutated producer target did not pass ({pstatus} {pdetail})")
         control = {"checker": status, "producer": pstatus, "producer_lines": baseline}
         # The TCB-02 fixtures are real Rust: each must compile in the crate it names, or

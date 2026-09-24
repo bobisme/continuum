@@ -30,7 +30,7 @@
   },
   "checker": {
     "name": "continuum-kernel-core",
-    "version": "0.0.0+wire.CONTCERT.1",
+    "version": "0.0.0+wire.CONTCERT.2",
     "source_hash": "blake3:kernel-core-source",
     "binary_hash": "blake3:kernel-core-binary",
     "toolchain": "rustc 1.97.0 (pinned by rust-toolchain.toml)"

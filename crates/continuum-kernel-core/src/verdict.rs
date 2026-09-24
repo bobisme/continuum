@@ -35,7 +35,7 @@
 //! There is deliberately no `Unknown`, no `Warning`, and no `Verified` variant that
 //! can be constructed without a [`CheckedClaim`].
 
-use crate::wire::Envelope;
+use crate::wire::{Envelope, Token};
 
 /// The outcome of checking one certificate from its wire form.
 ///
@@ -144,26 +144,32 @@ impl CertificateKind {
 /// the DieHard `TypeOK` invariant (`notes/plan/corpus/tla-examples/ports/TV-009`,
 /// `invariant TypeOK { big in 0..5 && small in 0..3 }`).
 ///
-/// Richer property languages need the propositional/first-order expression evaluator
-/// RFC 0005 places in `continuum-kernel-core`; until it lands, a certificate that
-/// names another class is [`Feature::PropertyClass`] rather than a rejection, so no
-/// caller can read "unimplemented" as "false".
+/// Richer property languages use the propositional expression evaluator RFC 0005
+/// places in `continuum-kernel-core` (`crate::model`), and so need a certificate that
+/// carries its model: [`Self::Invariant`] exists only at wire epoch 2. A wire-epoch-1
+/// certificate that names it, or any certificate that names another class, is
+/// [`Feature::PropertyClass`] rather than a rejection, so no caller can read
+/// "unimplemented" as "false".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PropertyClass {
     /// The safety property is the declared state domain itself: every state variable
     /// lies within its inclusive range.
     StateDomain,
+    /// The safety property is one named predicate of the carried model, evaluated by
+    /// the kernel at every table state (wire epoch 2 only; bn-35y4f).
+    Invariant,
 }
 
 impl PropertyClass {
     /// Every property class this crate evaluates, in wire-code order.
-    pub const ALL: [Self; 1] = [Self::StateDomain];
+    pub const ALL: [Self; 2] = [Self::StateDomain, Self::Invariant];
 
     /// The `property_class` code this class occupies in the wire body.
     #[must_use]
     pub const fn code(self) -> u16 {
         match self {
             Self::StateDomain => 1,
+            Self::Invariant => 2,
         }
     }
 
@@ -172,6 +178,7 @@ impl PropertyClass {
     pub const fn from_code(code: u16) -> Option<Self> {
         match code {
             1 => Some(Self::StateDomain),
+            2 => Some(Self::Invariant),
             _ => None,
         }
     }
@@ -181,9 +188,37 @@ impl PropertyClass {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::StateDomain => "state-domain",
+            Self::Invariant => "invariant",
         }
     }
 }
+
+/// How a verified claim is bound to its model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ModelBinding {
+    /// Wire epoch 1, or a family that carries no model: the correspondence between
+    /// the carried data and the model is trusted.
+    Trusted,
+    /// Wire epoch 2: the certificate carried the model, and every obligation was
+    /// re-derived from it.
+    Carried(Box<CarriedModel>),
+}
+
+/// What a model-bound claim records about its model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CarriedModel {
+    identity: Vec<u8>,
+    invariant: Option<Token>,
+}
+
+/// The trusted components of a claim whose model correspondence is trusted.
+const TRUSTED_WITHOUT_MODEL: &[&str] = &[
+    "certificate-model-correspondence",
+    "envelope-digest-binding",
+];
+
+/// The trusted components of a claim re-derived from its carried model.
+const TRUSTED_WITH_MODEL: &[&str] = &["envelope-digest-binding"];
 
 /// What a [`Verdict::Verified`] actually asserts.
 ///
@@ -201,10 +236,13 @@ pub struct CheckedClaim {
     states: u32,
     initial_states: u32,
     transitions: u64,
+    wire_epoch: u16,
+    binding: ModelBinding,
 }
 
 impl CheckedClaim {
-    /// Build a claim record. Crate-internal: only a completed check may mint one.
+    /// Build a claim record whose model correspondence is trusted (wire epoch 1).
+    /// Crate-internal: only a completed check may mint one.
     pub(crate) const fn new(
         kind: CertificateKind,
         property: PropertyClass,
@@ -220,6 +258,62 @@ impl CheckedClaim {
             states,
             initial_states,
             transitions,
+            wire_epoch: crate::wire::LEGACY_WIRE_EPOCH,
+            binding: ModelBinding::Trusted,
+        }
+    }
+
+    /// Build a claim record re-derived from a carried model (wire epoch 2).
+    /// Crate-internal: only a completed check may mint one.
+    pub(crate) fn model_bound(
+        property: PropertyClass,
+        envelope: Envelope,
+        counts: (u32, u32, u64),
+        identity: &[u8],
+        invariant: Option<Token>,
+    ) -> Self {
+        let (states, initial_states, transitions) = counts;
+        Self {
+            kind: CertificateKind::FiniteClosure,
+            property,
+            envelope,
+            states,
+            initial_states,
+            transitions,
+            wire_epoch: crate::wire::WIRE_EPOCH,
+            binding: ModelBinding::Carried(Box::new(CarriedModel {
+                identity: identity.to_vec(),
+                invariant,
+            })),
+        }
+    }
+
+    /// The wire epoch of the certificate this claim was checked from.
+    #[must_use]
+    pub const fn wire_epoch(&self) -> u16 {
+        self.wire_epoch
+    }
+
+    /// The carried model's canonical encoding, when the certificate carried one.
+    ///
+    /// `None` for a wire-epoch-1 claim. A caller binds a model-bound claim to its
+    /// own model by comparing these bytes with that model's canonical identity
+    /// (ADR-0013: identity is the encoding, compared exactly).
+    #[must_use]
+    pub fn model_identity(&self) -> Option<&[u8]> {
+        match &self.binding {
+            ModelBinding::Carried(carried) => Some(&carried.identity),
+            ModelBinding::Trusted => None,
+        }
+    }
+
+    /// The model predicate established at every reachable state, for
+    /// [`PropertyClass::Invariant`].
+    #[must_use]
+    pub fn invariant(&self) -> Option<&Token> {
+        match &self.binding {
+            ModelBinding::Carried(carried) => carried.invariant.as_ref(),
+            ModelBinding::Trusted => None,
         }
     }
 
@@ -269,24 +363,26 @@ impl CheckedClaim {
     /// The components this verdict still trusts, in the sense of docs/03 §2's
     /// `trusted: Vec<TrustedComponent>`.
     ///
-    /// The kernel re-derives every obligation *inside* the certificate. Two things
-    /// it structurally cannot re-derive, because a self-contained artifact does not
-    /// contain them, are named here so no rendering of a verified claim can quietly
-    /// omit them:
+    /// The kernel re-derives every obligation *inside* the certificate. What it
+    /// structurally cannot re-derive is named here so no rendering of a verified
+    /// claim can quietly omit it:
     ///
-    /// - `certificate-model-correspondence` — that the carried transition relation
-    ///   is the transition relation of the model named by `model_digest`. Binding
-    ///   those is the receipt/producer obligation (RFC 0024; ADR-0035), and it is
-    ///   precisely why RFC 0005 puts the envelope hashes in the certificate.
+    /// - `certificate-model-correspondence` — wire epoch 1 and the state-type family
+    ///   only: that the carried transition relation, initial states and domain are
+    ///   those of the model named by `model_digest`. A wire-epoch-2 certificate
+    ///   carries the model and the kernel re-derives all three from it, so its claim
+    ///   does not list this component (bn-35y4f).
     /// - `envelope-digest-binding` — that the envelope's digests were computed over
-    ///   the artifacts they name. The kernel checks their shape, not their contents;
-    ///   ADR-0013 canonical identity is `continuum-value`'s obligation.
+    ///   the artifacts they name, including, at wire epoch 2, that `model_digest`
+    ///   names the carried model ([`Self::model_identity`]). The kernel checks their
+    ///   shape, not their contents; ADR-0013 canonical identity is `continuum-value`'s
+    ///   obligation.
     #[must_use]
     pub const fn trusted_components(&self) -> &'static [&'static str] {
-        &[
-            "certificate-model-correspondence",
-            "envelope-digest-binding",
-        ]
+        match self.binding {
+            ModelBinding::Trusted => TRUSTED_WITHOUT_MODEL,
+            ModelBinding::Carried(_) => TRUSTED_WITH_MODEL,
+        }
     }
 }
 
@@ -347,8 +443,29 @@ pub enum Field {
     TransitionCount,
     /// Finite closure: one transition's action index.
     TransitionAction,
-    /// Finite closure: one transition's target state vector.
+    /// Finite closure: one transition's target state vector (wire epoch 1) or
+    /// table index (wire epoch 2).
     TransitionTarget,
+    /// Wire epoch 2: the model section's length.
+    ModelLength,
+    /// Model section: the `continuum-model/1` tag.
+    ModelTag,
+    /// Model section: the variable count, a variable name or its range.
+    ModelVariable,
+    /// Model section: the action count or an action name.
+    ModelAction,
+    /// Model section: an outcome or one of its assignments.
+    ModelOutcome,
+    /// Model section: an expression node.
+    ModelExpression,
+    /// Model section: the initial-state count or one initial state.
+    ModelInitialState,
+    /// Model section: the predicate count or a predicate name.
+    ModelPredicate,
+    /// Model section: the fairness section.
+    ModelFairness,
+    /// Wire epoch 2: the invariant property's predicate name.
+    PropertyPredicate,
 }
 
 impl Field {
@@ -382,6 +499,16 @@ impl Field {
             Self::TransitionCount => "transition-count",
             Self::TransitionAction => "transition-action",
             Self::TransitionTarget => "transition-target",
+            Self::ModelLength => "model-length",
+            Self::ModelTag => "model-tag",
+            Self::ModelVariable => "model-variable",
+            Self::ModelAction => "model-action",
+            Self::ModelOutcome => "model-outcome",
+            Self::ModelExpression => "model-expression",
+            Self::ModelInitialState => "model-initial-state",
+            Self::ModelPredicate => "model-predicate",
+            Self::ModelFairness => "model-fairness",
+            Self::PropertyPredicate => "property-predicate",
         }
     }
 }
@@ -540,6 +667,77 @@ pub enum Rejection {
         /// The value the state carried for that variable.
         value: i64,
     },
+    /// The model section does not start with the `continuum-model/1` tag.
+    BadModelTag,
+    /// Bytes remain in the model section after the model ends.
+    ModelTrailingBytes {
+        /// How many bytes followed the model.
+        extra: usize,
+    },
+    /// A byte that must be an opcode, an operator or a strength names none.
+    UnknownOpcode {
+        /// Where.
+        field: Field,
+        /// The byte.
+        opcode: u8,
+    },
+    /// A name the model mentions (in an expression, an assignment, a fairness
+    /// scope) or the invariant names is not declared.
+    UnresolvedName {
+        /// Where.
+        field: Field,
+    },
+    /// A wire-epoch-2 transition names a target index outside the state table.
+    TargetOutOfRange {
+        /// Index of the source state in the state table.
+        state: u32,
+        /// Index of the transition within that state's successor row.
+        entry: u32,
+        /// The out-of-range target index.
+        target: u32,
+    },
+    /// Evaluating the carried model at a table state overflowed `i64`.
+    ///
+    /// The model has no well-defined successor relation (or property value) at that
+    /// state, so no certificate about it can be valid.
+    EvaluationOverflow {
+        /// Index of the state in the state table.
+        state: u32,
+    },
+    /// An enabled action of the carried model leaves a variable's declared domain
+    /// at a table state.
+    UpdateOutsideDomain {
+        /// Index of the source state in the state table.
+        state: u32,
+        /// Index of the action in the model.
+        action: u16,
+        /// Index of the variable.
+        variable: u16,
+        /// The value it would take.
+        value: i64,
+    },
+    /// A successor the carried model derives at a table state is not in the table.
+    ///
+    /// The `Post(S) ⊆ S` obligation over the model's own relation, and
+    /// `ClosureCertificate.closed` in `lean/Continuum/Certificate.lean`.
+    SuccessorNotInTable {
+        /// Index of the source state in the state table.
+        state: u32,
+        /// Index of the action in the model.
+        action: u16,
+    },
+    /// A carried successor row is not the row the carried model derives.
+    RelationMismatch {
+        /// Index of the source state in the state table.
+        state: u32,
+        /// The first row position where the carried and the derived rows differ.
+        entry: u32,
+    },
+    /// A table state falsifies the certificate's invariant predicate.
+    InvariantViolated {
+        /// Index of the state in the state table.
+        state: u32,
+    },
 }
 
 impl Rejection {
@@ -570,6 +768,16 @@ impl Rejection {
             Self::UnknownAction { .. } => "unknown-action",
             Self::ClosureFailure { .. } => "closure-failure",
             Self::PropertyViolated { .. } => "property-violated",
+            Self::BadModelTag => "bad-model-tag",
+            Self::ModelTrailingBytes { .. } => "model-trailing-bytes",
+            Self::UnknownOpcode { .. } => "unknown-opcode",
+            Self::UnresolvedName { .. } => "unresolved-name",
+            Self::TargetOutOfRange { .. } => "target-out-of-range",
+            Self::EvaluationOverflow { .. } => "evaluation-overflow",
+            Self::UpdateOutsideDomain { .. } => "update-outside-domain",
+            Self::SuccessorNotInTable { .. } => "successor-not-in-table",
+            Self::RelationMismatch { .. } => "relation-mismatch",
+            Self::InvariantViolated { .. } => "invariant-violated",
         }
     }
 
@@ -583,7 +791,9 @@ impl Rejection {
             Self::Truncated { field, .. }
             | Self::MalformedToken { field, .. }
             | Self::CountOutOfRange { field, .. }
-            | Self::NotStrictlyAscending { field, .. } => Some(*field),
+            | Self::NotStrictlyAscending { field, .. }
+            | Self::UnknownOpcode { field, .. }
+            | Self::UnresolvedName { field } => Some(*field),
             _ => None,
         }
     }
@@ -615,11 +825,49 @@ pub enum Feature {
         /// The declared family code.
         found: u16,
     },
-    /// The certificate declares a property class outside [`PropertyClass::ALL`].
+    /// The certificate declares a property class outside [`PropertyClass::ALL`], or
+    /// one its wire epoch cannot carry.
     PropertyClass {
         /// The declared class code.
         found: u16,
     },
+    /// Checking the certificate needs more of a resource than this checker grants
+    /// (RFC 0005 "Resource bounds"). The certificate may be valid; this checker
+    /// declines to spend what checking it would cost.
+    ResourceBound {
+        /// Which resource.
+        resource: Resource,
+        /// How much the certificate needs (a lower bound when it did not fit).
+        needed: u64,
+        /// How much this checker grants.
+        limit: u64,
+    },
+}
+
+/// A resource a wire-epoch-2 check is bounded in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Resource {
+    /// The model section's length, against [`crate::wire::MAX_MODEL_BYTES`].
+    ModelBytes,
+    /// Expression nodes, against [`crate::wire::MAX_EXPRESSION_NODES`].
+    ExpressionNodes,
+    /// Expression nesting, against [`crate::wire::MAX_EXPRESSION_DEPTH`].
+    ExpressionDepth,
+    /// Precharged evaluation work, against [`crate::wire::MAX_EVALUATION_WORK`].
+    EvaluationWork,
+}
+
+impl Resource {
+    /// The stable lower-case token naming this resource in diagnostics.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ModelBytes => "model-bytes",
+            Self::ExpressionNodes => "expression-nodes",
+            Self::ExpressionDepth => "expression-depth",
+            Self::EvaluationWork => "evaluation-work",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -642,7 +890,7 @@ mod tests {
             assert_eq!(PropertyClass::from_code(class.code()), Some(class));
         }
         assert_eq!(PropertyClass::from_code(0), None);
-        assert_eq!(PropertyClass::from_code(2), None);
+        assert_eq!(PropertyClass::from_code(3), None);
     }
 
     #[test]
@@ -650,6 +898,7 @@ mod tests {
         assert_eq!(CertificateKind::FiniteClosure.as_str(), "finite-closure");
         assert_eq!(CertificateKind::StateType.as_str(), "state-type");
         assert_eq!(PropertyClass::StateDomain.as_str(), "state-domain");
+        assert_eq!(PropertyClass::Invariant.as_str(), "invariant");
     }
 
     #[test]
@@ -682,6 +931,16 @@ mod tests {
             Field::TransitionCount,
             Field::TransitionAction,
             Field::TransitionTarget,
+            Field::ModelLength,
+            Field::ModelTag,
+            Field::ModelVariable,
+            Field::ModelAction,
+            Field::ModelOutcome,
+            Field::ModelExpression,
+            Field::ModelInitialState,
+            Field::ModelPredicate,
+            Field::ModelFairness,
+            Field::PropertyPredicate,
         ];
         let tokens: std::collections::BTreeSet<&str> = fields.iter().map(|f| f.as_str()).collect();
         assert_eq!(tokens.len(), fields.len());

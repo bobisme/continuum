@@ -89,6 +89,32 @@ A prefix certificate commits to events, cutoffs, and continuation-equivalence ob
 
 A SAT/SMT solution maps observed events to model events and ordering constraints. The certificate must distinguish fully matched, existentially completed, ambiguous, and impossible traces.
 
+### Model-bound finite closure (correction 1)
+
+A closed-reachable-set certificate that carries only its own successor relation lets the kernel check closure under that relation, not that the relation is the model's. bn-2npu measured the gap: 7 of 12 producer mutants of the reference engine wrote a closed, in-domain relation that was not the model's, and the kernel verified it. So a certificate that names its model only by digest leaves `certificate-model-correspondence` trusted.
+
+Normative (bn-35y4f). `continuum-kernel-core` wire epoch 2 defines the finite-closure family as model-bound:
+
+```text
+body := model_len:u32 model          -- the model's canonical encoding, continuum-model/1
+        property                     -- 1 state-domain | 2 predicate:token (invariant)
+        state_count:u32 state*       -- the canonical table, strictly ascending
+        row * state_count
+row  := transition_count:u32 (action:u16 target:u32)*   -- indices, strictly ascending
+```
+
+The domain, the initial states and the action names are the carried model's. The kernel decodes the model with its own decoder and evaluates it with its own evaluator (see "Kernel layering"). Then it checks, in order:
+
+1. the evaluation work, charged from decoded sizes before any evaluation;
+2. every table state lies in the model's declared domain;
+3. every initial state of the model is in the table;
+4. at every table state, the kernel evaluates every action of the model and locates each successor in the table, and the carried row must equal that re-derived row entry for entry;
+5. for the invariant class, the named predicate of the model holds at every table state.
+
+A fault while evaluating (an `i64` overflow, or an update that leaves its variable's domain) is a rejection: the model has no well-defined relation at that state. Every carried index is range-checked at decode. A model section, an expression depth, a node count or an evaluation work over the kernel's bounds is `Unsupported` with the resource named, never a rejection. A verified wire-epoch-2 claim does not list `certificate-model-correspondence`. It still lists `envelope-digest-binding`: that the carried model is the caller's model. The claim exposes the carried encoding, so a caller binds it by exact byte comparison with its own model's identity (ADR-0013).
+
+Wire epoch 1 stays decodable for the two-epoch window of ADR-0018. A wire-epoch-1 claim keeps `certificate-model-correspondence` in its trusted components, so the assurance difference is visible in every verdict and receipt. Wire epoch 2 defines no state-type family. The invariant class exists only at wire epoch 2.
+
 ## Kernel layering
 
 ```text
@@ -148,6 +174,12 @@ Certificate checking itself is an attack surface. Formats need:
 - proof round trips from multiple producers;
 - reproducible cross-platform verdicts;
 - `unsafe` audit and minimal dependency closure.
+
+## Corrections recorded by this RFC
+
+Per plan §25, where plan prose or docs disagree with this RFC, this RFC governs. The corrections in force:
+
+1. **Model-bound finite closure.** docs/03 §6.1 lists "recompute every enabled transition" as a checker step, and "Kernel layering" places the expression and transition-relation evaluators in `continuum-kernel-core`, but the wire-epoch-1 certificate carried no model, so the kernel could not perform that step. Normative: "Model-bound finite closure (correction 1)" above (bn-35y4f). Direction: the RFC completes docs/03 §6.1 and its own "Closed reachable set"; no contradiction.
 
 ## Rejected alternatives
 

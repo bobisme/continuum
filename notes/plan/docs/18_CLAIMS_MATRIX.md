@@ -33,7 +33,7 @@ REFUTED
 | C015 | Cubical reduction outperforms optimal DPOR on high-width systems | preregistered benchmark | HYPOTHESIS |
 | C016 | Sheaf gluing yields useful compositional diagnostics | direct-SAT comparison and theorem | HYPOTHESIS |
 | C017 | Topological coverage improves bug yield | held-out mutant campaign | HYPOTHESIS |
-| C018 | Proof-carrying results materially shrink the TCB | independent checker audit and mutation | TARGET |
+| C018 | Proof-carrying results materially shrink the TCB | independent checker audit and mutation | OBSERVED |
 | C019 | Production instrumentation overhead is acceptable | per-tier real workload benchmarks | TARGET |
 | C020 | Agent repairs do not weaken properties/assumptions silently | semantic diff and hidden-mutant evaluation | OBSERVED |
 
@@ -185,8 +185,10 @@ allowed on an added accepted evidence class. RFC 0031 correction 20 (bn-36luu)
 now routes each of them to `review`.
 C033, agent repair of concurrent Rust, stays TARGET.
 
-C018 stays TARGET. bn-2npu ran the independent checker audit and the mutation
-campaign, and the evidence does not show a material shrink yet. The audit is
+C018 is observed on finite-closure certificates at `continuum-kernel-core` wire
+epoch 2, and only there (bn-35y4f). bn-2npu ran the independent checker audit and
+the mutation campaign, and at wire epoch 1 its evidence did not show a material
+shrink. bn-35y4f added the model-bound epoch and reran both. The audit is
 `tools/check_tcb_audit.py`, with its retained record
 `tools/tcb-audit/evidence/c018.json`. It reads the resolved dependency graph by Cargo
 package id, dev edges included. Over it, the checking base links only its own
@@ -208,24 +210,27 @@ compiling fixtures each fail it for their own stated reason. The retained record
 checked whole: its controls, rows, summary and measurements must equal a
 recomputation, and its digest covers every file under the checking crates and the
 workspace build inputs. The record is replaced only by a campaign that passed. The
-checking base is 11545 shipped lines by the KCOV counting method. An edit to it fails
+checking base is 13156 shipped lines by the KCOV counting method. An edit to it fails
 `just covenant` until the lane runs again.
 
 The checker campaign is `crates/continuum-certificate/tests/c018_checker_mutation.rs`.
 Its ledger is `tests/golden/c018_checker_ledger.txt`, and its corpus is
-`tests/c018-corpus/cases.txt`. It covers the six classes the kernels check: finite
-closure, state type, LRAT, SMT proof, ranking and fair-SCC exclusion. The kernels
-accept all nine green certificates. They reject 27 of 28 corrupted certificates, each
-for the reason it targets. The exception is a false SMT theory lemma. The kernel
-accepts it by design, and the claim names `TRUSTED_SOLVER` and the theory. Of 8142
-single-byte mutants, the kernels accept 1508. For each one, an oracle re-derives the
+`tests/c018-corpus/cases.txt`. It covers the seven classes the kernels check: finite
+closure at wire epochs 1 and 2, state type, LRAT, SMT proof, ranking and fair-SCC
+exclusion. The kernels accept all eleven green certificates. They reject 37 of 38
+corrupted certificates, each for the reason it targets. The exception is a false SMT
+theory lemma. The kernel accepts it by design, and the claim names `TRUSTED_SOLVER`
+and the theory. Of 11643 single-byte mutants, the kernels accept 2005. At wire epoch
+2 the oracle is a third reading of the model grammar, written in the test. For each one, an oracle re-derives the
 claim from the mutant by a different method, over the kernels' own decoder. No
 accepted claim is false about the structure the mutant carries. Some accepted mutants
 carry a different relation, such as a transition moved to another table state. The
 kernel cannot tell those from a producer's intent.
 
-Twenty-five source mutants of the checking base ran against scratch copies of its
-crates. The campaign kills 24 of them. Thirteen let a lie through, a false claim or a
+Thirty-five source mutants of the checking base ran against scratch copies of its
+crates. The campaign kills 33 of them. The second survivor turns off the epoch-2
+evaluation precharge: no corpus certificate comes near the budget, and the kernel's
+own unit test kills it. The counts that follow are bn-2npu's first 25. Thirteen let a lie through, a false claim or a
 broken proof. One overstates the assurance of a lemma proof, 6 reject a green, 2 give
 a wrong reason, and 2 change only the ledger. The two ledger-only kills are decoder
 canonicity rules. The survivor removes an arity guard that no wire input can reach.
@@ -242,14 +247,33 @@ kernel to the reference engine's deadlock report over the goal-stopped model, an
 kernel's.
 
 The shrink was measured on the one class with a real producer: finite closure from
-`continuum-engine-reference`. Twelve producer mutants ran through
-`crates/continuum-engine-reference/tests/c018_producer_corpus.rs`. The kernel caught 2
-search faults and 2 emitter faults. It missed 4 emitter faults and 3 evaluator faults,
-and the evaluator refused 1 before emission. Each missed mutant writes a closed,
-in-domain relation that is not the model's. The kernel sees the model only as an
-envelope digest, so the relation stays trusted. `bfs.rs` (892 lines) had no observed
-escape for finite-closure certificates. `certificate.rs` and `model.rs` (2319 lines)
-stay trusted, and the checker for this class adds 2960 lines. That is not a material
-shrink. The SAT, SMT and temporal kernels have no producer in the workspace, so their
-shrink is not measured. C018 needs a checker that re-derives the successor relation
-from the model, or a large producer whose search the checker replaces.
+`continuum-engine-reference`. At wire epoch 1, twelve producer mutants ran through
+`crates/continuum-engine-reference/tests/c018_producer_corpus.rs`. The kernel caught 4,
+missed 7 (4 emitter faults and 3 evaluator faults) and 1 was refused before emission.
+Each missed mutant wrote a closed, in-domain relation that was not the model's,
+because the kernel saw the model only as an envelope digest.
+
+At wire epoch 2 the certificate carries the model's canonical encoding. The kernel
+decodes it with its own decoder and re-derives every successor row with its own
+evaluator (RFC 0005 correction 1). The rerun has 13 producer mutants over six probes:
+three models, and three model invariants. The kernel caught 8: the 4 emitter faults,
+the 3 evaluator faults it missed before, and an encoder operator fault. Three were
+refused before the kernel was asked: the evaluator's domain check, and two search
+faults that the epoch-2 emitter now detects itself. It missed 2, both in the model's
+canonical encoder (`identity.rs`, 395 lines): an encoder that drops an initial state
+or widens a domain defines another model, and the certificate is true of that model.
+The binding of the carried model to the caller's model is `envelope-digest-binding`,
+a trusted component. So for this class the producer files with no observed escape
+are `bfs.rs`, `certificate.rs` and `model.rs` (3306 lines), and `identity.rs` stays
+trusted. The checker for this class is 4577 lines. A whole-domain differential
+(`c018_kernel_evaluator_differential.rs`) holds the kernel's evaluator to the model
+core's over 400 random models. The durable register's claim-A certificate, 61,504
+states and 597,184 transitions, is 14,697,631 bytes at epoch 2, against 117,371,613 at
+epoch 1. The kernel checks it and each of its three invariants.
+
+The scope is exact. A wire-epoch-1 claim still lists
+`certificate-model-correspondence` and keeps the old residual. The daemon today
+validates epoch-1 and epoch-2 certificates alike, and it does not compare a claim's
+carried model with the model it holds, so the binding is not yet enforced on the
+system path. The SAT, SMT and temporal kernels have no producer in the workspace, so
+their shrink is not measured.

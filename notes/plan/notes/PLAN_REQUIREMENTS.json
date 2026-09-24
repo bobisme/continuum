@@ -5790,14 +5790,14 @@
       "coverage": "leaf",
       "id": "C018",
       "metadata": {
-        "initial_state": "TARGET",
+        "initial_state": "OBSERVED",
         "required_evidence": "independent checker audit and mutation"
       },
       "source": {
         "line": 36,
         "path": "docs/18_CLAIMS_MATRIX.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Proof-carrying results materially shrink the TCB"
     },
     {

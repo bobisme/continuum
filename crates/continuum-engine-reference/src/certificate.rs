@@ -45,7 +45,7 @@
 //!
 //! header       := magic:8 wire_epoch:u16 kind:u16
 //! magic        := "CONTCERT"                         -- MAGIC
-//! wire_epoch   := 1                                  -- WIRE_EPOCH
+//! wire_epoch   := 2                                  -- WIRE_EPOCH
 //! kind         := 1 finite-closure                   -- FINITE_CLOSURE_KIND
 //!
 //! envelope     := model_digest:token
@@ -57,33 +57,31 @@
 //!                 schema_epoch:u16
 //!                 domain_pack_count:u16 token*
 //!
-//! body         := variable_count:u16 variable*
+//! body         := model_len:u32 model                -- Model::identity, byte for byte
+//!                 property
 //!                 state_count:u32 state*
-//!                 property_class:u16
-//!                 initial_count:u32 state*
-//!                 action_count:u16 token*
 //!                 row * state_count
-//! variable     := name:token lo:i64 hi:i64
+//! property     := 1                                  -- state-domain
+//!               | 2 predicate:token                  -- invariant
 //! state        := i64 * variable_count
 //! row          := transition_count:u32 transition*
-//! transition   := action:u16 state
+//! transition   := action:u16 target:u32              -- table index
 //! ```
 //!
-//! — `crates/continuum-kernel-core/src/wire.rs:43-74`. Integers are big-endian and
-//! `i64` is two's complement (`.../wire.rs:76`). Six sequences are *strictly*
-//! ascending: domain-pack digests, variable names, state vectors, initial state
-//! vectors, action names, and the transitions within one row (`.../wire.rs:89-96`).
+//! — the wire-epoch-2 grammar in `crates/continuum-kernel-core/src/wire.rs`'s module
+//! documentation (bn-35y4f). Integers are big-endian and `i64` is two's complement.
+//! Epoch 2 carries the model's canonical encoding instead of a separate domain,
+//! initial-state list and action list, so the kernel re-derives all three, and every
+//! successor, from the model. Three sequences are *strictly* ascending: domain-pack
+//! digests, state vectors, and the transitions within one row.
 //!
-//! **Every one of the six arrives already ordered**, which is the point of the two
-//! modules underneath this one:
+//! **Each arrives already ordered**, which is the point of the two modules underneath
+//! this one:
 //!
 //! | Sequence | Where its order comes from |
 //! |---|---|
-//! | variable names | [`Model::variables`], sorted by name at build (`model.rs:55-62`) |
 //! | state vectors | [`Reachable::states`] — "certificate emission is therefore a copy, not a sort" (`bfs.rs:281-286`) |
-//! | initial state vectors | [`Model::initial_states`], strictly ascending at build |
-//! | action names | [`Model::actions`], sorted by name; a position here *is* the wire's action index |
-//! | one successor row | [`Model::successors`], strictly ascending by `(action, target)` (`model.rs:507-513`) |
+//! | one successor row | [`Model::successors`], strictly ascending by `(action, target)`; a target's table index preserves that order because the table is ascending |
 //! | domain-pack digests | the caller's, and the one sequence this module has to check |
 //!
 //! [`Ident`] is byte-ordered for exactly this reason, and refuses names the kernel's
@@ -189,13 +187,13 @@ use crate::model::{EvaluationError, MAX_ACTIONS, MAX_VARIABLES, Model, State, St
 /// `crates/continuum-kernel-core/src/wire.rs:110`.
 pub const MAGIC: [u8; 8] = *b"CONTCERT";
 
-/// The wire epoch this module writes.
+/// The wire epoch this module writes: the model-bound epoch 2 (bn-35y4f).
 ///
-/// `crates/continuum-kernel-core/src/wire.rs:116`. A certificate declaring any other
+/// `crates/continuum-kernel-core/src/wire.rs` `WIRE_EPOCH`. A certificate declaring any other
 /// epoch is a *feature* the checker does not implement rather than a rejection
 /// (`.../wire.rs:914-919`), which is why this is a constant and not a parameter: an
 /// engine that could write an epoch of its choosing could write one no checker knows.
-pub const WIRE_EPOCH: u16 = 1;
+pub const WIRE_EPOCH: u16 = 2;
 
 /// The `kind` code of the finite-closure family.
 ///
@@ -207,9 +205,18 @@ pub const FINITE_CLOSURE_KIND: u16 = 1;
 
 /// The `property_class` code of "the safety property is the declared state domain".
 ///
-/// `PropertyClass::StateDomain` (`crates/continuum-kernel-core/src/verdict.rs:151-168`),
-/// the one class the kernel evaluates and the shape of the Die Hard `TypeOK` invariant.
+/// `PropertyClass::StateDomain` in `crates/continuum-kernel-core/src/verdict.rs`: the
+/// property is the model's declared state domain.
 pub const PROPERTY_CLASS_STATE_DOMAIN: u16 = 1;
+
+/// The `property_class` code of "the safety property is one named predicate of the
+/// model" (`PropertyClass::Invariant`), followed on the wire by the predicate's name.
+pub const PROPERTY_CLASS_INVARIANT: u16 = 2;
+
+/// The largest model section the kernel will decode (16 MiB).
+///
+/// `MAX_MODEL_BYTES` from `crates/continuum-kernel-core/src/wire.rs`.
+pub const MAX_MODEL_BYTES: usize = 1 << 24;
 
 /// The largest number of domain-pack profile digests an envelope may carry.
 ///
@@ -264,6 +271,8 @@ pub enum Field {
     TransitionTotal,
     /// A transition's action index.
     TransitionAction,
+    /// The model section's length.
+    ModelLength,
 }
 
 impl Field {
@@ -285,6 +294,7 @@ impl Field {
             Self::TransitionCount => "transition-count",
             Self::TransitionTotal => "transition-total",
             Self::TransitionAction => "transition-action",
+            Self::ModelLength => "model-length",
         }
     }
 }
@@ -579,6 +589,19 @@ pub enum EmissionError {
         /// The largest admissible value.
         max: u64,
     },
+    /// The invariant names no predicate the model declares.
+    UnknownPredicate {
+        /// The name asked for.
+        name: String,
+    },
+    /// A successor of a table state is not in the closed set.
+    ///
+    /// Unreachable for a [`ClosedSet`] of the model that produced it; reachable when a
+    /// set explored from one model is offered with another.
+    NotClosed {
+        /// The state whose successor is missing.
+        state: State,
+    },
     /// The encoded certificate is larger than [`MAX_CERTIFICATE_BYTES`].
     Oversized {
         /// How many bytes were written.
@@ -610,6 +633,12 @@ impl fmt::Display for EmissionError {
                 f,
                 "`{field}` is {found}; the wire form admits {min}..={max}"
             ),
+            Self::UnknownPredicate { name } => {
+                write!(f, "the model declares no predicate `{name}`")
+            }
+            Self::NotClosed { state } => {
+                write!(f, "a successor of state {state} is not in the closed set")
+            }
             Self::Oversized { bytes, max } => {
                 write!(f, "certificate is {bytes} bytes; the limit is {max}")
             }
@@ -622,38 +651,96 @@ impl core::error::Error for EmissionError {
         match self {
             Self::Envelope(source) => Some(source),
             Self::Evaluation { source, .. } => Some(&**source),
-            Self::CountOutOfRange { .. } | Self::Oversized { .. } => None,
+            Self::CountOutOfRange { .. }
+            | Self::UnknownPredicate { .. }
+            | Self::NotClosed { .. }
+            | Self::Oversized { .. } => None,
         }
     }
 }
 
-/// Emit the finite closure certificate for a closed exploration of `model`.
+/// Emit the finite closure certificate for a closed exploration of `model`, whose
+/// property is the model's declared state domain.
 ///
 /// Pure: the returned bytes are a function of `model`, `closed` and `envelope`, and of
 /// nothing else.
 ///
 /// # Errors
 ///
-/// Every arm of [`EmissionError`]. Nothing is written unless every one of them has
-/// been ruled out: the counts are checked and every successor row is recomputed before
-/// the first byte is produced, so a failed emission never leaves a partial artifact for
-/// a caller to mistake for a short one.
+/// Every arm of [`EmissionError`] except [`EmissionError::UnknownPredicate`]. Nothing
+/// is written unless every one of them has been ruled out: the counts are checked and
+/// every successor row is recomputed before the first byte is produced, so a failed
+/// emission never leaves a partial artifact for a caller to mistake for a short one.
+/// ([`EmissionError::NotClosed`] is found while the rows are written, into a local
+/// buffer that is dropped on error, so it too returns no bytes.)
 pub fn emit_finite_closure(
     model: &Model,
     closed: ClosedSet<'_>,
     envelope: &ClaimEnvelope<'_>,
 ) -> Result<Vec<u8>, EmissionError> {
+    emit(model, closed, envelope, None)
+}
+
+/// Emit the finite closure certificate for a closed exploration of `model`, whose
+/// property is the model's predicate `predicate`, established at every state of the
+/// set.
+///
+/// This module does not evaluate the predicate: whether it holds is the kernel's
+/// question, asked of the bytes. It only refuses a name the model does not declare.
+///
+/// # Errors
+///
+/// Every arm of [`EmissionError`].
+pub fn emit_invariant_closure(
+    model: &Model,
+    closed: ClosedSet<'_>,
+    envelope: &ClaimEnvelope<'_>,
+    predicate: &str,
+) -> Result<Vec<u8>, EmissionError> {
+    emit(model, closed, envelope, Some(predicate))
+}
+
+fn emit(
+    model: &Model,
+    closed: ClosedSet<'_>,
+    envelope: &ClaimEnvelope<'_>,
+    predicate: Option<&str>,
+) -> Result<Vec<u8>, EmissionError> {
     let envelope = Validated::new(envelope)?;
+
+    let predicate = match predicate {
+        Some(name) => {
+            let declared = model
+                .predicates()
+                .iter()
+                .find(|declared| declared.name().as_str() == name)
+                .ok_or_else(|| EmissionError::UnknownPredicate {
+                    name: name.to_owned(),
+                })?;
+            Some(declared.name().clone())
+        }
+        None => None,
+    };
+
+    let identity = model.identity();
+    let identity = identity.as_bytes();
+    if identity.len() > MAX_MODEL_BYTES {
+        return Err(EmissionError::CountOutOfRange {
+            field: Field::ModelLength,
+            found: identity.len() as u64,
+            min: 0,
+            max: MAX_MODEL_BYTES as u64,
+        });
+    }
+    let model_len = narrow_u32(identity.len());
 
     let variables = model.variables();
     let actions = model.actions();
-    let initial = model.initial_states();
     let states = closed.reachable().states();
 
-    let variable_count = count_u16(Field::VariableCount, variables.len(), 1, MAX_VARIABLES)?;
+    count_u16(Field::VariableCount, variables.len(), 1, MAX_VARIABLES)?;
     let action_count = count_u16(Field::ActionCount, actions.len(), 1, MAX_ACTIONS)?;
     let state_count = count_u32(Field::StateCount, states.len(), 1, MAX_STATES)?;
-    let initial_count = count_u32(Field::InitialCount, initial.len(), 1, MAX_STATES)?;
     // The count is a `u16` on the wire and was bounded by `MAX_DOMAIN_PACKS` when the
     // envelope was validated, so this conversion has no failure mode left to report.
     let domain_pack_count = narrow_u16(envelope.domain_pack_digests.len());
@@ -672,8 +759,7 @@ pub fn emit_finite_closure(
                 source: Box::new(source),
             })?;
         // One row's count is bounded by `MAX_STATES`, not by `MAX_TRANSITIONS`: that
-        // is the decoder's own range for the field
-        // (`crates/continuum-kernel-core/src/wire.rs:768`).
+        // is the decoder's own range for the field.
         let width = count_u32(Field::TransitionCount, row.len(), 0, MAX_STATES)?;
         total = total.saturating_add(u64::from(width));
         if total > MAX_TRANSITIONS {
@@ -698,19 +784,23 @@ pub fn emit_finite_closure(
     out.token(&envelope.scope_digest);
     out.token(&envelope.assumptions_digest);
     out.token(&envelope.producer);
-    // The decoder rejects a `schema_epoch` that disagrees with the header
-    // (`crates/continuum-kernel-core/src/wire.rs:419-424`), so the two are one value.
+    // The decoder rejects a `schema_epoch` that disagrees with the header, so the two
+    // are one value.
     out.u16(WIRE_EPOCH);
     out.u16(domain_pack_count);
     for digest in &envelope.domain_pack_digests {
         out.token(digest);
     }
 
-    out.u16(variable_count);
-    for variable in variables {
-        out.token(variable.name());
-        out.i64(variable.domain().lo());
-        out.i64(variable.domain().hi());
+    out.u32(model_len);
+    out.bytes(identity);
+
+    match &predicate {
+        Some(name) => {
+            out.u16(PROPERTY_CLASS_INVARIANT);
+            out.token(name);
+        }
+        None => out.u16(PROPERTY_CLASS_STATE_DOMAIN),
     }
 
     // A copy, not a sort: `Reachable::states` is already the canonical table
@@ -721,22 +811,11 @@ pub fn emit_finite_closure(
         out.state(state);
     }
 
-    out.u16(PROPERTY_CLASS_STATE_DOMAIN);
-    out.u32(initial_count);
-    for state in initial {
-        out.state(state);
-    }
-
-    out.u16(action_count);
-    for action in actions {
-        out.token(action.name());
-    }
-
-    for (width, row) in &rows {
+    for (index, (width, row)) in rows.iter().enumerate() {
         out.u32(*width);
         for step in row {
             out.u16(action_index(step, action_count)?);
-            out.state(step.target());
+            out.u32(target_index(states, step, index)?);
         }
     }
 
@@ -748,6 +827,22 @@ pub fn emit_finite_closure(
         });
     }
     Ok(bytes)
+}
+
+/// A step's target as its index in the canonical table.
+///
+/// The table is strictly ascending, so the index is a binary search, and it preserves
+/// the row's `(action, target)` order.
+fn target_index(states: &[State], step: &Step, source: usize) -> Result<u32, EmissionError> {
+    match states.binary_search(step.target()) {
+        Ok(index) => Ok(narrow_u32(index)),
+        Err(_) => Err(EmissionError::NotClosed {
+            state: states
+                .get(source)
+                .cloned()
+                .unwrap_or_else(|| step.target().clone()),
+        }),
+    }
 }
 
 /// A step's action index as the wire's `u16`.

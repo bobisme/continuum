@@ -2182,3 +2182,82 @@ fn the_counted_evidence_matches_its_golden() {
         assert!(ids.insert(sc.id), "{} is not reused", sc.id);
     }
 }
+
+// ---------------------------------------------------------------------------
+// claim A as a model-bound certificate (bn-35y4f; bn-1m952 merged)
+// ---------------------------------------------------------------------------
+
+/// The claim-A reachable set as a wire-epoch-2 finite-closure certificate, one for the
+/// state domain and one per invariant, each checked by `continuum-kernel-core` from its
+/// bytes alone.
+///
+/// bn-1m952 found the wire-epoch-1 certificate for this scope at 117,371,613 bytes,
+/// over `MAX_CERTIFICATE_BYTES` (64 MiB), because each transition carried its full
+/// target vector. Wire epoch 2 names targets by table index and carries the model, so
+/// the kernel re-derives all 597,184 transitions itself. It also evaluates each
+/// invariant of the model at every state, so the three invariants the engine
+/// establishes over claim A are established again by the checking base.
+///
+/// The certificate bytes are written to `CARGO_TARGET_TMPDIR/claim_a.contcert` so the
+/// check can be timed outside the test (a test reads no clock, INV-005).
+#[test]
+fn claim_a_is_a_model_bound_certificate_within_the_wire_limit_and_the_kernel_establishes_its_invariants()
+ {
+    use continuum_engine_reference::certificate::{
+        self, ClaimEnvelope, ClosedSet, MAX_CERTIFICATE_BYTES, PRODUCER,
+    };
+    use continuum_kernel_core::verdict::{PropertyClass, Verdict};
+
+    let (model, exploration) = claim_a();
+    let closed = ClosedSet::of(exploration).expect("the claim-A exploration completes");
+    let envelope = ClaimEnvelope {
+        model_digest: "blake3:durable-register-claim-a",
+        semantic_epoch: "continuum-semantics-1",
+        property_digest: "blake3:durable-register-claim-a-property",
+        scope_digest: "blake3:durable-register-claim-a-scope",
+        assumptions_digest: "blake3:empty-assumptions",
+        producer: PRODUCER,
+        domain_pack_digests: &[],
+    };
+
+    let bytes = certificate::emit_finite_closure(model, closed, &envelope)
+        .expect("claim A emits at wire epoch 2");
+    assert!(
+        bytes.len() <= MAX_CERTIFICATE_BYTES,
+        "{} bytes, over the {MAX_CERTIFICATE_BYTES}-byte limit",
+        bytes.len()
+    );
+    println!(
+        "C018-CLAIM-A certificate bytes={} model-bytes={}",
+        bytes.len(),
+        model.identity().as_bytes().len()
+    );
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(dir).expect("the scratch directory is creatable");
+    std::fs::write(dir.join("claim_a.contcert"), &bytes).expect("the scratch file is writable");
+
+    let Verdict::Verified(claim) = continuum_kernel_core::check_certificate(&bytes) else {
+        panic!("the kernel refused the claim-A certificate");
+    };
+    assert_eq!(claim.states() as usize, CLAIM_A_STATES);
+    assert_eq!(claim.transitions(), 597_184);
+    assert_eq!(claim.trusted_components(), ["envelope-digest-binding"]);
+    assert_eq!(claim.model_identity(), Some(model.identity().as_bytes()));
+
+    let names: Vec<String> = model
+        .predicates()
+        .iter()
+        .map(|p| p.name().as_str().to_owned())
+        .collect();
+    assert_eq!(names, ["AckedIsDurable", "Agreement", "OneValuePerSlot"]);
+    for name in &names {
+        let bytes = certificate::emit_invariant_closure(model, closed, &envelope, name)
+            .expect("claim A emits an invariant certificate");
+        let Verdict::Verified(claim) = continuum_kernel_core::check_certificate(&bytes) else {
+            panic!("the kernel refused invariant {name} over claim A");
+        };
+        assert_eq!(claim.property(), PropertyClass::Invariant);
+        assert_eq!(claim.invariant().map(|t| t.as_str()), Some(name.as_str()));
+        assert_eq!(claim.states() as usize, CLAIM_A_STATES);
+    }
+}

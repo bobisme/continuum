@@ -17,6 +17,7 @@
     "crates/continuum-kernel-core/src/check.rs",
     "crates/continuum-kernel-core/src/fixture.rs",
     "crates/continuum-kernel-core/src/lib.rs",
+    "crates/continuum-kernel-core/src/model.rs",
     "crates/continuum-kernel-core/src/receipt.rs",
     "crates/continuum-kernel-core/src/verdict.rs",
     "crates/continuum-kernel-core/src/wire.rs",
@@ -83,7 +84,7 @@
     "tools/tcb-audit/mutants.toml",
     "tools/tcb-audit/public-api.txt"
   ],
-  "checker_inputs_sha256": "c15764c363274bb7b48b0e3e21459a31aa02bdd65260add63ebca2f9255ef85e",
+  "checker_inputs_sha256": "5e570cc216c0a3472e424ac471cb546eec7f8714ad0c68bc27df9a73153d81e0",
   "checking_base": [
     "continuum-certificate",
     "continuum-kernel-core",
@@ -96,9 +97,12 @@
     "checker": "passed",
     "producer": "passed",
     "producer_lines": [
-      "C018-PRODUCER die-hard verified states=16 initial=1 transitions=96 fnv=b6c3dc8707bb9236",
-      "C018-PRODUCER gated-counter verified states=9 initial=2 transitions=17 fnv=bb8470999157f763",
-      "C018-PRODUCER halting-counter verified states=4 initial=1 transitions=3 fnv=c97c55fd0e439065"
+      "C018-PRODUCER die-hard verified epoch=2 states=16 initial=1 transitions=96 trusted=envelope-digest-binding fnv=f76815b3585a786c",
+      "C018-PRODUCER die-hard/NotSolved rejected:invariant-violated fnv=d86ac06e0cd2d6c2",
+      "C018-PRODUCER die-hard/TypeOK verified epoch=2 states=16 initial=1 transitions=96 trusted=envelope-digest-binding fnv=7ffc284d447dfa1d",
+      "C018-PRODUCER gated-counter verified epoch=2 states=9 initial=2 transitions=17 trusted=envelope-digest-binding fnv=1d132a9169271a3a",
+      "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted verified epoch=2 states=9 initial=2 transitions=17 trusted=envelope-digest-binding fnv=91737077c5dd4076",
+      "C018-PRODUCER halting-counter verified epoch=2 states=4 initial=1 transitions=3 trusted=envelope-digest-binding fnv=156307e7eb328971"
     ],
     "tcb02_fixtures_compile": {
       "tcb02-aliased-return": true,
@@ -178,14 +182,15 @@
       },
       "continuum-kernel-core": {
         "by_file": {
-          "check.rs": 214,
-          "lib.rs": 129,
-          "receipt.rs": 564,
-          "verdict.rs": 624,
-          "wire.rs": 963
+          "check.rs": 419,
+          "lib.rs": 134,
+          "model.rs": 861,
+          "receipt.rs": 579,
+          "verdict.rs": 872,
+          "wire.rs": 1240
         },
-        "code_lines": 1359,
-        "lines": 2494
+        "code_lines": 2511,
+        "lines": 4105
       },
       "continuum-kernel-sat": {
         "by_file": {
@@ -222,16 +227,16 @@
       }
     },
     "checking_base_total": {
-      "code_lines": 6527,
-      "lines": 11545
+      "code_lines": 7679,
+      "lines": 13156
     },
     "finite_closure_checker": {
-      "code_lines": 1501,
+      "code_lines": 2653,
       "crates": [
         "continuum-certificate",
         "continuum-kernel-core"
       ],
-      "lines": 2966
+      "lines": 4577
     },
     "method": "tools/check_kernel_covenant.py count_crate: shipped src lines; code_lines are non-blank non-comment"
   },
@@ -325,6 +330,138 @@
       "outcome": "survives",
       "side": "checker",
       "targets": "state lookup: a vector of the wrong arity is never a member"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "no_single_byte_mutant_verifies_a_claim_the_oracle_refutes",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "id": "core-v2-relation-compare-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "the carried relation equals the model's re-derived relation"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_single_byte_mutant_verifies_a_claim_the_oracle_refutes",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "id": "core-v2-successor-lookup-ignored",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "Post(S) ⊆ S under the model's relation: a derived successor must be in the table"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "no_single_byte_mutant_verifies_a_claim_the_oracle_refutes",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "id": "core-v2-initial-rule-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "Init(M) ⊆ S"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "no_lie_verifies",
+        "no_single_byte_mutant_verifies_a_claim_the_oracle_refutes",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "id": "core-v2-invariant-rule-off",
+      "kill_class": "soundness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "S ⊆ P for an invariant of the carried model"
+    },
+    {
+      "failed_tests": [],
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "id": "core-v2-precharge-off",
+      "kill_class": null,
+      "outcome": "survives",
+      "side": "checker",
+      "targets": "resource bound: evaluation work is charged before evaluation"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/model.rs",
+      "id": "core-v2-update-domain-off",
+      "kill_class": "precision",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "the model's relation is defined: an update stays in its variable's domain"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/model.rs",
+      "id": "core-v2-and-short-circuits",
+      "kill_class": "precision",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "semantics: a connective evaluates both operands"
+    },
+    {
+      "failed_tests": [
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/model.rs",
+      "id": "core-v2-add-wraps",
+      "kill_class": "precision",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "semantics: arithmetic is checked, never wrapping"
+    },
+    {
+      "failed_tests": [
+        "every_green_certificate_verifies_and_the_oracle_agrees",
+        "every_lie_is_rejected_for_the_reason_it_targets",
+        "the_c018_checker_ledger_matches_the_golden",
+        "the_committed_corpus_replays_with_its_recorded_verdicts"
+      ],
+      "file": "crates/continuum-kernel-core/src/model.rs",
+      "id": "core-v2-frame-rule-broken",
+      "kill_class": "completeness",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "semantics: an unassigned variable keeps its value"
+    },
+    {
+      "failed_tests": [
+        "the_c018_checker_ledger_matches_the_golden"
+      ],
+      "file": "crates/continuum-kernel-core/src/wire.rs",
+      "id": "core-v2-target-range-off",
+      "kill_class": "drift",
+      "outcome": "killed",
+      "side": "checker",
+      "targets": "decode: every carried target index is range-checked"
     },
     {
       "failed_tests": [
@@ -581,11 +718,14 @@
       "file": "crates/continuum-engine-reference/src/bfs.rs",
       "id": "bfs-loses-first-discovery",
       "lines": [
-        "C018-PRODUCER die-hard rejected:closure-failure fnv=2ea8889473f31da5",
-        "C018-PRODUCER gated-counter rejected:closure-failure fnv=c60ff260ed733f19",
-        "C018-PRODUCER halting-counter rejected:closure-failure fnv=216965e143c5e765"
+        "C018-PRODUCER die-hard emit-error a successor of state (0, 0) is not in the closed set",
+        "C018-PRODUCER die-hard/NotSolved emit-error a successor of state (0, 0) is not in the closed set",
+        "C018-PRODUCER die-hard/TypeOK emit-error a successor of state (0, 0) is not in the closed set",
+        "C018-PRODUCER gated-counter emit-error a successor of state (0, 0) is not in the closed set",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted emit-error a successor of state (0, 0) is not in the closed set",
+        "C018-PRODUCER halting-counter emit-error a successor of state (0) is not in the closed set"
       ],
-      "outcome": "caught",
+      "outcome": "refused",
       "side": "producer",
       "targets": "search: every discovered state is kept"
     },
@@ -593,11 +733,14 @@
       "file": "crates/continuum-engine-reference/src/bfs.rs",
       "id": "bfs-stops-at-depth-two",
       "lines": [
-        "C018-PRODUCER die-hard rejected:closure-failure fnv=9f21e8cf52b50a1a",
-        "C018-PRODUCER gated-counter rejected:closure-failure fnv=2ad3a23c1e15f233",
-        "C018-PRODUCER halting-counter rejected:closure-failure fnv=d8ec0ef75b45b391"
+        "C018-PRODUCER die-hard emit-error a successor of state (2, 3) is not in the closed set",
+        "C018-PRODUCER die-hard/NotSolved emit-error a successor of state (2, 3) is not in the closed set",
+        "C018-PRODUCER die-hard/TypeOK emit-error a successor of state (2, 3) is not in the closed set",
+        "C018-PRODUCER gated-counter emit-error a successor of state (3, 0) is not in the closed set",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted emit-error a successor of state (3, 0) is not in the closed set",
+        "C018-PRODUCER halting-counter emit-error a successor of state (2) is not in the closed set"
       ],
-      "outcome": "caught",
+      "outcome": "refused",
       "side": "producer",
       "targets": "search: the walk runs until the queue is empty"
     },
@@ -605,9 +748,12 @@
       "file": "crates/continuum-engine-reference/src/certificate.rs",
       "id": "emit-unsorted-table",
       "lines": [
-        "C018-PRODUCER die-hard rejected:not-strictly-ascending fnv=f5cc6973a70274b6",
-        "C018-PRODUCER gated-counter rejected:not-strictly-ascending fnv=c58917e5a01265e3",
-        "C018-PRODUCER halting-counter rejected:not-strictly-ascending fnv=47236d091a6f2865"
+        "C018-PRODUCER die-hard rejected:not-strictly-ascending fnv=6f23e202ebaea6ec",
+        "C018-PRODUCER die-hard/NotSolved rejected:not-strictly-ascending fnv=b151ce17c57f8542",
+        "C018-PRODUCER die-hard/TypeOK rejected:not-strictly-ascending fnv=07b062febf2ccb9d",
+        "C018-PRODUCER gated-counter rejected:not-strictly-ascending fnv=13911ac2bcb47cba",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:not-strictly-ascending fnv=20909f7d972122f6",
+        "C018-PRODUCER halting-counter rejected:not-strictly-ascending fnv=cc42caee1684b171"
       ],
       "outcome": "caught",
       "side": "producer",
@@ -617,9 +763,12 @@
       "file": "crates/continuum-engine-reference/src/certificate.rs",
       "id": "emit-action-index-shift",
       "lines": [
-        "C018-PRODUCER die-hard rejected:unknown-action fnv=34677c1840391076",
-        "C018-PRODUCER gated-counter rejected:unknown-action fnv=dbce479880c92bd6",
-        "C018-PRODUCER halting-counter rejected:unknown-action fnv=3fbe33dc1b02b8fa"
+        "C018-PRODUCER die-hard rejected:unknown-action fnv=7b3f647e68882e8c",
+        "C018-PRODUCER die-hard/NotSolved rejected:unknown-action fnv=bc54146970f47c62",
+        "C018-PRODUCER die-hard/TypeOK rejected:unknown-action fnv=54293d1a624b493d",
+        "C018-PRODUCER gated-counter rejected:unknown-action fnv=a34c6547368b7dc7",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:unknown-action fnv=383b885383c3d763",
+        "C018-PRODUCER halting-counter rejected:unknown-action fnv=e4d85bcc567a7e06"
       ],
       "outcome": "caught",
       "side": "producer",
@@ -627,59 +776,86 @@
     },
     {
       "file": "crates/continuum-engine-reference/src/certificate.rs",
-      "id": "emit-drops-first-initial-state",
-      "lines": [
-        "C018-PRODUCER gated-counter verified states=9 initial=1 transitions=17 fnv=8c87c2e37e152876"
-      ],
-      "outcome": "missed",
-      "side": "producer",
-      "targets": "emission: every initial state of the model is written"
-    },
-    {
-      "file": "crates/continuum-engine-reference/src/certificate.rs",
       "id": "emit-drops-first-transition-of-each-row",
       "lines": [
-        "C018-PRODUCER die-hard verified states=16 initial=1 transitions=80 fnv=8d9bb42dfe56261c",
-        "C018-PRODUCER gated-counter verified states=9 initial=2 transitions=8 fnv=08c1f530dadd8310",
-        "C018-PRODUCER halting-counter verified states=4 initial=1 transitions=0 fnv=e2695e4f867e6d42"
+        "C018-PRODUCER die-hard rejected:relation-mismatch fnv=ff7e9c6b7c727949",
+        "C018-PRODUCER die-hard/NotSolved rejected:relation-mismatch fnv=76383d1dfcbf0f33",
+        "C018-PRODUCER die-hard/TypeOK rejected:relation-mismatch fnv=6a86c57b673a9698",
+        "C018-PRODUCER gated-counter rejected:relation-mismatch fnv=964f5497dfe237dd",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:relation-mismatch fnv=af9236978db84689",
+        "C018-PRODUCER halting-counter rejected:relation-mismatch fnv=a036f42f70a7b7ce"
       ],
-      "outcome": "missed",
+      "outcome": "caught",
       "side": "producer",
       "targets": "emission: every successor of a state is written"
     },
     {
       "file": "crates/continuum-engine-reference/src/certificate.rs",
-      "id": "emit-widens-the-domain",
-      "lines": [
-        "C018-PRODUCER die-hard verified states=16 initial=1 transitions=96 fnv=007f3a6e1596a25c",
-        "C018-PRODUCER gated-counter verified states=9 initial=2 transitions=17 fnv=a75d2522acfdd0bb",
-        "C018-PRODUCER halting-counter verified states=4 initial=1 transitions=3 fnv=99d32a023408ef5c"
-      ],
-      "outcome": "missed",
-      "side": "producer",
-      "targets": "emission: the declared domain is the model's"
-    },
-    {
-      "file": "crates/continuum-engine-reference/src/certificate.rs",
       "id": "emit-retargets-to-the-first-state",
       "lines": [
-        "C018-PRODUCER die-hard verified states=16 initial=1 transitions=96 fnv=a3c76cf505e0a8c6",
-        "C018-PRODUCER gated-counter verified states=9 initial=2 transitions=17 fnv=ab671a22a7c2f643",
-        "C018-PRODUCER halting-counter verified states=4 initial=1 transitions=3 fnv=60b8ac946dedacb5"
+        "C018-PRODUCER die-hard rejected:relation-mismatch fnv=02d3d6bcad768c24",
+        "C018-PRODUCER die-hard/NotSolved rejected:relation-mismatch fnv=f5cd6837ee4be11a",
+        "C018-PRODUCER die-hard/TypeOK rejected:relation-mismatch fnv=dd9701851e7ed475",
+        "C018-PRODUCER gated-counter rejected:relation-mismatch fnv=1d6977cf6aa75324",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:relation-mismatch fnv=4040ebea744aae40",
+        "C018-PRODUCER halting-counter rejected:relation-mismatch fnv=9a6a63a1437a7361"
+      ],
+      "outcome": "caught",
+      "side": "producer",
+      "targets": "emission: a transition names its own target"
+    },
+    {
+      "file": "crates/continuum-model-core/src/identity.rs",
+      "id": "identity-drops-first-initial-state",
+      "lines": [
+        "C018-PRODUCER gated-counter verified epoch=2 states=9 initial=1 transitions=17 trusted=envelope-digest-binding fnv=4dc35a891c61be27",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted verified epoch=2 states=9 initial=1 transitions=17 trusted=envelope-digest-binding fnv=ff6d0e436de7ba13"
       ],
       "outcome": "missed",
       "side": "producer",
-      "targets": "emission: a transition names its own target"
+      "targets": "encoding: every initial state of the model is written"
+    },
+    {
+      "file": "crates/continuum-model-core/src/identity.rs",
+      "id": "identity-widens-the-domain",
+      "lines": [
+        "C018-PRODUCER die-hard verified epoch=2 states=16 initial=1 transitions=96 trusted=envelope-digest-binding fnv=3082a4284cf51522",
+        "C018-PRODUCER die-hard/NotSolved rejected:invariant-violated fnv=2d2fe1ad3f54b174",
+        "C018-PRODUCER die-hard/TypeOK verified epoch=2 states=16 initial=1 transitions=96 trusted=envelope-digest-binding fnv=02cc713d650f13db",
+        "C018-PRODUCER gated-counter verified epoch=2 states=9 initial=2 transitions=17 trusted=envelope-digest-binding fnv=b70c11ed159006aa",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted verified epoch=2 states=9 initial=2 transitions=17 trusted=envelope-digest-binding fnv=595e76e047f7b506",
+        "C018-PRODUCER halting-counter verified epoch=2 states=4 initial=1 transitions=3 trusted=envelope-digest-binding fnv=0448fe01a432d87a"
+      ],
+      "outcome": "missed",
+      "side": "producer",
+      "targets": "encoding: the declared domain is the model's"
+    },
+    {
+      "file": "crates/continuum-model-core/src/identity.rs",
+      "id": "identity-writes-sub-as-add",
+      "lines": [
+        "C018-PRODUCER die-hard rejected:successor-not-in-table fnv=0a0d91d7cebc28a8",
+        "C018-PRODUCER die-hard/NotSolved rejected:successor-not-in-table fnv=0069d138c911eb26",
+        "C018-PRODUCER die-hard/TypeOK rejected:successor-not-in-table fnv=08dcfcd1d7366b59",
+        "C018-PRODUCER gated-counter rejected:update-outside-domain fnv=d9759d6caeec6695",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:update-outside-domain fnv=584cc83aa6e5c205"
+      ],
+      "outcome": "caught",
+      "side": "producer",
+      "targets": "encoding: an operator is written as itself"
     },
     {
       "file": "crates/continuum-model-core/src/model.rs",
       "id": "eval-skips-the-last-action",
       "lines": [
-        "C018-PRODUCER die-hard verified states=16 initial=1 transitions=80 fnv=e8a36cdffbe2a0ec",
-        "C018-PRODUCER gated-counter verified states=9 initial=2 transitions=15 fnv=f23d1bf349dc655b",
-        "C018-PRODUCER halting-counter verified states=1 initial=1 transitions=0 fnv=6601ba0ce89699d5"
+        "C018-PRODUCER die-hard rejected:relation-mismatch fnv=2441f89a66f09281",
+        "C018-PRODUCER die-hard/NotSolved rejected:relation-mismatch fnv=a363bc0a6d54df8b",
+        "C018-PRODUCER die-hard/TypeOK rejected:relation-mismatch fnv=d68e5f554f858b90",
+        "C018-PRODUCER gated-counter rejected:relation-mismatch fnv=1e19c401d6dbd27a",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:relation-mismatch fnv=b2bf3c5592291996",
+        "C018-PRODUCER halting-counter rejected:successor-not-in-table fnv=c87c7f109a467ebd"
       ],
-      "outcome": "missed",
+      "outcome": "caught",
       "side": "producer",
       "targets": "evaluation: every action is tried"
     },
@@ -687,11 +863,14 @@
       "file": "crates/continuum-model-core/src/model.rs",
       "id": "eval-update-off-by-one",
       "lines": [
-        "C018-PRODUCER die-hard verified states=12 initial=1 transitions=72 fnv=c913d8c96b46d468",
-        "C018-PRODUCER gated-counter verified states=3 initial=2 transitions=5 fnv=b1f202744f8c1319",
-        "C018-PRODUCER halting-counter verified states=1 initial=1 transitions=1 fnv=216964e143c5e5b2"
+        "C018-PRODUCER die-hard rejected:successor-not-in-table fnv=bd8609c1e4f9a97b",
+        "C018-PRODUCER die-hard/NotSolved rejected:successor-not-in-table fnv=07ff1a44e7e45c31",
+        "C018-PRODUCER die-hard/TypeOK rejected:successor-not-in-table fnv=6ad37e8d982b7f46",
+        "C018-PRODUCER gated-counter rejected:successor-not-in-table fnv=e7ab29246e595814",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:successor-not-in-table fnv=1297d05a6051cc80",
+        "C018-PRODUCER halting-counter rejected:successor-not-in-table fnv=8025bb16d6d1933a"
       ],
-      "outcome": "missed",
+      "outcome": "caught",
       "side": "producer",
       "targets": "evaluation: an update writes the value it computed"
     },
@@ -699,10 +878,13 @@
       "file": "crates/continuum-model-core/src/model.rs",
       "id": "eval-frame-rule-broken",
       "lines": [
-        "C018-PRODUCER die-hard verified states=5 initial=1 transitions=30 fnv=86faa8ad38211162",
-        "C018-PRODUCER gated-counter verified states=7 initial=2 transitions=12 fnv=8e310dfdbc0478c5"
+        "C018-PRODUCER die-hard rejected:successor-not-in-table fnv=5c09edbb8fe34985",
+        "C018-PRODUCER die-hard/NotSolved rejected:successor-not-in-table fnv=f8d1f742cfc3d32f",
+        "C018-PRODUCER die-hard/TypeOK rejected:successor-not-in-table fnv=affaa46f596b2b34",
+        "C018-PRODUCER gated-counter rejected:successor-not-in-table fnv=81b9da2b8dc1f03b",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted rejected:successor-not-in-table fnv=2f910fea903c309f"
       ],
-      "outcome": "missed",
+      "outcome": "caught",
       "side": "producer",
       "targets": "evaluation: unassigned variables keep their value"
     },
@@ -711,6 +893,7 @@
       "id": "eval-guards-ignored",
       "lines": [
         "C018-PRODUCER gated-counter explore-error Evaluation { state: State { values: [4, 1] }, depth: 2, action: Some(Ident(\"inc\")), source: UpdateOutOfDomain { action: Ident(\"inc\"), variable: Ident(\"x\"), value: 5, domain: Domain { lo: 0, hi: 4 } } }",
+        "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted explore-error Evaluation { state: State { values: [4, 1] }, depth: 2, action: Some(Ident(\"inc\")), source: UpdateOutOfDomain { action: Ident(\"inc\"), variable: Ident(\"x\"), value: 5, domain: Domain { lo: 0, hi: 4 } } }",
         "C018-PRODUCER halting-counter explore-error Evaluation { state: State { values: [3] }, depth: 3, action: Some(Ident(\"step\")), source: UpdateOutOfDomain { action: Ident(\"step\"), variable: Ident(\"c\"), value: 4, domain: Domain { lo: 0, hi: 3 } } }"
       ],
       "outcome": "refused",
@@ -718,18 +901,18 @@
       "targets": "evaluation: a disabled action has no successor"
     }
   ],
-  "producer_inputs_sha256": "9699b39d541a74e225b9bff4bf857e8953252f9e4cfe60e7a095f719642c0b85",
+  "producer_inputs_sha256": "5d7f1f098654c126f79671b395aeacf73d29cded1e42a864561d17e32853a734",
   "producer_measurement": {
     "producers": {
       "continuum-engine-reference": {
         "by_file": {
           "bfs.rs": 892,
-          "certificate.rs": 882,
+          "certificate.rs": 977,
           "checking.rs": 1153,
           "defect.rs": 339,
           "diehard.rs": 201,
           "generate.rs": 372,
-          "lib.rs": 156,
+          "lib.rs": 157,
           "liveness.rs": 780,
           "mod.rs": 133,
           "oracle.rs": 1290,
@@ -737,8 +920,8 @@
           "system.rs": 786,
           "witness.rs": 477
         },
-        "code_lines": 4534,
-        "lines": 7512
+        "code_lines": 4597,
+        "lines": 7608
       },
       "continuum-model-core": {
         "by_file": {
@@ -763,27 +946,31 @@
   },
   "producer_residual": {
     "no_observed_escape": {
-      "crates/continuum-engine-reference/src/bfs.rs": 892
+      "crates/continuum-engine-reference/src/bfs.rs": 892,
+      "crates/continuum-engine-reference/src/certificate.rs": 977,
+      "crates/continuum-model-core/src/model.rs": 1437
     },
-    "no_observed_escape_lines": 892,
+    "no_observed_escape_lines": 3306,
     "per_file": {
       "crates/continuum-engine-reference/src/bfs.rs": {
-        "caught": 2
+        "refused": 2
       },
       "crates/continuum-engine-reference/src/certificate.rs": {
-        "caught": 2,
-        "missed": 4
+        "caught": 4
+      },
+      "crates/continuum-model-core/src/identity.rs": {
+        "caught": 1,
+        "missed": 2
       },
       "crates/continuum-model-core/src/model.rs": {
-        "missed": 3,
+        "caught": 3,
         "refused": 1
       }
     },
     "still_trusted": {
-      "crates/continuum-engine-reference/src/certificate.rs": 882,
-      "crates/continuum-model-core/src/model.rs": 1437
+      "crates/continuum-model-core/src/identity.rs": 395
     },
-    "still_trusted_lines": 2319
+    "still_trusted_lines": 395
   },
   "rules": [
     "TCB-01 checking-base-links-only-itself",
@@ -795,36 +982,38 @@
   "summary": {
     "checker_kill_classes": {
       "assurance": 1,
-      "completeness": 6,
-      "drift": 2,
-      "precision": 2,
-      "soundness": 13,
+      "completeness": 7,
+      "drift": 3,
+      "precision": 5,
+      "soundness": 17,
       "timeout": 0
     },
-    "checker_killed": 24,
-    "checker_mutants": 25,
+    "checker_killed": 33,
+    "checker_mutants": 35,
     "checker_survived": [
-      "core-lookup-ignores-arity"
+      "core-lookup-ignores-arity",
+      "core-v2-precharge-off"
     ],
-    "producer_mutants": 12,
+    "producer_mutants": 13,
     "producer_outcomes": {
       "caught": [
-        "bfs-loses-first-discovery",
-        "bfs-stops-at-depth-two",
         "emit-action-index-shift",
-        "emit-unsorted-table"
-      ],
-      "missed": [
-        "emit-drops-first-initial-state",
         "emit-drops-first-transition-of-each-row",
         "emit-retargets-to-the-first-state",
-        "emit-widens-the-domain",
+        "emit-unsorted-table",
         "eval-frame-rule-broken",
         "eval-skips-the-last-action",
-        "eval-update-off-by-one"
+        "eval-update-off-by-one",
+        "identity-writes-sub-as-add"
+      ],
+      "missed": [
+        "identity-drops-first-initial-state",
+        "identity-widens-the-domain"
       ],
       "no-effect": [],
       "refused": [
+        "bfs-loses-first-discovery",
+        "bfs-stops-at-depth-two",
         "eval-guards-ignored"
       ]
     }
@@ -846,7 +1035,7 @@
       ]
     },
     "continuum-kernel-core": {
-      "public_items": 121,
+      "public_items": 138,
       "verdict_entry_points": [
         {
           "alias_bindings": {},

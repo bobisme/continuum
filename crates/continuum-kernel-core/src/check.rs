@@ -23,27 +23,29 @@
 //! certificate's own carried data, in the same order Lean's
 //! `FiniteSystem.checkClosure` evaluates them.
 //!
-//! # What "self-contained" costs, stated honestly
+//! # What each wire epoch lets the kernel re-derive
 //!
-//! docs/03 §6.1 lists a checker step this crate cannot perform on a self-contained
-//! artifact: "recompute every enabled transition". Recomputing transitions requires
-//! the *model*, and a kernel that read the model would need a transition-relation
-//! evaluator — which is the one thing plan §20 forbids it from sharing with an
-//! engine, and which would put the model's elaborator inside the trusted base.
+//! docs/03 §6.1 lists a checker step a wire-epoch-1 certificate does not let the
+//! kernel perform: "recompute every enabled transition". That certificate carries its
+//! own successor relation and names the model only by digest, so the kernel
+//! re-derives every obligation *over* the carried relation, and the correspondence
+//! between that relation and the model stays trusted. A wire-epoch-1 claim reports
+//! it: [`CheckedClaim::trusted_components`] lists `certificate-model-correspondence`.
 //!
-//! So the split is drawn where the dossier draws it. The certificate carries its own
-//! successor relation; the kernel re-derives every obligation *over* that relation
-//! and never trusts the producer's own summary of it. What remains trusted is the
-//! correspondence between the carried relation and the model named by
-//! `Envelope::model_digest`, and that is reported, not hidden, by
-//! [`CheckedClaim::trusted_components`]. RFC 0005 puts the envelope hashes in the
-//! certificate for exactly this reason, and RFC 0024's receipt is where the binding
-//! is recorded.
+//! A wire-epoch-2 certificate carries the model's canonical encoding (bn-35y4f; RFC
+//! 0005 correction 1). The kernel decodes it with its own decoder (`crate::model`),
+//! evaluates every action at every table state with its own evaluator, and requires
+//! each carried row to equal the re-derived row. That closes the residual bn-2npu
+//! measured: a producer whose evaluator or emitter writes a closed, in-domain relation
+//! that is not the model's is rejected. The claim no longer lists
+//! `certificate-model-correspondence`. What stays trusted is
+//! `envelope-digest-binding`, now including that the carried model is the caller's;
+//! the claim exposes the carried encoding for that comparison
+//! ([`CheckedClaim::model_identity`]).
 //!
-//! Nothing about that weakens the closure obligation itself. A producer that stops
-//! exploring early cannot hide it: successors are carried as state *vectors*, so an
-//! unexplored successor is a vector absent from the table and
-//! [`Rejection::ClosureFailure`] follows.
+//! Neither epoch weakens the closure obligation. A producer that stops exploring
+//! early cannot hide it: at epoch 1 an unexplored successor is a carried vector absent
+//! from the table, and at epoch 2 it is a re-derived successor absent from the table.
 //!
 //! # Order of obligations
 //!
@@ -57,6 +59,10 @@
 //! 5. `Post(S) ⊆ S` — every transition names a declared action and lands in the
 //!    table.
 //!
+//! At wire epoch 2 the order is the one `check_model_closure` documents: precharge,
+//! `S ⊆ Dom(M)`, `Init(M) ⊆ S`, the carried relation equal to the model's, and the
+//! invariant.
+//!
 //! # Determinism
 //!
 //! The checker reads no clock, draws no randomness, opens no socket, and iterates
@@ -64,10 +70,12 @@
 //! docs/12 §1). Two runs over the same bytes produce byte-identical verdicts on any
 //! platform.
 
+use crate::model::Fault;
+use crate::verdict::Resource;
 use crate::verdict::{CertificateKind, CheckedClaim, Feature, PropertyClass, Rejection, Verdict};
 use crate::wire::{
-    Body, DecodeFailure, Envelope, FiniteClosureBody, StateDomain, StateTable, StateTypeBody,
-    decode,
+    Body, DecodeFailure, Envelope, FiniteClosureBody, MAX_EVALUATION_WORK, ModelClosureBody,
+    StateTable, StateTypeBody, Variable, decode,
 };
 
 /// Check one certificate from its wire form.
@@ -85,6 +93,7 @@ pub fn check_certificate(bytes: &[u8]) -> Verdict {
     };
     match certificate.body() {
         Body::FiniteClosure(body) => check_finite_closure(certificate.envelope(), body),
+        Body::ModelClosure(body) => check_model_closure(certificate.envelope(), body),
         Body::StateType(body) => check_state_type(certificate.envelope(), body),
     }
 }
@@ -92,12 +101,17 @@ pub fn check_certificate(bytes: &[u8]) -> Verdict {
 /// `Init ⊆ S`, `Post(S) ⊆ S`, `S ⊆ P` over the certificate's own carried relation.
 fn check_finite_closure(envelope: &Envelope, body: &FiniteClosureBody) -> Verdict {
     let class_code = body.property_class_code();
-    let Some(property) = PropertyClass::from_code(class_code) else {
-        return Verdict::Unsupported(Feature::PropertyClass { found: class_code });
+    // Wire epoch 1 carries no model, so the one class it can evaluate is the
+    // declared state domain; an invariant needs the model (wire epoch 2).
+    let property = match PropertyClass::from_code(class_code) {
+        Some(PropertyClass::StateDomain) => PropertyClass::StateDomain,
+        Some(PropertyClass::Invariant) | None => {
+            return Verdict::Unsupported(Feature::PropertyClass { found: class_code });
+        }
     };
 
     // S ⊆ P.
-    if let Some(rejection) = violated_state(body.domain(), body.table()) {
+    if let Some(rejection) = violated_state(body.domain().variables(), body.table()) {
         return Verdict::Rejected(rejection);
     }
 
@@ -146,9 +160,192 @@ fn check_finite_closure(envelope: &Envelope, body: &FiniteClosureBody) -> Verdic
     ))
 }
 
+/// The wire-epoch-2 check: every obligation re-derived from the carried model.
+///
+/// In order, after the precharge:
+///
+/// 1. `S ⊆ Dom(M)` — every table state lies in the model's declared domain, so every
+///    table state is a state of the model;
+/// 2. `Init(M) ⊆ S` — every initial state *of the model* is in the table;
+/// 3. `Post(S) ⊆ S`, exactly — for every table state the kernel evaluates every
+///    action of the model, locates each successor in the table, and requires the
+///    sorted, deduplicated result to equal the carried row entry for entry;
+/// 4. `S ⊆ P` — for [`PropertyClass::Invariant`], the named predicate holds at every
+///    table state. For [`PropertyClass::StateDomain`], `P` is `Dom(M)` and step 1
+///    discharged it.
+///
+/// Step 3 is what closes bn-2npu's residual: a row the producer wrote from a faulty
+/// evaluator, or wrote wrongly from a correct one, is not the kernel's row.
+fn check_model_closure(envelope: &Envelope, body: &ModelClosureBody) -> Verdict {
+    let model = body.model();
+    let table = body.table();
+
+    // Precharge (RFC 0005 "Resource bounds"): the whole evaluation is bounded from
+    // decoded sizes before the first expression is evaluated.
+    let work = evaluation_work(body);
+    let needed = work.unwrap_or(u64::MAX);
+    if work.is_none() || needed > MAX_EVALUATION_WORK {
+        return Verdict::Unsupported(Feature::ResourceBound {
+            resource: Resource::EvaluationWork,
+            needed,
+            limit: MAX_EVALUATION_WORK,
+        });
+    }
+
+    // 1. S ⊆ Dom(M).
+    if let Some(rejection) = violated_state(model.variables(), table) {
+        return Verdict::Rejected(rejection);
+    }
+
+    // 2. Init(M) ⊆ S.
+    for (position, state) in model.initial_states().iter().enumerate() {
+        if table.position(state).is_none() {
+            return Verdict::Rejected(Rejection::InitialStateNotInTable {
+                position: narrow_u32(position),
+            });
+        }
+    }
+
+    // 3. The carried relation is the model's relation.
+    let mut scratch: Vec<i64> = Vec::new();
+    let mut derived: Vec<(u16, u32)> = Vec::new();
+    for index in 0..table.len() {
+        let Some(state) = table.state(index) else {
+            return Verdict::Rejected(Rejection::RelationMismatch {
+                state: index,
+                entry: 0,
+            });
+        };
+        derived.clear();
+        let walk = model.successors(
+            state,
+            &mut scratch,
+            |action, target| match table.position(target) {
+                Some(position) => {
+                    derived.push((action, position));
+                    Ok(())
+                }
+                None => Err(Rejection::SuccessorNotInTable {
+                    state: index,
+                    action,
+                }),
+            },
+            |action, fault| match fault {
+                Fault::Overflow => Rejection::EvaluationOverflow { state: index },
+                Fault::OutsideDomain { variable, value } => Rejection::UpdateOutsideDomain {
+                    state: index,
+                    action,
+                    variable,
+                    value,
+                },
+            },
+        );
+        if let Err(rejection) = walk {
+            return Verdict::Rejected(rejection);
+        }
+        // Actions are visited in index order, so sorting orders targets within an
+        // action; two outcomes with one target are one transition.
+        derived.sort_unstable();
+        derived.dedup();
+        // Fail closed: a missing row is a mismatch, never an empty row. Unreachable,
+        // because the decoder reads exactly one row per table state.
+        let Some(carried) = body.row(index) else {
+            return Verdict::Rejected(Rejection::RelationMismatch {
+                state: index,
+                entry: 0,
+            });
+        };
+        if carried != derived.as_slice() {
+            let entry = carried
+                .iter()
+                .zip(derived.iter())
+                .position(|(c, d)| c != d)
+                .unwrap_or_else(|| carried.len().min(derived.len()));
+            return Verdict::Rejected(Rejection::RelationMismatch {
+                state: index,
+                entry: narrow_u32(entry),
+            });
+        }
+    }
+
+    // 4. S ⊆ P for the invariant class.
+    let invariant = match body.predicate() {
+        Some(predicate) => {
+            for index in 0..table.len() {
+                let holds = table
+                    .state(index)
+                    .map(|state| model.holds(predicate, state));
+                match holds {
+                    Some(Ok(true)) => {}
+                    Some(Ok(false)) | None => {
+                        return Verdict::Rejected(Rejection::InvariantViolated { state: index });
+                    }
+                    Some(Err(_)) => {
+                        return Verdict::Rejected(Rejection::EvaluationOverflow { state: index });
+                    }
+                }
+            }
+            model.predicate_name(predicate).cloned()
+        }
+        None => None,
+    };
+
+    Verdict::Verified(CheckedClaim::model_bound(
+        body.property(),
+        envelope.clone(),
+        (
+            table.len(),
+            narrow_u32(model.initial_states().len()),
+            body.transition_count(),
+        ),
+        model.identity(),
+        invariant,
+    ))
+}
+
+/// The row-sort share charged per derived successor: one comparison per level of a
+/// sort over at most `2^24` entries (the model section cannot hold more outcomes).
+const SORT_UNITS_PER_OUTCOME: u64 = 24;
+
+/// The precharge of [`check_model_closure`], or `None` when it does not fit in a
+/// `u64`.
+///
+/// Units: one per expression node evaluated, one per state component copied or
+/// compared. A table lookup is a binary search, so it costs `arity` per probe and
+/// `bits(states) + 1` probes. Per table state: the domain check (`arity`), every
+/// guard, every outcome of every action as if enabled (its assignments, a state copy
+/// and a lookup), a sort of the derived row (one lookup's worth per outcome, already
+/// counted), the row comparison (included in the copy), and the invariant. Plus one
+/// lookup per initial state.
+fn evaluation_work(body: &ModelClosureBody) -> Option<u64> {
+    let model = body.model();
+    let states = u64::from(body.table().len());
+    let arity = u64::try_from(model.variables().len()).ok()?;
+    let probes =
+        u64::from(u32::BITS.checked_sub(body.table().len().leading_zeros())?).checked_add(1)?;
+    // Two probes' worth per lookup, plus a flat charge per outcome for its share of
+    // the row sort: `k log k` comparisons over a row of `k` outcomes, and `k` is
+    // bounded by the model section's bytes (`log2 k < 24`).
+    let lookup = arity
+        .checked_mul(probes)?
+        .checked_mul(2)?
+        .checked_add(SORT_UNITS_PER_OUTCOME)?;
+    let invariant = body
+        .predicate()
+        .map_or(0, |index| model.predicate_size(index));
+    let per_state = model
+        .successor_work(lookup)?
+        .checked_add(arity)?
+        .checked_add(invariant)?;
+    let initial = u64::try_from(model.initial_states().len())
+        .ok()?
+        .checked_mul(lookup)?;
+    states.checked_mul(per_state)?.checked_add(initial)
+}
+
 /// Every state in the table lies in the declared state domain (docs/16 PO-MOD-003).
 fn check_state_type(envelope: &Envelope, body: &StateTypeBody) -> Verdict {
-    if let Some(rejection) = violated_state(body.domain(), body.table()) {
+    if let Some(rejection) = violated_state(body.domain().variables(), body.table()) {
         return Verdict::Rejected(rejection);
     }
     Verdict::Verified(CheckedClaim::new(
@@ -167,10 +364,18 @@ fn check_state_type(envelope: &Envelope, body: &StateTypeBody) -> Verdict {
 /// reads exactly `arity` components per state. The `else` arm below is therefore
 /// unreachable in practice and exists so that no future change to the decoder can
 /// turn a shape mismatch into an index panic.
-fn violated_state(domain: &StateDomain, table: &StateTable) -> Option<Rejection> {
+fn violated_state(domain: &[Variable], table: &StateTable) -> Option<Rejection> {
     for index in 0..table.len() {
-        let state = table.state(index)?;
-        for (position, variable) in domain.variables().iter().enumerate() {
+        // Fail closed: a table index the table cannot answer is a violation, never a
+        // pass. Unreachable, because the decoder reads exactly `len` states.
+        let Some(state) = table.state(index) else {
+            return Some(Rejection::PropertyViolated {
+                state: index,
+                variable: 0,
+                value: 0,
+            });
+        };
+        for (position, variable) in domain.iter().enumerate() {
             let Some(value) = state.get(position) else {
                 return Some(Rejection::PropertyViolated {
                     state: index,
@@ -226,8 +431,8 @@ mod tests {
 
     use super::*;
     use crate::fixture::{Plan, Xorshift};
-    use crate::verdict::{Field, TokenFault};
-    use crate::wire::{MAGIC, MAX_TOKEN_BYTES, WIRE_EPOCH};
+    use crate::verdict::{Field, Resource, TokenFault};
+    use crate::wire::{LEGACY_WIRE_EPOCH, MAGIC, MAX_TOKEN_BYTES, WIRE_EPOCH};
 
     fn verdict(plan: &Plan) -> Verdict {
         check_certificate(&plan.encode())
@@ -394,7 +599,7 @@ mod tests {
             rejection(&plan),
             Rejection::SchemaEpochMismatch {
                 declared: WIRE_EPOCH + 3,
-                header: WIRE_EPOCH,
+                header: LEGACY_WIRE_EPOCH,
             }
         );
     }
@@ -791,6 +996,430 @@ mod tests {
             "blake3:some-other-model",
             "the verdict must report the envelope it actually checked against"
         );
+    }
+
+    // --- wire epoch 2: the model-bound finite closure (bn-35y4f) -------------
+
+    use crate::fixture::{Expr, ModelPlan, PlanV2};
+
+    fn verdict_v2(plan: &PlanV2) -> Verdict {
+        check_certificate(&plan.encode())
+    }
+
+    fn rejection_v2(plan: &PlanV2) -> Rejection {
+        match verdict_v2(plan) {
+            Verdict::Rejected(rejection) => rejection,
+            other => panic!("expected a rejection, got {other:?}"),
+        }
+    }
+
+    /// Keep only the states `keep` admits, drop transitions into the others, and
+    /// renumber the rows.
+    fn restrict(plan: &PlanV2, keep: impl Fn(&[i64]) -> bool) -> PlanV2 {
+        let kept: Vec<usize> = (0..plan.states.len())
+            .filter(|i| keep(&plan.states[*i]))
+            .collect();
+        let renumber = |old: u32| kept.iter().position(|k| *k == old as usize);
+        let mut out = plan.clone();
+        out.states = kept.iter().map(|i| plan.states[*i].clone()).collect();
+        out.rows = kept
+            .iter()
+            .map(|i| {
+                plan.rows[*i]
+                    .iter()
+                    .filter_map(|(a, t)| renumber(*t).map(|n| (*a, u32::try_from(n).unwrap())))
+                    .collect()
+            })
+            .collect();
+        out
+    }
+
+    #[test]
+    fn the_model_bound_die_hard_certificate_is_verified_without_the_correspondence_trust() {
+        let Verdict::Verified(claim) = verdict_v2(&PlanV2::diehard()) else {
+            panic!("the wire-epoch-2 Die Hard certificate must check green");
+        };
+        assert_eq!(claim.kind(), CertificateKind::FiniteClosure);
+        assert_eq!(claim.property(), PropertyClass::StateDomain);
+        assert_eq!(claim.wire_epoch(), 2);
+        assert_eq!(claim.states(), 16);
+        assert_eq!(claim.transitions(), 96);
+        assert_eq!(claim.initial_states(), 1);
+        assert_eq!(claim.trusted_components(), ["envelope-digest-binding"]);
+        assert_eq!(
+            claim.model_identity(),
+            Some(ModelPlan::diehard().encode().as_slice())
+        );
+        assert_eq!(claim.invariant(), None);
+    }
+
+    #[test]
+    fn a_legacy_claim_still_names_the_correspondence_it_trusts() {
+        let Verdict::Verified(claim) = verdict(&Plan::diehard_closure()) else {
+            panic!("the wire-epoch-1 certificate must still check green");
+        };
+        assert_eq!(claim.wire_epoch(), 1);
+        assert_eq!(claim.model_identity(), None);
+        assert!(
+            claim
+                .trusted_components()
+                .contains(&"certificate-model-correspondence")
+        );
+    }
+
+    #[test]
+    fn an_invariant_of_the_model_is_established_or_refuted_at_every_state() {
+        let Verdict::Verified(claim) = verdict_v2(&PlanV2::diehard_invariant("TypeOK")) else {
+            panic!("TypeOK holds at every reachable Die Hard state");
+        };
+        assert_eq!(claim.property(), PropertyClass::Invariant);
+        assert_eq!(claim.invariant().map(|t| t.as_str()), Some("TypeOK"));
+
+        // The puzzle's point: big = 4 is reachable, so "big is never 4" is false.
+        assert!(matches!(
+            rejection_v2(&PlanV2::diehard_invariant("BigNotFour")),
+            Rejection::InvariantViolated { .. }
+        ));
+        assert_eq!(
+            rejection_v2(&PlanV2::diehard_invariant("NoSuchPredicate")),
+            Rejection::UnresolvedName {
+                field: Field::PropertyPredicate
+            }
+        );
+    }
+
+    #[test]
+    fn an_invariant_needs_the_model_so_epoch_one_cannot_carry_it() {
+        let mut plan = Plan::diehard_closure();
+        plan.property_class = 2;
+        assert_eq!(
+            verdict(&plan),
+            Verdict::Unsupported(Feature::PropertyClass { found: 2 })
+        );
+    }
+
+    #[test]
+    fn epoch_two_defines_only_the_finite_closure_family() {
+        let mut plan = PlanV2::diehard();
+        plan.kind = 2;
+        assert_eq!(
+            verdict_v2(&plan),
+            Verdict::Unsupported(Feature::CertificateKind { found: 2 })
+        );
+        let mut plan = PlanV2::diehard();
+        plan.property_class = 9;
+        assert_eq!(
+            verdict_v2(&plan),
+            Verdict::Unsupported(Feature::PropertyClass { found: 9 })
+        );
+    }
+
+    /// Metamorphic relation: equivalent guard normalization (docs/19 §3). Rewriting
+    /// every guard of the carried model into a logically equivalent form — `true` as
+    /// `not(not(true))`, and as `true and true` — keeps the verdict, the counts and the
+    /// property; only the carried identity changes.
+    #[test]
+    fn metamorphic_equivalent_guard_normalization_keeps_the_verdict() {
+        let green = verdict_v2(&PlanV2::diehard());
+        let Verdict::Verified(green) = green else {
+            panic!("the green certificate verifies");
+        };
+        let normalizations: [fn() -> Expr; 2] = [
+            || Expr::Not(Box::new(Expr::Not(Box::new(Expr::Bool(true))))),
+            || Expr::And(Box::new(Expr::Bool(true)), Box::new(Expr::Bool(true))),
+        ];
+        for normalize in normalizations {
+            let mut model = ModelPlan::diehard();
+            for action in &mut model.actions {
+                action.guard = normalize();
+            }
+            let mut plan = PlanV2::diehard();
+            plan.model = model.encode();
+            let Verdict::Verified(claim) = verdict_v2(&plan) else {
+                panic!("an equivalent guard normalization changed the verdict");
+            };
+            assert_eq!(claim.states(), green.states());
+            assert_eq!(claim.transitions(), green.transitions());
+            assert_eq!(claim.initial_states(), green.initial_states());
+            assert_eq!(claim.property(), green.property());
+            assert_ne!(claim.model_identity(), green.model_identity());
+        }
+    }
+
+    // The bn-2npu producer faults, as certificates.
+
+    #[test]
+    fn a_dropped_transition_is_not_the_models_relation() {
+        // emit-drops-first-transition-of-each-row: a closed sub-relation.
+        let mut plan = PlanV2::diehard();
+        plan.rows[3].remove(0);
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::RelationMismatch { state: 3, entry: 0 }
+        );
+    }
+
+    #[test]
+    fn a_retargeted_transition_is_not_the_models_relation() {
+        // emit-retargets-to-the-first-state: in the table, so closed.
+        let green = PlanV2::diehard();
+        for state in 0..green.rows.len() {
+            for entry in 0..green.rows[state].len() {
+                let mut plan = green.clone();
+                let (action, target) = plan.rows[state][entry];
+                let retarget = if target == 0 { 1 } else { 0 };
+                plan.rows[state][entry] = (action, retarget);
+                plan.rows[state].sort_unstable();
+                plan.rows[state].dedup();
+                assert!(
+                    matches!(rejection_v2(&plan), Rejection::RelationMismatch { state: s, .. }
+                        if s == u32::try_from(state).unwrap()),
+                    "row {state} entry {entry} retargeted was not caught"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_extra_or_relabelled_transition_is_not_the_models_relation() {
+        let mut plan = PlanV2::diehard();
+        let last = plan.rows[0].last().copied().unwrap();
+        plan.rows[0].push((last.0, last.1.saturating_add(1).min(15)));
+        plan.rows[0].sort_unstable();
+        plan.rows[0].dedup();
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::RelationMismatch { state: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn a_model_whose_evaluation_differs_from_the_rows_is_caught() {
+        // eval-update-off-by-one / eval-frame-rule-broken / eval-skips-the-last-action:
+        // the rows are the correct relation, the carried model is not the one that
+        // wrote them. Either way round, the two disagree.
+        let mut model = ModelPlan::diehard();
+        model.actions[4].outcomes[0][0].1 = Expr::Int(2); // fill-small := 2
+        let mut plan = PlanV2::diehard();
+        plan.model = model.encode();
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::RelationMismatch { .. } | Rejection::SuccessorNotInTable { .. }
+        ));
+
+        let mut model = ModelPlan::diehard();
+        model.actions[5].guard = Expr::Bool(false);
+        let mut plan = PlanV2::diehard();
+        plan.model = model.encode();
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::RelationMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn a_missing_initial_state_of_the_model_is_caught() {
+        // emit-drops-first-initial-state: the initial states are the model's.
+        let mut model = ModelPlan::diehard();
+        model.initial = vec![vec![0, 0], vec![1, 1]];
+        let mut plan = PlanV2::diehard();
+        plan.model = model.encode();
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::InitialStateNotInTable { position: 1 }
+        );
+    }
+
+    #[test]
+    fn a_table_missing_a_reachable_state_is_a_closure_failure_against_the_model() {
+        let plan = restrict(&PlanV2::diehard(), |s| s != [5, 3]);
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::SuccessorNotInTable { .. }
+        ));
+    }
+
+    #[test]
+    fn a_model_that_leaves_its_domain_or_overflows_has_no_relation_to_certify() {
+        let mut model = ModelPlan::diehard();
+        model.actions[3].outcomes[0][0].1 = Expr::Int(6); // fill-big := 6
+        let mut plan = PlanV2::diehard();
+        plan.model = model.encode();
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::UpdateOutsideDomain {
+                action: 3,
+                variable: 0,
+                value: 6,
+                ..
+            }
+        ));
+
+        let mut model = ModelPlan::diehard();
+        model.overflowing_guard();
+        let mut plan = PlanV2::diehard();
+        plan.model = model.encode();
+        assert_eq!(
+            rejection_v2(&plan),
+            Rejection::EvaluationOverflow { state: 0 }
+        );
+    }
+
+    #[test]
+    fn a_table_state_outside_the_models_domain_is_rejected() {
+        let mut plan = PlanV2::diehard();
+        plan.states.push(vec![6, 0]);
+        plan.rows.push(Vec::new());
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::PropertyViolated {
+                variable: 0,
+                value: 6,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn every_carried_index_is_range_checked_at_decode() {
+        let mut plan = PlanV2::diehard();
+        plan.rows[0].push((0, 16));
+        plan.rows[0].sort_unstable();
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::TargetOutOfRange {
+                state: 0,
+                target: 16,
+                ..
+            }
+        ));
+        let mut plan = PlanV2::diehard();
+        plan.rows[0].push((6, 0));
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::UnknownAction {
+                state: 0,
+                action: 6,
+                ..
+            }
+        ));
+        let mut plan = PlanV2::diehard();
+        plan.rows[0].reverse();
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::NotStrictlyAscending {
+                field: Field::TransitionAction,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn the_model_section_is_bounded_before_it_is_decoded() {
+        let mut plan = PlanV2::diehard();
+        plan.declared_model_len = Some(crate::wire::MAX_MODEL_BYTES + 1);
+        assert!(matches!(
+            rejection_v2(&plan),
+            Rejection::Truncated {
+                field: Field::ModelLength,
+                ..
+            }
+        ));
+        let mut plan = PlanV2::diehard();
+        let mut model = ModelPlan::diehard().encode();
+        model.resize(crate::wire::MAX_MODEL_BYTES as usize + 1, 0);
+        plan.model = model;
+        assert!(matches!(
+            verdict_v2(&plan),
+            Verdict::Unsupported(Feature::ResourceBound {
+                resource: Resource::ModelBytes,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn evaluation_work_is_charged_before_any_evaluation() {
+        // A guard of 2^20 - 1 nodes (a balanced conjunction 19 deep) over 20,000
+        // states: about 2 * 10^10 units, over the 2^33 budget. The rows are all empty
+        // and wrong, so a check that evaluated first would reject instead.
+        fn balanced(depth: u32) -> Expr {
+            if depth == 0 {
+                Expr::Bool(true)
+            } else {
+                Expr::And(Box::new(balanced(depth - 1)), Box::new(balanced(depth - 1)))
+            }
+        }
+        let model = ModelPlan {
+            variables: vec![("x".to_owned(), 0, 1_000_000)],
+            actions: vec![crate::fixture::PlannedAction {
+                name: "a".to_owned(),
+                guard: balanced(19),
+                outcomes: vec![vec![]],
+            }],
+            initial: vec![vec![0]],
+            predicates: Vec::new(),
+            ..ModelPlan::two_outcomes()
+        };
+        let plan = PlanV2 {
+            model: model.encode(),
+            states: (0..20_000).map(|x| vec![x]).collect(),
+            rows: vec![Vec::new(); 20_000],
+            ..PlanV2::diehard()
+        };
+        assert!(matches!(
+            verdict_v2(&plan),
+            Verdict::Unsupported(Feature::ResourceBound {
+                resource: Resource::EvaluationWork,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn every_prefix_of_a_model_bound_certificate_is_refused() {
+        let bytes = PlanV2::diehard().encode();
+        for cut in 0..bytes.len() {
+            assert!(
+                !check_certificate(&bytes[..cut]).is_verified(),
+                "a {cut}-byte prefix verified"
+            );
+        }
+    }
+
+    #[test]
+    fn single_byte_corruptions_of_a_model_bound_certificate_never_verify_a_different_relation() {
+        // A corruption may still verify only if it leaves the relation, the model
+        // and the property unchanged — i.e. it touched an envelope label, which is
+        // the trusted envelope-digest binding.
+        let green_plan = PlanV2::diehard();
+        let green = green_plan.encode();
+        let envelope_end = green.len()
+            - green_plan.model.len()
+            - 4
+            - 2
+            - 4
+            - 16 * 16
+            - green_plan
+                .rows
+                .iter()
+                .map(|r| 4 + 6 * r.len())
+                .sum::<usize>();
+        for position in envelope_end..green.len() {
+            for delta in [0x01_u8, 0x80] {
+                let mut mutated = green.clone();
+                mutated[position] ^= delta;
+                if let Verdict::Verified(claim) = check_certificate(&mutated) {
+                    // Only a model change that is semantically inert could verify,
+                    // and then the claim reports the changed identity.
+                    assert_ne!(
+                        claim.model_identity(),
+                        Some(green_plan.model.as_slice()),
+                        "byte {position} xor {delta:#04x} verified with the green identity"
+                    );
+                }
+            }
+        }
     }
 
     // --- adversarial: garbage cannot panic ---------------------------------

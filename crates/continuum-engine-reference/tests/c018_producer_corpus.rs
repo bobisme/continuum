@@ -35,17 +35,24 @@
 //!
 //! # What the kernel can and cannot see
 //!
-//! A `CONTCERT` finite-closure certificate carries the reachable set, the initial
-//! states, the declared domain and one successor row per state. The model is carried
-//! only as a digest in the envelope. So the kernel can refuse a certificate whose set
-//! is not closed under its own rows, leaves its own domain, or misses its own initial
-//! states. It cannot refuse a certificate whose rows, initial states or domain are not
-//! the model's. `CheckedClaim::trusted_components` names exactly that residual:
-//! `certificate-model-correspondence` and `envelope-digest-binding`.
+//! The reference engine writes wire-epoch-2 certificates (bn-35y4f). Each carries the
+//! model's canonical encoding (`Model::identity`), and the kernel re-derives the
+//! domain, the initial states and every successor row from it with its own evaluator.
+//! So a row, an initial state or a domain that is not the carried model's is a
+//! rejection. What stays trusted is `envelope-digest-binding`: that the carried
+//! encoding is the caller's model. The encoder that writes it
+//! (`continuum-model-core/src/identity.rs`) is therefore still trusted, and the
+//! campaign's identity-encoder mutants measure exactly that residual.
+//!
+//! Each model is probed for its state domain and, where the model declares one, for
+//! an invariant: `die-hard/TypeOK` verifies, `die-hard/NotSolved` is refuted (the
+//! film's solution reaches `big = 4`), and a producer fault that turned that
+//! refutation into a verification would be `missed`.
 
 use continuum_engine_reference::bfs::{self, Bounds, Exploration};
 use continuum_engine_reference::certificate::{self, ClaimEnvelope, ClosedSet, PRODUCER};
 use continuum_engine_reference::diehard;
+use continuum_engine_reference::diehard::{NOT_SOLVED, TYPE_OK};
 use continuum_engine_reference::expr::{BoolExpr, CmpOp, IntExpr};
 use continuum_engine_reference::model::{ActionDecl, Model, ModelBuilder};
 
@@ -93,6 +100,13 @@ fn gated_counter() -> Model {
             BoolExpr::compare(CmpOp::Eq, x(), IntExpr::constant(4)),
             vec![("x", IntExpr::constant(0)), ("y", IntExpr::constant(0))],
         ))
+        .predicate(
+            "FlippedOnlyWhenStarted",
+            BoolExpr::implies(
+                BoolExpr::compare(CmpOp::Eq, y(), IntExpr::constant(1)),
+                BoolExpr::compare(CmpOp::Ge, x(), IntExpr::constant(1)),
+            ),
+        )
         .build()
         .expect("the gated counter is a valid model")
 }
@@ -112,14 +126,22 @@ fn halting_counter() -> Model {
         .expect("the halting counter is a valid model")
 }
 
-fn corpus() -> Vec<(&'static str, Model)> {
+/// One probe: a name, a model, and the invariant to certify (`None`: the domain).
+type Probe = (&'static str, Model, Option<&'static str>);
+
+fn corpus() -> Vec<Probe> {
+    let die_hard = || diehard::model().expect("the Die Hard transcription is a valid model");
     vec![
+        ("die-hard", die_hard(), None),
+        ("die-hard/TypeOK", die_hard(), Some(TYPE_OK)),
+        ("die-hard/NotSolved", die_hard(), Some(NOT_SOLVED)),
+        ("gated-counter", gated_counter(), None),
         (
-            "die-hard",
-            diehard::model().expect("the Die Hard transcription is a valid model"),
+            "gated-counter/FlippedOnlyWhenStarted",
+            gated_counter(),
+            Some("FlippedOnlyWhenStarted"),
         ),
-        ("gated-counter", gated_counter()),
-        ("halting-counter", halting_counter()),
+        ("halting-counter", halting_counter(), None),
     ]
 }
 
@@ -134,7 +156,7 @@ fn fnv(bytes: &[u8]) -> u64 {
 }
 
 /// Run the whole producer, then the kernel, and render one stable line.
-fn probe(name: &str, model: &Model) -> String {
+fn probe(name: &str, model: &Model, invariant: Option<&str>) -> String {
     let exploration = match bfs::explore(model, Bounds::CERTIFIABLE) {
         Ok(exploration) => exploration,
         Err(error) => return format!("C018-PRODUCER {name} explore-error {error:?}"),
@@ -145,16 +167,24 @@ fn probe(name: &str, model: &Model) -> String {
     let Some(closed) = ClosedSet::of(&exploration) else {
         return format!("C018-PRODUCER {name} explore-not-closed");
     };
-    let bytes = match certificate::emit_finite_closure(model, closed, &envelope()) {
+    let emitted = match invariant {
+        Some(predicate) => {
+            certificate::emit_invariant_closure(model, closed, &envelope(), predicate)
+        }
+        None => certificate::emit_finite_closure(model, closed, &envelope()),
+    };
+    let bytes = match emitted {
         Ok(bytes) => bytes,
         Err(error) => return format!("C018-PRODUCER {name} emit-error {error}"),
     };
     let outcome = match check_certificate(&bytes) {
         Verdict::Verified(claim) => format!(
-            "verified states={} initial={} transitions={}",
+            "verified epoch={} states={} initial={} transitions={} trusted={}",
+            claim.wire_epoch(),
             claim.states(),
             claim.initial_states(),
-            claim.transitions()
+            claim.transitions(),
+            claim.trusted_components().join(",")
         ),
         Verdict::Rejected(rejection) => format!("rejected:{}", rejection.reason()),
         Verdict::Unsupported(feature) => format!("unsupported:{feature:?}"),
@@ -162,20 +192,24 @@ fn probe(name: &str, model: &Model) -> String {
     format!("C018-PRODUCER {name} {outcome} fnv={:016x}", fnv(&bytes))
 }
 
-/// The unmutated producer's lines. A deliberate change to the engine or the model core
+/// The unmutated producer's lines, at wire epoch 2 (bn-35y4f moved every digest: the
+/// certificates now carry the model and index their targets). A deliberate change to the engine or the model core
 /// that moves a certificate moves one of these, and C018's producer ledger
 /// (`tools/tcb-audit/evidence/c018.json`) must then be regenerated.
-const PINNED: [&str; 3] = [
-    "C018-PRODUCER die-hard verified states=16 initial=1 transitions=96 fnv=b6c3dc8707bb9236",
-    "C018-PRODUCER gated-counter verified states=9 initial=2 transitions=17 fnv=bb8470999157f763",
-    "C018-PRODUCER halting-counter verified states=4 initial=1 transitions=3 fnv=c97c55fd0e439065",
+const PINNED: [&str; 6] = [
+    "C018-PRODUCER die-hard verified epoch=2 states=16 initial=1 transitions=96 trusted=envelope-digest-binding fnv=f76815b3585a786c",
+    "C018-PRODUCER die-hard/TypeOK verified epoch=2 states=16 initial=1 transitions=96 trusted=envelope-digest-binding fnv=7ffc284d447dfa1d",
+    "C018-PRODUCER die-hard/NotSolved rejected:invariant-violated fnv=d86ac06e0cd2d6c2",
+    "C018-PRODUCER gated-counter verified epoch=2 states=9 initial=2 transitions=17 trusted=envelope-digest-binding fnv=1d132a9169271a3a",
+    "C018-PRODUCER gated-counter/FlippedOnlyWhenStarted verified epoch=2 states=9 initial=2 transitions=17 trusted=envelope-digest-binding fnv=91737077c5dd4076",
+    "C018-PRODUCER halting-counter verified epoch=2 states=4 initial=1 transitions=3 trusted=envelope-digest-binding fnv=156307e7eb328971",
 ];
 
 #[test]
 fn the_producer_corpus_verifies_from_bytes_with_pinned_certificates() {
     let lines: Vec<String> = corpus()
         .iter()
-        .map(|(name, model)| probe(name, model))
+        .map(|(name, model, invariant)| probe(name, model, *invariant))
         .collect();
     for line in &lines {
         println!("{line}");
@@ -185,7 +219,11 @@ fn the_producer_corpus_verifies_from_bytes_with_pinned_certificates() {
 
 #[test]
 fn the_probe_is_deterministic() {
-    for (name, model) in corpus() {
-        assert_eq!(probe(name, &model), probe(name, &model), "INV-005");
+    for (name, model, invariant) in corpus() {
+        assert_eq!(
+            probe(name, &model, invariant),
+            probe(name, &model, invariant),
+            "INV-005"
+        );
     }
 }

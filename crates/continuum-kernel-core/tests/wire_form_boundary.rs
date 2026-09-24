@@ -18,7 +18,7 @@
 //! `Verdict::Verified`. A change that added one would make this file's opening
 //! sentence false, which is why it is written down.
 
-use continuum_kernel_core::wire::{MAGIC, WIRE_EPOCH, decode};
+use continuum_kernel_core::wire::{LEGACY_WIRE_EPOCH, MAGIC, decode};
 use continuum_kernel_core::{
     CertificateKind, PropertyClass, Rejection, Verdict, check_certificate,
 };
@@ -57,7 +57,7 @@ impl Bytes {
 fn toggle_certificate() -> Vec<u8> {
     let mut out = Bytes::default();
     out.0.extend_from_slice(&MAGIC);
-    out.u16(WIRE_EPOCH);
+    out.u16(LEGACY_WIRE_EPOCH);
     out.u16(1); // finite-closure
 
     out.token("blake3:toggle-model");
@@ -66,7 +66,7 @@ fn toggle_certificate() -> Vec<u8> {
     out.token("blake3:toggle-scope");
     out.token("blake3:empty-assumptions");
     out.token("continuum-engine-reference/0.0.0");
-    out.u16(WIRE_EPOCH);
+    out.u16(LEGACY_WIRE_EPOCH);
     out.u16(0); // no domain packs
 
     out.u16(1); // one variable
@@ -135,7 +135,7 @@ fn an_open_certificate_is_rejected_from_bytes_alone() {
     // exact shape of an exploration that stopped early.
     let mut out = Bytes::default();
     out.0.extend_from_slice(&MAGIC);
-    out.u16(WIRE_EPOCH);
+    out.u16(LEGACY_WIRE_EPOCH);
     out.u16(1);
     out.token("blake3:toggle-model");
     out.token("continuum-semantics-1");
@@ -143,7 +143,7 @@ fn an_open_certificate_is_rejected_from_bytes_alone() {
     out.token("blake3:toggle-scope");
     out.token("blake3:empty-assumptions");
     out.token("continuum-engine-reference/0.0.0");
-    out.u16(WIRE_EPOCH);
+    out.u16(LEGACY_WIRE_EPOCH);
     out.u16(0);
     out.u16(1);
     out.token("bit");

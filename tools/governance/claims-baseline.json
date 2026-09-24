@@ -164,10 +164,10 @@
       "digest": "1da4235d8fcc33650acb0b5b48496ad7b5a3e94a15e7b038a60b210b390a7bce",
       "id": "C018",
       "revision": {
-        "bone": "bn-hakt3",
-        "reason": "initial claims-baseline pin: no evidence bone has ever moved this row off the state the dossier's rev3 import gave it, so this is a mechanical first pin, not a promotion"
+        "bone": "bn-35y4f",
+        "reason": "wire-epoch-2 model-bound finite closure: the kernel re-derives the relation from the carried model, and the rerun C018 lane moves the producer residual from certificate.rs and model.rs to identity.rs; observed on epoch-2 finite-closure certificates only"
       },
-      "state": "TARGET"
+      "state": "OBSERVED"
     },
     {
       "digest": "1be268f92e3ac33c7b688cbf3285addc902e30a93d2a3790d510ab5a5decc5c4",

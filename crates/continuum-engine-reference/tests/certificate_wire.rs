@@ -124,9 +124,34 @@ fn byte_layout_of_a_two_state_model_is_exactly_the_grammar() {
     let bytes = emit(&model, &exploration);
 
     let claim = envelope();
+    // The model section, transcribed from `continuum-model/1`'s documented grammar
+    // (`continuum-model-core/src/identity.rs`): counts and token lengths are u64.
+    let mut model_bytes = Expected::default();
+    let count = |e: &mut Expected, n: u64| {
+        e.bytes(&n.to_be_bytes());
+    };
+    model_bytes.bytes(b"continuum-model/1");
+    count(&mut model_bytes, 1); // one variable
+    count(&mut model_bytes, 1);
+    model_bytes.bytes(b"x").i64(0).i64(1);
+    count(&mut model_bytes, 1); // one action
+    count(&mut model_bytes, 4);
+    model_bytes.bytes(b"Flip").bytes(&[0x10, 1]); // guard: true
+    count(&mut model_bytes, 1); // one outcome
+    count(&mut model_bytes, 1); // one assignment
+    count(&mut model_bytes, 1);
+    model_bytes.bytes(b"x").bytes(&[0x03, 1, 0x01]).i64(1); // 1 - x
+    model_bytes.bytes(&[0x02]);
+    count(&mut model_bytes, 1);
+    model_bytes.bytes(b"x");
+    count(&mut model_bytes, 1); // one initial state
+    count(&mut model_bytes, 1);
+    model_bytes.i64(0);
+    count(&mut model_bytes, 0); // no predicates
+
     let mut want = Expected::default();
     // header := magic:8 wire_epoch:u16 kind:u16
-    want.bytes(b"CONTCERT").u16(1).u16(1);
+    want.bytes(b"CONTCERT").u16(2).u16(1);
     // envelope := six tokens, schema_epoch:u16, domain_pack_count:u16 token*
     want.token(claim.model_digest)
         .token(claim.semantic_epoch)
@@ -134,22 +159,19 @@ fn byte_layout_of_a_two_state_model_is_exactly_the_grammar() {
         .token(claim.scope_digest)
         .token(claim.assumptions_digest)
         .token(claim.producer)
-        .u16(1)
+        .u16(2)
         .u16(0);
-    // domain := variable_count:u16 variable*, variable := name:token lo:i64 hi:i64
-    want.u16(1).token("x").i64(0).i64(1);
+    // model_len:u32 model
+    want.u32(u32::try_from(model_bytes.out.len()).expect("small model"))
+        .bytes(&model_bytes.out);
+    // property := 1 (state-domain)
+    want.u16(1);
     // table := state_count:u32 state*, ascending
     want.u32(2).i64(0).i64(1);
-    // property_class:u16
-    want.u16(1);
-    // initial_count:u32 state*
-    want.u32(1).i64(0);
-    // action_count:u16 token*
-    want.u16(1).token("Flip");
     // row * state_count; row := transition_count:u32 transition*,
-    // transition := action:u16 state
-    want.u32(1).u16(0).i64(1);
-    want.u32(1).u16(0).i64(0);
+    // transition := action:u16 target:u32 (a table index)
+    want.u32(1).u16(0).u32(1);
+    want.u32(1).u16(0).u32(0);
 
     assert_eq!(bytes, want.out);
 }
@@ -165,7 +187,10 @@ fn the_header_names_this_epoch_and_this_family() {
         bytes.get(10..12),
         Some(FINITE_CLOSURE_KIND.to_be_bytes().as_slice())
     );
-    assert_eq!(WIRE_EPOCH, 1, "the wire epoch this build implements");
+    assert_eq!(
+        WIRE_EPOCH, 2,
+        "the model-bound wire epoch this build writes"
+    );
     assert_eq!(FINITE_CLOSURE_KIND, 1, "CertificateKind::FiniteClosure");
     assert_eq!(PROPERTY_CLASS_STATE_DOMAIN, 1, "PropertyClass::StateDomain");
 }
@@ -184,13 +209,15 @@ fn the_die_hard_certificate_has_the_size_the_frozen_facts_imply() {
     let model = diehard_model();
     let bytes = emit(&model, &complete(&model));
 
-    // 16 states of two i64s, and 96 transitions of a u16 tag plus two i64s, plus one
-    // u32 count per row. Everything else is header, envelope, domain and action names.
+    // 16 states of two i64s, and 96 transitions of a u16 action and a u32 target
+    // index, plus one u32 count per row, plus the model's canonical encoding.
+    // Everything else is header and envelope.
     let table = 16 * 2 * 8;
-    let rows = 16 * 4 + 96 * (2 + 2 * 8);
+    let rows = 16 * 4 + 96 * (2 + 4);
+    let model_len = model.identity().as_bytes().len();
     assert!(
-        bytes.len() > table + rows,
-        "the certificate carries the table and every row"
+        bytes.len() > table + rows + model_len,
+        "the certificate carries the model, the table and every row"
     );
     assert!(bytes.len() < 4096, "and nothing like 64 MiB of anything");
 }

@@ -1,0 +1,86 @@
+[change]
+bone = "bn-35y4f"
+author = "continuum-dev"
+summary = "continuum-kernel-core wire epoch 2: a finite-closure certificate carries the model's canonical encoding (continuum-model/1), and the kernel decodes it with its own decoder, re-derives every successor row with its own evaluator and requires exact equality with the carried rows (u32 target indices, range-checked), checks Init(M) and Dom(M), and evaluates an invariant property class; epoch-1 claims keep certificate-model-correspondence as trusted, epoch-2 claims do not; the reference emitter writes epoch 2 (RFC 0005 correction 1; bn-1m952 merged)"
+
+[semantic]
+covers = [
+  "crates/continuum-kernel-core/src/",
+  "crates/continuum-engine-reference/src/certificate.rs",
+  "crates/continuum-engine-reference/src/lib.rs",
+]
+reference_tests = [
+  "crates/continuum-kernel-core/src/check.rs::the_model_bound_die_hard_certificate_is_verified_without_the_correspondence_trust",
+  "crates/continuum-kernel-core/src/check.rs::a_legacy_claim_still_names_the_correspondence_it_trusts",
+  "crates/continuum-kernel-core/src/check.rs::an_invariant_of_the_model_is_established_or_refuted_at_every_state",
+  "crates/continuum-kernel-core/src/check.rs::a_dropped_transition_is_not_the_models_relation",
+  "crates/continuum-kernel-core/src/check.rs::a_retargeted_transition_is_not_the_models_relation",
+  "crates/continuum-kernel-core/src/check.rs::a_model_whose_evaluation_differs_from_the_rows_is_caught",
+  "crates/continuum-kernel-core/src/check.rs::a_missing_initial_state_of_the_model_is_caught",
+  "crates/continuum-kernel-core/src/check.rs::a_model_that_leaves_its_domain_or_overflows_has_no_relation_to_certify",
+  "crates/continuum-kernel-core/src/check.rs::evaluation_work_is_charged_before_any_evaluation",
+  "crates/continuum-kernel-core/src/model.rs::evaluation_is_checked_and_does_not_short_circuit",
+  "crates/continuum-engine-reference/tests/certificate_kernel_differential.rs::every_single_byte_mutation_of_the_successor_rows_is_rejected",
+  "crates/continuum-engine-reference/tests/c018_producer_corpus.rs::the_producer_corpus_verifies_from_bytes_with_pinned_certificates",
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::no_lie_verifies",
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::every_lie_is_rejected_for_the_reason_it_targets",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-kernel-core/src/check.rs::metamorphic_equivalent_guard_normalization_keeps_the_verdict", relation = "equivalent guard normalization" },
+]
+differential_tests = [
+  { test = "crates/continuum-engine-reference/tests/c018_kernel_evaluator_differential.rs::the_kernel_and_the_model_core_agree_on_every_random_model", oracle = "continuum-engine-reference", subject = "continuum-kernel-core" },
+]
+
+[semantic.claim_impact]
+claims = ["C018"]
+reason = "C018: the producer faults bn-2npu measured as missed (emitter and evaluator writing a closed, in-domain relation that is not the model's) are now rejected by the kernel for wire-epoch-2 certificates; the residual moves to the model's canonical encoder and the envelope binding. The docs/18 row moves only as far as tools/tcb-audit/evidence/c018.json supports, under a named claims-baseline revision"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document moves: the CONTCERT byte layout is continuum-kernel-core's own contract (wire.rs module documentation), versioned by its wire epoch, and schemas/proof-receipt.schema.json references the artifact only by kind, hash and path; the receipt keeps its shape and fields, and only checker.version (+wire.CONTCERT.2), claim.text and trusted_components carry different values"
+
+unaffected = { proof-receipt = "the receipt keeps every field and its shape; checker.version, claim.text and trusted_components carry new values that the schema already admits" }
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-kernel-core adds wire epoch 2 and keeps epoch 1 decodable (ADR-0018 window). Stored epoch-1 certificates keep their verdicts and keep certificate-model-correspondence among their trusted components. continuum-engine-reference now emits epoch 2 only, so its certificate bytes and digests move (the C018 producer pins and the certificate goldens are updated deliberately). A stored epoch-1 claim gains the stronger epoch-2 assurance only by re-emitting and re-checking; nothing is reinterpreted in place"
+
+[kernel]
+covers = [
+  "crates/continuum-kernel-core/src/",
+]
+
+[kernel.mutation_tests]
+tests = [
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::no_lie_verifies",
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::every_lie_is_rejected_for_the_reason_it_targets",
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::no_single_byte_mutant_verifies_a_claim_the_oracle_refutes",
+  "crates/continuum-kernel-core/src/check.rs::a_retargeted_transition_is_not_the_models_relation",
+  "crates/continuum-kernel-core/src/check.rs::every_carried_index_is_range_checked_at_decode",
+]
+classes = ["body.element-drop", "body.reference-retarget", "body.dangling-reference", "body.value-perturbation", "robustness.garbage-corpus"]
+
+[kernel.code_size]
+total = 12684
+budget = 15000
+note = "continuum-kernel-core grew from 2406 to 4105 shipped lines (KCOV-01 count, +1699): the model decoder and evaluator (src/model.rs, 861), the epoch-2 body and its decoder in wire.rs, check_model_closure and its precharge in check.rs, the epoch-2 rejection, field, feature and claim vocabulary in verdict.rs, and the receipt text; the other three kernel crates are unchanged"
+
+[kernel.no_unchecked_optimization]
+is_optimization = false
+reason = "a new certificate epoch with added obligations (the relation re-derivation, Init(M), Dom(M), the invariant and the precharge); nothing is made faster by skipping a check, and epoch-1 checking is unchanged"
+
+[kernel.fuzz_corpus]
+files = ["crates/continuum-certificate/tests/c018-corpus/cases.txt"]
+test = "crates/continuum-certificate/tests/c018_checker_mutation.rs::the_committed_corpus_replays_with_its_recorded_verdicts"
+
+[kernel.reviewers]
+entries = [
+  { reviewer = "continuum-security", review = "cr-18l29w", verdict = "approved" },
+  { reviewer = "continuum-kernel-review", review = "cr-18l29w", verdict = "approved" },
+]
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-18l29w"
+verdict = "approved"

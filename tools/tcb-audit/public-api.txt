@@ -40,7 +40,7 @@ crates/continuum-kernel-core/src/lib.rs: mod verdict
 crates/continuum-kernel-core/src/lib.rs: mod wire
 crates/continuum-kernel-core/src/lib.rs: use check::check_certificate
 crates/continuum-kernel-core/src/lib.rs: use receipt::{Receipt, ReceiptError, Seam, SeamField, receipt}
-crates/continuum-kernel-core/src/lib.rs: use verdict::{ CertificateKind, CheckedClaim, Feature, Field, PropertyClass, Rejection, TokenFault, Verdict, }
+crates/continuum-kernel-core/src/lib.rs: use verdict::{ CertificateKind, CheckedClaim, Feature, Field, PropertyClass, Rejection, Resource, TokenFault, Verdict, }
 crates/continuum-kernel-core/src/receipt.rs: const CHECKER_NAME
 crates/continuum-kernel-core/src/receipt.rs: const SCHEMA_EPOCH
 crates/continuum-kernel-core/src/receipt.rs: const SCHEMA_ID
@@ -66,6 +66,7 @@ crates/continuum-kernel-core/src/verdict.rs: enum Feature
 crates/continuum-kernel-core/src/verdict.rs: enum Field
 crates/continuum-kernel-core/src/verdict.rs: enum PropertyClass
 crates/continuum-kernel-core/src/verdict.rs: enum Rejection
+crates/continuum-kernel-core/src/verdict.rs: enum Resource
 crates/continuum-kernel-core/src/verdict.rs: enum TokenFault
 crates/continuum-kernel-core/src/verdict.rs: enum Verdict
 crates/continuum-kernel-core/src/verdict.rs: impl CertificateKind: const ALL
@@ -74,11 +75,14 @@ crates/continuum-kernel-core/src/verdict.rs: impl CertificateKind: fn code(self)
 crates/continuum-kernel-core/src/verdict.rs: impl CertificateKind: fn from_code(code: u16) -> Option<Self>
 crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn envelope(&self) -> &Envelope
 crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn initial_states(&self) -> u32
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn invariant(&self) -> Option<&Token>
 crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn model_identity(&self) -> Option<&[u8]>
 crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn property(&self) -> PropertyClass
 crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn states(&self) -> u32
 crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn transitions(&self) -> u64
 crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn trusted_components(&self) -> &'static [&'static str]
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn wire_epoch(&self) -> u16
 crates/continuum-kernel-core/src/verdict.rs: impl Field: fn as_str(self) -> &'static str
 crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: const ALL
 crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: fn as_str(self) -> &'static str
@@ -86,13 +90,19 @@ crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: fn code(self) -
 crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: fn from_code(code: u16) -> Option<Self>
 crates/continuum-kernel-core/src/verdict.rs: impl Rejection: fn field(&self) -> Option<Field>
 crates/continuum-kernel-core/src/verdict.rs: impl Rejection: fn reason(&self) -> &'static str
+crates/continuum-kernel-core/src/verdict.rs: impl Resource: fn as_str(self) -> &'static str
 crates/continuum-kernel-core/src/verdict.rs: impl Verdict: fn claim(&self) -> Option<&CheckedClaim>
 crates/continuum-kernel-core/src/verdict.rs: impl Verdict: fn is_verified(&self) -> bool
 crates/continuum-kernel-core/src/verdict.rs: struct CheckedClaim
+crates/continuum-kernel-core/src/wire.rs: const LEGACY_WIRE_EPOCH
 crates/continuum-kernel-core/src/wire.rs: const MAGIC
 crates/continuum-kernel-core/src/wire.rs: const MAX_ACTIONS
 crates/continuum-kernel-core/src/wire.rs: const MAX_CERTIFICATE_BYTES
 crates/continuum-kernel-core/src/wire.rs: const MAX_DOMAIN_PACKS
+crates/continuum-kernel-core/src/wire.rs: const MAX_EVALUATION_WORK
+crates/continuum-kernel-core/src/wire.rs: const MAX_EXPRESSION_DEPTH
+crates/continuum-kernel-core/src/wire.rs: const MAX_EXPRESSION_NODES
+crates/continuum-kernel-core/src/wire.rs: const MAX_MODEL_BYTES
 crates/continuum-kernel-core/src/wire.rs: const MAX_STATES
 crates/continuum-kernel-core/src/wire.rs: const MAX_TOKEN_BYTES
 crates/continuum-kernel-core/src/wire.rs: const MAX_TRANSITIONS
@@ -119,6 +129,12 @@ crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn property_cl
 crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn rows(&self) -> &[Vec<Transition>]
 crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn table(&self) -> &StateTable
 crates/continuum-kernel-core/src/wire.rs: impl From<Rejection> for DecodeFailure
+crates/continuum-kernel-core/src/wire.rs: impl ModelClosureBody: fn invariant(&self) -> Option<&Token>
+crates/continuum-kernel-core/src/wire.rs: impl ModelClosureBody: fn model_identity(&self) -> &[u8]
+crates/continuum-kernel-core/src/wire.rs: impl ModelClosureBody: fn property(&self) -> PropertyClass
+crates/continuum-kernel-core/src/wire.rs: impl ModelClosureBody: fn row(&self, index: u32) -> Option<&[(u16, u32)]>
+crates/continuum-kernel-core/src/wire.rs: impl ModelClosureBody: fn table(&self) -> &StateTable
+crates/continuum-kernel-core/src/wire.rs: impl ModelClosureBody: fn transition_count(&self) -> u64
 crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn i64(&mut self, field: Field) -> Result<i64, Rejection>
 crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn is_empty(&self) -> bool
 crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn new(bytes: &'a [u8]) -> Self
@@ -147,6 +163,7 @@ crates/continuum-kernel-core/src/wire.rs: impl Variable: fn name(&self) -> &Toke
 crates/continuum-kernel-core/src/wire.rs: struct Certificate
 crates/continuum-kernel-core/src/wire.rs: struct Envelope
 crates/continuum-kernel-core/src/wire.rs: struct FiniteClosureBody
+crates/continuum-kernel-core/src/wire.rs: struct ModelClosureBody
 crates/continuum-kernel-core/src/wire.rs: struct Reader
 crates/continuum-kernel-core/src/wire.rs: struct StateDomain
 crates/continuum-kernel-core/src/wire.rs: struct StateTable

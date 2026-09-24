@@ -29,56 +29,57 @@
     "by_crate": {
       "continuum-kernel-core": {
         "by_file": {
-          "crates/continuum-kernel-core/src/check.rs": 214,
-          "crates/continuum-kernel-core/src/lib.rs": 125,
-          "crates/continuum-kernel-core/src/receipt.rs": 527,
-          "crates/continuum-kernel-core/src/verdict.rs": 577,
-          "crates/continuum-kernel-core/src/wire.rs": 963
+          "crates/continuum-kernel-core/src/check.rs": 419,
+          "crates/continuum-kernel-core/src/lib.rs": 134,
+          "crates/continuum-kernel-core/src/model.rs": 861,
+          "crates/continuum-kernel-core/src/receipt.rs": 579,
+          "crates/continuum-kernel-core/src/verdict.rs": 872,
+          "crates/continuum-kernel-core/src/wire.rs": 1240
         },
-        "non_blank": 2239,
-        "non_blank_non_comment": 1309,
-        "total": 2406
+        "non_blank": 3847,
+        "non_blank_non_comment": 2511,
+        "total": 4105
       },
       "continuum-kernel-sat": {
         "by_file": {
           "crates/continuum-kernel-sat/src/check.rs": 442,
-          "crates/continuum-kernel-sat/src/lib.rs": 132,
-          "crates/continuum-kernel-sat/src/receipt.rs": 531,
-          "crates/continuum-kernel-sat/src/verdict.rs": 624,
+          "crates/continuum-kernel-sat/src/lib.rs": 136,
+          "crates/continuum-kernel-sat/src/receipt.rs": 566,
+          "crates/continuum-kernel-sat/src/verdict.rs": 680,
           "crates/continuum-kernel-sat/src/wire.rs": 896
         },
-        "non_blank": 2448,
-        "non_blank_non_comment": 1466,
-        "total": 2625
+        "non_blank": 2537,
+        "non_blank_non_comment": 1524,
+        "total": 2720
       },
       "continuum-kernel-smt": {
         "by_file": {
           "crates/continuum-kernel-smt/src/check.rs": 481,
-          "crates/continuum-kernel-smt/src/lib.rs": 121,
-          "crates/continuum-kernel-smt/src/receipt.rs": 554,
-          "crates/continuum-kernel-smt/src/verdict.rs": 645,
+          "crates/continuum-kernel-smt/src/lib.rs": 125,
+          "crates/continuum-kernel-smt/src/receipt.rs": 572,
+          "crates/continuum-kernel-smt/src/verdict.rs": 702,
           "crates/continuum-kernel-smt/src/wire.rs": 886
         },
-        "non_blank": 2494,
-        "non_blank_non_comment": 1625,
-        "total": 2687
+        "non_blank": 2569,
+        "non_blank_non_comment": 1678,
+        "total": 2766
       },
       "continuum-kernel-temporal": {
         "by_file": {
-          "crates/continuum-kernel-temporal/src/check.rs": 590,
+          "crates/continuum-kernel-temporal/src/check.rs": 636,
           "crates/continuum-kernel-temporal/src/lib.rs": 126,
-          "crates/continuum-kernel-temporal/src/receipt.rs": 543,
-          "crates/continuum-kernel-temporal/src/verdict.rs": 730,
+          "crates/continuum-kernel-temporal/src/receipt.rs": 577,
+          "crates/continuum-kernel-temporal/src/verdict.rs": 794,
           "crates/continuum-kernel-temporal/src/wire.rs": 960
         },
-        "non_blank": 2745,
-        "non_blank_non_comment": 1755,
-        "total": 2949
+        "non_blank": 2882,
+        "non_blank_non_comment": 1824,
+        "total": 3093
       }
     },
     "context_only": "`non_blank` and `non_blank_non_comment` are reported for comparison and are not enforced; the enforced number is `total`.",
-    "headroom": 4333,
-    "total": 10667
+    "headroom": 2316,
+    "total": 12684
   },
   "mutation_matrix": {
     "cells": 92,
@@ -113,20 +114,17 @@
       "proof.termination-shortcut/core",
       "assumption.strengthening/core"
     ],
-    "owning_tests": 166,
+    "owning_tests": 168,
     "policy": "fail-closed: a (class, crate) cell with no owning test and no waiver fails the gate. `uncovered` waivers are real gaps, listed above and reported by --strict.",
-    "uncovered_cells": [
-      "envelope.digest-relabelling/smt",
-      "envelope.digest-relabelling/temporal"
-    ]
+    "uncovered_cells": []
   },
   "produced_by": "tools/check_kernel_covenant.py",
   "receipts": {
     "continuum-kernel-core": {
       "golden": "crates/continuum-kernel-core/tests/receipt.golden.json",
       "magic": "CONTCERT",
-      "wire_epoch": "1",
-      "wire_epoch_id": "continuum-kernel-core/CONTCERT/1"
+      "wire_epoch": "2",
+      "wire_epoch_id": "continuum-kernel-core/CONTCERT/2"
     },
     "continuum-kernel-sat": {
       "golden": "crates/continuum-kernel-sat/tests/receipt.golden.json",
@@ -223,7 +221,11 @@
     "KCOV-07": {
       "boundary": "Textual. `include!` and `#[path]` are here as much for the line budget as for the covenant: both move code into a crate from somewhere the counter does not look.",
       "fixtures_proven_caught": [
+        "kcov-07-certificate-path-module",
+        "kcov-07-cfg-attr-path",
+        "kcov-07-include-bytes-as-code",
         "kcov-07-module-path-redirection",
+        "kcov-07-module-without-a-file",
         "kcov-07-source-splicing"
       ],
       "result": "pass",
@@ -263,7 +265,7 @@
   },
   "self_test": {
     "failures": [],
-    "fixtures": 21,
+    "fixtures": 25,
     "fixtures_by_requirement": {
       "KCOV-01": [
         "kcov-01-budget-exceeded",
@@ -289,7 +291,11 @@
         "kcov-06-async-runtime-dependency"
       ],
       "KCOV-07": [
+        "kcov-07-certificate-path-module",
+        "kcov-07-cfg-attr-path",
+        "kcov-07-include-bytes-as-code",
         "kcov-07-module-path-redirection",
+        "kcov-07-module-without-a-file",
         "kcov-07-source-splicing"
       ],
       "KCOV-08": [

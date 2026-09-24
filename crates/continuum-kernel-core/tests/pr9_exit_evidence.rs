@@ -85,7 +85,7 @@
 //!   can `use` a sibling one, and the whole point of the independent-encoder discipline
 //!   is that this file's bytes do not come from the crate's own encoder either.
 
-use continuum_kernel_core::wire::{MAGIC, WIRE_EPOCH, decode};
+use continuum_kernel_core::wire::{LEGACY_WIRE_EPOCH, MAGIC, WIRE_EPOCH, decode};
 use continuum_kernel_core::{CertificateKind, Feature, Rejection, Verdict, check_certificate};
 
 // --- the encoder, duplicated from `tests/wire_form_boundary.rs` -----------------------
@@ -130,7 +130,7 @@ impl Bytes {
 fn toggle_certificate_shaped(domain_pack_count: u16, first_action: u16) -> Vec<u8> {
     let mut out = Bytes::default();
     out.0.extend_from_slice(&MAGIC);
-    out.u16(WIRE_EPOCH);
+    out.u16(LEGACY_WIRE_EPOCH);
     out.u16(1); // finite-closure
 
     out.token("blake3:toggle-model");
@@ -139,7 +139,7 @@ fn toggle_certificate_shaped(domain_pack_count: u16, first_action: u16) -> Vec<u
     out.token("blake3:toggle-scope");
     out.token("blake3:empty-assumptions");
     out.token("continuum-engine-reference/0.0.0");
-    out.u16(WIRE_EPOCH);
+    out.u16(LEGACY_WIRE_EPOCH);
     out.u16(domain_pack_count);
 
     out.u16(1); // one variable
@@ -208,6 +208,7 @@ fn checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes() {
         "check.rs",
         "fixture.rs",
         "lib.rs",
+        "model.rs",
         "receipt.rs",
         "verdict.rs",
         "wire.rs",
@@ -624,6 +625,7 @@ fn no_public_value_can_carry_a_verdict_or_a_callable() {
         "check.rs",
         "fixture.rs",
         "lib.rs",
+        "model.rs",
         "receipt.rs",
         "verdict.rs",
         "wire.rs",

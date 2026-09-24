@@ -49,10 +49,10 @@ use continuum_kernel_core::wire::{self, Body};
 /// Not one of these six strings is computed by the engine. `model_digest`,
 /// `property_digest`, `scope_digest` and `assumptions_digest` are digests of artifacts
 /// this crate never sees; `semantic_epoch` is the CIR semantics version in force. The
-/// kernel checks their *shape* and reports the rest as trusted — `CheckedClaim::
-/// trusted_components` names `certificate-model-correspondence` and
-/// `envelope-digest-binding` — so this test asserts the envelope survives the round
-/// trip, never that it is true.
+/// kernel checks their *shape* and reports the rest as trusted — at wire epoch 2,
+/// `CheckedClaim::trusted_components` names only `envelope-digest-binding`, because
+/// the certificate carries the model itself — so this test asserts the envelope
+/// survives the round trip, never that it is true.
 fn envelope() -> ClaimEnvelope<'static> {
     ClaimEnvelope {
         model_digest: "blake3:diehard-model",
@@ -114,17 +114,19 @@ fn the_engines_die_hard_certificate_is_verified_by_the_independent_checker() {
         sent.assumptions_digest
     );
     assert_eq!(received.producer().as_str(), sent.producer);
-    assert_eq!(received.schema_epoch(), 1);
+    assert_eq!(received.schema_epoch(), 2);
     assert_eq!(received.domain_pack_digests().len(), 0);
 
     // And what a verified verdict still trusts, which is not nothing and is reported
-    // rather than hidden (INV-008; docs/03 §2).
+    // rather than hidden (INV-008; docs/03 §2). At wire epoch 2 the kernel re-derived
+    // the relation from the carried model, so the correspondence is no longer trusted
+    // (bn-35y4f); the binding of the carried model to the caller's is.
+    assert_eq!(claim.wire_epoch(), 2);
+    assert_eq!(claim.trusted_components(), ["envelope-digest-binding"]);
     assert_eq!(
-        claim.trusted_components(),
-        [
-            "certificate-model-correspondence",
-            "envelope-digest-binding"
-        ]
+        claim.model_identity(),
+        Some(model().identity().as_bytes()),
+        "the carried model is this model, compared as canonical identity (ADR-0013)"
     );
 }
 
@@ -163,32 +165,19 @@ fn two_independent_pipelines_from_a_declared_model_to_a_checked_certificate_are_
 }
 
 #[test]
-fn the_decoded_body_is_the_die_hard_transition_relation() {
+fn the_decoded_body_carries_the_model_and_the_reachable_set() {
     let model = model();
     let bytes = certificate(&model);
     let decoded = wire::decode(&bytes).expect("the kernel decodes what the engine wrote");
     assert_eq!(decoded.kind(), CertificateKind::FiniteClosure);
 
-    let Body::FiniteClosure(body) = decoded.body() else {
-        panic!("the finite-closure certificate decoded as another family");
+    let Body::ModelClosure(body) = decoded.body() else {
+        panic!("the wire-epoch-2 certificate decoded as another family");
     };
 
-    // The declared state domain is the model's, variable for variable.
-    assert_eq!(body.domain().arity(), 2);
-    let names: Vec<&str> = body
-        .domain()
-        .variables()
-        .iter()
-        .map(|variable| variable.name().as_str())
-        .collect();
-    assert_eq!(names, ["big", "small"]);
-    let ranges: Vec<(i64, i64)> = body
-        .domain()
-        .variables()
-        .iter()
-        .map(|variable| (variable.lo(), variable.hi()))
-        .collect();
-    assert_eq!(ranges, [(0, 5), (0, 3)]);
+    // The carried model is the model's canonical identity, byte for byte.
+    assert_eq!(body.model_identity(), model.identity().as_bytes());
+    assert_eq!(body.property(), PropertyClass::StateDomain);
 
     // The table is the engine's reachable set, in the engine's order, and the kernel's
     // own binary search agrees with the position each state came from.
@@ -201,44 +190,14 @@ fn the_decoded_body_is_the_die_hard_transition_relation() {
         assert_eq!(body.table().position(state.as_slice()), Some(position));
     }
 
-    // Initial states, action names, and one row per table state.
-    assert_eq!(body.initial_states(), [vec![0, 0]]);
-    let actions: Vec<&str> = body
-        .actions()
-        .iter()
-        .map(continuum_kernel_core::wire::Token::as_str)
-        .collect();
+    // The rows' raw material. Whether each row is the model's is the kernel's check,
+    // not this test's: `check_certificate` re-derives every row from the carried model
+    // and verified the certificate above.
     assert_eq!(
-        actions,
-        [
-            "BigToSmall",
-            "EmptyBig",
-            "EmptySmall",
-            "FillBig",
-            "FillSmall",
-            "SmallToBig"
-        ],
-        "the corpus spellings, in the wire form's byte order"
+        body.transition_count(),
+        96,
+        "the frozen labelled-transition count"
     );
-    assert_eq!(body.rows().len(), 16);
-
-    // Every row is the model's own successor row, transition for transition. This is
-    // the closure obligation's raw material: the kernel located every one of these
-    // targets in the table above, which is what `Post(S) ⊆ S` means.
-    let mut total = 0_usize;
-    for (index, state) in states.iter().enumerate() {
-        let expected = model
-            .successors(state)
-            .expect("Die Hard evaluates everywhere");
-        let row = body.rows().get(index).expect("one row per table state");
-        assert_eq!(row.len(), expected.len(), "row {index}");
-        for (transition, step) in row.iter().zip(expected.iter()) {
-            assert_eq!(usize::from(transition.action()), step.action());
-            assert_eq!(transition.target(), step.target().as_slice());
-        }
-        total += row.len();
-    }
-    assert_eq!(total, 96, "the frozen labelled-transition count");
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +207,7 @@ fn the_decoded_body_is_the_die_hard_transition_relation() {
 /// Where the canonical state table starts, derived from the grammar rather than
 /// measured from the bytes.
 ///
-/// `header:12 | envelope | variable_count:2 variable* | state_count:4`.
+/// `header:12 | envelope | model_len:4 model | property_class:2 | state_count:4`.
 fn table_offset(claim: &ClaimEnvelope<'_>, model: &Model) -> usize {
     let token = |value: &str| 2 + value.len();
     let mut at = 8 + 2 + 2;
@@ -259,12 +218,16 @@ fn table_offset(claim: &ClaimEnvelope<'_>, model: &Model) -> usize {
     at += token(claim.assumptions_digest);
     at += token(claim.producer);
     at += 2 + 2; // schema_epoch, domain_pack_count (no packs)
-    at += 2; // variable_count
-    for variable in model.variables() {
-        at += token(variable.name().as_str()) + 16;
-    }
+    at += model_offset_within_body();
+    at += model.identity().as_bytes().len();
+    at += 2; // property_class: state-domain
     at += 4; // state_count
     at
+}
+
+/// The model section's bytes start four bytes (its length) into the body.
+const fn model_offset_within_body() -> usize {
+    4
 }
 
 #[test]
@@ -324,11 +287,11 @@ fn the_header_the_tail_and_every_prefix_are_rejected_by_name() {
     // contract this build does not know (kernel-core wire.rs:112-116).
     let mut other_epoch = green.clone();
     if let Some(byte) = other_epoch.get_mut(9) {
-        *byte = 2;
+        *byte = 3;
     }
     assert_eq!(
         check_certificate(&other_epoch),
-        Verdict::Unsupported(Feature::WireEpoch { found: 2 })
+        Verdict::Unsupported(Feature::WireEpoch { found: 3 })
     );
 
     // The family code.
@@ -360,19 +323,53 @@ fn the_header_the_tail_and_every_prefix_are_rejected_by_name() {
 }
 
 #[test]
-fn a_widened_domain_bound_still_verifies_so_the_binding_lives_in_the_envelope() {
-    // The complement of the sweep above: mutating the *declared domain* can leave a
-    // verifiable certificate (a wider `hi` keeps every state in range), so the state
-    // table sweep is the honest place to make the non-vacuity claim, and this test
-    // records why rather than leaving the asymmetry unstated.
+fn every_single_byte_mutation_of_the_successor_rows_is_rejected() {
+    // The wire-epoch-2 closure of bn-2npu's residual, from the engine's own bytes: a
+    // row is fully determined by the carried model, so no change to any byte of any
+    // row — a count, an action index or a target index — can verify.
     let model = model();
     let green = certificate(&model);
-    let start = table_offset(&envelope(), &model);
+    let start = table_offset(&envelope(), &model) + 16 * 2 * 8;
+    let mut checked = 0_usize;
+    for offset in start..green.len() {
+        for mutate in [|byte: u8| byte ^ 0xFF, |byte: u8| byte.wrapping_add(1)] {
+            let mut bytes = green.clone();
+            let slot = bytes.get_mut(offset).expect("offset is inside the rows");
+            *slot = mutate(*slot);
+            let verdict = check_certificate(&bytes);
+            assert!(
+                !verdict.is_verified(),
+                "byte {offset} of the successor rows was mutated and the kernel still \
+                 verified the certificate: {verdict:?}"
+            );
+            checked += 1;
+        }
+    }
+    // 16 row counts and 96 transitions of `action:u16 target:u32`, two ways each.
+    assert_eq!(checked, (16 * 4 + 96 * 6) * 2);
+}
 
-    // Walking back from the table: `state_count` is 4 bytes, `small`'s whole variable
-    // record is `name:(2+5) lo:8 hi:8` = 23, and `big`'s `hi` ends immediately before
-    // it — so its low byte, the one that reads 5, is one further back still.
-    let hi_of_big = start - 4 - 23 - 1;
+#[test]
+fn a_widened_domain_in_the_carried_model_verifies_a_different_model_identity() {
+    // Widening a declared bound inside the carried model leaves a self-consistent
+    // certificate about a *different* model: every reachable state is still in range
+    // and no update reaches the new values. The kernel verifies it, and the claim
+    // reports the identity it checked, which is not this model's. That comparison is
+    // the caller's `envelope-digest-binding` obligation, stated here so the residual is
+    // not left implicit.
+    let model = model();
+    let green = certificate(&model);
+    let identity = model.identity();
+    let identity = identity.as_bytes();
+    let model_start = table_offset(&envelope(), &model) - 4 - 2 - identity.len();
+    assert_eq!(
+        green.get(model_start..model_start + identity.len()),
+        Some(identity)
+    );
+
+    // `continuum-model/1` (17) | count:8 | token "big" (8 + 3) | lo:8 | hi:8 — the low
+    // byte of `big`'s `hi` is the last of those.
+    let hi_of_big = model_start + 17 + 8 + 11 + 8 + 7;
     let mut widened = green.clone();
     let slot = widened
         .get_mut(hi_of_big)
@@ -380,15 +377,11 @@ fn a_widened_domain_bound_still_verifies_so_the_binding_lives_in_the_envelope() 
     assert_eq!(*slot, 5, "the declared hi bound of `big`");
     *slot = 9;
 
-    assert!(
-        check_certificate(&widened).is_verified(),
-        "a wider declared domain still admits every reachable state"
-    );
-    // …and the claim it verifies is a *weaker* one, which is exactly why the property
-    // digest is in the envelope and why the kernel names `envelope-digest-binding` as
-    // trusted: these bytes no longer describe the model the digest names, and no
-    // self-contained checker can know that.
-    assert_ne!(widened, green);
+    let Verdict::Verified(claim) = check_certificate(&widened) else {
+        panic!("a wider carried domain still admits every reachable state");
+    };
+    assert_ne!(claim.model_identity(), Some(identity));
+    assert_eq!(claim.trusted_components(), ["envelope-digest-binding"]);
 }
 
 #[test]

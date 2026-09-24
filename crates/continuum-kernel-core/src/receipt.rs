@@ -16,11 +16,11 @@
 //!
 //! Each of the four `continuum-kernel-*` crates declares its own `WIRE_EPOCH`, and
 //! all four currently read `1`. They are *four different contracts* that happen to
-//! share an ordinal: `CONTCERT 1`, `CONTSATC 1`, `CONTSMTC 1`, `CONTTMPC 1`. A
+//! share ordinals: `CONTCERT 2`, `CONTSATC 1`, `CONTSMTC 1`, `CONTTMPC 1`. A
 //! receipt that recorded a bare `1` would name none of them.
 //!
 //! So this crate's wire epoch is written only in its qualified spelling —
-//! [`WIRE_EPOCH_ID`], `continuum-kernel-core/CONTCERT/1` — and it is carried in
+//! [`WIRE_EPOCH_ID`], `continuum-kernel-core/CONTCERT/2` — and it is carried in
 //! `checker.version`, never in the receipt's `epochs` object:
 //!
 //! > **There is no checker epoch.** `EpochSet` has no `checker` member. […] checker
@@ -86,9 +86,13 @@ pub const CHECKER_NAME: &str = "continuum-kernel-core";
 /// The qualified spelling of this crate's wire epoch.
 ///
 /// `<crate>/<magic>/<epoch>`. The crate name and the eight-byte magic are what
-/// distinguish this `1` from the `1` of the three sibling kernel crates; see the
-/// module documentation.
-pub const WIRE_EPOCH_ID: &str = "continuum-kernel-core/CONTCERT/1";
+/// distinguish this crate's epoch from the sibling kernel crates'; see the module
+/// documentation. The epoch is the newest this checker implements
+/// ([`crate::wire::WIRE_EPOCH`]); it also decodes the legacy epoch 1. The epoch of
+/// the certificate a receipt covers shows in its trusted components (an epoch-1 claim
+/// lists `certificate-model-correspondence`) and, for epoch 2, in `claim.text`
+/// (bn-35y4f).
+pub const WIRE_EPOCH_ID: &str = "continuum-kernel-core/CONTCERT/2";
 
 /// The receipt fields a certificate checker cannot derive, and is therefore given.
 ///
@@ -428,6 +432,13 @@ const fn schema_certificate_kind(kind: CertificateKind) -> &'static str {
 fn claim_text(claim: &CheckedClaim) -> String {
     let mut out = String::new();
     match claim.kind() {
+        CertificateKind::FiniteClosure if claim.model_identity().is_some() => {
+            out.push_str(
+                "model-bound finite-closure certificate (wire epoch 2): S ⊆ Dom(M), \
+                 Init(M) ⊆ S, the carried relation equal to M's re-derived relation, \
+                 and S ⊆ P re-derived",
+            );
+        }
         CertificateKind::FiniteClosure => {
             out.push_str("finite-closure certificate: Init ⊆ S, Post(S) ⊆ S and S ⊆ P re-derived");
         }
@@ -445,6 +456,10 @@ fn claim_text(claim: &CheckedClaim) -> String {
         claim.transitions(),
         claim.property().as_str(),
     ));
+    if let Some(name) = claim.invariant() {
+        out.push(' ');
+        out.push_str(name.as_str());
+    }
     out
 }
 
@@ -608,9 +623,9 @@ mod tests {
         let verdict = verified(&Plan::diehard_closure());
         let built = receipt(&verdict, &SEAM).unwrap();
         // A bare `1` would name all four kernel crates at once, which is to say none.
-        assert_eq!(built.wire_epoch_id(), "continuum-kernel-core/CONTCERT/1");
+        assert_eq!(built.wire_epoch_id(), "continuum-kernel-core/CONTCERT/2");
         assert_eq!(built.checker_name(), "continuum-kernel-core");
-        assert!(built.checker_version().ends_with("+wire.CONTCERT.1"));
+        assert!(built.checker_version().ends_with("+wire.CONTCERT.2"));
         // RFC 0026 correction 17: there is no checker epoch, so the wire epoch is
         // never written into the receipt's `epochs` object.
         let json = built.to_json();
@@ -685,8 +700,8 @@ mod tests {
     #[test]
     fn an_unsupported_certificate_has_no_receipt() {
         let mut plan = Plan::diehard_closure();
-        plan.wire_epoch = 2;
-        plan.schema_epoch = 2;
+        plan.wire_epoch = 3;
+        plan.schema_epoch = 3;
         let verdict = verified(&plan);
         assert!(matches!(verdict, Verdict::Unsupported(_)));
         assert_eq!(receipt(&verdict, &SEAM), Err(ReceiptError::NotVerified));

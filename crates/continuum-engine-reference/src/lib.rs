@@ -134,6 +134,7 @@ pub use bfs::{
 };
 pub use certificate::{
     ClaimEnvelope, ClosedSet, EmissionError, EnvelopeError, Field, emit_finite_closure,
+    emit_invariant_closure,
 };
 pub use checking::{
     CheckError, CheckOutcome, CheckReport, Deadlock, DeadlockOutcome, DeadlockPolicy, Evidence,
