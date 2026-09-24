@@ -212,10 +212,12 @@ fn lowering_refuses_with_typed_reasons() {
         )),
         (Unlowerable::Quantifier, 5)
     );
-    assert_eq!(
-        lower_err(&model("action A { unchanged x }\nfairness weak A")),
-        (Unlowerable::Fairness, 5)
-    );
+    // A fairness assumption lowers (bn-1ln12): no longer a refusal.
+    let fair = lower(
+        &elaborate_source(&model("action A { unchanged x }\nfairness weak A")).expect("elaborates"),
+    )
+    .expect("fairness lowers");
+    assert_eq!(fair.fairness().len(), 1);
     assert_eq!(
         lower_err(&model(
             "action A { unchanged x }\nbehavior B = always(x == 0)"

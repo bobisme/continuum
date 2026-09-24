@@ -2517,11 +2517,11 @@ invariant I { forall k in s: m[k] >= 1 && m.get(k) != None }
 
 /// Each planned site spends exactly its plan, and every appended record is charged, so
 /// a lowering replays at the limits it reported, and one node or one unit of work less
-/// is refused — for the collection frame and for the replicated register.
+/// is refused — for the collection frame and for the replicated register, whose
+/// fairness assumption is one more planned site (bn-1ln12).
 #[test]
 fn collection_models_lower_at_their_measured_limits() {
-    let register =
-        dossier_text("examples/replicated_register.ctm").replace("fairness weak Recover", "");
+    let register = dossier_text("examples/replicated_register.ctm");
     let register_config = RunConfig::parse(
         dossier_text("schemas/examples/replicated-register.run-config.json").as_bytes(),
     )

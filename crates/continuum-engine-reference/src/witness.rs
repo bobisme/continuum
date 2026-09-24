@@ -130,6 +130,15 @@ pub struct Step {
 }
 
 impl Step {
+    /// A step, for the other witness producers in this crate (the liveness lasso).
+    pub(crate) const fn new(action: usize, name: Ident, target: State) -> Self {
+        Self {
+            action,
+            name,
+            target,
+        }
+    }
+
     /// The index of the action that fired, in [`Model::actions`] order.
     #[must_use]
     pub const fn action(&self) -> usize {

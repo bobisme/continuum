@@ -93,26 +93,49 @@ fn the_schema_example_reads_and_names_its_schema() {
     assert!(text.contains(r#""schema_id": "https://continuum.dev/schema/run-config.json""#));
 }
 
-/// The register's sorts and constants bind (no configuration refusal). Lowering stops
-/// at its fairness line (bn-1ln12); without it the register lowers under the flat
-/// layout (bn-23hzh; `tests/register.rs` checks the result against a simulation).
+/// The register's sorts and constants bind (no configuration refusal), and the whole
+/// register lowers, its fairness included (bn-1ln12; before it, lowering stopped at the
+/// fairness line with `cml.lower.fairness`). Regression guard: the flat layout
+/// (bn-23hzh; `tests/register.rs` checks it against a simulation) plus one weak
+/// assumption over the three `Recover` instances, which is the only difference from
+/// the register without its fairness line — same state, actions, initial states, and
+/// predicates, and a different identity (`tests/fairness.rs` checks the scope, and
+/// `tests/register.rs` the liveness it buys).
 #[test]
-fn the_replicated_register_binds_and_lowers_except_for_its_fairness() {
+fn the_replicated_register_binds_and_lowers_with_its_fairness() {
     let src = read(&dossier("examples/replicated_register.ctm"));
     let text = read(&dossier(
         "schemas/examples/replicated-register.run-config.json",
     ));
     let model = elaborate_source(&src).expect("elaborates");
-    let err = configured(&model, &text).expect_err("fairness");
-    assert_eq!(err.kind, LowerErrorKind::Unlowerable(Unlowerable::Fairness));
-
-    let without = elaborate_source(&src.replace("fairness weak Recover", "")).expect("elaborates");
-    let lowered = configured(&without, &text).expect("map-valued state lowers (bn-23hzh)");
+    let lowered = configured(&model, &text).expect("the whole register lowers (bn-1ln12)");
     assert_eq!(lowered.model().variables().len(), 14);
     assert_eq!(lowered.model().actions().len(), 50);
+    let fairness = lowered.model().fairness();
+    assert_eq!(fairness.len(), 1);
+    assert_eq!(fairness[0].strength(), continuum_model_core::Strength::Weak);
+    let scope: Vec<&str> = fairness[0]
+        .actions()
+        .iter()
+        .map(|i| lowered.model().actions()[*i].name().as_str())
+        .collect();
+    assert_eq!(scope, ["Recover(n=a)", "Recover(n=b)", "Recover(n=c)"]);
+
+    let without = elaborate_source(&src.replace("fairness weak Recover", "")).expect("elaborates");
+    let unfair = configured(&without, &text).expect("map-valued state lowers (bn-23hzh)");
+    assert!(unfair.model().fairness().is_empty());
+    assert_eq!(unfair.model().variables(), lowered.model().variables());
+    assert_eq!(unfair.model().actions(), lowered.model().actions());
+    assert_eq!(
+        unfair.model().initial_states(),
+        lowered.model().initial_states()
+    );
+    assert_eq!(unfair.model().predicates(), lowered.model().predicates());
+    assert_ne!(unfair.model().identity(), lowered.model().identity());
+    assert_ne!(unfair.run_identity(), lowered.run_identity());
 
     // The bindings are checked before anything else: dropping `Quorum` from the
-    // configuration is refused ahead of the fairness line.
+    // configuration is refused ahead of any lowering.
     let short = text.replace(r#""Quorum""#, r#""Unused""#);
     let err = configured(&model, &short).expect_err("Quorum is missing");
     assert_eq!(

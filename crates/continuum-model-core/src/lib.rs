@@ -10,8 +10,8 @@
 //!
 //! # What is here
 //!
-//! - the **programmatic transition model** ([`model`], with [`ident`], [`domain`], and
-//!   [`expr`]) — how a finite transition system is declared, what a state is, and how
+//! - the **programmatic transition model** ([`model`], with [`ident`], [`domain`],
+//!   [`expr`], and [`fairness`]) — how a finite transition system is declared, what a state is, and how
 //!   guards, updates, and named predicates are evaluated. It was written for PR 8 inside
 //!   `continuum-engine-reference` and moved here unchanged by bn-ybq (PR 15a), because
 //!   PR 15a requires that "the programmatic model API remains supported — CML is a
@@ -60,12 +60,14 @@
 
 pub mod domain;
 pub mod expr;
+pub mod fairness;
 pub mod ident;
 pub mod identity;
 pub mod model;
 
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};
+pub use fairness::{Fairness, Strength};
 pub use ident::{Ident, IdentError};
 pub use identity::ModelIdentity;
 pub use model::{

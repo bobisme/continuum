@@ -3,8 +3,8 @@
 //!
 //! # The pair
 //!
-//! - **subject**: `notes/plan/examples/replicated_register.ctm` (without its fairness
-//!   line, which bn-1ln12 owns), elaborated and lowered under the schema example
+//! - **subject**: `notes/plan/examples/replicated_register.ctm`, elaborated and
+//!   lowered under the schema example
 //!   configuration (`Nat` bounded to `0..=1`, nodes `a b c`, values `v0 v1`, and the
 //!   three majority quorums), explored by the reference engine;
 //! - **oracle**: [`Register`], a hand-written Rust simulation of the register over
@@ -27,7 +27,17 @@
 //!    `StableWitness` reads it are exactly those where its `#defined` predicate is
 //!    false — the typed outcome "undefined read", never a default value;
 //! 5. anti-vacuity: dropping `Choose`'s stability requirement makes `StableWitness`
-//!    fail in both, at the same states.
+//!    fail in both, at the same states;
+//! 6. liveness under the register's own fairness (bn-1ln12): `fairness weak Recover`
+//!    lowers to one weak assumption over the three `Recover` instances, and the
+//!    reference engine's fair-cycle search agrees with an independent one over the
+//!    simulation's graph (Kosaraju, written here) on `□◇` of "some node is alive" and
+//!    of "`b` is alive", with no fairness, with the lowered assumption, and with one
+//!    assumption per instance: the lowered fairness makes the first hold, and only the
+//!    per-instance reading, which is not the register's, makes the second hold.
+//!
+//! Items 1 to 5 are about the transition system, which the fairness line does not
+//! change (`tests/configured.rs` pins that): they lower the register without it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -36,15 +46,26 @@ use continuum_cml_elab::lower::{definedness_subject, lower_configured};
 use continuum_cml_elab::{Limits, LowerErrorKind, Unlowerable, elaborate_source};
 use continuum_engine_reference::bfs::{self, Bounds};
 use continuum_engine_reference::checking::{self, CheckOutcome, DeadlockPolicy, Obligations};
-use continuum_model_core::{Model, State};
+use continuum_engine_reference::liveness::{
+    Cycle, Goal, LivenessOutcome, Stuttering, check_liveness,
+};
+use continuum_model_core::{
+    ActionDecl, BoolExpr, CmpOp, IntExpr, Model, ModelBuilder, State, Strength,
+};
 
 fn dossier(rel: &str) -> String {
     let path = format!("{}/../../notes/plan/{rel}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
+/// The register without its fairness line: the transition system alone.
 fn source() -> String {
     dossier("examples/replicated_register.ctm").replace("fairness weak Recover", "")
+}
+
+/// The register as the corpus writes it, fairness included.
+fn fair_source() -> String {
+    dossier("examples/replicated_register.ctm")
 }
 
 fn schema_config() -> String {
@@ -593,4 +614,279 @@ fn dropping_the_stability_requirement_breaks_stable_witness_in_both() {
         report.invariant(i).expect("checked").outcome(),
         CheckOutcome::Violated { depth: 1, .. }
     ));
+}
+
+// ---------------------------------------------------------------------------
+// liveness under the register's fairness (bn-1ln12)
+// ---------------------------------------------------------------------------
+
+/// `model` rebuilt through `ModelBuilder`, with `extra` predicates added and its
+/// fairness replaced by `fairness`: the programmatic spelling of the same model.
+fn rebuild(model: &Model, extra: &[(&str, BoolExpr)], fairness: &[(Strength, Vec<&str>)]) -> Model {
+    let mut b = ModelBuilder::new();
+    for v in model.variables() {
+        b = b.variable(v.name().as_str(), v.domain().lo(), v.domain().hi());
+    }
+    for a in model.actions() {
+        let outcomes: Vec<Vec<(&str, IntExpr)>> = a
+            .outcomes()
+            .iter()
+            .map(|o| {
+                o.assignments()
+                    .iter()
+                    .map(|x| (x.variable().as_str(), x.value().clone()))
+                    .collect()
+            })
+            .collect();
+        b = b.action(ActionDecl::enumerated(
+            a.name().as_str(),
+            a.guard().clone(),
+            outcomes,
+        ));
+    }
+    for s in model.initial_states() {
+        let bindings: Vec<(&str, i64)> = model
+            .variables()
+            .iter()
+            .zip(s.as_slice())
+            .map(|(v, x)| (v.name().as_str(), *x))
+            .collect();
+        b = b.initial_state(&bindings);
+    }
+    for p in model.predicates() {
+        b = b.predicate(p.name().as_str(), p.body().clone());
+    }
+    for (name, body) in extra {
+        b = b.predicate(name, body.clone());
+    }
+    for (strength, scope) in fairness {
+        b = b.fairness(*strength, scope.iter().copied());
+    }
+    b.build().expect("the rebuilt model is valid")
+}
+
+fn alive(node: &str) -> BoolExpr {
+    BoolExpr::compare(
+        CmpOp::Eq,
+        IntExpr::var(&format!("alive{{{node}}}")),
+        IntExpr::constant(1),
+    )
+}
+
+const RECOVER: [&str; 3] = ["Recover(n=a)", "Recover(n=b)", "Recover(n=c)"];
+
+/// The lowered fairness is the programmatic assumption written by hand: one identity.
+#[test]
+fn the_register_fairness_is_one_weak_assumption_over_its_recover_instances() {
+    let fair = lowered(&fair_source(), &schema_config()).expect("lowers");
+    let unfair = lowered(&source(), &schema_config()).expect("lowers");
+    let by_hand = rebuild(&unfair, &[], &[(Strength::Weak, RECOVER.to_vec())]);
+    assert_eq!(by_hand, fair);
+    assert_eq!(by_hand.identity(), fair.identity());
+    // Not the per-instance reading: that is a different, stronger model.
+    let each = rebuild(&unfair, &[], &RECOVER.map(|r| (Strength::Weak, vec![r])));
+    assert_ne!(each.identity(), fair.identity());
+    // The scope is exactly the actions whose name is a `Recover` instance.
+    let expected: Vec<usize> = (0..fair.actions().len())
+        .filter(|i| fair.actions()[*i].name().as_str().starts_with("Recover("))
+        .collect();
+    assert_eq!(fair.fairness()[0].actions(), &expected[..]);
+}
+
+/// A test on a transition label (a weak assumption's scope, for the oracle).
+type LabelTest = dyn Fn(&str) -> bool;
+/// A test on a simulation state (a goal, for the oracle).
+type RegTest = dyn Fn(&Reg) -> bool;
+
+/// The simulation's graph and an independent fair-cycle search over it: whether some
+/// fair execution avoids `goal` forever, under weak assumptions given as label tests.
+/// Kosaraju's two passes, iterative. Every state may stutter (CML's
+/// `stutter(state)`), so every component carries a cycle; it is fair when each
+/// assumption has a labelled edge inside it or a state where no labelled successor
+/// exists (a stutter takes no action).
+fn oracle_refutes_recurrence(oracle: &Register, goal: &RegTest, fairness: &[&LabelTest]) -> bool {
+    let states: Vec<Reg> = oracle.reachable().into_iter().collect();
+    let index: BTreeMap<&Reg, usize> = states.iter().enumerate().map(|(i, s)| (s, i)).collect();
+    let bad: Vec<bool> = states.iter().map(|s| !goal(s)).collect();
+    let succ: Vec<Vec<(String, usize)>> = states
+        .iter()
+        .map(|s| {
+            oracle
+                .step(s)
+                .0
+                .into_iter()
+                .map(|(l, t)| (l, index[&t]))
+                .collect()
+        })
+        .collect();
+    let n = states.len();
+    let mut pred: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (u, row) in succ.iter().enumerate() {
+        for (_, v) in row {
+            if bad[u] && bad[*v] {
+                pred[*v].push(u);
+            }
+        }
+    }
+    // Pass 1: finishing order over the bad subgraph.
+    let mut seen = vec![false; n];
+    let mut order: Vec<usize> = Vec::new();
+    for root in 0..n {
+        if !bad[root] || seen[root] {
+            continue;
+        }
+        seen[root] = true;
+        let mut stack: Vec<(usize, usize)> = vec![(root, 0)];
+        while let Some((u, k)) = stack.pop() {
+            if let Some((_, v)) = succ[u].get(k) {
+                stack.push((u, k + 1));
+                if bad[*v] && !seen[*v] {
+                    seen[*v] = true;
+                    stack.push((*v, 0));
+                }
+            } else {
+                order.push(u);
+            }
+        }
+    }
+    // Pass 2: components on the reversed graph, in reverse finishing order.
+    let mut comp = vec![usize::MAX; n];
+    let mut components: Vec<Vec<usize>> = Vec::new();
+    for &root in order.iter().rev() {
+        if comp[root] != usize::MAX {
+            continue;
+        }
+        let id = components.len();
+        let mut members = vec![root];
+        comp[root] = id;
+        let mut stack = vec![root];
+        while let Some(u) = stack.pop() {
+            for &w in &pred[u] {
+                if comp[w] == usize::MAX {
+                    comp[w] = id;
+                    members.push(w);
+                    stack.push(w);
+                }
+            }
+        }
+        components.push(members);
+    }
+    components.iter().enumerate().any(|(id, members)| {
+        fairness.iter().all(|f| {
+            let taken = members
+                .iter()
+                .any(|&u| succ[u].iter().any(|(l, v)| comp[*v] == id && f(l)));
+            let disabled = members.iter().any(|&u| !succ[u].iter().any(|(l, _)| f(l)));
+            taken || disabled
+        })
+    })
+}
+
+/// `□◇ SomeAlive` and `□◇ BAlive` on the register, under no fairness, the lowered
+/// fairness, and per-instance fairness: the reference engine's verdicts equal the
+/// independent search's, every counterexample is a lasso the model reproduces, and
+/// the verdicts are the ones the fairness semantics predicts.
+#[test]
+fn the_register_liveness_under_its_fairness_agrees_with_an_independent_search() {
+    let unfair = lowered(&source(), &schema_config()).expect("lowers");
+    let fair = lowered(&fair_source(), &schema_config()).expect("lowers");
+    let extra = [
+        (
+            "SomeAlive",
+            BoolExpr::or(alive("a"), BoolExpr::or(alive("b"), alive("c"))),
+        ),
+        ("BAlive", alive("b")),
+    ];
+    let union_scope = vec![(Strength::Weak, RECOVER.to_vec())];
+    let each_scope: Vec<(Strength, Vec<&str>)> =
+        RECOVER.iter().map(|r| (Strength::Weak, vec![*r])).collect();
+    let variants = [
+        ("none", rebuild(&unfair, &extra, &[])),
+        ("lowered", rebuild(&fair, &extra, &union_scope)),
+        ("per-instance", rebuild(&unfair, &extra, &each_scope)),
+    ];
+    // The lowered variant keeps the lowered fairness exactly.
+    assert_eq!(variants[1].1.fairness(), fair.fairness());
+
+    let oracle = Register {
+        nodes: BTreeSet::from([0, 1, 2]),
+        quorums: majority(),
+        choose_needs_quorum_stable: true,
+    };
+    let recover = |l: &str| l.starts_with("Recover(");
+    let recover_n = |n: &'static str| move |l: &str| l == format!("Recover(n={n})");
+    let (ra, rb, rc) = (recover_n("a"), recover_n("b"), recover_n("c"));
+    let oracle_fairness: [Vec<&LabelTest>; 3] = [vec![], vec![&recover], vec![&ra, &rb, &rc]];
+    let some_alive = |r: &Reg| !r.alive.is_empty();
+    let b_alive = |r: &Reg| r.alive.contains(&1);
+    let goals: [(&str, &RegTest); 2] = [("SomeAlive", &some_alive), ("BAlive", &b_alive)];
+
+    let mut verdicts = BTreeMap::new();
+    for ((label, model), assumptions) in variants.iter().zip(&oracle_fairness) {
+        let exploration = bfs::explore(model, Bounds::CERTIFIABLE).expect("evaluates");
+        for (goal_name, goal) in goals {
+            let index = model.predicate_index(goal_name).expect("declared");
+            let outcome = check_liveness(
+                model,
+                &exploration,
+                Goal::Recurrence(index),
+                Stuttering::Everywhere,
+            )
+            .expect("runs");
+            let refuted = oracle_refutes_recurrence(&oracle, goal, assumptions);
+            match &outcome {
+                LivenessOutcome::Holds { states } => {
+                    assert!(
+                        !refuted,
+                        "{label} {goal_name}: the oracle finds a fair cycle"
+                    );
+                    assert_eq!(*states, oracle.reachable().len());
+                }
+                LivenessOutcome::Violated(lasso) => {
+                    assert!(refuted, "{label} {goal_name}: the oracle finds none");
+                    // The loop is labelled transitions of the model, avoids the goal,
+                    // and satisfies each assumption on it.
+                    let steps: &[_] = match lasso.cycle() {
+                        Cycle::Steps(steps) => steps,
+                        Cycle::Stutter => &[],
+                    };
+                    let mut here = lasso.loop_state().clone();
+                    let mut visited = vec![here.clone()];
+                    for step in steps {
+                        assert!(model.successors(&here).expect("evaluates").iter().any(
+                            |s| s.action() == step.action() && s.target() == step.target()
+                        ));
+                        here = step.target().clone();
+                        visited.push(here.clone());
+                    }
+                    assert_eq!(&here, lasso.loop_state());
+                    for v in &visited {
+                        assert!(!model.evaluate_predicate(index, v).expect("evaluates"));
+                    }
+                    for (f, assumption) in model.fairness().iter().enumerate() {
+                        let taken = steps.iter().any(|s| assumption.contains(s.action()));
+                        let disabled = visited
+                            .iter()
+                            .any(|v| !model.is_fairness_enabled(f, v).expect("evaluates"));
+                        assert!(taken || disabled, "{label} {goal_name}: assumption {f}");
+                    }
+                }
+                LivenessOutcome::Inconclusive(why) => panic!("{label} {goal_name}: {why}"),
+            }
+            verdicts.insert((*label, goal_name), !refuted);
+        }
+    }
+    // The semantics: the register's own fairness buys "some node recovers", and only
+    // the stronger per-instance reading buys "b recovers".
+    assert_eq!(
+        verdicts,
+        BTreeMap::from([
+            (("none", "SomeAlive"), false),
+            (("none", "BAlive"), false),
+            (("lowered", "SomeAlive"), true),
+            (("lowered", "BAlive"), false),
+            (("per-instance", "SomeAlive"), true),
+            (("per-instance", "BAlive"), true),
+        ])
+    );
 }

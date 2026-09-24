@@ -1,0 +1,65 @@
+[change]
+bone = "bn-1ln12"
+author = "continuum-dev"
+summary = "fairness end to end (RFC 0003 correction 5): continuum-model-core's Model carries weak and strong fairness assumptions, each over a set of actions, canonical and part of Model::identity in an optional trailing section (a model without fairness keeps its continuum-model/1 bytes); continuum-cml-elab lowers `fairness weak|strong X` to one assumption over every action X expands to (instances, relational candidates, a choice's actions: the union, never per instance) as a planned, precharged site, and cml.lower.fairness is withdrawn; continuum-engine-reference gains a liveness check (◇P, □◇P) under the model's fairness and an explicit stuttering policy by an Emerson–Lei fair-cycle search with lasso counterexamples, and its semantic oracle refuses a model that declares its own fairness; the replicated register now lowers whole"
+
+[semantic]
+covers = [
+  "crates/continuum-model-core/src/",
+  "crates/continuum-cml-elab/src/",
+  "crates/continuum-engine-reference/src/",
+]
+reference_tests = [
+  "crates/continuum-model-core/tests/fairness.rs::a_scope_resolves_to_sorted_action_indices",
+  "crates/continuum-model-core/tests/fairness.rs::a_model_without_fairness_declares_none",
+  "crates/continuum-model-core/tests/fairness.rs::malformed_fairness_is_a_typed_refusal",
+  "crates/continuum-model-core/tests/fairness.rs::a_scope_is_enabled_where_any_of_its_actions_is",
+  "crates/continuum-model-core/tests/identity_golden.rs::the_fairness_section_is_pinned_byte_for_byte",
+  "crates/continuum-model-core/tests/identity_golden.rs::the_model_identity_encoding_is_pinned_byte_for_byte",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::without_fairness_a_wait_loop_refutes_progress_and_weak_fairness_excludes_it",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::weak_fairness_does_not_force_an_intermittent_action_and_strong_does",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::a_scope_is_one_assumption_over_its_set",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::strong_fairness_shrinks_a_component_to_the_fair_cycle_inside_it",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::the_completion_policy_decides_a_terminal_state",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::a_bounded_exploration_is_inconclusive_and_a_bad_goal_is_refused",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::a_long_ring_is_searched_in_a_small_stack",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::the_semantic_oracle_refuses_a_model_that_declares_fairness",
+  "crates/continuum-engine-reference/tests/liveness_contract.rs::stuttering_everywhere_makes_no_progress_assumption",
+  "crates/continuum-cml-elab/tests/fairness.rs::a_schema_is_one_assumption_over_all_its_instances",
+  "crates/continuum-cml-elab/tests/fairness.rs::a_relational_action_covers_every_candidate_of_every_instance",
+  "crates/continuum-cml-elab/tests/fairness.rs::a_choice_is_one_assumption_over_the_union_of_its_actions",
+  "crates/continuum-cml-elab/tests/fairness.rs::a_list_is_several_assumptions_and_strengths_are_separate",
+  "crates/continuum-cml-elab/tests/fairness.rs::changing_the_fairness_changes_the_identity",
+  "crates/continuum-cml-elab/tests/fairness.rs::fairness_lowers_at_its_measured_limits",
+  "crates/continuum-cml-elab/tests/fairness.rs::too_many_assumptions_are_refused_before_any_scope_is_built",
+  "crates/continuum-cml-elab/tests/fairness.rs::hand_built_fairness_targets_fail_closed_at_the_declaration",
+  "crates/continuum-cml-elab/tests/configured.rs::the_replicated_register_binds_and_lowers_with_its_fairness",
+  "crates/continuum-cml-elab/tests/register.rs::the_register_fairness_is_one_weak_assumption_over_its_recover_instances",
+  "crates/continuum-cml-elab/tests/resource_bounds.rs::collection_models_lower_at_their_measured_limits",
+  "crates/continuum-cml-elab/tests/errors.rs::lowering_refuses_with_typed_reasons",
+  "crates/continuum-cml-elab/tests/fixtures.rs::replicated_register_elaborates_and_refuses_to_lower_with_a_reason",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-cml-elab/tests/fairness.rs::the_lowered_fairness_is_the_hand_written_one_and_reordering_keeps_it", relation = "stable reordering of declarations" },
+]
+differential_tests = [
+  { test = "crates/continuum-cml-elab/tests/register.rs::the_register_liveness_under_its_fairness_agrees_with_an_independent_search", oracle = "continuum-engine-reference", subject = "continuum-cml-elab" },
+  { test = "crates/continuum-cml-elab/tests/fairness.rs::the_lowered_fairness_is_the_hand_written_one_and_reordering_keeps_it", oracle = "continuum-model-core", subject = "continuum-cml-elab" },
+]
+
+[semantic.claim_impact]
+claims = ["C021", "C022"]
+reason = "fairness is part of what the replicated register and the TLA+ corpus models mean (C021) and of the expressiveness C022 claims; this change adds evidence toward both (the whole register lowers, fairness included, and the reference engine's liveness verdicts under it equal an independent fair-cycle search over a hand-written simulation) and promotes neither: both stay TARGET, the same-identity goldens are bn-3jz, and the kernel cannot yet certify union-scope or strong fairness"
+
+[semantic.schemas]
+updated = []
+reason = "no schema document changes: the model identity is an in-crate canonical encoding, not a published schema, and a model without fairness keeps its continuum-model/1 bytes; the run configuration is read unchanged; the intent contract's fairness[] shape is untouched (this change neither reads nor writes it)"
+
+[semantic.migration]
+verdict = "Preserved"
+note = "continuum-model-core: every existing Model and its continuum-model/1 identity are unchanged (tests/identity_golden.rs); Model gains fairness() and is_fairness_enabled, ModelBuilder gains fairness(), and ModelError (EmptyFairness, UnknownAction), EvaluationError (UnknownFairness), and Symbol (Fairness) gain variants. continuum-cml-elab: a model with a fairness declaration that was refused as cml.lower.fairness now lowers (or meets the next refusal in the fixed order, now behaviors, state, init, actions, invariants, fairness); Unlowerable::Fairness and its code are removed; every model without fairness lowers to the same Model with the same usage except the added fairness sites. continuum-engine-reference: new liveness module; semantic::System refuses a model with its own fairness (SystemError::ModelFairness), which no generated system has"
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-1mppce"
+verdict = "approved"

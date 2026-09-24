@@ -25,12 +25,14 @@
 //! # Encoding
 //!
 //! ```text
-//! identity   := "continuum-model/1" variables actions initials predicates
+//! identity   := "continuum-model/1" variables actions initials predicates [fairness]
 //! variables  := count (token lo:i64 hi:i64)*
 //! actions    := count (token bool outcomes)*
 //! outcomes   := count (count (token int)*)*      -- sorted by encoding, no duplicates
 //! initials   := count (count i64*)*
 //! predicates := count (token bool)*
+//! fairness   := count (strength count token*)*  -- only when count >= 1; see below
+//! strength   := 0x20 (weak) | 0x21 (strong)
 //! count      := u64 big-endian     token := count bytes     i64 := big-endian
 //! int        := 0x01 i64 | 0x02 token | 0x03 op int int | 0x04 int int | 0x05 int int
 //! bool       := 0x10 b | 0x11 cmp int int | 0x12 bool | 0x13 bool bool | 0x14 bool bool
@@ -39,8 +41,25 @@
 //!
 //! Every field is length-prefixed or fixed-width, so the encoding is injective: two
 //! different models cannot share one byte string.
+//!
+//! # Fairness (bn-1ln12)
+//!
+//! A model's fairness assumptions are part of what the model *means* (docs/02 §2's
+//! \(F\)), so they are part of its identity: RFC 0015, "Adding a fairness assumption
+//! changes the claim identity". The section is written after the predicates, and only
+//! when the model declares at least one assumption: each assumption in canonical order
+//! ([`crate::fairness`]), as its strength byte and its scope's action *names*, in
+//! ascending order. A model without fairness therefore keeps, byte for byte, the
+//! identity it had before fairness existed (`tests/identity_golden.rs` pins it).
+//!
+//! Injectivity still holds. The part before the section is self-delimiting (every field
+//! is length-prefixed or fixed-width), so a reader knows where it ends; after it comes
+//! either nothing (no assumption) or a count of at least one and that many
+//! self-delimiting assumptions. Two models that differ in their fairness differ in
+//! these bytes; two that differ elsewhere differ before them.
 
 use crate::expr::{ArithOp, BoolExpr, CmpOp, IntExpr};
+use crate::fairness::Strength;
 use crate::model::Model;
 
 /// The version tag every identity starts with.
@@ -128,6 +147,21 @@ impl Model {
             bool_expr(&mut out, predicate.body());
         }
 
+        if !self.fairness().is_empty() {
+            count(&mut out, self.fairness().len());
+            for assumption in self.fairness() {
+                out.push(strength_byte(assumption.strength()));
+                count(&mut out, assumption.actions().len());
+                for index in assumption.actions() {
+                    let name = self
+                        .actions()
+                        .get(*index)
+                        .map_or("", |action| action.name().as_str());
+                    token(&mut out, name);
+                }
+            }
+        }
+
         ModelIdentity { bytes: out }
     }
 
@@ -173,7 +207,7 @@ impl Model {
     /// allocations charges this before calling [`Model::identity`].
     ///
     /// It visits each variable, action, outcome, assignment, initial-state value,
-    /// predicate, and expression node once; recursion is bounded as in
+    /// predicate, fairness member, and expression node once; recursion is bounded as in
     /// [`Model::identity`]. Saturates.
     #[must_use]
     pub fn identity_len_bound(&self) -> usize {
@@ -212,7 +246,28 @@ impl Model {
                 .saturating_add(token(predicate.name().as_str()))
                 .saturating_add(bool_len(predicate.body()));
         }
+        if !self.fairness().is_empty() {
+            n = n.saturating_add(COUNT);
+            for assumption in self.fairness() {
+                n = n.saturating_add(1).saturating_add(COUNT);
+                for index in assumption.actions() {
+                    let name = self
+                        .actions()
+                        .get(*index)
+                        .map_or("", |action| action.name().as_str());
+                    n = n.saturating_add(token(name));
+                }
+            }
+        }
         n
+    }
+}
+
+/// The byte that opens one fairness assumption's encoding.
+const fn strength_byte(strength: Strength) -> u8 {
+    match strength {
+        Strength::Weak => 0x20,
+        Strength::Strong => 0x21,
     }
 }
 
@@ -354,6 +409,7 @@ mod tests {
     }
 
     use crate::expr::{BoolExpr, IntExpr};
+    use crate::fairness::Strength;
     use crate::model::{ActionDecl, ModelBuilder};
 
     fn two_outcomes(first: i64, second: i64) -> crate::model::Model {
@@ -370,6 +426,104 @@ mod tests {
             ))
             .build()
             .unwrap()
+    }
+
+    fn two_actions() -> ModelBuilder {
+        ModelBuilder::new()
+            .variable("x", 0, 1)
+            .initial_state(&[("x", 0)])
+            .action(ActionDecl::deterministic(
+                "A",
+                BoolExpr::Const(true),
+                vec![("x", IntExpr::constant(1))],
+            ))
+            .action(ActionDecl::deterministic(
+                "B",
+                BoolExpr::Const(true),
+                vec![("x", IntExpr::constant(0))],
+            ))
+    }
+
+    /// No fairness keeps the pre-fairness bytes: no trailing section at all.
+    #[test]
+    fn a_model_without_fairness_has_no_fairness_section() {
+        let plain = two_actions().build().unwrap();
+        let bytes = plain.identity();
+        assert_eq!(plain.identity_len_bound(), bytes.as_bytes().len());
+        let fair = two_actions()
+            .fairness(Strength::Weak, ["A"])
+            .build()
+            .unwrap();
+        let fair_bytes = fair.identity();
+        assert!(fair_bytes.as_bytes().starts_with(bytes.as_bytes()));
+        // count(1) strength count(1) token("A")
+        assert_eq!(
+            fair_bytes.as_bytes().len() - bytes.as_bytes().len(),
+            8 + 1 + 8 + 8 + 1
+        );
+        assert_eq!(fair.identity_len_bound(), fair_bytes.as_bytes().len());
+    }
+
+    /// Strength, scope, and the split of a scope into assumptions are all identity.
+    #[test]
+    fn fairness_is_part_of_identity() {
+        let ids = [
+            two_actions().build().unwrap().identity(),
+            two_actions()
+                .fairness(Strength::Weak, ["A"])
+                .build()
+                .unwrap()
+                .identity(),
+            two_actions()
+                .fairness(Strength::Strong, ["A"])
+                .build()
+                .unwrap()
+                .identity(),
+            two_actions()
+                .fairness(Strength::Weak, ["B"])
+                .build()
+                .unwrap()
+                .identity(),
+            two_actions()
+                .fairness(Strength::Weak, ["A", "B"])
+                .build()
+                .unwrap()
+                .identity(),
+            two_actions()
+                .fairness(Strength::Weak, ["A"])
+                .fairness(Strength::Weak, ["B"])
+                .build()
+                .unwrap()
+                .identity(),
+        ];
+        for (i, a) in ids.iter().enumerate() {
+            for b in ids.iter().skip(i + 1) {
+                assert_ne!(a, b);
+            }
+        }
+    }
+
+    /// Declaration order, repetition inside a scope, and a repeated assumption are not.
+    #[test]
+    fn fairness_declaration_order_is_not_part_of_identity() {
+        let one = two_actions()
+            .fairness(Strength::Strong, ["B"])
+            .fairness(Strength::Weak, ["B", "A"])
+            .build()
+            .unwrap();
+        let two = two_actions()
+            .fairness(Strength::Weak, ["A", "B", "A"])
+            .fairness(Strength::Strong, vec!["B".to_owned()])
+            .fairness(Strength::Weak, ["B", "A"])
+            .build()
+            .unwrap();
+        assert_eq!(one, two);
+        assert_eq!(one.identity(), two.identity());
+        assert_eq!(one.fairness().len(), 2);
+        let first = one.fairness().first().unwrap();
+        assert_eq!(first.strength(), Strength::Weak);
+        assert_eq!(first.actions(), &[0, 1]);
+        assert_eq!(one.identity_len_bound(), one.identity().as_bytes().len());
     }
 
     #[test]

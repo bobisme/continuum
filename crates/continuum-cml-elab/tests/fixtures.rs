@@ -88,8 +88,11 @@ fn die_hard_header_no_longer_claims_it_is_unparsed() {
 
 /// The replicated register is well-formed CML with sets, maps, options, sorts,
 /// constants, parameterized actions, domainless binders, and a fairness assumption.
-/// It elaborates. It does not lower, because the programmatic model has no fairness —
-/// and it says so with a typed reason at the declaration, rather than dropping it.
+/// It elaborates. Without a run configuration it does not lower: its sorts are not
+/// instantiated, and the first reason is its first non-integer state variable. Its
+/// fairness line is no longer a reason (bn-1ln12): with it or without it, the refusal
+/// is the same. Under the schema example configuration it lowers whole
+/// (`tests/configured.rs`, `tests/fairness.rs`).
 #[test]
 fn replicated_register_elaborates_and_refuses_to_lower_with_a_reason() {
     let model = accept(
@@ -103,12 +106,16 @@ fn replicated_register_elaborates_and_refuses_to_lower_with_a_reason() {
         "{dump}"
     );
 
-    let err = lower(&model).expect_err("the register does not lower");
-    assert_eq!(err.kind, LowerErrorKind::Unlowerable(Unlowerable::Fairness));
-    assert_eq!((err.span.line, err.span.col), (63, 15));
+    // The first non-integer state variable, `alive: Set[Node]`, in canonical (name)
+    // order: fairness is lowered last, so it is not reached.
+    let err = lower(&model).expect_err("the register does not lower unconfigured");
+    assert_eq!(
+        err.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::NonIntegerState)
+    );
+    assert_eq!(err.span.line, 12);
 
-    // Without the fairness line, the next reason is the first non-integer state
-    // variable, `alive: Set[Node]`, in canonical (name) order.
+    // Without the fairness line, the same reason at the same place.
     let src =
         read(&dossier("examples/replicated_register.ctm")).replace("fairness weak Recover", "");
     let model = elaborate_source(&src).expect("still elaborates");
@@ -153,15 +160,19 @@ fn transitive_closure_elaborates_and_refuses_to_lower_with_a_reason() {
 /// `Receive` primes `phase` in `phase'[m.src] == Done` and updates no `phase`: `phase`
 /// is relational (RFC 0003 "Relational actions", bn-2ouro), and the fixture elaborates.
 /// It does not lower: the first reason, in the lowering's fixed order, is its
-/// `fairness` line; without it, the maps and sequences of its state.
+/// non-standard behavior, with its `fairness` line (which lowers since bn-1ln12) or
+/// without it.
 #[test]
 fn syntax_coverage_elaborates_with_a_relational_action() {
     let model = accept("SyntaxCoverage", &parser_fixture("SyntaxCoverage"));
     let dump = model.dump();
     assert!(dump.contains("(relational phase)"), "{dump}");
     assert!(dump.contains("(post (eq (index (primed phase)"), "{dump}");
-    let err = lower(&model).expect_err("fairness, maps, sequences");
-    assert_eq!(err.kind, LowerErrorKind::Unlowerable(Unlowerable::Fairness));
+    let err = lower(&model).expect_err("a non-standard behavior");
+    assert_eq!(
+        err.kind,
+        LowerErrorKind::Unlowerable(Unlowerable::NonStandardBehavior)
+    );
     let src = read(&parser_fixture("SyntaxCoverage")).replace("fairness strong Receive, Reset", "");
     let err = lower(&elaborate_source(&src).expect("elaborates")).expect_err("maps");
     assert_eq!(

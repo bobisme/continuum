@@ -39,14 +39,20 @@
 //!   candidate;
 //! - the init predicate is satisfied by at least one state of the (finite) domain;
 //! - every behavior is the standard specification `Init && always(step(N) ||
-//!   stutter(state))`, where `N` offers every action — which is exactly what the
-//!   programmatic model means — and there is no fairness assumption, which the
-//!   programmatic model cannot carry.
+//!   stutter(state))`, where `N` offers every action — which is exactly the
+//!   programmatic model's transition system; for liveness, the stuttering it admits is
+//!   `continuum_engine_reference::liveness::Stuttering::Everywhere`, stated at the
+//!   check, since the model itself holds no progress assumption;
+//! - every fairness assumption `fairness weak|strong X` lowers to one model-core
+//!   assumption of that strength whose scope is every programmatic action `X` expands
+//!   to — every parameter instance and relational candidate of the action `X`, or of
+//!   every action the choice `X` offers — named exactly as those actions are (RFC 0003
+//!   correction 5, bn-1ln12; see `lower_fairness`).
 //!
 //! Anything else is a typed [`Unlowerable`] reason, never an approximation: an unbounded
 //! `Nat` is not silently bounded, a quantifier is unrolled only over a finite domain it
-//! enumerates exactly (never a truncated one), and a fairness assumption is not silently
-//! dropped.
+//! enumerates exactly (never a truncated one), and a fairness assumption is never
+//! dropped or split into per-instance assumptions (which would strengthen it).
 //!
 //! # Under a run configuration
 //!
@@ -81,11 +87,12 @@ use std::rc::Rc;
 use continuum_cml_syntax::Span;
 use continuum_model_core::domain::{Domain, Variable};
 use continuum_model_core::expr::{Environment, MAX_EXPR_DEPTH};
+use continuum_model_core::fairness::MAX_FAIRNESS;
 use continuum_model_core::ident::MAX_IDENT_BYTES;
-use continuum_model_core::model::{MAX_ACTIONS, MAX_INITIAL_STATES, MAX_VARIABLES};
+use continuum_model_core::model::{MAX_ACTIONS, MAX_INITIAL_STATES, MAX_VARIABLES, Symbol};
 use continuum_model_core::{
     ActionDecl, ArithOp, BoolExpr, CmpOp, EvalError, Ident, IntExpr, Model, ModelBuilder,
-    ModelError,
+    ModelError, Strength,
 };
 
 use crate::budget::{Budget, Fuel, Limits, Usage, lookup_cost, sort_cost};
@@ -150,8 +157,6 @@ pub enum Unlowerable {
     NonIntegerValue,
     /// An integer-valued `if`.
     ConditionalValue,
-    /// A fairness assumption, which the programmatic model cannot carry.
-    Fairness,
     /// A behavior other than the standard specification over every action.
     NonStandardBehavior,
     /// No `init` declaration.
@@ -245,7 +250,6 @@ impl Unlowerable {
             Unlowerable::DivisionOrModulo => "cml.lower.division_or_modulo",
             Unlowerable::NonIntegerValue => "cml.lower.non_integer_value",
             Unlowerable::ConditionalValue => "cml.lower.conditional_value",
-            Unlowerable::Fairness => "cml.lower.fairness",
             Unlowerable::NonStandardBehavior => "cml.lower.non_standard_behavior",
             Unlowerable::NoInit => "cml.lower.no_init",
             Unlowerable::InitDomainTooLarge => "cml.lower.init_domain_too_large",
@@ -287,7 +291,6 @@ impl fmt::Display for Unlowerable {
             Unlowerable::DivisionOrModulo => "`/` and `%` do not lower",
             Unlowerable::NonIntegerValue => "only integer and boolean values lower",
             Unlowerable::ConditionalValue => "an integer-valued `if` does not lower",
-            Unlowerable::Fairness => "fairness assumptions do not lower",
             Unlowerable::NonStandardBehavior => {
                 "only `Init && always(step(Next) || stutter(state))` over every action lowers"
             }
@@ -447,7 +450,8 @@ fn no<T>(u: Unlowerable, span: Span) -> R<T> {
 /// # Errors
 ///
 /// A typed [`Unlowerable`] reason for the first construct that does not lower (checked
-/// in a fixed order: fairness, behaviors, state, init, actions, invariants), or the
+/// in a fixed order: behaviors, state, model-core's limits (including the count of
+/// fairness assumptions), init, actions, invariants, fairness), or the
 /// builder's own [`ModelError`].
 pub fn lower(model: &NormModel) -> Result<Model, LowerError> {
     lower_with(model, Limits::default()).0
@@ -699,7 +703,8 @@ pub fn lower_configured(
             // made: the walks are charged — `identity_alloc_bound` visits the model twice,
             // and `Model::identity` visits it three times (its two capacity walks and the
             // encoding) — each visit covering every expression node (every one of which the
-            // lowering charged) and each initial-state value; then the peak allocation
+            // lowering charged), each initial-state value, and each fairness assumption and
+            // member (bn-1ln12); then the peak allocation
             // itself (`identity_alloc_bound`: the output buffer, the one reused outcome
             // scratch buffer, and its range list, each allocated once at that capacity) is
             // charged as output and as work. Only then is the identity encoded, and its
@@ -713,7 +718,14 @@ pub fn lower_configured(
                 )
                 .saturating_add(lowered.variables().len() as u64)
                 .saturating_add(lowered.actions().len() as u64)
-                .saturating_add(lowered.predicates().len() as u64);
+                .saturating_add(lowered.predicates().len() as u64)
+                .saturating_add(
+                    lowered
+                        .fairness()
+                        .iter()
+                        .map(|f| f.actions().len() as u64 + 1)
+                        .fold(0_u64, u64::saturating_add),
+                );
             burn(&mut meter, walk.saturating_mul(5), at)?;
             let bound = lowered.identity_alloc_bound();
             charge(&mut meter, crate::budget::text_cost(bound), at)?;
@@ -1277,9 +1289,6 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
     // Every expression node this lowering builds or copies is charged to `meter` first.
     let budget = meter;
 
-    if let Some(f) = model.fairness.first() {
-        return no(Unlowerable::Fairness, f.span);
-    }
     // Which choices offer every action: computed once (linear in the choices), so each
     // behavior is then checked with one lookup, not a comparison against every action.
     let every: Vec<&String> = model.actions.iter().map(|a| &a.name).collect();
@@ -1600,15 +1609,40 @@ fn lower_metered(model: &NormModel, meter: &mut Meter) -> Result<Model, LowerErr
         }
     }
 
-    // `ModelBuilder::build` sorts the variables, actions, and predicates by name; the
-    // rest of its validation is linear in what was charged above.
+    // Fairness assumptions, each over the actions its target expands to (bn-1ln12).
+    let mut lowered_fairness = Lowered::default();
+    builder = lower_fairness(
+        builder,
+        model,
+        &by_name,
+        &mut *budget,
+        &mut lowered_fairness,
+    )?;
+
+    // `ModelBuilder::build` sorts the variables, actions, and predicates by name; it
+    // resolves each fairness member by a binary search over the actions and sorts the
+    // members and the assumptions; the rest of its validation is linear in what was
+    // charged above.
     let slot_bytes: usize = variables.iter().map(|v| v.name().as_str().len()).sum();
     let sorting = sort_cost(variables.len(), slot_bytes)
         .saturating_add(sort_cost(lowered_actions.count, lowered_actions.bytes))
         .saturating_add(sort_cost(
             lowered_predicates.count,
             lowered_predicates.bytes,
-        ));
+        ))
+        .saturating_add(fairness_resolution(
+            &lowered_fairness,
+            lowered_actions.count,
+        ))
+        .saturating_add(sort_cost(
+            lowered_fairness.count,
+            lowered_fairness.count.saturating_mul(8),
+        ))
+        .saturating_add(sort_cost(
+            model.fairness.len(),
+            lowered_fairness.count.saturating_mul(8),
+        ))
+        .saturating_add(lowered_fairness.count as u64);
     burn(budget, sorting, whole)?;
     builder.build().map_err(|e| LowerError {
         kind: LowerErrorKind::Model(e),
@@ -1756,12 +1790,7 @@ fn relational_action(
 
     let mut values: Vec<i64> = relational.iter().map(|v| v.domain().lo()).collect();
     loop {
-        let label: Vec<String> = relational
-            .iter()
-            .zip(&values)
-            .map(|(v, c)| format!("{}={c}", v.name().as_str()))
-            .collect();
-        let action = format!("{name}[{}]", label.join(","));
+        let action = candidate_label(name, relational, &values);
         let mut steps = 0_u64;
         let guard_c = subst_bool(&guard.0, &values, &mut steps);
         let mut assigns: Vec<(&str, IntExpr)> =
@@ -1790,6 +1819,19 @@ fn relational_action(
         }
     }
     Ok(builder)
+}
+
+/// The name of the relational candidate `values` of the action instance `name`:
+/// `name[r1=c1,…,rn=cn]`, the relational variables in name order. The one spelling of
+/// a candidate's name: `relational_action` names the action with it, and
+/// `lower_fairness` names the same action in a fairness scope with it (bn-1ln12).
+fn candidate_label(name: &str, relational: &[&Variable], values: &[i64]) -> String {
+    let parts: Vec<String> = relational
+        .iter()
+        .zip(values)
+        .map(|(v, c)| format!("{}={c}", v.name().as_str()))
+        .collect();
+    format!("{name}[{}]", parts.join(","))
 }
 
 /// `e` with each placeholder `'k` replaced by `values[k]`. `steps` counts one per node
@@ -1911,6 +1953,18 @@ fn preflight(
     by_name: &std::collections::BTreeMap<&str, &Variable>,
     budget: &mut Meter,
 ) -> R<()> {
+    // The model's own limit on fairness assumptions, before any scope is built.
+    if model.fairness.len() > MAX_FAIRNESS {
+        let span = model.fairness.first().map_or(whole_span(model), |f| f.span);
+        return Err(LowerError {
+            kind: LowerErrorKind::Model(ModelError::TooMany {
+                symbol: Symbol::Fairness,
+                count: model.fairness.len(),
+                max: MAX_FAIRNESS,
+            }),
+            span,
+        });
+    }
     let names = model
         .state
         .iter()
@@ -2071,16 +2125,46 @@ fn escaped_len(name: &str) -> usize {
 }
 
 /// The work one instance spends on parameter `p`: its scope entry (a lookup by its name)
-/// and its value's text (a lookup by its type's name, for a sort or an enumeration; for
-/// a composite, its longest text `widest` and one, spent before the text is written).
+/// and its value's text ([`text_work`]).
 fn param_work(p: &crate::norm::Param, params: usize, widest: usize, budget: &Meter) -> u64 {
-    let text = match &p.ty {
+    lookup_cost(params, p.name.len()).saturating_add(text_work(p, widest, budget))
+}
+
+/// The work [`value_text`] spends on one value of parameter `p`: a lookup by its type's
+/// name, for a sort or an enumeration; for a composite, its longest text `widest` and
+/// one, spent before the text is written; nothing for a Boolean or an integer.
+fn text_work(p: &crate::norm::Param, widest: usize, budget: &Meter) -> u64 {
+    match &p.ty {
         Type::Sort(s) => lookup_cost(budget.bind.sort_names.len(), s.len()),
         Type::Enum(e) => lookup_cost(budget.enums.len(), e.len()),
         t if !layout::is_scalar(t) => widest as u64 + 1,
         _ => 0,
-    };
-    lookup_cost(params, p.name.len()).saturating_add(text)
+    }
+}
+
+/// The name of the instance `values` of action `a`: `A(p1=u1,…,pn=un)`, each value in
+/// its canonical text ([`value_text`]), or `A` for an action without parameters. The one
+/// spelling of an instance's name: `build_action` names the action with it, and
+/// `lower_fairness` names the same action in a fairness scope with it (bn-1ln12), so
+/// the two cannot disagree. Spends [`text_work`] per parameter.
+fn instance_label(
+    a: &crate::norm::Action,
+    values: &[i64],
+    widest: &[usize],
+    budget: &mut Meter,
+) -> R<String> {
+    if a.params.is_empty() {
+        return Ok(a.name.clone());
+    }
+    let mut parts = Vec::with_capacity(a.params.len());
+    for ((p, v), w) in a.params.iter().zip(values).zip(widest) {
+        parts.push(format!(
+            "{}={}",
+            p.name,
+            value_text(&p.ty, *v, *w, budget, a.span)?
+        ));
+    }
+    Ok(format!("{}({})", a.name, parts.join(",")))
 }
 
 /// The canonical text of the atom `v` of a parameter of type `ty`: `false`/`true`, an
@@ -2485,20 +2569,11 @@ fn build_action(
     let mut defined: Vec<Sized<BoolExpr>> = Vec::new();
     loop {
         // This instance's parameter values, and its name.
-        let mut label = a.name.clone();
-        if !a.params.is_empty() {
-            let mut parts = Vec::with_capacity(a.params.len());
-            for ((p, v), w) in a.params.iter().zip(&values).zip(&widest) {
-                burn(budget, lookup_cost(space.len(), p.name.len()), a.span)?;
-                budget.env.params.insert(p.name.clone(), (*v, *v));
-                parts.push(format!(
-                    "{}={}",
-                    p.name,
-                    value_text(&p.ty, *v, *w, budget, a.span)?
-                ));
-            }
-            label = format!("{}({})", a.name, parts.join(","));
+        for (p, v) in a.params.iter().zip(&values) {
+            burn(budget, lookup_cost(space.len(), p.name.len()), a.span)?;
+            budget.env.params.insert(p.name.clone(), (*v, *v));
         }
+        let label = instance_label(a, &values, &widest, budget)?;
         budget.defs.clear();
         let mut guard_clauses = Vec::with_capacity(a.guard.len());
         for c in &a.guard {
@@ -2601,6 +2676,285 @@ fn build_action(
         predicates.add(&name);
     }
     Ok(builder)
+}
+
+/// The work `ModelBuilder::build` spends resolving the fairness members `fair`: one
+/// binary search over the `actions` names per member, each step comparing names.
+fn fairness_resolution(fair: &Lowered, actions: usize) -> u64 {
+    let levels = u64::from(usize::BITS.saturating_sub(actions.leading_zeros()).max(1));
+    levels.saturating_mul(
+        (fair.count as u64)
+            .saturating_mul(2)
+            .saturating_add(crate::budget::text_cost(fair.bytes) as u64),
+    )
+}
+
+/// Lower every fairness assumption (RFC 0003 correction 5, bn-1ln12).
+///
+/// `fairness s X` becomes one model-core assumption of strength `s` whose scope is the
+/// set of every programmatic action `X` lowers to: each parameter instance `X(p=u,…)`
+/// of the action `X`, and each relational candidate `X(…)[r=c,…]` of each instance —
+/// or, for a choice `X`, the same for every action it offers. It is one assumption
+/// over the union, never one per instance: RFC 0008 and RFC 0015 attach fairness to the
+/// action schema, whose relation ranges over its parameters (docs/02 §2), and per-
+/// instance fairness would be a strictly stronger assumption (INV-011).
+///
+/// The names are spelled by the functions that name the actions ([`instance_label`],
+/// [`candidate_label`]), so a scope names exactly the actions `X` lowered to, and they
+/// are as injective as the action names are.
+///
+/// Resources: the action and choice tables hold references (one node per entry,
+/// charged, and their sort spent) before they are built; each assumption is one planned
+/// site ([`fairness_site`]).
+fn lower_fairness(
+    mut builder: ModelBuilder,
+    model: &NormModel,
+    by_name: &BTreeMap<&str, &Variable>,
+    budget: &mut Meter,
+    lowered: &mut Lowered,
+) -> R<ModelBuilder> {
+    let Some(first) = model.fairness.first() else {
+        return Ok(builder);
+    };
+    let entries = model.actions.len().saturating_add(model.choices.len());
+    let names = model
+        .actions
+        .iter()
+        .map(|a| a.name.len())
+        .chain(model.choices.iter().map(|c| c.name.len()))
+        .fold(0_usize, usize::saturating_add);
+    charge(budget, entries, first.span)?;
+    burn(budget, sort_cost(entries, names), first.span)?;
+    let actions: BTreeMap<&str, &crate::norm::Action> =
+        model.actions.iter().map(|a| (a.name.as_str(), a)).collect();
+    let choices: BTreeMap<&str, &crate::norm::Choice> =
+        model.choices.iter().map(|c| (c.name.as_str(), c)).collect();
+    for (index, f) in model.fairness.iter().enumerate() {
+        burn(
+            budget,
+            lookup_cost(actions.len(), f.action.len())
+                .saturating_add(lookup_cost(choices.len(), f.action.len())),
+            f.span,
+        )?;
+        let covered: Vec<&crate::norm::Action> = if let Some(a) = actions.get(f.action.as_str()) {
+            vec![*a]
+        } else if let Some(c) = choices.get(f.action.as_str()) {
+            // The offered actions, one reference each, charged; one lookup each,
+            // spent before the pass.
+            charge(budget, c.actions.len(), f.span)?;
+            burn(
+                budget,
+                c.actions.iter().fold(0_u64, |acc, n| {
+                    acc.saturating_add(lookup_cost(actions.len(), n.len()))
+                }),
+                f.span,
+            )?;
+            let mut offered = Vec::with_capacity(c.actions.len());
+            for n in &c.actions {
+                match actions.get(n.as_str()) {
+                    Some(a) => offered.push(*a),
+                    None => return unknown_fair_action(index, n, f.span),
+                }
+            }
+            offered
+        } else {
+            return unknown_fair_action(index, &f.action, f.span);
+        };
+        let strength = match f.strength {
+            crate::norm::Strength::Weak => Strength::Weak,
+            crate::norm::Strength::Strong => Strength::Strong,
+        };
+        builder = fairness_site(
+            builder, index, strength, &covered, by_name, budget, f.span, lowered,
+        )?;
+    }
+    Ok(builder)
+}
+
+/// A fairness target that names no action or choice: only a hand-built model has one
+/// (elaboration resolves every target). The builder's own refusal, typed.
+fn unknown_fair_action<T>(index: usize, name: &str, span: Span) -> R<T> {
+    let kind = match Ident::new(name) {
+        Ok(name) => ModelError::UnknownAction {
+            fairness: index,
+            name,
+        },
+        Err(source) => ModelError::InvalidName {
+            symbol: Symbol::Action,
+            spelling: name.to_owned(),
+            source,
+        },
+    };
+    Err(LowerError {
+        kind: LowerErrorKind::Model(kind),
+        span,
+    })
+}
+
+/// One covered action of a fairness assumption, planned.
+struct FairCover<'a> {
+    action: &'a crate::norm::Action,
+    space: Vec<(i64, i64)>,
+    relational: Vec<&'a Variable>,
+    widest: Vec<usize>,
+    /// The longest name of one of its programmatic actions.
+    label: usize,
+}
+
+/// The work of one scope member beyond its values' text: writing its name and taking
+/// it into the scope, each by its length.
+fn member_work(label: usize) -> u128 {
+    (crate::budget::text_cost(label) as u128)
+        .saturating_mul(2)
+        .saturating_add(1)
+}
+
+/// The output of one scope member: the name, and the builder's resolved copy of it,
+/// each a node with its text, and its index in the model's scope.
+fn member_size(label: usize) -> u128 {
+    (crate::budget::text_cost(label) as u128)
+        .saturating_add(1)
+        .saturating_mul(2)
+        .saturating_add(1)
+}
+
+/// One fairness assumption as a planned site: the plan computes every covered action's
+/// instances, candidates, and longest name (as `preflight` does), predicts the output
+/// (per member [`member_size`], and the assumption's record) and the work (per instance
+/// its values' text, [`text_work`], and per member [`member_work`]), and opens the site,
+/// which checks the work and charges the output before the first name is written. The
+/// build then writes each name with [`instance_label`] and [`candidate_label`], in the
+/// order the actions were built, and spends exactly the prediction.
+#[allow(clippy::too_many_arguments)]
+fn fairness_site(
+    builder: ModelBuilder,
+    index: usize,
+    strength: Strength,
+    covered: &[&crate::norm::Action],
+    by_name: &BTreeMap<&str, &Variable>,
+    budget: &mut Meter,
+    span: Span,
+    lowered: &mut Lowered,
+) -> R<ModelBuilder> {
+    // The plan's own tables: per covered action its record, its parameter universes,
+    // widest texts, and relational variables, charged before they are built.
+    let tables = covered.iter().fold(0_usize, |acc, a| {
+        acc.saturating_add(1)
+            .saturating_add(a.params.len().saturating_mul(2))
+            .saturating_add(a.next.len())
+    });
+    charge(budget, tables, span)?;
+    let mut plans: Vec<FairCover<'_>> = Vec::with_capacity(covered.len());
+    // The assumption's two records: the builder's declaration and the model's own.
+    let mut size: u128 = 2;
+    let mut total: u128 = 0;
+    let mut work: u128 = 0;
+    for a in covered {
+        let space = param_space(a, budget)?;
+        let instances = instance_count(&space);
+        let width = instance_width(a, &space, budget)?;
+        burn(
+            budget,
+            (a.next.len() as u64).saturating_mul(lookup_cost(by_name.len(), 32)),
+            a.span,
+        )?;
+        let relational: Vec<&Variable> = a
+            .next
+            .iter()
+            .filter(|(_, n)| matches!(n, Next::Relational))
+            .filter_map(|(v, _)| by_name.get(v.as_str()).copied())
+            .collect();
+        let (candidates, label) = if relational.is_empty() {
+            (1, width)
+        } else {
+            (
+                candidate_count(&relational),
+                widest_label(width, &relational),
+            )
+        };
+        let mut widest = Vec::with_capacity(a.params.len());
+        let mut text: u128 = 0;
+        for p in &a.params {
+            let w = if layout::is_scalar(&p.ty) {
+                0
+            } else {
+                collections::widest_text(&p.ty, MAX_IDENT_BYTES, budget, a.span)?
+            };
+            text = text.saturating_add(u128::from(text_work(p, w, budget)));
+            widest.push(w);
+        }
+        let members = instances.saturating_mul(candidates);
+        total = total.saturating_add(members);
+        size = size.saturating_add(members.saturating_mul(member_size(label)));
+        work = work
+            .saturating_add(instances.saturating_mul(text))
+            .saturating_add(members.saturating_mul(member_work(label)));
+        plans.push(FairCover {
+            action: a,
+            space,
+            relational,
+            widest,
+            label,
+        });
+    }
+    // A scope with no member (a hand-built choice that offers nothing, or an action
+    // with no instance) is the builder's refusal, made here at the declaration.
+    if total == 0 {
+        return Err(LowerError {
+            kind: LowerErrorKind::Model(ModelError::EmptyFairness { index }),
+            span,
+        });
+    }
+    budget.predicted = work;
+    begin_site(budget, usize::try_from(size).unwrap_or(usize::MAX), 0, span)?;
+    let capacity = usize::try_from(total).unwrap_or(0);
+    let built = fairness_members(&plans, capacity, budget, lowered);
+    end_site(budget);
+    Ok(builder.fairness(strength, built?))
+}
+
+/// The build of [`fairness_site`]: every covered action's programmatic names, in the
+/// order its actions were built.
+fn fairness_members(
+    plans: &[FairCover<'_>],
+    capacity: usize,
+    budget: &mut Meter,
+    lowered: &mut Lowered,
+) -> R<Vec<String>> {
+    // Exactly the planned member count, prepaid by the site: no growth.
+    let mut members: Vec<String> = Vec::with_capacity(capacity);
+    for plan in plans {
+        let a = plan.action;
+        if instance_count(&plan.space) == 0 {
+            continue;
+        }
+        let spend = u64::try_from(member_work(plan.label)).unwrap_or(u64::MAX);
+        let mut values: Vec<i64> = plan.space.iter().map(|(lo, _)| *lo).collect();
+        loop {
+            let label = instance_label(a, &values, &plan.widest, budget)?;
+            if plan.relational.is_empty() {
+                burn(budget, spend, a.span)?;
+                lowered.add(&label);
+                members.push(label);
+            } else {
+                let mut candidate: Vec<i64> =
+                    plan.relational.iter().map(|v| v.domain().lo()).collect();
+                loop {
+                    burn(budget, spend, a.span)?;
+                    let name = candidate_label(&label, &plan.relational, &candidate);
+                    lowered.add(&name);
+                    members.push(name);
+                    if !advance(&mut candidate, &plan.relational) {
+                        break;
+                    }
+                }
+            }
+            if !advance_space(&mut values, &plan.space) {
+                break;
+            }
+        }
+    }
+    Ok(members)
 }
 
 /// Step `values` to the next parameter tuple of `space`, last position fastest.

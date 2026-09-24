@@ -30,6 +30,8 @@ weak_fair(Action): continuously enabled ⇒ eventually taken
 strong_fair(Action): enabled infinitely often ⇒ taken infinitely often
 ```
 
+For an action schema that a front end expands per parameter, the assumption is one assumption over the union of the instances: the schema is enabled when some instance is enabled, and it is taken when some instance is taken. A step counts as taken by its action label. RFC 0003 correction 5 (bn-1ln12) states this, and states that per-instance fairness is a different, stronger assumption.
+
 Distributed assumptions are separate:
 
 - eventual message delivery;

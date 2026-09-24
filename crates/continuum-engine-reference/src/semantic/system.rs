@@ -15,6 +15,11 @@
 //! | [`ObligationDecl`] | an obligation flag, and the phase of its owner | quiescence and completion leaks, fair lassos |
 //! | [`PhaseDecl`] | a cancellation phase variable and its final value | monotonicity on every reachable transition |
 //!
+//! A system's fairness is the per-action declaration above, never the model's own
+//! assumptions (`crate::fairness`, bn-1ln12): a model that declares any is refused
+//! ([`SystemError::ModelFairness`]), so the oracle never ignores one silently. The
+//! model-level assumptions are checked by [`crate::liveness`].
+//!
 //! The **claimed independence relation** is fixed by these declarations and by nothing
 //! else: two distinct actions are claimed independent iff their footprints do not
 //! interfere ([`Footprint::interferes`]) and the pair is not a declared conflict. That
@@ -260,6 +265,11 @@ pub enum SystemError {
     },
     /// A lineage line with a line break in it, which would corrupt the encoding.
     BadLineage,
+    /// The model declares its own fairness assumptions (bn-1ln12). A system states
+    /// fairness per action in [`ActionMeta::fairness`], and the oracle reads only that;
+    /// a model-level assumption would be silently ignored, and the rebuilding edits
+    /// would drop it, so it is refused instead.
+    ModelFairness,
 }
 
 impl From<ModelError> for SystemError {
@@ -301,6 +311,9 @@ impl System {
             phases,
             lineage,
         } = parts;
+        if !model.fairness().is_empty() {
+            return Err(SystemError::ModelFairness);
+        }
         let declared: BTreeSet<&str> = model
             .variables()
             .iter()

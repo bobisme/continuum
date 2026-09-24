@@ -49,6 +49,13 @@
 //!   written as `CONTCERT` wire bytes, the only form in which anything this crate
 //!   computes reaches the trusted checking base.
 //!
+//! Since bn-1ln12 it also answers **liveness under fairness** ([`liveness`]): `◇ P`
+//! and `□◇ P` over a closed exploration, under the model's own weak and strong
+//! fairness assumptions ([`fairness`]), by an Emerson–Lei fair-cycle search whose
+//! counterexample is a lasso. It is the reference the liveness engine
+//! (`continuum-engine-liveness`, Phase D) will be measured against; it emits no
+//! certificate.
+//!
 //! It also carries the **tiny exhaustive oracle** of docs/19 §2 ([`semantic`], bn-1zgs):
 //! a seeded generator of finite semantic systems (a [`model::Model`] plus footprints,
 //! conflicts, obligations, cancellation phases and fairness), an oracle that enumerates
@@ -114,11 +121,13 @@ pub mod bfs;
 pub mod certificate;
 pub mod checking;
 pub mod diehard;
+pub mod liveness;
 pub mod semantic;
 pub mod witness;
 
-// The programmatic model, re-exported from the model core under the paths PR 8 gave it.
-pub use continuum_model_core::{domain, expr, ident, model};
+// The programmatic model, re-exported from the model core under the paths PR 8 gave it
+// (and its fairness assumptions, bn-1ln12).
+pub use continuum_model_core::{domain, expr, fairness, ident, model};
 
 pub use bfs::{
     Bound, Bounds, Discovery, Exploration, ExplorationError, Partial, Reachable, explore,
@@ -132,7 +141,11 @@ pub use checking::{
 };
 pub use domain::{Domain, DomainError, Variable};
 pub use expr::{ArithOp, BoolExpr, CmpOp, EvalError, IntExpr};
+pub use fairness::{Fairness, Strength};
 pub use ident::{Ident, IdentError};
+pub use liveness::{
+    Cycle, Goal, Lasso, LivenessError, LivenessOutcome, Stuttering, check_liveness,
+};
 pub use model::{
     Action, ActionDecl, Assignment, EvaluationError, Model, ModelBuilder, ModelError, Outcome,
     Predicate, Site, State, Step, Symbol,

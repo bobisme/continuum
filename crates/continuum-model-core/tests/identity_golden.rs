@@ -9,10 +9,20 @@
 //! with a duplicate, every integer and Boolean expression form, several initial
 //! states, and predicates. Regenerate only for a deliberate encoding change (which is
 //! a `continuum-model/2`), with `MODEL_IDENTITY_BLESS=1`.
+//!
+//! bn-1ln12 added the optional fairness section. `every_form` declares no fairness, so
+//! its golden did not move; `every_form_fair` pins the section itself, with both
+//! strengths, a scope of two actions, and assumptions declared out of order and twice.
 
-use continuum_model_core::{ActionDecl, ArithOp, BoolExpr, CmpOp, IntExpr, Model, ModelBuilder};
+use continuum_model_core::{
+    ActionDecl, ArithOp, BoolExpr, CmpOp, IntExpr, Model, ModelBuilder, Strength,
+};
 
 fn every_form() -> Model {
+    every_form_builder().build().expect("a valid model")
+}
+
+fn every_form_builder() -> ModelBuilder {
     let x = || IntExpr::var("x");
     let y = || IntExpr::var("y");
     let int = IntExpr::Max(
@@ -68,8 +78,6 @@ fn every_form() -> Model {
             "Even",
             BoolExpr::compare(CmpOp::Ne, y(), IntExpr::constant(1)),
         )
-        .build()
-        .expect("a valid model")
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -99,4 +107,45 @@ fn the_model_identity_encoding_is_pinned_byte_for_byte() {
     // strictly larger here).
     assert!(model.identity_len_bound() > model.identity().as_bytes().len());
     assert!(model.identity_alloc_bound() > model.identity_len_bound());
+}
+
+/// The fairness section, pinned: `every_form` plus strong fairness of `Step`, weak
+/// fairness over `{Pick, Step}` (named out of order and with a repeat), and the weak
+/// assumption declared a second time. The bytes before the section are exactly
+/// `every_form`'s.
+#[test]
+fn the_fairness_section_is_pinned_byte_for_byte() {
+    let model = every_form_builder()
+        .fairness(Strength::Strong, ["Step"])
+        .fairness(Strength::Weak, ["Step", "Pick", "Step"])
+        .fairness(Strength::Weak, ["Pick", "Step"])
+        .build()
+        .expect("a valid model");
+    let plain = every_form().identity();
+    let fair = model.identity();
+    assert!(fair.as_bytes().starts_with(plain.as_bytes()));
+    let got = hex(fair.as_bytes());
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden/every_form_fair.identity.hex");
+    if std::env::var_os("MODEL_IDENTITY_BLESS").is_some() {
+        std::fs::write(&path, &got).expect("write golden");
+    }
+    let want = std::fs::read_to_string(&path).expect("golden present");
+    assert_eq!(got, want, "continuum-model/1 fairness bytes changed");
+    // The section by hand: count 2; weak, 2 members, "Pick", "Step"; strong, 1, "Step".
+    let mut section: Vec<u8> = Vec::new();
+    let count = |out: &mut Vec<u8>, n: u64| out.extend_from_slice(&n.to_be_bytes());
+    count(&mut section, 2);
+    section.push(0x20);
+    count(&mut section, 2);
+    for name in ["Pick", "Step"] {
+        count(&mut section, name.len() as u64);
+        section.extend_from_slice(name.as_bytes());
+    }
+    section.push(0x21);
+    count(&mut section, 1);
+    count(&mut section, 4);
+    section.extend_from_slice(b"Step");
+    assert_eq!(&fair.as_bytes()[plain.as_bytes().len()..], &section[..]);
+    assert!(model.identity_len_bound() >= fair.as_bytes().len());
 }

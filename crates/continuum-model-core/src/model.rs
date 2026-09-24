@@ -14,9 +14,13 @@
 //! fragment the closed-finite-state-space certificate can carry (docs/03 §6.1). \(S\)
 //! is the product of the declared variable domains, \(I\) is an explicit enumeration,
 //! \(\mathcal{A}\) is a set of named actions, and each \(T_a\) is a guard plus a
-//! non-empty set of simultaneous updates. Observations and fairness are absent on
-//! purpose: nothing in PR 8 consumes them, and a field with no consumer is a field
-//! with no defined meaning.
+//! non-empty set of simultaneous updates. It also carries \(F\), the fairness
+//! assumptions ([`crate::fairness`], bn-1ln12): each a weak or strong assumption over
+//! a set of the actions, consumed by the reference engine's liveness check
+//! (`continuum_engine_reference::liveness`). A safety check and the finite closure
+//! certificate ignore them, as they must: fairness constrains infinite executions
+//! only. Observations are still absent on purpose: nothing consumes them yet, and a
+//! field with no consumer is a field with no defined meaning.
 //!
 //! # What this module is *not*
 //!
@@ -81,6 +85,7 @@ use std::collections::BTreeSet;
 
 use crate::domain::{Domain, DomainError, Variable};
 use crate::expr::{BoolExpr, Environment, EvalError, IntExpr, MAX_EXPR_DEPTH};
+use crate::fairness::{Fairness, MAX_FAIRNESS, Strength};
 use crate::ident::{Ident, IdentError};
 
 /// The largest number of state variables a model may declare.
@@ -308,6 +313,7 @@ pub struct Model {
     actions: Vec<Action>,
     initial_states: Vec<State>,
     predicates: Vec<Predicate>,
+    fairness: Vec<Fairness>,
 }
 
 impl Model {
@@ -366,6 +372,42 @@ impl Model {
         self.predicates
             .iter()
             .position(|predicate| predicate.name().as_str() == name)
+    }
+
+    /// The declared fairness assumptions, in canonical order: by strength (weak
+    /// first), then by scope. Empty when the model declares none; there is no
+    /// default ([`crate::fairness`]).
+    #[must_use]
+    pub fn fairness(&self) -> &[Fairness] {
+        &self.fairness
+    }
+
+    /// Whether the scope of the fairness assumption at `index` is enabled in `state`:
+    /// whether at least one of its actions is.
+    ///
+    /// # Errors
+    ///
+    /// [`EvaluationError::UnknownFairness`] for an index outside [`Model::fairness`],
+    /// and those of [`Model::is_enabled`] for the first action whose guard fails to
+    /// evaluate. Every guard of the scope is evaluated (strict, as the model's
+    /// connectives are), so the answer does not depend on the order of the scope.
+    pub fn is_fairness_enabled(
+        &self,
+        index: usize,
+        state: &State,
+    ) -> Result<bool, EvaluationError> {
+        let assumption = self
+            .fairness
+            .get(index)
+            .ok_or(EvaluationError::UnknownFairness {
+                index,
+                declared: self.fairness.len(),
+            })?;
+        let mut enabled = false;
+        for action in assumption.actions() {
+            enabled |= self.is_enabled(*action, state)?;
+        }
+        Ok(enabled)
     }
 
     /// How many states the declared domain admits, whether reachable or not.
@@ -632,6 +674,7 @@ pub struct ModelBuilder {
     actions: Vec<ActionDecl>,
     initial: Vec<Vec<(String, i64)>>,
     predicates: Vec<(String, BoolExpr)>,
+    fairness: Vec<(Strength, Vec<String>)>,
 }
 
 impl ModelBuilder {
@@ -678,11 +721,28 @@ impl ModelBuilder {
         self
     }
 
+    /// Declare a fairness assumption of `strength` over the named actions, its scope
+    /// ([`crate::fairness`]). The scope is a set: a name given twice is one member, and
+    /// an assumption declared twice is declared once.
+    ///
+    /// Takes owned names or borrowed ones: a caller that already holds `String`s
+    /// passes them without a copy.
+    #[must_use]
+    pub fn fairness<I, S>(mut self, strength: Strength, actions: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.fairness
+            .push((strength, actions.into_iter().map(Into::into).collect()));
+        self
+    }
+
     /// Validate every declaration and produce a [`Model`].
     ///
-    /// Rules are applied in a fixed order — variables, actions, expressions, initial
-    /// states, predicates — and the first failure is returned, so the error a given
-    /// set of declarations produces is itself deterministic.
+    /// Rules are applied in a fixed order — variables, actions, expressions,
+    /// predicates, initial states, fairness — and the first failure is returned, so
+    /// the error a given set of declarations produces is itself deterministic.
     ///
     /// # Errors
     ///
@@ -692,11 +752,13 @@ impl ModelBuilder {
         let actions = build_actions(&self.actions, &variables)?;
         let predicates = build_predicates(&self.predicates, &variables)?;
         let initial_states = build_initial_states(&self.initial, &variables)?;
+        let fairness = build_fairness(self.fairness, &actions)?;
         Ok(Model {
             variables,
             actions,
             initial_states,
             predicates,
+            fairness,
         })
     }
 }
@@ -920,6 +982,46 @@ fn build_initial_states(
     Ok(states)
 }
 
+/// Resolve every fairness scope to action indices, canonically ([`crate::fairness`]).
+///
+/// Each name is found by binary search over the actions, which `build_actions` sorted
+/// by name, so resolution is `O(names · log actions)` and never a scan per name.
+fn build_fairness(
+    declared: Vec<(Strength, Vec<String>)>,
+    actions: &[Action],
+) -> Result<Vec<Fairness>, ModelError> {
+    if declared.len() > MAX_FAIRNESS {
+        return Err(ModelError::TooMany {
+            symbol: Symbol::Fairness,
+            count: declared.len(),
+            max: MAX_FAIRNESS,
+        });
+    }
+    let mut assumptions: Vec<Fairness> = Vec::with_capacity(declared.len());
+    for (index, (strength, names)) in declared.into_iter().enumerate() {
+        if names.is_empty() {
+            return Err(ModelError::EmptyFairness { index });
+        }
+        let mut scope: Vec<usize> = Vec::with_capacity(names.len());
+        for spelling in &names {
+            let name = ident(Symbol::Action, spelling)?;
+            let Ok(position) = actions.binary_search_by(|action| action.name.cmp(&name)) else {
+                return Err(ModelError::UnknownAction {
+                    fairness: index,
+                    name,
+                });
+            };
+            scope.push(position);
+        }
+        scope.sort_unstable();
+        scope.dedup();
+        assumptions.push(Fairness::new(strength, scope));
+    }
+    assumptions.sort();
+    assumptions.dedup();
+    Ok(assumptions)
+}
+
 fn ident(symbol: Symbol, spelling: &str) -> Result<Ident, ModelError> {
     Ident::new(spelling).map_err(|source| ModelError::InvalidName {
         symbol,
@@ -998,6 +1100,8 @@ pub enum Symbol {
     Predicate,
     /// An enumerated initial state.
     InitialState,
+    /// A fairness assumption.
+    Fairness,
 }
 
 impl fmt::Display for Symbol {
@@ -1007,6 +1111,7 @@ impl fmt::Display for Symbol {
             Self::Action => "action",
             Self::Predicate => "predicate",
             Self::InitialState => "initial state",
+            Self::Fairness => "fairness assumption",
         })
     }
 }
@@ -1146,6 +1251,19 @@ pub enum ModelError {
         /// The repeated state.
         state: State,
     },
+    /// A fairness assumption over no action: it would constrain nothing, and a
+    /// declaration that means nothing is a mistake, not an assumption.
+    EmptyFairness {
+        /// Position in declaration order.
+        index: usize,
+    },
+    /// A fairness assumption names an action the model does not declare.
+    UnknownAction {
+        /// The assumption's position in declaration order.
+        fairness: usize,
+        /// The undeclared name.
+        name: Ident,
+    },
 }
 
 impl fmt::Display for ModelError {
@@ -1198,6 +1316,13 @@ impl fmt::Display for ModelError {
             Self::DuplicateInitialState { state } => {
                 write!(f, "initial state {state} is enumerated twice")
             }
+            Self::EmptyFairness { index } => {
+                write!(f, "fairness assumption #{index} names no action")
+            }
+            Self::UnknownAction { fairness, name } => write!(
+                f,
+                "fairness assumption #{fairness} names undeclared action `{name}`"
+            ),
         }
     }
 }
@@ -1250,6 +1375,13 @@ pub enum EvaluationError {
         /// How many predicates are declared.
         declared: usize,
     },
+    /// A fairness index outside [`Model::fairness`].
+    UnknownFairness {
+        /// The index offered.
+        index: usize,
+        /// How many fairness assumptions are declared.
+        declared: usize,
+    },
     /// An expression could not be evaluated.
     Expression(EvalError),
 }
@@ -1286,6 +1418,10 @@ impl fmt::Display for EvaluationError {
             Self::UnknownPredicate { index, declared } => {
                 write!(f, "predicate index {index}; the model declares {declared}")
             }
+            Self::UnknownFairness { index, declared } => write!(
+                f,
+                "fairness index {index}; the model declares {declared} assumptions"
+            ),
             Self::Expression(source) => write!(f, "{source}"),
         }
     }
