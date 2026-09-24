@@ -629,3 +629,11 @@
 1790215692276893	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy7hQ		item.link	bn-131yp	{"link_type":"blocks","target":"bn-19p"}	blake3:lIr9hSEvOLtmfyfAmTuW0PgFL1399fzPM1K1Panmqac
 1790215692310942	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy7xQ		item.link	bn-131yp	{"link_type":"blocks","target":"bn-2rsp"}	blake3:WMrtiSsIgF1TtYBWqNNYZhs61GKfdS0erUgtI-IBLqg
 1790215692355660	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy8BQ		item.link	bn-oqc	{"link_type":"blocks","target":"bn-131yp"}	blake3:TACSCcTD0p8iHVqBnCGXBbJk8Vv22bz7fYfmQTNlqgk
+1790216007710926	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy8RQ		item.move	bn-2rsp	{"state":"doing"}	blake3:B4w8-QwB2KOVZllBBNMXj9ciMSPYFJZDDibt8BjPPnU
+1790216007724985	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy8hQ		item.assign	bn-2rsp	{"action":"assign","agent":"continuum-dev"}	blake3:lVp65l7fOFgXAUH733mPkfQc04wAokAUbmf8Rb1kYzM
+1790216008095109	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy8xQ		item.move	bn-31ie2	{"state":"doing"}	blake3:t7Kil7MwDM1gz8Y5hCX0cZ2jlmc4s6PeBJrlm55oYFU
+1790216008109294	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy9BQ		item.assign	bn-31ie2	{"action":"assign","agent":"continuum-dev"}	blake3:LcAYPTnDpMtsJZVN3nMiUxW7ZZDT96RtDEyGJ7kwOFo
+1790216301073081	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy9RQ		item.move	bn-3glnv	{"state":"done"}	blake3:_dEIBP1cjfDyuPL_8oxyr-9XCBGuI5IaYZz80pNjFcU
+1790216301103634	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy9hQ		item.comment	bn-3glnv	{"body":"Merged at 32159e7d after Codex LGTM cr-2unxyh (round 5). Protocol 3.8 / IDL 1.16. The workspace gate failed only on lead-owned traceability staleness. Follow-ups: bn-18w74, bn-1uspo, bn-10mth, bn-3rb3e."}	blake3:RCPYJOk_25Fp1OigA3D3SbVA7neXsUJxDEfGWsDUQVo
+1790216301135709	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy9xQ		item.comment	bn-g7f1h	{"body":"Delivered inside bn-3glnv (merged 32159e7d): key-attested rotation and revocation links, whose adoption depends on the link set alone."}	blake3:ZDgHEPFswSNxDDJg7RemRWXQGpKLNKK8zjBWmupejCA
+1790216301165771	continuum-dev	itc:v3:AWKSTzM5JJnJPkQAAAAAQar23VW6voAAAAEy-BQ		item.move	bn-g7f1h	{"state":"done"}	blake3:yXMulJCPO1ZfUmNtETNfDXlMgX0yocfGFE0bcEMov4s

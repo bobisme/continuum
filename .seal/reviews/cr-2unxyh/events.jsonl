@@ -37,3 +37,4 @@
 {"ts":"2026-09-24T02:06:13.380927051Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-d3x20n","reason":"Target 44536e4e rejects malformed topology before bounded traversal."}}
 {"ts":"2026-09-24T02:06:24.266330432Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-2unxyh","vote":"lgtm","reason":"Whole persisted range reviewed at 44536e4e. The recovery-reserve and malformed-topology findings are resolved. No security blocker remains. This static LGTM does not replace the separate risk:critical human-approval gate.","target_commit":"44536e4edba506808f7632605c7d1a41e47c91a4"}}
 {"ts":"2026-09-24T02:06:24.303293399Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-2unxyh","target_commit":"44536e4edba506808f7632605c7d1a41e47c91a4"}}
+{"ts":"2026-09-24T02:18:13.701864611Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-2unxyh","final_commit":"32159e7d"}}
