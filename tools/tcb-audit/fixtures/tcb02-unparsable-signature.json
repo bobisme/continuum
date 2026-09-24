@@ -1,0 +1,15 @@
+{
+  "id": "tcb02-unparsable-signature",
+  "crate": "continuum-kernel-core",
+  "why": "a signature whose return type holds a block, which the grammar does not admit",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a const block in the return type.\n#[must_use]\npub const fn sized() -> [u8; { 1 + 1 }] {\n    [0; 2]\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn sized() -> [u8; { 1 + 1 }]"
+  ],
+  "expect": "signature the scan cannot parse"
+}

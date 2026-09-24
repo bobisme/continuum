@@ -1,0 +1,16 @@
+{
+  "id": "tcb02-const-generic-default-alias",
+  "crate": "continuum-kernel-core",
+  "why": "a const-generic default on an alias of a verdict",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a const-generic alias.\npub type Decision<const N: usize = 0> = Verdict;\n\n/// Fixture: decided from a decoded certificate.\n#[must_use]\npub fn decide(certificate: &crate::wire::Certificate) -> Decision {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(certificate: &crate::wire::Certificate) -> Decision",
+    "crates/continuum-kernel-core/src/check.rs: type Decision<const N: usize = 0> = Verdict"
+  ],
+  "expect": "alias the scan cannot resolve"
+}

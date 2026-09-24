@@ -1,0 +1,14 @@
+{
+  "description": "`include_bytes!` pulls a file the covenant never reviewed into the kernel's shipped code.",
+  "id": "kcov-07-include-bytes-as-code",
+  "requirement": "KCOV-07",
+  "rule": "no-plugins-or-dynamic-loading",
+  "substitute": {
+    "crates/continuum-kernel-sat/src/wire.rs": [
+      {
+        "find": "pub const MAGIC: [u8; 8] = *b\"CONTSATC\";",
+        "replace": "pub const MAGIC: [u8; 8] = *include_bytes!(\"magic.bin\");"
+      }
+    ]
+  }
+}

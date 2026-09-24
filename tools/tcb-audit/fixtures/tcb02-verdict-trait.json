@@ -1,0 +1,21 @@
+{
+  "id": "tcb02-verdict-trait",
+  "crate": "continuum-kernel-core",
+  "why": "a public trait whose method returns a verdict",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a deciding trait.\npub trait Decides {\n    /// Fixture: decide.\n    fn decide(&self, certificate: &crate::wire::Certificate) -> Verdict;\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: trait Decides",
+    "crates/continuum-kernel-core/src/check.rs: trait Decides: fn decide(&self, certificate: &crate::wire::Certificate) -> Verdict"
+  ],
+  "expect": "yields a verdict from non-wire input",
+  "authority_test": {
+    "package": "continuum-kernel-core",
+    "target": "pr9_exit_evidence"
+  },
+  "expect_authority_failure": true
+}

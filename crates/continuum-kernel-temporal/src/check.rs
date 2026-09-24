@@ -65,18 +65,41 @@
 //! action continuously enabled throughout the cycle and never taken would be a justice
 //! violation, so such a cycle is not a legal execution and does not refute anything.
 //!
-//! The certificate is rejected exactly when a fair nontrivial component exists, and the
-//! rejection names a state on it ([`Rejection::FairCycleExists`]).
+//! Reachability here stops at the goal. A state is *in scope* when some path from a
+//! declared initial state reaches it without passing through a goal state, and it is
+//! not itself a goal state. What happens after an execution has visited the goal does
+//! not bear on `eventually goal`, so the kernel does not look at it.
 //!
-//! Two things make that exact rather than approximate. If a fair execution avoided the
-//! goal set forever, the set of states it visits infinitely often would be a strongly
-//! connected set of reachable non-goal states, contained in some maximal component `D`;
-//! every fair action it takes inside that set is an edge inside `D`, and every fair
-//! action disabled somewhere in it is disabled somewhere in `D` — so `D` would be fair,
-//! and the search would have found it. Conversely, a fair component admits an execution
-//! that cycles through all of it forever, taking every internal fair edge infinitely
-//! often and visiting every disabling state infinitely often; that execution satisfies
-//! weak fairness and never reaches the goal. So the search neither over- nor
+//! The certificate is rejected when an in-scope state has no successors
+//! ([`Rejection::ProgressDeadlock`]), and otherwise exactly when a fair nontrivial
+//! component of the in-scope subgraph exists, and the rejection names a state on it
+//! ([`Rejection::FairCycleExists`]).
+//!
+//! The deadlock half is not optional. RFC 0015 completes a finite execution by an
+//! explicit policy, and names four: stutter forever at the terminal state, a deadlock
+//! violation, a finite-trace property only, and environment-closed completion. The
+//! certificate carries a closed relation, so environment-closed completion does not
+//! apply. Under each of the other three, an execution that stops at an in-scope state
+//! has not visited the goal and never will. Every action is disabled at an empty row,
+//! so no weak fairness assumption excludes it. The ranking family already refused such
+//! a state. Before bn-2npu this family did not, and it accepted `eventually n = 0` for a
+//! countdown that stops at `n = 1`. The C018 audit found that.
+//!
+//! Until bn-2npu the reachability search also ran through goal states, so a fair cycle
+//! entered only after a goal visit was reported as a counterexample. That was a false
+//! rejection of a true `eventually goal` claim, and bn-2npu fixed it with the same
+//! scope (Codex review cr-10mg1y).
+//!
+//! Two things make the cycle half exact rather than approximate. If an infinite fair
+//! execution never visited the goal, every state it visits is in scope, and the set of
+//! states it visits infinitely often would be a strongly connected set of in-scope
+//! states, contained in some maximal component `D`; every fair action it takes inside
+//! that set is an edge inside `D`, and every fair action disabled somewhere in it is
+//! disabled somewhere in `D` — so `D` would be fair, and the search would have found
+//! it. Conversely, a fair component admits an execution that reaches it without a goal
+//! visit and then cycles through all of it forever, taking every internal fair edge
+//! infinitely often and visiting every disabling state infinitely often; that execution
+//! satisfies weak fairness and never reaches the goal. So the search neither over- nor
 //! under-approximates, and a rejection is a genuine fair lasso.
 //!
 //! That last construction is the Revision 2 fair-lasso spike's rule, lifted from a
@@ -255,8 +278,11 @@ fn check_temporal(envelope: &Envelope, kind: CertificateKind, body: &TemporalBod
             }
         }
         CertificateKind::FairSccExclusion => {
-            let reachable = reachable_states(&common);
+            let reachable = reachable_before_goal(&common);
             let in_scope = scope(&reachable, &common.goal);
+            if let Some(state) = stuck_state(&common.successors, &in_scope) {
+                return Verdict::Rejected(Rejection::ProgressDeadlock { state });
+            }
             if let Some(state) = fair_cycle(body, &common.successors, &in_scope) {
                 return Verdict::Rejected(Rejection::FairCycleExists { state });
             }
@@ -317,12 +343,14 @@ fn check_ranking(body: &TemporalBody, common: &Common) -> Result<u64, Rejection>
 // the fair-cycle-exclusion family
 // ---------------------------------------------------------------------------
 
-/// Breadth-first reachability from the declared initial states.
+/// Reachability from the declared initial states, stopping at goal states.
 ///
 /// Recomputed, never carried: PO-LIV-004 speaks of a *reachable* component, and a
 /// certificate that got to say which states are reachable could exclude the interesting
-/// ones by omission.
-fn reachable_states(common: &Common) -> Vec<bool> {
+/// ones by omission. A goal state is marked when it is reached but never expanded: an
+/// execution that has visited the goal has satisfied `eventually goal`, so nothing
+/// after it bears on the claim (cr-10mg1y).
+fn reachable_before_goal(common: &Common) -> Vec<bool> {
     let mut reachable = vec![false; common.successors.len()];
     let mut frontier: Vec<u32> = Vec::new();
     for state in &common.initial {
@@ -332,6 +360,9 @@ fn reachable_states(common: &Common) -> Vec<bool> {
         }
     }
     while let Some(state) = frontier.pop() {
+        if common.goal.get(state as usize).copied().unwrap_or(false) {
+            continue;
+        }
         let targets = common
             .successors
             .get(state as usize)
@@ -449,6 +480,21 @@ fn fair_cycle(body: &TemporalBody, successors: &[Vec<u32>], in_scope: &[bool]) -
             if fair {
                 return component.iter().copied().min();
             }
+        }
+    }
+    None
+}
+
+/// The lowest-indexed in-scope state with no successors, or `None`.
+///
+/// In scope means reached from an initial state without passing through a goal state,
+/// and not a goal state. An execution that stops there has not visited the goal and
+/// never will. No fairness assumption can exclude it, because every action is disabled
+/// at a state with an empty row.
+fn stuck_state(successors: &[Vec<u32>], in_scope: &[bool]) -> Option<u32> {
+    for (index, targets) in successors.iter().enumerate() {
+        if targets.is_empty() && in_scope.get(index).copied().unwrap_or(false) {
+            return Some(narrow_u32(index));
         }
     }
     None
@@ -1258,6 +1304,132 @@ mod tests {
         };
         assert_eq!(claim.states(), 4);
         assert_eq!(claim.reachable_states(), 2);
+    }
+
+    #[test]
+    fn a_reachable_non_goal_deadlock_refutes_fair_cycle_exclusion() {
+        // bn-2npu (C018 audit). The countdown stops at `n = 1`: every execution from
+        // `n = 2` ends there and never reaches `n = 0`. Every fair action is disabled
+        // at an empty row, so the stutter is a weakly fair execution. Before the fix
+        // the family verified this certificate, because a dead end carries no cycle.
+        let mut plan = Plan::fair_progress_exclusion();
+        plan.rows[0].clear();
+        assert_eq!(rejection(&plan), Rejection::ProgressDeadlock { state: 0 });
+
+        // The same shape with no fairness declared, and with the dead end one step
+        // away from the initial state.
+        let mut plan = Plan::ping_pong_exclusion();
+        plan.fair_actions.clear();
+        plan.rows[1].clear();
+        assert_eq!(rejection(&plan), Rejection::ProgressDeadlock { state: 1 });
+    }
+
+    #[test]
+    fn an_unreachable_or_goal_dead_end_does_not_refute_fair_cycle_exclusion() {
+        // A goal state may stop: it has reached the goal. An unreachable state may
+        // stop: no execution visits it. Only reachable non-goal dead ends refute.
+        let mut plan = Plan::unreachable_trap_exclusion();
+        plan.rows[1].clear(); // [0,1] is the goal
+        plan.rows[2].clear(); // [1,0] is unreachable
+        plan.rows[3].clear(); // [1,1] is unreachable
+        assert!(matches!(verdict(&plan), Verdict::Verified(_)));
+    }
+
+    #[test]
+    fn a_dead_end_after_the_goal_does_not_refute_the_eventuality() {
+        // cr-10mg1y. `p` reaches the goal `2` and then stops at `3`. Every execution
+        // visits the goal, so `eventually p = 2` holds, and the kernel accepts.
+        let mut plan = Plan::ping_pong_exclusion();
+        plan.variables = vec![("p".to_owned(), 0, 3)];
+        plan.states.push(vec![3]);
+        plan.rows[2] = vec![(1, vec![3])];
+        plan.rows.push(Vec::new());
+        let Verdict::Verified(claim) = verdict(&plan) else {
+            panic!("a dead end after the goal is not a counterexample");
+        };
+        assert_eq!(claim.reachable_states(), 3, "[3] lies beyond the goal");
+    }
+
+    #[test]
+    fn a_fair_cycle_after_the_goal_does_not_refute_the_eventuality() {
+        // cr-10mg1y, and a false rejection that predates bn-2npu. `p` reaches the goal
+        // `2` and then loops on `3` forever. Before the fix the search walked through the
+        // goal and reported the loop as a fair lasso.
+        let mut plan = Plan::ping_pong_exclusion();
+        plan.variables = vec![("p".to_owned(), 0, 3)];
+        plan.states.push(vec![3]);
+        plan.rows[2] = vec![(1, vec![3])];
+        plan.rows.push(vec![(1, vec![3])]);
+        assert!(matches!(verdict(&plan), Verdict::Verified(_)));
+    }
+
+    #[test]
+    fn an_initial_goal_state_followed_by_a_dead_end_is_accepted() {
+        // The execution starts at the goal `2`, so the eventuality holds at once, and
+        // the dead end `3` after it does not bear on the claim.
+        let mut plan = Plan::ping_pong_exclusion();
+        plan.variables = vec![("p".to_owned(), 0, 3)];
+        plan.states.push(vec![3]);
+        plan.initial = vec![vec![2]];
+        plan.rows[2] = vec![(1, vec![3])];
+        plan.rows.push(Vec::new());
+        assert!(matches!(verdict(&plan), Verdict::Verified(_)));
+    }
+
+    #[test]
+    fn a_goal_on_one_branch_and_a_dead_end_on_the_other_is_refused() {
+        // From `0`, `finish` reaches the goal `2`; `toggle` reaches `1`, which stops.
+        let mut plan = Plan::ping_pong_exclusion();
+        plan.fair_actions.clear();
+        plan.rows[1].clear();
+        assert_eq!(rejection(&plan), Rejection::ProgressDeadlock { state: 1 });
+    }
+
+    #[test]
+    fn metamorphic_alpha_renaming_keeps_the_dead_end_verdict() {
+        // Relation: alpha-renaming. Renaming the variable and every action, with the
+        // action table's order kept, changes no verdict: a dead end is a fact about
+        // the carried graph, not about names.
+        let rename = |plan: &Plan| {
+            let mut renamed = plan.clone();
+            renamed.variables = plan
+                .variables
+                .iter()
+                .map(|(name, lo, hi)| (format!("renamed-{name}"), *lo, *hi))
+                .collect();
+            renamed.actions = plan.actions.iter().map(|a| format!("act-{a}")).collect();
+            renamed
+        };
+        let mut stuck = Plan::ping_pong_exclusion();
+        stuck.fair_actions.clear();
+        stuck.rows[1].clear();
+        let green = Plan::ping_pong_exclusion();
+        let mut goal_dead_end = Plan::ping_pong_exclusion();
+        goal_dead_end.rows[2].clear();
+        for plan in [stuck, green, goal_dead_end] {
+            let renamed = rename(&plan);
+            assert_ne!(
+                renamed.encode(),
+                plan.encode(),
+                "the renaming changed the bytes"
+            );
+            assert_eq!(
+                verdict(&renamed).is_verified(),
+                verdict(&plan).is_verified()
+            );
+            if let Verdict::Rejected(original) = verdict(&plan) {
+                assert_eq!(rejection(&renamed), original);
+            }
+        }
+        assert_eq!(
+            rejection(&rename(&{
+                let mut plan = Plan::ping_pong_exclusion();
+                plan.fair_actions.clear();
+                plan.rows[1].clear();
+                plan
+            })),
+            Rejection::ProgressDeadlock { state: 1 }
+        );
     }
 
     #[test]

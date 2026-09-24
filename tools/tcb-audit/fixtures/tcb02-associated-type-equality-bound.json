@@ -1,0 +1,18 @@
+{
+  "id": "tcb02-associated-type-equality-bound",
+  "crate": "continuum-kernel-core",
+  "why": "an associated-type equality bound that binds a verdict",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a deciding trait.\npub trait Decide {\n    /// Fixture: the output.\n    type Output;\n    /// Fixture: decide.\n    fn decide(&self) -> Self::Output;\n}\n\n/// Fixture: the verdict arrives through the bound, not a signature.\npub fn decide_with<D: Decide<Output = Verdict>>(decider: &D) -> D::Output {\n    decider.decide()\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide_with<D: Decide<Output = Verdict>>(decider: &D) -> D::Output",
+    "crates/continuum-kernel-core/src/check.rs: trait Decide",
+    "crates/continuum-kernel-core/src/check.rs: trait Decide: fn decide(&self) -> Self::Output",
+    "crates/continuum-kernel-core/src/check.rs: trait Decide: type Output"
+  ],
+  "expect": "alias the scan cannot resolve"
+}

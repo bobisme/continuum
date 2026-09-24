@@ -25,7 +25,9 @@ Nine requirements, each with violating fixtures that `--self-test` replays:
   KCOV-04 no-unsafe                    no `unsafe`, no `allow(unsafe_code)`
   KCOV-05 no-panic-escape              no unwind constructs, no lint escapes
   KCOV-06 dependency-freedom           the dependency set plan §20 admits
-  KCOV-07 no-plugins-or-dynamic-loading no FFI, no dynamic loading, no splicing
+  KCOV-07 no-plugins-or-dynamic-loading no FFI, no dynamic loading, no splicing,
+                                       no include_str!/include_bytes!, no `mod` without
+                                       its file; also over continuum-certificate
   KCOV-08 mutation-matrix              every class owned or explicitly waived
   KCOV-09 receipt-conformance          receipts the schema admits, epochs named
 
@@ -143,7 +145,15 @@ DYNAMIC_LOADING_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"#\s*\[\s*unsafe\b", "#[unsafe(…)]"),
     (r"\binclude!\s*\(", "include!(…)"),
     (r"#\s*\[\s*path\s*=", "#[path = …]"),
+    (r"\binclude_str!\s*\(", "include_str!(…)"),
+    (r"\binclude_bytes!\s*\(", "include_bytes!(…)"),
 )
+
+# KCOV-07 alone also covers `continuum-certificate`, the composition above the four
+# kernels: a `#[path]` module or an `include!` there hides checking code from the line
+# count, the C018 public-API inventory and its digest just as it would in a kernel
+# (Codex cr-10mg1y round 4). The other requirements keep their kernel-only scope.
+SPLICING_SCOPE: tuple[str, ...] = (*KERNEL_CRATES, "continuum-certificate")
 
 
 class Violation(str):
@@ -647,14 +657,52 @@ def rule_dependency_freedom(tree: Tree) -> list[Violation]:
     return violations
 
 
+def scoped_sources(tree: Tree, crates: Iterable[str]) -> list[tuple[str, Scan]]:
+    """`kernel_sources`, over any list of crates."""
+    out: list[tuple[str, Scan]] = []
+    for crate in crates:
+        sources = tree.glob(f"crates/{crate}/src/**/*.rs")
+        scans = {rel: scan_rust(tree.read_text(rel) or "") for rel in sources}
+        excluded = test_only_files(scans)
+        out.extend((rel, scans[rel]) for rel in sorted(scans) if rel not in excluded)
+    return out
+
+
+def module_file_candidates(rel: str, name: str) -> tuple[str, str]:
+    """Where rustc looks for `mod name;` declared in `rel`, without `#[path]`."""
+    base, file = rel.rsplit("/", 1)
+    if file not in ("lib.rs", "main.rs", "mod.rs"):
+        base = f"{base}/{file[:-3]}"
+    return f"{base}/{name}.rs", f"{base}/{name}/mod.rs"
+
+
 def rule_no_dynamic_loading(tree: Tree) -> list[Violation]:
-    return _pattern_rule(
-        tree,
-        "no-plugins-or-dynamic-loading",
-        DYNAMIC_LOADING_PATTERNS,
+    rule = "no-plugins-or-dynamic-loading"
+    why = (
         "plan §20 forbids plugins and dynamic loading in the kernel, and a spliced or "
-        "redirected source file would also defeat the line count",
+        "redirected source file would also defeat the line count"
     )
+    violations: list[Violation] = []
+    for rel, scan in scoped_sources(tree, SPLICING_SCOPE):
+        for number, line in enumerate(scan.shipped_code().splitlines(), start=1):
+            for pattern, label in DYNAMIC_LOADING_PATTERNS:
+                if re.search(pattern, line):
+                    violations.append(Violation(f"[{rule}] {rel}:{number} uses `{label}` — {why}"))
+            for declared in re.finditer(r"\bmod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;", line):
+                if not any(tree.exists(c) for c in module_file_candidates(rel, declared.group(1))):
+                    violations.append(
+                        Violation(
+                            f"[{rule}] {rel}:{number} declares `mod {declared.group(1)};` with no file "
+                            f"at {' or '.join(module_file_candidates(rel, declared.group(1)))} — {why}"
+                        )
+                    )
+        # A `cfg_attr` that can expand to `path` redirects a module as surely as
+        # `#[path]` does, over any number of lines (Codex cr-3i3rst). Banned outright.
+        code = scan.shipped_code()
+        for attr in re.finditer(r"#\s*!?\[\s*cfg_attr\b[^\]]*?\bpath\b", code):
+            number = code.count("\n", 0, attr.start()) + 1
+            violations.append(Violation(f"[{rule}] {rel}:{number} uses `cfg_attr(…, path …)` — {why}"))
+    return violations
 
 
 # ============================================================================

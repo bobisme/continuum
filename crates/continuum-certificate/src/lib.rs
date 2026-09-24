@@ -60,7 +60,9 @@
 //!   `tests/inv004_no_self_certification.rs` re-states the same boundary against this
 //!   crate's own tracked manifest, without sharing any code with that tool.
 //! - **This crate cannot see a producer's structure.** [`check_certificate`] takes
-//!   `&[u8]` and there is no other way in. Plan §20 puts "a serialization boundary
+//!   `&[u8]`, and it is the only public free function that returns an [`Outcome`].
+//!   The checks that pin this cover `fn` and method signatures and public values, not
+//!   trait-associated items or other forms (bn-2npu, Codex cr-3i3rst). Plan §20 puts "a serialization boundary
 //!   between every engine and the kernel — a certificate is checked from its wire form,
 //!   never from shared memory", and that boundary is preserved *through* this
 //!   composition rather than merely at its far end: the full byte string is handed to

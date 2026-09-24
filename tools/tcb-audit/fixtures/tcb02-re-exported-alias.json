@@ -1,0 +1,20 @@
+{
+  "id": "tcb02-re-exported-alias",
+  "crate": "continuum-kernel-core",
+  "why": "a verdict type re-exported under another name, then returned from decoded input",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/lib.rs",
+      "append": "\n/// Fixture: a re-exported alias.\npub use verdict::Verdict as Decision;\n"
+    },
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: decided from a decoded certificate.\n#[must_use]\npub fn decide(certificate: &crate::wire::Certificate) -> crate::Decision {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(certificate: &crate::wire::Certificate) -> crate::Decision",
+    "crates/continuum-kernel-core/src/lib.rs: use verdict::Verdict as Decision"
+  ],
+  "expect": "alias the scan cannot resolve"
+}

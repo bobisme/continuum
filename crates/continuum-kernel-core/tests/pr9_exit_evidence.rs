@@ -174,25 +174,7 @@ fn toggle_certificate() -> Vec<u8> {
 
 // --- clause 2: "checking wire-form input only" ----------------------------------------
 
-const LIB_SRC: &str = include_str!("../src/lib.rs");
-const CHECK_SRC: &str = include_str!("../src/check.rs");
 const WIRE_SRC: &str = include_str!("../src/wire.rs");
-const VERDICT_SRC: &str = include_str!("../src/verdict.rs");
-const RECEIPT_SRC: &str = include_str!("../src/receipt.rs");
-const FIXTURE_SRC: &str = include_str!("../src/fixture.rs");
-
-/// Every source file this crate's public surface could hide a second entry point in.
-/// A module added to `src/` and not to this list is a module this file's checks cannot
-/// see — the same self-consistency worry `pr4_exit_evidence.rs`'s
-/// `no_type_in_this_crate_has_a_mut_self_method` names about its own `CRATE_SOURCES`.
-const CRATE_SOURCES: &[(&str, &str)] = &[
-    ("lib.rs", LIB_SRC),
-    ("check.rs", CHECK_SRC),
-    ("wire.rs", WIRE_SRC),
-    ("verdict.rs", VERDICT_SRC),
-    ("receipt.rs", RECEIPT_SRC),
-    ("fixture.rs", FIXTURE_SRC),
-];
 
 /// Whether `source` contains `-> {exact_type}` as a bare return type — not merely as a
 /// prefix of a longer identifier (`CertificateKind` must not count as a hit for
@@ -218,21 +200,23 @@ fn contains_bare_return_type(source: &str, exact_type: &str) -> bool {
 #[test]
 fn checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes() {
     // The mechanical half of `src/lib.rs`'s own claim: "`check_certificate` takes
-    // `&[u8]`. There is no other entry point." A second `pub fn` returning `Verdict`
+    // `&[u8]`." A second `pub fn` returning `Verdict`
     // anywhere in the crate would be a second way in, wire-form or not, and this check
     // would catch it whichever file it landed in.
     let mut public_verdict_producers = Vec::new();
-    for (name, source) in CRATE_SOURCES {
-        for line in source.lines() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("pub fn") && line.contains("-> Verdict") {
-                public_verdict_producers.push(format!("{name}: {}", line.trim()));
-            }
-        }
+    for (name, source) in walked_sources(&[
+        "check.rs",
+        "fixture.rs",
+        "lib.rs",
+        "receipt.rs",
+        "verdict.rs",
+        "wire.rs",
+    ]) {
+        public_verdict_producers.extend(verdict_producers(&name, &source, "Verdict"));
     }
     assert_eq!(
         public_verdict_producers,
-        vec!["check.rs: pub fn check_certificate(bytes: &[u8]) -> Verdict {".to_owned()],
+        vec!["check.rs: pub fn check_certificate(bytes: &[u8]) -> Verdict".to_owned()],
         "the crate must expose exactly one public route to a Verdict, and it must take \
          wire-form bytes; found {public_verdict_producers:?}"
     );
@@ -378,4 +362,295 @@ fn the_shaped_green_fixture_still_matches_the_original_toggle_certificate() {
     assert_eq!(claim.initial_states(), 1);
     let redecoded = decode(&bytes).expect("the green fixture decodes");
     assert_eq!(redecoded.kind(), CertificateKind::FiniteClosure);
+}
+
+// --- the entry-point scan (Codex cr-10mg1y round 4) ------------------------------------
+
+/// Every file under this crate's `src/`, walked from disk, as (relative path, text).
+///
+/// A fixed list of `include_str!`s cannot see a module it does not name, and a
+/// `#[path]` module or a non-`.rs` file would sit outside it. So the list is walked,
+/// and any file that is not in `expected` fails this check, whatever its extension.
+fn walked_sources(expected: &[&str]) -> Vec<(String, String)> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut stack = vec![root.clone()];
+    let mut out = Vec::new();
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("src/ is readable") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&root)
+                .expect("the walk stays under src/")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("src/{rel} is not readable text: {error}"));
+            out.push((rel, text));
+        }
+    }
+    out.sort();
+    let found: Vec<&str> = out.iter().map(|(rel, _)| rel.as_str()).collect();
+    assert_eq!(
+        found, expected,
+        "src/ holds a file this check does not expect; a module it cannot see is a way \
+         around it"
+    );
+    out
+}
+
+/// Every `pub fn` / `pub const fn` whose return type names `ty` as a path segment,
+/// each signature normalised to one line. Raw identifiers (`r#try`), qualified return
+/// paths (`crate::verdict::Verdict`, `super::Verdict`) and signatures split over lines
+/// are all seen.
+fn verdict_producers(name: &str, source: &str, ty: &str) -> Vec<String> {
+    let code = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let flat = code.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = Vec::new();
+    let mut rest = flat.as_str();
+    while let Some(start) = ["pub fn ", "pub const fn "]
+        .iter()
+        .filter_map(|marker| rest.find(marker))
+        .min()
+    {
+        let tail = &rest[start..];
+        let end = tail.find(['{', ';']).unwrap_or(tail.len());
+        let signature = tail[..end].trim();
+        if let Some((_, returned)) = signature.split_once("->")
+            && returned
+                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .any(|segment| segment == ty)
+        {
+            out.push(format!("{name}: {signature}"));
+        }
+        rest = &tail[end.max(1)..];
+    }
+    out
+}
+
+#[test]
+fn the_entry_point_scan_sees_raw_identifiers_qualified_returns_and_split_signatures() {
+    let planted = "pub fn r#try(decoded: &crate::wire::Certificate) -> crate::verdict::TY {\n}\n\
+                   pub fn split(\n    decoded: &Certificate,\n) -> super::TY {\n}\n\
+                   pub const fn quiet(x: u8) -> u8 {\n    x\n}\n\
+                   pub fn named(x: u8) -> TYAndMore {\n}\n"
+        .replace("TY", "Verdict");
+    assert_eq!(
+        verdict_producers("planted.rs", &planted, "Verdict"),
+        [
+            "planted.rs: pub fn r#try(decoded: &crate::wire::Certificate) -> crate::verdict::Verdict",
+            "planted.rs: pub fn split( decoded: &Certificate, ) -> super::Verdict",
+        ],
+        "a raw identifier, a qualified return and a split signature are producers; a \
+         longer identifier that merely starts with the type's name is not"
+    );
+}
+
+// --- public values that could carry a verdict or a callable (Codex cr-3i3rst round 6) ---
+
+/// The verdict types of the checking base. A public value whose type names one, or any
+/// callable (`Fn`, `FnMut`, `FnOnce`, `fn(`, `dyn`, `impl `), is refused: the scan
+/// refuses the whole syntactic class rather than proving an instance wire-only.
+const VERDICT_TYPES: [&str; 4] = ["Verdict", "Outcome", "KernelVerdict", "CheckedClaim"];
+
+fn flat_code(source: &str) -> String {
+    let code = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    code.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether a type's text names a callable.
+fn carries_callable(ty: &str) -> bool {
+    let squeezed: String = ty.chars().filter(|c| !c.is_whitespace()).collect();
+    squeezed.contains("fn(")
+        || ty.contains("impl ")
+        || ty
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .any(|word| matches!(word, "Fn" | "FnMut" | "FnOnce" | "dyn"))
+}
+
+/// Whether a type's text names a callable or a verdict type.
+fn carries_callable_or_verdict(ty: &str) -> bool {
+    carries_callable(ty)
+        || ty
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .any(|word| VERDICT_TYPES.contains(&word))
+}
+
+/// The byte offset of the first `stop` at depth zero, skipping `->`.
+fn depth_zero(text: &str, stops: &[char]) -> usize {
+    let bytes: Vec<char> = text.chars().collect();
+    let mut depth = 0_i32;
+    let mut offset = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == '-' && bytes.get(i + 1) == Some(&'>') {
+            offset += 2;
+            i += 2;
+            continue;
+        }
+        if depth == 0 && stops.contains(&c) {
+            return offset;
+        }
+        match c {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth -= 1,
+            _ => {}
+        }
+        offset += c.len_utf8();
+        i += 1;
+    }
+    text.len()
+}
+
+/// The text inside the delimiter that opens at the start of `text`.
+fn delimited(text: &str) -> &str {
+    let inner = &text[1..];
+    &inner[..depth_zero(inner, &[')', '}'])]
+}
+
+/// Split at depth-zero commas.
+fn fields(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while !rest.trim().is_empty() {
+        let end = depth_zero(rest, &[',']);
+        out.push(rest[..end].trim());
+        rest = rest.get(end + 1..).unwrap_or("");
+    }
+    out
+}
+
+/// Every public value, field or trait method that could carry a verdict or a callable.
+fn public_values(name: &str, source: &str) -> Vec<String> {
+    let flat = flat_code(source);
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(found) = flat[from..].find("pub ") {
+        let at = from + found;
+        from = at + 4;
+        let boundary = flat[..at]
+            .chars()
+            .last()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        if !boundary {
+            continue;
+        }
+        let rest = &flat[at + 4..];
+        if (rest.starts_with("static ") || rest.starts_with("const "))
+            && !rest.starts_with("const fn ")
+        {
+            let item = &rest[..depth_zero(rest, &[';'])];
+            let ty = item
+                .split_once(':')
+                .map_or("", |(_, t)| t.split_once('=').map_or(t, |(t, _)| t));
+            if carries_callable_or_verdict(ty) {
+                out.push(format!("{name}: pub {item}"));
+            }
+        } else if rest.starts_with("type ") {
+            let item = &rest[..depth_zero(rest, &[';'])];
+            if carries_callable_or_verdict(item.split_once('=').map_or("", |(_, t)| t)) {
+                out.push(format!("{name}: pub {item}"));
+            }
+        } else if let Some(body) = rest.strip_prefix("trait ") {
+            let open = body.find('{').unwrap_or(body.len());
+            for method in delimited(&body[open..]).split("fn ").skip(1) {
+                let signature = &method[..depth_zero(method, &[';', '{'])];
+                if signature
+                    .split_once("->")
+                    .is_some_and(|(_, r)| carries_callable_or_verdict(r))
+                {
+                    out.push(format!("{name}: pub trait method fn {}", signature.trim()));
+                }
+            }
+        } else if let Some(body) = rest.strip_prefix("struct ") {
+            let open = body.find(['{', '(', ';']).unwrap_or(body.len());
+            if matches!(body[open..].chars().next(), Some('{' | '(')) {
+                for field in fields(delimited(&body[open..])) {
+                    if let Some(public) = field.strip_prefix("pub ") {
+                        let ty = public.split_once(':').map_or(public, |(_, t)| t);
+                        if carries_callable_or_verdict(ty) {
+                            out.push(format!("{name}: pub field {field}"));
+                        }
+                    }
+                }
+            }
+        } else if let Some(body) = rest.strip_prefix("enum ") {
+            let enum_name: String = body
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            // A verdict enum carries its own claim, which is what a verdict is; it may
+            // still hold no callable.
+            let own_verdict = VERDICT_TYPES.contains(&enum_name.as_str());
+            let open = body.find('{').unwrap_or(body.len());
+            if open < body.len() {
+                for variant in fields(delimited(&body[open..])) {
+                    if let Some(start) = variant.find(['{', '(']) {
+                        for field in fields(delimited(&variant[start..])) {
+                            let ty = field.split_once(':').map_or(field, |(_, t)| t);
+                            let flagged = if own_verdict {
+                                carries_callable(ty)
+                            } else {
+                                carries_callable_or_verdict(ty)
+                            };
+                            if flagged {
+                                out.push(format!("{name}: pub enum {enum_name} field {field}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn no_public_value_can_carry_a_verdict_or_a_callable() {
+    let mut found = Vec::new();
+    for (name, source) in walked_sources(&[
+        "check.rs",
+        "fixture.rs",
+        "lib.rs",
+        "receipt.rs",
+        "verdict.rs",
+        "wire.rs",
+    ]) {
+        found.extend(public_values(&name, &source));
+    }
+    assert!(
+        found.is_empty(),
+        "a public static, const, field, alias or trait method carries a callable or a \
+         verdict type; the scan refuses the whole class: {found:?}"
+    );
+}
+
+#[test]
+fn the_public_value_scan_refuses_callable_and_verdict_carrying_values() {
+    let planted = "pub static DECIDE_DECODED: &(dyn Fn(&crate::wire::Certificate) -> Verdict + Sync) = &|c| { check(c) };\n\
+                   pub const DECIDE: fn(&crate::wire::Certificate) -> Verdict = decide_impl;\n\
+                   pub struct Decider {\n    pub decide: fn(&crate::wire::Certificate) -> Verdict,\n    pub count: u32,\n}\n\
+                   pub struct Holder;\nimpl Holder {\n    pub const DECIDE: fn(&crate::wire::Certificate) -> Verdict = decide_impl;\n}\n\
+                   pub trait Decides {\n    fn decide(&self, c: &crate::wire::Certificate) -> Verdict;\n}\n\
+                   pub const MAGIC: [u8; 8] = *b\"CONTCERT\";\n";
+    let found = public_values("planted.rs", planted);
+    assert_eq!(found.len(), 5, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .all(|f| !f.contains("MAGIC") && !f.contains("count")),
+        "{found:?}"
+    );
 }

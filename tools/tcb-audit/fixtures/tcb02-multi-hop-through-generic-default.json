@@ -1,0 +1,16 @@
+{
+  "id": "tcb02-multi-hop-through-generic-default",
+  "crate": "continuum-kernel-core",
+  "why": "a plain alias over a generic-default alias",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: plain outer hop.\npub type Decision = Inner;\n/// Fixture: defaulted inner hop.\ntype Inner<T = Verdict> = T;\n\n/// Fixture: decided from a decoded certificate.\n#[must_use]\npub fn decide(certificate: &crate::wire::Certificate) -> Decision {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(certificate: &crate::wire::Certificate) -> Decision",
+    "crates/continuum-kernel-core/src/check.rs: type Decision = Inner"
+  ],
+  "expect": "alias the scan cannot resolve"
+}

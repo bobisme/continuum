@@ -493,6 +493,7 @@
     "cross-path-tests-live": "the Rust tests pinning the wire boundary and the differential are live",
     "gate-coverage": "the boundary gate's lists match the roles and catch every checker->producer edge",
     "model-not-derived-from-program": "the model plane does not link the program plane",
+    "package-identity": "every name the graph uses for a workspace member names that member's package id alone: no second package, version or renamed dependency carries it",
     "producer-does-not-link-checker": "no producer links the checking base in normal/build position",
     "program-not-derived-from-model": "the program plane does not link the model plane",
     "refinement-independent": "the refinement checker links no producer and no program-plane crate",

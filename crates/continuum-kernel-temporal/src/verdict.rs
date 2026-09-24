@@ -209,7 +209,9 @@ impl FairnessClass {
 ///   [`Self::progress_bound`] steps. No fairness assumption is involved.
 /// - [`CertificateKind::FairSccExclusion`] — no execution starting in a declared
 ///   initial state, satisfying weak fairness for the declared fair actions, avoids the
-///   goal set forever.
+///   goal set forever. That is `eventually goal`: every such execution visits the goal
+///   set at least once. What an execution does after its first goal visit is outside
+///   the claim.
 ///
 /// Both are statements about the *carried* transition relation. That it is the model's
 /// is named by [`Self::trusted_components`].
@@ -307,7 +309,10 @@ impl CheckedClaim {
 
     /// How many table states the kernel found reachable from the initial states.
     ///
-    /// Recomputed here, never taken from the certificate. Equal to
+    /// Recomputed here, never taken from the certificate. For
+    /// [`CertificateKind::FairSccExclusion`] the search stops at goal states: it counts
+    /// the states reached along paths that do not pass through a goal state, goal
+    /// states so reached included (bn-2npu, cr-10mg1y). Equal to
     /// [`Self::states`] for [`CertificateKind::Ranking`], whose obligation is
     /// discharged at every table state whether it is reachable or not — a strictly
     /// stronger claim, and the reason the reachability search is not run for it.
@@ -665,6 +670,12 @@ pub enum Rejection {
     /// progress takes, but only a total transition relation guarantees that progress
     /// happens at all. `continuum-kernel-core`'s empty row is a declared deadlock, which
     /// is a legitimate safety fact and a fatal liveness one.
+    ///
+    /// Both families raise it. The ranking family checks every table state. The
+    /// fair-cycle-exclusion family checks every non-goal state reached from an initial
+    /// state without passing through a goal state. An execution that stops there has
+    /// not visited the goal and never will, under each RFC 0015 completion policy that
+    /// applies to a closed relation, and no fairness assumption excludes it (bn-2npu).
     ProgressDeadlock {
         /// Index of the state in the state table.
         state: u32,

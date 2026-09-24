@@ -156,6 +156,7 @@ RULES: dict[str, str] = {
     "cross-path-tests-live": "the Rust tests pinning the wire boundary and the differential are live",
     "a7-model-independent": "the A7 conformance model imports std only, names no workspace crate or runtime, and the witness loads it",
     "gate-coverage": "the boundary gate's lists match the roles and catch every checker->producer edge",
+    "package-identity": "every name the graph uses for a workspace member names that member's package id alone: no second package, version or renamed dependency carries it",
 }
 
 # The Rust tests this audit leans on. Each is (crate-relative test file, test fn).
@@ -267,6 +268,10 @@ class Graph:
     dev: dict[str, set[str]]  # dev edges, workspace members only
     overlay: dict[str, str] = field(default_factory=dict)  # rel path -> appended text
     replace: dict[str, list[tuple[str, str]]] = field(default_factory=dict)  # rel path -> edits
+    # The graph is keyed by name, which is only sound if a member's name names that
+    # member's package id and nothing else. `build_graph` records every place it does
+    # not (bn-2npu, cr-10mg1y), and `evaluate` reports them.
+    identity: list[str] = field(default_factory=list)
 
     def copy(self) -> Graph:
         return Graph(
@@ -275,6 +280,7 @@ class Graph:
             {k: set(v) for k, v in self.dev.items()},
             dict(self.overlay),
             {k: list(v) for k, v in self.replace.items()},
+            list(self.identity),
         )
 
 
@@ -294,19 +300,30 @@ def cargo_metadata(root: pathlib.Path) -> dict:
 
 def build_graph(meta: dict) -> Graph:
     names = {pkg["id"]: pkg["name"] for pkg in meta["packages"]}
-    members = {names[pid] for pid in meta["workspace_members"]}
+    member_ids = set(meta["workspace_members"])
+    members = {names[pid] for pid in member_ids}
+    identity: list[str] = []
+    for pid, name in sorted(names.items()):
+        if name in members and pid not in member_ids:
+            identity.append(f"[package-identity] {name} also names the non-member package {pid}")
     normal: dict[str, set[str]] = {name: set() for name in names.values()}
     dev: dict[str, set[str]] = {name: set() for name in members}
     for node in meta["resolve"]["nodes"]:
         src = names[node["id"]]
         for dep in node["deps"]:
             dst = names[dep["pkg"]]
+            extern = dep.get("name", "")
+            if src in members and extern and extern != dst.replace("-", "_"):
+                identity.append(
+                    f"[package-identity] {src} -> {dst} ({dep['pkg']}) is renamed to `{extern}`; "
+                    "the name-keyed graph would misread it"
+                )
             for kind in dep["dep_kinds"]:
                 if kind.get("kind") == "dev":
                     dev.setdefault(src, set()).add(dst)
                 else:
                     normal[src].add(dst)
-    return Graph(members, normal, dev)
+    return Graph(members, normal, dev, identity=identity)
 
 
 def reach(edges: dict[str, set[str]], start: str) -> dict[str, list[str]]:
@@ -399,7 +416,7 @@ PUB_FN = re.compile(r"^\s*pub fn\s+(\w+)\s*(?:<[^>]*>)?\s*\((?P<params>[^)]*)\)\
 def evaluate(graph: Graph, root: pathlib.Path, gate) -> list[str]:
     """Every finding as `[rule] detail`."""
     r = roles(graph.members)
-    out: list[str] = []
+    out: list[str] = list(graph.identity)
     checker = set(r.checker)
     producers = set(r.producers)
     program = set(r.program)

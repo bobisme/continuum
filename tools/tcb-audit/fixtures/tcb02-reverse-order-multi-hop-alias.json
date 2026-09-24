@@ -1,0 +1,20 @@
+{
+  "id": "tcb02-reverse-order-multi-hop-alias",
+  "crate": "continuum-kernel-core",
+  "why": "three hops, each alias written before the one it names, across two files",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: outer hop.\npub type Decision = Middle;\n/// Fixture: middle hop.\ntype Middle = crate::verdict::Inner;\n\n/// Fixture: decided from a decoded certificate.\n#[must_use]\npub fn decide(certificate: &crate::wire::Certificate) -> Decision {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+    },
+    {
+      "file": "crates/continuum-kernel-core/src/verdict.rs",
+      "append": "\n/// Fixture: inner hop.\npub(crate) type Inner = Verdict;\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(certificate: &crate::wire::Certificate) -> Decision",
+    "crates/continuum-kernel-core/src/check.rs: type Decision = Middle"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}

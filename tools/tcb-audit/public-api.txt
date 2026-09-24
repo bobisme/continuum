@@ -1,0 +1,529 @@
+# The approved public API of the trusted checking base (C018, TCB-02; bn-2npu, cr-10mg1y).
+#
+# One line per public item of the shipped code of continuum-certificate and the four
+# continuum-kernel-* crates: `file: key`. `tools/check_tcb_audit.py` fails on any live
+# item not listed here and on any line that names no live item. Adding a line is an
+# approval: a reviewer reads the new item and confirms it cannot decide a verdict from
+# anything but wire bytes. Regenerate the candidate list with
+# `python3 tools/check_tcb_audit.py --print-inventory` and review the diff; never copy it
+# over blind.
+#
+# The Rust tests `checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes`
+# stay the authority. This inventory is the second line.
+
+crates/continuum-certificate/src/check.rs: fn check_certificate(bytes: &[u8]) -> Outcome
+crates/continuum-certificate/src/family.rs: const MAGIC_BYTES
+crates/continuum-certificate/src/family.rs: enum Family
+crates/continuum-certificate/src/family.rs: enum RoutingFault
+crates/continuum-certificate/src/family.rs: impl Family: const ALL
+crates/continuum-certificate/src/family.rs: impl Family: fn checker_crate(self) -> &'static str
+crates/continuum-certificate/src/family.rs: impl Family: fn from_magic(magic: &[u8; MAGIC_BYTES]) -> Option<Self>
+crates/continuum-certificate/src/family.rs: impl Family: fn magic(self) -> [u8; MAGIC_BYTES]
+crates/continuum-certificate/src/family.rs: impl Family: fn route(bytes: &[u8]) -> Result<Self, RoutingFault>
+crates/continuum-certificate/src/lib.rs: mod check
+crates/continuum-certificate/src/lib.rs: mod family
+crates/continuum-certificate/src/lib.rs: mod verdict
+crates/continuum-certificate/src/lib.rs: use check::check_certificate
+crates/continuum-certificate/src/lib.rs: use family::{Family, MAGIC_BYTES, RoutingFault}
+crates/continuum-certificate/src/lib.rs: use verdict::{KernelVerdict, Outcome}
+crates/continuum-certificate/src/lib.rs: use { continuum_kernel_core, continuum_kernel_sat, continuum_kernel_smt, continuum_kernel_temporal, }
+crates/continuum-certificate/src/verdict.rs: enum KernelVerdict
+crates/continuum-certificate/src/verdict.rs: enum Outcome
+crates/continuum-certificate/src/verdict.rs: impl KernelVerdict: fn family(&self) -> Family
+crates/continuum-certificate/src/verdict.rs: impl Outcome: fn family(&self) -> Option<Family>
+crates/continuum-certificate/src/verdict.rs: impl Outcome: fn routing_fault(&self) -> Option<&RoutingFault>
+crates/continuum-certificate/src/verdict.rs: impl Outcome: fn verdict(&self) -> Option<&KernelVerdict>
+crates/continuum-kernel-core/src/check.rs: fn check_certificate(bytes: &[u8]) -> Verdict
+crates/continuum-kernel-core/src/lib.rs: mod check
+crates/continuum-kernel-core/src/lib.rs: mod receipt
+crates/continuum-kernel-core/src/lib.rs: mod verdict
+crates/continuum-kernel-core/src/lib.rs: mod wire
+crates/continuum-kernel-core/src/lib.rs: use check::check_certificate
+crates/continuum-kernel-core/src/lib.rs: use receipt::{Receipt, ReceiptError, Seam, SeamField, receipt}
+crates/continuum-kernel-core/src/lib.rs: use verdict::{ CertificateKind, CheckedClaim, Feature, Field, PropertyClass, Rejection, TokenFault, Verdict, }
+crates/continuum-kernel-core/src/receipt.rs: const CHECKER_NAME
+crates/continuum-kernel-core/src/receipt.rs: const SCHEMA_EPOCH
+crates/continuum-kernel-core/src/receipt.rs: const SCHEMA_ID
+crates/continuum-kernel-core/src/receipt.rs: const WIRE_EPOCH_ID
+crates/continuum-kernel-core/src/receipt.rs: enum ReceiptError
+crates/continuum-kernel-core/src/receipt.rs: enum SeamField
+crates/continuum-kernel-core/src/receipt.rs: fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptError>
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn assurance_class(&self) -> &'static str
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn certificate_kind(&self) -> &'static str
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn checker_name(&self) -> &'static str
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn checker_version(&self) -> &str
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn claim_text(&self) -> &str
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn receipt_id(&self) -> &str
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn to_json(&self) -> String
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn trusted_components(&self) -> &[String]
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn trusted_inputs(&self) -> &'static [&'static str]
+crates/continuum-kernel-core/src/receipt.rs: impl Receipt: fn wire_epoch_id(&self) -> &'static str
+crates/continuum-kernel-core/src/receipt.rs: impl SeamField: fn as_str(self) -> &'static str
+crates/continuum-kernel-core/src/receipt.rs: struct Receipt
+crates/continuum-kernel-core/src/receipt.rs: struct Seam
+crates/continuum-kernel-core/src/verdict.rs: enum CertificateKind
+crates/continuum-kernel-core/src/verdict.rs: enum Feature
+crates/continuum-kernel-core/src/verdict.rs: enum Field
+crates/continuum-kernel-core/src/verdict.rs: enum PropertyClass
+crates/continuum-kernel-core/src/verdict.rs: enum Rejection
+crates/continuum-kernel-core/src/verdict.rs: enum TokenFault
+crates/continuum-kernel-core/src/verdict.rs: enum Verdict
+crates/continuum-kernel-core/src/verdict.rs: impl CertificateKind: const ALL
+crates/continuum-kernel-core/src/verdict.rs: impl CertificateKind: fn as_str(self) -> &'static str
+crates/continuum-kernel-core/src/verdict.rs: impl CertificateKind: fn code(self) -> u16
+crates/continuum-kernel-core/src/verdict.rs: impl CertificateKind: fn from_code(code: u16) -> Option<Self>
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn initial_states(&self) -> u32
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn property(&self) -> PropertyClass
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn states(&self) -> u32
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn transitions(&self) -> u64
+crates/continuum-kernel-core/src/verdict.rs: impl CheckedClaim: fn trusted_components(&self) -> &'static [&'static str]
+crates/continuum-kernel-core/src/verdict.rs: impl Field: fn as_str(self) -> &'static str
+crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: const ALL
+crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: fn as_str(self) -> &'static str
+crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: fn code(self) -> u16
+crates/continuum-kernel-core/src/verdict.rs: impl PropertyClass: fn from_code(code: u16) -> Option<Self>
+crates/continuum-kernel-core/src/verdict.rs: impl Rejection: fn field(&self) -> Option<Field>
+crates/continuum-kernel-core/src/verdict.rs: impl Rejection: fn reason(&self) -> &'static str
+crates/continuum-kernel-core/src/verdict.rs: impl Verdict: fn claim(&self) -> Option<&CheckedClaim>
+crates/continuum-kernel-core/src/verdict.rs: impl Verdict: fn is_verified(&self) -> bool
+crates/continuum-kernel-core/src/verdict.rs: struct CheckedClaim
+crates/continuum-kernel-core/src/wire.rs: const MAGIC
+crates/continuum-kernel-core/src/wire.rs: const MAX_ACTIONS
+crates/continuum-kernel-core/src/wire.rs: const MAX_CERTIFICATE_BYTES
+crates/continuum-kernel-core/src/wire.rs: const MAX_DOMAIN_PACKS
+crates/continuum-kernel-core/src/wire.rs: const MAX_STATES
+crates/continuum-kernel-core/src/wire.rs: const MAX_TOKEN_BYTES
+crates/continuum-kernel-core/src/wire.rs: const MAX_TRANSITIONS
+crates/continuum-kernel-core/src/wire.rs: const MAX_VARIABLES
+crates/continuum-kernel-core/src/wire.rs: const WIRE_EPOCH
+crates/continuum-kernel-core/src/wire.rs: enum Body
+crates/continuum-kernel-core/src/wire.rs: enum DecodeFailure
+crates/continuum-kernel-core/src/wire.rs: fn decode(bytes: &[u8]) -> Result<Certificate, DecodeFailure>
+crates/continuum-kernel-core/src/wire.rs: impl Certificate: fn body(&self) -> &Body
+crates/continuum-kernel-core/src/wire.rs: impl Certificate: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-core/src/wire.rs: impl Certificate: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn assumptions_digest(&self) -> &Token
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn domain_pack_digests(&self) -> &[Token]
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn model_digest(&self) -> &Token
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn producer(&self) -> &Token
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn property_digest(&self) -> &Token
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn schema_epoch(&self) -> u16
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn scope_digest(&self) -> &Token
+crates/continuum-kernel-core/src/wire.rs: impl Envelope: fn semantic_epoch(&self) -> &Token
+crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn actions(&self) -> &[Token]
+crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn domain(&self) -> &StateDomain
+crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn initial_states(&self) -> &[Vec<i64>]
+crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn property_class_code(&self) -> u16
+crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn rows(&self) -> &[Vec<Transition>]
+crates/continuum-kernel-core/src/wire.rs: impl FiniteClosureBody: fn table(&self) -> &StateTable
+crates/continuum-kernel-core/src/wire.rs: impl From<Rejection> for DecodeFailure
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn i64(&mut self, field: Field) -> Result<i64, Rejection>
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn is_empty(&self) -> bool
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn new(bytes: &'a [u8]) -> Self
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn remaining(&self) -> usize
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn take(&mut self, field: Field, len: usize) -> Result<&'a [u8], Rejection>
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn token(&mut self, field: Field) -> Result<Token, Rejection>
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn u16(&mut self, field: Field) -> Result<u16, Rejection>
+crates/continuum-kernel-core/src/wire.rs: impl Reader<'a>: fn u32(&mut self, field: Field) -> Result<u32, Rejection>
+crates/continuum-kernel-core/src/wire.rs: impl StateDomain: fn arity(&self) -> usize
+crates/continuum-kernel-core/src/wire.rs: impl StateDomain: fn variables(&self) -> &[Variable]
+crates/continuum-kernel-core/src/wire.rs: impl StateTable: fn arity(&self) -> usize
+crates/continuum-kernel-core/src/wire.rs: impl StateTable: fn is_empty(&self) -> bool
+crates/continuum-kernel-core/src/wire.rs: impl StateTable: fn len(&self) -> u32
+crates/continuum-kernel-core/src/wire.rs: impl StateTable: fn position(&self, state: &[i64]) -> Option<u32>
+crates/continuum-kernel-core/src/wire.rs: impl StateTable: fn state(&self, index: u32) -> Option<&[i64]>
+crates/continuum-kernel-core/src/wire.rs: impl StateTypeBody: fn domain(&self) -> &StateDomain
+crates/continuum-kernel-core/src/wire.rs: impl StateTypeBody: fn table(&self) -> &StateTable
+crates/continuum-kernel-core/src/wire.rs: impl Token: fn as_bytes(&self) -> &[u8]
+crates/continuum-kernel-core/src/wire.rs: impl Token: fn as_str(&self) -> &str
+crates/continuum-kernel-core/src/wire.rs: impl Transition: fn action(&self) -> u16
+crates/continuum-kernel-core/src/wire.rs: impl Transition: fn target(&self) -> &[i64]
+crates/continuum-kernel-core/src/wire.rs: impl Variable: fn admits(&self, value: i64) -> bool
+crates/continuum-kernel-core/src/wire.rs: impl Variable: fn hi(&self) -> i64
+crates/continuum-kernel-core/src/wire.rs: impl Variable: fn lo(&self) -> i64
+crates/continuum-kernel-core/src/wire.rs: impl Variable: fn name(&self) -> &Token
+crates/continuum-kernel-core/src/wire.rs: struct Certificate
+crates/continuum-kernel-core/src/wire.rs: struct Envelope
+crates/continuum-kernel-core/src/wire.rs: struct FiniteClosureBody
+crates/continuum-kernel-core/src/wire.rs: struct Reader
+crates/continuum-kernel-core/src/wire.rs: struct StateDomain
+crates/continuum-kernel-core/src/wire.rs: struct StateTable
+crates/continuum-kernel-core/src/wire.rs: struct StateTypeBody
+crates/continuum-kernel-core/src/wire.rs: struct Token
+crates/continuum-kernel-core/src/wire.rs: struct Transition
+crates/continuum-kernel-core/src/wire.rs: struct Variable
+crates/continuum-kernel-sat/src/check.rs: fn check_certificate(bytes: &[u8]) -> Verdict
+crates/continuum-kernel-sat/src/lib.rs: mod check
+crates/continuum-kernel-sat/src/lib.rs: mod receipt
+crates/continuum-kernel-sat/src/lib.rs: mod verdict
+crates/continuum-kernel-sat/src/lib.rs: mod wire
+crates/continuum-kernel-sat/src/lib.rs: use check::check_certificate
+crates/continuum-kernel-sat/src/lib.rs: use receipt::{ClaimKind, Receipt, ReceiptError, Seam, SeamField, receipt}
+crates/continuum-kernel-sat/src/lib.rs: use verdict::{CertificateKind, CheckedClaim, Feature, Field, Rejection, TokenFault, Verdict}
+crates/continuum-kernel-sat/src/receipt.rs: const CHECKER_NAME
+crates/continuum-kernel-sat/src/receipt.rs: const SCHEMA_EPOCH
+crates/continuum-kernel-sat/src/receipt.rs: const SCHEMA_ID
+crates/continuum-kernel-sat/src/receipt.rs: const WIRE_EPOCH_ID
+crates/continuum-kernel-sat/src/receipt.rs: enum ClaimKind
+crates/continuum-kernel-sat/src/receipt.rs: enum ReceiptError
+crates/continuum-kernel-sat/src/receipt.rs: enum SeamField
+crates/continuum-kernel-sat/src/receipt.rs: fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptError>
+crates/continuum-kernel-sat/src/receipt.rs: impl ClaimKind: fn as_str(self) -> &'static str
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn assurance_class(&self) -> &'static str
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn certificate_kind(&self) -> &'static str
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn checker_name(&self) -> &'static str
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn checker_version(&self) -> &str
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn claim_kind(&self) -> ClaimKind
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn claim_text(&self) -> &str
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn receipt_id(&self) -> &str
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn to_json(&self) -> String
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn trusted_components(&self) -> &[String]
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn trusted_inputs(&self) -> &'static [&'static str]
+crates/continuum-kernel-sat/src/receipt.rs: impl Receipt: fn wire_epoch_id(&self) -> &'static str
+crates/continuum-kernel-sat/src/receipt.rs: impl SeamField: fn as_str(self) -> &'static str
+crates/continuum-kernel-sat/src/receipt.rs: struct Receipt
+crates/continuum-kernel-sat/src/receipt.rs: struct Seam
+crates/continuum-kernel-sat/src/verdict.rs: enum CertificateKind
+crates/continuum-kernel-sat/src/verdict.rs: enum Feature
+crates/continuum-kernel-sat/src/verdict.rs: enum Field
+crates/continuum-kernel-sat/src/verdict.rs: enum Rejection
+crates/continuum-kernel-sat/src/verdict.rs: enum TokenFault
+crates/continuum-kernel-sat/src/verdict.rs: enum Verdict
+crates/continuum-kernel-sat/src/verdict.rs: impl CertificateKind: const ALL
+crates/continuum-kernel-sat/src/verdict.rs: impl CertificateKind: fn as_str(self) -> &'static str
+crates/continuum-kernel-sat/src/verdict.rs: impl CertificateKind: fn code(self) -> u16
+crates/continuum-kernel-sat/src/verdict.rs: impl CertificateKind: fn from_code(code: u16) -> Option<Self>
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn deleted_clauses(&self) -> u32
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn derived_clauses(&self) -> u32
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn input_clauses(&self) -> u32
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn propagations(&self) -> u64
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn trusted_components(&self) -> &'static [&'static str]
+crates/continuum-kernel-sat/src/verdict.rs: impl CheckedClaim: fn variables(&self) -> u32
+crates/continuum-kernel-sat/src/verdict.rs: impl Field: fn as_str(self) -> &'static str
+crates/continuum-kernel-sat/src/verdict.rs: impl Rejection: fn field(&self) -> Option<Field>
+crates/continuum-kernel-sat/src/verdict.rs: impl Rejection: fn reason(&self) -> &'static str
+crates/continuum-kernel-sat/src/verdict.rs: impl Verdict: fn claim(&self) -> Option<&CheckedClaim>
+crates/continuum-kernel-sat/src/verdict.rs: impl Verdict: fn is_verified(&self) -> bool
+crates/continuum-kernel-sat/src/verdict.rs: struct CheckedClaim
+crates/continuum-kernel-sat/src/wire.rs: const MAGIC
+crates/continuum-kernel-sat/src/wire.rs: const MAX_CERTIFICATE_BYTES
+crates/continuum-kernel-sat/src/wire.rs: const MAX_CLAUSES
+crates/continuum-kernel-sat/src/wire.rs: const MAX_CLAUSE_ID
+crates/continuum-kernel-sat/src/wire.rs: const MAX_CLAUSE_LITERALS
+crates/continuum-kernel-sat/src/wire.rs: const MAX_DELETIONS
+crates/continuum-kernel-sat/src/wire.rs: const MAX_DOMAIN_PACKS
+crates/continuum-kernel-sat/src/wire.rs: const MAX_HINTS
+crates/continuum-kernel-sat/src/wire.rs: const MAX_STEPS
+crates/continuum-kernel-sat/src/wire.rs: const MAX_TOKEN_BYTES
+crates/continuum-kernel-sat/src/wire.rs: const MAX_TOTAL_HINTS
+crates/continuum-kernel-sat/src/wire.rs: const MAX_TOTAL_LITERALS
+crates/continuum-kernel-sat/src/wire.rs: const MAX_VARIABLES
+crates/continuum-kernel-sat/src/wire.rs: const WIRE_EPOCH
+crates/continuum-kernel-sat/src/wire.rs: enum Body
+crates/continuum-kernel-sat/src/wire.rs: enum DecodeFailure
+crates/continuum-kernel-sat/src/wire.rs: enum Step
+crates/continuum-kernel-sat/src/wire.rs: fn decode(bytes: &[u8]) -> Result<Certificate, DecodeFailure>
+crates/continuum-kernel-sat/src/wire.rs: impl Addition: fn clause(&self) -> &Clause
+crates/continuum-kernel-sat/src/wire.rs: impl Addition: fn hints(&self) -> &[u32]
+crates/continuum-kernel-sat/src/wire.rs: impl Addition: fn id(&self) -> u32
+crates/continuum-kernel-sat/src/wire.rs: impl Certificate: fn body(&self) -> &Body
+crates/continuum-kernel-sat/src/wire.rs: impl Certificate: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-sat/src/wire.rs: impl Certificate: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-sat/src/wire.rs: impl Clause: fn is_empty(&self) -> bool
+crates/continuum-kernel-sat/src/wire.rs: impl Clause: fn is_tautology(&self) -> bool
+crates/continuum-kernel-sat/src/wire.rs: impl Clause: fn len(&self) -> usize
+crates/continuum-kernel-sat/src/wire.rs: impl Clause: fn literals(&self) -> &[i32]
+crates/continuum-kernel-sat/src/wire.rs: impl Deletion: fn ids(&self) -> &[u32]
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn assumptions_digest(&self) -> &Token
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn domain_pack_digests(&self) -> &[Token]
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn model_digest(&self) -> &Token
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn producer(&self) -> &Token
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn property_digest(&self) -> &Token
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn schema_epoch(&self) -> u16
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn scope_digest(&self) -> &Token
+crates/continuum-kernel-sat/src/wire.rs: impl Envelope: fn semantic_epoch(&self) -> &Token
+crates/continuum-kernel-sat/src/wire.rs: impl Formula: fn clauses(&self) -> &[Clause]
+crates/continuum-kernel-sat/src/wire.rs: impl Formula: fn variables(&self) -> u32
+crates/continuum-kernel-sat/src/wire.rs: impl From<Rejection> for DecodeFailure
+crates/continuum-kernel-sat/src/wire.rs: impl LratBody: fn formula(&self) -> &Formula
+crates/continuum-kernel-sat/src/wire.rs: impl LratBody: fn steps(&self) -> &[Step]
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn i32(&mut self, field: Field) -> Result<i32, Rejection>
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn is_empty(&self) -> bool
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn new(bytes: &'a [u8]) -> Self
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn remaining(&self) -> usize
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn take(&mut self, field: Field, len: usize) -> Result<&'a [u8], Rejection>
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn token(&mut self, field: Field) -> Result<Token, Rejection>
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn u16(&mut self, field: Field) -> Result<u16, Rejection>
+crates/continuum-kernel-sat/src/wire.rs: impl Reader<'a>: fn u32(&mut self, field: Field) -> Result<u32, Rejection>
+crates/continuum-kernel-sat/src/wire.rs: impl Token: fn as_bytes(&self) -> &[u8]
+crates/continuum-kernel-sat/src/wire.rs: impl Token: fn as_str(&self) -> &str
+crates/continuum-kernel-sat/src/wire.rs: struct Addition
+crates/continuum-kernel-sat/src/wire.rs: struct Certificate
+crates/continuum-kernel-sat/src/wire.rs: struct Clause
+crates/continuum-kernel-sat/src/wire.rs: struct Deletion
+crates/continuum-kernel-sat/src/wire.rs: struct Envelope
+crates/continuum-kernel-sat/src/wire.rs: struct Formula
+crates/continuum-kernel-sat/src/wire.rs: struct LratBody
+crates/continuum-kernel-sat/src/wire.rs: struct Reader
+crates/continuum-kernel-sat/src/wire.rs: struct Token
+crates/continuum-kernel-smt/src/check.rs: fn check_certificate(bytes: &[u8]) -> Verdict
+crates/continuum-kernel-smt/src/lib.rs: mod check
+crates/continuum-kernel-smt/src/lib.rs: mod receipt
+crates/continuum-kernel-smt/src/lib.rs: mod verdict
+crates/continuum-kernel-smt/src/lib.rs: mod wire
+crates/continuum-kernel-smt/src/lib.rs: use check::check_certificate
+crates/continuum-kernel-smt/src/lib.rs: use receipt::{ClaimKind, Receipt, ReceiptError, Seam, SeamField, receipt}
+crates/continuum-kernel-smt/src/lib.rs: use verdict::{ AssuranceClass, CertificateKind, CheckedClaim, Feature, Field, Rejection, TokenFault, Verdict, }
+crates/continuum-kernel-smt/src/receipt.rs: const CHECKER_NAME
+crates/continuum-kernel-smt/src/receipt.rs: const SCHEMA_EPOCH
+crates/continuum-kernel-smt/src/receipt.rs: const SCHEMA_ID
+crates/continuum-kernel-smt/src/receipt.rs: const WIRE_EPOCH_ID
+crates/continuum-kernel-smt/src/receipt.rs: enum ClaimKind
+crates/continuum-kernel-smt/src/receipt.rs: enum ReceiptError
+crates/continuum-kernel-smt/src/receipt.rs: enum SeamField
+crates/continuum-kernel-smt/src/receipt.rs: fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptError>
+crates/continuum-kernel-smt/src/receipt.rs: impl ClaimKind: fn as_str(self) -> &'static str
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn assurance_class(&self) -> AssuranceClass
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn certificate_kind(&self) -> &'static str
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn checker_name(&self) -> &'static str
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn checker_version(&self) -> &str
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn claim_kind(&self) -> ClaimKind
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn claim_text(&self) -> &str
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn receipt_id(&self) -> &str
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn to_json(&self) -> String
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn trusted_components(&self) -> &[String]
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn trusted_inputs(&self) -> &'static [&'static str]
+crates/continuum-kernel-smt/src/receipt.rs: impl Receipt: fn wire_epoch_id(&self) -> &'static str
+crates/continuum-kernel-smt/src/receipt.rs: impl SeamField: fn as_str(self) -> &'static str
+crates/continuum-kernel-smt/src/receipt.rs: struct Receipt
+crates/continuum-kernel-smt/src/receipt.rs: struct Seam
+crates/continuum-kernel-smt/src/verdict.rs: enum AssuranceClass
+crates/continuum-kernel-smt/src/verdict.rs: enum CertificateKind
+crates/continuum-kernel-smt/src/verdict.rs: enum Feature
+crates/continuum-kernel-smt/src/verdict.rs: enum Field
+crates/continuum-kernel-smt/src/verdict.rs: enum Rejection
+crates/continuum-kernel-smt/src/verdict.rs: enum TokenFault
+crates/continuum-kernel-smt/src/verdict.rs: enum Verdict
+crates/continuum-kernel-smt/src/verdict.rs: impl AssuranceClass: fn as_str(self) -> &'static str
+crates/continuum-kernel-smt/src/verdict.rs: impl CertificateKind: const ALL
+crates/continuum-kernel-smt/src/verdict.rs: impl CertificateKind: fn as_str(self) -> &'static str
+crates/continuum-kernel-smt/src/verdict.rs: impl CertificateKind: fn code(self) -> u16
+crates/continuum-kernel-smt/src/verdict.rs: impl CertificateKind: fn from_code(code: u16) -> Option<Self>
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn assertions(&self) -> u32
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn assurance_class(&self) -> AssuranceClass
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn atoms(&self) -> u32
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn deleted_clauses(&self) -> u32
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn derived_clauses(&self) -> u32
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn lemmas_carried(&self) -> u32
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn lemmas_used(&self) -> u32
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn propagations(&self) -> u64
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn theories(&self) -> &[Token]
+crates/continuum-kernel-smt/src/verdict.rs: impl CheckedClaim: fn trusted_components(&self) -> Vec<String>
+crates/continuum-kernel-smt/src/verdict.rs: impl Field: fn as_str(self) -> &'static str
+crates/continuum-kernel-smt/src/verdict.rs: impl Rejection: fn field(&self) -> Option<Field>
+crates/continuum-kernel-smt/src/verdict.rs: impl Rejection: fn reason(&self) -> &'static str
+crates/continuum-kernel-smt/src/verdict.rs: impl Verdict: fn claim(&self) -> Option<&CheckedClaim>
+crates/continuum-kernel-smt/src/verdict.rs: impl Verdict: fn is_verified(&self) -> bool
+crates/continuum-kernel-smt/src/verdict.rs: struct CheckedClaim
+crates/continuum-kernel-smt/src/wire.rs: const MAGIC
+crates/continuum-kernel-smt/src/wire.rs: const MAX_ASSERTIONS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_ATOMS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_CERTIFICATE_BYTES
+crates/continuum-kernel-smt/src/wire.rs: const MAX_CLAUSE_ID
+crates/continuum-kernel-smt/src/wire.rs: const MAX_CLAUSE_LITERALS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_DELETIONS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_DOMAIN_PACKS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_HINTS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_LEMMAS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_STEPS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_TOKEN_BYTES
+crates/continuum-kernel-smt/src/wire.rs: const MAX_TOTAL_HINTS
+crates/continuum-kernel-smt/src/wire.rs: const MAX_TOTAL_LITERALS
+crates/continuum-kernel-smt/src/wire.rs: const WIRE_EPOCH
+crates/continuum-kernel-smt/src/wire.rs: enum Body
+crates/continuum-kernel-smt/src/wire.rs: enum DecodeFailure
+crates/continuum-kernel-smt/src/wire.rs: enum Step
+crates/continuum-kernel-smt/src/wire.rs: fn decode(bytes: &[u8]) -> Result<Certificate, DecodeFailure>
+crates/continuum-kernel-smt/src/wire.rs: impl Certificate: fn body(&self) -> &Body
+crates/continuum-kernel-smt/src/wire.rs: impl Certificate: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-smt/src/wire.rs: impl Certificate: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-smt/src/wire.rs: impl Clause: fn is_empty(&self) -> bool
+crates/continuum-kernel-smt/src/wire.rs: impl Clause: fn is_tautology(&self) -> bool
+crates/continuum-kernel-smt/src/wire.rs: impl Clause: fn len(&self) -> usize
+crates/continuum-kernel-smt/src/wire.rs: impl Clause: fn literals(&self) -> &[i32]
+crates/continuum-kernel-smt/src/wire.rs: impl Deletion: fn ids(&self) -> &[u32]
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn assumptions_digest(&self) -> &Token
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn domain_pack_digests(&self) -> &[Token]
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn model_digest(&self) -> &Token
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn producer(&self) -> &Token
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn property_digest(&self) -> &Token
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn schema_epoch(&self) -> u16
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn scope_digest(&self) -> &Token
+crates/continuum-kernel-smt/src/wire.rs: impl Envelope: fn semantic_epoch(&self) -> &Token
+crates/continuum-kernel-smt/src/wire.rs: impl From<Rejection> for DecodeFailure
+crates/continuum-kernel-smt/src/wire.rs: impl Lemma: fn clause(&self) -> &Clause
+crates/continuum-kernel-smt/src/wire.rs: impl Lemma: fn theory(&self) -> &Token
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn i32(&mut self, field: Field) -> Result<i32, Rejection>
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn is_empty(&self) -> bool
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn new(bytes: &'a [u8]) -> Self
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn remaining(&self) -> usize
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn take(&mut self, field: Field, len: usize) -> Result<&'a [u8], Rejection>
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn token(&mut self, field: Field) -> Result<Token, Rejection>
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn u16(&mut self, field: Field) -> Result<u16, Rejection>
+crates/continuum-kernel-smt/src/wire.rs: impl Reader<'a>: fn u32(&mut self, field: Field) -> Result<u32, Rejection>
+crates/continuum-kernel-smt/src/wire.rs: impl Resolution: fn clause(&self) -> &Clause
+crates/continuum-kernel-smt/src/wire.rs: impl Resolution: fn hints(&self) -> &[u32]
+crates/continuum-kernel-smt/src/wire.rs: impl Resolution: fn id(&self) -> u32
+crates/continuum-kernel-smt/src/wire.rs: impl SmtProofBody: fn assertions(&self) -> &[Clause]
+crates/continuum-kernel-smt/src/wire.rs: impl SmtProofBody: fn atoms(&self) -> &[Token]
+crates/continuum-kernel-smt/src/wire.rs: impl SmtProofBody: fn lemmas(&self) -> &[Lemma]
+crates/continuum-kernel-smt/src/wire.rs: impl SmtProofBody: fn steps(&self) -> &[Step]
+crates/continuum-kernel-smt/src/wire.rs: impl Token: fn as_bytes(&self) -> &[u8]
+crates/continuum-kernel-smt/src/wire.rs: impl Token: fn as_str(&self) -> &str
+crates/continuum-kernel-smt/src/wire.rs: struct Certificate
+crates/continuum-kernel-smt/src/wire.rs: struct Clause
+crates/continuum-kernel-smt/src/wire.rs: struct Deletion
+crates/continuum-kernel-smt/src/wire.rs: struct Envelope
+crates/continuum-kernel-smt/src/wire.rs: struct Lemma
+crates/continuum-kernel-smt/src/wire.rs: struct Reader
+crates/continuum-kernel-smt/src/wire.rs: struct Resolution
+crates/continuum-kernel-smt/src/wire.rs: struct SmtProofBody
+crates/continuum-kernel-smt/src/wire.rs: struct Token
+crates/continuum-kernel-temporal/src/check.rs: fn check_certificate(bytes: &[u8]) -> Verdict
+crates/continuum-kernel-temporal/src/lib.rs: mod check
+crates/continuum-kernel-temporal/src/lib.rs: mod receipt
+crates/continuum-kernel-temporal/src/lib.rs: mod verdict
+crates/continuum-kernel-temporal/src/lib.rs: mod wire
+crates/continuum-kernel-temporal/src/lib.rs: use check::check_certificate
+crates/continuum-kernel-temporal/src/lib.rs: use receipt::{Receipt, ReceiptError, Seam, SeamField, receipt}
+crates/continuum-kernel-temporal/src/lib.rs: use verdict::{ CertificateKind, CheckedClaim, FairnessClass, Feature, Field, PropertyClass, Rejection, TokenFault, Verdict, }
+crates/continuum-kernel-temporal/src/receipt.rs: const CHECKER_NAME
+crates/continuum-kernel-temporal/src/receipt.rs: const SCHEMA_EPOCH
+crates/continuum-kernel-temporal/src/receipt.rs: const SCHEMA_ID
+crates/continuum-kernel-temporal/src/receipt.rs: const WIRE_EPOCH_ID
+crates/continuum-kernel-temporal/src/receipt.rs: enum ReceiptError
+crates/continuum-kernel-temporal/src/receipt.rs: enum SeamField
+crates/continuum-kernel-temporal/src/receipt.rs: fn receipt(verdict: &Verdict, seam: &Seam<'_>) -> Result<Receipt, ReceiptError>
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn assurance_class(&self) -> &'static str
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn certificate_kind(&self) -> &'static str
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn checker_name(&self) -> &'static str
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn checker_version(&self) -> &str
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn claim_text(&self) -> &str
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn receipt_id(&self) -> &str
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn to_json(&self) -> String
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn trusted_components(&self) -> &[String]
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn trusted_inputs(&self) -> &'static [&'static str]
+crates/continuum-kernel-temporal/src/receipt.rs: impl Receipt: fn wire_epoch_id(&self) -> &'static str
+crates/continuum-kernel-temporal/src/receipt.rs: impl SeamField: fn as_str(self) -> &'static str
+crates/continuum-kernel-temporal/src/receipt.rs: struct Receipt
+crates/continuum-kernel-temporal/src/receipt.rs: struct Seam
+crates/continuum-kernel-temporal/src/verdict.rs: enum CertificateKind
+crates/continuum-kernel-temporal/src/verdict.rs: enum FairnessClass
+crates/continuum-kernel-temporal/src/verdict.rs: enum Feature
+crates/continuum-kernel-temporal/src/verdict.rs: enum Field
+crates/continuum-kernel-temporal/src/verdict.rs: enum PropertyClass
+crates/continuum-kernel-temporal/src/verdict.rs: enum Rejection
+crates/continuum-kernel-temporal/src/verdict.rs: enum TokenFault
+crates/continuum-kernel-temporal/src/verdict.rs: enum Verdict
+crates/continuum-kernel-temporal/src/verdict.rs: impl CertificateKind: const ALL
+crates/continuum-kernel-temporal/src/verdict.rs: impl CertificateKind: fn as_str(self) -> &'static str
+crates/continuum-kernel-temporal/src/verdict.rs: impl CertificateKind: fn code(self) -> u16
+crates/continuum-kernel-temporal/src/verdict.rs: impl CertificateKind: fn from_code(code: u16) -> Option<Self>
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn fair_actions(&self) -> u16
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn fairness(&self) -> FairnessClass
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn goal_states(&self) -> u32
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn initial_states(&self) -> u32
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn progress_bound(&self) -> Option<u64>
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn property(&self) -> PropertyClass
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn reachable_states(&self) -> u32
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn states(&self) -> u32
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn transitions(&self) -> u64
+crates/continuum-kernel-temporal/src/verdict.rs: impl CheckedClaim: fn trusted_components(&self) -> &'static [&'static str]
+crates/continuum-kernel-temporal/src/verdict.rs: impl FairnessClass: const ALL
+crates/continuum-kernel-temporal/src/verdict.rs: impl FairnessClass: fn as_str(self) -> &'static str
+crates/continuum-kernel-temporal/src/verdict.rs: impl FairnessClass: fn code(self) -> u16
+crates/continuum-kernel-temporal/src/verdict.rs: impl FairnessClass: fn from_code(code: u16) -> Option<Self>
+crates/continuum-kernel-temporal/src/verdict.rs: impl Field: fn as_str(self) -> &'static str
+crates/continuum-kernel-temporal/src/verdict.rs: impl PropertyClass: const ALL
+crates/continuum-kernel-temporal/src/verdict.rs: impl PropertyClass: fn as_str(self) -> &'static str
+crates/continuum-kernel-temporal/src/verdict.rs: impl PropertyClass: fn code(self) -> u16
+crates/continuum-kernel-temporal/src/verdict.rs: impl PropertyClass: fn from_code(code: u16) -> Option<Self>
+crates/continuum-kernel-temporal/src/verdict.rs: impl Rejection: fn field(&self) -> Option<Field>
+crates/continuum-kernel-temporal/src/verdict.rs: impl Rejection: fn reason(&self) -> &'static str
+crates/continuum-kernel-temporal/src/verdict.rs: impl Verdict: fn claim(&self) -> Option<&CheckedClaim>
+crates/continuum-kernel-temporal/src/verdict.rs: impl Verdict: fn is_verified(&self) -> bool
+crates/continuum-kernel-temporal/src/verdict.rs: struct CheckedClaim
+crates/continuum-kernel-temporal/src/wire.rs: const MAGIC
+crates/continuum-kernel-temporal/src/wire.rs: const MAX_ACTIONS
+crates/continuum-kernel-temporal/src/wire.rs: const MAX_CERTIFICATE_BYTES
+crates/continuum-kernel-temporal/src/wire.rs: const MAX_DOMAIN_PACKS
+crates/continuum-kernel-temporal/src/wire.rs: const MAX_STATES
+crates/continuum-kernel-temporal/src/wire.rs: const MAX_TOKEN_BYTES
+crates/continuum-kernel-temporal/src/wire.rs: const MAX_TRANSITIONS
+crates/continuum-kernel-temporal/src/wire.rs: const MAX_VARIABLES
+crates/continuum-kernel-temporal/src/wire.rs: const WIRE_EPOCH
+crates/continuum-kernel-temporal/src/wire.rs: enum DecodeFailure
+crates/continuum-kernel-temporal/src/wire.rs: fn decode(bytes: &[u8]) -> Result<Certificate, DecodeFailure>
+crates/continuum-kernel-temporal/src/wire.rs: impl Certificate: fn body(&self) -> &TemporalBody
+crates/continuum-kernel-temporal/src/wire.rs: impl Certificate: fn envelope(&self) -> &Envelope
+crates/continuum-kernel-temporal/src/wire.rs: impl Certificate: fn kind(&self) -> CertificateKind
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn assumptions_digest(&self) -> &Token
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn domain_pack_digests(&self) -> &[Token]
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn model_digest(&self) -> &Token
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn producer(&self) -> &Token
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn property_digest(&self) -> &Token
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn schema_epoch(&self) -> u16
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn scope_digest(&self) -> &Token
+crates/continuum-kernel-temporal/src/wire.rs: impl Envelope: fn semantic_epoch(&self) -> &Token
+crates/continuum-kernel-temporal/src/wire.rs: impl From<Rejection> for DecodeFailure
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn i64(&mut self, field: Field) -> Result<i64, Rejection>
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn is_empty(&self) -> bool
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn new(bytes: &'a [u8]) -> Self
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn remaining(&self) -> usize
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn take(&mut self, field: Field, len: usize) -> Result<&'a [u8], Rejection>
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn token(&mut self, field: Field) -> Result<Token, Rejection>
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn u16(&mut self, field: Field) -> Result<u16, Rejection>
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn u32(&mut self, field: Field) -> Result<u32, Rejection>
+crates/continuum-kernel-temporal/src/wire.rs: impl Reader<'a>: fn u64(&mut self, field: Field) -> Result<u64, Rejection>
+crates/continuum-kernel-temporal/src/wire.rs: impl StateDomain: fn arity(&self) -> usize
+crates/continuum-kernel-temporal/src/wire.rs: impl StateDomain: fn variables(&self) -> &[Variable]
+crates/continuum-kernel-temporal/src/wire.rs: impl StateTable: fn arity(&self) -> usize
+crates/continuum-kernel-temporal/src/wire.rs: impl StateTable: fn is_empty(&self) -> bool
+crates/continuum-kernel-temporal/src/wire.rs: impl StateTable: fn len(&self) -> u32
+crates/continuum-kernel-temporal/src/wire.rs: impl StateTable: fn position(&self, state: &[i64]) -> Option<u32>
+crates/continuum-kernel-temporal/src/wire.rs: impl StateTable: fn state(&self, index: u32) -> Option<&[i64]>
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn actions(&self) -> &[Token]
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn domain(&self) -> &StateDomain
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn fair_actions(&self) -> &[u16]
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn fairness_class_code(&self) -> u16
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn goal_states(&self) -> &[Vec<i64>]
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn initial_states(&self) -> &[Vec<i64>]
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn property_class_code(&self) -> u16
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn ranks(&self) -> &[u64]
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn rows(&self) -> &[Vec<Transition>]
+crates/continuum-kernel-temporal/src/wire.rs: impl TemporalBody: fn table(&self) -> &StateTable
+crates/continuum-kernel-temporal/src/wire.rs: impl Token: fn as_bytes(&self) -> &[u8]
+crates/continuum-kernel-temporal/src/wire.rs: impl Token: fn as_str(&self) -> &str
+crates/continuum-kernel-temporal/src/wire.rs: impl Transition: fn action(&self) -> u16
+crates/continuum-kernel-temporal/src/wire.rs: impl Transition: fn target(&self) -> &[i64]
+crates/continuum-kernel-temporal/src/wire.rs: impl Variable: fn admits(&self, value: i64) -> bool
+crates/continuum-kernel-temporal/src/wire.rs: impl Variable: fn hi(&self) -> i64
+crates/continuum-kernel-temporal/src/wire.rs: impl Variable: fn lo(&self) -> i64
+crates/continuum-kernel-temporal/src/wire.rs: impl Variable: fn name(&self) -> &Token
+crates/continuum-kernel-temporal/src/wire.rs: struct Certificate
+crates/continuum-kernel-temporal/src/wire.rs: struct Envelope
+crates/continuum-kernel-temporal/src/wire.rs: struct Reader
+crates/continuum-kernel-temporal/src/wire.rs: struct StateDomain
+crates/continuum-kernel-temporal/src/wire.rs: struct StateTable
+crates/continuum-kernel-temporal/src/wire.rs: struct TemporalBody
+crates/continuum-kernel-temporal/src/wire.rs: struct Token
+crates/continuum-kernel-temporal/src/wire.rs: struct Transition
+crates/continuum-kernel-temporal/src/wire.rs: struct Variable

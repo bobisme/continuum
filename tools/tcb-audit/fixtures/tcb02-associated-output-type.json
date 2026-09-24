@@ -1,0 +1,18 @@
+{
+  "id": "tcb02-associated-output-type",
+  "crate": "continuum-kernel-core",
+  "why": "a verdict through an associated output type",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a deciding trait.\npub trait Decide {\n    /// Fixture: the output.\n    type Output;\n    /// Fixture: decide.\n    fn decide(&self) -> Self::Output;\n}\n\nimpl Decide for crate::wire::Certificate {\n    type Output = Verdict;\n    fn decide(&self) -> Self::Output {\n        check_certificate(&[])\n    }\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: impl Decide for crate::wire::Certificate",
+    "crates/continuum-kernel-core/src/check.rs: trait Decide",
+    "crates/continuum-kernel-core/src/check.rs: trait Decide: fn decide(&self) -> Self::Output",
+    "crates/continuum-kernel-core/src/check.rs: trait Decide: type Output"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}

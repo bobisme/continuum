@@ -1,0 +1,20 @@
+{
+  "id": "tcb02-callable-struct-field",
+  "crate": "continuum-kernel-core",
+  "why": "a public struct field of type `fn(&Certificate) -> Verdict`",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a struct carrying a decider.\npub struct Decider {\n    /// Fixture: the decider.\n    pub decide: fn(&crate::wire::Certificate) -> Verdict,\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: struct Decider"
+  ],
+  "expect": "public value the scan cannot prove wire-only",
+  "authority_test": {
+    "package": "continuum-kernel-core",
+    "target": "pr9_exit_evidence"
+  },
+  "expect_authority_failure": true
+}

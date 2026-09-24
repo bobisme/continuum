@@ -1,0 +1,13 @@
+{
+  "id": "tcb02-macro-generated-entry",
+  "crate": "continuum-kernel-core",
+  "why": "a public entry a macro generates, which no lexical scan sees",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\nmacro_rules! entry {\n    ($name:ident) => {\n        /// Fixture: generated.\n        #[must_use]\n        pub fn $name(certificate: &crate::wire::Certificate) -> Verdict {\n            let _ = certificate;\n            check_certificate(&[])\n        }\n    };\n}\nentry!(check_generated);\n"
+    }
+  ],
+  "inventory_add": [],
+  "expect": "can generate items the scan cannot see"
+}

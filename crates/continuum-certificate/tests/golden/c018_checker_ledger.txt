@@ -1,0 +1,56 @@
+# C018 checker mutation campaign: corrupted certificates of every checked class
+# crates/continuum-certificate/tests/c018_checker_mutation.rs (bn-2npu)
+# checker: continuum_certificate::check_certificate over the four kernels
+# oracle: brute-force re-derivation over the kernel-decoded mutant (see module docs)
+# masks: 0x01 0x80 0xff at every byte of every green certificate
+# GREEN class | verdict | oracle
+GREEN core/finite-closure | verified | claim-holds
+GREEN core/state-type | verified | claim-holds
+GREEN sat/lrat | verified | claim-holds
+GREEN smt/smt-proof | verified:TRUSTED_SOLVER | claim-holds
+GREEN temporal/ranking | verified | claim-holds
+GREEN temporal/fair-scc-exclusion | verified | claim-holds
+GREEN temporal/fair-scc-unreachable-trap | verified | claim-holds
+GREEN temporal/fair-scc-harmless-dead-ends | verified | claim-holds
+GREEN temporal/fair-scc-after-the-goal | verified | claim-holds
+# LIE id | kind | targets | expected | verdict | oracle | grade
+LIE core-fc/drop-reachable-state | false-claim | Post(S) ⊆ S: a state the explorer lost | closure-failure | closure-failure | claim-false | caught
+LIE core-fc/retarget-outside-table | false-claim | Post(S) ⊆ S: a successor outside the carried set | closure-failure | closure-failure | claim-false | caught
+LIE core-fc/state-outside-property | false-claim | S ⊆ P: a carried state the declared domain refuses | property-violated | property-violated | claim-false | caught
+LIE core-fc/initial-outside-table | false-claim | Init ⊆ S | initial-state-not-in-table | initial-state-not-in-table | claim-false | caught
+LIE core-fc/undeclared-action | false-claim | every transition names a declared action | unknown-action | unknown-action | claim-false | caught
+LIE core-st/state-outside-domain | false-claim | S ⊆ P | property-violated | property-violated | claim-false | caught
+LIE sat/satisfiable-formula | false-claim | refutation: the formula without clause 4 is satisfiable | no-conflict | no-conflict | claim-false | caught
+LIE sat/antecedent-not-unit | broken-evidence | RUP: an antecedent with two unassigned literals | hint-not-unit | hint-not-unit | claim-holds | caught
+LIE sat/use-after-delete | broken-evidence | the clause store: a deleted antecedent | hint-deleted | hint-deleted | claim-holds | caught
+LIE sat/no-empty-clause | broken-evidence | refutation: the proof stops before the empty clause | empty-clause-not-derived | empty-clause-not-derived | claim-holds | caught
+LIE sat/tautology-derived | broken-evidence | a vacuous derivation | vacuous-derivation | vacuous-derivation | claim-holds | caught
+LIE sat/antecedent-unknown-id | broken-evidence | an antecedent that names no clause | hint-out-of-range | hint-out-of-range | claim-holds | caught
+LIE sat/chain-without-conflict | broken-evidence | RUP: a chain that never reaches a conflict | no-conflict | no-conflict | claim-holds | caught
+LIE sat/conflict-before-end | broken-evidence | a chain's conflict is its last antecedent | conflict-before-end | conflict-before-end | claim-holds | caught
+LIE sat/proof-continues | broken-evidence | nothing may follow the empty clause | proof-continues-after-empty-clause | proof-continues-after-empty-clause | claim-holds | caught
+LIE smt/satisfiable-skeleton | false-claim | refutation: without `c<a` the skeleton and the lemma are satisfiable | no-conflict | no-conflict | claim-false | caught
+LIE smt/lemma-before-its-units | broken-evidence | RUP: the lemma is not unit before the assertions propagate | hint-not-unit | hint-not-unit | claim-holds | caught
+LIE smt/false-theory-lemma | trusted-component | a theory lemma: `a<b ∧ b<c` is consistent, so `¬a<b ∨ ¬b<c` is not LIA-valid | verified:TRUSTED_SOLVER | verified:TRUSTED_SOLVER | claim-holds | NOT-CAUGHT
+LIE tmp-rank/rank-does-not-decrease | broken-evidence | every step out of a non-goal state decreases the rank | rank-does-not-decrease | rank-does-not-decrease | claim-holds | caught
+LIE tmp-rank/goal-rank-not-zero | broken-evidence | goal states rank zero | goal-rank-not-zero | goal-rank-not-zero | claim-holds | caught
+LIE tmp-rank/dead-end | false-claim | a non-goal state with no successor never progresses | progress-deadlock | progress-deadlock | claim-false | caught
+LIE tmp-rank/cycle | false-claim | a cycle among non-goal states: `1 → 2 → 1` | rank-does-not-decrease | rank-does-not-decrease | claim-false | caught
+LIE tmp-rank/state-outside-domain | false-claim | safety side condition: every state in the domain | state-outside-domain | state-outside-domain | claim-false | caught
+LIE tmp-scc/unfair-wait-loop | false-claim | without fairness the `Wait` loop is an execution that never completes | fair-cycle-exists | fair-cycle-exists | claim-false | caught
+LIE tmp-scc/complete-disabled | false-claim | `Complete` disabled on the loop discharges weak fairness vacuously | fair-cycle-exists | fair-cycle-exists | claim-false | caught
+LIE tmp-scc/reachable-dead-end | false-claim | an execution that stops at a non-goal state (bn-2npu fix) | progress-deadlock | progress-deadlock | claim-false | caught
+LIE tmp-scc/fair-action-undeclared | false-claim | a fairness assumption over an action outside the alphabet | fair-action-out-of-range | fair-action-out-of-range | claim-false | caught
+LIE tmp-scc/successor-outside-table | false-claim | every transition lands in the table | closure-failure | closure-failure | claim-false | caught
+# LIES caught 27 not-caught 1
+# SWEEP class | bytes | mutants | verified (same claim / relabelled) | verified-false | outcome histogram
+SWEEP core/finite-closure | 267 | 801 | 159 (39 / 120) | 0 | rejected:closure-failure=71 rejected:count-out-of-range=39 rejected:initial-state-not-in-table=23 rejected:inverted-variable-range=23 rejected:malformed-token=315 rejected:no-initial-states=2 rejected:not-strictly-ascending=60 rejected:property-violated=24 rejected:schema-epoch-mismatch=7 rejected:trailing-bytes=3 rejected:truncated=18 rejected:unknown-action=15 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:PropertyClass=6 unsupported:WireEpoch=6 verified=159
+SWEEP core/state-type | 240 | 720 | 189 (69 / 120) | 0 | rejected:count-out-of-range=15 rejected:inverted-variable-range=27 rejected:malformed-token=293 rejected:not-strictly-ascending=50 rejected:property-violated=96 rejected:schema-epoch-mismatch=7 rejected:trailing-bytes=1 rejected:truncated=6 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:WireEpoch=6 verified=189
+SWEEP sat/lrat | 266 | 798 | 133 (17 / 116) | 0 | rejected:count-out-of-range=75 rejected:deletion-out-of-range=17 rejected:hint-not-unit=1 rejected:hint-out-of-range=61 rejected:hint-satisfied=4 rejected:id-not-increasing=15 rejected:literal-out-of-range=122 rejected:literals-not-ascending=25 rejected:malformed-token=268 rejected:schema-epoch-mismatch=7 rejected:trailing-bytes=2 rejected:truncated=11 rejected:zero-literal=2 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:ProofStep=19 unsupported:WireEpoch=6 verified=133
+SWEEP smt/smt-proof | 261 | 783 | 146 (25 / 121) | 0 | rejected:atom-out-of-range=80 rejected:conflict-before-end=2 rejected:count-out-of-range=64 rejected:hint-out-of-range=46 rejected:hint-satisfied=4 rejected:id-not-increasing=3 rejected:literals-not-ascending=22 rejected:malformed-token=351 rejected:not-strictly-ascending=2 rejected:schema-epoch-mismatch=7 rejected:truncated=12 rejected:zero-literal=1 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:ProofStep=7 unsupported:WireEpoch=6 verified=146
+SWEEP temporal/ranking | 347 | 1041 | 180 (36 / 144) | 0 | rejected:closure-failure=116 rejected:count-out-of-range=56 rejected:goal-rank-not-zero=24 rejected:goal-state-not-in-table=23 rejected:initial-state-not-in-table=23 rejected:inverted-variable-range=23 rejected:malformed-token=316 rejected:no-initial-states=2 rejected:not-strictly-ascending=129 rejected:progress-deadlock=1 rejected:rank-does-not-decrease=51 rejected:schema-epoch-mismatch=7 rejected:state-outside-domain=25 rejected:trailing-bytes=1 rejected:truncated=1 rejected:unknown-action=15 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:FairnessClass=6 unsupported:PropertyClass=6 unsupported:WireEpoch=6 verified=180
+SWEEP temporal/fair-scc-exclusion | 291 | 873 | 173 (50 / 123) | 0 | rejected:closure-failure=69 rejected:count-out-of-range=47 rejected:fair-action-out-of-range=5 rejected:fair-cycle-exists=3 rejected:goal-state-not-in-table=23 rejected:initial-state-not-in-table=23 rejected:inverted-variable-range=23 rejected:malformed-token=353 rejected:no-initial-states=3 rejected:not-strictly-ascending=54 rejected:schema-epoch-mismatch=7 rejected:state-outside-domain=25 rejected:trailing-bytes=1 rejected:truncated=5 rejected:unknown-action=11 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:FairnessClass=6 unsupported:PropertyClass=6 unsupported:WireEpoch=6 verified=173
+SWEEP temporal/fair-scc-unreachable-trap | 405 | 1215 | 188 (65 / 123) | 0 | rejected:closure-failure=184 rejected:count-out-of-range=56 rejected:fair-action-out-of-range=5 rejected:fair-cycle-exists=4 rejected:goal-state-not-in-table=46 rejected:initial-state-not-in-table=46 rejected:inverted-variable-range=46 rejected:malformed-token=323 rejected:no-initial-states=3 rejected:not-strictly-ascending=158 rejected:schema-epoch-mismatch=7 rejected:state-outside-domain=73 rejected:trailing-bytes=2 rejected:truncated=6 rejected:unknown-action=20 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:FairnessClass=6 unsupported:PropertyClass=6 unsupported:WireEpoch=6 verified=188
+SWEEP temporal/fair-scc-harmless-dead-ends | 331 | 993 | 180 (57 / 123) | 0 | rejected:closure-failure=47 rejected:count-out-of-range=48 rejected:fair-action-out-of-range=5 rejected:fair-cycle-exists=1 rejected:goal-state-not-in-table=47 rejected:initial-state-not-in-table=46 rejected:inverted-variable-range=46 rejected:malformed-token=323 rejected:no-initial-states=2 rejected:not-strictly-ascending=93 rejected:progress-deadlock=1 rejected:schema-epoch-mismatch=7 rejected:state-outside-domain=73 rejected:trailing-bytes=1 rejected:truncated=20 rejected:unknown-action=5 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:FairnessClass=6 unsupported:PropertyClass=6 unsupported:WireEpoch=6 verified=180
+SWEEP temporal/fair-scc-after-the-goal | 306 | 918 | 160 (37 / 123) | 0 | rejected:closure-failure=92 rejected:count-out-of-range=57 rejected:fair-cycle-exists=1 rejected:goal-state-not-in-table=23 rejected:initial-state-not-in-table=23 rejected:inverted-variable-range=23 rejected:malformed-token=318 rejected:no-initial-states=3 rejected:not-strictly-ascending=110 rejected:schema-epoch-mismatch=7 rejected:state-outside-domain=25 rejected:trailing-bytes=1 rejected:truncated=12 rejected:unknown-action=15 unroutable:UnknownFamily=24 unsupported:CertificateKind=6 unsupported:FairnessClass=6 unsupported:PropertyClass=6 unsupported:WireEpoch=6 verified=160
+# SWEEP total mutants 8142, verified 1508, not verified 6634

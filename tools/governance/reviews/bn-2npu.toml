@@ -1,0 +1,75 @@
+[change]
+bone = "bn-2npu"
+author = "continuum-dev"
+summary = "continuum-kernel-temporal's fair-SCC exclusion check decides eventually-goal over the states reached without passing through a goal: it now rejects such a state with no successors (ProgressDeadlock), which it accepted before (C018 audit), and no longer rejects a dead end or fair cycle after a goal visit, a false rejection the cycle half had before bn-2npu (Codex cr-10mg1y)"
+
+[semantic]
+covers = [
+  "crates/continuum-kernel-temporal/src/check.rs",
+]
+reference_tests = [
+  "crates/continuum-kernel-temporal/src/check.rs::a_reachable_non_goal_deadlock_refutes_fair_cycle_exclusion",
+  "crates/continuum-kernel-temporal/src/check.rs::an_unreachable_or_goal_dead_end_does_not_refute_fair_cycle_exclusion",
+  "crates/continuum-kernel-temporal/src/check.rs::a_dead_end_after_the_goal_does_not_refute_the_eventuality",
+  "crates/continuum-kernel-temporal/src/check.rs::a_fair_cycle_after_the_goal_does_not_refute_the_eventuality",
+  "crates/continuum-kernel-temporal/src/check.rs::an_initial_goal_state_followed_by_a_dead_end_is_accepted",
+  "crates/continuum-kernel-temporal/src/check.rs::a_goal_on_one_branch_and_a_dead_end_on_the_other_is_refused",
+  "crates/continuumd/tests/daemon_evidence.rs::the_daemon_relays_the_eventuality_scope_the_temporal_kernel_decides",
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::no_lie_verifies",
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::every_lie_is_rejected_for_the_reason_it_targets",
+]
+metamorphic_tests = [
+  { test = "crates/continuum-kernel-temporal/src/check.rs::metamorphic_alpha_renaming_keeps_the_dead_end_verdict", relation = "alpha-renaming" },
+]
+differential_tests = [
+  { test = "crates/continuumd/tests/c018_fair_scc_dead_end_differential.rs::the_kernel_refuses_a_dead_end_exactly_when_the_reference_engine_reports_one", oracle = "continuum-engine-reference", subject = "continuum-kernel-temporal" },
+]
+
+[semantic.claim_impact]
+claims = ["C018", "C012"]
+reason = "C018: the checker audit found the defect, and the C018 evidence record cites the fix. C012 (liveness lane handles explicit fairness correctly) stays HYPOTHESIS; the fix removes a false acceptance in the fair-SCC exclusion family it would rest on. Neither docs/18 row moves"
+
+[semantic.schemas]
+updated = []
+reason = "no artifact shape moves: CONTTMPC wire epoch 1 is unchanged, and ProgressDeadlock is an existing Rejection arm with its existing receipt spelling progress-deadlock"
+
+[semantic.migration]
+verdict = "Revalidate"
+note = "continuum-kernel-temporal fair-scc-exclusion: reachability now stops at goal states. A certificate with a non-goal dead end reached before any goal visit was Verified and is now Rejected(ProgressDeadlock); that was a false acceptance. A certificate whose only fair cycle comes after a goal visit was Rejected(FairCycleExists) and is now Verified; that was a false rejection. CheckedClaim::reachable_states for this family now counts the states reached without passing through a goal. No producer in the workspace emits CONTTMPC certificates yet, so no stored artifact is known to move; any stored fair-scc-exclusion verdict must be re-checked"
+
+[kernel]
+covers = [
+  "crates/continuum-kernel-temporal/src/check.rs",
+]
+
+[kernel.mutation_tests]
+tests = [
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::no_lie_verifies",
+  "crates/continuum-certificate/tests/c018_checker_mutation.rs::no_single_byte_mutant_verifies_a_claim_the_oracle_refutes",
+  "crates/continuum-kernel-temporal/src/check.rs::a_reachable_non_goal_deadlock_refutes_fair_cycle_exclusion",
+]
+classes = ["body.element-drop", "body.value-perturbation"]
+
+[kernel.code_size]
+total = 11073
+budget = 15000
+note = "continuum-kernel-temporal and the kernel crates grew by 69 lines (11004 to 11073): the stuck_state helper and its call, the goal stop in reachable_before_goal, the documentation of the eventuality scope and the completion policies, and the scoped entry-point documentation in three kernel lib.rs files"
+
+[kernel.no_unchecked_optimization]
+is_optimization = false
+reason = "a correctness fix that adds one obligation to the fair-SCC exclusion check; nothing is made faster and no check is skipped"
+
+[kernel.fuzz_corpus]
+files = ["crates/continuum-certificate/tests/c018-corpus/cases.txt"]
+test = "crates/continuum-certificate/tests/c018_checker_mutation.rs::the_committed_corpus_replays_with_its_recorded_verdicts"
+
+[kernel.reviewers]
+entries = [
+  { reviewer = "continuum-security", review = "cr-3i3rst", verdict = "approved" },
+  { reviewer = "continuum-kernel-review", review = "cr-3i3rst", verdict = "approved" },
+]
+
+[semantic.security_review]
+reviewer = "continuum-security"
+review = "cr-3i3rst"
+verdict = "approved"

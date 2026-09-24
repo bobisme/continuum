@@ -1,0 +1,15 @@
+{
+  "id": "tcb02-raw-identifier",
+  "crate": "continuum-kernel-core",
+  "why": "a raw identifier and a fully qualified return type",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a raw identifier.\n#[must_use]\npub fn r#try(decoded: &crate::wire::Certificate) -> crate::verdict::Verdict {\n    let _ = decoded;\n    check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn r#try(decoded: &crate::wire::Certificate) -> crate::verdict::Verdict"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}

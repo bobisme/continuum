@@ -1,0 +1,23 @@
+{
+  "id": "tcb02-trait-associated-const",
+  "crate": "continuum-kernel-core",
+  "known_miss": true,
+  "why": "KNOWN MISS (Codex cr-3i3rst round 7): a public trait declares `const DECIDE: &dyn Fn(&Certificate) -> Verdict`, and a checking-base impl binds it to a private decision function. TCB-02 and the Rust authority test both accept it; trait-associated items are outside the scan's scope, and a complete check needs a rustc-derived public API surface.",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\nfn decide_privately(certificate: &crate::wire::Certificate) -> Verdict {\n    let _ = certificate;\n    check_certificate(&[])\n}\n\n/// Fixture: a trait whose associated const is a verdict-returning callable.\npub trait Decides {\n    /// Fixture: the decider.\n    const DECIDE: &'static dyn Fn(&crate::wire::Certificate) -> Verdict;\n}\n\nimpl Decides for crate::wire::Certificate {\n    const DECIDE: &'static dyn Fn(&crate::wire::Certificate) -> Verdict = &decide_privately;\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: impl Decides for crate::wire::Certificate",
+    "crates/continuum-kernel-core/src/check.rs: trait Decides",
+    "crates/continuum-kernel-core/src/check.rs: trait Decides: const DECIDE: &'static dyn Fn(&crate::wire::Certificate) -> Verdict"
+  ],
+  "expect": "",
+  "authority_test": {
+    "package": "continuum-kernel-core",
+    "target": "pr9_exit_evidence"
+  },
+  "expect_authority_failure": false
+}

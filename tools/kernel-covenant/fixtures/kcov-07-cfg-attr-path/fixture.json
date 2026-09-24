@@ -1,0 +1,17 @@
+{
+  "description": "`cfg_attr(all(), path = \u2026)` redirects a module to a file the scan never reads, with a dummy standard module file present so no `mod` check fires (Codex cr-3i3rst).",
+  "id": "kcov-07-cfg-attr-path",
+  "overlay": {
+    "crates/continuum-certificate/src/family_shadow.rs": "family_shadow.rs.fixture"
+  },
+  "requirement": "KCOV-07",
+  "rule": "no-plugins-or-dynamic-loading",
+  "substitute": {
+    "crates/continuum-certificate/src/lib.rs": [
+      {
+        "find": "pub mod check;",
+        "replace": "pub mod check;\n#[cfg_attr(\n    all(),\n    path = \"../hidden/decide.rs\"\n)]\nmod family_shadow;"
+      }
+    ]
+  }
+}

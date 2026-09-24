@@ -1,0 +1,15 @@
+{
+  "id": "tcb02-private-alias",
+  "crate": "continuum-kernel-core",
+  "why": "a private alias in a public signature",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: private alias.\ntype Private = Verdict;\n\n/// Fixture: decided from a decoded certificate.\n#[must_use]\npub fn decide(certificate: &crate::wire::Certificate) -> Private {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(certificate: &crate::wire::Certificate) -> Private"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}

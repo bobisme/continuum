@@ -1,0 +1,20 @@
+{
+  "id": "tcb02-path-module",
+  "crate": "continuum-certificate",
+  "why": "a `#[path]` module in continuum-certificate holding a decoded-input producer",
+  "edits": [
+    {
+      "file": "crates/continuum-certificate/src/lib.rs",
+      "append": "\n#[path = \"hidden.inc\"]\nmod hidden;\n/// Fixture: re-exported from a file outside src/**/*.rs.\npub use hidden::decide;\n"
+    },
+    {
+      "file": "crates/continuum-certificate/src/hidden.inc",
+      "append": "/// Fixture: hidden from the inventory.\n#[must_use]\npub fn decide(decoded: &continuum_kernel_core::wire::Certificate) -> crate::Outcome {\n    let _ = decoded;\n    crate::check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-certificate/src/lib.rs: use hidden::decide"
+  ],
+  "expect": "a module the scan cannot see",
+  "expect_compiled_mismatch": true
+}

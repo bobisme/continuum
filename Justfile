@@ -88,9 +88,20 @@ boundaries:
 #
 # `--strict` (not run here) promotes the matrix's `uncovered` waivers to failures;
 # it is the burn-down switch, not the gate.
+#
+# Then the C018 checker audit (bn-2npu): the checking base links only itself over the
+# resolved graph, every public verdict entry takes wire bytes, the campaign's Rust
+# tests are live, and every source mutant in tools/tcb-audit/mutants.toml still finds
+# its target. The real run fails when tools/tcb-audit/evidence/c018.json was recorded
+# over other checking-base sources, or when a mutant's recorded outcome differs from
+# its `expect`. Regenerate with `python3 tools/check_tcb_audit.py --evidence`, which
+# runs every source mutant against a scratch copy of the kernels and the reference
+# producer.
 covenant:
     python3 tools/check_kernel_covenant.py --self-test
     python3 tools/check_kernel_covenant.py
+    python3 tools/check_tcb_audit.py --self-test
+    python3 tools/check_tcb_audit.py
 
 # Enforce the docs/12 executable policy obligations (GOV §1 code/semantic
 # policy, GOV §2 ADR process, GOV §3 claim governance), the docs/09 T12

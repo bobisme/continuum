@@ -35,9 +35,13 @@
 //! >
 //! > — `notes/plan/notes/START_HERE_IMPLEMENTATION.md`, PR 9
 //!
-//! [`check_certificate`] takes `&[u8]`. There is no other entry point, and no
-//! constructor exists for [`wire::Certificate`] outside [`wire::decode`], which also
-//! takes `&[u8]`. An engine therefore cannot hand the checker a structure it built —
+//! [`check_certificate`] takes `&[u8]`, and it is the only public free function that
+//! returns a [`Verdict`]; no constructor exists for [`wire::Certificate`] outside
+//! [`wire::decode`], which also takes `&[u8]`. The checks that pin this (the crate's
+//! `pr9_exit_evidence.rs` and the C018 audit) cover `fn` and method signatures and
+//! public statics, consts, aliases and fields. They do not cover trait-associated
+//! items or other forms, so "no other entry point" is not a proved statement
+//! (bn-2npu, Codex cr-3i3rst). An engine therefore cannot hand the checker a structure it built —
 //! the type system, not a convention, forbids it. This is the mechanical half of
 //! INV-004 ("no self-certification"); the other half is that the crate cannot link an
 //! engine at all.

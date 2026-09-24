@@ -3259,3 +3259,141 @@ fn an_edge_identity_is_domain_separated_from_a_node_identity() {
     // The subject's status is exactly what it was: an edge is not a promotion.
     assert_eq!(node(&fixture, &subject).status(), before);
 }
+
+// --- the fair-SCC eventuality scope, end to end (bn-2npu, cr-10mg1y) -------------------------
+
+/// A `CONTTMPC` fair-SCC exclusion certificate over one variable `p ∈ 0..=3`, no fair
+/// actions, written from `continuum-kernel-temporal`'s documented grammar.
+fn eventuality_certificate(
+    states: &[i64],
+    goal: &[i64],
+    initial: &[i64],
+    rows: &[&[(u16, i64)]],
+) -> Vec<u8> {
+    fn u16(out: &mut Vec<u8>, v: u16) {
+        out.extend_from_slice(&v.to_be_bytes());
+    }
+    fn u32(out: &mut Vec<u8>, v: usize) {
+        out.extend_from_slice(&u32::try_from(v).expect("small").to_be_bytes());
+    }
+    fn token(out: &mut Vec<u8>, s: &str) {
+        u16(out, u16::try_from(s.len()).expect("short"));
+        out.extend_from_slice(s.as_bytes());
+    }
+    let mut out = b"CONTTMPC".to_vec();
+    u16(&mut out, 1); // wire epoch
+    u16(&mut out, 2); // fair-scc-exclusion
+    for t in [
+        "blake3:eventuality-model",
+        "continuum-semantics-1",
+        "blake3:eventually-goal",
+        "blake3:eventuality-scope",
+        "blake3:empty-assumptions",
+        "daemon-evidence/0",
+    ] {
+        token(&mut out, t);
+    }
+    u16(&mut out, 1); // schema epoch
+    u16(&mut out, 0); // domain packs
+    u16(&mut out, 1);
+    token(&mut out, "p");
+    out.extend_from_slice(&0_i64.to_be_bytes());
+    out.extend_from_slice(&3_i64.to_be_bytes());
+    u32(&mut out, states.len());
+    for s in states {
+        out.extend_from_slice(&s.to_be_bytes());
+    }
+    u16(&mut out, 1); // eventually-state-set
+    u32(&mut out, goal.len());
+    for s in goal {
+        out.extend_from_slice(&s.to_be_bytes());
+    }
+    u32(&mut out, initial.len());
+    for s in initial {
+        out.extend_from_slice(&s.to_be_bytes());
+    }
+    u16(&mut out, 2);
+    token(&mut out, "a");
+    token(&mut out, "b");
+    u16(&mut out, 1); // weak fairness
+    u16(&mut out, 0); // no fair actions
+    for row in rows {
+        u32(&mut out, row.len());
+        for (action, target) in *row {
+            u16(&mut out, *action);
+            out.extend_from_slice(&target.to_be_bytes());
+        }
+    }
+    out
+}
+
+#[test]
+fn the_daemon_relays_the_eventuality_scope_the_temporal_kernel_decides() {
+    use continuum_certificate::continuum_kernel_temporal;
+
+    // (name, certificate, the kernel's expected rejection reason or None for valid)
+    let cases: Vec<(&str, Vec<u8>, Option<&str>)> = vec![
+        (
+            "initial-goal-dead-end",
+            eventuality_certificate(&[0, 1, 2], &[1], &[0], &[&[(0, 1)], &[(0, 2)], &[]]),
+            None,
+        ),
+        (
+            "initial-is-goal-then-dead-end",
+            eventuality_certificate(&[0, 1], &[0], &[0], &[&[(0, 1)], &[]]),
+            None,
+        ),
+        (
+            "initial-dead-end",
+            eventuality_certificate(&[0, 1], &[1], &[0], &[&[], &[]]),
+            Some("progress-deadlock"),
+        ),
+        (
+            "goal-on-one-branch-dead-end-on-the-other",
+            eventuality_certificate(&[0, 1, 2], &[2], &[0], &[&[(0, 1), (1, 2)], &[], &[]]),
+            Some("progress-deadlock"),
+        ),
+        (
+            "post-goal-cycle",
+            eventuality_certificate(&[0, 1, 2], &[1], &[0], &[&[(0, 1)], &[(0, 2)], &[(0, 2)]]),
+            None,
+        ),
+    ];
+    for (name, bytes, expected) in cases {
+        // The kernel's own verdict over the bytes.
+        let kernel = continuum_kernel_temporal::check_certificate(&bytes);
+        match (expected, &kernel) {
+            (None, continuum_kernel_temporal::Verdict::Verified(_)) => {}
+            (Some(reason), continuum_kernel_temporal::Verdict::Rejected(r)) => {
+                assert_eq!(r.reason(), reason, "{name}");
+            }
+            _ => panic!("{name}: the kernel answered {kernel:?}"),
+        }
+
+        // The daemon's answer over the same bytes.
+        let mut fixture = fixture();
+        let handle = certificate_node(&mut fixture, &format!("certs/{name}.cert"), bytes);
+        let outcome = verify(&mut fixture, &handle, "req_eventuality", "idem-eventuality");
+        match expected {
+            None => {
+                assert_eq!(
+                    outcome.envelope.status,
+                    ResultStatus::Ok,
+                    "{name}: {:?}",
+                    outcome.envelope.error
+                );
+                assert_eq!(verify_response(&outcome).status, EvidenceStatus::Validated);
+            }
+            Some(reason) => {
+                assert_eq!(code(&outcome), ErrorCode::CertificateRejected, "{name}");
+                match &outcome.data {
+                    ErrorData::CertificateRejection(data) => {
+                        assert_eq!(data.checker, "continuum-kernel-temporal", "{name}");
+                        assert_eq!(data.reason, reason, "{name}");
+                    }
+                    ErrorData::None => panic!("{name}: CertificateRejected carries its data"),
+                }
+            }
+        }
+    }
+}

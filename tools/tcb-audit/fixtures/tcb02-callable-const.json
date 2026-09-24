@@ -1,0 +1,20 @@
+{
+  "id": "tcb02-callable-const",
+  "crate": "continuum-kernel-core",
+  "why": "a public const holding a function pointer that decides a verdict",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\nfn decide_impl(certificate: &crate::wire::Certificate) -> Verdict {\n    let _ = certificate;\n    check_certificate(&[])\n}\n\n/// Fixture: a callable const.\npub const DECIDE: fn(&crate::wire::Certificate) -> Verdict = decide_impl;\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: const DECIDE"
+  ],
+  "expect": "public value the scan cannot prove wire-only",
+  "authority_test": {
+    "package": "continuum-kernel-core",
+    "target": "pr9_exit_evidence"
+  },
+  "expect_authority_failure": true
+}

@@ -1,0 +1,15 @@
+{
+  "id": "tcb02-certificate-check-method",
+  "crate": "continuum-kernel-core",
+  "why": "a Certificate::check method: a verdict from shared memory",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\nimpl crate::wire::Certificate {\n    /// Fixture: a verdict from the decoded structure.\n    #[must_use]\n    pub fn check(&self) -> Verdict {\n        check_certificate(&[])\n    }\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: impl crate::wire::Certificate: fn check(&self) -> Verdict"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}

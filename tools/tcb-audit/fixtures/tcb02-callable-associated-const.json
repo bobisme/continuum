@@ -1,0 +1,21 @@
+{
+  "id": "tcb02-callable-associated-const",
+  "crate": "continuum-kernel-core",
+  "why": "an associated const holding a function pointer",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\nfn decide_impl(certificate: &crate::wire::Certificate) -> Verdict {\n    let _ = certificate;\n    check_certificate(&[])\n}\n\n/// Fixture: a holder.\npub struct Holder;\n\nimpl Holder {\n    /// Fixture: the decider.\n    pub const DECIDE: fn(&crate::wire::Certificate) -> Verdict = decide_impl;\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: impl Holder: const DECIDE",
+    "crates/continuum-kernel-core/src/check.rs: struct Holder"
+  ],
+  "expect": "public value the scan cannot prove wire-only",
+  "authority_test": {
+    "package": "continuum-kernel-core",
+    "target": "pr9_exit_evidence"
+  },
+  "expect_authority_failure": true
+}

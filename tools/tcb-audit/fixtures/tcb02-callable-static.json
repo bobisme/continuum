@@ -1,0 +1,20 @@
+{
+  "id": "tcb02-callable-static",
+  "crate": "continuum-kernel-core",
+  "why": "a public static holding a closure that decides a verdict from a decoded certificate",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a callable static.\npub static DECIDE_DECODED: &(dyn Fn(&crate::wire::Certificate) -> Verdict + Sync) =\n    &|certificate: &crate::wire::Certificate| {\n        let _ = certificate;\n        check_certificate(&[])\n    };\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: static DECIDE_DECODED"
+  ],
+  "expect": "public value the scan cannot prove wire-only",
+  "authority_test": {
+    "package": "continuum-kernel-core",
+    "target": "pr9_exit_evidence"
+  },
+  "expect_authority_failure": true
+}

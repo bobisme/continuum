@@ -1,0 +1,14 @@
+{
+  "description": "A `mod` declaration whose file is absent from `src/` can only be satisfied from somewhere the covenant does not look.",
+  "id": "kcov-07-module-without-a-file",
+  "requirement": "KCOV-07",
+  "rule": "no-plugins-or-dynamic-loading",
+  "substitute": {
+    "crates/continuum-certificate/src/lib.rs": [
+      {
+        "find": "pub mod check;",
+        "replace": "pub mod check;\nmod phantom;"
+      }
+    ]
+  }
+}

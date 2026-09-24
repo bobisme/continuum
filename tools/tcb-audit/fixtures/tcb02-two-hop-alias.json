@@ -1,0 +1,16 @@
+{
+  "id": "tcb02-two-hop-alias",
+  "crate": "continuum-kernel-core",
+  "why": "two hops through a private alias, defined before its user",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: private hop.\ntype HiddenDecision = Verdict;\n/// Fixture: public hop.\npub type Decision = HiddenDecision;\n\n/// Fixture: decided from a decoded certificate.\n#[must_use]\npub fn decide(certificate: &crate::wire::Certificate) -> Decision {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(certificate: &crate::wire::Certificate) -> Decision",
+    "crates/continuum-kernel-core/src/check.rs: type Decision = HiddenDecision"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "tcb02-aliased-return",
+  "crate": "continuum-kernel-core",
+  "why": "one public alias hop",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\n/// Fixture: a verdict under another name.\npub type Decision = Verdict;\n\n/// Fixture: decided from a decoded certificate.\n#[must_use]\npub fn decide(certificate: &crate::wire::Certificate) -> Decision {\n    let _ = certificate;\n    check_certificate(&[])\n}\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(certificate: &crate::wire::Certificate) -> Decision",
+    "crates/continuum-kernel-core/src/check.rs: type Decision = Verdict"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}

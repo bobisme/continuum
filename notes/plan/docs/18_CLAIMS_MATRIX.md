@@ -96,8 +96,9 @@ record `tools/triptych/evidence/c023.json` (bn-2270, A7 by bn-ujpz0). The audit
 reads the full resolved graph, dev edges included, and derives the roles from the
 members. Over it, the checking base links only itself, no producer links the
 checking base, the model plane and the program plane do not link each other, and
-the graph has no cycle. Every public verdict entry of the checking base takes wire
-bytes only. A kernel entry that takes a decoded certificate makes the real Rust
+the graph has no cycle. Every public verdict-returning `fn` of the checking base
+takes wire bytes only; trait-associated items and other forms are not checked (see
+C018's record). A kernel entry that takes a decoded certificate makes the real Rust
 test `checking_has_exactly_one_public_entry_point_and_it_takes_wire_form_bytes`
 fail. Seventeen circular mutants are rejected by the audit. The boundary gate owns
 five of them, and it rejects each. For the other twelve, the fixture states why
@@ -183,3 +184,72 @@ records each of them. The campaign also found 8 mutants that `no-downgrade`
 allowed on an added accepted evidence class. RFC 0031 correction 20 (bn-36luu)
 now routes each of them to `review`.
 C033, agent repair of concurrent Rust, stays TARGET.
+
+C018 stays TARGET. bn-2npu ran the independent checker audit and the mutation
+campaign, and the evidence does not show a material shrink yet. The audit is
+`tools/check_tcb_audit.py`, with its retained record
+`tools/tcb-audit/evidence/c018.json`. It reads the resolved dependency graph by Cargo
+package id, dev edges included. Over it, the checking base links only its own
+workspace members and no external package. No second package, version or renamed
+dependency carries a checking-base name. Each of its five crates has one public
+verdict-returning `fn`, and it takes wire bytes only. The Rust entry-point tests are
+the authority for that. The audit's lexical scan (TCB-02) is a conservative second
+line, and it is not complete over the public surface. It refuses whole syntactic
+classes rather than proving them safe, and it covers exactly these: `fn` and method
+signatures, aliases and renames, public statics, consts, fields and inherent
+associated consts, trait methods, and `#[path]`, `cfg_attr`, `include!` and macro
+constructs. It does not cover trait-associated consts or types, or forms it does not
+name. One such route is pinned as a known miss: a public trait const holding a
+verdict-returning callable, bound in a checking-base impl. Both the scan and the Rust
+test accept it, and the evidence records that. A complete check needs a public API
+surface derived from rustc. The scan is bound to what rustc compiled: the files in
+rustc's dep-info for the five crates must equal the files the scan reads. Twenty-two
+compiling fixtures each fail it for their own stated reason. The retained record is
+checked whole: its controls, rows, summary and measurements must equal a
+recomputation, and its digest covers every file under the checking crates and the
+workspace build inputs. The record is replaced only by a campaign that passed. The
+checking base is 11545 shipped lines by the KCOV counting method. An edit to it fails
+`just covenant` until the lane runs again.
+
+The checker campaign is `crates/continuum-certificate/tests/c018_checker_mutation.rs`.
+Its ledger is `tests/golden/c018_checker_ledger.txt`, and its corpus is
+`tests/c018-corpus/cases.txt`. It covers the six classes the kernels check: finite
+closure, state type, LRAT, SMT proof, ranking and fair-SCC exclusion. The kernels
+accept all nine green certificates. They reject 27 of 28 corrupted certificates, each
+for the reason it targets. The exception is a false SMT theory lemma. The kernel
+accepts it by design, and the claim names `TRUSTED_SOLVER` and the theory. Of 8142
+single-byte mutants, the kernels accept 1508. For each one, an oracle re-derives the
+claim from the mutant by a different method, over the kernels' own decoder. No
+accepted claim is false about the structure the mutant carries. Some accepted mutants
+carry a different relation, such as a transition moved to another table state. The
+kernel cannot tell those from a producer's intent.
+
+Twenty-five source mutants of the checking base ran against scratch copies of its
+crates. The campaign kills 24 of them. Thirteen let a lie through, a false claim or a
+broken proof. One overstates the assurance of a lemma proof, 6 reject a green, 2 give
+a wrong reason, and 2 change only the ledger. The two ledger-only kills are decoder
+canonicity rules. The survivor removes an arity guard that no wire input can reach.
+
+The audit found one checker defect, and Codex review cr-10mg1y found a second in the
+first fix. Fair-SCC exclusion accepted `eventually goal` for a system that stops at a
+non-goal state before any goal visit. Its reachability also ran through goal states,
+so it rejected a fair cycle, and after the first fix a dead end, that comes only after
+a goal visit. bn-2npu fixed both. Reachability now stops at goal states, and a dead
+end or fair cycle refutes the claim only when an execution reaches it without a goal
+visit. `crates/continuumd/tests/c018_fair_scc_dead_end_differential.rs` holds the
+kernel to the reference engine's deadlock report over the goal-stopped model, and
+`crates/continuumd/tests/daemon_evidence.rs` holds the daemon's answer to the
+kernel's.
+
+The shrink was measured on the one class with a real producer: finite closure from
+`continuum-engine-reference`. Twelve producer mutants ran through
+`crates/continuum-engine-reference/tests/c018_producer_corpus.rs`. The kernel caught 2
+search faults and 2 emitter faults. It missed 4 emitter faults and 3 evaluator faults,
+and the evaluator refused 1 before emission. Each missed mutant writes a closed,
+in-domain relation that is not the model's. The kernel sees the model only as an
+envelope digest, so the relation stays trusted. `bfs.rs` (892 lines) had no observed
+escape for finite-closure certificates. `certificate.rs` and `model.rs` (2319 lines)
+stay trusted, and the checker for this class adds 2960 lines. That is not a material
+shrink. The SAT, SMT and temporal kernels have no producer in the workspace, so their
+shrink is not measured. C018 needs a checker that re-derives the successor relation
+from the model, or a large producer whose search the checker replaces.

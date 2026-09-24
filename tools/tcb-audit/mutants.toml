@@ -1,0 +1,413 @@
+# C018 source mutants (bn-2npu).
+#
+# `tools/check_tcb_audit.py --evidence` applies each mutant, one at a time, to a
+# scratch copy of the checking base and the reference producer, then runs a real
+# Rust test target over the mutated code:
+#
+#   side = "checker"   ->  continuum-certificate --test c018_checker_mutation
+#   side = "producer"  ->  continuum-engine-reference --test c018_producer_corpus
+#
+# `find` must occur exactly once in `file`. The gate checks that against the live
+# tree, so a source edit that moves a mutant's target fails `just covenant` until
+# this file is updated and the evidence is regenerated.
+#
+# `expect` is the claim the campaign makes about the mutant. The gate compares it
+# with the recorded outcome:
+#
+#   checker:  killed    - at least one test of the target fails
+#             survives  - no test fails; `reason` must say why that is acceptable
+#   producer: caught    - the kernel rejects a changed certificate
+#             missed    - a changed certificate still verifies; `reason` names the
+#                         trusted component that let it through
+#             refused   - the producer errors before the kernel is asked
+#             no-effect - no certificate of the corpus changes
+
+schema = "continuum.tcb-audit.mutants/1"
+
+# --- checker: continuum-kernel-core --------------------------------------------
+
+[[mutant]]
+id = "core-closure-rule-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "Post(S) ⊆ S"
+find = "if body.table().position(transition.target()).is_none() {"
+replace = "if false && body.table().position(transition.target()).is_none() {"
+expect = "killed"
+
+[[mutant]]
+id = "core-domain-rule-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "S ⊆ P"
+find = "if !variable.admits(*value) {"
+replace = "if false && !variable.admits(*value) {"
+expect = "killed"
+
+[[mutant]]
+id = "core-initial-rule-off"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "Init ⊆ S"
+find = "if body.table().position(state).is_none() {"
+replace = "if false && body.table().position(state).is_none() {"
+expect = "killed"
+
+[[mutant]]
+id = "core-action-bound-off-by-one"
+side = "checker"
+file = "crates/continuum-kernel-core/src/check.rs"
+targets = "every transition names a declared action (boundary)"
+find = "if u32::from(transition.action()) >= action_count {"
+replace = "if u32::from(transition.action()) > action_count {"
+expect = "killed"
+
+[[mutant]]
+id = "core-decoder-accepts-unsorted-table"
+side = "checker"
+file = "crates/continuum-kernel-core/src/wire.rs"
+targets = "canonicity: a strictly ascending state table"
+find = "(Some(before), Some(here)) => before < here,"
+replace = "(Some(before), Some(here)) => before != here,"
+expect = "killed"
+
+[[mutant]]
+id = "core-decoder-accepts-trailing-bytes"
+side = "checker"
+file = "crates/continuum-kernel-core/src/wire.rs"
+targets = "canonicity: no trailing bytes"
+find = """    if !reader.is_empty() {
+        return Err(DecodeFailure::Rejected(Rejection::TrailingBytes {"""
+replace = """    if false && !reader.is_empty() {
+        return Err(DecodeFailure::Rejected(Rejection::TrailingBytes {"""
+expect = "killed"
+
+[[mutant]]
+id = "core-lookup-ignores-arity"
+side = "checker"
+file = "crates/continuum-kernel-core/src/wire.rs"
+targets = "state lookup: a vector of the wrong arity is never a member"
+find = """    pub fn position(&self, state: &[i64]) -> Option<u32> {
+        if state.len() != self.arity {
+            return None;
+        }"""
+replace = """    pub fn position(&self, state: &[i64]) -> Option<u32> {"""
+expect = "survives"
+reason = "Every vector the decoder hands to `position` is read with the table's own arity, so no wire input reaches the guard. It is defence in depth. The kernel's own unit test of `position` kills this mutant, but the lane runs only the C018 target."
+
+# --- checker: continuum-kernel-sat ---------------------------------------------
+
+[[mutant]]
+id = "sat-chain-need-not-conflict"
+side = "checker"
+file = "crates/continuum-kernel-sat/src/check.rs"
+targets = "RUP: every chain ends in a conflict"
+find = """    if conflict {
+        Ok(propagations)"""
+replace = """    if true {
+        Ok(propagations)"""
+expect = "killed"
+
+[[mutant]]
+id = "sat-empty-clause-not-required"
+side = "checker"
+file = "crates/continuum-kernel-sat/src/check.rs"
+targets = "refutation: the empty clause is derived"
+find = "if refuted_at.is_none() {"
+replace = "if false && refuted_at.is_none() {"
+expect = "killed"
+
+[[mutant]]
+id = "sat-deleted-hint-allowed"
+side = "checker"
+file = "crates/continuum-kernel-sat/src/check.rs"
+targets = "the clause store: deleted clauses are gone"
+find = """        if !store.is_active(slot) {
+            return Err(Rejection::HintDeleted {"""
+replace = """        if false && !store.is_active(slot) {
+            return Err(Rejection::HintDeleted {"""
+expect = "killed"
+
+[[mutant]]
+id = "sat-tautology-allowed"
+side = "checker"
+file = "crates/continuum-kernel-sat/src/check.rs"
+targets = "no vacuous derivation"
+find = """    if clause.is_tautology() {
+        return Err(Rejection::VacuousDerivation { step });"""
+replace = """    if false && clause.is_tautology() {
+        return Err(Rejection::VacuousDerivation { step });"""
+expect = "killed"
+
+[[mutant]]
+id = "sat-rup-assumes-the-clause"
+side = "checker"
+file = "crates/continuum-kernel-sat/src/check.rs"
+targets = "RUP: assume the negation of the derived clause"
+find = "        assignment.satisfy(literal.wrapping_neg());"
+replace = "        assignment.satisfy(*literal);"
+expect = "killed"
+
+[[mutant]]
+id = "sat-conflict-anywhere"
+side = "checker"
+file = "crates/continuum-kernel-sat/src/check.rs"
+targets = "a chain's conflict is its last antecedent"
+find = "                if index != last {"
+replace = "                if false && index != last {"
+expect = "killed"
+
+# --- checker: continuum-kernel-smt ---------------------------------------------
+
+[[mutant]]
+id = "smt-chain-need-not-conflict"
+side = "checker"
+file = "crates/continuum-kernel-smt/src/check.rs"
+targets = "RUP: every chain ends in a conflict"
+find = """    if conflict {
+        Ok(effect)"""
+replace = """    if true {
+        Ok(effect)"""
+expect = "killed"
+
+[[mutant]]
+id = "smt-lemma-use-not-recorded"
+side = "checker"
+file = "crates/continuum-kernel-smt/src/check.rs"
+targets = "assurance: a refutation that used a lemma is trusted-solver"
+find = "            effect.lemmas.push(*id);"
+replace = ""
+expect = "killed"
+
+# --- checker: continuum-kernel-temporal ----------------------------------------
+
+[[mutant]]
+id = "tmp-rank-decrease-off"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "ranking: every step decreases the rank"
+find = "if target_rank >= rank {"
+replace = "if false && target_rank >= rank {"
+expect = "killed"
+
+[[mutant]]
+id = "tmp-ranking-dead-end-off"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "ranking: a non-goal state has a successor"
+find = """        if targets.is_empty() {
+            return Err(Rejection::ProgressDeadlock { state: index });"""
+replace = """        if false && targets.is_empty() {
+            return Err(Rejection::ProgressDeadlock { state: index });"""
+expect = "killed"
+
+[[mutant]]
+id = "tmp-goal-rank-off"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "ranking: goal states rank zero"
+find = "if rank != 0 {"
+replace = "if false && rank != 0 {"
+expect = "killed"
+
+[[mutant]]
+id = "tmp-revert-bn-2npu-dead-end-fix"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "fair-SCC exclusion: a reachable non-goal dead end refutes (the defect bn-2npu fixed)"
+find = """            if let Some(state) = stuck_state(&common.successors, &in_scope) {
+                return Verdict::Rejected(Rejection::ProgressDeadlock { state });
+            }"""
+replace = """            let _ = stuck_state;"""
+expect = "killed"
+
+[[mutant]]
+id = "tmp-stuck-state-ignores-scope"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "fair-SCC exclusion: only reachable non-goal dead ends refute (the scope of the bn-2npu rule)"
+find = "if targets.is_empty() && in_scope.get(index).copied().unwrap_or(false) {"
+replace = "if targets.is_empty() {"
+expect = "killed"
+
+[[mutant]]
+id = "tmp-reachability-walks-through-goals"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "fair-SCC exclusion: behaviour after a goal visit does not refute eventually-goal (cr-10mg1y)"
+find = """        if common.goal.get(state as usize).copied().unwrap_or(false) {
+            continue;
+        }"""
+replace = ""
+expect = "killed"
+
+[[mutant]]
+id = "tmp-no-cycle-is-fair"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "fair-SCC exclusion: a fair cycle refutes"
+find = """            let fair = carries_cycle(successors, in_scope, &component)
+                && is_fair(body, successors, &membership, &component);"""
+replace = """            let fair = carries_cycle(successors, in_scope, &component)
+                && is_fair(body, successors, &membership, &component)
+                && false;"""
+expect = "killed"
+
+[[mutant]]
+id = "tmp-every-cycle-is-fair"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "weak fairness: a cycle that never takes an enabled fair action is not fair"
+find = """        if !taken && !disabled {
+            return false;"""
+replace = """        if false && !taken && !disabled {
+            return false;"""
+expect = "killed"
+
+[[mutant]]
+id = "tmp-reachability-ignored"
+side = "checker"
+file = "crates/continuum-kernel-temporal/src/check.rs"
+targets = "fair-SCC exclusion: only reachable cycles refute"
+find = """        *flag = reachable.get(index).copied().unwrap_or(false)
+            && !goal.get(index).copied().unwrap_or(false);"""
+replace = """        *flag = !goal.get(index).copied().unwrap_or(false);"""
+expect = "killed"
+
+# --- checker: continuum-certificate (the router) --------------------------------
+
+[[mutant]]
+id = "router-matches-a-magic-prefix"
+side = "checker"
+file = "crates/continuum-certificate/src/family.rs"
+targets = "routing: the full eight-byte magic names the family"
+find = ".find(|family| family.magic() == *magic)"
+replace = ".find(|family| family.magic().get(..4) == magic.get(..4))"
+expect = "killed"
+
+# --- producer: continuum-engine-reference (search) ------------------------------
+
+[[mutant]]
+id = "bfs-loses-first-discovery"
+side = "producer"
+file = "crates/continuum-engine-reference/src/bfs.rs"
+targets = "search: every discovered state is kept"
+find = "        for (target, action) in discovered {"
+replace = "        for (target, action) in discovered.into_iter().skip(1) {"
+expect = "caught"
+
+[[mutant]]
+id = "bfs-stops-at-depth-two"
+side = "producer"
+file = "crates/continuum-engine-reference/src/bfs.rs"
+targets = "search: the walk runs until the queue is empty"
+find = "    while let Some((here, depth)) = queue.pop_front() {"
+replace = "    while let Some((here, depth)) = queue.pop_front().filter(|(_, d)| *d < 2) {"
+expect = "caught"
+
+# --- producer: continuum-engine-reference (emitter) -----------------------------
+
+[[mutant]]
+id = "emit-unsorted-table"
+side = "producer"
+file = "crates/continuum-engine-reference/src/certificate.rs"
+targets = "emission: the table is written in order"
+find = """    out.u32(state_count);
+    for state in states {"""
+replace = """    out.u32(state_count);
+    for state in states.iter().rev() {"""
+expect = "caught"
+
+[[mutant]]
+id = "emit-action-index-shift"
+side = "producer"
+file = "crates/continuum-engine-reference/src/certificate.rs"
+targets = "emission: a transition names its own action"
+find = """            out.u16(action_index(step, action_count)?);
+            out.state(step.target());"""
+replace = """            out.u16(action_index(step, action_count)?.saturating_add(1));
+            out.state(step.target());"""
+expect = "caught"
+
+[[mutant]]
+id = "emit-drops-first-initial-state"
+side = "producer"
+file = "crates/continuum-engine-reference/src/certificate.rs"
+targets = "emission: every initial state of the model is written"
+find = "    let initial = model.initial_states();"
+replace = "    let initial = model.initial_states().get(1..).filter(|rest| !rest.is_empty()).unwrap_or(model.initial_states());"
+expect = "missed"
+reason = "The kernel checks Init ⊆ S for the initial states the certificate carries. Whether they are all of the model's is certificate-model-correspondence, a trusted component."
+
+[[mutant]]
+id = "emit-drops-first-transition-of-each-row"
+side = "producer"
+file = "crates/continuum-engine-reference/src/certificate.rs"
+targets = "emission: every successor of a state is written"
+find = "        let width = count_u32(Field::TransitionCount, row.len(), 0, MAX_STATES)?;"
+replace = """        let row: Vec<Step> = row.into_iter().skip(1).collect();
+        let width = count_u32(Field::TransitionCount, row.len(), 0, MAX_STATES)?;"""
+expect = "missed"
+reason = "A sub-relation of a closed relation is still closed. The kernel checks closure under the carried rows, not that they are the model's rows (certificate-model-correspondence)."
+
+[[mutant]]
+id = "emit-widens-the-domain"
+side = "producer"
+file = "crates/continuum-engine-reference/src/certificate.rs"
+targets = "emission: the declared domain is the model's"
+find = "        out.i64(variable.domain().hi());"
+replace = "        out.i64(variable.domain().hi().saturating_add(1));"
+expect = "missed"
+reason = "The property P is the carried domain. A wider P is an easier S ⊆ P, and the binding of P to the property digest is envelope-digest-binding, a trusted component."
+
+[[mutant]]
+id = "emit-retargets-to-the-first-state"
+side = "producer"
+file = "crates/continuum-engine-reference/src/certificate.rs"
+targets = "emission: a transition names its own target"
+find = "            out.state(step.target());"
+replace = "            out.state(states.first().unwrap_or(step.target()));"
+expect = "missed"
+reason = "Every table state is a member, so a wrong target inside the table keeps the set closed. Target fidelity is certificate-model-correspondence."
+
+# --- producer: continuum-model-core (the successor evaluator) --------------------
+
+[[mutant]]
+id = "eval-skips-the-last-action"
+side = "producer"
+file = "crates/continuum-model-core/src/model.rs"
+targets = "evaluation: every action is tried"
+find = "        for action in 0..self.actions.len() {"
+replace = "        for action in 0..self.actions.len().saturating_sub(1) {"
+expect = "missed"
+reason = "Search and emission share the evaluator, so the wrong relation is explored and certified consistently. The kernel never sees the model."
+
+[[mutant]]
+id = "eval-update-off-by-one"
+side = "producer"
+file = "crates/continuum-model-core/src/model.rs"
+targets = "evaluation: an update writes the value it computed"
+find = "                *slot = value;"
+replace = "                *slot = if value > 0 { value - 1 } else { value };"
+expect = "missed"
+reason = "A consistent evaluator bug yields a closed, in-domain, wrong relation. The kernel checks the carried relation, not the model's."
+
+[[mutant]]
+id = "eval-frame-rule-broken"
+side = "producer"
+file = "crates/continuum-model-core/src/model.rs"
+targets = "evaluation: unassigned variables keep their value"
+find = "            let mut values = state.values.clone();"
+replace = "            let mut values = vec![0; state.values.len()];"
+expect = "missed"
+reason = "As eval-update-off-by-one: the explorer and the emitter agree on a wrong relation."
+
+[[mutant]]
+id = "eval-guards-ignored"
+side = "producer"
+file = "crates/continuum-model-core/src/model.rs"
+targets = "evaluation: a disabled action has no successor"
+find = "        if !self.is_enabled(action, state)? {"
+replace = "        if false && !self.is_enabled(action, state)? {"
+expect = "refused"
+reason = "`inc` at `x = 4` leaves the domain, and the evaluator reports UpdateOutOfDomain before any certificate exists. A guard bug that stays inside the domain would be missed like the other evaluator mutants."

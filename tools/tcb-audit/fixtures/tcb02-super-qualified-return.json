@@ -1,0 +1,16 @@
+{
+  "id": "tcb02-super-qualified-return",
+  "crate": "continuum-kernel-core",
+  "why": "a `super::` return path from a nested module",
+  "edits": [
+    {
+      "file": "crates/continuum-kernel-core/src/check.rs",
+      "append": "\nmod inner {\n    /// Fixture: a verdict through `super::`.\n    #[must_use]\n    pub fn decide(decoded: &crate::wire::Certificate) -> super::Verdict {\n        let _ = decoded;\n        super::check_certificate(&[])\n    }\n}\n/// Fixture: re-exported.\npub use inner::decide;\n"
+    }
+  ],
+  "inventory_add": [
+    "crates/continuum-kernel-core/src/check.rs: fn decide(decoded: &crate::wire::Certificate) -> super::Verdict",
+    "crates/continuum-kernel-core/src/check.rs: use inner::decide"
+  ],
+  "expect": "yields a verdict from non-wire input"
+}
