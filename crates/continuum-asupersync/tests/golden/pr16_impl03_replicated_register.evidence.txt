@@ -1,0 +1,110 @@
+# PR-16/IMPL-03 replicated register on asupersync 0.5.0 (bn-131yp): the program in
+# crates/continuum-asupersync/tests/support/replicated_register.rs, run through the
+# binding, projected onto notes/plan/examples/durable_register.ctm.
+# Regenerate: PR16_IMPL03_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl03_replicated_register
+
+[pr16-impl03-pos-01-two-writers]
+plan two-writers: epochs=1 values a=v0 b=v0 c=v1
+  a: reserve0 submit0 sync0 release0 confirm0
+  b: reserve0 submit0 sync0 release0 confirm0
+  c: idle
+program: actors=5 operations=27 tasks=4
+scope: exhaustive, every admissible log with the setup first: 6732; logs digest a31e667b1032900c5f70ac1136708c0abc173c7c107e5f28c0223c59208f0f6d
+journals: 6732 runs, 6732 distinct, 6732 conform, 6732 A7-accepted, 0 projection refusals
+steps: 398340 observed, 351216 stutters
+durable-register steps: Ack=6732 Reserve=13464 Submit=13464 Sync=13464
+abstract chooses: Choose(epoch=0,value=v0)=6732
+projected states: 17 of 248 reachable
+failures: 0
+
+[pr16-impl03-pos-02-quorum-split]
+plan quorum-split: epochs=1 values a=v0 b=v0 c=v1
+  a: reserve0 submit0 sync0 release0 confirm0
+  b: reserve0 submit0 sync0 release0 confirm0
+  c: reserve0 submit0 sync0 release0 confirm0
+program: actors=6 operations=36 tasks=5
+scope: sampled, 400 admissible logs from seed 0x1603 (more than 50000 exist); logs digest 8cf097ba565646d36e09aacbc444ba629115676c8008d94a78b85b5440574949
+journals: 400 runs, 400 distinct, 400 conform, 400 A7-accepted, 0 projection refusals
+steps: 33213 observed, 29213 stutters
+durable-register steps: Ack=400 Reserve=1200 Submit=1200 Sync=1200
+abstract chooses: Choose(epoch=0,value=v0)=400
+projected states: 68 of 248 reachable
+failures: 0
+
+[pr16-impl03-pos-03-crash-restart]
+plan crash-restart: epochs=1 values a=v0 b=v0 c=v0
+  a: reserve0 submit0 crash reserve0 submit0 sync0 release0 confirm0
+  b: reserve0 crash reserve0 submit0 sync0 release0 confirm0
+  c: reserve0 submit0 sync0 crash confirm0
+program: actors=5 operations=46 tasks=7
+scope: sampled, 400 admissible logs from seed 0x1603 (more than 50000 exist); logs digest d22dd0b94b19dad250e8bd5a9e184740cf25afa5ad166d567cee4069ccf1f71d
+journals: 400 runs, 400 distinct, 400 conform, 400 A7-accepted, 0 projection refusals
+steps: 46831 observed, 40831 stutters
+durable-register steps: Ack=400 Lose/reserved=400 Lose/volatile=400 Reserve=2000 Submit=1600 Sync=1200
+abstract chooses: Choose(epoch=0,value=v0)=400
+projected states: 72 of 248 reachable
+failures: 0
+
+[pr16-impl03-pos-04-abort-retry]
+plan abort-retry: epochs=1 values a=v1 b=v1 c=v0
+  a: reserve0 abort0 reserve0 submit0 sync0 release0 confirm0
+  b: reserve0 submit0 sync0 release0 confirm0
+  c: reserve0 submit0 sync0 release0 confirm0
+program: actors=6 operations=38 tasks=5
+scope: sampled, 400 admissible logs from seed 0x1603 (more than 50000 exist); logs digest 9ac1fe94838450126517583a6a06026b6358ebde09a0f495962886673a793215
+journals: 400 runs, 400 distinct, 400 conform, 400 A7-accepted, 0 projection refusals
+steps: 35688 observed, 30888 stutters
+durable-register steps: Abort=400 Ack=400 Reserve=1600 Submit=1200 Sync=1200
+abstract chooses: Choose(epoch=0,value=v1)=400
+projected states: 68 of 248 reachable
+failures: 0
+
+[pr16-impl03-pos-05-two-epochs]
+plan two-epochs: epochs=2 values a=v0/v1 b=v0/v1 c=v1/v1
+  a: reserve0 submit0 sync0 release0 confirm0 reserve1 submit1 sync1 release1 confirm1
+  b: reserve1 submit1 sync1 release1 confirm1 reserve0 submit0 sync0 release0 confirm0
+  c: reserve0 submit0 sync0 release0 confirm0 reserve1 submit1 crash reserve1 submit1 sync1 release1 confirm1
+program: actors=7 operations=72 tasks=11
+scope: sampled, 400 admissible logs from seed 0x1603 (more than 50000 exist); logs digest 82bf8fc7faa83deb24dff9144102e978302d8b752baf1ebadfbe2f04ddb5013c
+journals: 400 runs, 400 distinct, 400 conform, 400 A7-accepted, 0 projection refusals
+steps: 70861 observed, 61661 stutters
+durable-register steps: Ack=800 Lose/volatile=400 Reserve=2800 Submit=2800 Sync=2400
+abstract chooses: Choose(epoch=0,value=v0)=400 Choose(epoch=1,value=v1)=400
+projected states: 334 of 61504 reachable
+failures: 0
+
+[pr16-impl03-pos-06-port]
+slot protocol ported verbatim from crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs: 9 items
+claim A: scope: Complete { states: 61504 }; correspondence: steps=597184 stutters=581312 chooses=15872 realized=4 covered=9 failures=0; durability step violations: 0
+one epoch: scope: Complete { states: 248 }; correspondence: steps=1204 stutters=1172 chooses=32 realized=2 covered=3 failures=0; durability step violations: 0
+pinned notes/plan/examples/durable_register.ctm fab2eeb019b3487f60e463ce7cd6b0e30172cfa0f7670bee7cdae8882fc78636
+pinned notes/plan/examples/abstract_register.ctm da82b97b927e48fdf1ed6dde6413a9471888398e5499c1c588893decb51c1b40
+pinned crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::project 65c573ee5455541732d56b677527b7c844945ae3b241fa9ddbbd651d666c2a2b
+pinned crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::correspondence 2df9757c41eb672c7ca9918dad9da7ab3496bc792d03a5f52d2c8df419ae0fd3
+pinned crates/continuum-cml-elab/tests/pr16_impl02_durable_register.rs::durability_violations 4d0d6a3da785770b08ba867616e8b81445016c65bfb703193f13f8247478b61c
+
+[pr16-impl03-neg-01-missing-sync]
+two-writers log 0 without the first sync
+first failure: NotAnEnabledStep at `51 reserve-commit-abort committed e2`
+
+[pr16-impl03-neg-02-ack-before-quorum]
+two-writers log 0 with the ack moved before the first sync
+first failure: NotAnEnabledStep at `22 reserve-commit-abort committed e2`
+
+[pr16-impl03-neg-03-crash-keeps-bytes]
+crash-restart log 0 without a's lost bytes
+first failure: Unprojectable at `49 reserve-commit-abort reserved e2 task=t1`
+
+[pr16-impl03-bnd-01-parked-coordinator]
+log [0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0]
+refusal: task t3 waits on a channel and cannot take a command
+
+[pr16-impl03-bnd-02-wrong-roles]
+two-writers log 0 with crash-restart's roles
+refusal: RolesDisagree { seq: 16 }
+
+[pr16-impl03-bnd-03-no-quorum-no-ack]
+quorum-split: Sync(n=c,epoch=0)=400 Ack(epoch=0,value=v1)=0
+
+[pr16-impl03-bnd-04-sampled-scope]
+sampled, each over 50000 admissible logs: quorum-split crash-restart abort-retry two-epochs
