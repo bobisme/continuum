@@ -7,8 +7,9 @@
 //!
 //! The constitutional backdrop is INV-016 — content arriving from a source never carries
 //! authority — and the delivering evidence is `crates/continuum-security/src/injection.rs`
-//! (the corpus) plus `crates/continuumd/tests/g2_injection_corpus_evidence.rs` (twenty-nine
-//! tests reading the admission ledger and the stored carriers).
+//! (the corpus) plus `crates/continuumd/tests/g2_injection_corpus_evidence.rs` (thirty-four
+//! tests reading the admission ledger, the stored carriers, and which payloads a handler
+//! reads).
 //!
 //! # What this file is, and what it deliberately is not
 //!
@@ -50,11 +51,18 @@
 //!    refused" into "the corpus was refused *by T3 and by nothing else*" — the ladder,
 //!    scope, expiry, delegation and data-grant terms are all positively satisfied and
 //!    therefore excluded as explanations.
-//! 4. **Every request names live state.** The delivering suite's planter makes a
-//!    `predictable handles` payload the request's own handle, so such a case is a request
-//!    against a record that does not exist. [`plant`] never does that: every frame this file
-//!    sends names the fixture's real proposal, real staged commitment and real evidence node,
-//!    so no refusal here can be an accident of a dangling reference.
+//! 4. **Every body names live state, where it names a proposal, a commitment, an evidence
+//!    node or a pack.** The delivering suite's planter makes a `predictable handles` payload
+//!    the request's own handle, so such a case is a request against a record that does not
+//!    exist. [`plant`] never does that: every frame this file sends names the fixture's real
+//!    proposal, real staged commitment, real evidence node and, since bn-2lc0t, real Context
+//!    Pack ([`the_context_expand_case_reaches_its_anchor_at_every_rung`]). Until bn-2lc0t the
+//!    pack was not held, and this item overstated. Three references are still not live, and
+//!    are stated rather than hidden: the `task.resume` continuation and the `task.cancel` task
+//!    name nothing held (F4's handle-only bodies), and a `verification.start` envelope names
+//!    no snapshot, so that case is refused `MalformedRequest` at the rungs that admit it. None
+//!    of the three is privileged, so none bears on the privilege-bit comparison; the delivering
+//!    suite provisions real state for all three.
 //!
 //! # Findings, stated before any pass
 //!
@@ -200,8 +208,11 @@
 //!    refusal, however inert. Here ten cases answer `ok` at some rung: the six
 //!    `evidence.verify` cases against this fixture's real observation node, the three
 //!    `observe.ingest` cases at the rungs holding the production-trace grant, and the one
-//!    `evidence.query` case. In the delivering suite the `isolation/hard-kill` case answers
-//!    `ok` with the cancelled task's terminal status, and `evidence.query` answers `ok` too.
+//!    `evidence.query` case. In the delivering suite six cases answer without an error for some corpus
+//!    principal: `evidence.query`; for the reviser, the three `observe.ingest` cases (it holds
+//!    the production-trace grant since bn-2lc0t), the `isolation/resource-limits` start (`task_started`: a
+//!    campaign started under the all-absent budget its payload asks for), and the
+//!    `isolation/hard-kill` resume, answered with the cancelled task's terminal status.
 //!    None is a refusal, so the gate is open on this clause;
 //! 2. **zero unprivileged evidence-status alterations** (observed, from the daemon's own
 //!    status view, since the wire has no bulk status read) — at every rung, `read` included,
@@ -738,6 +749,11 @@ fn fixture() -> Fixture {
         )
         .expect("staging names its content");
 
+    daemon.state_mut().put_context_pack(
+        ContextHandle::new(CONTEXT_PACK_ID).expect("a `ctx_` handle"),
+        context_pack(),
+    );
+
     let mut fixture = Fixture {
         server: Server::new(daemon, negotiated()),
         proposal,
@@ -747,6 +763,80 @@ fn fixture() -> Fixture {
     };
     fixture.evidence = seed_evidence_node(&mut fixture);
     fixture
+}
+
+/// The `ctx_*` this file's held Context Pack is registered under.
+const CONTEXT_PACK_ID: &str = "ctx_g207pack";
+
+/// A conforming Context Pack with one expandable group, `source_span@e_ack`, written as text.
+///
+/// Registered so the corpus's `context.expand` case names a pack the daemon holds, and its
+/// anchor, the payload, is what the handler decides on (bn-2lc0t). Before, the case named a
+/// `ctx_*` nothing was filed under and was refused as a dangling reference, which method 4
+/// above says no refusal here is. Not shared with the delivering suite's pack, for the reason
+/// no helper is.
+const CONTEXT_PACK: &str = r#"{
+  "assurance": {"class": "bounded", "envelope": {}},
+  "content_budget": {"bytes": 16384},
+  "content_hash": "blake3-256:g207packplaceholder",
+  "context_id": "ctx_g207pack",
+  "evidence": ["ev_g207failure"],
+  "expansions": [{"anchor": "e_ack", "relation": "source_span"}],
+  "guarantees": ["ReplayPreserving", "CausallyClosed"],
+  "intent": "in_g207intent",
+  "omissions": [
+    {"count": 1, "expandable": true,
+     "expansion": {"anchor": "e_ack", "relation": "source_span"},
+     "kind": "source", "reason": "budget"}
+  ],
+  "parent": null,
+  "question": "why did the acceptance fixture fail?",
+  "redactions": [],
+  "replay": "crash_g207",
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/context-pack.json",
+  "selected": [{"artifact": "ev_g207ack", "id": "e_ack", "kind": "event",
+                "summary": "reply published before stable write"}],
+  "semantic_epoch": "semantic-1",
+  "snapshot": "ws_g207pack",
+  "verdict": "refuted"
+}"#;
+
+fn context_pack() -> continuumd::daemon::context::ContextPackRecord {
+    use continuum_context::expansion::{
+        ExpansionPayload, ExpansionQuery, ExpansionRelation as PackRelation,
+    };
+    use continuum_context::omission::{OmissionReason as PackReason, OmissionRecord};
+    use continuum_context::selection::SelectionKind;
+    use continuum_context::source::{SourceRef, SourceSpan};
+    use continuum_value::value::Name;
+
+    let name = |text: &str| Name::new(text).expect("a canonical identifier");
+    let span = SourceSpan::new(
+        WorkspacePath::new("src/ack.rs").expect("a repo-relative path"),
+        10,
+        1,
+        10,
+        40,
+    )
+    .expect("a well-formed span");
+    let payload = ExpansionPayload::new(
+        OmissionRecord::expandable(
+            SelectionKind::Source,
+            1,
+            PackReason::Budget,
+            ExpansionQuery::new(PackRelation::SourceSpan, name("e_ack")),
+        ),
+        vec![SourceRef::new(span).into_selected_item(name("s_1"))],
+    )
+    .expect("one item for a count of one");
+    continuumd::daemon::context::ContextPackRecord::new(
+        ContractJson::parse(CONTEXT_PACK.as_bytes()).expect("the pack is canonical JSON"),
+        continuumd::protocol::scalar::WorkspaceHandle::new("ws_g207pack")
+            .expect("a workspace handle"),
+        [payload],
+    )
+    .expect("a conforming pack and a well-formed expansion graph")
 }
 
 fn intent_handle(contract: &IntentContract) -> IntentHandle {
@@ -940,8 +1030,7 @@ fn plant(operation: &str, payload: &str, fixture: &Fixture) -> Option<Arguments>
             instrumentation_profile: payload.to_owned(),
         }),
         "context.expand" => Arguments::ContextExpand(ContextExpandRequest {
-            context: ContextHandle::new("ctx_g207fixturepackaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-                .expect("a `ctx_` handle"),
+            context: ContextHandle::new(CONTEXT_PACK_ID).expect("a `ctx_` handle"),
             anchor: payload.to_owned(),
             relation: ExpansionRelation::SourceSpan,
             depth: Optional::Absent,
@@ -1807,6 +1896,27 @@ fn the_delivering_suites_default_principal_reaches_a_handler_for_eight_of_forty_
             * LADDER.len(),
         55
     );
+}
+
+#[test]
+fn the_context_expand_case_reaches_its_anchor_at_every_rung() {
+    // Method 4, for the one case whose reference this file used to leave dangling (bn-2lc0t).
+    // The pack is held, so at every rung the case is admitted (`context.expand` is `authority
+    // read`) and refused for its anchor, which is prose and not a canonical identifier. A
+    // `CapabilityDenied` here would be the dangling-pack refusal RFC 0027 X2 gives.
+    let decisions: Vec<Decision> = matrix(hostile)
+        .into_iter()
+        .filter(|decision| decision.operation == "context.expand")
+        .collect();
+    assert_eq!(decisions.len(), LADDER.len());
+    for decision in decisions {
+        assert_eq!(decision.admitted, Some(true), "{decision:?}");
+        assert_eq!(
+            decision.code,
+            Some(ErrorCode::MalformedRequest),
+            "{decision:?}"
+        );
+    }
 }
 
 // =====================================================================================

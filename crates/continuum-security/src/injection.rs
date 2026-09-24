@@ -13,9 +13,14 @@
 //! corpus `evidence.verify` at `authority read` moves it from the bottom of the lattice to
 //! `observed`, so the ratified gate is open on its evidence-status clause as well. It does
 //! not hold the daemon to *refusing* every
-//! case, and the daemon does not: a few cases get an inert `ok` answer (an `evidence.query`
-//! page, the terminal status of a cancelled task), which changes nothing and is still not a
-//! refusal. See below.
+//! case, and the daemon does not. In that evidence suite six cases get a non-error answer,
+//! and none is a refusal: an `evidence.query` page and the terminal status of a cancelled
+//! task (`ok`), which change nothing; three `observe.ingest` appends at the bottom of the
+//! lattice (`ok`), for a principal holding the production-trace grant; and a verification
+//! campaign started under the all-absent budget the `resource limits` case asks for
+//! (`task_started`, bn-2lc0t). Nor is every carried
+//! payload read: `evidence.link` refuses an `agent:` actor before it reads the body, so its
+//! four cases are carried and unread for both corpus principals. See below.
 //!
 //! It lives in `continuum-security` rather than beside that test because plan §20 gives
 //! this crate "capability model, sandboxing […] context privacy, audit trail", because the
@@ -69,7 +74,7 @@
 //! promotion. The gate is open on its refusal and evidence-status clauses today, not only
 //! on those: a read-level `evidence.verify` of a verifiable observation node moves its
 //! status to `observed`, some cases
-//! are answered `ok` and inert rather than refused, and eleven are refused by the codec
+//! are answered `ok` rather than refused, and eleven are refused by the codec
 //! before any authority check runs. `gate_g2_07_acceptance.rs`'s
 //! `the_clauses_of_the_ratified_promotion_gate_this_evidence_leaves_open` derives each
 //! observable clause from a run rather than stating it. This crate ships the corpus at the ratified shape so that lane starts from a

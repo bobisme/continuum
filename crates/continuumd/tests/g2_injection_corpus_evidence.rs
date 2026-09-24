@@ -23,7 +23,10 @@
 //!    the code alone cannot tell "refused by admission" from "no such record".
 //! 2. **Zero prohibited outcomes.** The security-relevant state of the daemon — every Intent
 //!    Contract's registry status, every evidence claim's status, the store's authorization
-//!    audit log — is captured before the corpus runs and compared after. research/35's kill
+//!    audit log — is captured before the corpus runs and compared after. What may change is
+//!    pinned: the three nodes the reviser's `observe.ingest` cases append, at the lattice's
+//!    bottom, and the store publications they and the `resource limits` campaign make under
+//!    the reviser's own capability (three `Evidence`, two `Task`). research/35's kill
 //!    criterion names three prohibited outcomes (unprivileged intent-status alteration,
 //!    unprivileged evidence-status alteration, isolation escape); the first two are exactly
 //!    this comparison, and the third is accounted for honestly in [`unlanded`].
@@ -67,9 +70,15 @@
 //! [`carriage`] decides, per case and never by trying a parse, how the payload reaches the
 //! daemon, and [`plant`] puts it there (bn-2zccj):
 //!
-//! - **a free field of the body** (27 cases) — an acceptance signature, a reject reason, a
+//! - **a free field of the body** (26 cases) — an acceptance signature, a reject reason, a
 //!   policy-table key, a change-set document, a checker profile, an instrumentation profile,
-//!   an expansion anchor, a target id, or a query filter;
+//!   an expansion anchor, or a query filter;
+//! - **the request envelope's `budget`** (1 case), the `resource limits` control, whose
+//!   declared carrier is "the budget the task is started under". Its payload asks for every
+//!   dimension to be omitted, and the envelope carries exactly that budget over a real sealed
+//!   snapshot (bn-2lc0t). Until bn-2lc0t the payload rode in `target.id` under a fixed budget,
+//!   and the envelope named no snapshot, so the start was refused `MalformedRequest` before
+//!   the budget was read;
 //! - **the request's handle** (3 cases), where the case *is* a guessed handle — the
 //!   `predictable handles` class. A payload of that class that is not a handle fails the run;
 //! - **a stored artifact the request names** (7 cases), where the operation declares no free
@@ -94,11 +103,24 @@
 //! holds each stored carrier to a typed refusal or an inert answer from the handler itself,
 //! with state unchanged, and holds the untampered carrier to a resume that does move state.
 //!
-//! "Carried" is not "read". Several field-carried cases are refused before their field is
-//! looked at: `evidence.link` refuses any `agent:` actor before its body is read, and the
-//! fixture's `evidence.link` subject and `context.expand` pack name nothing the daemon holds.
-//! Those refusals are the capability check and RFC 0027 X2, which is this file's subject, and
-//! they are stated here so a green run is not read as "every payload was parsed".
+//! "Carried" is not "read", and [`Reach`] is the second census (bn-2lc0t). Of the 48 cases, 22
+//! reach a handler that reads the payload's position for some corpus principal; 11 are
+//! `@privileged` and denied at admission for both, by design; 11 are unlanded; and 4 are
+//! carried and unread. Those four are the `evidence.link` cases: the handler refuses any actor
+//! that is not a `service:` as its first step, before it reads the body, and both corpus
+//! principals are `agent:` actors. Authority before parse is the right order, so the refusal
+//! stays and the four are not counted as exercising their payload.
+//! `stored_carriers::the_reach_census_is_observed` holds each class to a run.
+//!
+//! Before bn-2lc0t, five more cases did not reach their payload. The `context.expand` pack
+//! named nothing the daemon held, so the case was refused as a dangling reference (RFC 0027
+//! X2) before its anchor was read; the pack is now a registered Context Pack, and the anchor
+//! is what the handler decides on. The three `observe.ingest` cases were denied at admission
+//! for both principals, because neither held the `production_trace` data grant; the reviser
+//! now holds it ([`REVISER`]). The `resource limits` case is described above. The
+//! `evidence.link` subject named nothing held either. That changed no answer, because the
+//! actor scheme refuses first, but the subject is now a held node, so the actor scheme is the
+//! only reason left.
 //!
 //! # The honest boundary: what "isolation escape" can and cannot mean here
 //!
@@ -184,9 +206,9 @@ use continuumd::protocol::operations::workspace::{
 };
 use continuumd::protocol::registry::{self, ENCODINGS};
 use continuumd::protocol::scalar::{
-    ActorId, CapabilityHandle, Commitment, ContextHandle, ContinuationHandle, EpochIdentity,
-    EvidenceHandle, IntentHandle, Opaque, OperationName, ProtocolVersion, RequestId, SignerHandle,
-    TaskHandle, Timestamp, WorkspaceHandle,
+    ActorId, ByteCount, CapabilityHandle, Commitment, ContextHandle, ContinuationHandle,
+    DurationMs, EpochIdentity, EvidenceHandle, IntentHandle, Opaque, OperationName,
+    ProtocolVersion, RequestId, SignerHandle, TaskHandle, Timestamp, WorkspaceHandle,
 };
 use continuumd::protocol::shared::{
     EvidenceQuery, FileOverlay, IntentChangeSet, SnapshotComponents, SnapshotEpochs, Target,
@@ -234,6 +256,14 @@ const AGENT: Principal = Principal {
 
 /// The reviser: `revise-intent` with an *empty* `privileged_operations` list — docs/49's
 /// "revise intent: proposal only" cell. The same level as the steward, and that is the point.
+///
+/// It holds the `production_trace` data grant, and so does the steward (bn-2lc0t). A data
+/// grant is "an additional requirement satisfied, never a substitute for a level" (the IDL,
+/// `CapabilityProfile`), and it is not a privilege: `observe.ingest` is not `@privileged`, so
+/// research/35's "unprivileged path" includes a principal holding the grant. Without it the
+/// three `observe.ingest` cases were denied at admission for both corpus principals and their
+/// payloads never reached the handler. The steward holds the grant too, so the reviser and
+/// the steward still differ in `privileged_operations` and in nothing else.
 const REVISER: Principal = Principal {
     actor: "agent:reviser",
     capability: "cap_reviser",
@@ -245,6 +275,18 @@ const REVISER: Principal = Principal {
 const STEWARD: Principal = Principal {
     actor: "human:steward",
     capability: "cap_steward",
+};
+
+/// A `service:` checker at `execute`, with no privilege and no data grant.
+///
+/// Not a corpus principal. It exists for one control: `evidence.link` refuses every actor that
+/// is not a `service:` before it reads its body, so the corpus's `evidence.link` cases are
+/// carried and unread for both corpus principals ([`Reach::CarriedUnread`]). This principal
+/// sends the same body and shows that the handler does read the payload once the actor scheme
+/// admits it.
+const CHECKER: Principal = Principal {
+    actor: "service:g2-checker",
+    capability: "cap_checker",
 };
 
 /// Every privilege the steward (and the root above it) holds.
@@ -435,6 +477,11 @@ struct Fixture {
     proposal: IntentHandle,
     evidence: EvidenceHandle,
     receipt: Commitment,
+    /// A held evidence node, the subject every `evidence.link` case names (bn-2lc0t). It is
+    /// the benign twin's stored carrier: certificate-class, produced by `agent:untrusted`.
+    subject: EvidenceHandle,
+    /// A held Context Pack, the pack the `context.expand` case expands (bn-2lc0t).
+    context: ContextHandle,
     /// The stored state the `task.resume` cases name ([`Tasks`]).
     tasks: Tasks,
     /// How many admission records provisioning left behind. Everything at or after this
@@ -525,8 +572,9 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
                 AuthorityLevel::ReviseIntent,
                 3,
                 // The level the steward holds; the privilege list the steward holds is empty
-                // here, and that one difference is the whole experiment.
-                Optional::Present(profile(&[], &[])),
+                // here, and that one difference is the whole experiment. The data grant is
+                // the steward's too (bn-2lc0t).
+                Optional::Present(profile(&[], &[DataGrant::ProductionTrace])),
             ),
             root.clone(),
         )
@@ -536,7 +584,17 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
                 STEWARD.actor,
                 AuthorityLevel::ReviseIntent,
                 3,
-                Optional::Present(profile(&STEWARD_PRIVILEGES, &[])),
+                Optional::Present(profile(&STEWARD_PRIVILEGES, &[DataGrant::ProductionTrace])),
+            ),
+            root.clone(),
+        )
+        .capability(
+            grant(
+                CHECKER.capability,
+                CHECKER.actor,
+                AuthorityLevel::Execute,
+                3,
+                Optional::Present(profile(&[], &[])),
             ),
             root,
         )
@@ -586,11 +644,16 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
             Carriage::StoredContinuation => {
                 store_continuation(&mut daemon, case, &tasks);
             }
-            Carriage::Field | Carriage::Handle | Carriage::Unlanded => {}
+            Carriage::Field | Carriage::Handle | Carriage::EnvelopeBudget | Carriage::Unlanded => {}
         }
     }
-    // The benign twin of every stored-evidence case is a stored artifact too.
-    store_evidence(&mut daemon, BENIGN.as_bytes());
+    // The benign twin of every stored-evidence case is a stored artifact too, and it is the
+    // held subject the `evidence.link` cases name.
+    let subject = store_evidence(&mut daemon, BENIGN.as_bytes());
+    let context = ContextHandle::new(CONTEXT_PACK_ID).expect("a `ctx_` handle");
+    daemon
+        .state_mut()
+        .put_context_pack(context.clone(), context_pack());
     let provisioned = daemon.state().admissions().len();
 
     Fixture {
@@ -598,6 +661,8 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
         proposal,
         evidence,
         receipt,
+        subject,
+        context,
         tasks,
         provisioned,
     }
@@ -611,6 +676,92 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
 /// than filtered by operation, which would hide a corpus admission of the same operation.
 fn corpus_admissions(fixture: &Fixture) -> &[AdmissionRecord] {
     &fixture.server.daemon().state().admissions()[fixture.provisioned..]
+}
+
+// --- the held Context Pack ----------------------------------------------------------------
+
+/// The `ctx_*` the held pack is registered under, and its own `context_id`.
+const CONTEXT_PACK_ID: &str = "ctx_g2corpuspack";
+
+/// The one anchor the held pack advertises an expansion for.
+const CONTEXT_ANCHOR: &str = "e_ack";
+
+/// A conforming Context Pack, as a document: one selected item and one expandable omission,
+/// `source_span` at [`CONTEXT_ANCHOR`]. Written as text, as `daemon_context_operations.rs`
+/// writes its fixture, so the pack is an artifact and not something built by the code that
+/// reads it.
+const CONTEXT_PACK: &str = r#"{
+  "assurance": {"class": "bounded", "envelope": {}},
+  "content_budget": {"bytes": 16384},
+  "content_hash": "blake3-256:g2corpuspackplaceholder",
+  "context_id": "ctx_g2corpuspack",
+  "evidence": ["ev_g2corpusfailure"],
+  "expansions": [{"anchor": "e_ack", "relation": "source_span"}],
+  "guarantees": ["ReplayPreserving", "CausallyClosed"],
+  "intent": "in_g2corpusintent",
+  "omissions": [
+    {"count": 2, "expandable": true,
+     "expansion": {"anchor": "e_ack", "relation": "source_span"},
+     "kind": "source", "reason": "budget"}
+  ],
+  "parent": null,
+  "question": "why did the corpus fixture fail?",
+  "redactions": [],
+  "replay": "crash_g2corpus",
+  "schema_epoch": 1,
+  "schema_id": "https://continuum.dev/schema/context-pack.json",
+  "selected": [{"artifact": "ev_g2corpusack", "id": "e_ack", "kind": "event",
+                "summary": "reply published before stable write"}],
+  "semantic_epoch": "semantic-1",
+  "snapshot": "ws_g2corpuspack",
+  "verdict": "refuted"
+}"#;
+
+/// The held pack, and the one group its manifest accounts for: two `source` items behind
+/// `source_span@e_ack`, dropped for budget.
+///
+/// This is a **direct state insertion**, the out-of-band registration route
+/// `DaemonState::put_context_pack` documents. It stands for a pack the daemon holds, so the
+/// `context.expand` case names something real and its anchor, the payload, is what the
+/// handler decides on (bn-2lc0t). Before, the case named a `ctx_*` no pack is filed under
+/// and was refused for that, before the anchor was read.
+fn context_pack() -> continuumd::daemon::context::ContextPackRecord {
+    use continuum_context::expansion::{
+        ExpansionPayload, ExpansionQuery, ExpansionRelation as PackRelation,
+    };
+    use continuum_context::omission::{OmissionReason as PackReason, OmissionRecord};
+    use continuum_context::selection::SelectionKind;
+    use continuum_context::source::{SourceRef, SourceSpan};
+    use continuum_value::value::Name;
+
+    let name = |text: &str| Name::new(text).expect("a canonical identifier");
+    let item = |id: &str, line: u32| {
+        let span = SourceSpan::new(
+            WorkspacePath::new("src/ack.rs").expect("a repo-relative path"),
+            line,
+            1,
+            line,
+            40,
+        )
+        .expect("a well-formed span");
+        SourceRef::new(span).into_selected_item(name(id))
+    };
+    let payload = ExpansionPayload::new(
+        OmissionRecord::expandable(
+            SelectionKind::Source,
+            2,
+            PackReason::Budget,
+            ExpansionQuery::new(PackRelation::SourceSpan, name(CONTEXT_ANCHOR)),
+        ),
+        vec![item("s_1", 10), item("s_2", 20)],
+    )
+    .expect("two items for a count of two");
+    continuumd::daemon::context::ContextPackRecord::new(
+        ContractJson::parse(CONTEXT_PACK.as_bytes()).expect("the pack is canonical JSON"),
+        WorkspaceHandle::new("ws_g2corpuspack").expect("a workspace handle"),
+        [payload],
+    )
+    .expect("a conforming pack and a well-formed expansion graph")
 }
 
 // =====================================================================================
@@ -633,6 +784,10 @@ enum Carriage {
     /// `task.resume` declares no free field. The payload is what a stored continuation the
     /// request names pins ([`Tasks`], [`store_continuation`]).
     StoredContinuation,
+    /// The payload is the request envelope's `budget`: the `resource limits` control, whose
+    /// declared carrier is "the budget the task is started under" (bn-2lc0t). The body names
+    /// a real target and the envelope a real sealed snapshot ([`envelope_budget`]).
+    EnvelopeBudget,
     /// No family in this daemon: the payload is the request's whole `arguments` blob.
     Unlanded,
 }
@@ -653,6 +808,11 @@ fn carriage(case: &Case) -> Carriage {
         "intent.reject" | "evidence.verify" | "task.cancel" if guessed => Carriage::Handle,
         "evidence.verify" => Carriage::StoredEvidence,
         "task.resume" if stored_continuation_kind(case).is_some() => Carriage::StoredContinuation,
+        "verification.start"
+            if case.vector == Vector::Isolation(IsolationControl::ResourceLimits) =>
+        {
+            Carriage::EnvelopeBudget
+        }
         "intent.accept"
         | "intent.reject"
         | "intent.lock"
@@ -673,6 +833,100 @@ fn carriage(case: &Case) -> Carriage {
              the case a real carrier; never substitute a handle for it",
             case.id
         ),
+    }
+}
+
+/// Whether a case's payload reaches a handler that reads it, for some corpus principal.
+///
+/// "Carried" is not "read" (bn-2lc0t). [`Carriage`] says where the payload travels; this says
+/// whether any code past admission looks at it. Decided per case from the operation, and
+/// then checked against a run by [`stored_carriers::the_reach_census_is_observed`], so a case
+/// cannot be counted as exercising its payload on a reading nobody measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Reach {
+    /// Admitted for a corpus principal, and the handler reads the payload's position: it
+    /// parses it, looks it up, stores it, or runs under it.
+    Read,
+    /// Admitted, and then refused on authority before the body is read. `evidence.link`
+    /// refuses every actor that is not a `service:` as its first step, and both corpus
+    /// principals are `agent:` actors. Authority before parse is the right order, so the
+    /// refusal is kept; the case is not counted as exercising its payload.
+    CarriedUnread,
+    /// A `@privileged` operation, denied at admission for both corpus principals. The body is
+    /// never read, by design: that denial is what this file measures.
+    RefusedAtAdmission,
+    /// No family in this daemon: the codec refuses the operation name ([`unlanded`]).
+    Unlanded,
+}
+
+/// The reach of `case`.
+fn reach(case: &Case) -> Reach {
+    if !is_landed(case.operation) {
+        Reach::Unlanded
+    } else if is_privileged(case.operation) {
+        Reach::RefusedAtAdmission
+    } else if case.operation == "evidence.link" {
+        Reach::CarriedUnread
+    } else {
+        Reach::Read
+    }
+}
+
+/// The nine budget dimensions, by their wire names.
+const BUDGET_DIMENSIONS: [&str; 9] = [
+    "wall_ms",
+    "cpu_ms",
+    "memory_bytes",
+    "states",
+    "solver_ms",
+    "proof_ms",
+    "tokens",
+    "candidates",
+    "bytes",
+];
+
+/// The envelope budget an [`Carriage::EnvelopeBudget`] payload describes.
+///
+/// The payload is a JSON object naming budget dimensions. A dimension named with an integer
+/// is present at that value; a dimension named `null`, or not named, is absent. Keys that are
+/// not one of the nine dimensions (the payload's `note`) have no field in `Budget` and are
+/// not carried. This is a structural translation, as the stored continuation is: the wire
+/// `Budget` is fully typed, so what travels is what the payload asks the budget to be.
+///
+/// # Panics
+///
+/// When `payload` is not a JSON object, or names a dimension with a value that is neither
+/// `null` nor a non-negative integer. A payload that says nothing about a budget has no
+/// carrier here.
+fn envelope_budget(payload: &str) -> Budget {
+    let Ok(ContractJson::Object(fields)) = ContractJson::parse(payload.as_bytes()) else {
+        panic!("a budget payload is a JSON object naming dimensions: {payload:?}")
+    };
+    let dimension = |name: &str| -> Option<u64> {
+        match fields.get(name) {
+            None | Some(ContractJson::Null) => None,
+            Some(ContractJson::Integer(value)) => Some(
+                u64::try_from(*value)
+                    .unwrap_or_else(|_| panic!("budget.{name} is negative: {value}")),
+            ),
+            Some(other) => panic!("budget.{name} is not an integer or null: {other:?}"),
+        }
+    };
+    let millis = |name: &str| dimension(name).map(DurationMs::new);
+    let bytes = |name: &str| dimension(name).map(ByteCount::new);
+    fn optional<T>(value: Option<T>) -> Optional<T> {
+        value.map_or(Optional::Absent, Optional::Present)
+    }
+    Budget {
+        wall_ms: optional(millis("wall_ms")),
+        cpu_ms: optional(millis("cpu_ms")),
+        memory_bytes: optional(bytes("memory_bytes")),
+        states: optional(dimension("states")),
+        solver_ms: optional(millis("solver_ms")),
+        proof_ms: optional(millis("proof_ms")),
+        tokens: optional(dimension("tokens")),
+        candidates: optional(dimension("candidates")),
+        bytes: optional(bytes("bytes")),
     }
 }
 
@@ -1308,7 +1562,9 @@ fn plant(case: &Case, payload: &str, fixture: &Fixture) -> Option<Arguments> {
             })
         }
         ("evidence.link", Carriage::Field) => Arguments::EvidenceLink(EvidenceLinkRequest {
-            subject: fixture.evidence.clone(),
+            // A held node (bn-2lc0t). The fixture's `evidence` names nothing, so a link
+            // naming it was refused for the dangling subject.
+            subject: fixture.subject.clone(),
             receipt: fixture.receipt.clone(),
             checker_profile: payload.to_owned(),
         }),
@@ -1327,8 +1583,8 @@ fn plant(case: &Case, payload: &str, fixture: &Fixture) -> Option<Arguments> {
             instrumentation_profile: payload.to_owned(),
         }),
         ("context.expand", Carriage::Field) => Arguments::ContextExpand(ContextExpandRequest {
-            context: ContextHandle::new("ctx_g2fixturepackaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-                .expect("a `ctx_` handle"),
+            // A held pack (bn-2lc0t), so the anchor is what the handler decides on.
+            context: fixture.context.clone(),
             anchor: payload.to_owned(),
             relation: ExpansionRelation::SourceSpan,
             depth: Optional::Absent,
@@ -1338,6 +1594,19 @@ fn plant(case: &Case, payload: &str, fixture: &Fixture) -> Option<Arguments> {
                 target: Target {
                     kind: TargetKind::AllClaims,
                     id: payload.to_owned(),
+                },
+                portfolio: Portfolio::Interactive,
+                context_policy: Optional::Absent,
+                priority_class: Optional::Absent,
+            })
+        }
+        // The payload is the envelope's budget ([`dress`]). The body names the campaign the
+        // fixture's own live task runs, so the request is a real start over a real snapshot.
+        ("verification.start", Carriage::EnvelopeBudget) => {
+            Arguments::VerificationStart(VerificationStartRequest {
+                target: Target {
+                    kind: TargetKind::AllClaims,
+                    id: "DieHard".to_owned(),
                 },
                 portfolio: Portfolio::Interactive,
                 context_policy: Optional::Absent,
@@ -1390,6 +1659,26 @@ fn plant(case: &Case, payload: &str, fixture: &Fixture) -> Option<Arguments> {
     })
 }
 
+/// The envelope fields a case's request needs beyond [`envelope`]'s defaults.
+///
+/// A `verification.start` names the fixture's current sealed snapshot: a campaign "requires
+/// the envelope's `snapshot` to name the sealed workspace it runs over", and without one the
+/// request is refused `MalformedRequest` before its budget is read (bn-2lc0t). An
+/// [`Carriage::EnvelopeBudget`] case's budget is the one its payload describes; its benign
+/// twin's is [`budget`].
+fn dress(case: &Case, payload: &str, fixture: &Fixture, envelope: &mut RequestEnvelope) {
+    if case.operation == "verification.start" {
+        envelope.snapshot = Nullable::Value(fixture.tasks.current.clone());
+    }
+    if carriage(case) == Carriage::EnvelopeBudget {
+        envelope.budget = Optional::Present(if payload == BENIGN {
+            budget()
+        } else {
+            envelope_budget(payload)
+        });
+    }
+}
+
 /// The handle a `predictable handles` payload guesses.
 ///
 /// # Panics
@@ -1418,6 +1707,7 @@ fn frame(
     fixture: &Fixture,
 ) -> Vec<u8> {
     let mut envelope = envelope(case.operation, principal, request_id);
+    dress(case, payload, fixture, &mut envelope);
     envelope.arguments = match plant(case, payload, fixture) {
         Some(arguments) => transport::encode_arguments(&arguments).expect("the body encodes"),
         None => Opaque::from_bytes(WireJson::String(payload.to_owned()).to_canonical_bytes()),
@@ -1661,7 +1951,17 @@ fn the_corpus_alters_no_intent_status_and_no_evidence_status() {
     // read-level `evidence.verify` has nothing here it could promote. With such a node,
     // `gate_g2_07_acceptance.rs` measures the first corpus verify moving it to `observed`
     // (cr-2rgnsb round 2); this test does not contradict that and does not cover it.
-    for principal in [AGENT, REVISER] {
+    //
+    // Since bn-2lc0t the reviser's run reaches handlers that write: the three `observe.ingest`
+    // cases append a node each, and the `resource limits` case starts a campaign. Neither is
+    // a status alteration. An appended node lands at the lattice's bottom — a new claim, not
+    // an altered one, and the same reading `gate_g2_07_acceptance.rs`'s `alterations` takes —
+    // and a publication the store records is one the store permitted. So the comparison is
+    // exact about what may change and fails on anything else: every intent status and every
+    // pre-existing node's status unchanged, exactly the appends the admitted writes account
+    // for, each at the bottom and produced by the running principal, and every new store
+    // decision a permitted publication under the running principal's own capability.
+    for (principal, appended) in [(AGENT, 0), (REVISER, 3)] {
         let mut fixture = fixture();
         let before = security_state(&fixture);
         assert!(
@@ -1671,9 +1971,88 @@ fn the_corpus_alters_no_intent_status_and_no_evidence_status() {
         let _ = run_corpus(&mut fixture, principal, "outcome");
         let after = security_state(&fixture);
         assert_eq!(
-            before, after,
-            "the corpus moved security-relevant state under {principal:?}"
+            before.intents, after.intents,
+            "the corpus moved an intent status under {principal:?}"
         );
+        for (handle, status) in &before.evidence {
+            assert_eq!(
+                after.evidence.get(handle),
+                Some(status),
+                "the corpus moved the status of {handle} under {principal:?}"
+            );
+        }
+        let state = fixture.server.daemon().state();
+        let new: Vec<&String> = after
+            .evidence
+            .keys()
+            .filter(|handle| !before.evidence.contains_key(*handle))
+            .collect();
+        assert_eq!(
+            new.len(),
+            appended,
+            "the evidence nodes the corpus appended under {principal:?}: {new:?}"
+        );
+        for handle in new {
+            let node = state
+                .evidence_nodes()
+                .find(|(held, _)| held.as_str() == handle)
+                .map(|(_, node)| node)
+                .expect("an appended node is held");
+            assert_eq!(node.status(), ClaimStatus::BOTTOM, "{handle}");
+            assert_eq!(node.producer, who(principal.actor), "{handle}");
+            assert!(
+                CASES
+                    .iter()
+                    .any(|case| case.operation == "observe.ingest" && case.payload == node.tool),
+                "{handle}: an appended node no ingest case accounts for"
+            );
+        }
+        let token = continuumd::daemon::identity::capability_to_store(&cap(principal.capability))
+            .expect("a capability handle names a store token");
+        let records = fixture.server.daemon().store_audit().records();
+        // The exact publications: one `Evidence` record per ingest, and the `resource limits`
+        // campaign's two `Task` records. Any other publish, of any class, fails here.
+        let mut classes: BTreeMap<String, usize> = BTreeMap::new();
+        for record in &records[before.audit_records..] {
+            *classes.entry(format!("{:?}", record.class())).or_insert(0) += 1;
+        }
+        let expected: BTreeMap<String, usize> = if appended == 0 {
+            BTreeMap::new()
+        } else {
+            BTreeMap::from([
+                (format!("{:?}", Some(ArtifactClass::Evidence)), 3),
+                (format!("{:?}", Some(ArtifactClass::Task)), 2),
+            ])
+        };
+        assert_eq!(
+            classes, expected,
+            "the store publications under {principal:?}"
+        );
+        for record in &records[before.audit_records..] {
+            assert_eq!(
+                record.decision(),
+                continuum_workspace::publication::AuthorizationDecision::Permitted,
+                "{record:?}"
+            );
+            assert_eq!(
+                record.action(),
+                continuum_workspace::publication::Action::Publish,
+                "{record:?}"
+            );
+            assert_eq!(record.capability(), &token, "{record:?}");
+        }
+        if appended == 0 {
+            assert_eq!(
+                before, after,
+                "the corpus moved security-relevant state under {principal:?}"
+            );
+        } else {
+            assert!(
+                after.audit_records > before.audit_records,
+                "the reviser's admitted writes published nothing, so the store comparison \
+                 above compared nothing"
+            );
+        }
     }
 }
 
@@ -1762,6 +2141,43 @@ mod enforcement {
         // `privileged_operations` and in nothing else. The *same case*, planted with the
         // *same payload*, encoded into the *same bytes*, is denied for one and admitted for
         // the other.
+        // The premise, checked rather than stated: the two descriptors differ in their
+        // handle, their actor and `privileged_operations`, and in nothing else.
+        {
+            let fixture = fixture();
+            let held = |capability: &str| {
+                fixture
+                    .server
+                    .daemon()
+                    .state()
+                    .grant(&super::cap(capability))
+                    .expect("the capability is registered")
+                    .clone()
+            };
+            assert_eq!(
+                held(REVISER.capability).parent,
+                held(STEWARD.capability).parent,
+                "one delegation parent"
+            );
+            let held = |capability: &str| held(capability).descriptor;
+            let (mut reviser, steward) = (held(REVISER.capability), held(STEWARD.capability));
+            reviser.capability = steward.capability.clone();
+            reviser.actor = steward.actor.clone();
+            if let (super::Optional::Present(r), super::Optional::Present(s)) =
+                (&mut reviser.profile, &steward.profile)
+            {
+                assert!(r.privileged_operations.is_empty());
+                assert!(!s.privileged_operations.is_empty());
+                r.privileged_operations = s.privileged_operations.clone();
+            } else {
+                panic!("both profiles are present");
+            }
+            assert_eq!(
+                reviser, steward,
+                "the reviser and the steward differ beyond privilege"
+            );
+        }
+
         let operations = landed_privileged_operations();
         assert_eq!(
             operations.len(),
@@ -2421,7 +2837,8 @@ fn the_corpus_is_carried_whole_into_this_suite() {
 // Leg 6 — every case carries its payload (bn-2zccj)
 // =====================================================================================
 
-/// The stored carriers, driven one at a time against the principal that reaches the handler.
+/// The stored carriers, and each position the [`Reach`] census counts as read or unread,
+/// driven one at a time against the principal that reaches the handler.
 ///
 /// `cap_agent` sits at `propose` and `task.resume` needs `execute`, so under the corpus's
 /// default runner a `task.resume` case is refused on the ladder before any continuation is
@@ -2432,9 +2849,9 @@ fn the_corpus_is_carried_whole_into_this_suite() {
 mod stored_carriers {
     use super::{
         AGENT, BENIGN, CASES, Carriage, Case, ClaimStatus, ContinuationHandle, ErrorCode,
-        FORGED_CONTINUATION, Fixture, ProhibitedOutcome, REVISER, RedTeamClass, ResultStatus,
-        TaskHandle, TaskStatus, Vector, carriage, corpus_admissions, error_code, fixture,
-        forged_continuation, plant, run, security_state,
+        FORGED_CONTINUATION, Fixture, ProhibitedOutcome, REVISER, Reach, RedTeamClass,
+        ResultStatus, TaskHandle, TaskStatus, Vector, carriage, corpus_admissions, error_code,
+        fixture, forged_continuation, plant, run, security_state,
     };
     use continuum_security::injection::case as named;
     use continuum_workspace::artifact_path::ArtifactClass;
@@ -2789,12 +3206,41 @@ mod stored_carriers {
         assert_eq!(
             census,
             std::collections::BTreeMap::from([
-                ("Field".to_owned(), 27),
+                ("EnvelopeBudget".to_owned(), 1),
+                ("Field".to_owned(), 26),
                 ("Handle".to_owned(), 3),
                 ("StoredContinuation".to_owned(), 2),
                 ("StoredEvidence".to_owned(), 5),
                 ("Unlanded".to_owned(), 11),
             ])
+        );
+        // Where a payload travels is not whether it is read (bn-2lc0t).
+        let mut reached = std::collections::BTreeMap::new();
+        for case in CASES {
+            *reached.entry(super::reach(case)).or_insert(0) += 1;
+        }
+        assert_eq!(
+            reached,
+            std::collections::BTreeMap::from([
+                (Reach::Read, 22),
+                (Reach::CarriedUnread, 4),
+                (Reach::RefusedAtAdmission, 11),
+                (Reach::Unlanded, 11),
+            ])
+        );
+        let unread: Vec<&str> = CASES
+            .iter()
+            .filter(|case| super::reach(case) == Reach::CarriedUnread)
+            .map(|case| case.id)
+            .collect();
+        assert_eq!(
+            unread,
+            vec![
+                "generated-code-host-access/evidence-status",
+                "malicious-domain-pack/evidence-status",
+                "forged-signing-lineage/evidence-status",
+                "isolation/audit-trace",
+            ]
         );
         let stored_continuations: Vec<&str> = CASES
             .iter()
@@ -2814,6 +3260,559 @@ mod stored_carriers {
             let _ = plant(case, case.payload, &fixture);
             let _ = plant(case, BENIGN, &fixture);
         }
+    }
+
+    // --- what is read, measured (bn-2lc0t) -------------------------------------------------
+
+    /// The admission record one attempt left, or [`None`] where it never reached admission.
+    fn attempt(
+        fixture: &mut Fixture,
+        case: &Case,
+        payload: &str,
+        principal: super::Principal,
+        request_id: &str,
+    ) -> (
+        Option<continuumd::daemon::state::AdmissionRecord>,
+        continuumd::protocol::envelope::ResultEnvelope,
+    ) {
+        let seen = corpus_admissions(fixture).len();
+        let frame = super::frame(case, payload, principal, request_id, fixture);
+        let result = super::answer(fixture, &frame);
+        let admissions = corpus_admissions(fixture);
+        assert!(
+            admissions.len() <= seen + 1,
+            "{}: two admission records",
+            case.id
+        );
+        (admissions.get(seen).cloned(), result)
+    }
+
+    /// The reviser's observed outcome for every [`Reach::Read`] case, in corpus order.
+    ///
+    /// What each reads: `evidence.verify` over a stored carrier reads the content's leading
+    /// family magic, finds no family, and answers `EpochUnsupported` (only the magic is
+    /// decoded); a guessed handle is looked up and is not held (`CapabilityDenied`); a
+    /// forged continuation is refused `StaleSnapshot`; the policy blocks' change sets are
+    /// parsed and refused by the lock table (`IntentMutationDenied`) or as a change this
+    /// daemon cannot apply (`UnsupportedSemanticFeature`); the `context.expand` anchor is not
+    /// a canonical identifier (`MalformedRequest`); and the rest are answered.
+    const READ_OUTCOMES: [(&str, ResultStatus, Option<ErrorCode>); 22] = [
+        (
+            "comments-weakening-property/evidence-status",
+            ResultStatus::Error,
+            Some(ErrorCode::EpochUnsupported),
+        ),
+        (
+            "forged-receipt-json/evidence-status",
+            ResultStatus::Error,
+            Some(ErrorCode::EpochUnsupported),
+        ),
+        (
+            "predictable-handles/evidence-status",
+            ResultStatus::Error,
+            Some(ErrorCode::CapabilityDenied),
+        ),
+        (
+            "predictable-handles/isolation-escape",
+            ResultStatus::Error,
+            Some(ErrorCode::CapabilityDenied),
+        ),
+        (
+            "stale-snapshot-substitution/evidence-status",
+            ResultStatus::Error,
+            Some(ErrorCode::EpochUnsupported),
+        ),
+        (
+            "stale-snapshot-substitution/isolation-escape",
+            ResultStatus::Error,
+            Some(ErrorCode::StaleSnapshot),
+        ),
+        (
+            "solver-output-bombs/evidence-status",
+            ResultStatus::Error,
+            Some(ErrorCode::EpochUnsupported),
+        ),
+        (
+            "hidden-benchmark-exfiltration/evidence-status",
+            ResultStatus::Ok,
+            None,
+        ),
+        (
+            "production-trace-secret-leakage/evidence-status",
+            ResultStatus::Ok,
+            None,
+        ),
+        (
+            "production-trace-secret-leakage/isolation-escape",
+            ResultStatus::Error,
+            Some(ErrorCode::MalformedRequest),
+        ),
+        (
+            "resource-exhaustion-synthesis-grammar/evidence-status",
+            ResultStatus::Error,
+            Some(ErrorCode::EpochUnsupported),
+        ),
+        (
+            "forged-signing-lineage/isolation-escape",
+            ResultStatus::Ok,
+            None,
+        ),
+        (
+            "policy-block/bound-contraction",
+            ResultStatus::Error,
+            Some(ErrorCode::UnsupportedSemanticFeature),
+        ),
+        (
+            "policy-block/property-weakening",
+            ResultStatus::Error,
+            Some(ErrorCode::IntentMutationDenied),
+        ),
+        (
+            "policy-block/assumption-strengthening",
+            ResultStatus::Error,
+            Some(ErrorCode::IntentMutationDenied),
+        ),
+        (
+            "policy-block/fault-removal",
+            ResultStatus::Error,
+            Some(ErrorCode::UnsupportedSemanticFeature),
+        ),
+        (
+            "policy-block/observer-coarsening",
+            ResultStatus::Error,
+            Some(ErrorCode::UnsupportedSemanticFeature),
+        ),
+        (
+            "policy-block/assurance-downgrade",
+            ResultStatus::Error,
+            Some(ErrorCode::UnsupportedSemanticFeature),
+        ),
+        (
+            "policy-block/opaque-boundary-expansion",
+            ResultStatus::Error,
+            Some(ErrorCode::UnsupportedSemanticFeature),
+        ),
+        ("isolation/no-ambient-credentials", ResultStatus::Ok, None),
+        ("isolation/resource-limits", ResultStatus::TaskStarted, None),
+        ("isolation/hard-kill", ResultStatus::Ok, None),
+    ];
+
+    #[test]
+    fn the_reach_census_is_observed() {
+        // `reach` is decided per case from its operation. This holds each class to what the
+        // run shows, under both corpus principals, so the census cannot count a payload as
+        // read on a reading nobody measured.
+        let mut agent = fixture();
+        let mut reviser = fixture();
+        for (index, case) in CASES.iter().enumerate() {
+            let (by_agent, _) = attempt(
+                &mut agent,
+                case,
+                case.payload,
+                AGENT,
+                &super::request_id("reach_agent", index),
+            );
+            let (by_reviser, result) = attempt(
+                &mut reviser,
+                case,
+                case.payload,
+                REVISER,
+                &super::request_id("reach_reviser", index),
+            );
+            match super::reach(case) {
+                Reach::Unlanded => {
+                    assert!(by_agent.is_none() && by_reviser.is_none(), "{}", case.id);
+                }
+                Reach::RefusedAtAdmission => {
+                    for record in [&by_agent, &by_reviser] {
+                        let record = record.as_ref().expect("a landed attempt is adjudicated");
+                        assert!(
+                            !record.admitted,
+                            "{}: a privileged case was admitted",
+                            case.id
+                        );
+                    }
+                }
+                Reach::CarriedUnread => {
+                    let record = by_reviser.expect("a landed attempt is adjudicated");
+                    assert!(record.admitted, "{}", case.id);
+                    // Refused by the handler's first step, the actor scheme. The subject is
+                    // held, so this is not a dangling reference; see the dedicated test.
+                    assert_eq!(
+                        error_code(&result),
+                        Some(ErrorCode::CapabilityDenied),
+                        "{}",
+                        case.id
+                    );
+                }
+                Reach::Read => {
+                    let record = by_reviser.expect("a landed attempt is adjudicated");
+                    assert!(
+                        record.admitted,
+                        "{}: a case counted as read is refused at admission for the reviser",
+                        case.id
+                    );
+                    // The outcome the handler gave, pinned per case. An admission record
+                    // alone says a handler ran, not that it read the payload; the pinned
+                    // outcome is the handler's decision about the payload's position, so a
+                    // fixture change that refuses the case earlier (a dropped snapshot, an
+                    // unheld pack) moves a row here.
+                    let pinned = READ_OUTCOMES
+                        .iter()
+                        .find(|(id, _, _)| *id == case.id)
+                        .unwrap_or_else(|| panic!("{}: no pinned outcome", case.id));
+                    assert_eq!(
+                        (result.status, error_code(&result)),
+                        (pinned.1, pinned.2),
+                        "{}: the handler's outcome moved",
+                        case.id
+                    );
+                    // A handler that answers `CapabilityDenied` past admission names nothing
+                    // it holds (RFC 0027 X2). That is a read only where the payload *is* the
+                    // handle it names.
+                    if carriage(case) != Carriage::Handle {
+                        assert_ne!(
+                            error_code(&result),
+                            Some(ErrorCode::CapabilityDenied),
+                            "{}: a case counted as read was refused for a reference the \
+                             daemon does not hold",
+                            case.id
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_evidence_link_cases_are_carried_and_unread_for_an_agent_actor() {
+        // `evidence.link`'s first step refuses any actor that is not a `service:`, before it
+        // reads the subject, the receipt or the checker profile. Both corpus principals are
+        // `agent:` actors, so the four cases are carried and unread. Authority before parse is
+        // the right order and stays. What this test adds is that nothing else explains it:
+        // the subject is held, and a `service:` checker sending the same body gets the payload
+        // read and stored.
+        let links: Vec<&Case> = CASES
+            .iter()
+            .filter(|case| case.operation == "evidence.link")
+            .collect();
+        assert_eq!(links.len(), 4);
+        let mut fixture = fixture();
+        assert!(
+            fixture
+                .server
+                .daemon()
+                .state()
+                .evidence(&fixture.subject)
+                .is_some(),
+            "the subject every link names is held"
+        );
+        for (index, case) in links.into_iter().enumerate() {
+            assert_eq!(super::reach(case), Reach::CarriedUnread);
+            let nodes = |fixture: &Fixture| {
+                fixture
+                    .server
+                    .daemon()
+                    .state()
+                    .evidence_nodes()
+                    .filter(|(_, node)| node.tool == case.payload)
+                    .count()
+            };
+            let before = security_state(&fixture);
+            let (record, refused) = attempt(
+                &mut fixture,
+                case,
+                case.payload,
+                REVISER,
+                &super::request_id("link_reviser", index),
+            );
+            assert!(record.expect("adjudicated").admitted, "{}", case.id);
+            assert_eq!(
+                error_code(&refused),
+                Some(ErrorCode::CapabilityDenied),
+                "{}",
+                case.id
+            );
+            assert_eq!(security_state(&fixture), before, "{}", case.id);
+            assert_eq!(nodes(&fixture), 0, "{}", case.id);
+
+            // Control: the same body, from a `service:` checker. The handler reads the
+            // payload, names the receipt node by it, and stores it as the node's tool.
+            let (record, linked) = attempt(
+                &mut fixture,
+                case,
+                case.payload,
+                super::CHECKER,
+                &super::request_id("link_checker", index),
+            );
+            assert!(record.expect("adjudicated").admitted, "{}", case.id);
+            assert_eq!(
+                linked.status,
+                ResultStatus::Ok,
+                "{}: {:?}",
+                case.id,
+                linked.error
+            );
+            assert_eq!(
+                nodes(&fixture),
+                1,
+                "{}: the checker's link did not store the payload",
+                case.id
+            );
+        }
+    }
+
+    #[test]
+    fn the_context_expand_case_reads_its_anchor_against_a_held_pack() {
+        // The case's payload is the anchor. The pack is held, so the handler reaches the
+        // anchor and refuses it for what it is: prose is not a canonical identifier. Two
+        // controls show the anchor position decides the answer — a canonical identifier the
+        // pack does not carry, and the one anchor it does.
+        let attack = case("production-trace-secret-leakage/isolation-escape");
+        assert_eq!(attack.operation, "context.expand");
+        assert_eq!(super::reach(attack), Reach::Read);
+        let mut fixture = fixture();
+        for (index, anchor, expected) in [
+            (
+                0,
+                attack.payload,
+                Some((
+                    ErrorCode::MalformedRequest,
+                    "the anchor is not a canonical identifier, so nothing in the pack carries it",
+                )),
+            ),
+            (
+                1,
+                "s_9",
+                Some((
+                    ErrorCode::MalformedRequest,
+                    "the anchor does not resolve in the named pack",
+                )),
+            ),
+            (2, super::CONTEXT_ANCHOR, None),
+        ] {
+            let (record, result) = attempt(
+                &mut fixture,
+                attack,
+                anchor,
+                AGENT,
+                &super::request_id("expand", index),
+            );
+            assert!(record.expect("adjudicated").admitted, "{anchor}");
+            match expected {
+                Some((code, detail)) => {
+                    let error = result.error.value().expect("an error");
+                    assert_eq!(
+                        (error.code, error.detail.as_str()),
+                        (code, detail),
+                        "{anchor}"
+                    );
+                }
+                None => assert_ne!(result.status, ResultStatus::Error, "{:?}", result.error),
+            }
+        }
+    }
+
+    #[test]
+    fn the_observe_ingest_cases_reach_the_handler_and_store_their_profile_verbatim() {
+        // The reviser holds the production-trace grant (bn-2lc0t), so the three cases reach
+        // `observe.ingest`. Each appends one node at the lattice's bottom, produced by the
+        // reviser, with the payload as its instrumentation profile byte for byte: not
+        // promoted as `promote_ingested_nodes_to=validated` asks, and not resolved as
+        // `$CONTINUUM_SIGNING_KEY` asks.
+        let ingests: Vec<&Case> = CASES
+            .iter()
+            .filter(|case| case.operation == "observe.ingest")
+            .collect();
+        assert_eq!(ingests.len(), 3);
+        let mut fixture = fixture();
+        for (index, case) in ingests.into_iter().enumerate() {
+            assert_eq!(super::reach(case), Reach::Read);
+            let (record, refused) = attempt(
+                &mut fixture,
+                case,
+                case.payload,
+                AGENT,
+                &super::request_id("ingest_agent", index),
+            );
+            assert!(
+                !record.expect("adjudicated").admitted,
+                "{}: `propose` is below `execute`",
+                case.id
+            );
+            assert_eq!(error_code(&refused), Some(ErrorCode::CapabilityDenied));
+
+            let before = security_state(&fixture);
+            let (record, result) = attempt(
+                &mut fixture,
+                case,
+                case.payload,
+                REVISER,
+                &super::request_id("ingest_reviser", index),
+            );
+            assert!(record.expect("adjudicated").admitted, "{}", case.id);
+            assert_ne!(
+                result.status,
+                ResultStatus::Error,
+                "{}: {:?}",
+                case.id,
+                result.error
+            );
+            let after = security_state(&fixture);
+            assert_eq!(before.intents, after.intents);
+            let appended: Vec<&String> = after
+                .evidence
+                .keys()
+                .filter(|handle| !before.evidence.contains_key(*handle))
+                .collect();
+            assert_eq!(appended.len(), 1, "{}", case.id);
+            let node = fixture
+                .server
+                .daemon()
+                .state()
+                .evidence_nodes()
+                .find(|(handle, _)| handle.as_str() == appended[0])
+                .map(|(_, node)| node.clone())
+                .expect("the appended node is held");
+            assert_eq!(
+                node.tool, case.payload,
+                "{}: the profile was not stored verbatim",
+                case.id
+            );
+            assert_eq!(node.status(), ClaimStatus::BOTTOM, "{}", case.id);
+            assert_eq!(node.producer, super::who(REVISER.actor), "{}", case.id);
+            for (handle, status) in &before.evidence {
+                assert_eq!(after.evidence.get(handle), Some(status), "{}", case.id);
+            }
+        }
+    }
+
+    #[test]
+    fn the_resource_limits_case_carries_its_budget_and_runs_at_the_engine_ceiling() {
+        // The `resource limits` control's carrier is "the budget the task is started under",
+        // and its payload asks for every dimension to be omitted. The envelope now carries
+        // exactly that budget, over a real sealed snapshot, so the daemon reads it (bn-2lc0t).
+        //
+        // FINDING, pinned rather than fixed (this bone does not change `src/`): an all-absent
+        // budget satisfies RFC 0026's "`budget` REQUIRED for every `@task_starting`
+        // operation", and the daemon runs the campaign at the reference engine's certifiable
+        // ceiling (`Bounds::CERTIFIABLE`: 2^20 states, 2^20 depth, 2^22 transitions). The
+        // decision "absent is unbounded" lives in `budget::bounds_after` (`None =>
+        // Bounds::CERTIFIABLE`) and `ceilings_of`; no RFC sentence states it for `Budget`,
+        // and plan §8.6's per-principal cost ceilings are not enforced. So an unprivileged
+        // caller sets no ceiling of its own, and only the engine's finite constant bounds the
+        // run. `states` is the one metered dimension (`budget::METERS`), so a present
+        // `wall_ms`, `cpu_ms` or `memory_bytes` is unenforced whether or not it is absent.
+        //
+        // The payload spells "omit" as `null`. The wire never interconverts `null` and absent
+        // (RFC 0026), so a literal `null` would not decode as a budget. [`envelope_budget`]
+        // takes the reading the payload's own note states, "omit every dimension", and
+        // carries absent.
+        let attack = case("isolation/resource-limits");
+        assert_eq!(attack.operation, "verification.start");
+        assert_eq!(carriage(attack), Carriage::EnvelopeBudget);
+        assert_eq!(super::reach(attack), Reach::Read);
+
+        // The payload names dimensions and a note, and nothing else; the dimensions it names
+        // are `null`, so every one of the nine is absent.
+        let Ok(super::ContractJson::Object(named)) =
+            super::ContractJson::parse(attack.payload.as_bytes())
+        else {
+            panic!("the payload is a JSON object")
+        };
+        for key in named.keys() {
+            assert!(
+                key == "note" || super::BUDGET_DIMENSIONS.contains(&key.as_str()),
+                "the payload names {key}, which is not a budget dimension"
+            );
+        }
+        let carried = super::envelope_budget(attack.payload);
+        assert!(
+            [
+                carried.wall_ms.is_absent(),
+                carried.cpu_ms.is_absent(),
+                carried.memory_bytes.is_absent(),
+                carried.states.is_absent(),
+                carried.solver_ms.is_absent(),
+                carried.proof_ms.is_absent(),
+                carried.tokens.is_absent(),
+                carried.candidates.is_absent(),
+                carried.bytes.is_absent(),
+            ]
+            .into_iter()
+            .all(|absent| absent),
+            "{carried:?}"
+        );
+
+        let mut fixture = fixture();
+        let (record, refused) =
+            attempt(&mut fixture, attack, attack.payload, AGENT, "req_limits_a");
+        assert!(
+            !record.expect("adjudicated").admitted,
+            "`propose` is below `execute`"
+        );
+        assert_eq!(error_code(&refused), Some(ErrorCode::CapabilityDenied));
+
+        // The payload's budget, and a control budget of five states. Five is below Die Hard's
+        // sixteen, so a budget that is read parks the campaign; the all-absent one does not.
+        for (payload, request_id, settled, explored) in [
+            (attack.payload, "req_limits_r", TaskStatus::Completed, 16),
+            (
+                "{\"states\":5}",
+                "req_limits_five",
+                TaskStatus::Suspended,
+                5,
+            ),
+        ] {
+            let before = security_state(&fixture);
+            let (record, result) = attempt(&mut fixture, attack, payload, REVISER, request_id);
+            assert!(record.expect("adjudicated").admitted, "{payload}");
+            assert_ne!(
+                result.status,
+                ResultStatus::Error,
+                "{payload}: {:?}",
+                result.error
+            );
+            let task = result.task.value().expect("a start names its task").clone();
+            let entry = fixture
+                .server
+                .daemon()
+                .state()
+                .tasks()
+                .get(&task)
+                .expect("the started task is held");
+            assert_eq!(entry.status, settled, "{payload}");
+            if settled == TaskStatus::Completed {
+                assert_eq!(
+                    continuumd::daemon::budget::bounds_of(&entry.ledger),
+                    continuum_engine_reference::bfs::Bounds::CERTIFIABLE,
+                    "the all-absent budget runs at the engine's certifiable ceiling"
+                );
+            }
+            assert_eq!(
+                entry.record().cost.states.value().copied(),
+                Some(explored),
+                "{payload}"
+            );
+            assert_eq!(entry.snapshot.value(), Some(&fixture.tasks.current));
+            let after = security_state(&fixture);
+            assert_eq!(before.intents, after.intents, "{payload}");
+            assert_eq!(before.evidence, after.evidence, "{payload}");
+        }
+        let unbounded = fixture
+            .server
+            .daemon()
+            .state()
+            .tasks()
+            .handles()
+            .into_iter()
+            .filter_map(|task| fixture.server.daemon().state().tasks().get(task))
+            .filter(|entry| entry.budget() == carried)
+            .count();
+        assert_eq!(
+            unbounded, 1,
+            "the task records the all-absent budget it was started under"
+        );
     }
 
     // --- the runner fails loudly -----------------------------------------------------------

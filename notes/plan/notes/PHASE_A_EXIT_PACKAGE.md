@@ -509,6 +509,23 @@ content and each has at least one case; the nineteenth is `cap_*`, excluded
 because RFC 0027 S5 keeps a capability out of every trace, error and
 rendering.
 
+**Correction (2026-09-24, bn-2lc0t).** The sentence "every case is driven
+through the real wire boundary" was true of the frames and not of the
+payloads. At the time of this package, 7 cases did not carry their payload
+through the wire. The shared runner parsed the payload as a handle and,
+when that failed, named a fixed handle the daemon never held. So the two
+`task.resume` cases and five `evidence.verify` cases sent a request about
+nothing and still counted toward the ratified floor. bn-2zccj fixed this:
+each case now names a real stored carrier, and the runner fails loudly
+instead of substituting a handle. bn-2lc0t then separated "carried" from
+"read" and counted it. At package time 9 more cases carried their payload
+but no handler read it: the three `observe.ingest` cases (no corpus
+principal held the data grant), the `context.expand` case (its pack was
+not held), the `resource limits` case (no snapshot, so its budget was never
+read), and the four `evidence.link` cases (an `agent:` actor is refused
+before the body is read, which is still true and correct). The record
+above is left as it was written.
+
 ### 5.2 The three claims it holds
 
 1. **Zero privileged operations triggered**, read off the admission ledger
