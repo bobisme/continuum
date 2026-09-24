@@ -42,7 +42,7 @@ use continuum_value::epoch::ProtocolWindow;
 use continuum_workspace::snapshot::WorkspacePath;
 use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::{self, Blake3Identity};
-use continuumd::daemon::state::{DaemonState, IntentRecord, RegistryStatus};
+use continuumd::daemon::state::{Acceptance, DaemonState, IntentRecord, RegistryStatus};
 use continuumd::daemon::workspace::WorkspaceFamily;
 use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest};
 use continuumd::protocol::envelope::{EpochSet, RequestEnvelope};
@@ -239,7 +239,15 @@ fn fixture_with(pinned: Option<EpochSet>) -> Fixture {
                 status: RegistryStatus::Accepted,
                 supersedes: None,
                 superseded_by: None,
-                acceptance: None,
+                // With the block `intent.accept` writes: `workspace.create` binds only an accepted
+                // head that carries it (RFC 0037 correction 23).
+                acceptance: Some(Acceptance {
+                    accepted_by: "human:steward".to_owned(),
+                    signature: "seeded".to_owned(),
+                    timestamp: "2026-08-01T00:00:00.000Z".to_owned(),
+                    audit_record: "seeded".to_owned(),
+                    chain: Vec::new(),
+                }),
             },
         );
     }

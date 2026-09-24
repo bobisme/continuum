@@ -838,9 +838,12 @@ mod daemon_boundary {
             "bn-1604's 'never read at all' finding still holds in the handler"
         );
         // Drafts gain protection only on acceptance (plan §4): a snapshot cannot be
-        // governed by a proposal whose intent can still change.
+        // governed by a proposal whose intent can still change, nor by a contract a later
+        // acceptance or lock superseded (RFC 0037 correction 23, bn-1mgcv).
+        assert!(DAEMON_WORKSPACE.contains("super::intent::accepted_head(intent)"));
         assert!(
-            DAEMON_WORKSPACE.contains("the governing intent is not an accepted registry record")
+            DAEMON_WORKSPACE
+                .contains("the governing intent is not the accepted head of its lineage")
         );
         assert!(
             normalized(PLAN_MD)

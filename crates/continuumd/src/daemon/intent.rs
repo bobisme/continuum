@@ -73,6 +73,12 @@
 //! policy protects moves (the stand-in for RFC 0031's unshipped classifier that import also
 //! applies). Accepting a revision supersedes the head, so a lineage keeps one.
 //!
+//! A lock's successor is protected by the lock, so its acceptance block names the lock —
+//! the admitted actor, this daemon's time, and the lock's audit record — and never copies
+//! its predecessor's (RFC 0037 correction 23, bn-1mgcv). A daemon that signs acceptances
+//! signs that statement, so a peer's CI acceptance check verifies the lock actor honestly;
+//! one that does not records no chain, and no peer honors the record.
+//!
 //! # Bundles, and the one acceptance path that verifies a chain
 //!
 //! Plan §4.2.1's intent bundles arrive at protocol 3.8. `intent.export_bundle` signs the
@@ -149,6 +155,7 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("intent.lock", ErrorCode::CapabilityDenied),
     ("intent.lock", ErrorCode::IntentMutationDenied),
     ("intent.lock", ErrorCode::MalformedRequest),
+    ("intent.lock", ErrorCode::UnsupportedSemanticFeature),
     ("intent.export_bundle", ErrorCode::CapabilityDenied),
     ("intent.export_bundle", ErrorCode::MalformedRequest),
     ("intent.export_bundle", ErrorCode::PolicyGateFailed),
@@ -159,7 +166,6 @@ pub const FAULTS: &[(&str, ErrorCode)] = &[
     ("intent.import_bundle", ErrorCode::QuotaExhausted),
     ("intent.import_bundle", ErrorCode::IntentMutationDenied),
     ("intent.import_bundle", ErrorCode::PublicationAborted),
-    ("intent.lock", ErrorCode::IntentMutationDenied),
 ];
 
 /// The `$id` of the governing schema, with the `v<schema_epoch>/` segment removed
@@ -519,7 +525,6 @@ fn lock(
         ));
     }
     let contract = record.contract.clone();
-    let acceptance = record.acceptance.clone();
     let current = contract.policy().clone();
 
     // Decode the edit against RFC 0037's two closed vocabularies. A key outside the fifteen
@@ -585,6 +590,8 @@ fn lock(
     let successor = respell_id(&successor, &handle)?;
     let policy = wire_policy(successor.policy());
     let predecessor = request.intent.clone();
+    // Decided before anything is written, so a refusal here changes nothing either.
+    let acceptance = lock_acceptance(call, services, state, &handle, &predecessor)?;
 
     if let Some(previous) = state.intent_mut(&predecessor) {
         previous.status = RegistryStatus::Superseded;
@@ -597,7 +604,7 @@ fn lock(
             status: RegistryStatus::Accepted,
             supersedes: Some(predecessor),
             superseded_by: None,
-            acceptance,
+            acceptance: Some(acceptance),
         },
     );
 
@@ -610,11 +617,78 @@ fn lock(
     ))
 }
 
+/// The `signature` text of a lock successor's acceptance when this daemon signs no
+/// acceptances (below protocol 3.8, or with no key local policy allows to sign one). It is
+/// not a signature and names no one; the record then carries no chain, so no other
+/// daemon's CI acceptance check honors it (RFC 0037 correction 23).
+pub(crate) const UNSIGNED_LOCK: &str = "unsigned";
+
+/// The acceptance block of the successor that a lock of `predecessor` mints as `successor`
+/// (RFC 0037 correction 23, bn-1mgcv).
+///
+/// The successor is protected by the lock, so its record names the lock: the admitted
+/// actor that performed it, this daemon's own time reading, and the lock's own audit
+/// record. It never copies the predecessor's acceptance, which is a statement about
+/// another contract by a principal who did not perform this act. When this daemon signs
+/// acceptances, it signs the A1 statement over the successor and its predecessor as a
+/// one-element chain, which a peer's CI acceptance check verifies against the lock actor
+/// and time. A predecessor's chain is never carried over, because every element of a chain
+/// signs the statement of its own contract (correction 21).
+///
+/// # Errors
+///
+/// `UnsupportedSemanticFeature` when the deployment has no clock reading, or its
+/// acceptance-signing key is no longer active: a lock that cannot record its own act
+/// honestly is refused, and nothing is written.
+fn lock_acceptance(
+    call: &Call<'_>,
+    services: &Services,
+    state: &DaemonState,
+    successor: &IntentHandle,
+    predecessor: &IntentHandle,
+) -> Result<Acceptance, Fault> {
+    let now = services.now().ok_or_else(|| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "this deployment has no clock reading, and a lock records its own time; nothing \
+             was locked",
+        )
+    })?;
+    let mut acceptance = Acceptance {
+        accepted_by: call.grant.actor.as_str().to_owned(),
+        signature: UNSIGNED_LOCK.to_owned(),
+        timestamp: now.as_str().to_owned(),
+        audit_record: call.audit.as_str().to_owned(),
+        chain: Vec::new(),
+    };
+    if services.negotiated().protocol_version() < super::signing::SIGNING_SINCE {
+        return Ok(acceptance);
+    }
+    let statement = super::acceptance::Statement {
+        intent: successor,
+        base: Some(predecessor),
+        accepted_by: &acceptance.accepted_by,
+        timestamp: &acceptance.timestamp,
+    };
+    let element = state.signing().sign_acceptance(&statement).map_err(|()| {
+        Fault::new(
+            ErrorCode::UnsupportedSemanticFeature,
+            "this daemon's acceptance-signing key is not active; nothing was locked",
+        )
+    })?;
+    if let Some(element) = element {
+        acceptance.signature.clone_from(&element.signature);
+        acceptance.chain = vec![element];
+    }
+    Ok(acceptance)
+}
+
 /// Whether `record` is the accepted head of its lineage, holding the acceptance block that
 /// `intent.accept` recorded (RFC 0037, "the `proposed` → protected transition is performed
-/// only by the `intent.accept` operation"). It is what `intent.lock` may start from and what
-/// an accepted revision may supersede; a record without its acceptance block fails closed.
-fn accepted_head(record: &IntentRecord) -> bool {
+/// only by the `intent.accept` operation"). It is what `intent.lock` may start from, what
+/// an accepted revision may supersede, and what `workspace.create` may bind a new snapshot
+/// to; a record without its acceptance block fails closed.
+pub(crate) fn accepted_head(record: &IntentRecord) -> bool {
     record.status == RegistryStatus::Accepted
         && record.superseded_by.is_none()
         && record.acceptance.is_some()
@@ -647,8 +721,9 @@ impl BundleRecord {
     /// # Errors
     ///
     /// `()` for any record that does not name `intent`, carries another schema header, an
-    /// unknown status, a malformed `supersedes`, or an `accepted` status without its
-    /// acceptance block (RFC 0037: such a bundle "is malformed and MUST be rejected").
+    /// unknown status, a malformed `supersedes` or `superseded_by`, an `accepted` status
+    /// without its acceptance block (RFC 0037: such a bundle "is malformed and MUST be
+    /// rejected"), or a `superseded_by` present exactly when the status is not `superseded`.
     pub(crate) fn parse(bytes: &[u8], intent: &IntentHandle) -> Result<Self, ()> {
         let Ok(Json::Object(fields)) = Json::parse(bytes) else {
             return Err(());
@@ -693,6 +768,20 @@ impl BundleRecord {
             Some(_) => return Err(()),
         };
         if status == RegistryStatus::Accepted && acceptance.is_none() {
+            return Err(());
+        }
+        // The lineage edge the schema ties to status (bn-1mgcv): a `superseded` record names
+        // its successor, and a record that names one is not an accepted head, whatever its
+        // status says. Either inconsistency is a malformed record, not an acceptance.
+        let names_successor = match fields.get("superseded_by") {
+            None | Some(Json::Null) => false,
+            Some(Json::String(value)) => {
+                IntentHandle::new(value).map_err(|_| ())?;
+                true
+            }
+            Some(_) => return Err(()),
+        };
+        if names_successor != (status == RegistryStatus::Superseded) {
             return Err(());
         }
         // The chain is read, bounded, and kept verbatim here; it is verified only when an

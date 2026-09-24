@@ -150,10 +150,26 @@ fn negotiated() -> Negotiated {
     negotiate(&[version()], ProtocolWindow::new(3), ENCODINGS, &hello).expect("3.1 is served")
 }
 
-/// A daemon with the whole capability tree provisioned and both families registered.
+/// This daemon's clock reading in the clocked fixture. A lock records its own time in its
+/// successor's acceptance (RFC 0037 correction 23), so a deployment with no clock cannot
+/// lock.
+const NOW: &str = "2026-09-24T00:00:00.000Z";
+
+/// A daemon with the whole capability tree provisioned and both families registered, and
+/// no clock reading.
 fn daemon() -> Daemon {
+    daemon_at(None)
+}
+
+/// [`daemon`], with the clock reading `now` when there is one.
+fn daemon_at(now: Option<&str>) -> Daemon {
     let root = Some(cap("cap_root"));
-    Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"))
+    let builder = Daemon::builder(Blake3Identity, negotiated(), cap("cap_root"));
+    let builder = match now {
+        Some(now) => builder.now(Timestamp::new(now).expect("a timestamp")),
+        None => builder,
+    };
+    builder
         .capability(
             grant(
                 "cap_root",
@@ -310,10 +326,18 @@ fn intent_handle(contract: &IntentContract) -> IntentHandle {
 }
 
 /// A daemon holding the Die Hard workspace as staged content and its contract as a
-/// *proposed* registry record. Acceptance happens through the wire, in the tests that need
-/// an accepted one.
+/// *proposed* registry record, with the clock reading [`NOW`]. Acceptance happens through
+/// the wire, in the tests that need an accepted one.
 fn fixture() -> Fixture {
-    let mut daemon = daemon();
+    fixture_on(daemon_at(Some(NOW)))
+}
+
+/// [`fixture`] on a daemon with no clock reading.
+fn unclocked_fixture() -> Fixture {
+    fixture_on(daemon())
+}
+
+fn fixture_on(mut daemon: Daemon) -> Fixture {
     let contract = die_hard_contract();
     let intent = intent_handle(&contract);
     daemon.state_mut().put_intent(
@@ -650,7 +674,8 @@ fn seal_as(
 
 #[test]
 fn every_admission_failure_is_one_byte_identical_answer() {
-    let mut fixture = fixture();
+    // Unclocked, so the expiring capability is denied as undecidable rather than expired.
+    let mut fixture = unclocked_fixture();
     fixture
         .daemon
         .state_mut()
@@ -1527,6 +1552,173 @@ fn the_control_a_tightening_with_the_same_reviewers_is_accepted() {
     let (refused, unchanged) = accept_revision_over(predecessor, successor);
     assert_eq!(refused, None);
     assert!(!unchanged);
+}
+
+// --- bn-1mgcv: the successor names the lock, and a snapshot binds only the head --------
+//
+// RFC 0037 correction 23. A lock's successor is protected by the lock, so its acceptance
+// block records the lock and never the predecessor's acceptor; and `workspace.create`
+// binds a new snapshot only to the accepted head that carries its block.
+
+/// Lock the fixture's accepted intent so that `fairness` is `locked`, and return the
+/// successor with the lock's own audit record.
+fn lock_accepted_fixture(fixture: &mut Fixture) -> (IntentHandle, String) {
+    let accepted = accept_intent(fixture, "req_accept", "idem-accept");
+    assert_eq!(accepted.envelope.status, ResultStatus::Ok);
+    let original = fixture.intent.clone();
+    let locked = lock_fairness(fixture, &original, "req_lock_head");
+    let audit = locked
+        .envelope
+        .audit
+        .value()
+        .expect("an @audit_recorded result carries `audit`")
+        .as_str()
+        .to_owned();
+    let Payload::IntentLock(response) = &locked.payload else {
+        panic!("unexpected payload {:?}", locked.envelope.error)
+    };
+    (response.intent.clone(), audit)
+}
+
+#[test]
+fn a_lock_successor_names_the_lock_and_never_copies_the_predecessors_acceptance() {
+    let mut fixture = fixture();
+    let (successor, audit) = lock_accepted_fixture(&mut fixture);
+    let state = fixture.daemon.state();
+    let predecessor = state
+        .intent(&fixture.intent)
+        .and_then(|record| record.acceptance.clone())
+        .expect("the predecessor keeps its own acceptance");
+    let record = state.intent(&successor).expect("minted");
+    assert_eq!(record.status, RegistryStatus::Accepted);
+    let acceptance = record.acceptance.as_ref().expect("an accepted successor");
+    assert_eq!(acceptance.accepted_by, "human:steward", "the lock's actor");
+    assert_eq!(
+        acceptance.timestamp, NOW,
+        "this daemon's time, not the acceptance's"
+    );
+    assert_eq!(
+        acceptance.audit_record, audit,
+        "the lock's own audit record"
+    );
+    // Below 3.8 nothing signs, so the record names no signature and carries no chain: no
+    // peer's CI acceptance check honors it.
+    assert_eq!(acceptance.signature, "unsigned");
+    assert!(acceptance.chain.is_empty());
+    assert_ne!(
+        acceptance, &predecessor,
+        "the predecessor's acceptance is a statement about another contract"
+    );
+    assert_ne!(acceptance.signature, predecessor.signature);
+    assert_ne!(acceptance.audit_record, predecessor.audit_record);
+}
+
+#[test]
+fn a_lock_with_no_clock_reading_is_refused_and_changes_nothing() {
+    // The successor's acceptance records the lock's own time; a deployment with no clock
+    // cannot, so it locks nothing rather than borrow the predecessor's time.
+    let mut fixture = unclocked_fixture();
+    let accepted = accept_intent(&mut fixture, "req_accept", "idem-accept");
+    assert_eq!(accepted.envelope.status, ResultStatus::Ok);
+    let before = registry(&fixture);
+    let original = fixture.intent.clone();
+    let outcome = lock_fairness(&mut fixture, &original, "req_unclocked");
+    assert_eq!(code(&outcome), ErrorCode::UnsupportedSemanticFeature);
+    assert_eq!(
+        registry(&fixture),
+        before,
+        "no successor, and the head stays the head"
+    );
+}
+
+#[test]
+fn a_workspace_bound_to_a_superseded_intent_is_refused_and_creates_nothing() {
+    let mut fixture = fixture();
+    let (successor, _) = lock_accepted_fixture(&mut fixture);
+    let superseded = fixture.intent.clone();
+    assert_eq!(
+        fixture
+            .daemon
+            .state()
+            .intent(&superseded)
+            .expect("held")
+            .status,
+        RegistryStatus::Superseded
+    );
+    let before = registry(&fixture);
+    let snapshot = snapshot_these_components_would_name();
+
+    let outcome = create_workspace(&mut fixture, "req_create_superseded", "idem-superseded");
+    assert_eq!(code(&outcome), ErrorCode::AcceptanceChainInvalid);
+    assert_eq!(registry(&fixture), before);
+    assert!(
+        fixture.daemon.state().workspace(&snapshot).is_none(),
+        "no snapshot is created"
+    );
+
+    // The control: the same components under the lineage's head are created. Had the
+    // refused create written its snapshot, this one would be refused as held under
+    // another intent.
+    fixture.intent = successor;
+    let created = create_workspace(&mut fixture, "req_create_head", "idem-head");
+    assert_eq!(
+        created.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        created.envelope.error
+    );
+}
+
+#[test]
+fn a_workspace_bound_to_an_accepted_record_without_its_acceptance_is_refused() {
+    // Partial state, fail closed: `accepted` without the block is not an accepted head.
+    let mut fixture = fixture();
+    let intent = fixture.intent.clone();
+    fixture
+        .daemon
+        .state_mut()
+        .intent_mut(&intent)
+        .expect("held")
+        .status = RegistryStatus::Accepted;
+    let before = registry(&fixture);
+    let snapshot = snapshot_these_components_would_name();
+    let outcome = create_workspace(&mut fixture, "req_create_bare", "idem-bare");
+    assert_eq!(code(&outcome), ErrorCode::AcceptanceChainInvalid);
+    assert_eq!(registry(&fixture), before);
+    assert!(fixture.daemon.state().workspace(&snapshot).is_none());
+}
+
+#[test]
+fn a_workspace_bound_to_an_accepted_record_that_names_a_successor_is_refused() {
+    // Partial state, fail closed: a record that names its successor is not the head, and
+    // `accepted` does not make it one. `superseded` is refused on its status alone; this is
+    // the case only the head test decides.
+    let mut fixture = fixture();
+    let (successor, _) = lock_accepted_fixture(&mut fixture);
+    let intent = fixture.intent.clone();
+    let record = fixture
+        .daemon
+        .state_mut()
+        .intent_mut(&intent)
+        .expect("held");
+    record.status = RegistryStatus::Accepted;
+    assert_eq!(record.superseded_by.as_ref(), Some(&successor));
+    assert!(record.acceptance.is_some());
+    let before = registry(&fixture);
+    let snapshot = snapshot_these_components_would_name();
+    let outcome = create_workspace(&mut fixture, "req_create_named", "idem-named");
+    assert_eq!(code(&outcome), ErrorCode::AcceptanceChainInvalid);
+    assert_eq!(registry(&fixture), before);
+    assert!(fixture.daemon.state().workspace(&snapshot).is_none());
+}
+
+/// The snapshot the fixture's components name, learned on a scratch daemon where the
+/// create succeeds: the handle is a function of the components, not of the intent.
+fn snapshot_these_components_would_name() -> WorkspaceHandle {
+    let mut scratch = fixture();
+    let accepted = accept_intent(&mut scratch, "req_accept", "idem-accept");
+    assert_eq!(accepted.envelope.status, ResultStatus::Ok);
+    created_handle(&create_workspace(&mut scratch, "req_learn", "idem-learn"))
 }
 
 #[test]

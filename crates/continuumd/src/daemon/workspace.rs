@@ -171,7 +171,7 @@ use super::family::{
     Arguments, Call, Effect, Fault, OperationFamily, Payload, RATIONALE_RESEAL_LINEAGE_HEAD,
     RecoveryOffer, ScopeClaim,
 };
-use super::state::{DaemonState, RegistryStatus, WorkspaceRecord};
+use super::state::{DaemonState, WorkspaceRecord};
 use super::{Services, identity};
 use crate::protocol::envelope::{ArtifactRef, StructuralVerdictValue, Verdict};
 use crate::protocol::operations::workspace::{
@@ -345,15 +345,22 @@ fn create(
 ) -> Result<Effect, Fault> {
     // The governing Intent Contract, by identity only (plan §4.2, INV-001). A snapshot
     // bound to a proposal would be a snapshot whose intent can still change, which is what
-    // INV-001 exists to prevent, so only an accepted contract governs. The absent case is a
-    // denial rather than a not-found (X2).
+    // INV-001 exists to prevent, so only an accepted contract governs (RFC 0037 R2). It
+    // must also be the accepted head of its lineage, holding the acceptance block
+    // `intent.accept` or `intent.lock` recorded, which is the test `intent.lock` and A2
+    // apply (bn-1mgcv). A superseded contract no longer governs: a new snapshot bound to it
+    // would do new work under the intent a later acceptance or lock replaced — around the
+    // lock that tightened it (plan §5.4) — and `accepted` without its block is partial
+    // state, which fails closed. `workspace.fork` is different: RFC 0037 requires it to
+    // keep its base's binding by identity. The absent case is a denial rather than a
+    // not-found (X2).
     let intent = state
         .intent(&request.components.intent)
         .ok_or_else(Fault::denied)?;
-    if intent.status != RegistryStatus::Accepted {
+    if !super::intent::accepted_head(intent) {
         return Err(Fault::new(
             ErrorCode::AcceptanceChainInvalid,
-            "the governing intent is not an accepted registry record",
+            "the governing intent is not the accepted head of its lineage",
         ));
     }
 

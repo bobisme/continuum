@@ -1795,6 +1795,182 @@ fn an_acceptance_needs_its_predecessor_accepted_here() {
     assert_eq!(q_record.superseded_by.as_ref(), Some(&p));
 }
 
+// --- bn-1mgcv: a lock's successor names the lock (RFC 0037 correction 23) ----------------
+
+/// The root principal, which holds every privilege: a lock actor who is not the acceptor.
+const LOCKSMITH: (&str, &str) = ("service:continuumd", "cap_root");
+
+/// Lock `intent` as [`LOCKSMITH`] so that `fairness` is `locked`.
+fn lock_as_locksmith(world: &mut World, intent: &IntentHandle) -> OperationOutcome {
+    world.call(
+        LOCKSMITH,
+        Arguments::IntentLock(
+            continuumd::protocol::operations::intent::IntentLockRequest {
+                intent: intent.clone(),
+                policy: BTreeMap::from([("fairness".to_owned(), "locked".to_owned())]),
+            },
+        ),
+    )
+}
+
+/// The whole intent registry, for "nothing moved" assertions.
+fn intents(world: &World) -> Vec<(IntentHandle, IntentRecord)> {
+    world
+        .daemon
+        .state()
+        .intents()
+        .map(|(handle, record)| (handle.clone(), record.clone()))
+        .collect()
+}
+
+#[test]
+fn a_lock_successor_is_signed_as_the_lock_and_a_peer_verifies_it_honestly() {
+    let mut exporter = with_entropy(10);
+    let (_, identity) = exporter.mint(&[SignedArtifactKind::IntentBundle]);
+    let head = exporter.put_accepted(&contract(None), None);
+    // The head travels while it is the head: a `superseded` bundle record is no acceptance.
+    let (head_bundle, head_content) = exporter.export(vec![head.clone()]);
+
+    let locked = lock_as_locksmith(&mut exporter, &head);
+    let Payload::IntentLock(response) = &locked.payload else {
+        panic!("the lock failed: {:?}", locked.envelope.error);
+    };
+    let successor = response.intent.clone();
+    let audit = locked
+        .envelope
+        .audit
+        .value()
+        .expect("audited")
+        .as_str()
+        .to_owned();
+    let state = exporter.daemon.state();
+    let original = state
+        .intent(&head)
+        .and_then(|record| record.acceptance.clone())
+        .expect("the head keeps its acceptance");
+    let acceptance = state
+        .intent(&successor)
+        .and_then(|record| record.acceptance.clone())
+        .expect("an accepted successor");
+    assert_eq!(original.accepted_by, STEWARD.0);
+    assert_eq!(
+        acceptance.accepted_by, LOCKSMITH.0,
+        "the lock's actor, not the acceptor"
+    );
+    assert_eq!(
+        acceptance.timestamp, ACCEPTED_AT,
+        "this daemon's time reading"
+    );
+    assert_eq!(acceptance.audit_record, audit);
+    assert_eq!(
+        acceptance.chain.len(),
+        1,
+        "one element, signed for the successor"
+    );
+    assert_eq!(acceptance.signature, acceptance.chain[0].signature);
+    assert_ne!(
+        acceptance.chain, original.chain,
+        "no predecessor element is carried"
+    );
+
+    let (bundle, content) = exporter.export(vec![successor.clone()]);
+    let mut importer = world(Setup {
+        entropy: Some(100),
+        allowed: Some(AllowedSigners::new().allow(identity, BUNDLE_KINDS)),
+        ..Setup::default()
+    });
+    for content in [head_content, content] {
+        let (outcome, _, entered) = import_outcome(&importer.import(content));
+        assert_eq!(outcome, SignatureOutcome::Verified);
+        assert_eq!(entered, 1);
+    }
+    assert_eq!(
+        importer
+            .accept(&head, Some(&head_bundle), FROM_BUNDLE)
+            .error_code(),
+        None
+    );
+
+    // The CI check presents the acceptance the bundle's record carries. Naming the
+    // original acceptor instead is refused, and nothing moves.
+    let present = |importer: &mut World, by: &str| {
+        importer.call(
+            STEWARD,
+            Arguments::IntentAccept(IntentAcceptRequest {
+                proposal: successor.clone(),
+                acceptance: self::acceptance(by, &acceptance.signature, ACCEPTED_AT),
+                bundle: Optional::Present(bundle.clone()),
+            }),
+        )
+    };
+    let before = intents(&importer);
+    assert_eq!(
+        present(&mut importer, STEWARD.0).error_code(),
+        Some(ErrorCode::AcceptanceChainInvalid)
+    );
+    assert_eq!(intents(&importer), before);
+
+    // The lock actor, as the record says, verifies: the peer accepts the successor and
+    // supersedes its own head.
+    let accepted = present(&mut importer, LOCKSMITH.0);
+    assert_eq!(accepted.error_code(), None, "{:?}", accepted.envelope.error);
+    let state = importer.daemon.state();
+    let record = state.intent(&successor).expect("held");
+    assert_eq!(record.status, RegistryStatus::Accepted);
+    assert_eq!(
+        record.acceptance.as_ref().map(|a| a.accepted_by.as_str()),
+        Some(LOCKSMITH.0)
+    );
+    assert_eq!(
+        state.intent(&head).expect("held").status,
+        RegistryStatus::Superseded
+    );
+}
+
+#[test]
+fn a_lock_on_a_daemon_that_signs_no_acceptances_names_no_signature() {
+    // At 3.8, with no key local policy allows for acceptances: the successor names the lock
+    // and carries no chain, so no peer's CI acceptance check honors it (fails closed).
+    let mut world = with_entropy(10);
+    let head = world.put_accepted(&contract(None), None);
+    let locked = lock_as_locksmith(&mut world, &head);
+    let Payload::IntentLock(response) = &locked.payload else {
+        panic!("the lock failed: {:?}", locked.envelope.error);
+    };
+    let acceptance = world
+        .daemon
+        .state()
+        .intent(&response.intent)
+        .and_then(|record| record.acceptance.clone())
+        .expect("an accepted successor");
+    assert_eq!(acceptance.accepted_by, LOCKSMITH.0);
+    assert_eq!(acceptance.signature, "unsigned");
+    assert!(acceptance.chain.is_empty());
+}
+
+#[test]
+fn a_lock_whose_acceptance_key_is_revoked_is_refused_and_changes_nothing() {
+    // The same rule a local acceptance follows: a daemon that signs acceptances refuses
+    // rather than record the lock unsigned.
+    let mut world = with_entropy(10);
+    let (held, _) = world.mint(&[SignedArtifactKind::IntentBundle]);
+    let head = world.put_accepted(&contract(None), None);
+    let revoked = world.call(
+        STEWARD,
+        Arguments::SigningRevoke(SigningRevokeRequest {
+            signer: held,
+            reason: RevocationReason::Compromised,
+        }),
+    );
+    assert_eq!(revoked.error_code(), None, "the key is revoked");
+    let before = intents(&world);
+    assert_eq!(
+        lock_as_locksmith(&mut world, &head).error_code(),
+        Some(ErrorCode::UnsupportedSemanticFeature)
+    );
+    assert_eq!(intents(&world), before);
+}
+
 #[test]
 fn the_ci_check_refuses_a_retired_signer() {
     // A rotated key's old signatures still verify, but a retired key does not vouch for a
@@ -3446,6 +3622,80 @@ fn a_record_is_accepted_only_as_its_chain_signed_it() {
                 },
                 "{case}, acceptance {}allowed by local policy",
                 if allowed { "" } else { "not " }
+            );
+        }
+    }
+}
+
+/// A bundle record whose status and `superseded_by` disagree is malformed, not an
+/// acceptance (bn-1mgcv): a record that names its successor is no accepted head, and a
+/// `superseded` one names it (the registry schema's `allOf`). Each is refused whole.
+#[test]
+fn a_bundle_record_whose_status_and_successor_disagree_is_refused_whole() {
+    let (k_log, k) = keyed(161);
+    let proposal_contract = contract(None);
+    let proposal = intent_handle(&proposal_contract);
+    let honest = acceptance_element(&k_log, &k, &proposal, STEWARD.0, None);
+    let respell = |status: &str, successor: Option<&str>| {
+        let bytes = record_json(&proposal, None, &honest.1, std::slice::from_ref(&honest));
+        let Ok(ContractJson::Object(mut fields)) = ContractJson::parse(&bytes) else {
+            panic!("a record object");
+        };
+        fields.insert("status".to_owned(), ContractJson::String(status.to_owned()));
+        fields.insert(
+            "superseded_by".to_owned(),
+            successor.map_or(ContractJson::Null, |handle| {
+                ContractJson::String(handle.to_owned())
+            }),
+        );
+        ContractJson::Object(fields).to_canonical_bytes()
+    };
+    let cases = [
+        (
+            "accepted, naming a successor",
+            respell("accepted", Some("in_next")),
+            false,
+        ),
+        (
+            "superseded, naming none",
+            respell("superseded", None),
+            false,
+        ),
+        (
+            "the control: accepted and the head",
+            respell("accepted", None),
+            true,
+        ),
+    ];
+    for (case, record, imports) in cases {
+        let pins = AllowedSigners::new().allow(k.identity().clone(), BUNDLE_KINDS);
+        let mut importer = world(Setup {
+            entropy: Some(100),
+            allowed: Some(pins.clone()),
+            ..Setup::default()
+        });
+        let bytes = forged_bundle(
+            &k_log,
+            &k,
+            vec![BundleContract {
+                intent: proposal.clone(),
+                contract: proposal_contract.to_artifact_bytes(),
+                record,
+            }],
+            pins,
+        );
+        let outcome = importer.import(bytes);
+        if imports {
+            assert_eq!(outcome.error_code(), None, "{case}");
+        } else {
+            assert_eq!(
+                outcome.error_code(),
+                Some(ErrorCode::MalformedRequest),
+                "{case}"
+            );
+            assert!(
+                importer.daemon.state().intents().next().is_none(),
+                "{case}: nothing enters"
             );
         }
     }
