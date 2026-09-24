@@ -8,3 +8,4 @@
 {"ts":"2026-09-24T21:14:55.400502502Z","author":"continuum-security","event":"ThreadResolved","data":{"thread_id":"th-25s4fv","reason":"Fixed at 7c0d922: persisted derived handles are reauthorized before replay."}}
 {"ts":"2026-09-24T21:14:55.444674682Z","author":"continuum-security","event":"ReviewerVoted","data":{"review_id":"cr-3lrkq3","vote":"lgtm","reason":"Whole persisted range reviewed at 7c0d922. No remaining reportable security findings. The risk:critical human-approval gate remains separate.","target_commit":"7c0d922ef655f847fde5caeee89e35ceb4259118"}}
 {"ts":"2026-09-24T21:14:55.490509131Z","author":"continuum-security","event":"ReviewApproved","data":{"review_id":"cr-3lrkq3","target_commit":"7c0d922ef655f847fde5caeee89e35ceb4259118"}}
+{"ts":"2026-09-24T21:31:56.440313610Z","author":"continuum-dev","event":"ReviewMerged","data":{"review_id":"cr-3lrkq3","final_commit":"0877e2de"}}
