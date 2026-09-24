@@ -1,0 +1,12 @@
+PR-14 exit evidence (bn-3qzd)
+sentence: identical controlled choice logs produce canonical identical semantic events
+source: notes/plan/notes/START_HERE_IMPLEMENTATION.md, PR 14 Exit; matrix twin: PR-14-EXIT
+
+corpus digest: 18c6b2d18f89c4c72eba4ce3c19c6f5cf4ea7f55d5f600564f8cf9becd44325e
+scenario deadline-and-effect: 7560 logs, 2940 distinct journal digests, 7560 conforming, 7560 A7-accepted
+scenario channels: 720 logs, 720 distinct journal digests, 720 conforming, 720 A7-accepted
+
+total logs: 8280
+total distinct journal digests: 3660
+families observed across the corpus: 6 of 6
+config observes all 6 families on every run (lifecycle default plus effect, cancellation, obligation, time, channel)

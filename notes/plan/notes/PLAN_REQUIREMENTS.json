@@ -2028,7 +2028,7 @@
         "line": 394,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
+      "status": "satisfied",
       "summary": "Asupersync semantic journal [G4]"
     },
     {
@@ -2112,8 +2112,8 @@
         "line": 394,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "identical controlled choice logs produce canonical identical semantic events."
+      "status": "satisfied",
+      "summary": "identical controlled choice logs produce canonical identical semantic events (delivered: bn-3qzd \u2014 crates/continuum-asupersync/tests/pr14exitevidence.rs plus the retained artifact tests/golden/pr14exitevidence.txt: an independent exit layer over the six PR-14-IMPL bones' own per-family suites, touching none of their tests and none of src/. Every run in a fixed, 8,280-log, two-scenario corpus uses one BindingConfig observing all six families at once \u2014 deadline-and-effect, 7,560 logs, covers lifecycle, reserve/commit/abort, cancellation by both an explicit region cancel and a task's own deadline, obligations and virtual time in one substrate run, and channels, 720 logs, covers channel communication \u2014 with identical choice logs giving byte-identical journals on every log, the lab seed checked not to reach the journal on a sample across 7 seeds, and 3,660 distinct journal digests across the corpus rather than one. Every journal lifts as Conforms into continuumtask::region, never accepted on Violates or Inconclusive, INV-008 fail-closed, and the independently written A7 model accepts every one under the full six-family alphabet. Anti-vacuity: a perturbed choice log changes the journal, and deleting one event from a conforming journal fails the lift. Golden regeneration is explicit and always red, PR14EXITBLESS=1)."
     },
     {
       "category": "pr",
