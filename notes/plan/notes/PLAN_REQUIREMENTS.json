@@ -2869,8 +2869,8 @@
         "line": 516,
         "path": "notes/START_HERE_IMPLEMENTATION.md"
       },
-      "status": "active",
-      "summary": "spike implementing the four reuse-edge classes and query.explaininvalidation over parse/elaborate/explore"
+      "status": "satisfied",
+      "summary": "spike implementing the four reuse-edge classes and query.explaininvalidation over parse/elaborate/explore (delivered: bn-31vf \u2014 crates/continuum-incremental: a custom content-addressed query engine with no salsa dependency over parse, elaborate, buildmodel, projections, explore, domainsafety and checkinvariant; each edge carries an RFC 0030 class (Exact, Validated through a kernel-checked epoch-2 finite-closure witness bound to the engine's model, Conservative under recorded assumptions A1/A2, Experimental in the interactive lane only), class-scoped quarantine checked against every producing licence, explaininvalidation placing each query in invalidated, unknown or reused with its causal edge chain, and an independent clean-recompute parity audit (INV-010) whose verdict is Parity, Mismatch or typed Inconclusive; evidence pr22a-impl02-reuse-spike in crates/continuum-incremental/tests/golden/, promotion lane 152 queries: Exact 53, Validated 3, Conservative 14, 0 parity mismatches, 0 under-invalidation, 0 inconclusive. Not here: the daemon's query.explaininvalidation is not wired, because it takes an RFC 0031 diff handle the daemon cannot build yet; each invalidation carries one explanatory chain, not the complete edge set rule query.invalidationedges requires; the deviations from RFC 0030 listed in the crate docs; definedness chains in the incremental scan are bn-1eoco)"
     },
     {
       "category": "pr-deliverable",
