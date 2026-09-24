@@ -7,7 +7,7 @@
 //!
 //! The constitutional backdrop is INV-016 — content arriving from a source never carries
 //! authority — and the delivering evidence is `crates/continuum-security/src/injection.rs`
-//! (the corpus) plus `crates/continuumd/tests/g2_injection_corpus_evidence.rs` (thirty-four
+//! (the corpus) plus `crates/continuumd/tests/g2_injection_corpus_evidence.rs` (thirty-nine
 //! tests reading the admission ledger, the stored carriers, and which payloads a handler
 //! reads).
 //!
@@ -78,7 +78,9 @@
 //! pins it, names the two, and fails when either lands without a case. Tracked `bn-1n7hy`.
 //! Protocol 3.8 (bn-3glnv) widened the declared privileged surface to eleven: six landed
 //! signing-wire operations the ratified corpus predates. The corpus covers 3 of 11; the
-//! delivering suite drives the six with its own `SIGNING_WIRE_PROBES`, and the F1 test now
+//! delivering suite drives the six with its own `SIGNING_WIRE_CASES` — ordinary `Case`
+//! values run on their own connection, negotiated at each operation's own IDL floor
+//! (bn-162z4; before it, a bespoke probe named `SIGNING_WIRE_PROBES`) — and the F1 test now
 //! requires each landed, corpus-uncovered privileged operation to be one of them.
 //!
 //! **F2 — under the delivering suite's default principal, most of the corpus never reaches a
@@ -1597,28 +1599,30 @@ fn the_corpus_drives_at_three_of_the_five_privileged_operations_this_protocol_de
     // The gap is bounded by the reason for it. The two repair operations have no family in
     // this process, so neither is reachable today. The six protocol 3.8 operations
     // (bn-3glnv) have landed, and research/35 now names a vector for the signing wire —
-    // `RedTeamClass::ForgedSigningLineage` (bn-1uspo) — but its three cases are planted on
-    // operations that predate the signing wire, because a `Case` names no protocol version
-    // and these six are refused below 3.8 by the codec rather than by the capability check
-    // the corpus measures; `daemon_signing.rs` drives them directly at 3.8 instead (see its
+    // `RedTeamClass::ForgedSigningLineage` (bn-1uspo) — but its three ratified cases are
+    // planted on operations that predate the signing wire, because a `Case` names no
+    // protocol version and these six are refused below 3.8 by the dispatch pipeline's own
+    // version gate (`registry::introduced_at`) rather than by the capability check the
+    // corpus measures; `daemon_signing.rs` drives them directly at 3.8 instead (see its
     // "research/35 injection-corpus vector" section). Here, each is still driven at by
-    // `g2_injection_corpus_evidence.rs`'s own `SIGNING_WIRE_PROBES`, whose privilege-bit
-    // experiment runs over them exactly as over a corpus case. This assertion is the
-    // tripwire in both halves: a repair family landing, or a landed privileged operation no
-    // probe names, goes red before anything else notices.
+    // `g2_injection_corpus_evidence.rs`'s own `SIGNING_WIRE_CASES` — six ordinary `Case`
+    // values run on their own connection, negotiated at each operation's own IDL floor
+    // (bn-162z4) — whose privilege-bit experiment runs over them exactly as over a corpus
+    // case. This assertion is the tripwire in both halves: a repair family landing, or a
+    // landed privileged operation no probe names, goes red before anything else notices.
     let delivering = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/g2_injection_corpus_evidence.rs"
     ))
     .expect("the delivering suite is in the tree");
     let probes_start = delivering
-        .find("const SIGNING_WIRE_PROBES")
-        .expect("the delivering suite declares its signing-wire probes");
+        .find("const SIGNING_WIRE_CASES")
+        .expect("the delivering suite declares its signing-wire cases");
     let probes = &delivering[probes_start
         ..probes_start
             + delivering[probes_start..]
                 .find("];")
-                .expect("the probe list closes")];
+                .expect("the signing-wire case list closes")];
     for operation in &uncovered {
         assert!(
             !is_landed(operation) || probes.contains(&format!("\"{operation}\"")),
