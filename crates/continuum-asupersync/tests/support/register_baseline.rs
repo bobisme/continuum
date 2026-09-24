@@ -79,17 +79,32 @@
 //! identity is a digest, not claim B's campaign envelope artifact. The scenario's
 //! `[network]` faults, `max_partitions` and `[storage]` torn tails are not modeled.
 //!
-//! Every crash of the campaign is graceful region cancellation, not a fail-stop crash
-//! (`register::CRASH_SEMANTICS`, bn-20d8u). The crashed incarnation's cleanup aborts its
-//! permit and unsynced bytes, its tasks end and its region finalizes. So the zero
-//! findings of `RuntimeToAbstract`, `asupersync::Quiescence` and
+//! Every crash of the campaign ([`execute`]) is graceful region cancellation, not a
+//! fail-stop crash (`register::CRASH_SEMANTICS`, bn-20d8u). The crashed incarnation's
+//! cleanup aborts its permit and unsynced bytes, its tasks end and its region finalizes.
+//! So the zero findings of `RuntimeToAbstract`, `asupersync::Quiescence` and
 //! `asupersync::ObligationConservation` on plans with crashes rest on that cleanup: the
 //! projection reads a crash's `Lose` from the cleanup's aborts, so the refinement map
-//! itself is specific to graceful cancellation (IMPL-03 `neg-03-crash-keeps-bytes`).
-//! Under the process pack's fail-stop crash, the crashed incarnation's tasks would never
-//! end and its in-flight obligations would stay pending, and all three properties would
-//! need a fail-stop reading that this campaign does not define or run. The counts of runs with a crash, such as a crash after an
-//! ack, count region cancellations.
+//! itself is specific to graceful cancellation (IMPL-03 `neg-03-crash-keeps-bytes`). The
+//! counts of runs with a crash, such as a crash after an ack, count region cancellations
+//! there.
+//!
+//! # The fail-stop reading (bn-20d8u)
+//!
+//! [`execute_in`] with `register::CrashMode::FailStop` runs the same campaign with each
+//! crash a fail-stop `Crash` (`register::FAIL_STOP_SEMANTICS`). The three runtime
+//! properties then read the crash as the process profile states it, and count what it
+//! stopped apart, never as a success of the protocol and never hidden:
+//!
+//! - `RuntimeToAbstract`: the projection reads the crash's `Lose` steps from the
+//!   `region-crashed` event, not from any cleanup;
+//! - `asupersync::Quiescence`: a task the crash stopped ended, as fenced
+//!   ([`Tally::fenced`]); a finalization whose only outstanding obligations are fenced
+//!   ones, with no orphan and no unresolved publication, is the crash's, not a failure;
+//!   anything else outstanding still fails it;
+//! - `asupersync::ObligationConservation`: an obligation opened is discharged exactly
+//!   once, or fenced by its holder's crash ([`Tally::fenced`]), and never leaked; a
+//!   settle's fenced set is the crash's, and an open or leaked one still fails it.
 //!
 //! The coordinator counts confirmations: it has no data to tell senders apart. So
 //! "count each replica once" (M05's subject) rests on the replica rule
@@ -118,12 +133,14 @@ use std::fmt::Write as _;
 use continuum_asupersync::binding::{BindingConfig, run};
 use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::family::channel::ChannelEvent;
+use continuum_asupersync::family::effect::EffectEvent;
 use continuum_asupersync::family::lifecycle::{LifecycleEvent, TaskStep};
 use continuum_asupersync::family::obligation::{Discharge, ObligationEvent};
 use continuum_asupersync::family::time::TimeEvent;
 use continuum_asupersync::family::{EventBody, Family};
 use continuum_asupersync::journal::Journal;
 use continuum_asupersync::lift::{LiftVerdict, lift};
+use continuum_task::region::obligation::Subject;
 use continuum_value::identity::{Blake3Hasher, ContentHasher};
 
 use crate::model::{Alphabet, FamilyTag, judge};
@@ -861,6 +878,9 @@ pub struct Tally {
     /// was cancelled: a timer of an old epoch firing in the new one. The correct program
     /// sets none; the IMPL-05 stale-timer mutant M08 does (bn-28oa).
     pub timers: [usize; 4],
+    /// What fail-stop crashes stopped and fenced, counted apart (bn-20d8u): tasks,
+    /// obligations, reservations and timers.
+    pub fenced: [usize; 4],
 }
 
 impl Tally {
@@ -876,6 +896,9 @@ impl Tally {
         self.finalized += other.finalized;
         self.sent += other.sent;
         for (a, b) in self.timers.iter_mut().zip(other.timers) {
+            *a += b;
+        }
+        for (a, b) in self.fenced.iter_mut().zip(other.fenced) {
             *a += b;
         }
     }
@@ -899,8 +922,37 @@ pub fn settle(
     let mut region_of: BTreeMap<u32, u32> = BTreeMap::new();
     let mut timer_task: BTreeMap<u32, u32> = BTreeMap::new();
     let mut cancelled_regions = BTreeSet::new();
+    let mut fenced_obligations = BTreeSet::new();
+    let mut parent_of: BTreeMap<u32, u32> = BTreeMap::new();
     for event in journal.events() {
         match event.body() {
+            // A fail-stop crash (bn-20d8u): the stopped tasks ended, counted apart.
+            EventBody::Lifecycle(LifecycleEvent::RegionCrashed { region, fenced }) => {
+                // The whole crashed subtree, so a stale fire in a subregion counts too.
+                for r in regions.iter().copied().collect::<Vec<_>>() {
+                    let mut at = Some(r);
+                    while let Some(x) = at {
+                        if x == region.0 {
+                            cancelled_regions.insert(r);
+                            break;
+                        }
+                        at = parent_of.get(&x).copied();
+                    }
+                }
+                for t in fenced.as_slice() {
+                    tally.fenced[0] += 1;
+                    live.remove(&t.0);
+                }
+            }
+            EventBody::Obligation(ObligationEvent::Fenced { obligation }) => {
+                tally.fenced[1] += 1;
+                if !open.remove(&obligation.0) {
+                    unbalanced.push(Unbalanced::DischargedTwice(obligation.0));
+                }
+                fenced_obligations.insert(u64::from(obligation.0));
+            }
+            EventBody::Effect(EffectEvent::Fenced { .. }) => tally.fenced[2] += 1,
+            EventBody::Time(TimeEvent::Fenced { .. }) => tally.fenced[3] += 1,
             EventBody::Lifecycle(LifecycleEvent::TaskSpawned { task, region, .. }) => {
                 tally.tasks += 1;
                 live.insert(task.0);
@@ -926,8 +978,9 @@ pub fn settle(
                     live.remove(&t.0);
                 }
             }
-            EventBody::Lifecycle(LifecycleEvent::RegionOpened { region, .. }) => {
+            EventBody::Lifecycle(LifecycleEvent::RegionOpened { region, parent }) => {
                 regions.insert(region.0);
+                parent_of.insert(region.0, parent.0);
             }
             EventBody::Lifecycle(LifecycleEvent::RegionFinalized { region }) => {
                 tally.finalized += 1;
@@ -957,6 +1010,7 @@ pub fn settle(
                 region,
                 open: o,
                 leaked,
+                ..
             }) => {
                 if !o.is_empty() || !leaked.is_empty() {
                     unbalanced.push(Unbalanced::SettledWithObligations(region.0));
@@ -1001,7 +1055,12 @@ pub fn settle(
     match verdict {
         LiftVerdict::Conforms(lifted) => {
             for (_, f) in lifted.finalizations() {
-                if !f.is_total()
+                // What a crash fenced stays owed in the calculus's ledger: a finalization
+                // whose only outstanding obligations are fenced ones is the crash's.
+                let only_fenced = f.ledger().outstanding().iter().all(|o| {
+                    matches!(o.subject(), Subject::Substrate(id) if fenced_obligations.contains(&id.ordinal()))
+                });
+                if !(f.is_total() || only_fenced)
                     || !f.orphans().is_empty()
                     || !f.unresolved_publications().is_empty()
                 {
@@ -1228,7 +1287,10 @@ pub fn run_one(built: &Built, epochs: u8, log: &ChoiceLog, reachable: &BTreeSet<
                     e.seq() > at
                         && matches!(
                             e.body(),
-                            EventBody::Lifecycle(LifecycleEvent::RegionCancelRequested { .. })
+                            EventBody::Lifecycle(
+                                LifecycleEvent::RegionCancelRequested { .. }
+                                    | LifecycleEvent::RegionCrashed { .. }
+                            )
                         )
                 })
             });
@@ -1352,6 +1414,12 @@ pub fn render_plan(plan: &Plan) -> String {
 #[must_use]
 pub fn execute(campaign: &Campaign) -> Outcome {
     execute_with(campaign, |p| Ok(register::build_with_shutdown(p)))
+}
+
+/// As [`execute`], with each crash realized as `mode` says (bn-20d8u).
+#[must_use]
+pub fn execute_in(campaign: &Campaign, mode: register::CrashMode) -> Outcome {
+    execute_with(campaign, |p| Ok(register::build_with_shutdown_in(p, mode)))
 }
 
 /// As [`execute`], with `builder` turning each plan into its program: a mutant of the

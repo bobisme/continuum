@@ -65,7 +65,7 @@
 //! Reservations are named by dense ordinals in the order the journal allocated them.
 //! Tasks are the lifecycle family's [`TaskOrdinal`]s.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use continuum_task::region::worker::{CancelPhase, PublicationSlot, WorkerId, WorkerStep};
@@ -151,6 +151,13 @@ pub enum EffectEvent {
         /// Why.
         cause: AbortCause,
     },
+    /// The reservation's holder crashed, fail-stop, holding it: it is neither committed
+    /// nor aborted, and no later step of that holder resolves it (bn-20d8u). asupersync
+    /// 0.5.0 records it as its holder's leak. Encoding version 3.
+    Fenced {
+        /// The reservation.
+        reservation: ReservationOrdinal,
+    },
 }
 
 impl EffectEvent {
@@ -159,6 +166,7 @@ impl EffectEvent {
             Self::Reserved { .. } => 1,
             Self::Committed { .. } => 2,
             Self::Aborted { .. } => 3,
+            Self::Fenced { .. } => 4,
         }
     }
 
@@ -167,6 +175,7 @@ impl EffectEvent {
             Self::Reserved { .. } => "reserved",
             Self::Committed { .. } => "committed",
             Self::Aborted { .. } => "aborted",
+            Self::Fenced { .. } => "fenced",
         }
     }
 
@@ -176,7 +185,8 @@ impl EffectEvent {
         match self {
             Self::Reserved { reservation, .. }
             | Self::Committed { reservation }
-            | Self::Aborted { reservation, .. } => *reservation,
+            | Self::Aborted { reservation, .. }
+            | Self::Fenced { reservation } => *reservation,
         }
     }
 }
@@ -186,7 +196,7 @@ pub(crate) fn encode(event: &EffectEvent, out: &mut Encoder) -> Result<(), Encod
     out.u32(event.reservation().0);
     match event {
         EffectEvent::Reserved { task, .. } => out.u32(task.0),
-        EffectEvent::Committed { .. } => {}
+        EffectEvent::Committed { .. } | EffectEvent::Fenced { .. } => {}
         EffectEvent::Aborted { cause, .. } => out.tag(cause.tag()),
     }
     Ok(())
@@ -214,6 +224,12 @@ pub(crate) fn decode(input: &mut Decoder<'_>, _seq: u64) -> Result<EffectEvent, 
             })?;
             EffectEvent::Aborted { reservation, cause }
         }
+        4 => {
+            input.require_version(3, "effect event", 4, at)?;
+            EffectEvent::Fenced {
+                reservation: ReservationOrdinal(input.u32()?),
+            }
+        }
         other => {
             return Err(DecodeError::UnknownTag {
                 table: "effect event",
@@ -233,6 +249,7 @@ pub(crate) fn render(event: &EffectEvent) -> String {
         EffectEvent::Aborted { reservation, cause } => {
             format!("aborted e{} cause={cause}", reservation.0)
         }
+        EffectEvent::Fenced { reservation } => format!("fenced e{}", reservation.0),
     }
 }
 
@@ -244,6 +261,7 @@ enum Phase {
     Reserved,
     Committed,
     Aborted,
+    Fenced,
 }
 
 impl Phase {
@@ -252,6 +270,7 @@ impl Phase {
             Self::Reserved => "reserved",
             Self::Committed => "committed",
             Self::Aborted => "aborted",
+            Self::Fenced => "fenced",
         }
     }
 }
@@ -391,6 +410,40 @@ impl fmt::Display for EffectFault {
 #[derive(Debug, Default)]
 pub struct LiftState {
     reservations: BTreeMap<u32, (u32, Phase)>,
+    /// The reservations each task holds reserved, for a crash's fences (bn-20d8u).
+    reserved: BTreeMap<u32, BTreeSet<u32>>,
+    /// Whether the journal carries this family at all.
+    present: bool,
+}
+
+/// The journal carries this family (set before the first event is lifted).
+pub(crate) fn mark_present(cx: &mut LiftContext) {
+    cx.effect.present = true;
+}
+
+/// The reservations `task` holds reserved, when the journal carries this family: the
+/// fences a crash of `task` owes (bn-20d8u).
+pub(crate) fn reserved_by(cx: &LiftContext, task: u32) -> Vec<u32> {
+    if !cx.effect.present {
+        return Vec::new();
+    }
+    cx.effect
+        .reserved
+        .get(&task)
+        .map(|set| set.iter().copied().collect())
+        .unwrap_or_default()
+}
+
+fn set_phase(state: &mut LiftState, reservation: u32, task: u32, phase: Phase) {
+    state.reservations.insert(reservation, (task, phase));
+    if phase == Phase::Reserved {
+        state.reserved.entry(task).or_default().insert(reservation);
+    } else if let Some(set) = state.reserved.get_mut(&task) {
+        set.remove(&reservation);
+        if set.is_empty() {
+            state.reserved.remove(&task);
+        }
+    }
 }
 
 fn fault(fault: EffectFault) -> LiftStop {
@@ -398,6 +451,7 @@ fn fault(fault: EffectFault) -> LiftStop {
 }
 
 pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), LiftStop> {
+    cx.effect.present = true;
     let reservation = event.reservation().0;
     if let EffectEvent::Reserved { task, .. } = event {
         let expected = u32::try_from(cx.effect.reservations.len()).unwrap_or(u32::MAX);
@@ -413,9 +467,7 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
             WorkerId::at(task.0),
             WorkerStep::ReserveSlot(slot(reservation)),
         )?;
-        cx.effect
-            .reservations
-            .insert(reservation, (task.0, Phase::Reserved));
+        set_phase(&mut cx.effect, reservation, task.0, Phase::Reserved);
         return Ok(());
     }
     let Some((task, phase)) = cx.effect.reservations.get(&reservation).copied() else {
@@ -430,6 +482,18 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
     }
     let worker = WorkerId::at(task);
     let next = match event {
+        // A crash's fence: owed by the crash that stopped the holder, and only then
+        // (bn-20d8u). The calculus already discarded what the holder staged when it
+        // failed at the crash.
+        EffectEvent::Fenced { .. } => {
+            if !cx.fences.reservations.remove(&reservation) {
+                return Err(LiftStop::Violation(Nonconformance::FenceUnowed {
+                    family: crate::family::Family::Effect,
+                    ordinal: reservation,
+                }));
+            }
+            Phase::Fenced
+        }
         EffectEvent::Committed { .. } => {
             cx.tree
                 .advance(worker, WorkerStep::CommitSlot(slot(reservation)))?;
@@ -487,7 +551,7 @@ pub(crate) fn lift(event: &EffectEvent, cx: &mut LiftContext) -> Result<(), Lift
         }
         EffectEvent::Reserved { .. } => unreachable!("handled above"),
     };
-    cx.effect.reservations.insert(reservation, (task, next));
+    set_phase(&mut cx.effect, reservation, task, next);
     Ok(())
 }
 
@@ -506,7 +570,7 @@ pub(crate) fn actor_of(cx: &LiftContext, event: &EffectEvent) -> Option<u32> {
             .reservations
             .get(&reservation.0)
             .map(|(task, _)| *task),
-        EffectEvent::Aborted { .. } => None,
+        EffectEvent::Aborted { .. } | EffectEvent::Fenced { .. } => None,
     }
 }
 
@@ -536,7 +600,12 @@ const fn slot(reservation: u32) -> PublicationSlot {
 /// while the model has terminated its holder.
 pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
     for (reservation, (task, phase)) in &cx.effect.reservations {
-        if *phase == Phase::Reserved && cx.tree.worker_state(WorkerId::at(*task))?.is_terminal() {
+        // A reservation a crash still owes a fence is the truncated crash's, which the
+        // lifecycle family's finish reports incomplete (bn-20d8u).
+        if *phase == Phase::Reserved
+            && !cx.fences.reservations.contains(reservation)
+            && cx.tree.worker_state(WorkerId::at(*task))?.is_terminal()
+        {
             return Err(fault(EffectFault::LeakedAtClose {
                 reservation: *reservation,
                 task: *task,
@@ -571,6 +640,11 @@ pub enum EffectReport {
         /// Why.
         cause: AbortCause,
     },
+    /// `reservation` was fenced by its holder's crash (bn-20d8u).
+    Fence {
+        /// The reservation.
+        reservation: ReservationOrdinal,
+    },
 }
 
 /// Recorder state this family keeps: none. The recorder judges nothing, and the phase
@@ -590,6 +664,9 @@ pub(crate) fn record(report: &EffectReport, cx: &mut RecordContext) -> Result<()
         EffectReport::Abort { reservation, cause } => EffectEvent::Aborted {
             reservation: *reservation,
             cause: *cause,
+        },
+        EffectReport::Fence { reservation } => EffectEvent::Fenced {
+            reservation: *reservation,
         },
     };
     cx.append(EventBody::Effect(event));

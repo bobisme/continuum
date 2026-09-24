@@ -109,7 +109,8 @@ fn journal_ledger(journal: &Journal) -> BTreeMap<u32, Option<u32>> {
                 | ObligationEvent::Leaked { obligation } => {
                     out.insert(obligation.0, None);
                 }
-                ObligationEvent::RegionSettled { .. } => {}
+                // A fence stays owed, as the calculus's ledger keeps it (bn-20d8u).
+                ObligationEvent::RegionSettled { .. } | ObligationEvent::Fenced { .. } => {}
             }
         }
     }

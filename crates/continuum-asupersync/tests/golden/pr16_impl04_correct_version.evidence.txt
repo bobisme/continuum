@@ -2,7 +2,7 @@
 # the program with its shutdown, and the baseline campaign in
 # crates/continuum-asupersync/tests/support/register_baseline.rs.
 # Regenerate: PR16_IMPL04_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl04_correct_version
-# crash: a crash is modelled as graceful region cancellation (Cancel of the incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; a fail-stop crash, which runs no handler and fences pending completions by (node, epoch), is not covered: bn-20d8u
+# crash: a crash is modelled as graceful region cancellation (Cancel of the incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; a fail-stop crash, which runs no handler and fences pending completions by (node, epoch), is run separately where the evidence says fail-stop: bn-20d8u
 
 [pr16-impl04-pos-01-baseline]
 campaign pr16-correct-baseline seed 104729 (scenario cancel-after-submit-before-sync); bounds nodes=3 values=2 epochs<=2 crashes<=2 cancellations<=3
@@ -10,7 +10,7 @@ group 0 scenario: 2 plans, logs per plan 400 (all when fewer), 800 runs, 0 plans
 group 1 sweep-one-epoch: 307 plans, logs per plan 6 (all when fewer), 1837 runs, 3 plans exhaustive
 group 2 sample-two-epochs: 48 plans, logs per plan 6 (all when fewer), 288 runs, 0 plans exhaustive
 plans digest 612f58fd830a5a4ee4c6e49397accf77ab0eb252ccf909369611b47596fa6d2d
-campaign identity 65f82bbde578dad46296b1fe687ad470cc8c1c5d4086164cb7868a2ccfb4e1c9
+campaign identity 2354ce7bf1c083023c2db8e3ab4df4098f027150a46dbed3731c521f0db716eb
 runs 2925; protocol breaches 0; findings: abstract_register::Agreement=0 RuntimeToAbstract=0 asupersync::Quiescence=0 asupersync::ObligationConservation=0 run=0
 
 [pr16-impl04-pos-02-coverage]
@@ -24,7 +24,7 @@ obligations opened: IoOp=10300 SendPermit=8790 Transaction=15576; committed=2862
 
 [pr16-impl04-pos-03-scenario]
 plan epochs=1 | a[v0,v1]: reserve0 submit0 crash-repropose0=v1 reserve0 submit0 sync0 release0 confirm0 | b[v0]: reserve0 submit0 sync0 release0 confirm0 | c[v1]: reserve0 submit0 sync0 release0 confirm0
-400 runs; chooses Choose(epoch=0,value=v1)=400; Lose/volatile=400; findings 0; identity b1031ee10e2bdb61a44b64dd67ce31db330baf88acc545e07c5da06f11f7a118
+400 runs; chooses Choose(epoch=0,value=v1)=400; Lose/volatile=400; findings 0; identity f6ec7fa204009cff5ca8dd0a1e2c53df3e688bcff8c5df61d7cd5923c3dae95b
 
 [pr16-impl04-pos-04-bounds]
 notes/plan/examples/replicated_register.scenario.toml: domains, max_crashes, max_cancellations, seed, name and check list equal the campaign's: abstract_register::Agreement, RuntimeToAbstract, asupersync::Quiescence, asupersync::ObligationConservation; not modeled: [network] faults, max_partitions, [storage] torn tails

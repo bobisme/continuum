@@ -16,6 +16,7 @@
 //! | [`LifecycleEvent::RegionCancelRequested`] | `RegionTree::cancel` |
 //! | [`LifecycleEvent::RegionDrained`] | `RegionTree::drain`, with the tasks the drain cancelled |
 //! | [`LifecycleEvent::RegionFinalized`] | `RegionTree::finalize` |
+//! | [`LifecycleEvent::RegionCrashed`] | a fail-stop crash of the region's subtree (bn-20d8u): each live task `Fail(crashed)` (a parked one taken off its park first, `Resume`), then `RegionTree::close` on the subtree's open regions |
 //!
 //! Two steps of the calculus are deliberately **not** here. `Reserve` and `Commit` are
 //! the reserve/commit/abort family's (PR-14-IMPL-02), and the cancellation *phases* a
@@ -33,10 +34,10 @@
 //! they never reach the journal, so two scripts that differ only in label spelling
 //! produce the same bytes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use continuum_task::region::worker::{
-    CancelPhase, FailureReason, NonResumableReason, Resumability, WorkerId, WorkerStep,
+    CancelPhase, FailureReason, NonResumableReason, Resumability, WorkerId, WorkerState, WorkerStep,
 };
 use continuum_task::region::{DrainCause, RegionId, RegionState};
 
@@ -204,6 +205,17 @@ pub enum LifecycleEvent {
         /// The region.
         region: RegionOrdinal,
     },
+    /// `region`'s subtree crashed, fail-stop (bn-20d8u; RFC 0026 correction 58): these
+    /// tasks, every task of the subtree that had not ended, stopped where they were.
+    /// None of their code ran at the crash or after it, no cancellation handler and no
+    /// cleanup; what they held is fenced, not aborted. The subtree's open regions are
+    /// closed with it. Encoding version 3.
+    RegionCrashed {
+        /// The subtree's root.
+        region: RegionOrdinal,
+        /// The tasks the crash stopped.
+        fenced: TaskSet,
+    },
 }
 
 impl LifecycleEvent {
@@ -217,6 +229,7 @@ impl LifecycleEvent {
             Self::RegionCancelRequested { .. } => "region-cancel-requested",
             Self::RegionDrained { .. } => "region-drained",
             Self::RegionFinalized { .. } => "region-finalized",
+            Self::RegionCrashed { .. } => "region-crashed",
         }
     }
 
@@ -229,8 +242,33 @@ impl LifecycleEvent {
             Self::RegionCancelRequested { .. } => 5,
             Self::RegionDrained { .. } => 6,
             Self::RegionFinalized { .. } => 7,
+            Self::RegionCrashed { .. } => 8,
         }
     }
+}
+
+fn encode_tasks(tasks: &TaskSet, out: &mut Encoder) -> Result<(), EncodeError> {
+    let count = u32::try_from(tasks.0.len())
+        .map_err(|_| EncodeError::FieldTooLong { len: tasks.0.len() })?;
+    out.u32(count);
+    for task in &tasks.0 {
+        out.u32(task.0);
+    }
+    Ok(())
+}
+
+fn decode_tasks(input: &mut Decoder<'_>) -> Result<TaskSet, DecodeError> {
+    let set_at = input.offset();
+    let count = input.u32()?;
+    let mut tasks: Vec<TaskOrdinal> = Vec::new();
+    for _ in 0..count {
+        let task = TaskOrdinal(input.u32()?);
+        if tasks.last().is_some_and(|last| *last >= task) {
+            return Err(DecodeError::UnsortedSet { at: set_at });
+        }
+        tasks.push(task);
+    }
+    Ok(TaskSet(tasks))
 }
 
 pub(crate) fn encode(event: &LifecycleEvent, out: &mut Encoder) -> Result<(), EncodeError> {
@@ -265,16 +303,16 @@ pub(crate) fn encode(event: &LifecycleEvent, out: &mut Encoder) -> Result<(), En
         LifecycleEvent::RegionCloseRequested { region }
         | LifecycleEvent::RegionCancelRequested { region }
         | LifecycleEvent::RegionFinalized { region } => out.u32(region.0),
-        LifecycleEvent::RegionDrained { region, cancelled } => {
+        LifecycleEvent::RegionDrained {
+            region,
+            cancelled: tasks,
+        }
+        | LifecycleEvent::RegionCrashed {
+            region,
+            fenced: tasks,
+        } => {
             out.u32(region.0);
-            let count =
-                u32::try_from(cancelled.0.len()).map_err(|_| EncodeError::FieldTooLong {
-                    len: cancelled.0.len(),
-                })?;
-            out.u32(count);
-            for task in &cancelled.0 {
-                out.u32(task.0);
-            }
+            encode_tasks(tasks, out)?;
         }
     }
     Ok(())
@@ -351,26 +389,20 @@ pub(crate) fn decode(input: &mut Decoder<'_>, _seq: u64) -> Result<LifecycleEven
         5 => LifecycleEvent::RegionCancelRequested {
             region: RegionOrdinal(input.u32()?),
         },
-        6 => {
-            let region = RegionOrdinal(input.u32()?);
-            let set_at = input.offset();
-            let count = input.u32()?;
-            let mut tasks: Vec<TaskOrdinal> = Vec::new();
-            for _ in 0..count {
-                let task = TaskOrdinal(input.u32()?);
-                if tasks.last().is_some_and(|last| *last >= task) {
-                    return Err(DecodeError::UnsortedSet { at: set_at });
-                }
-                tasks.push(task);
-            }
-            LifecycleEvent::RegionDrained {
-                region,
-                cancelled: TaskSet(tasks),
-            }
-        }
+        6 => LifecycleEvent::RegionDrained {
+            region: RegionOrdinal(input.u32()?),
+            cancelled: decode_tasks(input)?,
+        },
         7 => LifecycleEvent::RegionFinalized {
             region: RegionOrdinal(input.u32()?),
         },
+        8 => {
+            input.require_version(3, "lifecycle event", 8, at)?;
+            LifecycleEvent::RegionCrashed {
+                region: RegionOrdinal(input.u32()?),
+                fenced: decode_tasks(input)?,
+            }
+        }
         other => {
             return Err(DecodeError::UnknownTag {
                 table: "lifecycle event",
@@ -418,6 +450,10 @@ pub(crate) fn render(event: &LifecycleEvent) -> String {
             )
         }
         LifecycleEvent::RegionFinalized { region } => format!("region-finalized r{}", region.0),
+        LifecycleEvent::RegionCrashed { region, fenced } => {
+            let tasks: Vec<String> = fenced.0.iter().map(|t| format!("t{}", t.0)).collect();
+            format!("region-crashed r{} fenced=[{}]", region.0, tasks.join(","))
+        }
     }
 }
 
@@ -425,6 +461,188 @@ pub(crate) fn render(event: &LifecycleEvent) -> String {
 
 fn ordinal(count: usize) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// The fences a fail-stop crash owes the journal, per family, by ordinal (bn-20d8u): the
+/// reservations, obligations and timers its stopped tasks held, each of a family the
+/// journal carries. They come right after the crash, before any other event.
+#[derive(Debug, Default)]
+pub struct FencesDue {
+    pub(crate) reservations: BTreeSet<u32>,
+    pub(crate) obligations: BTreeSet<u32>,
+    pub(crate) timers: BTreeSet<u32>,
+}
+
+impl FencesDue {
+    /// Whether nothing is owed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.reservations.is_empty() && self.obligations.is_empty() && self.timers.is_empty()
+    }
+
+    /// The first fence owed, in the binding's order: reservations, then obligations,
+    /// then timers, each by ascending ordinal.
+    fn first(&self) -> Option<(crate::family::Family, u32)> {
+        use crate::family::Family;
+        self.reservations
+            .first()
+            .map(|r| (Family::Effect, *r))
+            .or_else(|| self.obligations.first().map(|o| (Family::Obligation, *o)))
+            .or_else(|| self.timers.first().map(|k| (Family::Time, *k)))
+    }
+}
+
+/// While the last crash owes a fence, the next event is the first fence it owes, in the
+/// binding's order (bn-20d8u); anything else, another owed fence included, is
+/// [`Nonconformance::FenceOwed`].
+pub(crate) fn check_fences_first(body: &EventBody, cx: &LiftContext) -> Result<(), LiftStop> {
+    use crate::family::Family;
+    let Some((family, ordinal)) = cx.fences.first() else {
+        return Ok(());
+    };
+    // Exactly the next owed fence, in the binding's order: one spelling per crash.
+    let fence = match body {
+        EventBody::Effect(crate::family::effect::EffectEvent::Fenced { reservation }) => {
+            Some((Family::Effect, reservation.0))
+        }
+        EventBody::Obligation(crate::family::obligation::ObligationEvent::Fenced {
+            obligation,
+        }) => Some((Family::Obligation, obligation.0)),
+        EventBody::Time(crate::family::time::TimeEvent::Fenced { timer }) => {
+            Some((Family::Time, timer.0))
+        }
+        _ => None,
+    };
+    if fence == Some((family, ordinal)) {
+        Ok(())
+    } else {
+        Err(LiftStop::Violation(Nonconformance::FenceOwed {
+            family,
+            ordinal,
+        }))
+    }
+}
+
+/// The reason a crashed task's calculus worker fails with.
+fn crashed_reason() -> FailureReason {
+    FailureReason::new("crashed")
+        .unwrap_or_else(|_| unreachable!("`crashed` is a canonical reason token"))
+}
+
+/// A lifecycle `region-crashed`: `region`'s subtree crashes, fail-stop (bn-20d8u; RFC
+/// 0026 correction 58).
+///
+/// 1. The region is open, or closing normally, no earlier crash covered it, and no
+///    region of its subtree is draining under cancellation or crashed and not yet
+///    finalized ([`Nonconformance::CrashedRegionState`]); and no timer is already due,
+///    since it fires first ([`crate::family::time::TimeFault::Late`]). The binding
+///    produces none of these.
+/// 2. The reported stopped set is exactly the subtree's live tasks
+///    ([`Nonconformance::CrashOutcome`]), the drain check's counterpart.
+/// 3. A stopped task in cancellation (its own or its region's, requested or
+///    acknowledged), under a budget deadline, or holding a channel's receiver or a
+///    blocked send has no crash semantics here: [`LiftStop::Unsupported`] of the family
+///    that shows it, never a conformance. The binding refuses those crashes too.
+/// 4. The calculus has no crash step, so each stopped worker fails with the reason
+///    `crashed` (`Fail` discards what it staged, which publishes nothing), a parked one
+///    taken off its park first because `Fail` leaves `Created | Running` only; then the
+///    subtree's open regions are closed. The adapter obligations the workers held stay
+///    open in the calculus's ledger: they are owed, and the region's finalization is not
+///    total.
+/// 5. What the stopped tasks held is owed as fences, per family the journal carries
+///    ([`FencesDue`]); nothing of theirs happens after the crash, because every family
+///    refuses a step of a terminal task.
+fn lift_crash(cx: &mut LiftContext, region: u32, fenced: &TaskSet) -> Result<(), LiftStop> {
+    let id = RegionId::at(region);
+    let state = cx.tree.state(id)?;
+    if cx.crashed_regions.contains(&region) {
+        return Err(LiftStop::Violation(Nonconformance::CrashedRegionState {
+            region,
+            state: "crashed",
+        }));
+    }
+    if !matches!(
+        state,
+        RegionState::Open | RegionState::Draining(DrainCause::Closed)
+    ) || cx.drained.contains(&region)
+    {
+        return Err(LiftStop::Violation(Nonconformance::CrashedRegionState {
+            region,
+            state: state.token(),
+        }));
+    }
+    // No region of the subtree is under cancellation, or crashed and not yet finalized:
+    // the binding refuses both (review finding, bn-20d8u pre-review).
+    for member in cx.tree.subtree(id)? {
+        let member_state = cx.tree.state(member)?;
+        if member_state == RegionState::Draining(DrainCause::Cancelled)
+            || (cx.crashed_regions.contains(&member.ordinal())
+                && member_state != RegionState::Finalized)
+        {
+            return Err(LiftStop::Violation(Nonconformance::CrashedRegionState {
+                region: member.ordinal(),
+                state: if member_state == RegionState::Finalized {
+                    "crashed"
+                } else {
+                    member_state.token()
+                },
+            }));
+        }
+    }
+    // A timer already due should have fired first: a crash may not fence it away.
+    crate::family::time::check_none_late(cx)?;
+    let model: Vec<u32> = cx
+        .tree
+        .outstanding_workers(id)?
+        .into_iter()
+        .map(WorkerId::ordinal)
+        .collect();
+    let reported: Vec<u32> = fenced.0.iter().map(|t| t.0).collect();
+    if model != reported {
+        return Err(LiftStop::Violation(Nonconformance::CrashOutcome {
+            region,
+            reported,
+            model,
+        }));
+    }
+    let channel_holders = crate::family::channel::holders(cx);
+    for task in &model {
+        let worker = WorkerId::at(*task);
+        if cx.tree.cancel_phase(worker)? != CancelPhase::Active
+            || crate::family::cancellation::phase_of(cx, *task).is_some()
+        {
+            return Err(LiftStop::Unsupported(crate::family::Family::Cancellation));
+        }
+        if crate::family::time::has_deadline(cx, *task) {
+            return Err(LiftStop::Unsupported(crate::family::Family::Time));
+        }
+        if channel_holders.contains(task) {
+            return Err(LiftStop::Unsupported(crate::family::Family::Channel));
+        }
+    }
+    for task in &model {
+        let worker = WorkerId::at(*task);
+        if *cx.tree.worker_state(worker)? == WorkerState::Suspended {
+            cx.tree.advance(worker, WorkerStep::Resume)?;
+        }
+        cx.tree
+            .advance(worker, WorkerStep::Fail(crashed_reason()))?;
+    }
+    if state == RegionState::Open {
+        cx.tree.close(id)?;
+    }
+    for member in cx.tree.subtree(id)? {
+        cx.crashed_regions.insert(member.ordinal());
+    }
+    for task in &model {
+        let reservations = crate::family::effect::reserved_by(cx, *task);
+        cx.fences.reservations.extend(reservations);
+        let obligations = crate::family::obligation::open_held_by(cx, *task);
+        cx.fences.obligations.extend(obligations);
+        let timers = crate::family::time::armed_by(cx, *task);
+        cx.fences.timers.extend(timers);
+    }
+    Ok(())
 }
 
 /// The whole-journal check, run after the last event: the journal does not end inside a
@@ -445,11 +663,14 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
     // region loop only notes the incomplete case and keeps scanning: it must not return
     // before `finish_alone` runs (cr-19ec8g).
     let count = ordinal(cx.tree.region_count());
-    let mut incomplete = false;
+    // A crash's fences and its subtree's close come within the operation that crashed
+    // it, so a journal that ends before them is truncated (bn-20d8u).
+    let mut incomplete = !cx.fences.is_empty();
     for region in 0..count {
         let state = cx.tree.state(RegionId::at(region))?;
         if state == RegionState::Draining(DrainCause::Cancelled)
             || (cx.drained.contains(&region) && state != RegionState::Finalized)
+            || (cx.crashed_regions.contains(&region) && state != RegionState::Finalized)
         {
             incomplete = true;
         }
@@ -499,6 +720,7 @@ fn lift_single_cancel(cx: &mut LiftContext, task: u32) -> Result<(), LiftStop> {
 
 pub(crate) fn lift(event: &LifecycleEvent, cx: &mut LiftContext) -> Result<(), LiftStop> {
     match event {
+        LifecycleEvent::RegionCrashed { region, fenced } => lift_crash(cx, region.0, fenced)?,
         LifecycleEvent::RegionOpened { region, parent } => {
             let got = cx.tree.open_child(RegionId::at(parent.0))?;
             if got.ordinal() != region.0 {
@@ -687,6 +909,12 @@ pub enum LifecycleReport {
         /// The region.
         region: RegionLabel,
     },
+    /// Crash the region's subtree, fail-stop (bn-20d8u). The recorder computes the
+    /// stopped set: every live task of the subtree.
+    Crash {
+        /// The region.
+        region: RegionLabel,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -859,6 +1087,28 @@ pub(crate) fn record(
             let region = state.region(*region)?;
             state.mark_subtree(region.0, |_| StandInRegion::Finalized);
             LifecycleEvent::RegionFinalized { region }
+        }
+        LifecycleReport::Crash { region } => {
+            let region = state.region(*region)?;
+            let mut fenced = Vec::new();
+            for task in 0..ordinal(state.task_live.len()) {
+                let owner = state.task_region[task as usize];
+                if state.task_live[task as usize] && state.in_subtree(owner, region.0) {
+                    state.task_live[task as usize] = false;
+                    fenced.push(TaskOrdinal(task));
+                }
+            }
+            state.mark_subtree(region.0, |s| {
+                if s == StandInRegion::Open {
+                    StandInRegion::Closed
+                } else {
+                    s
+                }
+            });
+            LifecycleEvent::RegionCrashed {
+                region,
+                fenced: TaskSet::new(fenced),
+            }
         }
     };
     cx.append(EventBody::Lifecycle(event));

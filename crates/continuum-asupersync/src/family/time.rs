@@ -58,7 +58,7 @@
 //! Timers are named by dense ordinals in the order the journal allocated them. Tasks
 //! are the lifecycle family's [`TaskOrdinal`]s.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use continuum_task::region::worker::{CancelPhase, WorkerId, WorkerState};
@@ -124,6 +124,14 @@ pub enum TimeEvent {
         /// Its deadline.
         at: VirtualInstant,
     },
+    /// The timer's task crashed, fail-stop, while it slept on it: the timer is neither
+    /// fired nor cancelled, and no later fire of it reaches a task (bn-20d8u). In
+    /// asupersync 0.5.0 its wheel entry still comes due and wakes a task that no longer
+    /// exists, which polls nothing and traces nothing. Encoding version 3.
+    Fenced {
+        /// The timer.
+        timer: TimerOrdinal,
+    },
 }
 
 impl TimeEvent {
@@ -134,6 +142,7 @@ impl TimeEvent {
             Self::Fired { .. } => 3,
             Self::Cancelled { .. } => 4,
             Self::Deadline { .. } => 5,
+            Self::Fenced { .. } => 6,
         }
     }
 
@@ -144,6 +153,7 @@ impl TimeEvent {
             Self::Fired { .. } => "fired",
             Self::Cancelled { .. } => "cancelled",
             Self::Deadline { .. } => "deadline",
+            Self::Fenced { .. } => "fenced",
         }
     }
 }
@@ -170,6 +180,7 @@ pub(crate) fn encode(event: &TimeEvent, out: &mut Encoder) -> Result<(), EncodeE
             out.u32(timer.0);
             out.u64(at.0);
         }
+        TimeEvent::Fenced { timer } => out.u32(timer.0),
         TimeEvent::Deadline { task, at } => {
             out.u32(task.0);
             out.u64(at.0);
@@ -207,6 +218,12 @@ pub(crate) fn decode(input: &mut Decoder<'_>, _seq: u64) -> Result<TimeEvent, De
                 at: VirtualInstant(input.u64()?),
             }
         }
+        6 => {
+            input.require_version(3, "time event", 6, at_offset)?;
+            TimeEvent::Fenced {
+                timer: TimerOrdinal(input.u32()?),
+            }
+        }
         other => {
             return Err(DecodeError::UnknownTag {
                 table: "time event",
@@ -232,6 +249,7 @@ pub(crate) fn render(event: &TimeEvent) -> String {
         TimeEvent::Fired { timer, at } => format!("fired k{} at={}", timer.0, at.0),
         TimeEvent::Cancelled { timer, at } => format!("cancelled k{} at={}", timer.0, at.0),
         TimeEvent::Deadline { task, at } => format!("deadline t{} at={}", task.0, at.0),
+        TimeEvent::Fenced { timer } => format!("fenced k{}", timer.0),
     }
 }
 
@@ -242,6 +260,7 @@ enum State {
     Scheduled,
     Fired,
     Cancelled,
+    Fenced,
 }
 
 impl State {
@@ -250,6 +269,7 @@ impl State {
             Self::Scheduled => "scheduled",
             Self::Fired => "fired",
             Self::Cancelled => "cancelled",
+            Self::Fenced => "fenced",
         }
     }
 }
@@ -562,8 +582,42 @@ pub struct LiftState {
     /// The tasks with a declared deadline, by the region that owns them, for the race
     /// check at that region's cancellation ([`check_cancel_not_raced`]).
     deadlines_by_region: BTreeMap<u32, std::collections::BTreeSet<u32>>,
+    /// The timers each task sleeps on (scheduled), for a crash's fences (bn-20d8u).
+    armed: BTreeMap<u32, BTreeSet<u32>>,
     /// Whether the journal carries this family at all.
     present: bool,
+}
+
+/// Record `timer`, keeping the per-task index of scheduled timers in step.
+fn put(state: &mut LiftState, timer: u32, entry: Timer) {
+    if entry.state == State::Scheduled {
+        state.armed.entry(entry.task).or_default().insert(timer);
+    } else if let Some(set) = state.armed.get_mut(&entry.task) {
+        set.remove(&timer);
+        if set.is_empty() {
+            state.armed.remove(&entry.task);
+        }
+    }
+    state.timers.insert(timer, entry);
+}
+
+/// The timers `task` sleeps on, when the journal carries this family: the fences a
+/// crash of `task` owes (bn-20d8u).
+pub(crate) fn armed_by(cx: &LiftContext, task: u32) -> Vec<u32> {
+    if !cx.time.present {
+        return Vec::new();
+    }
+    cx.time
+        .armed
+        .get(&task)
+        .map(|set| set.iter().copied().collect())
+        .unwrap_or_default()
+}
+
+/// Whether `task` runs under a declared budget deadline, when the journal carries this
+/// family: a crash of it has no semantics here (bn-20d8u).
+pub(crate) fn has_deadline(cx: &LiftContext, task: u32) -> bool {
+    cx.time.present && cx.time.deadlines.contains_key(&task)
 }
 
 fn fault(fault: TimeFault) -> LiftStop {
@@ -581,6 +635,12 @@ fn on_clock(state: &LiftState, event: &TimeEvent, at: u64) -> Result<(), LiftSto
             now: state.now,
         }))
     }
+}
+
+/// No scheduled timer is past due, when the journal carries this family: checked at a
+/// crash, which may not fence an overdue timer away (bn-20d8u).
+pub(crate) fn check_none_late(cx: &LiftContext) -> Result<(), LiftStop> {
+    none_late(&cx.time)
 }
 
 /// No scheduled timer is past due.
@@ -701,7 +761,8 @@ pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftSt
                     state,
                 }));
             }
-            cx.time.timers.insert(
+            put(
+                &mut cx.time,
                 timer.0,
                 Timer {
                     task: task.0,
@@ -761,7 +822,29 @@ pub(crate) fn lift(event: &TimeEvent, cx: &mut LiftContext) -> Result<(), LiftSt
                 crate::family::cancellation::imply_acknowledgement(cx, entry.task)?;
                 entry.state = State::Cancelled;
             }
-            cx.time.timers.insert(timer.0, entry);
+            put(&mut cx.time, timer.0, entry);
+        }
+        // A crash's fence: owed by the crash that stopped the sleeper, and only then
+        // (bn-20d8u). A fenced timer is never late: its fire reaches no task.
+        TimeEvent::Fenced { timer } => {
+            let Some(mut entry) = cx.time.timers.get(&timer.0).copied() else {
+                return Err(fault(TimeFault::UnknownTimer { timer: timer.0 }));
+            };
+            if entry.state != State::Scheduled {
+                return Err(fault(TimeFault::AlreadyEnded {
+                    timer: timer.0,
+                    event: event.token(),
+                    state: entry.state.token(),
+                }));
+            }
+            if !cx.fences.timers.remove(&timer.0) {
+                return Err(LiftStop::Violation(Nonconformance::FenceUnowed {
+                    family: crate::family::Family::Time,
+                    ordinal: timer.0,
+                }));
+            }
+            entry.state = State::Fenced;
+            put(&mut cx.time, timer.0, entry);
         }
     }
     Ok(())
@@ -903,9 +986,14 @@ pub(crate) fn check_none_armed(cx: &LiftContext, task: u32) -> Result<(), LiftSt
 /// The whole-journal check, run after the last event: no timer is late, and no timer
 /// outlives the task that sleeps on it.
 pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
+    // A timer a crash still owes a fence is the truncated crash's, which the lifecycle
+    // family's finish reports incomplete; it is neither late nor outliving (bn-20d8u).
+    // A crash is refused over a late timer, so an owed timer is never late here.
+    let owed = |timer: &u32| cx.fences.timers.contains(timer);
     none_late(&cx.time)?;
     for (timer, entry) in &cx.time.timers {
         if entry.state == State::Scheduled
+            && !owed(timer)
             && cx
                 .tree
                 .worker_state(WorkerId::at(entry.task))?

@@ -730,6 +730,19 @@ pub(crate) fn receiver_of(cx: &LiftContext, channel: u32) -> Option<u32> {
         .map(|model| model.receiver)
 }
 
+/// Every task that holds a channel's receiver or a blocked send: one pass over the
+/// channels, for a crash's check of its stopped tasks (bn-20d8u).
+pub(crate) fn holders(cx: &LiftContext) -> std::collections::BTreeSet<u32> {
+    let mut out = std::collections::BTreeSet::new();
+    for model in cx.channel.channels.values() {
+        if model.receiver_present {
+            out.insert(model.receiver);
+        }
+        out.extend(model.blocked_sends.values().copied());
+    }
+    out
+}
+
 /// A task that completes as cancelled holds no channel's receiver and no blocked
 /// send.
 pub(crate) fn check_none_held(cx: &LiftContext, task: u32) -> Result<(), LiftStop> {

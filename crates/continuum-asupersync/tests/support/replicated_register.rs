@@ -50,11 +50,23 @@
 //! The process pack's profile `process/crash-restart-v0` (bn-3mmf) calls this graceful
 //! cancellation, not a crash. Its fail-stop crash runs nothing more of the incarnation,
 //! no finalizer and no cancellation handler, and leaves each operation the incarnation
-//! began pending, with a late completion fenced by `(node, epoch)`. The binding has no
-//! operation that stops a task without its cancellation cleanup, so this program does
-//! not realize a fail-stop crash. Every claim here, and in `register_baseline.rs` and
-//! `register_mutants.rs`, about what a crash does is a claim about graceful region
-//! cancellation. Fail-stop crash coverage is open, owned by bn-20d8u.
+//! began pending, with a late completion fenced by `(node, epoch)`. [`build`] and
+//! [`build_with_shutdown`] realize every crash as graceful region cancellation, and
+//! every claim made of their runs, here and in `register_baseline.rs` and
+//! `register_mutants.rs`, is a claim about graceful region cancellation.
+//!
+//! # The fail-stop crash (bn-20d8u)
+//!
+//! [`build_with_shutdown_in`] with [`CrashMode::FailStop`] builds the same program with
+//! each crash act realized as the binding's `Crash` of the incarnation's region instead
+//! ([`FAIL_STOP_SEMANTICS`]): the incarnation's tasks stop where they are, run nothing
+//! (no cancellation handler, no cleanup), and what they held is fenced: the write permit,
+//! the unsynced bytes' `IoOp`. The projection reads the loss from the crash event itself:
+//! at `region-crashed`, every attempt of a stopped writer that is still reserved or
+//! volatile is lost (one `Lose` step each, by attempt order), and the fences that follow
+//! stutter. A durable attempt stays durable. So the refinement map does not rest on any
+//! cleanup, and `register_baseline.rs` reads quiescence and conservation with the stopped
+//! tasks and the fenced obligations counted apart.
 //!
 //! Virtual time is not used: no step of the durable register waits for a timer, and a
 //! sleeping writer would only add a refusal (`TaskAsleep`) to the admissibility rule.
@@ -162,7 +174,25 @@ pub const CRASH_SEMANTICS: &str = "a crash is modelled as graceful region cancel
      incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), \
      process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; \
      a fail-stop crash, which runs no \
-     handler and fences pending completions by (node, epoch), is not covered: bn-20d8u";
+     handler and fences pending completions by (node, epoch), is run separately where the evidence says \
+     fail-stop: bn-20d8u";
+
+/// What [`Act::Crash`] and [`Act::CrashRepropose`] are in a [`CrashMode::FailStop`] build
+/// (bn-20d8u): the profile's `fail-stop-crash` row. The evidence renders this line beside
+/// [`CRASH_SEMANTICS`].
+pub const FAIL_STOP_SEMANTICS: &str = "a fail-stop crash is the binding's Crash of the incarnation's region: \
+     its tasks stop where they are and run nothing, no cancellation handler and no cleanup; the permit and \
+     the unsynced IoOp they held are fenced, never aborted, and the projection reads their Lose from the \
+     crash event; process/crash-restart-v0 row fail-stop-crash (bn-20d8u)";
+
+/// How a build realizes a crash act (bn-20d8u).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrashMode {
+    /// `Cancel` of the incarnation's region: graceful region cancellation.
+    Graceful,
+    /// `Crash` of the incarnation's region: the profile's fail-stop crash.
+    FailStop,
+}
 
 // ---------------------------------------------------------------------------
 // 1. the program
@@ -348,7 +378,7 @@ fn coordinators(plan: &Plan) -> Vec<(u8, u8, usize)> {
 /// On a plan that is not well formed: an epoch out of range, or an act on a permit or
 /// bytes that the same incarnation has not taken.
 pub fn build(plan: &Plan) -> Built {
-    build_inner(plan, false)
+    build_inner(plan, false, CrashMode::Graceful)
 }
 
 /// The binding programs of `plan` with the service's shutdown (PR-16/IMPL-04, bn-5fpl):
@@ -365,7 +395,17 @@ pub fn build(plan: &Plan) -> Built {
 ///
 /// As [`build`].
 pub fn build_with_shutdown(plan: &Plan) -> Built {
-    build_inner(plan, true)
+    build_inner(plan, true, CrashMode::Graceful)
+}
+
+/// [`build_with_shutdown`] with each crash act realized as `mode` says (bn-20d8u). The
+/// graceful build is [`build_with_shutdown`], operation for operation.
+///
+/// # Panics
+///
+/// As [`build`].
+pub fn build_with_shutdown_in(plan: &Plan, mode: CrashMode) -> Built {
+    build_inner(plan, true, mode)
 }
 
 /// `built` without operation `index` of actor `actor`, its admissibility facts kept in
@@ -427,7 +467,7 @@ pub fn with_op(built: &Built, actor: usize, index: usize, op: SubstrateOp) -> Bu
     out
 }
 
-fn build_inner(plan: &Plan, shutdown: bool) -> Built {
+fn build_inner(plan: &Plan, shutdown: bool, mode: CrashMode) -> Built {
     assert!((1..=2).contains(&plan.epochs), "one or two epochs");
     assert!(
         plan.values
@@ -599,7 +639,10 @@ fn build_inner(plan: &Plan, shutdown: bool) -> Built {
                     inc += 1;
                     permit.clear();
                     bytes.clear();
-                    (SubstrateOp::Cancel { region: r }, None)
+                    match mode {
+                        CrashMode::Graceful => (SubstrateOp::Cancel { region: r }, None),
+                        CrashMode::FailStop => (SubstrateOp::Crash { region: r }, None),
+                    }
                 }
             };
             ops.push(op);
@@ -893,6 +936,8 @@ enum Phase {
 /// One writer attempt at a slot: a permit, and bytes once submitted.
 #[derive(Debug, Clone)]
 struct Attempt {
+    /// The writer task that makes it.
+    task: u32,
     node: u8,
     epoch: u8,
     value: u8,
@@ -1033,6 +1078,62 @@ pub fn observe(roles: &Roles, journal: &Journal) -> Result<Vec<Observed>, Projec
         let seq = event.seq();
         let pre = view.raw();
         let unknown = ProjectionRefusal::UnknownEntity { seq };
+        // A fail-stop crash (bn-20d8u): every attempt of a stopped writer that is still
+        // reserved or volatile is lost at the crash itself, one `Lose` step each, by
+        // attempt order; a durable one stays durable. The fences that follow stutter.
+        if let EventBody::Lifecycle(LifecycleEvent::RegionCrashed { fenced, .. }) = event.body() {
+            let stopped: BTreeSet<u32> = fenced.as_slice().iter().map(|t| t.0).collect();
+            let mut lost_any = false;
+            for i in 0..view.attempts.len() {
+                let a = &view.attempts[i];
+                if !stopped.contains(&a.task) {
+                    continue;
+                }
+                let before = view.raw();
+                let live = a.live();
+                let a = &mut view.attempts[i];
+                let expect = match live {
+                    Some(Live::Volatile(v)) => Expect::Step(format!(
+                        "Lose({},value={})",
+                        at(a.node, a.epoch),
+                        VALUES[usize::from(v)]
+                    )),
+                    Some(Live::Reserved) => {
+                        Expect::StepPrefix(format!("Lose({},", at(a.node, a.epoch)))
+                    }
+                    Some(Live::Durable(_)) | None => {
+                        if a.permit == Some(Phase::Open) {
+                            a.permit = Some(Phase::Aborted);
+                        }
+                        continue;
+                    }
+                };
+                if a.bytes == Some(Phase::Open) {
+                    a.bytes = Some(Phase::Aborted);
+                }
+                if a.permit == Some(Phase::Open) {
+                    a.permit = Some(Phase::Aborted);
+                }
+                lost_any = true;
+                out.push(Observed {
+                    seq,
+                    event: event.render(),
+                    expect,
+                    pre: before,
+                    post: view.raw(),
+                });
+            }
+            if !lost_any {
+                out.push(Observed {
+                    seq,
+                    event: event.render(),
+                    expect: Expect::Stutter,
+                    pre,
+                    post: view.raw(),
+                });
+            }
+            continue;
+        }
         let expect = match event.body() {
             EventBody::Lifecycle(LifecycleEvent::TaskSpawned { task, region, .. }) => {
                 let want = roles
@@ -1075,6 +1176,7 @@ pub fn observe(roles: &Roles, journal: &Journal) -> Result<Vec<Observed>, Projec
                 match role {
                     Role::Writer { node, epoch, value } => {
                         view.attempts.push(Attempt {
+                            task: task.0,
                             node,
                             epoch,
                             value,
@@ -1150,6 +1252,7 @@ pub fn observe(roles: &Roles, journal: &Journal) -> Result<Vec<Observed>, Projec
                     Some(&i) if view.attempts[i].bytes.is_none() => i,
                     _ => {
                         view.attempts.push(Attempt {
+                            task: holder.0,
                             node,
                             epoch,
                             value,

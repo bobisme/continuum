@@ -2,7 +2,7 @@
 # crates/continuum-asupersync/tests/support/replicated_register.rs, run through the
 # binding, projected onto notes/plan/examples/durable_register.ctm.
 # Regenerate: PR16_IMPL03_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl03_replicated_register
-# crash: a crash is modelled as graceful region cancellation (Cancel of the incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; a fail-stop crash, which runs no handler and fences pending completions by (node, epoch), is not covered: bn-20d8u
+# crash: a crash is modelled as graceful region cancellation (Cancel of the incarnation's region, whose tasks run their cancellation cleanup and abort what they hold), process/crash-restart-v0 row graceful-cancellation, which that profile marks Unsupported; a fail-stop crash, which runs no handler and fences pending completions by (node, epoch), is run separately where the evidence says fail-stop: bn-20d8u
 
 [pr16-impl03-pos-01-two-writers]
 plan two-writers: epochs=1 values a=v0 b=v0 c=v1

@@ -569,6 +569,7 @@ impl Account {
             | SubstrateOp::Send { .. }
             | SubstrateOp::Recv { .. }
             | SubstrateOp::CloseSenders { .. }
+            | SubstrateOp::Crash { .. }
             | SubstrateOp::SpawnWithDeadline { .. } => {
                 unreachable!("the ledger corpus does not sleep")
             }
@@ -679,6 +680,7 @@ impl Account {
                 region: RegionOrdinal(member),
                 open,
                 leaked,
+                fenced: ObligationSet::default(),
             });
         }
     }
@@ -1074,6 +1076,7 @@ fn mutated_ledger_journals_are_rejected() {
             region: RegionOrdinal(2),
             open: ObligationSet::default(),
             leaked: ObligationSet::new([obligation]),
+            fenced: ObligationSet::default(),
         });
         // A leak is its holder's end, so a leak by a parked holder is refused first
         // (cr-3pu5cu round 7); a running holder's leak reaches the unbalanced close.
@@ -1120,6 +1123,7 @@ fn mutated_ledger_journals_are_rejected() {
             region: RegionOrdinal(2),
             open: ObligationSet::default(),
             leaked: ObligationSet::new([obligation]),
+            fenced: ObligationSet::default(),
         });
         assert!(
             matches!(
@@ -1375,6 +1379,7 @@ fn refusals_are_typed() {
             region: RegionOrdinal(0),
             open: ObligationSet::default(),
             leaked: ObligationSet::new([ObligationOrdinal(1), ObligationOrdinal(2)]),
+            fenced: ObligationSet::default(),
         }))
         .unwrap();
     let mut unsorted = journal.encode().unwrap();

@@ -159,6 +159,11 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// The journal encoding version whose grammar the bytes are read under.
+    pub(crate) const fn version(&self) -> u32 {
+        self.version
+    }
+
     /// The offset of the next unread byte.
     #[must_use]
     pub const fn offset(&self) -> usize {

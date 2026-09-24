@@ -433,6 +433,7 @@ fn reports(program: &Program, index: usize) -> Vec<Report> {
         | SubstrateOp::Send { .. }
         | SubstrateOp::Recv { .. }
         | SubstrateOp::CloseSenders { .. }
+        | SubstrateOp::Crash { .. }
         | SubstrateOp::SpawnWithDeadline { .. } => {
             unreachable!("the lifecycle corpus has no effect operations")
         }

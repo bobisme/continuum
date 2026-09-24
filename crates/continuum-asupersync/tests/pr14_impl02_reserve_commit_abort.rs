@@ -446,6 +446,7 @@ impl Account {
             | SubstrateOp::Send { .. }
             | SubstrateOp::Recv { .. }
             | SubstrateOp::CloseSenders { .. }
+            | SubstrateOp::Crash { .. }
             | SubstrateOp::SpawnWithDeadline { .. } => {
                 unreachable!("the effect corpus reserves transactions only")
             }

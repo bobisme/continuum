@@ -44,17 +44,29 @@ pub const MAGIC: &[u8] = b"continuum/semantic-journal\n";
 /// Version 2 (bn-36wy3, cr-3pu5cu) adds tags to three existing families: lifecycle
 /// task steps 6 (`cancel`) and 7 (`cancel-requested`), cancel cause 3 (`deadline`),
 /// and virtual time event 5 (`deadline`). Compatibility statement: a version-1 journal
-/// is `Preserved`. It decodes to the same journal and lifts to the same verdict; its
-/// canonical re-encoding is version 2, a new identity. Nothing is rewritten in place:
-/// no persisted or published artifact carries these bytes (the journal is produced
-/// and judged in process).
-pub const ENCODING_VERSION: u32 = 2;
+/// was `Preserved`. It decoded to the same journal and lifted to the same verdict; its
+/// canonical re-encoding was version 2, a new identity.
+///
+/// Version 3 (bn-20d8u, RFC 0026 correction 58) records a fail-stop crash: lifecycle
+/// event 8 (`region-crashed`), effect event 4, obligation event 6 and time event 6
+/// (each `fenced`), and it changes an existing payload: obligation event 5
+/// (`region-settled`) gains a third set, the obligations fenced in the region.
+/// Compatibility statement: a version-2 journal is `Preserved`. It is read under the
+/// version-2 grammar, its settles have an empty fenced set, and it decodes to the same
+/// journal and lifts to the same verdict; its canonical re-encoding is version 3, a new
+/// identity. Under ADR-0018's two-version rule, version 1 is no longer read
+/// ([`DecodeError::UnsupportedVersion`]). Nothing is rewritten in place: no persisted
+/// or published artifact carries these bytes (the journal is produced and judged in
+/// process), and the journal is not the protocol's IDL, so no protocol version moves.
+///
+/// [`DecodeError::UnsupportedVersion`]: crate::encoding::DecodeError::UnsupportedVersion
+pub const ENCODING_VERSION: u32 = 3;
 
 /// Every encoding version this crate reads: the current one and its predecessor
-/// (ADR-0018: at most two held at once). A version-1 journal is read under the
-/// version-1 grammar, so a tag added in version 2 is
+/// (ADR-0018: at most two held at once). A version-2 journal is read under the
+/// version-2 grammar, so a tag added in version 3 is
 /// [`DecodeError::TagNotInVersion`] there.
-pub const READ_VERSIONS: [u32; 2] = [1, 2];
+pub const READ_VERSIONS: [u32; 2] = [2, 3];
 
 /// One semantic event: its position and its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]

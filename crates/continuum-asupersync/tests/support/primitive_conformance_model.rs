@@ -26,9 +26,14 @@
 //!   time). The channel rules (bn-1i050) are those of a bounded multi-producer,
 //!   single-consumer FIFO channel whose send is a docs/02 §7 two-phase effect (a send
 //!   permit is reserved, then committed as the send), written from that semantics and
-//!   the family's wire table, not from the adapter's channel lift. Where the adapter's family documentation fixes an observation the normative
-//!   text leaves open (which phase of a cancellation the substrate lets a run see), the
-//!   rule says so.
+//!   the family's wire table, not from the adapter's channel lift. The fail-stop crash
+//!   rules (bn-20d8u) are those of the process pack's profile
+//!   `process/crash-restart-v0`, rows `fail-stop-crash` and `late-completion`, written
+//!   from the profile's statements and RFC 0026 correction 58, not from the adapter's
+//!   crash lift: a crash stops its incarnation's live tasks where they are, runs
+//!   nothing of them, and fences what they held. Where the adapter's family
+//!   documentation fixes an observation the normative text leaves open (which phase of
+//!   a cancellation the substrate lets a run see), the rule says so.
 //!
 //! # The model
 //!
@@ -56,10 +61,12 @@ use std::fmt;
 
 /// The fixed header of a canonical journal (`src/journal.rs`, "The encoding").
 const MAGIC: &[u8] = b"continuum/semantic-journal\n";
-/// The encoding versions this reader accepts: 1, and 2, which adds lifecycle task
-/// steps 6-7, cancel cause 3 and time event 5 (`src/journal.rs`, bn-36wy3). Under
-/// version 1 those tags are [`WireFault::NotInVersion`].
-const VERSIONS: [u32; 2] = [1, 2];
+/// The encoding versions this reader accepts: 2, and 3, which adds lifecycle event 8
+/// (`region-crashed`), effect event 4, obligation event 6 and time event 6 (each
+/// `fenced`), and a third set on obligation event 5 (`src/journal.rs`, bn-20d8u). Under
+/// version 2 those tags are [`WireFault::NotInVersion`] and a settle has no fenced set.
+/// Version 1 is no longer read (two versions at most, ADR-0018).
+const VERSIONS: [u32; 2] = [2, 3];
 
 /// The six families the substrate binding observes, with their wire tags
 /// (`src/family.rs`, "The six families").
@@ -163,6 +170,8 @@ pub enum Step {
     Close { region: u32 },
     /// Cancellation requested on a region's subtree.
     Cancel { region: u32 },
+    /// A fail-stop crash of a region's subtree; these live tasks stopped (bn-20d8u).
+    Crash { region: u32, stopped: Vec<u32> },
     /// A region's subtree drained; these tasks were cancelled by it.
     Drain { region: u32, cancelled: Vec<u32> },
     /// A region's subtree finalized.
@@ -182,6 +191,8 @@ pub enum Step {
         reservation: u32,
         reason: AbortReason,
     },
+    /// `Reserved`, and its holder crashed: fenced (bn-20d8u).
+    EffectFenced { reservation: u32 },
     /// An obligation opened, of wire kind `kind`, held by `holder` in `region`.
     Opened {
         obligation: u32,
@@ -204,7 +215,10 @@ pub enum Step {
         region: u32,
         open: Vec<u32>,
         leaked: Vec<u32>,
+        fenced: Vec<u32>,
     },
+    /// An open obligation whose holder crashed: fenced (bn-20d8u).
+    ObligationFenced { obligation: u32 },
     /// A timer armed by a task at `at` for `deadline`.
     Scheduled {
         timer: u32,
@@ -220,6 +234,8 @@ pub enum Step {
     TimerCancelled { timer: u32, at: u64 },
     /// A task runs under a budget deadline at `deadline`.
     DeadlineSet { task: u32, deadline: u64 },
+    /// An armed timer whose task crashed: fenced (bn-20d8u).
+    TimerFenced { timer: u32 },
     /// A bounded channel opened, its receiver held by `receiver`.
     ChannelOpened {
         channel: u32,
@@ -278,22 +294,28 @@ impl Step {
             | Self::TaskCancelled { .. }
             | Self::Close { .. }
             | Self::Cancel { .. }
+            | Self::Crash { .. }
             | Self::Drain { .. }
             | Self::Finalize { .. } => FamilyTag::Lifecycle,
             Self::CancelRequested { .. }
             | Self::CancelAcknowledged { .. }
             | Self::CancelCompleted { .. } => FamilyTag::Cancellation,
-            Self::Reserve { .. } | Self::Commit { .. } | Self::Abort { .. } => FamilyTag::Effect,
+            Self::Reserve { .. }
+            | Self::Commit { .. }
+            | Self::Abort { .. }
+            | Self::EffectFenced { .. } => FamilyTag::Effect,
             Self::Opened { .. }
             | Self::Discharged { .. }
             | Self::Transferred { .. }
             | Self::Leaked { .. }
-            | Self::Settled { .. } => FamilyTag::Obligation,
+            | Self::Settled { .. }
+            | Self::ObligationFenced { .. } => FamilyTag::Obligation,
             Self::Scheduled { .. }
             | Self::Advanced { .. }
             | Self::Fired { .. }
             | Self::TimerCancelled { .. }
-            | Self::DeadlineSet { .. } => FamilyTag::Time,
+            | Self::DeadlineSet { .. }
+            | Self::TimerFenced { .. } => FamilyTag::Time,
             Self::ChannelOpened { .. }
             | Self::Sent { .. }
             | Self::SendBlocked { .. }
@@ -416,18 +438,18 @@ impl<'a> Reader<'a> {
         }
         Ok(tag)
     }
-    /// A tag of a table that grew in version 2: `max` is its version-2 bound, and a
-    /// tag above `v1_max` needs version 2.
-    fn tag_since(&mut self, table: &'static str, v1_max: u8, max: u8) -> Result<u8, WireFault> {
+    /// A tag of a table that grew in version 3: `max` is its version-3 bound, and a
+    /// tag above `v2_max` needs version 3.
+    fn tag_since(&mut self, table: &'static str, v2_max: u8, max: u8) -> Result<u8, WireFault> {
         let at = self.at;
         let tag = self.tag(table, max)?;
-        if tag > v1_max && self.version < 2 {
+        if tag > v2_max && self.version < 3 {
             return Err(WireFault::NotInVersion { table, tag, at });
         }
         Ok(tag)
     }
     fn cause(&mut self) -> Result<Cause, WireFault> {
-        Ok(match self.tag_since("cancel cause", 2, 3)? {
+        Ok(match self.tag("cancel cause", 3)? {
             1 => Cause::User,
             2 => Cause::ParentCancelled,
             _ => Cause::Deadline,
@@ -495,8 +517,8 @@ pub fn read(bytes: &[u8]) -> Result<Vec<Step>, WireFault> {
 
 fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault> {
     Ok(match family {
-        // src/family/lifecycle.rs: tags 1..=7.
-        FamilyTag::Lifecycle => match r.tag("lifecycle event", 7)? {
+        // src/family/lifecycle.rs: tags 1..=8; 8 from version 3.
+        FamilyTag::Lifecycle => match r.tag_since("lifecycle event", 7, 8)? {
             1 => Step::OpenRegion {
                 region: r.u32()?,
                 parent: r.u32()?,
@@ -516,7 +538,7 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
             }
             3 => {
                 let task = r.u32()?;
-                match r.tag_since("task step", 5, 7)? {
+                match r.tag("task step", 7)? {
                     1 => Step::Begin { task },
                     2 => Step::Suspend { task },
                     3 => Step::Resume { task },
@@ -535,11 +557,15 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                 region: r.u32()?,
                 cancelled: r.set()?,
             },
-            _ => Step::Finalize { region: r.u32()? },
+            7 => Step::Finalize { region: r.u32()? },
+            _ => Step::Crash {
+                region: r.u32()?,
+                stopped: r.set()?,
+            },
         },
-        // src/family/effect.rs: tags 1..=3, abort reasons 1..=2.
+        // src/family/effect.rs: tags 1..=4 (4 from version 3), abort reasons 1..=2.
         FamilyTag::Effect => {
-            let tag = r.tag("effect event", 3)?;
+            let tag = r.tag_since("effect event", 3, 4)?;
             let reservation = r.u32()?;
             match tag {
                 1 => Step::Reserve {
@@ -547,6 +573,7 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                     task: r.u32()?,
                 },
                 2 => Step::Commit { reservation },
+                4 => Step::EffectFenced { reservation },
                 _ => Step::Abort {
                     reservation,
                     reason: match r.tag("abort reason", 2)? {
@@ -572,8 +599,9 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                 },
             }
         }
-        // src/family/obligation.rs: tags 1..=5, kinds 1..=6, discharge 1..=2.
-        FamilyTag::Obligation => match r.tag("obligation event", 5)? {
+        // src/family/obligation.rs: tags 1..=6 (6 from version 3), kinds 1..=6,
+        // discharge 1..=2; a version-3 settle has a third set, the fenced obligations.
+        FamilyTag::Obligation => match r.tag_since("obligation event", 5, 6)? {
             1 => Step::Opened {
                 obligation: r.u32()?,
                 kind: r.tag("obligation kind", 6)?,
@@ -592,14 +620,18 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
             4 => Step::Leaked {
                 obligation: r.u32()?,
             },
-            _ => Step::Settled {
+            5 => Step::Settled {
                 region: r.u32()?,
                 open: r.set()?,
                 leaked: r.set()?,
+                fenced: if r.version >= 3 { r.set()? } else { Vec::new() },
+            },
+            _ => Step::ObligationFenced {
+                obligation: r.u32()?,
             },
         },
-        // src/family/time.rs: tags 1..=5.
-        FamilyTag::Time => match r.tag_since("time event", 4, 5)? {
+        // src/family/time.rs: tags 1..=6 (6 from version 3).
+        FamilyTag::Time => match r.tag_since("time event", 5, 6)? {
             1 => Step::Scheduled {
                 timer: r.u32()?,
                 task: r.u32()?,
@@ -618,10 +650,11 @@ fn payload_step(family: FamilyTag, r: &mut Reader<'_>) -> Result<Step, WireFault
                 timer: r.u32()?,
                 at: r.u64()?,
             },
-            _ => Step::DeadlineSet {
+            5 => Step::DeadlineSet {
                 task: r.u32()?,
                 deadline: r.u64()?,
             },
+            _ => Step::TimerFenced { timer: r.u32()? },
         },
         // src/family/channel.rs: tags 1..=11, each `u8 tag, u32 channel, fields`.
         FamilyTag::Channel => {
@@ -696,6 +729,8 @@ struct Region {
     origin: Option<u32>,
     drained: bool,
     settled: bool,
+    /// A fail-stop crash covered it (bn-20d8u).
+    crashed: bool,
 }
 
 /// A task's lifecycle (plan §4.1: `Created → Running → Suspended | Completed | Failed |
@@ -708,11 +743,17 @@ enum TaskPhase {
     Completed,
     Failed,
     Cancelled,
+    /// Stopped by a fail-stop crash: nothing of it runs again (`process/crash-restart-v0`
+    /// row `fail-stop-crash`; bn-20d8u).
+    Crashed,
 }
 
 impl TaskPhase {
     const fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Crashed
+        )
     }
 }
 
@@ -753,6 +794,8 @@ enum EffectPhase {
     Reserved,
     Committed,
     Aborted,
+    /// Its holder crashed with it reserved: neither committed nor aborted, ever.
+    Fenced,
 }
 
 #[derive(Debug, Clone)]
@@ -766,6 +809,8 @@ enum ObligationPhase {
     Open,
     Discharged,
     Leaked,
+    /// Its holder crashed with it open: owed, never discharged (row `late-completion`).
+    Fenced,
 }
 
 #[derive(Debug, Clone)]
@@ -797,6 +842,8 @@ enum TimerPhase {
     Armed,
     Fired,
     Cancelled,
+    /// Its task crashed while it slept on it: its fire reaches no task.
+    Fenced,
 }
 
 #[derive(Debug, Clone)]
@@ -905,6 +952,16 @@ pub enum Fault {
     /// A task ends, or is drained, while it still holds a channel's receiver, a blocked
     /// receive or a blocked send.
     ChannelOutlivesTask { task: u32 },
+    /// A crash stopped a set of tasks other than its subtree's live ones (bn-20d8u).
+    CrashSet { region: u32, model: Vec<u32> },
+    /// A crash of a task with no fail-stop semantics here: in a cancellation, under a
+    /// budget deadline, or holding a channel (bn-20d8u).
+    CrashUnsupported(u32),
+    /// A step other than an owed fence while a crash still owes one: what a crashed
+    /// task held is fenced right after its crash (bn-20d8u).
+    FenceOwed { family: FamilyTag, ordinal: u32 },
+    /// A fence that no crash owes (bn-20d8u).
+    FenceUnowed { family: FamilyTag, ordinal: u32 },
 }
 
 /// A step the generator enables, with free coordinates.
@@ -1027,6 +1084,8 @@ pub struct Model {
     next_message: u64,
     /// Send permits a task committed and has not yet sent with.
     permits: std::collections::BTreeMap<u32, u32>,
+    /// The fences the last crash still owes, by family and ordinal (bn-20d8u).
+    owed: BTreeSet<(FamilyTag, u32)>,
 }
 
 fn ord(len: usize) -> u32 {
@@ -1045,6 +1104,7 @@ impl Model {
                 origin: None,
                 drained: false,
                 settled: false,
+                crashed: false,
             }],
             tasks: Vec::new(),
             reservations: Vec::new(),
@@ -1056,6 +1116,7 @@ impl Model {
             blocked: std::collections::BTreeMap::new(),
             next_message: 0,
             permits: std::collections::BTreeMap::new(),
+            owed: BTreeSet::new(),
         }
     }
 
@@ -1387,7 +1448,7 @@ impl Model {
         }
         Ok(out)
     }
-    fn balance(&self, r: u32) -> (Vec<u32>, Vec<u32>) {
+    fn balance(&self, r: u32) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
         let pick = |phase| {
             (0..ord(self.obligations.len()))
                 .filter(|o| {
@@ -1396,7 +1457,80 @@ impl Model {
                 })
                 .collect()
         };
-        (pick(ObligationPhase::Open), pick(ObligationPhase::Leaked))
+        (
+            pick(ObligationPhase::Open),
+            pick(ObligationPhase::Leaked),
+            pick(ObligationPhase::Fenced),
+        )
+    }
+    /// A region of `r`'s subtree under cancellation, or crashed and not yet finalized: an
+    /// incarnation that is already being torn down does not crash.
+    fn crash_blocked(&self, r: u32) -> Option<u32> {
+        self.subtree(r).into_iter().find(|s| {
+            let g = &self.regions[*s as usize];
+            g.phase == RegionPhase::Cancelling || (g.crashed && g.phase != RegionPhase::Finalized)
+        })
+    }
+    /// The live tasks of `r`'s subtree: what a crash of `r` stops.
+    fn crash_set(&self, r: u32) -> Vec<u32> {
+        (0..ord(self.tasks.len()))
+            .filter(|t| {
+                let task = &self.tasks[*t as usize];
+                !task.phase.is_terminal() && self.in_subtree(task.region, r)
+            })
+            .collect()
+    }
+    /// A live task a crash may stop (bn-20d8u): not in a cancellation (its own, its
+    /// region's, requested or observed), not under a budget deadline, and holding no
+    /// channel. The process profile's crash lands at a step boundary of a task that acts
+    /// on its own; the model gives the others no crash semantics.
+    fn crashable(&self, t: u32) -> bool {
+        self.tasks.get(t as usize).is_some_and(|task| {
+            task.cancel == CancelPhase::None
+                && !task.requested_alone
+                && !task.region_requested
+                && !task.cleaned_up
+                && task.deadline.is_none()
+                && !self.holds_channel(t)
+        })
+    }
+    /// What a crash of `stopped` owes (`process/crash-restart-v0` rows `fail-stop-crash`
+    /// and `late-completion`): every effect it had reserved, every obligation it held
+    /// open and every timer it slept on, each of a family the alphabet observes.
+    fn fences_of(&self, stopped: &[u32]) -> BTreeSet<(FamilyTag, u32)> {
+        let mut out = BTreeSet::new();
+        let stopped: BTreeSet<u32> = stopped.iter().copied().collect();
+        if self.alphabet.has(FamilyTag::Effect) {
+            for (e, res) in self.reservations.iter().enumerate() {
+                if res.phase == EffectPhase::Reserved && stopped.contains(&res.task) {
+                    out.insert((FamilyTag::Effect, ord(e)));
+                }
+            }
+        }
+        if self.alphabet.has(FamilyTag::Obligation) {
+            for (o, ob) in self.obligations.iter().enumerate() {
+                if ob.phase == ObligationPhase::Open && stopped.contains(&ob.holder) {
+                    out.insert((FamilyTag::Obligation, ord(o)));
+                }
+            }
+        }
+        if self.alphabet.has(FamilyTag::Time) {
+            for (k, timer) in self.timers.iter().enumerate() {
+                if timer.phase == TimerPhase::Armed && stopped.contains(&timer.task) {
+                    out.insert((FamilyTag::Time, ord(k)));
+                }
+            }
+        }
+        out
+    }
+    /// The fence `step` is, if it is one.
+    const fn fence(step: &Step) -> Option<(FamilyTag, u32)> {
+        match step {
+            Step::EffectFenced { reservation } => Some((FamilyTag::Effect, *reservation)),
+            Step::ObligationFenced { obligation } => Some((FamilyTag::Obligation, *obligation)),
+            Step::TimerFenced { timer } => Some((FamilyTag::Time, *timer)),
+            _ => None,
+        }
     }
 
     // --- the guard formulation -----------------------------------------------------
@@ -1431,6 +1565,15 @@ impl Model {
                 })
             }
         };
+        // `process/crash-restart-v0`: the crash is one step, and what its tasks held is
+        // fenced with it, before anything else happens (RFC 0026 correction 58).
+        // Exactly the next owed fence, in the binding's order (effect, obligation, time;
+        // each by ordinal), so a crash has one spelling.
+        if let Some(&(family, ordinal)) = self.owed.first() {
+            if Self::fence(step) != Some((family, ordinal)) {
+                return Err(Fault::FenceOwed { family, ordinal });
+            }
+        }
         if let Some(t) = self.open_alone() {
             if !self.inside_own_cancel(t, step) {
                 return Err(Fault::OwnCancellationInterrupted(t));
@@ -1555,6 +1698,49 @@ impl Model {
             Step::Close { region } => {
                 if self.region(*region)?.phase != RegionPhase::Open {
                     return Err(Fault::RegionPhase(*region));
+                }
+            }
+            // `process/crash-restart-v0` row `fail-stop-crash`: the node's running
+            // incarnation stops at a step boundary, all of its live tasks at once, and
+            // nothing of it runs after. An incarnation is a region that still runs: open,
+            // or closing while its tasks finish; a region under cancellation or torn
+            // down is not one, and a crashed one does not crash again.
+            Step::Crash { region, stopped } => {
+                let g = self.region(*region)?;
+                if !matches!(g.phase, RegionPhase::Open | RegionPhase::Closing)
+                    || g.drained
+                    || g.crashed
+                {
+                    return Err(Fault::RegionPhase(*region));
+                }
+                if let Some(r) = self.crash_blocked(*region) {
+                    return Err(Fault::RegionPhase(r));
+                }
+                // A due timer fires before anything else happens: a crash may not fence it.
+                if let Some(k) = self.late() {
+                    return Err(Fault::LateTimer(k));
+                }
+                let model = self.crash_set(*region);
+                if &model != stopped {
+                    return Err(Fault::CrashSet {
+                        region: *region,
+                        model,
+                    });
+                }
+                if let Some(t) = model.iter().find(|t| !self.crashable(**t)) {
+                    return Err(Fault::CrashUnsupported(*t));
+                }
+            }
+            // Row `late-completion`: a fence is owed by the crash that stopped its holder.
+            Step::EffectFenced { .. }
+            | Step::ObligationFenced { .. }
+            | Step::TimerFenced { .. } => {
+                let fence = Self::fence(step).unwrap_or((FamilyTag::Lifecycle, 0));
+                if !self.owed.contains(&fence) {
+                    return Err(Fault::FenceUnowed {
+                        family: fence.0,
+                        ordinal: fence.1,
+                    });
                 }
             }
             // A cancel request may upgrade a close; it may not revisit a cancelled or
@@ -1874,17 +2060,20 @@ impl Model {
             }
             // "region close implies no descendant … obligations": the balance reported
             // at close is the ledger's own, and it must be empty.
+            // A fenced obligation is the crash's, reported apart; it is not the region's
+            // own close failing (bn-20d8u).
             Step::Settled {
                 region,
                 open,
                 leaked,
+                fenced,
             } => {
                 let g = self.region(*region)?;
                 if g.phase != RegionPhase::Finalized || g.settled {
                     return Err(Fault::Settle(*region));
                 }
-                let (model_open, model_leaked) = self.balance(*region);
-                if &model_open != open || &model_leaked != leaked {
+                let (model_open, model_leaked, model_fenced) = self.balance(*region);
+                if &model_open != open || &model_leaked != leaked || &model_fenced != fenced {
                     return Err(Fault::Settle(*region));
                 }
                 if !open.is_empty() || !leaked.is_empty() {
@@ -2173,7 +2362,33 @@ impl Model {
                 origin: None,
                 drained: false,
                 settled: false,
+                crashed: false,
             }),
+            Step::Crash { region, stopped } => {
+                for t in stopped {
+                    self.set_task(*t, TaskPhase::Crashed);
+                }
+                for r in self.subtree(*region) {
+                    let g = &mut self.regions[r as usize];
+                    g.crashed = true;
+                    if g.phase == RegionPhase::Open {
+                        g.phase = RegionPhase::Closing;
+                    }
+                }
+                self.owed = self.fences_of(stopped);
+            }
+            Step::EffectFenced { reservation } => {
+                self.reservations[*reservation as usize].phase = EffectPhase::Fenced;
+                self.owed.remove(&(FamilyTag::Effect, *reservation));
+            }
+            Step::ObligationFenced { obligation } => {
+                self.obligations[*obligation as usize].phase = ObligationPhase::Fenced;
+                self.owed.remove(&(FamilyTag::Obligation, *obligation));
+            }
+            Step::TimerFenced { timer } => {
+                self.timers[*timer as usize].phase = TimerPhase::Fenced;
+                self.owed.remove(&(FamilyTag::Time, *timer));
+            }
             Step::Spawn { region, .. } => self.tasks.push(Task {
                 region: *region,
                 phase: TaskPhase::Created,
@@ -2392,6 +2607,10 @@ impl Model {
     /// leak whose holder never ended, and a finalized region that never settled its
     /// obligations.
     pub fn finish(&self) -> Result<(), Fault> {
+        // A crash's fences come within the step that crashed it.
+        if let Some(&(family, ordinal)) = self.owed.first() {
+            return Err(Fault::FenceOwed { family, ordinal });
+        }
         for t in 0..ord(self.tasks.len()) {
             let task = &self.tasks[t as usize];
             if !task.phase.is_terminal()
@@ -2426,6 +2645,7 @@ impl Model {
             let g = &self.regions[r as usize];
             if (g.phase == RegionPhase::Cancelling && !g.drained)
                 || (g.drained && g.phase != RegionPhase::Finalized)
+                || (g.crashed && g.phase != RegionPhase::Finalized)
             {
                 return Err(Fault::UnfinishedRegion(r));
             }
@@ -2462,6 +2682,21 @@ impl Model {
     #[allow(clippy::too_many_lines)]
     pub fn enabled(&self) -> Vec<Pattern> {
         let mut out = Vec::new();
+        // A crash's owed fences, and nothing else (bn-20d8u).
+        if let Some(&(family, ordinal)) = self.owed.first() {
+            {
+                out.push(Pattern::Exact(match family {
+                    FamilyTag::Effect => Step::EffectFenced {
+                        reservation: ordinal,
+                    },
+                    FamilyTag::Obligation => Step::ObligationFenced {
+                        obligation: ordinal,
+                    },
+                    _ => Step::TimerFenced { timer: ordinal },
+                }));
+            }
+            return out;
+        }
         let has = |f| self.alphabet.has(f);
         let regions = ord(self.regions.len());
         let tasks = ord(self.tasks.len());
@@ -2487,6 +2722,17 @@ impl Model {
                 && self.raced_by_cancel(r).is_none()
             {
                 out.push(Pattern::Exact(Step::Cancel { region: r }));
+            }
+            if matches!(g.phase, RegionPhase::Open | RegionPhase::Closing)
+                && !g.drained
+                && !g.crashed
+                && self.crash_blocked(r).is_none()
+                && self.late().is_none()
+            {
+                let stopped = self.crash_set(r);
+                if stopped.iter().all(|t| self.crashable(*t)) {
+                    out.push(Pattern::Exact(Step::Crash { region: r, stopped }));
+                }
             }
             if matches!(g.phase, RegionPhase::Closing | RegionPhase::Cancelling) && !g.drained {
                 if let Ok(cancelled) = self.drain_outcome(r) {
@@ -2716,12 +2962,13 @@ impl Model {
             for r in 0..regions {
                 let g = &self.regions[r as usize];
                 if g.phase == RegionPhase::Finalized && !g.settled {
-                    let (o, l) = self.balance(r);
+                    let (o, l, f) = self.balance(r);
                     if o.is_empty() && l.is_empty() {
                         out.push(Pattern::Exact(Step::Settled {
                             region: r,
                             open: o,
                             leaked: l,
+                            fenced: f,
                         }));
                     }
                 }

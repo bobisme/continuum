@@ -20,7 +20,7 @@
 //! | identical choice logs → byte-identical journals and digests, every log | [`identical_choice_logs_produce_byte_identical_journals`] |
 //! | different choice logs → different journals, every pair | [`different_choice_logs_produce_different_journals`] |
 //! | alpha-renaming of labels is invisible in the bytes | [`alpha_renaming_of_labels_does_not_reach_the_journal`] |
-//! | serialization round trip, a pinned version-2 golden, and the version-1 golden still decodes to the same journal | [`serialization_round_trip_holds_and_the_encoding_is_pinned`] |
+//! | serialization round trip, a pinned version-3 golden, the version-2 golden still decodes to the same journal, and version 1 is no longer read | [`serialization_round_trip_holds_and_the_encoding_is_pinned`] |
 //! | the decoder refuses every second spelling | [`the_decoder_refuses_every_second_spelling`] |
 //! | lift ≡ region calculus at every interleaving (differential) | [`the_lift_agrees_with_the_region_calculus_at_every_interleaving`] |
 //! | the lift can say no (anti-vacuity) | [`the_lift_rejects_nonconforming_journals`] |
@@ -254,30 +254,44 @@ fn serialization_round_trip_holds_and_the_encoding_is_pinned() {
     let journal = tiny_journal();
     let bytes = journal.encode().unwrap();
     let magic = hex(b"continuum/semantic-journal\n");
-    // The version-1 golden, unchanged since bn-lf4i: still read, and read as the same
-    // journal (encoding version 2's compatibility statement, `Preserved`). The writer
-    // now emits version 2, which differs only in the version word.
-    let golden_v1 = format!(
-        "{magic}00000001\
-         0000000000000004\
-         0000000000000000 01 0000000a 02 00000000 00000000 01\
-         0000000000000001 01 00000005 05 00000000\
-         0000000000000002 01 0000000d 06 00000000 00000001 00000000\
-         0000000000000003 01 00000005 07 00000000"
-    )
-    .replace(' ', "");
-    let expected = golden_v1.replacen(&format!("{magic}00000001"), &format!("{magic}00000002"), 1);
-    assert_eq!(hex(&bytes), expected, "the canonical encoding moved");
-    let v1: Vec<u8> = (0..golden_v1.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&golden_v1[i..i + 2], 16).unwrap())
-        .collect();
+    // The golden, unchanged since bn-lf4i but for its version word. Version 1 is no
+    // longer read (encoding version 3, bn-20d8u: two versions at most); the same bytes
+    // labelled version 2 are still read, as the same journal (version 3's compatibility
+    // statement, `Preserved`: this journal has no settle, the one payload version 3
+    // changed). The writer now emits version 3, which differs only in the version word.
+    let golden = |version: &str| {
+        format!(
+            "{magic}{version}\
+             0000000000000004\
+             0000000000000000 01 0000000a 02 00000000 00000000 01\
+             0000000000000001 01 00000005 05 00000000\
+             0000000000000002 01 0000000d 06 00000000 00000001 00000000\
+             0000000000000003 01 00000005 07 00000000"
+        )
+        .replace(' ', "")
+    };
+    let unhex = |text: &str| -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+            .collect()
+    };
     assert_eq!(
-        Journal::decode(&v1).unwrap(),
-        journal,
-        "the v1 golden still decodes"
+        hex(&bytes),
+        golden("00000003"),
+        "the canonical encoding moved"
     );
-    assert_eq!(Journal::decode(&v1).unwrap().encode().unwrap(), bytes);
+    let v2 = unhex(&golden("00000002"));
+    assert_eq!(
+        Journal::decode(&v2).unwrap(),
+        journal,
+        "the v2 golden still decodes"
+    );
+    assert_eq!(Journal::decode(&v2).unwrap().encode().unwrap(), bytes);
+    assert!(matches!(
+        Journal::decode(&unhex(&golden("00000001"))),
+        Err(DecodeError::UnsupportedVersion { version: 1, .. })
+    ));
     assert_eq!(Journal::decode(&bytes).unwrap(), journal);
     assert_eq!(
         journal.render(),
@@ -315,8 +329,8 @@ fn the_decoder_refuses_every_second_spelling() {
         Err(DecodeError::Truncated { .. })
     ));
 
-    // Versions 1 and 2 are read; any other is refused as unsupported, never guessed.
-    for unknown in [0_u8, 3, 255] {
+    // Versions 2 and 3 are read; any other is refused as unsupported, never guessed.
+    for unknown in [0_u8, 1, 4, 255] {
         let mut version = bytes.clone();
         version[header + 3] = unknown;
         assert!(matches!(
@@ -430,6 +444,7 @@ fn oracle_schedule(scripts: &[Script], log: &ChoiceLog) -> Option<Schedule> {
             LifecycleReport::Cancel { region: r } => Step::Cancel { region: region(r)? },
             LifecycleReport::Drain { region: r } => Step::Drain { region: region(r)? },
             LifecycleReport::Finalize { region: r } => Step::Finalize { region: region(r)? },
+            LifecycleReport::Crash { .. } => unreachable!("the programs here do not crash"),
         });
     }
     Some(Schedule::new(steps))

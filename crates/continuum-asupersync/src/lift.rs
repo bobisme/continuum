@@ -17,6 +17,14 @@
 //!    `finalize` on any requested region whose workers are terminal, and a journal
 //!    that lost its drain report would otherwise lift.
 //!
+//! A fail-stop crash (bn-20d8u; RFC 0026 correction 58) adds three more checks the
+//! calculus, which has no crash step, cannot make: the stopped set is the crashed
+//! subtree's live tasks ([`Nonconformance::CrashOutcome`]), a crash's fences come right
+//! after it and name only what it owes ([`Nonconformance::FenceOwed`],
+//! [`Nonconformance::FenceUnowed`]), and a region crashes once, while it is open or
+//! closing ([`Nonconformance::CrashedRegionState`]). In the calculus each stopped worker
+//! fails with the reason `crashed`; what it held stays owed there.
+//!
 //! Everything else — work enters only an open region, cancellation is subtree-wide,
 //! drain is total under cancellation and blocking under close, finalize requires every
 //! owned task terminal and discharges the obligation ledger — is the calculus's own
@@ -101,6 +109,41 @@ pub enum Nonconformance {
         /// The first region of its subtree with no drain report.
         undrained: u32,
     },
+    /// A fail-stop crash reported a different set of stopped tasks than the model's:
+    /// every task of the crashed subtree that has not ended (bn-20d8u).
+    CrashOutcome {
+        /// The crashed region.
+        region: u32,
+        /// Tasks the journal says the crash stopped.
+        reported: Vec<u32>,
+        /// The subtree's live tasks in the model.
+        model: Vec<u32>,
+    },
+    /// A crash of a region that is neither open nor closing normally, or that an
+    /// earlier crash already covered (bn-20d8u).
+    CrashedRegionState {
+        /// The region.
+        region: u32,
+        /// The model's token for its state, or `crashed`.
+        state: &'static str,
+    },
+    /// An event came while the last crash still owed the journal a fence: each
+    /// reservation, obligation and timer its stopped tasks held is fenced right after
+    /// the crash, before anything else (bn-20d8u).
+    FenceOwed {
+        /// The family of the first owed fence.
+        family: Family,
+        /// Its ordinal.
+        ordinal: u32,
+    },
+    /// A fence of something the last crash does not owe: not held by a task it
+    /// stopped, already resolved, or already fenced (bn-20d8u).
+    FenceUnowed {
+        /// The fence's family.
+        family: Family,
+        /// Its ordinal.
+        ordinal: u32,
+    },
 }
 
 impl fmt::Display for Nonconformance {
@@ -140,6 +183,24 @@ impl fmt::Display for Nonconformance {
                 f,
                 "r{region} finalized but r{undrained} in its subtree has no drain report"
             ),
+            Self::CrashOutcome {
+                region,
+                reported,
+                model,
+            } => write!(
+                f,
+                "the crash of r{region} reported stopped {reported:?} but the model's live tasks are {model:?}"
+            ),
+            Self::CrashedRegionState { region, state } => {
+                write!(f, "r{region} crashes while it is {state}")
+            }
+            Self::FenceOwed { family, ordinal } => write!(
+                f,
+                "an event comes while the last crash still owes the {family} fence of #{ordinal}"
+            ),
+            Self::FenceUnowed { family, ordinal } => {
+                write!(f, "a {family} fence of #{ordinal}, which no crash owes")
+            }
         }
     }
 }
@@ -177,6 +238,10 @@ pub struct LiftContext {
     /// The task the previous event spawned, when the previous event was a spawn: a
     /// budget deadline is declared by the event right after its task's spawn.
     pub(crate) spawned_just_before: Option<u32>,
+    /// Regions a crash covered: each crashed region's subtree, as it was at the crash.
+    pub(crate) crashed_regions: BTreeSet<u32>,
+    /// What the last crash still owes the journal: its fences.
+    pub(crate) fences: family::lifecycle::FencesDue,
     pub(crate) effect: family::effect::LiftState,
     pub(crate) cancellation: family::cancellation::LiftState,
     pub(crate) obligation: family::obligation::LiftState,
@@ -263,6 +328,7 @@ pub fn lift(journal: &Journal) -> LiftVerdict {
     // event comes later in the same journal (cr-3pu5cu, pre-review adversarial pass).
     for event in journal.events() {
         match event.body().family() {
+            Family::Effect => family::effect::mark_present(&mut cx),
             Family::Cancellation => family::cancellation::mark_present(&mut cx),
             Family::Obligation => family::obligation::mark_present(&mut cx),
             Family::Time => family::time::mark_present(&mut cx),

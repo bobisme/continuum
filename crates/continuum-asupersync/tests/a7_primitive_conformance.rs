@@ -1334,6 +1334,7 @@ fn mutants() -> Vec<Mutant> {
                         region: *region,
                         open: ObligationSet::new([ObligationOrdinal(0)]),
                         leaked: leaked.clone(),
+                        fenced: ObligationSet::default(),
                     });
                 }
                 Some(rebuild(b))
@@ -3458,6 +3459,7 @@ fn round_six_pre_review_journals_are_rejected() {
             region: r(region),
             open: ObligationSet::new([]),
             leaked: ObligationSet::new([]),
+            fenced: ObligationSet::new([]),
         })
     };
     let deadline = |task, at| {
@@ -4265,101 +4267,181 @@ fn a_deadline_is_declared_right_after_its_spawn() {
     }
 }
 
-/// Codex cr-3pu5cu round 8 (2): encoding version 2 adds lifecycle task steps 6-7,
-/// cancel cause 3 and time event 5. Both readers (the crate's decoder and the A7
-/// model's own) read versions 1 and 2. A real deadline journal decodes as version 2,
-/// lifts as conforming and is accepted by the model; the same bytes labelled version 1
-/// are refused by both as a tag outside that version's grammar, one table at a time,
-/// never as an unknown tag. A version-1-grammar journal relabelled version 1 decodes to
-/// the same journal and gets the same verdict from both.
+/// The canonical bytes of `journal` under the version-2 grammar: the version word 2,
+/// and each settle without the fenced set that version 3 added (bn-20d8u). Only for a
+/// journal with no version-3 tag and no fenced obligation.
+fn as_version_2(journal: &Journal) -> Vec<u8> {
+    let magic = b"continuum/semantic-journal\n";
+    let mut out = magic.to_vec();
+    out.extend_from_slice(&2_u32.to_be_bytes());
+    out.extend_from_slice(&(journal.len() as u64).to_be_bytes());
+    for event in journal.events() {
+        let one = rebuild([event.body().clone()]).encode().unwrap();
+        // MAGIC, version, count, seq, family tag, length.
+        let at = magic.len() + 4 + 8 + 8;
+        let family = one[at];
+        let mut payload = one[at + 1 + 4..].to_vec();
+        if let EventBody::Obligation(ObligationEvent::RegionSettled { fenced, .. }) = event.body() {
+            assert!(fenced.is_empty(), "a version-2 journal has no fence");
+            let cut = payload.len() - 4;
+            assert_eq!(payload[cut..], [0, 0, 0, 0]);
+            payload.truncate(cut);
+        }
+        out.extend_from_slice(&event.seq().to_be_bytes());
+        out.push(family);
+        out.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_be_bytes());
+        out.extend_from_slice(&payload);
+    }
+    out
+}
+
+/// Encoding version 3 (bn-20d8u) adds lifecycle event 8 (`region-crashed`), effect
+/// event 4, obligation event 6 and time event 6 (each `fenced`), and a third set on
+/// obligation event 5 (`region-settled`). Both readers (the crate's decoder and the A7
+/// model's own) read versions 2 and 3, each under its own grammar, and no longer read
+/// version 1 (ADR-0018: two at most). A real crash journal decodes as version 3, lifts
+/// as conforming and is accepted by the model; the same bytes labelled version 2 are
+/// refused by both, a new tag as a tag outside that version's grammar, one table at a
+/// time. A version-2-grammar journal (settles with two sets) decodes to the same journal
+/// as its version-3 encoding and gets the same verdict from both. The bn-36wy3 tables
+/// (lifecycle steps 6-7, cancel cause 3, time event 5) are version-2 tags and read under
+/// either label.
 #[test]
 fn the_two_encoding_versions_are_two_grammars() {
     use continuum_asupersync::encoding::DecodeError;
     let header = b"continuum/semantic-journal\n".len();
-    let as_v1 = |bytes: &[u8]| {
-        let mut v1 = bytes.to_vec();
-        assert_eq!(&v1[header..header + 4], &[0, 0, 0, 2]);
-        v1[header + 3] = 1;
-        v1
+    let relabel = |bytes: &[u8], version: u8| {
+        let mut out = bytes.to_vec();
+        assert_eq!(&out[header..header + 4], &[0, 0, 0, 3]);
+        out[header + 3] = version;
+        out
     };
-    let programs = own_cancel_base();
+    let config = all_families();
+    let programs = vec![vec![
+        open(ROOT, R[1]),
+        spawn(R[1], T[1]),
+        begin(T[1]),
+        reserve(T[1], 1),
+        acquire(T[1], 2, ObligationKind::Lease),
+        SubstrateOp::Sleep {
+            task: T[1],
+            nanos: 10,
+        },
+        SubstrateOp::Crash { region: R[1] },
+    ]];
     let log = ChoiceLog::new(vec![0; programs[0].len()]);
-    let config = every_projection().remove(31);
     let journal = run(&programs, &log, &config).unwrap();
     let bytes = journal.encode().unwrap();
     assert_eq!(Journal::decode(&bytes).unwrap(), journal);
     assert!(lift_accepts(&journal) && judge(&config, &journal).is_accepted());
     assert!(matches!(
-        Journal::decode(&as_v1(&bytes)),
-        Err(DecodeError::TagNotInVersion { version: 1, .. })
+        Journal::decode(&relabel(&bytes, 2)),
+        Err(DecodeError::TagNotInVersion { version: 2, .. })
     ));
     assert!(matches!(
-        model::read(&as_v1(&bytes)),
+        model::read(&relabel(&bytes, 2)),
         Err(WireFault::NotInVersion { .. })
     ));
+    for unread in [0_u8, 1, 4] {
+        assert!(matches!(
+            Journal::decode(&relabel(&bytes, unread)),
+            Err(DecodeError::UnsupportedVersion { .. })
+        ));
+        assert_eq!(
+            model::read(&relabel(&bytes, unread)),
+            Err(WireFault::Header)
+        );
+    }
     // Each table that grew, alone.
-    let t = TaskOrdinal;
     let spawn = EventBody::Lifecycle(LifecycleEvent::TaskSpawned {
-        task: t(0),
+        task: TaskOrdinal(0),
         region: RegionOrdinal(0),
         resumability: Resumability::Resumable,
     });
     for (table, event) in [
         (
-            "lifecycle task step",
-            EventBody::Lifecycle(LifecycleEvent::TaskStepped {
-                task: t(0),
-                step: TaskStep::CancelRequested,
+            "lifecycle event",
+            EventBody::Lifecycle(LifecycleEvent::RegionCrashed {
+                region: RegionOrdinal(0),
+                fenced: TaskSet::new([TaskOrdinal(0)]),
             }),
         ),
         (
-            "lifecycle task step",
-            EventBody::Lifecycle(LifecycleEvent::TaskStepped {
-                task: t(0),
-                step: TaskStep::Cancel,
+            "effect event",
+            EventBody::Effect(EffectEvent::Fenced {
+                reservation: continuum_asupersync::family::effect::ReservationOrdinal(0),
             }),
         ),
         (
-            "cancel cause",
-            EventBody::Cancellation(CancellationEvent::Requested {
-                task: t(0),
-                cause: CancelCause::Deadline,
+            "obligation event",
+            EventBody::Obligation(ObligationEvent::Fenced {
+                obligation: ObligationOrdinal(0),
             }),
         ),
         (
             "time event",
-            EventBody::Time(TimeEvent::Deadline {
-                task: t(0),
-                at: VirtualInstant(10),
+            EventBody::Time(TimeEvent::Fenced {
+                timer: continuum_asupersync::family::time::TimerOrdinal(0),
             }),
         ),
     ] {
         let bytes = rebuild([spawn.clone(), event]).encode().unwrap();
         assert!(Journal::decode(&bytes).is_ok(), "{table}");
+        assert!(model::read(&bytes).is_ok(), "{table}");
         assert!(
             matches!(
-                Journal::decode(&as_v1(&bytes)),
-                Err(DecodeError::TagNotInVersion { table: found, version: 1, .. }) if found == table
+                Journal::decode(&relabel(&bytes, 2)),
+                Err(DecodeError::TagNotInVersion { table: found, version: 2, .. }) if found == table
             ),
             "{table}: {:?}",
-            Journal::decode(&as_v1(&bytes))
+            Journal::decode(&relabel(&bytes, 2))
         );
         assert!(
             matches!(
-                model::read(&as_v1(&bytes)),
+                model::read(&relabel(&bytes, 2)),
                 Err(WireFault::NotInVersion { .. })
             ),
             "{table}"
         );
     }
-    // A journal of the version-1 grammar reads the same under either label.
-    let programs = effects();
-    let log = ChoiceLog::enumerate(&lengths(&programs)).remove(0);
-    let journal = run(&programs, &log, &config).unwrap();
-    let bytes = journal.encode().unwrap();
-    let old = as_v1(&bytes);
-    assert_eq!(Journal::decode(&old).unwrap(), journal);
-    assert_eq!(model::read(&old).unwrap(), model::read(&bytes).unwrap());
+    // A version-3 settle labelled version 2 has a set too many for its payload.
+    let settle = rebuild([EventBody::Obligation(ObligationEvent::RegionSettled {
+        region: RegionOrdinal(0),
+        open: ObligationSet::default(),
+        leaked: ObligationSet::default(),
+        fenced: ObligationSet::default(),
+    })])
+    .encode()
+    .unwrap();
+    assert!(matches!(
+        Journal::decode(&relabel(&settle, 2)),
+        Err(DecodeError::PayloadLength { .. })
+    ));
+    assert!(matches!(
+        model::read(&relabel(&settle, 2)),
+        Err(WireFault::PayloadLength { .. })
+    ));
+    // Journals of the version-2 grammar (settles included, and a deadline journal with
+    // the bn-36wy3 tags) read as the same journal and get the same verdicts.
+    let deadline = own_cancel_base();
+    for (programs, config) in [
+        (ledger(), all_families()),
+        (deadline.clone(), every_projection().remove(31)),
+    ] {
+        let log = ChoiceLog::enumerate(&lengths(&programs)).remove(0);
+        let journal = run(&programs, &log, &config).unwrap();
+        let old = as_version_2(&journal);
+        assert_eq!(Journal::decode(&old).unwrap(), journal);
+        assert_eq!(
+            model::read(&old).unwrap(),
+            model::read(&journal.encode().unwrap()).unwrap()
+        );
+        assert_eq!(
+            model::judge(&alphabet(&config), &old),
+            judge(&config, &journal)
+        );
+        assert!(lift_accepts(&Journal::decode(&old).unwrap()));
+    }
 }
 
 // --- a requested task acknowledges before it does anything (bn-28hup) ---------------

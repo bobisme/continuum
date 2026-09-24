@@ -21,6 +21,7 @@
 //! | [`ObligationEvent::Transferred`] | moves to a new holder and region | the runtime's handoff trace message |
 //! | [`ObligationEvent::Leaked`] | −1 as a failure: the holder ended with it open | `ObligationLeak` |
 //! | [`ObligationEvent::RegionSettled`] | the region's balance at close | the region's `RegionCloseComplete` |
+//! | [`ObligationEvent::Fenced`] | −1 as a fence: the holder crashed, fail-stop, with it open (bn-20d8u) | `ObligationLeak` of a holder the binding crashed |
 //!
 //! The reserve/commit/abort family (PR-14-IMPL-02) is the *effect phase* of the
 //! `Transaction` kind: which staged publication a worker holds. This family is the
@@ -58,7 +59,7 @@
 //! Obligations are named by dense ordinals in the order the journal allocated them,
 //! over every kind. Tasks and regions are the lifecycle family's ordinals.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use continuum_task::region::obligation::{
@@ -256,6 +257,16 @@ pub enum ObligationEvent {
         open: ObligationSet,
         /// Obligations leaked in it.
         leaked: ObligationSet,
+        /// Obligations fenced in it by a crash (bn-20d8u): owed, and never to be
+        /// discharged. Encoding version 3; a version-2 journal reads it empty.
+        fenced: ObligationSet,
+    },
+    /// The holder crashed, fail-stop, with the obligation open: it is neither discharged
+    /// nor leaked, and no later step of that holder resolves it (bn-20d8u). asupersync
+    /// 0.5.0 records it as its holder's leak. Encoding version 3.
+    Fenced {
+        /// The obligation.
+        obligation: ObligationOrdinal,
     },
 }
 
@@ -267,6 +278,7 @@ impl ObligationEvent {
             Self::Transferred { .. } => 3,
             Self::Leaked { .. } => 4,
             Self::RegionSettled { .. } => 5,
+            Self::Fenced { .. } => 6,
         }
     }
 
@@ -277,6 +289,7 @@ impl ObligationEvent {
             Self::Transferred { .. } => "transferred",
             Self::Leaked { .. } => "leaked",
             Self::RegionSettled { .. } => "region-settled",
+            Self::Fenced { .. } => "fenced",
         }
     }
 }
@@ -318,15 +331,19 @@ pub(crate) fn encode(event: &ObligationEvent, out: &mut Encoder) -> Result<(), E
             out.u32(holder.0);
             out.u32(region.0);
         }
-        ObligationEvent::Leaked { obligation } => out.u32(obligation.0),
+        ObligationEvent::Leaked { obligation } | ObligationEvent::Fenced { obligation } => {
+            out.u32(obligation.0);
+        }
         ObligationEvent::RegionSettled {
             region,
             open,
             leaked,
+            fenced,
         } => {
             out.u32(region.0);
             encode_set(open, out)?;
             encode_set(leaked, out)?;
+            encode_set(fenced, out)?;
         }
     }
     Ok(())
@@ -378,11 +395,29 @@ pub(crate) fn decode(input: &mut Decoder<'_>, _seq: u64) -> Result<ObligationEve
         4 => ObligationEvent::Leaked {
             obligation: ObligationOrdinal(input.u32()?),
         },
-        5 => ObligationEvent::RegionSettled {
-            region: RegionOrdinal(input.u32()?),
-            open: decode_set(input)?,
-            leaked: decode_set(input)?,
-        },
+        5 => {
+            let region = RegionOrdinal(input.u32()?);
+            let open = decode_set(input)?;
+            let leaked = decode_set(input)?;
+            // Version 3 adds the fenced set; a version-2 settle has none.
+            let fenced = if input.version() >= 3 {
+                decode_set(input)?
+            } else {
+                ObligationSet::default()
+            };
+            ObligationEvent::RegionSettled {
+                region,
+                open,
+                leaked,
+                fenced,
+            }
+        }
+        6 => {
+            input.require_version(3, "obligation event", 6, at)?;
+            ObligationEvent::Fenced {
+                obligation: ObligationOrdinal(input.u32()?),
+            }
+        }
         other => {
             return Err(DecodeError::UnknownTag {
                 table: "obligation event",
@@ -421,15 +456,29 @@ pub(crate) fn render(event: &ObligationEvent) -> String {
             obligation.0, holder.0, region.0
         ),
         ObligationEvent::Leaked { obligation } => format!("leaked o{}", obligation.0),
+        ObligationEvent::Fenced { obligation } => format!("fenced o{}", obligation.0),
         ObligationEvent::RegionSettled {
             region,
             open,
             leaked,
-        } => format!(
+            fenced,
+        } if fenced.is_empty() => format!(
             "region-settled r{} open={} leaked={}",
             region.0,
             render_set(open),
             render_set(leaked)
+        ),
+        ObligationEvent::RegionSettled {
+            region,
+            open,
+            leaked,
+            fenced,
+        } => format!(
+            "region-settled r{} open={} leaked={} fenced={}",
+            region.0,
+            render_set(open),
+            render_set(leaked),
+            render_set(fenced)
         ),
     }
 }
@@ -442,6 +491,7 @@ enum State {
     Open,
     Discharged,
     Leaked,
+    Fenced,
 }
 
 impl State {
@@ -450,6 +500,7 @@ impl State {
             Self::Open => "open",
             Self::Discharged => "discharged",
             Self::Leaked => "leaked",
+            Self::Fenced => "fenced",
         }
     }
 }
@@ -461,6 +512,9 @@ struct Entry {
     region: u32,
     state: State,
 }
+
+/// A region's balance: its open, leaked and fenced obligations, each ascending.
+pub type Balance = (Vec<u32>, Vec<u32>, Vec<u32>);
 
 /// Why an obligation-ledger event does not conform.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -545,10 +599,10 @@ pub enum LedgerFault {
     BalanceMismatch {
         /// The region.
         region: u32,
-        /// Reported open and leaked obligations.
-        reported: (Vec<u32>, Vec<u32>),
-        /// The ledger's open and leaked obligations.
-        ledger: (Vec<u32>, Vec<u32>),
+        /// Reported open, leaked and fenced obligations (boxed: the fault stays small).
+        reported: Box<Balance>,
+        /// The ledger's open, leaked and fenced obligations.
+        ledger: Box<Balance>,
     },
     /// A region closed while obligations in it were open or leaked: "region close
     /// implies no descendant tasks or obligations" does not hold.
@@ -621,7 +675,7 @@ impl fmt::Display for LedgerFault {
                 ledger,
             } => write!(
                 f,
-                "r{region} reports open/leaked {reported:?} but the ledger has {ledger:?}"
+                "r{region} reports open/leaked/fenced {reported:?} but the ledger has {ledger:?}"
             ),
             Self::UnbalancedAtClose {
                 region,
@@ -639,6 +693,8 @@ impl fmt::Display for LedgerFault {
 #[derive(Debug, Default)]
 pub struct LiftState {
     entries: BTreeMap<u32, Entry>,
+    /// The open obligations each task holds, for a crash's fences (bn-20d8u).
+    held: BTreeMap<u32, BTreeSet<u32>>,
     /// Send permits each task committed and has not yet sent with (bn-1i050).
     permits: BTreeMap<u32, u32>,
     settled: BTreeMap<u32, bool>,
@@ -648,6 +704,39 @@ pub struct LiftState {
 /// The journal carries this family (set before the first event is lifted).
 pub(crate) fn mark_present(cx: &mut LiftContext) {
     cx.obligation.present = true;
+}
+
+/// The open obligations `task` holds, when the journal carries this family: the fences
+/// a crash of `task` owes (bn-20d8u).
+pub(crate) fn open_held_by(cx: &LiftContext, task: u32) -> Vec<u32> {
+    if !cx.obligation.present {
+        return Vec::new();
+    }
+    cx.obligation
+        .held
+        .get(&task)
+        .map(|set| set.iter().copied().collect())
+        .unwrap_or_default()
+}
+
+/// Record `entry` for `obligation`, keeping the per-holder index of open ones in step.
+fn put(state: &mut LiftState, obligation: u32, entry: Entry) {
+    if let Some(before) = state.entries.get(&obligation)
+        && let Some(set) = state.held.get_mut(&before.holder)
+    {
+        set.remove(&obligation);
+        if set.is_empty() {
+            state.held.remove(&before.holder);
+        }
+    }
+    if entry.state == State::Open {
+        state
+            .held
+            .entry(entry.holder)
+            .or_default()
+            .insert(obligation);
+    }
+    state.entries.insert(obligation, entry);
 }
 
 fn fault(fault: LedgerFault) -> LiftStop {
@@ -823,7 +912,8 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
             // (RFC 0026 correction 51 item 3).
             cx.tree
                 .open_substrate(WorkerId::at(holder.0), substrate(*kind, obligation.0))?;
-            cx.obligation.entries.insert(
+            put(
+                &mut cx.obligation,
                 obligation.0,
                 Entry {
                     kind: *kind,
@@ -863,7 +953,20 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
                 }
                 entry.state = State::Leaked;
             }
-            cx.obligation.entries.insert(obligation.0, entry);
+            put(&mut cx.obligation, obligation.0, entry);
+        }
+        // A crash's fence: owed by the crash that stopped the holder, and only then. It
+        // stays open in the calculus's ledger, which owes it (bn-20d8u).
+        ObligationEvent::Fenced { obligation } => {
+            let mut entry = open_entry(cx, obligation.0, event)?;
+            if !cx.fences.obligations.remove(&obligation.0) {
+                return Err(LiftStop::Violation(Nonconformance::FenceUnowed {
+                    family: crate::family::Family::Obligation,
+                    ordinal: obligation.0,
+                }));
+            }
+            entry.state = State::Fenced;
+            put(&mut cx.obligation, obligation.0, entry);
         }
         ObligationEvent::Transferred {
             obligation,
@@ -884,12 +987,13 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
             )?;
             entry.holder = holder.0;
             entry.region = region.0;
-            cx.obligation.entries.insert(obligation.0, entry);
+            put(&mut cx.obligation, obligation.0, entry);
         }
         ObligationEvent::RegionSettled {
             region,
             open,
             leaked,
+            fenced,
         } => {
             let state = cx.tree.state(RegionId::at(region.0))?;
             if state != RegionState::Finalized {
@@ -902,14 +1006,16 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
                 return Err(fault(LedgerFault::SettledTwice { region: region.0 }));
             }
             let ledger = region_balance(cx, region.0);
-            let reported = (members(open), members(leaked));
+            let reported = (members(open), members(leaked), members(fenced));
             if reported != ledger {
                 return Err(fault(LedgerFault::BalanceMismatch {
                     region: region.0,
-                    reported,
-                    ledger,
+                    reported: Box::new(reported),
+                    ledger: Box::new(ledger),
                 }));
             }
+            // A fenced obligation is a crash's, and the crash owes it: counted apart,
+            // not a failure of the region's own close (bn-20d8u).
             if !open.is_empty() || !leaked.is_empty() {
                 return Err(fault(LedgerFault::UnbalancedAtClose {
                     region: region.0,
@@ -922,9 +1028,9 @@ pub(crate) fn lift(event: &ObligationEvent, cx: &mut LiftContext) -> Result<(), 
     Ok(())
 }
 
-/// The obligations this family's own account still has open, or reports leaked, in
-/// `region`: the balance a `RegionSettled` event for it would have to report.
-fn region_balance(cx: &LiftContext, region: u32) -> (Vec<u32>, Vec<u32>) {
+/// The obligations this family's own account still has open, reports leaked, or reports
+/// fenced, in `region`: the balance a `RegionSettled` event for it would have to report.
+fn region_balance(cx: &LiftContext, region: u32) -> Balance {
     let in_region = |wanted: State| -> Vec<u32> {
         cx.obligation
             .entries
@@ -933,7 +1039,11 @@ fn region_balance(cx: &LiftContext, region: u32) -> (Vec<u32>, Vec<u32>) {
             .map(|(o, _)| *o)
             .collect()
     };
-    (in_region(State::Open), in_region(State::Leaked))
+    (
+        in_region(State::Open),
+        in_region(State::Leaked),
+        in_region(State::Fenced),
+    )
 }
 
 /// The whole-journal check, run after the last event: when the journal carries this
@@ -987,7 +1097,7 @@ pub(crate) fn finish(cx: &LiftContext) -> Result<(), LiftStop> {
         if cx.tree.state(RegionId::at(region))? == RegionState::Finalized
             && !cx.obligation.settled.contains_key(&region)
         {
-            let (open, leaked) = region_balance(cx, region);
+            let (open, leaked, _fenced) = region_balance(cx, region);
             if !open.is_empty() || !leaked.is_empty() {
                 return Err(fault(LedgerFault::UnbalancedAtClose {
                     region,

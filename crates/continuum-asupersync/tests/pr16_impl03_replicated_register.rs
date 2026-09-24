@@ -412,6 +412,8 @@ const fn stops_a_task_without_cleanup(op: &SubstrateOp) -> bool {
         | SubstrateOp::CloseSenders { .. }
         | SubstrateOp::Advance { .. }
         | SubstrateOp::Transfer { .. } => false,
+        // bn-20d8u path (a): the binding's fail-stop crash.
+        SubstrateOp::Crash { .. } => true,
     }
 }
 
@@ -478,8 +480,20 @@ fn a_crash_is_a_graceful_region_cancellation_and_not_a_fail_stop_crash() {
             assert_eq!(acks, crashes * usize::from(e.plan.epochs), "{}", e.id);
         }
     }
-    // Referenced so the exhaustive match is compiled; it is false for every variant.
-    let _ = stops_a_task_without_cleanup;
+    // The exhaustive match is compiled and holds: only the binding's `Crash` stops a
+    // task without its cleanup, and this graceful build never uses it.
+    assert!(stops_a_task_without_cleanup(&SubstrateOp::Crash {
+        region: continuum_asupersync::family::lifecycle::RegionLabel(1),
+    }));
+    for e in corpus() {
+        for program in &e.built.programs {
+            assert!(
+                !program.iter().any(stops_a_task_without_cleanup),
+                "{}",
+                e.id
+            );
+        }
+    }
     assert!(
         register::CRASH_SEMANTICS
             .starts_with("a crash is modelled as graceful region cancellation")

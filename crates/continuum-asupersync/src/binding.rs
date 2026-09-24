@@ -259,6 +259,33 @@
 //! the refusal reports the first in trace order, which the seed can move. No journal
 //! is returned in that case, so no journal content depends on it.
 //!
+//! # Fail-stop crash (bn-20d8u)
+//!
+//! [`SubstrateOp::Crash`] realizes the process pack's `fail-stop-crash` row
+//! (`process/crash-restart-v0`) on asupersync 0.5.0's public API, with no substrate
+//! change. Each task of the region's subtree that has not ended stops where it is: its
+//! future is withdrawn from the runtime unpolled, and its record ends through the
+//! substrate's own abnormal completion. No code of the task runs, so no checkpoint, no
+//! cancellation handler and no cleanup. The completion's audit leaks what the task still
+//! held; that leak is the fence, since the substrate admits no later commit or abort of a
+//! leaked obligation. The subtree's regions then close, and nothing in them is live.
+//!
+//! | substrate observation | journal event |
+//! |---|---|
+//! | the binding's own `complete_task` of every live task of the subtree, all returning `true` | [`LifecycleEvent::RegionCrashed`], with those tasks, before anything the crash traces |
+//! | `Complete` of a stopped task, its join empty (its future never returned) | nothing of its own: the crash event names it |
+//! | `ObligationLeak` of an obligation a stopped task held | [`EffectEvent::Fenced`] for a reservation, [`ObligationEvent::Fenced`]; each by ascending ordinal, reservations first |
+//! | a stopped task was asleep | [`TimeEvent::Fenced`] for its timer, after the obligation fences; its wheel entry still comes due later and wakes a task that no longer exists, which polls and traces nothing |
+//! | `RegionCloseComplete` of the subtree | the usual drain (cancelling no task), finalize and settle, whose fenced set names what the crash fenced |
+//!
+//! A stopped task takes no command afterwards ([`BindingRefusal::TaskCrashed`]). A crash
+//! the binding gives no fail-stop semantics is refused before anything happens: a live
+//! task under a budget deadline, holding a channel's receiver, waiting on a channel, or in
+//! a cancellation ([`BindingRefusal::CrashUnsupported`], INV-008 `Unsupported`), and a
+//! region that is closed or under cancellation ([`BindingRefusal::SubstrateRefused`]).
+//! The withdrawn futures drop only with the driver, after its runtime: their destructors
+//! reach no runtime and no journal.
+//!
 //! # No ambient output
 //!
 //! The binding builds its `LabRuntime` from an explicit `LabConfig` and never calls the
@@ -298,9 +325,10 @@ use asupersync::record::{
     ObligationAbortReason, ObligationKind as SubstrateObligationKind, ObligationState,
 };
 use asupersync::runtime::obligation_mailbox::ObligationToken;
-use asupersync::runtime::{JoinError, TaskHandle};
+use asupersync::runtime::{JoinError, StoredTask, TaskHandle};
 use asupersync::time::{Sleep, sleep_until};
 use asupersync::trace::event::{TraceData, TraceEvent, TraceEventKind};
+use asupersync::types::{Outcome, PanicPayload};
 use asupersync::{
     Budget, CancelKind, CancelReason, Cx, LabConfig, LabRuntime, ObligationId,
     RegionId as SubstrateRegion, TaskId as SubstrateTask, Time,
@@ -456,6 +484,29 @@ pub enum SubstrateOp {
         /// The region.
         region: RegionLabel,
     },
+    /// A fail-stop crash of `region`'s subtree (bn-20d8u; RFC 0026 correction 58): the
+    /// process pack's `fail-stop-crash` row realized on the substrate. Each task of the
+    /// subtree that has not ended stops where it is: the binding withdraws its future
+    /// from the runtime (`RuntimeState::remove_stored_future`) without polling it
+    /// again, and ends its record through the substrate's own abnormal completion
+    /// (`RuntimeState::complete_task` with `Outcome::Panicked`, then
+    /// `RuntimeState::task_completed`). No code of the task runs: no checkpoint, no
+    /// cancellation handler, no cleanup, no destructor. The substrate's completion
+    /// audit records each obligation the task still held as leaked, which is the fence:
+    /// no later commit or abort of it is admitted. Then the subtree's open regions are
+    /// closed (`begin_close`, `advance_region_state`), and they close, since nothing in
+    /// them is live. The withdrawn futures are dropped only after the runtime is gone,
+    /// so their destructors reach no runtime.
+    ///
+    /// Refused as [`BindingRefusal::CrashUnsupported`] when a live task of the subtree
+    /// runs under a budget deadline, holds a channel's receiver, waits on a channel, or
+    /// is in a cancellation, and as [`BindingRefusal::SubstrateRefused`] for a region
+    /// that is closed or under cancellation: those crashes have no semantics here. A
+    /// sleeping task may crash: its timer is fenced, and its later fire reaches no task.
+    Crash {
+        /// The subtree's root.
+        region: RegionLabel,
+    },
     /// Wake `task` with a command to reserve a two-phase effect through its own `Cx`
     /// (`Cx::try_register_obligation_checked`), bound to `reservation`. The task then
     /// waits, mid-effect, for the reservation's resolution.
@@ -555,6 +606,7 @@ impl SubstrateOp {
             Self::Finish { .. } => "finish",
             Self::Close { .. } => "close",
             Self::Cancel { .. } => "cancel",
+            Self::Crash { .. } => "crash",
             Self::Reserve { .. } => "reserve",
             Self::Commit { .. } => "commit",
             Self::Abort { .. } => "abort",
@@ -783,6 +835,21 @@ pub enum BindingRefusal {
         /// The task's journal ordinal.
         task: u32,
     },
+    /// An operation commands a task a fail-stop crash stopped: the crashed incarnation
+    /// takes no command, and nothing of it runs (bn-20d8u).
+    TaskCrashed {
+        /// The task's journal ordinal.
+        task: u32,
+    },
+    /// A crash of a task this binding gives no fail-stop semantics: one under a budget
+    /// deadline, holding a channel's receiver, waiting on a channel, or in a
+    /// cancellation (bn-20d8u).
+    CrashUnsupported {
+        /// The task's journal ordinal.
+        task: u32,
+        /// Why.
+        why: &'static str,
+    },
     /// An operation begins a task that has already begun.
     TaskAlreadyBegun {
         /// The task's journal ordinal.
@@ -860,6 +927,7 @@ impl BindingRefusal {
             | Self::UnorderedWake { .. }
             | Self::UnmappedCancelReason { .. }
             | Self::CancelRaced { .. }
+            | Self::CrashUnsupported { .. }
             | Self::ReservationDropped { .. } => Some(InconclusiveReason::Unsupported),
             Self::SubstrateProtocolViolation { .. }
             | Self::SubstrateLedgerDisagrees { .. }
@@ -890,6 +958,7 @@ impl BindingRefusal {
             | Self::ZeroDuration { .. }
             | Self::TaskNotBegun { .. }
             | Self::TaskEnded { .. }
+            | Self::TaskCrashed { .. }
             | Self::TaskAlreadyBegun { .. }
             | Self::TaskAsleep { .. }
             | Self::TaskBlocked { .. }
@@ -1012,6 +1081,15 @@ impl fmt::Display for BindingRefusal {
             }
             Self::TaskEnded { task } => {
                 write!(f, "task t{task} has ended and cannot take a command")
+            }
+            Self::TaskCrashed { task } => {
+                write!(f, "task t{task} crashed and cannot take a command")
+            }
+            Self::CrashUnsupported { task, why } => {
+                write!(
+                    f,
+                    "a fail-stop crash of task t{task}, which {why}, is not supported"
+                )
             }
             Self::TaskAlreadyBegun { task } => write!(f, "task t{task} has already begun"),
             Self::TaskAsleep { task } => {
@@ -1538,6 +1616,8 @@ struct Slot {
     id: SubstrateTask,
     handle: TaskHandle<()>,
     gate: Gate,
+    /// The owning region's ordinal.
+    region: u32,
     resumability: Resumability,
     ordinal: Option<TaskOrdinal>,
     /// The task's budget deadline, in virtual nanoseconds, when it has one.
@@ -1576,6 +1656,8 @@ enum Standing {
     Open,
     Discharged,
     Leaked,
+    /// Leaked by the substrate because a crash stopped its holder: a fence (bn-20d8u).
+    Fenced,
 }
 
 /// A substrate obligation the run reserved, as the trace shows it.
@@ -1677,6 +1759,16 @@ struct Driver {
     observed: BTreeSet<u64>,
     last_seq: Option<u64>,
     record: RecordContext,
+    /// Tasks a fail-stop crash stopped, by slot (bn-20d8u).
+    crashed: BTreeSet<usize>,
+    /// The tasks the crash being applied stops, while it is applied.
+    crashing: Option<BTreeSet<usize>>,
+    /// The crash's fences not yet journaled: reservation, obligation and timer
+    /// ordinals, journaled in that order, each by ascending ordinal.
+    pending_fences: (BTreeSet<u32>, BTreeSet<u32>, BTreeSet<u32>),
+    /// The futures a crash withdrew from the runtime, never polled again. Declared
+    /// last, so they drop after `lab`: their destructors reach no runtime.
+    withdrawn: Vec<StoredTask>,
 }
 
 fn ordinal(count: usize) -> u32 {
@@ -1752,6 +1844,10 @@ impl Driver {
             observed: BTreeSet::new(),
             last_seq: None,
             record: RecordContext::default(),
+            crashed: BTreeSet::new(),
+            crashing: None,
+            pending_fences: (BTreeSet::new(), BTreeSet::new(), BTreeSet::new()),
+            withdrawn: Vec::new(),
         };
         driver.sync()?;
         if driver.region_ordinals.get(&root) != Some(&RegionOrdinal(0)) {
@@ -2162,8 +2258,31 @@ impl Driver {
         }
     }
 
+    /// Journal a crash's fences: reservations, then obligations, then timers, each by
+    /// ascending ordinal, right after the crash and before its subtree's closes.
+    fn flush_fences(&mut self) {
+        let (reservations, obligations, timers) = core::mem::take(&mut self.pending_fences);
+        for reservation in reservations {
+            self.record.append(EventBody::Effect(EffectEvent::Fenced {
+                reservation: ReservationOrdinal(reservation),
+            }));
+        }
+        for obligation in obligations {
+            self.record
+                .append(EventBody::Obligation(ObligationEvent::Fenced {
+                    obligation: ObligationOrdinal(obligation),
+                }));
+        }
+        for timer in timers {
+            self.record.append(EventBody::Time(TimeEvent::Fenced {
+                timer: TimerOrdinal(timer),
+            }));
+        }
+    }
+
     fn flush_closes(&mut self) {
         self.flush_leaks();
+        self.flush_fences();
         if self.pending_closes.is_empty() {
             return;
         }
@@ -2206,7 +2325,12 @@ impl Driver {
 
     fn command_slot(&mut self, slot: usize, command: Command) -> Result<(), BindingRefusal> {
         // A command to a task that is not polling its gate would wait unseen: before
-        // `begin`, after the task ended, or while it sleeps.
+        // `begin`, after the task ended, or while it sleeps. A crashed task first.
+        if self.crashed.contains(&slot) {
+            return Err(BindingRefusal::TaskCrashed {
+                task: self.task_ordinal(slot)?.0,
+            });
+        }
         if !self.begun.contains(&slot) {
             return Err(BindingRefusal::TaskNotBegun {
                 task: self.task_ordinal(slot)?.0,
@@ -2284,6 +2408,11 @@ impl Driver {
             }
             SubstrateOp::Begin { task } => {
                 let slot = self.slot(*task)?;
+                if self.crashed.contains(&slot) {
+                    return Err(BindingRefusal::TaskCrashed {
+                        task: self.task_ordinal(slot)?.0,
+                    });
+                }
                 if !self.begun.insert(slot) {
                     return Err(BindingRefusal::TaskAlreadyBegun {
                         task: self.task_ordinal(slot)?.0,
@@ -2315,6 +2444,7 @@ impl Driver {
                 self.lab.state.advance_region_state(id);
                 self.run()
             }
+            SubstrateOp::Crash { region } => self.crash(*region),
             SubstrateOp::Cancel { region } => {
                 self.in_cancel = true;
                 let id = self.region(*region)?;
@@ -2374,6 +2504,9 @@ impl Driver {
                 }
                 let slot = self.slot(*receiver)?;
                 let task = self.task_ordinal(slot)?;
+                if self.crashed.contains(&slot) {
+                    return Err(BindingRefusal::TaskCrashed { task: task.0 });
+                }
                 if self.ended.contains(&slot) {
                     return Err(BindingRefusal::TaskEnded { task: task.0 });
                 }
@@ -2493,6 +2626,11 @@ impl Driver {
                     return Err(BindingRefusal::EffectNotTransferable(reservation.0));
                 }
                 let destination = self.slot(*to)?;
+                if self.crashed.contains(&destination) {
+                    return Err(BindingRefusal::TaskCrashed {
+                        task: self.task_ordinal(destination)?.0,
+                    });
+                }
                 let cx = self
                     .lab
                     .state
@@ -2517,6 +2655,139 @@ impl Driver {
                 }
             }
         }
+    }
+
+    /// A fail-stop crash of `label`'s subtree ([`SubstrateOp::Crash`]; bn-20d8u).
+    fn crash(&mut self, label: RegionLabel) -> Result<(), BindingRefusal> {
+        let refused = |detail: &str| BindingRefusal::SubstrateRefused {
+            operation: "crash",
+            detail: detail.to_owned(),
+        };
+        let id = self.region(label)?;
+        let root = self.ordinal_of(id)?.0;
+        let record = self
+            .lab
+            .state
+            .region(id)
+            .ok_or_else(|| refused("the region record is gone"))?;
+        if record.state().is_terminal() {
+            return Err(refused("the region is closed"));
+        }
+        // The subtree's regions, children before parents, and its live tasks.
+        let by_ordinal: BTreeMap<u32, SubstrateRegion> = self
+            .region_ordinals
+            .iter()
+            .map(|(substrate, ordinal)| (ordinal.0, *substrate))
+            .collect();
+        let regions: Vec<(u32, SubstrateRegion)> = self
+            .post_order()
+            .into_iter()
+            .filter(|region| self.in_subtree(*region, root))
+            .map(|region| {
+                by_ordinal
+                    .get(&region)
+                    .map(|substrate| (region, *substrate))
+                    .ok_or(BindingRefusal::UnknownSubstrateEntity { what: "region" })
+            })
+            .collect::<Result<_, _>>()?;
+        let open_cancelled = regions.iter().any(|(region, substrate)| {
+            self.cancelled.contains(region)
+                && self
+                    .lab
+                    .state
+                    .region(*substrate)
+                    .is_some_and(|record| !record.state().is_terminal())
+        });
+        if self.under_cancel(root) || open_cancelled {
+            return Err(refused("the region's subtree is under cancellation"));
+        }
+        let mut live: Vec<(TaskOrdinal, usize)> = Vec::new();
+        for (slot, entry) in self.slots.iter().enumerate() {
+            if !self.ended.contains(&slot) && self.in_subtree(entry.region, root) {
+                live.push((self.task_ordinal(slot)?, slot));
+            }
+        }
+        live.sort_unstable();
+        // Receiver holders, in one pass over the channels.
+        let receivers: BTreeSet<usize> = self.channels.iter().map(|c| c.receiver_slot).collect();
+        for (task, slot) in &live {
+            let unsupported = |why| BindingRefusal::CrashUnsupported { task: task.0, why };
+            if self.slots[*slot].deadline.is_some() {
+                return Err(unsupported("runs under a budget deadline"));
+            }
+            if self.channel_blocked.contains(slot) || self.pending_sends.contains_key(slot) {
+                return Err(unsupported("waits on a channel"));
+            }
+            let gate = lock(&self.slots[*slot].gate);
+            let holds_receiver = !gate.receiver_inbox.is_empty() || receivers.contains(slot);
+            let queued = !gate.commands.is_empty();
+            drop(gate);
+            if holds_receiver {
+                return Err(unsupported("holds a channel's receiver"));
+            }
+            if queued
+                || self.phases.contains_key(&task.0)
+                || self.region_requested.contains(&task.0)
+            {
+                return Err(unsupported("is in a cancellation or has a command pending"));
+            }
+        }
+        let fenced = TaskSet::new(live.iter().map(|(task, _)| *task));
+        self.append(LifecycleEvent::RegionCrashed {
+            region: RegionOrdinal(root),
+            fenced,
+        });
+        let stopped: BTreeSet<usize> = live.iter().map(|(_, slot)| *slot).collect();
+        self.crashing = Some(stopped.clone());
+        self.crashed.extend(stopped.iter().copied());
+        for (_, slot) in &live {
+            // A sleeping task's timer stays in the wheel; its fire wakes a task that no
+            // longer exists, which polls nothing. The journal fences it.
+            if let Some(timer) = self.sleeping.remove(slot)
+                && self.observes_time()
+            {
+                self.pending_fences.2.insert(timer);
+            }
+            let task = self.slots[*slot].id;
+            let future = self
+                .lab
+                .state
+                .remove_stored_future(task)
+                .ok_or_else(|| refused("the task's future is not stored"))?;
+            self.withdrawn.push(future);
+            let completed = self.lab.state.complete_task(
+                task,
+                Outcome::Panicked(PanicPayload::new("continuum fail-stop crash")),
+            );
+            if !completed {
+                return Err(refused("the task record did not complete"));
+            }
+            let (waiters, observer) = self.lab.state.task_completed(task).into_parts();
+            if !waiters.is_empty() {
+                return Err(refused("the task had joiners"));
+            }
+            observer.dispatch();
+        }
+        for (_, substrate) in &regions {
+            if let Some(record) = self.lab.state.region(*substrate)
+                && !record.state().is_terminal()
+            {
+                // `false` for a region already closing: its close continues.
+                let _ = record.begin_close(None);
+            }
+        }
+        for (_, substrate) in &regions {
+            self.lab.state.advance_region_state(*substrate);
+        }
+        let result = self.run();
+        self.crashing = None;
+        result?;
+        if let Some(slot) = stopped.iter().find(|slot| !self.ended.contains(slot)) {
+            return Err(BindingRefusal::TaskOutcomeUnobserved {
+                task: self.task_ordinal(*slot)?.0,
+            });
+        }
+        Ok(())
     }
 
     /// Create a gated task in `region`, bound to `task`, with a finite budget deadline
@@ -2573,10 +2844,12 @@ impl Driver {
                 ));
             }
         }
+        let region = self.ordinal_of(region)?.0;
         self.slots.push(Slot {
             id,
             handle,
             gate,
+            region,
             resumability: resumability.clone(),
             ordinal: None,
             deadline,
@@ -2626,6 +2899,12 @@ impl Driver {
             .get(&label)
             .ok_or(BindingRefusal::UnboundReservation(label.0))?;
         if state.resolved {
+            // A fenced reservation's holder crashed: it takes no command (bn-20d8u).
+            if let Some(held) = self.reservations.values().find(|held| {
+                held.obligation == state.obligation && held.standing == Standing::Fenced
+            }) {
+                return Err(BindingRefusal::TaskCrashed { task: held.task.0 });
+            }
             return Err(BindingRefusal::ReservationResolved(label.0));
         }
         self.reservations
@@ -2866,6 +3145,24 @@ impl Driver {
                     task,
                     EventBody::Lifecycle(LifecycleEvent::TaskStepped { task, step }),
                 );
+            }
+            (TraceEventKind::Complete, TraceData::Task { task, .. })
+                if self.crashing.as_ref().is_some_and(|crashing| {
+                    self.slot_of
+                        .get(task)
+                        .is_some_and(|slot| crashing.contains(slot))
+                }) =>
+            {
+                // The crash's own completion of a stopped task: its future never
+                // returned, so its join has no value, and it journals nothing of its own
+                // (the crash event names it).
+                let slot = self.slot_of(*task)?;
+                if !matches!(self.slots[slot].handle.try_join(), Ok(None)) {
+                    return Err(BindingRefusal::TaskOutcomeUnobserved {
+                        task: self.task_ordinal(slot)?.0,
+                    });
+                }
+                self.ended.insert(slot);
             }
             (TraceEventKind::Complete, TraceData::Task { task, region }) => {
                 let slot = self.slot_of(*task)?;
@@ -3139,6 +3436,26 @@ impl Driver {
                 }
             }
             (TraceEventKind::ObligationLeak, TraceData::Obligation { obligation, .. })
+                if self.reservations.contains_key(obligation)
+                    && self.crashing.as_ref().is_some_and(|crashing| {
+                        crashing
+                            .contains(&self.held(*obligation).map_or(usize::MAX, |held| held.slot))
+                    }) =>
+            {
+                // A crash stopped the holder: the substrate's completion audit leaks
+                // what it held, and that leak is the fence (bn-20d8u).
+                let held = self.held(*obligation)?;
+                self.resolve(*obligation, Standing::Fenced);
+                if let Some(reservation) = held.reservation
+                    && self.observes_effect()
+                {
+                    self.pending_fences.0.insert(reservation);
+                }
+                if self.observes_obligation() {
+                    self.pending_fences.1.insert(held.obligation);
+                }
+            }
+            (TraceEventKind::ObligationLeak, TraceData::Obligation { obligation, .. })
                 if self.reservations.contains_key(obligation) =>
             {
                 let held = self.held(*obligation)?;
@@ -3233,6 +3550,7 @@ impl Driver {
             region: RegionOrdinal(region),
             open: members(Standing::Open),
             leaked: members(Standing::Leaked),
+            fenced: members(Standing::Fenced),
         }
     }
 
@@ -3253,7 +3571,13 @@ impl Driver {
                 ObligationState::Committed | ObligationState::Aborted => Standing::Discharged,
                 ObligationState::Leaked => Standing::Leaked,
             };
-            if standing != held.standing
+            // A fence is the substrate's leak of a crashed holder's obligation.
+            let traced = if held.standing == Standing::Fenced {
+                Standing::Leaked
+            } else {
+                held.standing
+            };
+            if standing != traced
                 || record.kind != held.kind
                 || record.holder != self.slots[held.slot].id
                 || regions.get(&held.region) != Some(&record.region)
@@ -3281,7 +3605,9 @@ impl Driver {
                     .region(*region)
                     .is_none_or(|record| record.state().is_terminal())
             });
-            if held.standing == Standing::Leaked || (held.standing == Standing::Open && closed) {
+            if matches!(held.standing, Standing::Leaked | Standing::Fenced)
+                || (held.standing == Standing::Open && closed)
+            {
                 unbalanced
                     .entry(held.region)
                     .or_default()

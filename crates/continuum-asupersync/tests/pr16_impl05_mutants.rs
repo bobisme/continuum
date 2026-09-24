@@ -25,9 +25,18 @@
 //! the shallowest failing run the campaign found, replayed from its plan and log, and not
 //! minimized. Two mutants (M03, M08) are excluded by the substrate rather than detected,
 //! and two (M09, M10) are not program mutants and are deferred to their owners. Every
-//! crash is graceful region cancellation, not a fail-stop crash
+//! crash of the nine campaigns is graceful region cancellation, not a fail-stop crash
 //! (`register::CRASH_SEMANTICS`, bn-20d8u); each mutant's `crash:` line in the golden
 //! states what its result rests on.
+//!
+//! # The fail-stop reruns (bn-20d8u)
+//!
+//! The four mutants whose graceful result rests on the crash's cleanup (M02, M03, M07,
+//! M08, `mutants::FAIL_STOP`) are run again with each crash the binding's fail-stop
+//! `Crash` (`register::FAIL_STOP_SEMANTICS`), beside a fail-stop baseline, which stays at
+//! zero findings with what the crashes stopped and fenced counted apart. Each mutant's
+//! section of the golden gains `fail-stop` lines next to the graceful ones: its expected
+//! result, the campaign and its identity, the result and a replayed witness.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -56,6 +65,10 @@ struct All {
     base: Campaign,
     baseline: Outcome,
     mutants: BTreeMap<Id, (Mutant, Outcome)>,
+    /// The baseline, every crash fail-stop (bn-20d8u).
+    fail_stop_baseline: Outcome,
+    /// The fail-stop reruns of `mutants::FAIL_STOP`.
+    fail_stop: BTreeMap<Id, (Mutant, Outcome)>,
 }
 
 /// The baseline and every mutant campaign, run once, in parallel.
@@ -67,9 +80,18 @@ fn all() -> &'static All {
             .iter()
             .filter_map(|id| mutants::mutant(*id, &base))
             .collect();
+        let fs: Vec<Mutant> = mutants::FAIL_STOP
+            .iter()
+            .filter_map(|id| mutants::mutant_fail_stop(*id, &base))
+            .collect();
         std::thread::scope(|s| {
             let b = s.spawn(|| baseline::execute(&base));
+            let fb = s.spawn(|| baseline::execute_in(&base, register::CrashMode::FailStop));
             let hs: Vec<_> = ms
+                .iter()
+                .map(|m| s.spawn(move || mutants::execute(m)))
+                .collect();
+            let fhs: Vec<_> = fs
                 .iter()
                 .map(|m| s.spawn(move || mutants::execute(m)))
                 .collect();
@@ -79,10 +101,18 @@ fn all() -> &'static All {
                 .zip(hs)
                 .map(|(m, h)| (m.id, (m, h.join().expect("a campaign"))))
                 .collect();
+            let fail_stop = fs
+                .iter()
+                .cloned()
+                .zip(fhs)
+                .map(|(m, h)| (m.id, (m, h.join().expect("a fail-stop campaign"))))
+                .collect();
             All {
                 baseline: b.join().expect("the baseline"),
                 base: base.clone(),
                 mutants,
+                fail_stop_baseline: fb.join().expect("the fail-stop baseline"),
+                fail_stop,
             }
         })
     })
@@ -97,8 +127,46 @@ fn repo(rel: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
+/// Which crash semantics a campaign runs under (bn-20d8u).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Graceful,
+    FailStop,
+}
+
+/// A campaign and its outcome, and its expected result, under `mode`.
+fn run_of(id: Id, mode: Mode) -> (&'static Mutant, &'static Outcome, Expected) {
+    match mode {
+        Mode::Graceful => {
+            let (m, o) = get(id);
+            (m, o, mutants::expected(id))
+        }
+        Mode::FailStop => {
+            let (m, o) = &all().fail_stop[&id];
+            (
+                m,
+                o,
+                mutants::expected_fail_stop(id).expect("a fail-stop expectation"),
+            )
+        }
+    }
+}
+
+/// Whether the mutant changed a plan, against the build of its own mode.
+fn changed_in(mode: Mode, m: &Mutant, gi: usize, pi: usize) -> bool {
+    let base = &all().base;
+    match mode {
+        Mode::Graceful => mutants::changed(m, base, gi, pi),
+        Mode::FailStop => mutants::changed_fail_stop(m, base, gi, pi),
+    }
+}
+
 /// Per plan of a mutant campaign: `(group, plan, changed, runs, failing runs)`.
 fn per_plan(m: &Mutant, o: &Outcome) -> Vec<(usize, usize, bool, usize, usize)> {
+    per_plan_in(Mode::Graceful, m, o)
+}
+
+fn per_plan_in(mode: Mode, m: &Mutant, o: &Outcome) -> Vec<(usize, usize, bool, usize, usize)> {
     let base = &all().base;
     o.plans
         .iter()
@@ -111,7 +179,7 @@ fn per_plan(m: &Mutant, o: &Outcome) -> Vec<(usize, usize, bool, usize, usize)> 
             (
                 gi,
                 p.index,
-                mutants::changed(m, base, gi, p.index),
+                changed_in(mode, m, gi, p.index),
                 p.runs,
                 p.findings.len(),
             )
@@ -136,9 +204,13 @@ struct Summary {
 }
 
 fn summary(id: Id) -> Summary {
-    let (m, o) = get(id);
-    let rows = per_plan(m, o);
-    let (symptom, also) = match mutants::expected(id) {
+    summary_in(id, Mode::Graceful)
+}
+
+fn summary_in(id: Id, mode: Mode) -> Summary {
+    let (m, o, expected) = run_of(id, mode);
+    let rows = per_plan_in(mode, m, o);
+    let (symptom, also) = match expected {
         Expected::Detected { symptom, also, .. } => (Some(symptom), also),
         _ => (None, None),
     };
@@ -161,7 +233,7 @@ fn summary(id: Id) -> Summary {
         .iter()
         .filter(|p| p.findings.iter().any(|(_, f)| detects(f)))
         .count();
-    let witness = match (symptom, mutants::expected(id)) {
+    let witness = match (symptom, expected) {
         (Some(s), _) => mutants::witness(m, o, |f| s.matches(f), |_, _| true),
         (
             None,
@@ -173,6 +245,18 @@ fn summary(id: Id) -> Summary {
             m,
             o,
             |f| matches!(f, Finding::Refused(r) if Refusal::TaskEnded.matches(r)),
+            |_, _| true,
+        ),
+        (
+            None,
+            Expected::Excluded {
+                exclusion: Exclusion::EpochFencedByCrash,
+                ..
+            },
+        ) => mutants::witness(
+            m,
+            o,
+            |f| matches!(f, Finding::Refused(r) if Refusal::TaskCrashed.matches(r)),
             |_, _| true,
         ),
         _ => None,
@@ -226,6 +310,16 @@ fn summaries() -> &'static BTreeMap<Id, Summary> {
             .iter()
             .filter(|id| all().mutants.contains_key(id))
             .map(|id| (*id, summary(*id)))
+            .collect()
+    })
+}
+
+fn fail_stop_summaries() -> &'static BTreeMap<Id, Summary> {
+    static CELL: OnceLock<BTreeMap<Id, Summary>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        mutants::FAIL_STOP
+            .iter()
+            .map(|id| (*id, summary_in(*id, Mode::FailStop)))
             .collect()
     })
 }
@@ -350,17 +444,24 @@ fn the_mutants_are_the_specs() {
 
 /// Hold a detected mutant's campaign to its expectation.
 fn check_detected(id: Id) {
+    check_detected_in(id, Mode::Graceful);
+}
+
+fn check_detected_in(id: Id, mode: Mode) {
+    let (m, o, expected) = run_of(id, mode);
     let Expected::Detected {
         breach,
         symptom,
         also,
         refusal,
-    } = mutants::expected(id)
+    } = expected
     else {
         panic!("{id:?} is expected to be detected");
     };
-    let (m, o) = get(id);
-    let s = &summaries()[&id];
+    let s = match mode {
+        Mode::Graceful => &summaries()[&id],
+        Mode::FailStop => &fail_stop_summaries()[&id],
+    };
     // The mutant changes some plans, and each changed plan of a plan mutant breaks the
     // named protocol rule first. A program mutant's plans are the correct ones.
     assert!(s.changed > 0, "{id:?} changes something");
@@ -370,7 +471,7 @@ fn check_detected(id: Id) {
     }
     // Findings come only from changed plans: the mutation, not the campaign, is what
     // fails.
-    for (g, p, changed, _, failing) in per_plan(m, o) {
+    for (g, p, changed, _, failing) in per_plan_in(mode, m, o) {
         assert!(
             changed || failing == 0,
             "{id:?}: unchanged plan {g}/{p} fails"
@@ -739,7 +840,11 @@ fn a_timer_fired_after_its_epoch_is_cancelled_is_counted() {
 
 /// The crashes over every run of a campaign: what M08 arms timers for.
 fn crash_runs(m: &Mutant) -> usize {
-    let (_, o) = get(m.id);
+    crash_runs_in(Mode::Graceful, m)
+}
+
+fn crash_runs_in(mode: Mode, m: &Mutant) -> usize {
+    let (_, o, _) = run_of(m.id, mode);
     o.plans
         .iter()
         .map(|p| {
@@ -759,6 +864,218 @@ fn crash_runs(m: &Mutant) -> usize {
             crashes * p.runs
         })
         .sum()
+}
+
+// ---------------------------------------------------------------------------
+// the fail-stop reruns (bn-20d8u)
+// ---------------------------------------------------------------------------
+
+/// The fail-stop baseline: the correct program with every crash fail-stop has no finding,
+/// and what its crashes stopped and fenced is counted apart; no crash runs a cleanup.
+#[test]
+fn mut_00_the_fail_stop_baseline_stays_at_zero_findings_and_counts_fences_apart() {
+    let a = all();
+    let o = &a.fail_stop_baseline;
+    assert_eq!(o.by_property, BTreeMap::new());
+    assert!(o.plans.iter().all(|p| p.findings.is_empty()));
+    assert_eq!(o.breaches, BTreeMap::new());
+    assert_eq!(o.runs, a.baseline.runs);
+    assert_ne!(o.digest, a.baseline.digest, "its own identity");
+    let [tasks, obligations, reservations, timers] = o.tally.fenced;
+    assert!(
+        tasks > 0 && obligations > 0 && reservations > 0,
+        "{:?}",
+        o.tally.fenced
+    );
+    assert_eq!(timers, 0, "the correct program sets no timer");
+    assert_eq!(
+        a.baseline.tally.fenced, [0; 4],
+        "graceful crashes fence nothing"
+    );
+    // The graceful baseline's crash cleanup cancels tasks in drains; a fail-stop crash
+    // cancels none.
+    assert!(a.baseline.tally.cancelled > 0);
+    assert_eq!(o.tally.cancelled, 0);
+    assert!(o.crash_after_ack > 0 && o.cancel_after_submit > 0);
+}
+
+/// Every rerun is the graceful campaign's plans under the fail-stop build, with its own
+/// name and identity.
+#[test]
+fn every_fail_stop_rerun_is_derived_from_the_baseline() {
+    let a = all();
+    assert_eq!(
+        a.fail_stop.keys().copied().collect::<Vec<_>>(),
+        mutants::FAIL_STOP.to_vec()
+    );
+    for (id, (m, o)) in &a.fail_stop {
+        let (g, go) = get(*id);
+        assert_eq!(m.campaign.name, mutants::fail_stop_name(*id));
+        assert_eq!(m.campaign.seed, a.base.seed);
+        assert_eq!(m.plan_mutant, g.plan_mutant, "{id:?}");
+        for (x, y) in m.campaign.groups.iter().zip(&g.campaign.groups) {
+            for (p, q) in x.plans.iter().zip(&y.plans) {
+                assert_eq!(render_plan(p), render_plan(q), "{id:?}");
+            }
+        }
+        assert_eq!(o.plans.len(), go.plans.len());
+        assert_ne!(o.digest, go.digest, "{id:?}: its own identity");
+        // Each crash act is a `Crash` in the rerun's build, and a `Cancel` in the
+        // graceful one.
+        let plan = &m.campaign.groups[0].plans[0];
+        let crashes = |b: &register::Built| {
+            b.programs
+                .iter()
+                .flatten()
+                .filter(|op| matches!(op, continuum_asupersync::binding::SubstrateOp::Crash { .. }))
+                .count()
+        };
+        let acts = plan
+            .replicas
+            .iter()
+            .flatten()
+            .filter(|a| matches!(a, register::Act::Crash | register::Act::CrashRepropose(..)))
+            .count();
+        assert_eq!(crashes(&(m.builder)(plan).expect("built")), acts, "{id:?}");
+        assert_eq!(crashes(&(g.builder)(plan).expect("built")), 0, "{id:?}");
+    }
+}
+
+/// mut-02 under the fail-stop crash: still detected. A changed plan's runs are runs
+/// exactly when each lost permit's incarnation later crashes: the crash now fences the
+/// permit (it stops its holder), where the graceful crash's cleanup aborted it. So the
+/// detection does not rest on the cleanup; the refused runs are those whose writer ends
+/// holding the permit, as before.
+#[test]
+fn fail_stop_mut_02_lost_abort_is_detected_and_the_crash_fences_the_permit() {
+    use continuum_asupersync::family::EventBody;
+    use continuum_asupersync::family::effect::{AbortCause, EffectEvent};
+    check_detected_in(Id::M02, Mode::FailStop);
+    let (m, o) = &all().fail_stop[&Id::M02];
+    let base = &all().base;
+    let (mut admitted, mut refused) = (0, 0);
+    for p in &o.plans {
+        let gi = base.groups.iter().position(|g| g.id == p.group).expect("g");
+        if !mutants::changed_fail_stop(m, base, gi, p.index) {
+            continue;
+        }
+        let runs_refused = p
+            .findings
+            .iter()
+            .filter(|(_, fs)| {
+                fs.iter().any(
+                    |f| matches!(f, Finding::Refused(r) if Refusal::ReservationDropped.matches(r)),
+                )
+            })
+            .count();
+        if lost_permits_meet_a_crash(&base.groups[gi].plans[p.index]) {
+            assert_eq!(runs_refused, 0, "{}/{}", p.group, p.index);
+            admitted += p.runs;
+        } else {
+            assert_eq!(runs_refused, p.runs, "{}/{}", p.group, p.index);
+            refused += p.runs;
+        }
+    }
+    let s = &fail_stop_summaries()[&Id::M02];
+    assert_eq!((admitted, refused), (s.detecting_runs, s.refused_runs));
+    let g = &summaries()[&Id::M02];
+    assert_eq!(
+        (s.detecting_runs, s.refused_runs),
+        (g.detecting_runs, g.refused_runs)
+    );
+    // In the witness, the lost permit is fenced by the crash, never aborted.
+    let w = s.witness.as_ref().expect("a witness");
+    let plan = &m.campaign.groups[w.group.0].plans[w.plan];
+    let built = (m.builder)(plan).expect("built");
+    let journal = continuum_asupersync::binding::run(&built.programs, &w.log, &baseline::config())
+        .expect("a run");
+    assert!(
+        journal
+            .events()
+            .iter()
+            .any(|e| matches!(e.body(), EventBody::Effect(EffectEvent::Fenced { .. })))
+    );
+    assert!(!journal.events().iter().any(|e| matches!(
+        e.body(),
+        EventBody::Effect(EffectEvent::Aborted {
+            cause: AbortCause::Cancel,
+            ..
+        })
+    )));
+}
+
+/// mut-03 under the fail-stop crash: excluded. Every run of every changed plan is the
+/// binding's typed `TaskCrashed` refusal: the crashed incarnation's tasks take no command.
+#[test]
+fn fail_stop_mut_03_stale_epoch_is_excluded_by_the_crash_fence() {
+    let (m, o) = &all().fail_stop[&Id::M03];
+    assert_eq!(o.breaches, BTreeMap::new());
+    let s = &fail_stop_summaries()[&Id::M03];
+    assert!(s.changed > 0);
+    for (g, p, changed, runs, failing) in per_plan_in(Mode::FailStop, m, o) {
+        assert_eq!(failing, if changed { runs } else { 0 }, "{g}/{p}");
+    }
+    for (_, fs) in o.plans.iter().flat_map(|p| &p.findings) {
+        assert!(
+            matches!(fs.as_slice(), [Finding::Refused(r)] if Refusal::TaskCrashed.matches(r)),
+            "{fs:?}"
+        );
+    }
+    assert_eq!(s.refused_runs, s.changed_runs);
+    let w = s.witness.as_ref().expect("a refused run");
+    let (_, raw) = mutants::replay(m, w);
+    assert!(raw.is_err_and(|r| Refusal::TaskCrashed.is(&r)));
+}
+
+/// mut-07 under the fail-stop crash: detected. The crash leaves the recovered record's
+/// `IoOp` pending and fences it; the projection reads its `Lose` from the crash event,
+/// so the ack has no durable majority, as under the graceful crash.
+#[test]
+fn fail_stop_mut_07_torn_tail_is_detected_with_the_loss_read_from_the_crash() {
+    check_detected_in(Id::M07, Mode::FailStop);
+    let (m, _) = &all().fail_stop[&Id::M07];
+    let w = fail_stop_summaries()[&Id::M07]
+        .witness
+        .as_ref()
+        .expect("a witness");
+    let plan = &m.campaign.groups[w.group.0].plans[w.plan];
+    let built = (m.builder)(plan).expect("built");
+    let journal = continuum_asupersync::binding::run(&built.programs, &w.log, &baseline::config())
+        .expect("a run");
+    let steps = register::observe(&built.roles, &journal).expect("projects");
+    let losses: Vec<&register::Observed> = steps
+        .iter()
+        .filter(|st| matches!(&st.expect, register::Expect::Step(l) if l.starts_with("Lose(")))
+        .collect();
+    assert!(!losses.is_empty());
+    assert!(losses.iter().all(|st| st.event.contains("region-crashed")));
+}
+
+/// mut-08 under the fail-stop crash: excluded. Every timer the old incarnation armed and
+/// had not fired before the crash is fenced at it, none is cancelled, and none fires
+/// after it.
+#[test]
+fn fail_stop_mut_08_stale_timer_is_excluded_by_the_fence() {
+    let (m, o) = &all().fail_stop[&Id::M08];
+    let s = &fail_stop_summaries()[&Id::M08];
+    assert!(s.changed > 0);
+    assert_eq!(o.by_property, BTreeMap::new());
+    assert_eq!(o.breaches, BTreeMap::new());
+    let [scheduled, fired, cancelled, stale] = o.tally.timers;
+    let fenced = o.tally.fenced[3];
+    assert_eq!(
+        scheduled,
+        crash_runs_in(Mode::FailStop, m),
+        "one timer per crash per run"
+    );
+    assert_eq!(stale, 0, "no timer fires after its incarnation crashed");
+    assert_eq!(cancelled, 0, "no crash cancels a timer");
+    assert_eq!(
+        fired + fenced,
+        scheduled,
+        "every timer fires before the crash or is fenced"
+    );
+    assert!(fenced > fired);
 }
 
 /// mut-09 and mut-10: deferred, with owners.
@@ -794,7 +1111,11 @@ fn by_property(o: &Outcome) -> String {
 }
 
 fn expected_line(id: Id) -> String {
-    match mutants::expected(id) {
+    render_expected(mutants::expected(id))
+}
+
+fn render_expected(expected: Expected) -> String {
+    match expected {
         Expected::Detected {
             breach,
             symptom,
@@ -828,6 +1149,10 @@ fn expected_line(id: Id) -> String {
                     "typed refusal TaskEnded on every run, the binding's check for a command to an ended task, with no INV-008 reason",
                 Exclusion::TimerDropped =>
                     "typed TimeEvent::Cancelled for every armed timer the crash overtakes, and no timer fired after its epoch is cancelled, by the binding's bookkeeping over the substrate's trace",
+                Exclusion::EpochFencedByCrash =>
+                    "typed refusal TaskCrashed on every run, the binding's check for a command to a task a fail-stop crash stopped, with no INV-008 reason",
+                Exclusion::TimerFenced =>
+                    "typed TimeEvent::Fenced for every armed timer the crash stops, and no timer fired after its incarnation crashed",
             }
         ),
         Expected::Deferred { owner, why } => format!("deferred to {owner}: {why}"),
@@ -867,7 +1192,8 @@ fn evidence() -> String {
          # campaign derived from pr16-correct-baseline; tests/support/register_mutants.rs.\n\
          # Regenerate: PR16_IMPL05_BLESS=1 cargo test -p continuum-asupersync --test pr16_impl05_mutants\n",
     );
-    let _ = writeln!(out, "# crash: {}\n", register::CRASH_SEMANTICS);
+    let _ = writeln!(out, "# crash: {}", register::CRASH_SEMANTICS);
+    let _ = writeln!(out, "# fail-stop: {}\n", register::FAIL_STOP_SEMANTICS);
     let _ = writeln!(out, "[pr16-impl05-mut-00-baseline]");
     let _ = writeln!(
         out,
@@ -878,6 +1204,25 @@ fn evidence() -> String {
         a.baseline.runs,
         a.baseline.digest,
         by_property(&a.baseline)
+    );
+    // The previous line ends the section with a blank line; the fail-stop baseline goes
+    // before it.
+    out.pop();
+    let fb = &a.fail_stop_baseline;
+    let _ = writeln!(
+        out,
+        "fail-stop campaign {} seed {}: {} plans, {} runs; identity {}; findings {}; fenced tasks {}, obligations {}, reservations {}, timers {}; tasks cancelled in drains {}\n",
+        mutants::FAIL_STOP_BASELINE,
+        a.base.seed,
+        fb.plans.len(),
+        fb.runs,
+        fb.digest,
+        by_property(fb),
+        fb.tally.fenced[0],
+        fb.tally.fenced[1],
+        fb.tally.fenced[2],
+        fb.tally.fenced[3],
+        fb.tally.cancelled
     );
     for id in Id::ALL {
         let _ = writeln!(out, "[{}]", id.name());
@@ -910,39 +1255,7 @@ fn evidence() -> String {
             counts(o.breaches.iter().map(|(b, n)| (format!("{b:?}"), *n))),
             by_property(o)
         );
-        let result = match mutants::expected(id) {
-            Expected::Detected { symptom, also, .. } => {
-                let mut r = format!(
-                    "result: detected, {} with {symptom:?}",
-                    symptom.property().scenario_name().unwrap_or("run")
-                );
-                if let Some(x) = also {
-                    let _ = write!(
-                        r,
-                        ", and {} with {x:?}",
-                        x.property().scenario_name().unwrap_or("run")
-                    );
-                }
-                r
-            }
-            Expected::Excluded {
-                exclusion: Exclusion::EpochFenced,
-                ..
-            } => format!(
-                "result: excluded, every run of the {} changed plans is the typed refusal TaskEnded, the binding's check with no INV-008 reason; no detection claimed",
-                s.changed
-            ),
-            Expected::Excluded {
-                exclusion: Exclusion::TimerDropped,
-                ..
-            } => {
-                let [sch, fired, can, stale] = o.tally.timers;
-                format!(
-                    "result: excluded, timers scheduled {sch}, cancelled {can}, fired {fired}, fired after their task's region was cancelled {stale}; no finding; no detection claimed"
-                )
-            }
-            Expected::Deferred { .. } => "result: deferred".to_owned(),
-        };
+        let result = result_line(mutants::expected(id), s, o);
         let _ = writeln!(out, "{result}");
         if let Some(w) = &s.witness {
             out.push_str(&witness_line("witness", m, w));
@@ -954,9 +1267,105 @@ fn evidence() -> String {
                 let _ = writeln!(out, "  causal story: {}", story.join(" "));
             }
         }
+        if let Some((fm, fo)) = a.fail_stop.get(&id) {
+            out.push_str(&fail_stop_lines(id, fm, fo));
+        }
         out.push('\n');
     }
     out
+}
+
+/// A rerun's `fail-stop` lines, next to the graceful ones (bn-20d8u).
+fn fail_stop_lines(id: Id, m: &Mutant, o: &Outcome) -> String {
+    let expected = mutants::expected_fail_stop(id).expect("a fail-stop expectation");
+    let s = &fail_stop_summaries()[&id];
+    let mut out = String::new();
+    let _ = writeln!(out, "fail-stop expected: {}", render_expected(expected));
+    let _ = writeln!(
+        out,
+        "fail-stop campaign {} from {}: seed {}, {} plans, {} runs; identity {}",
+        m.campaign.name,
+        all().base.name,
+        m.campaign.seed,
+        s.plans,
+        s.runs,
+        o.digest
+    );
+    let _ = writeln!(
+        out,
+        "fail-stop plans changed {} (runs {}), failing {}, detecting {}; runs failing {}, refused {}, detecting a scenario property {}; protocol breaches {}; findings {}; fenced tasks {}, obligations {}, reservations {}, timers {}",
+        s.changed,
+        s.changed_runs,
+        s.failing,
+        s.detecting_plans,
+        s.failing_runs,
+        s.refused_runs,
+        s.detecting_runs,
+        counts(o.breaches.iter().map(|(b, n)| (format!("{b:?}"), *n))),
+        by_property(o),
+        o.tally.fenced[0],
+        o.tally.fenced[1],
+        o.tally.fenced[2],
+        o.tally.fenced[3]
+    );
+    let _ = writeln!(out, "fail-stop {}", result_line(expected, s, o));
+    if let Some(w) = &s.witness {
+        out.push_str(&witness_line("fail-stop witness", m, w));
+    }
+    out
+}
+
+fn result_line(expected: Expected, s: &Summary, o: &Outcome) -> String {
+    match expected {
+        Expected::Detected { symptom, also, .. } => {
+            let mut r = format!(
+                "result: detected, {} with {symptom:?}",
+                symptom.property().scenario_name().unwrap_or("run")
+            );
+            if let Some(x) = also {
+                let _ = write!(
+                    r,
+                    ", and {} with {x:?}",
+                    x.property().scenario_name().unwrap_or("run")
+                );
+            }
+            r
+        }
+        Expected::Excluded {
+            exclusion: Exclusion::EpochFenced,
+            ..
+        } => format!(
+            "result: excluded, every run of the {} changed plans is the typed refusal TaskEnded, the binding's check with no INV-008 reason; no detection claimed",
+            s.changed
+        ),
+        Expected::Excluded {
+            exclusion: Exclusion::TimerDropped,
+            ..
+        } => {
+            let [sch, fired, can, stale] = o.tally.timers;
+            format!(
+                "result: excluded, timers scheduled {sch}, cancelled {can}, fired {fired}, fired after their task's region was cancelled {stale}; no finding; no detection claimed"
+            )
+        }
+        Expected::Excluded {
+            exclusion: Exclusion::EpochFencedByCrash,
+            ..
+        } => format!(
+            "result: excluded, every run of the {} changed plans is the typed refusal TaskCrashed, the binding's check with no INV-008 reason; no detection claimed",
+            s.changed
+        ),
+        Expected::Excluded {
+            exclusion: Exclusion::TimerFenced,
+            ..
+        } => {
+            let [sch, fired, can, stale] = o.tally.timers;
+            format!(
+                "result: excluded, timers scheduled {sch}, fired before the crash {fired}, fenced by the crash {}, cancelled {can}, fired after their incarnation crashed {stale}; no finding; no detection claimed",
+                o.tally.fenced[3]
+            )
+        }
+        Expected::Deferred { .. } => "result: deferred".to_owned(),
+    }
 }
 
 #[test]

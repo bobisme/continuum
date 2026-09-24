@@ -269,6 +269,9 @@ impl EventBody {
     }
 
     pub(crate) fn lift(&self, cx: &mut LiftContext) -> Result<(), LiftStop> {
+        // A fail-stop crash's fences come right after it, before anything else
+        // (bn-20d8u; RFC 0026 correction 58).
+        lifecycle::check_fences_first(self, cx)?;
         // A task's own cancellation is one run of that task's events, whatever family
         // an event belongs to (RFC 0026 correction 53 item 6; cr-3pu5cu round 6).
         cancellation::check_own_cancel_admits(self, cx)?;

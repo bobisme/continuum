@@ -53,10 +53,12 @@
 //! reduces). The binding has no data-dependent control flow, so a mutant's decisions are
 //! its scripts' structure.
 //!
-//! Every crash here is graceful region cancellation, not the process pack's fail-stop
-//! crash (`register::CRASH_SEMANTICS`, bn-20d8u). [`crash_dependence`] states, for each
-//! mutant, which part of its result rests on that cleanup and what is only argued, not
-//! run, for a fail-stop crash.
+//! Every crash of a mutant's campaign is graceful region cancellation, not the process
+//! pack's fail-stop crash (`register::CRASH_SEMANTICS`, bn-20d8u). [`crash_dependence`]
+//! states, for each mutant, which part of its result rests on that cleanup. The four whose
+//! result rests on it ([`FAIL_STOP`]) are rerun with each crash fail-stop
+//! ([`mutant_fail_stop`], `register::FAIL_STOP_SEMANTICS`), each with its own expected
+//! result ([`expected_fail_stop`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -65,7 +67,7 @@ use continuum_asupersync::choice::ChoiceLog;
 use continuum_asupersync::family::lifecycle::TaskLabel;
 
 use crate::baseline::{self, Breach, Campaign, Finding, Outcome, Property, RunReport};
-use crate::register::{self, Act, Built, Plan, Role};
+use crate::register::{self, Act, Built, CrashMode, Plan, Role};
 
 /// The required mutants of `replicated_register.md`, by their IDs there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -215,6 +217,9 @@ pub enum Refusal {
     ReservationDropped,
     /// [`BindingRefusal::TaskEnded`]: an operation commands a task that has ended.
     TaskEnded,
+    /// [`BindingRefusal::TaskCrashed`]: an operation commands a task a fail-stop crash
+    /// stopped (bn-20d8u).
+    TaskCrashed,
 }
 
 impl Refusal {
@@ -225,6 +230,7 @@ impl Refusal {
         let template = match self {
             Self::ReservationDropped => BindingRefusal::ReservationDropped { reservation: 0 },
             Self::TaskEnded => BindingRefusal::TaskEnded { task: 0 },
+            Self::TaskCrashed => BindingRefusal::TaskCrashed { task: 0 },
         };
         digits_blank(rendered) == digits_blank(&template.to_string())
     }
@@ -238,6 +244,7 @@ impl Refusal {
                 Self::ReservationDropped,
                 BindingRefusal::ReservationDropped { .. }
             ) | (Self::TaskEnded, BindingRefusal::TaskEnded { .. })
+                | (Self::TaskCrashed, BindingRefusal::TaskCrashed { .. })
         )
     }
 }
@@ -325,6 +332,17 @@ pub enum Exclusion {
     /// finding. The zero is the binding's bookkeeping over the substrate's trace, not an
     /// independent observation.
     TimerDropped,
+    /// Under the fail-stop crash (bn-20d8u): the crash stops the old incarnation's tasks,
+    /// and every run of a changed plan is the binding's typed [`Refusal::TaskCrashed`]
+    /// when the new process commands one of them. A stopped task takes no command: the
+    /// fence of the crashed incarnation, by task identity. It does not show a fence of a
+    /// stale epoch carried in data.
+    EpochFencedByCrash,
+    /// Under the fail-stop crash (bn-20d8u): the old incarnation's timer stays armed in
+    /// the substrate, and the journal fences it at the crash (`TimeEvent::Fenced`). The
+    /// clock then passes its deadline and nothing fires: its wake reaches a task that no
+    /// longer exists, which polls nothing. Every timer M08 arms is fenced, and none fires.
+    TimerFenced,
 }
 
 /// What a mutant's campaign is expected to show: the mutant's expected intent.
@@ -426,9 +444,10 @@ pub const fn expected(id: Id) -> Expected {
     }
 }
 
-/// What each mutant's result rests on about a crash, given that every crash here is
-/// graceful region cancellation (`register::CRASH_SEMANTICS`, bn-20d8u); `None` when the
-/// mutant has no campaign. "Shown" is what the campaign runs; "argued" is not run.
+/// What each mutant's result rests on about a crash, given that every crash of its
+/// campaign is graceful region cancellation (`register::CRASH_SEMANTICS`, bn-20d8u), and,
+/// for the four in [`FAIL_STOP`], what the fail-stop rerun shows; `None` when the mutant
+/// has no campaign. "Shown" is what a campaign runs; "argued" is not run.
 #[must_use]
 pub const fn crash_dependence(id: Id) -> Option<&'static str> {
     match id {
@@ -442,16 +461,16 @@ pub const fn crash_dependence(id: Id) -> Option<&'static str> {
         Id::M02 => Some(
             "the lost abort is not a crash; a changed plan's runs are runs, not the \
              ReservationDropped refusal, exactly when each lost permit's incarnation later \
-             crashes and its cancellation cleanup aborts the permit, so the detection is \
-             shown for graceful region cancellation only; the detecting event comes before \
-             the crash, and under a fail-stop crash the permit would stay pending in the \
-             dead incarnation, so the refusal might not arise: argued, not run",
+             crashes, which here aborts the permit in the crash's cancellation cleanup; the \
+             fail-stop rerun runs the same plans with a crash that fences the permit instead, \
+             and detects on the same runs, so the detection does not rest on the cleanup",
         ),
         Id::M03 => Some(
-            "the exclusion is the region cancellation ending the old epoch's tasks \
-             (TaskEnded); a fail-stop crash stops them without ending them and fences their \
-             late completions by (node, epoch), and the binding has no such fence, so the \
-             exclusion is shown for graceful region cancellation only",
+            "the exclusion here is the region cancellation ending the old epoch's tasks \
+             (TaskEnded); the fail-stop rerun stops them without ending them, and every \
+             changed run is the binding's TaskCrashed refusal instead: the crashed \
+             incarnation takes no command, a fence by task identity, not of an epoch carried \
+             in data",
         ),
         Id::M04 => Some(
             "the witness has no crash, so the detection does not rest on the crash \
@@ -463,22 +482,23 @@ pub const fn crash_dependence(id: Id) -> Option<&'static str> {
              not rest on it; a fail-stop crash is not run",
         ),
         Id::M06 => Some(
-            "the finding is a live coordinator, and coordinators never crash; under a \
-             fail-stop crash Quiescence as defined would also fail for every crashed \
-             incarnation, whose tasks never end: argued, not run",
+            "the finding is a live coordinator, and coordinators never crash; the fail-stop \
+             reading of Quiescence counts a crashed incarnation's stopped tasks as fenced, \
+             not live (the fail-stop baseline has no finding), so the finding would be the \
+             same live coordinator: argued, not run",
         ),
         Id::M07 => Some(
-            "the crash's cancellation cleanup aborts the recovered record's IoOp (a Lose); a \
-             fail-stop crash leaves that IoOp pending, and whether its bytes become durable is \
-             the storage pack's to state; the detection holds only where they stay volatile \
-             (a pending slot is not durable), and the witness's does not if they become \
-             durable: argued on projected states, not run",
+            "the crash's cancellation cleanup aborts the recovered record's IoOp (a Lose); the \
+             fail-stop rerun leaves that IoOp pending and fences it, and the projection reads \
+             the Lose from the crash event, so the detection is run under both; whether fenced \
+             bytes later become durable is the storage pack's to state, and the witness's \
+             detection does not hold if they do (checked on its projected states)",
         ),
         Id::M08 => Some(
-            "the exclusion is the region cancellation dropping the old timer; a fail-stop \
-             crash runs no cleanup, so the timer would stay pending and a late fire would \
-             need a (node, epoch) fence the binding does not have, so the exclusion is \
-             shown for graceful region cancellation only",
+            "the exclusion here is the region cancellation dropping the old timer; the \
+             fail-stop rerun runs no cleanup, the timer stays armed in the substrate and is \
+             fenced in the journal, and its fire after the crash reaches no task, so the \
+             exclusion is run under both",
         ),
         Id::M09 | Id::M10 => None,
     }
@@ -632,7 +652,10 @@ pub fn confirmation_counts(plan: &Plan) -> BTreeMap<(u8, u8), usize> {
 ///
 /// Never; the signature is `execute_with`'s.
 pub fn stale_epoch(plan: &Plan) -> Result<Built, String> {
-    let mut built = register::build_with_shutdown(plan);
+    Ok(stale_epoch_of(register::build_with_shutdown(plan)))
+}
+
+fn stale_epoch_of(mut built: Built) -> Built {
     let w = writers(&built);
     let old: BTreeMap<TaskLabel, TaskLabel> = w
         .iter()
@@ -650,7 +673,7 @@ pub fn stale_epoch(plan: &Plan) -> Result<Built, String> {
             }
         }
     }
-    Ok(built)
+    built
 }
 
 /// The losers of the quorum race in `plan`, as task ordinals: the coordinator of each
@@ -714,7 +737,10 @@ pub const STALE_TIMER: (u64, u64) = (10, 20);
 ///
 /// Never; the signature is `execute_with`'s.
 pub fn stale_timer(plan: &Plan) -> Result<Built, String> {
-    let mut built = register::build_with_shutdown(plan);
+    Ok(stale_timer_of(plan, register::build_with_shutdown(plan)))
+}
+
+fn stale_timer_of(plan: &Plan, mut built: Built) -> Built {
     let w = writers(&built);
     for n in 0..3_u8 {
         let script = &plan.replicas[usize::from(n)];
@@ -755,7 +781,7 @@ pub fn stale_timer(plan: &Plan) -> Result<Built, String> {
             );
         }
     }
-    Ok(built)
+    built
 }
 
 // ---------------------------------------------------------------------------
@@ -834,6 +860,140 @@ pub fn changed(m: &Mutant, base: &Campaign, group: usize, plan: usize) -> bool {
     } else {
         (m.builder)(before).map(|b| b.programs)
             != Ok(register::build_with_shutdown(before).programs)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the fail-stop reruns (bn-20d8u)
+// ---------------------------------------------------------------------------
+
+/// The mutants rerun under the fail-stop crash: those whose graceful result rests on the
+/// crash's cancellation cleanup ([`crash_dependence`]).
+pub const FAIL_STOP: [Id; 4] = [Id::M02, Id::M03, Id::M07, Id::M08];
+
+/// The fail-stop rerun's campaign name and evidence ID.
+#[must_use]
+pub const fn fail_stop_name(id: Id) -> &'static str {
+    match id {
+        Id::M02 => "pr16-impl05-mut-02-lost-abort-fail-stop",
+        Id::M03 => "pr16-impl05-mut-03-stale-epoch-fail-stop",
+        Id::M07 => "pr16-impl05-mut-07-torn-tail-fail-stop",
+        Id::M08 => "pr16-impl05-mut-08-stale-timer-fail-stop",
+        _ => "",
+    }
+}
+
+/// The fail-stop baseline's campaign name.
+pub const FAIL_STOP_BASELINE: &str = "pr16-correct-baseline-fail-stop";
+
+/// Each rerun mutant's expected result under the fail-stop crash; `None` for a mutant
+/// that is not rerun.
+#[must_use]
+pub const fn expected_fail_stop(id: Id) -> Option<Expected> {
+    Some(match id {
+        Id::M02 => Expected::Detected {
+            breach: Some(Breach::ReserveHeld),
+            symptom: Symptom::Unprojectable,
+            also: None,
+            refusal: Some(Refusal::ReservationDropped),
+        },
+        Id::M03 => Expected::Excluded {
+            exclusion: Exclusion::EpochFencedByCrash,
+            residual: "a stale epoch carried in message or record data, accepted by a \
+                       receiver that compares epochs; the program's messages and records \
+                       carry no data, so it needs data-carrying Prepare, Prepared and \
+                       Commit messages",
+        },
+        Id::M07 => Expected::Detected {
+            breach: Some(Breach::ConfirmBeforeSync),
+            symptom: Symptom::AckedNotDurable,
+            also: None,
+            refusal: None,
+        },
+        Id::M08 => Expected::Excluded {
+            exclusion: Exclusion::TimerFenced,
+            residual: "a timer armed outside the incarnation's region, whose firing \
+                       carries the old epoch into the new process; the binding's timers \
+                       carry no data and the correct program has no timers, so it needs \
+                       data-carrying timer callbacks",
+        },
+        _ => return None,
+    })
+}
+
+fn correct_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(register::build_with_shutdown_in(plan, CrashMode::FailStop))
+}
+
+/// M03's builder under the fail-stop crash.
+///
+/// # Errors
+///
+/// Never; the signature is `execute_with`'s.
+pub fn stale_epoch_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(stale_epoch_of(register::build_with_shutdown_in(
+        plan,
+        CrashMode::FailStop,
+    )))
+}
+
+/// M08's builder under the fail-stop crash.
+///
+/// # Errors
+///
+/// Never; the signature is `execute_with`'s.
+pub fn stale_timer_fail_stop(plan: &Plan) -> Result<Built, String> {
+    Ok(stale_timer_of(
+        plan,
+        register::build_with_shutdown_in(plan, CrashMode::FailStop),
+    ))
+}
+
+/// The fail-stop rerun of `id`, derived from `base` as [`mutant`] derives the graceful
+/// one, under its own name; `None` for a mutant not in [`FAIL_STOP`].
+#[must_use]
+pub fn mutant_fail_stop(id: Id, base: &Campaign) -> Option<Mutant> {
+    let name = fail_stop_name(id);
+    match id {
+        Id::M02 => Some(Mutant {
+            id,
+            campaign: base.mutated(name, lost_abort),
+            builder: correct_fail_stop,
+            plan_mutant: true,
+        }),
+        Id::M07 => Some(Mutant {
+            id,
+            campaign: base.mutated(name, torn_tail),
+            builder: correct_fail_stop,
+            plan_mutant: true,
+        }),
+        Id::M03 => Some(Mutant {
+            id,
+            campaign: base.mutated(name, Plan::clone),
+            builder: stale_epoch_fail_stop,
+            plan_mutant: false,
+        }),
+        Id::M08 => Some(Mutant {
+            id,
+            campaign: base.mutated(name, Plan::clone),
+            builder: stale_timer_fail_stop,
+            plan_mutant: false,
+        }),
+        _ => None,
+    }
+}
+
+/// Whether the fail-stop rerun changed plan `plan` of group `group` against `base`, as
+/// [`changed`] does for the graceful mutant, against the fail-stop build.
+#[must_use]
+pub fn changed_fail_stop(m: &Mutant, base: &Campaign, group: usize, plan: usize) -> bool {
+    let before = &base.groups[group].plans[plan];
+    if m.plan_mutant {
+        let after = &m.campaign.groups[group].plans[plan];
+        before.replicas != after.replicas || before.values != after.values
+    } else {
+        (m.builder)(before).map(|b| b.programs)
+            != Ok(register::build_with_shutdown_in(before, CrashMode::FailStop).programs)
     }
 }
 

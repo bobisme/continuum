@@ -500,6 +500,7 @@ fn neg_02_more() -> (Vec<Unbalanced>, Vec<Unbalanced>, u32) {
                     region: *r,
                     open: ObligationSet::new([ObligationOrdinal(target)]),
                     leaked: leaked.clone(),
+                    fenced: ObligationSet::default(),
                 })
             }
             other => other.clone(),

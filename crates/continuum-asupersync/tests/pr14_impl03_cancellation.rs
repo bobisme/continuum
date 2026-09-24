@@ -458,6 +458,7 @@ impl Account {
             | SubstrateOp::Send { .. }
             | SubstrateOp::Recv { .. }
             | SubstrateOp::CloseSenders { .. }
+            | SubstrateOp::Crash { .. }
             | SubstrateOp::SpawnWithDeadline { .. } => {
                 unreachable!("the cancellation corpus has no effect operations")
             }

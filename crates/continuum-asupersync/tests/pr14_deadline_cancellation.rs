@@ -757,6 +757,7 @@ impl Account {
                 region: RegionOrdinal(member),
                 open,
                 leaked: ObligationSet::default(),
+                fenced: ObligationSet::default(),
             });
         }
     }

@@ -545,6 +545,7 @@ impl Account {
                     region: RegionOrdinal(member),
                     open,
                     leaked: ObligationSet::default(),
+                    fenced: ObligationSet::default(),
                 },
             )));
         }
@@ -668,6 +669,9 @@ fn every_time_journal_conforms() {
                         );
                     }
                     TimeEvent::Cancelled { timer, .. } => {
+                        assert!(deadlines.remove(&timer.0).is_some());
+                    }
+                    TimeEvent::Fenced { timer } => {
                         assert!(deadlines.remove(&timer.0).is_some());
                     }
                     TimeEvent::Advanced { .. } | TimeEvent::Deadline { .. } => {}
