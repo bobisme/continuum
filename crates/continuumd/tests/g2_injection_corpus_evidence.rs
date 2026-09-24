@@ -707,7 +707,7 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
     for case in CASES {
         match carriage(case) {
             Carriage::StoredEvidence => {
-                store_evidence(&mut daemon, case.payload.as_bytes());
+                store_evidence(&mut daemon, case.payload.as_bytes(), None);
             }
             Carriage::StoredContinuation => {
                 store_continuation(&mut daemon, case, &tasks);
@@ -721,7 +721,7 @@ fn fixture_at(at: ProtocolVersion) -> Fixture {
     }
     // The benign twin of every stored-evidence case is a stored artifact too, and it is the
     // held subject the `evidence.link` cases name.
-    let subject = store_evidence(&mut daemon, BENIGN.as_bytes());
+    let subject = store_evidence(&mut daemon, BENIGN.as_bytes(), None);
     let context = ContextHandle::new(CONTEXT_PACK_ID).expect("a `ctx_` handle");
     daemon
         .state_mut()
@@ -1084,7 +1084,16 @@ fn stored_evidence_handle(daemon: &Daemon, payload: &[u8]) -> EvidenceHandle {
 /// artifact class this protocol does not accept from a caller, so the held content of the
 /// checked artifact is the nearest position the wire reaches. Leg 6's positive control shows
 /// the same path does reach the kernel for bytes a kernel owns.
-fn store_evidence(daemon: &mut Daemon, payload: &[u8]) -> EvidenceHandle {
+///
+/// `snapshot`, when given, is the sealed snapshot the node derives from
+/// (`provenance.inputs`). The daemon binds a verified certificate's carried model to the
+/// model it holds for that snapshot (bn-3hk4v), so only the kernel positive control names
+/// one. The prose carriers are refused at routing, before any binding.
+fn store_evidence(
+    daemon: &mut Daemon,
+    payload: &[u8],
+    snapshot: Option<&WorkspaceHandle>,
+) -> EvidenceHandle {
     let artifact = daemon
         .state_mut()
         .stage(
@@ -1103,7 +1112,10 @@ fn store_evidence(daemon: &mut Daemon, payload: &[u8]) -> EvidenceHandle {
         producer: who(AGENT.actor),
         tool: STORED_PROFILE.to_owned(),
         created_at: now(),
-        inputs: Vec::new(),
+        inputs: snapshot
+            .map(|snapshot| snapshot.as_str().to_owned())
+            .into_iter()
+            .collect(),
         idempotency_key: "idem-g2-stored-carrier".to_owned(),
         history: vec![StatusWrite {
             status: ClaimStatus::BOTTOM,
@@ -3545,7 +3557,11 @@ mod stored_carriers {
             ),
         ] {
             let mut fixture = fixture();
-            let handle = super::store_evidence(fixture.server.daemon_mut(), &bytes);
+            // The node derives from the fixture's current sealed Die Hard snapshot, whose
+            // model the daemon holds, so the verified claim binds (bn-3hk4v).
+            let snapshot = fixture.tasks.current.clone();
+            let handle =
+                super::store_evidence(fixture.server.daemon_mut(), &bytes, Some(&snapshot));
             let mut request = super::envelope("evidence.verify", AGENT, "req_kernel_control");
             request.arguments = super::transport::encode_arguments(
                 &super::Arguments::EvidenceVerify(super::EvidenceVerifyRequest {

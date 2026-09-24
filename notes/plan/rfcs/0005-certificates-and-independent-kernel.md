@@ -115,6 +115,8 @@ A fault while evaluating (an `i64` overflow, or an update that leaves its variab
 
 Wire epoch 1 stays decodable for the two-epoch window of ADR-0018. A wire-epoch-1 claim keeps `certificate-model-correspondence` in its trusted components, so the assurance difference is visible in every verdict and receipt. Wire epoch 2 defines no state-type family. The invariant class exists only at wire epoch 2.
 
+On the system path the daemon is that caller (bn-3hk4v). `evidence.verify` promotes a verified claim to `validated` only when the binding holds. The node names the one sealed snapshot it derives from in `provenance.inputs`. The daemon resolves that snapshot's model as `verification.start` does, and compares the carried encoding with that model's canonical identity, byte for byte. A claim that trusts any component beyond `envelope-digest-binding` is not bound and does not reach `validated` (`InsufficientEvidence`); this covers `certificate-model-correspondence` and the LRAT and SMT kernels' formula and skeleton correspondence. A carried model that is not the held model is `CertificateRejected`: the certificate may be true, but of another model. A missing, ambiguous, unsealed or unregistered snapshot is `InsufficientEvidence`. None of these is a new code, and none reads a snapshot from the request. The binding covers the model only: the claim's property is not yet compared with the node's claim, and the model catalog is a trusted registration (docs/18 C018).
+
 ## Kernel layering
 
 ```text

@@ -298,6 +298,45 @@ pub enum Derived<'handle> {
     Instance(&'handle str),
 }
 
+/// A [`Derived`] handle a call consulted, owned so the idempotency ledger can keep it.
+///
+/// A replay returns a recorded outcome without running the handler, so the handler's own
+/// derived-handle decisions do not run again. The ledger keeps every derived handle the
+/// original call admitted, and a replay re-decides each one against the presenting grant
+/// (cr-3lrkq3). Recorded by [`Call::admits`](super::family::Call::admits), the one place a
+/// handler decides a derived handle, so every operation is covered by the same mechanism.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Consulted {
+    /// A `ws_*` snapshot.
+    Snapshot(WorkspaceHandle),
+    /// An `in_*` intent.
+    Intent(IntentHandle),
+    /// Any other instance.
+    Instance(String),
+}
+
+impl Consulted {
+    /// The owned form of `derived`.
+    #[must_use]
+    pub fn of(derived: Derived<'_>) -> Self {
+        match derived {
+            Derived::Snapshot(handle) => Self::Snapshot(handle.clone()),
+            Derived::Intent(handle) => Self::Intent(handle.clone()),
+            Derived::Instance(handle) => Self::Instance(handle.to_owned()),
+        }
+    }
+
+    /// The borrowed form, for [`admits_derived`].
+    #[must_use]
+    pub fn as_derived(&self) -> Derived<'_> {
+        match self {
+            Self::Snapshot(handle) => Derived::Snapshot(handle),
+            Self::Intent(handle) => Derived::Intent(handle),
+            Self::Instance(handle) => Derived::Instance(handle),
+        }
+    }
+}
+
 /// Whether `descriptor` admits a derived handle by the same T2 it applies to a named one
 /// (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4).
 ///

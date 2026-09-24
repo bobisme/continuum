@@ -435,6 +435,13 @@ pub struct Call<'a> {
     /// alone (`rule audit.correlation`). A family that writes an audit record cites this
     /// value rather than minting one.
     pub audit: &'a AuditCorrelationId,
+    /// Every derived handle this call admitted through [`Call::admits`].
+    /// The dispatcher files it with the replay record, so a replay re-decides each one
+    /// against the presenting grant (cr-3lrkq3). A set: a traversal that decides one
+    /// handle twice records it once, and insertion is logarithmic. A shared reference, so
+    /// a copy of the call records into the same log and no decision escapes it.
+    pub(crate) consulted:
+        &'a std::cell::RefCell<std::collections::BTreeSet<super::admission::Consulted>>,
 }
 
 impl Call<'_> {
@@ -451,13 +458,36 @@ impl Call<'_> {
     ///
     /// [`admits_derived`]: super::admission::admits_derived
     pub fn derived(&self, derived: super::admission::Derived<'_>) -> Result<(), Fault> {
-        if super::admission::admits_derived(self.grant, derived) {
+        if self.admits(derived) {
             Ok(())
         } else {
             let mut denied = Fault::denied();
             denied.derived_denial = true;
             Err(denied)
         }
+    }
+
+    /// Whether the grant admits a handle this call reached from one it named
+    /// ([`admits_derived`]), recording an admitted handle for the replay ledger.
+    ///
+    /// Only an admitted handle is recorded. A refused one either ends the call in the one
+    /// denial, which names nothing, or was filtered out, and the outcome says nothing about
+    /// it; recording it would make a legitimate replay under the identical grant fail.
+    ///
+    /// Every derived-handle decision a handler makes goes through here, directly or through
+    /// [`Call::derived`]. That is what lets a replay, which does not run the handler,
+    /// re-decide exactly the handles the original call decided (cr-3lrkq3).
+    ///
+    /// [`admits_derived`]: super::admission::admits_derived
+    #[must_use]
+    pub fn admits(&self, derived: super::admission::Derived<'_>) -> bool {
+        let admitted = super::admission::admits_derived(self.grant, derived);
+        if admitted {
+            self.consulted
+                .borrow_mut()
+                .insert(super::admission::Consulted::of(derived));
+        }
+        admitted
     }
 }
 

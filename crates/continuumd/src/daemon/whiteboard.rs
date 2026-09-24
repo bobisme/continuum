@@ -212,14 +212,23 @@ fn compile(
     //    grant (`rule capability.instance_scope`, the derived-handle clause; cr-3hcpn4). A
     //    node outside the scope neither resolves a reference nor supports a decision, so the
     //    answer says nothing about it (X2). The index is built once for the whole note.
+    //
+    //    The node a reference resolves through is recorded as a derived handle of this call
+    //    ([`Call::admits`]), so a replay, which does not run this step, re-decides it against
+    //    the presenting grant (cr-3lrkq3). One node per content: the first admitted one in
+    //    graph order, so the record is deterministic.
     let scope = InstanceScope::of(call.grant);
-    let held: Vec<Commitment> = state
-        .evidence_nodes()
-        .filter(|(handle, _)| scope.admits(handle.as_str()))
-        .map(|(_, node)| node.artifact.clone())
-        .collect();
-    let resolves =
-        |reference: &ArtifactRef| held.iter().any(|it| it.as_str() == reference.as_str());
+    let mut held: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for (handle, node) in state.evidence_nodes() {
+        if scope.admits(handle.as_str()) {
+            held.entry(node.artifact.as_str())
+                .or_insert(handle.as_str());
+        }
+    }
+    let resolves = |reference: &ArtifactRef| {
+        held.get(reference.as_str())
+            .is_some_and(|handle| call.admits(super::admission::Derived::Instance(handle)))
+    };
     for section in Section::ALL {
         for entry in entries(&note, section) {
             if entry.references().any(|it| !resolves(it)) {
@@ -274,6 +283,13 @@ fn compile(
                 .evidence_nodes()
                 .filter(|(handle, _)| scope.admits(handle.as_str()))
                 .filter(|(_, node)| node.artifact.as_str() == reference.as_str())
+                // Each supporting node is a derived handle this call reports through its
+                // edge, so it is decided by `call.admits` and recorded for replay
+                // (cr-3lrkq3). The scope filter above has already admitted it, so nothing
+                // refused is recorded.
+                .filter(|(handle, _)| {
+                    call.admits(super::admission::Derived::Instance(handle.as_str()))
+                })
                 .map(|(handle, _)| handle.clone())
                 .collect();
             for from in supporting {

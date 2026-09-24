@@ -2320,3 +2320,302 @@ fn a_ceiling_records_budget_and_never_relabels_the_deployments_unsupported() {
         "an `unsupported` record still names no route, because there is none to name"
     );
 }
+
+// --- replay re-decides the handles a campaign derived (bn-3hk4v, cr-3lrkq3) ---------------
+
+/// Register a same-actor grant for `agent:runner` whose only difference from `cap_runner`
+/// is the scope `narrow` applies, so it passes admission and misses one derived handle.
+fn register_runner(
+    fixture: &mut Fixture,
+    handle: &str,
+    narrow: impl FnOnce(&mut CapabilityDescriptor),
+) {
+    let mut descriptor = grant(
+        handle,
+        "agent:runner",
+        AuthorityLevel::Execute,
+        3,
+        Optional::Absent,
+    );
+    narrow(&mut descriptor);
+    fixture
+        .daemon
+        .state_mut()
+        .register_capability(descriptor, Some(cap("cap_root")))
+        .expect("the narrowed grant registers");
+}
+
+/// A grant whose intent list names only an intent the fixture's snapshot is not governed
+/// by: the campaign's intent is derived from the snapshot, never named by the request.
+fn other_intent(descriptor: &mut CapabilityDescriptor) {
+    descriptor.intents =
+        vec![IntentHandle::new("in_notthefixturesintent").expect("a well-formed intent handle")];
+}
+
+fn start_as(
+    fixture: &mut Fixture,
+    capability: &str,
+    request: &str,
+    key: &str,
+    states: Option<u64>,
+) -> OperationOutcome {
+    let snapshot = fixture.snapshot.clone();
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: on(
+            budgeted(
+                keyed(
+                    envelope("verification.start", "agent:runner", capability, request),
+                    key,
+                ),
+                states,
+            ),
+            &snapshot,
+        ),
+        arguments: Arguments::VerificationStart(VerificationStartRequest {
+            target: target(TargetKind::AllClaims, "DieHard"),
+            portfolio: Portfolio::Interactive,
+            context_policy: Optional::Absent,
+            priority_class: Optional::Absent,
+        }),
+    })
+}
+
+fn resume_as(
+    fixture: &mut Fixture,
+    capability: &str,
+    continuation: &ContinuationHandle,
+    request: &str,
+    key: &str,
+) -> OperationOutcome {
+    fixture.daemon.dispatch(&OperationRequest {
+        envelope: budgeted(
+            keyed(
+                envelope("task.resume", "agent:runner", capability, request),
+                key,
+            ),
+            Some(64),
+        ),
+        arguments: Arguments::TaskResume(TaskResumeRequest {
+            continuation: continuation.clone(),
+            budget: Optional::Present(budget(Some(64))),
+        }),
+    })
+}
+
+fn denial_detail(outcome: &OperationOutcome) -> String {
+    outcome
+        .envelope
+        .error
+        .value()
+        .expect("an error result carries one")
+        .detail
+        .clone()
+}
+
+fn last_denial(fixture: &Fixture) -> (bool, Option<continuumd::daemon::state::Denial>) {
+    let record = fixture
+        .daemon
+        .state()
+        .admissions()
+        .last()
+        .expect("every call is recorded at admission");
+    (record.admitted, record.denial)
+}
+
+/// The replay denial: admitted, then refused at the ledger, naming nothing.
+fn assert_replay_denied(fixture: &Fixture, replayed: &OperationOutcome) {
+    assert_eq!(code(replayed), ErrorCode::CapabilityDenied);
+    assert_eq!(replayed.payload, Payload::None);
+    assert_eq!(
+        last_denial(fixture),
+        (
+            true,
+            Some(continuumd::daemon::state::Denial::ReplayAuthority)
+        ),
+        "the grant passed admission and the replay check refused it"
+    );
+}
+
+#[test]
+fn a_verification_start_replay_under_a_grant_without_its_intent_is_denied() {
+    // The campaign's intent is derived from the sealed snapshot. The narrow grant lists
+    // another intent only, so a fresh start under it is refused on the derived intent; the
+    // recorded answer (a task handle) names nothing the grant refuses, so before cr-3lrkq3
+    // the replay returned it.
+    let mut fixture = fixture();
+    register_runner(&mut fixture, "cap_runner_narrow", other_intent);
+    let first = start_as(
+        &mut fixture,
+        "cap_runner",
+        "req_first",
+        "idem-replayed",
+        Some(64),
+    );
+    assert!(
+        first.envelope.error.is_absent(),
+        "{:?}",
+        first.envelope.error
+    );
+
+    let replayed = start_as(
+        &mut fixture,
+        "cap_runner_narrow",
+        "req_narrow",
+        "idem-replayed",
+        Some(64),
+    );
+    assert_replay_denied(&fixture, &replayed);
+
+    let mut fresh_fixture = fixture_for_fresh();
+    let fresh = start_as(
+        &mut fresh_fixture,
+        "cap_runner_narrow",
+        "req_fresh",
+        "idem-fresh",
+        Some(64),
+    );
+    assert_eq!(code(&fresh), ErrorCode::CapabilityDenied);
+    assert_eq!(
+        last_denial(&fresh_fixture),
+        (true, Some(continuumd::daemon::state::Denial::DerivedHandle))
+    );
+    assert_eq!(denial_detail(&replayed), denial_detail(&fresh));
+
+    // Anti-vacuity: the full grant replays the recorded answer.
+    let again = start_as(
+        &mut fixture,
+        "cap_runner",
+        "req_again",
+        "idem-replayed",
+        Some(64),
+    );
+    assert_eq!(again.payload, first.payload);
+    assert_eq!(last_denial(&fixture), (true, None));
+}
+
+#[test]
+fn a_verification_start_replay_under_a_grant_without_the_minted_continuation_is_denied() {
+    // A bounded campaign parks and mints a continuation, which the minted-handle check
+    // decides through `call.admits`. The narrow grant holds every class except `cont`.
+    // The recorded answer names that continuation, so the outcome-name check also refuses
+    // this replay, and it did before cr-3lrkq3. This test holds the minted path to the same
+    // single denial; the intent tests above are the ones that failed before the fix.
+    let no_continuations = |descriptor: &mut CapabilityDescriptor| {
+        descriptor.artifact_classes = continuum_workspace::artifact_path::ArtifactClass::ALL
+            .into_iter()
+            .filter(|class| {
+                *class != continuum_workspace::artifact_path::ArtifactClass::Continuation
+            })
+            .map(|class| class.token().to_owned())
+            .collect();
+    };
+    let mut fixture = fixture();
+    register_runner(&mut fixture, "cap_runner_narrow", no_continuations);
+    let first = start_as(
+        &mut fixture,
+        "cap_runner",
+        "req_first",
+        "idem-parked",
+        Some(4),
+    );
+    assert!(
+        first.envelope.error.is_absent(),
+        "{:?}",
+        first.envelope.error
+    );
+
+    let replayed = start_as(
+        &mut fixture,
+        "cap_runner_narrow",
+        "req_narrow",
+        "idem-parked",
+        Some(4),
+    );
+    assert_replay_denied(&fixture, &replayed);
+
+    let mut fresh_fixture = fixture_for_fresh();
+    register_runner(&mut fresh_fixture, "cap_runner_narrow", no_continuations);
+    let fresh = start_as(
+        &mut fresh_fixture,
+        "cap_runner_narrow",
+        "req_fresh",
+        "idem-fresh",
+        Some(4),
+    );
+    assert_eq!(code(&fresh), ErrorCode::CapabilityDenied);
+    assert_eq!(denial_detail(&replayed), denial_detail(&fresh));
+
+    let again = start_as(
+        &mut fixture,
+        "cap_runner",
+        "req_again",
+        "idem-parked",
+        Some(4),
+    );
+    assert_eq!(again.payload, first.payload);
+    assert_eq!(last_denial(&fixture), (true, None));
+}
+
+#[test]
+fn a_task_resume_replay_under_a_grant_without_its_intent_is_denied() {
+    // `task.resume` names a continuation; the intent it runs under is derived from it.
+    let mut fixture = fixture();
+    register_runner(&mut fixture, "cap_runner_narrow", other_intent);
+    let (_, continuation) = park(&mut fixture);
+    let first = resume_as(
+        &mut fixture,
+        "cap_runner",
+        &continuation,
+        "req_first",
+        "idem-resumed",
+    );
+    assert_eq!(
+        first.envelope.status,
+        ResultStatus::Ok,
+        "{:?}",
+        first.envelope.error
+    );
+
+    let replayed = resume_as(
+        &mut fixture,
+        "cap_runner_narrow",
+        &continuation,
+        "req_narrow",
+        "idem-resumed",
+    );
+    assert_replay_denied(&fixture, &replayed);
+
+    let mut fresh_fixture = fixture_for_fresh();
+    let (_, fresh_continuation) = park(&mut fresh_fixture);
+    let fresh = resume_as(
+        &mut fresh_fixture,
+        "cap_runner_narrow",
+        &fresh_continuation,
+        "req_fresh",
+        "idem-fresh",
+    );
+    assert_eq!(code(&fresh), ErrorCode::CapabilityDenied);
+    assert_eq!(
+        last_denial(&fresh_fixture),
+        (true, Some(continuumd::daemon::state::Denial::DerivedHandle))
+    );
+    assert_eq!(denial_detail(&replayed), denial_detail(&fresh));
+
+    let again = resume_as(
+        &mut fixture,
+        "cap_runner",
+        &continuation,
+        "req_again",
+        "idem-resumed",
+    );
+    assert_eq!(again.payload, first.payload);
+    assert_eq!(last_denial(&fixture), (true, None));
+}
+
+/// A second fixture for the fresh-call comparison, with the intent-narrowed grant
+/// registered, so the fresh call does not meet the first fixture's recorded task.
+fn fixture_for_fresh() -> Fixture {
+    let mut fresh = fixture();
+    register_runner(&mut fresh, "cap_runner_narrow", other_intent);
+    fresh
+}

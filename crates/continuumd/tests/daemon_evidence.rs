@@ -28,6 +28,9 @@
 //! construct a `daemon::evidence::Promotion`, so the producer-side code *cannot be written*
 //! to promote. That is checked by the compiler on every build.
 
+#[path = "support/model_binding.rs"]
+mod model_binding;
+
 use continuum_certificate::{KernelVerdict, Outcome, continuum_kernel_core};
 use continuum_evidence::claim_status::{ClaimStatus, verify_promotion_history};
 use continuum_value::epoch::ProtocolWindow;
@@ -40,6 +43,7 @@ use continuumd::daemon::family::{Arguments, ErrorData, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::observe::ObserveFamily;
 use continuumd::daemon::state::{EvidenceNode, StatusWrite};
+use continuumd::daemon::workspace::WorkspaceFamily;
 use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest, errors, evidence, observe};
 use continuumd::protocol::envelope::{
     Budget, EnvelopeDimension, Redacted, RequestEnvelope, Verdict,
@@ -310,7 +314,9 @@ fn daemon_with(clock: Option<Timestamp>) -> Daemon {
             root,
         )
         .family(EvidenceFamily::new())
-        .family(ObserveFamily);
+        .family(ObserveFamily)
+        // For the sealed Die Hard snapshot a certificate node derives from (bn-3hk4v).
+        .family(WorkspaceFamily);
     if let Some(reading) = clock {
         builder = builder.now(reading);
     }
@@ -855,12 +861,31 @@ fn certificate_bytes() -> Vec<u8> {
     .expect("a closed exploration of a declared model emits")
 }
 
+/// The sealed Die Hard snapshot, with the Die Hard model registered for it.
+///
+/// Created through `workspace.create` under one idempotency key, so a second call replays
+/// the first and names the same snapshot.
+fn die_hard_snapshot(fixture: &mut Fixture) -> continuumd::protocol::scalar::WorkspaceHandle {
+    let mut create = envelope(
+        "workspace.create",
+        "service:continuumd",
+        "cap_root",
+        "req_seal_die_hard",
+    );
+    create.idempotency_key = Optional::Present("idem-seal-die-hard".to_owned());
+    model_binding::die_hard_snapshot(&mut fixture.daemon, create)
+}
+
 /// Stage `bytes` and file a certificate-class node over them, under the identity it derives.
 ///
 /// Filed under `node_identity(commitment, profile)` deliberately: steps 3a and 3b of the
 /// daemon's check run on this lane too, so a node filed anywhere else would be refused for
 /// the misfiling and never reach a kernel at all.
+///
+/// The node derives from the sealed Die Hard snapshot (`provenance.inputs`), so step 5 binds
+/// a verified claim to the Die Hard model the daemon holds for it (bn-3hk4v).
 fn certificate_node(fixture: &mut Fixture, path: &str, bytes: Vec<u8>) -> EvidenceHandle {
+    let snapshot = die_hard_snapshot(fixture);
     let artifact = fixture
         .daemon
         .state_mut()
@@ -883,7 +908,7 @@ fn certificate_node(fixture: &mut Fixture, path: &str, bytes: Vec<u8>) -> Eviden
         producer: who("agent:observer"),
         tool: CERTIFICATE_PROFILE.to_owned(),
         created_at: now(),
-        inputs: Vec::new(),
+        inputs: vec![snapshot.as_str().to_owned()],
         idempotency_key: "idem-certificate-append".to_owned(),
         history: vec![StatusWrite {
             status: ClaimStatus::BOTTOM,
@@ -3375,14 +3400,17 @@ fn the_daemon_relays_the_eventuality_scope_the_temporal_kernel_decides() {
         let handle = certificate_node(&mut fixture, &format!("certs/{name}.cert"), bytes);
         let outcome = verify(&mut fixture, &handle, "req_eventuality", "idem-eventuality");
         match expected {
+            // The kernel verified it, and its claim still trusts the correspondence between
+            // the carried relation and a model: the temporal wire carries no model. So the
+            // daemon does not promote it to `validated` (bn-3hk4v, RFC 0005 correction 1).
+            // Until bn-3hk4v this arm asserted `validated`.
             None => {
                 assert_eq!(
-                    outcome.envelope.status,
-                    ResultStatus::Ok,
-                    "{name}: {:?}",
-                    outcome.envelope.error
+                    code(&outcome),
+                    ErrorCode::InsufficientEvidence,
+                    "{name}: a claim bound to no model does not reach validated"
                 );
-                assert_eq!(verify_response(&outcome).status, EvidenceStatus::Validated);
+                assert_eq!(node(&fixture, &handle).status(), ClaimStatus::Proposed);
             }
             Some(reason) => {
                 assert_eq!(code(&outcome), ErrorCode::CertificateRejected, "{name}");

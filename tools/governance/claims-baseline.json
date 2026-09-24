@@ -164,8 +164,8 @@
       "digest": "1da4235d8fcc33650acb0b5b48496ad7b5a3e94a15e7b038a60b210b390a7bce",
       "id": "C018",
       "revision": {
-        "bone": "bn-35y4f",
-        "reason": "wire-epoch-2 model-bound finite closure: the kernel re-derives the relation from the carried model, and the rerun C018 lane moves the producer residual from certificate.rs and model.rs to identity.rs; observed on epoch-2 finite-closure certificates only"
+        "bone": "bn-3hk4v",
+        "reason": "system path enforces the model binding: evidence.verify promotes a verified finite-closure claim only when its carried model equals, byte for byte, the model the daemon holds for the sealed snapshot the node derives from; a claim that trusts a model correspondence (epoch 1, state type, temporal, LRAT, SMT) no longer reaches validated; state and row wording unchanged from bn-35y4f"
       },
       "state": "OBSERVED"
     },

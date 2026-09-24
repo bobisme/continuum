@@ -101,6 +101,13 @@
 //! Four outcomes come back, and [`certificate_check`] keeps all four apart on the wire.
 //! Their reasoning is written there, beside the `match` that performs it.
 //!
+//! A kernel's `Verified` is true of the model the certificate carries, and not yet of the
+//! model this daemon holds. So a verified claim promotes only when it is bound to that
+//! model (bn-3hk4v, RFC 0005 correction 1): the node names the sealed snapshot it derives
+//! from, and the carried encoding equals the held model's canonical identity byte for byte.
+//! A claim that trusts its model correspondence (wire epoch 1, state type, temporal) does
+//! not reach `validated`. [`bind_model`] and [`require_model_bound`] state the rules.
+//!
 //! # Redaction is reported beside the result, never instead of it
 //!
 //! > `evidence.verify` over a receipt whose referenced content is redacted MUST return the
@@ -153,7 +160,7 @@ use crate::protocol::operations::evidence::{
     EvidenceQueryRequest, EvidenceQueryResponse, EvidenceSubscribeRequest,
     EvidenceSubscribeResponse, EvidenceVerifyRequest, EvidenceVerifyResponse,
 };
-use crate::protocol::scalar::{ActorId, EvidenceHandle, Opaque};
+use crate::protocol::scalar::{ActorId, EvidenceHandle, Opaque, WorkspaceHandle};
 use crate::protocol::shared::EvidenceQuery;
 use crate::protocol::spec::{Nullable, Optional, ProtocolEnum};
 use crate::protocol::task::EvidenceEvent;
@@ -370,7 +377,7 @@ impl OperationFamily for EvidenceFamily {
         match call.arguments {
             Arguments::EvidenceGet(request) => get(call, request, state, services),
             Arguments::EvidenceQuery(request) => query(request, state, call.grant),
-            Arguments::EvidenceVerify(request) => self.verify(request, state, services),
+            Arguments::EvidenceVerify(request) => self.verify(call, request, state, services),
             Arguments::EvidenceSubscribe(request) => subscribe(request, state, call.grant),
             Arguments::EvidenceLink(request) => link(call, request, state, services, store),
             // Unreachable: the dispatcher checked shape agreement against the registry
@@ -1060,6 +1067,7 @@ enum Checked {
 impl EvidenceFamily {
     fn verify(
         &self,
+        call: &Call<'_>,
         request: &EvidenceVerifyRequest,
         state: &mut DaemonState,
         services: &Services,
@@ -1068,6 +1076,14 @@ impl EvidenceFamily {
             .evidence(&request.evidence)
             .ok_or_else(Fault::denied)?
             .clone();
+
+        // Every handle the node's derivation names is decided against the grant before
+        // anything about the node is checked, as `evidence.get` decides it before reporting
+        // the node (`rule capability.instance_scope`, derived-handle clause). A caller the
+        // grant refuses the snapshot a certificate derives from learns nothing from this
+        // operation about the certificate or the snapshot, and costs no kernel run
+        // (bn-3hk4v).
+        record_scope(call, [], &node.inputs)?;
 
         // INV-004, dimension four. Checked before the content is even looked at, because a
         // verification service that is the claim's own producer has nothing to establish
@@ -1097,7 +1113,7 @@ impl EvidenceFamily {
             ));
         };
 
-        let checked = self.check(&request.evidence, &node, state, services)?;
+        let checked = self.check(call, &request.evidence, &node, state, services)?;
 
         let expected = match &request.expected_status {
             // The caller stated what it believes the claim holds. This is the CAS guard and
@@ -1227,7 +1243,7 @@ impl EvidenceFamily {
         .with_omissions(omissions))
     }
 
-    /// Run the independent check this daemon ships, in four steps.
+    /// Run the independent check this daemon ships, in five steps.
     ///
     /// The steps close a chain, and each link is *re-derived* rather than read back:
     ///
@@ -1237,6 +1253,7 @@ impl EvidenceFamily {
     /// | 2 | the reference resolves — the daemon holds content under the identity the node names | `InsufficientEvidence` |
     /// | 3 | the bytes it holds re-derive to that identity, and the node re-derives to the identity it is *filed under* | `CertificateRejected` |
     /// | 4 | for the certificate lane only: the trusted checking base's answer on those bytes | [`certificate_check`] |
+    /// | 5 | for a verified certificate only: the claim is bound to the model this daemon holds for the node's snapshot | [`bind_model`], [`require_model_bound`] |
     ///
     /// Steps 2 and 3 run in **both** lanes, and deliberately run *before* the kernel. They
     /// are what stops a certificate node from being filed under someone else's identity or
@@ -1259,6 +1276,7 @@ impl EvidenceFamily {
     /// re-derived, and a link that cannot break today is not a link that can be dropped.
     fn check(
         &self,
+        call: &Call<'_>,
         handle: &EvidenceHandle,
         node: &EvidenceNode,
         state: &DaemonState,
@@ -1333,7 +1351,12 @@ impl EvidenceFamily {
             )),
             // 4. The bytes go to the trusted checking base exactly as they are held. The
             //    daemon reads none of them: not the magic, not a length, not an epoch.
-            Lane::Certificate => certificate_check(&staged.content),
+            //    What the daemon does read is the kernel's *claim*: a verified claim is bound
+            //    to the model this daemon holds for the node's snapshot, or it does not
+            //    promote (step 5, bn-3hk4v).
+            Lane::Certificate => certificate_check(&staged.content, |carried| {
+                bind_model(call, node, state, services, carried)
+            }),
         }
     }
 }
@@ -1369,7 +1392,8 @@ enum Lane {
 ///
 /// | outcome | wire | why this one |
 /// |---|---|---|
-/// | `Checked(Verified)` | `ok`, promoted to `validated`, `verdict = established` | the kernel re-derived every obligation from the bytes |
+/// | `Checked(Verified)`, bound | `ok`, promoted to `validated`, `verdict = established` | the kernel re-derived every obligation from the bytes, and step 5 bound the claim to the model the daemon holds |
+/// | `Checked(Verified)`, not bound | `error InsufficientEvidence`, or `error CertificateRejected` on a model mismatch | step 5 below |
 /// | `Checked(Rejected)` | `error CertificateRejected` | "An independent checker rejected a certificate or proof artifact" — the code's own sentence, and this is the only place in the daemon that can raise it truthfully |
 /// | `Checked(Unsupported)` | `ok`, nothing promoted, `verdict = inconclusive`, `inconclusive_reason = Unsupported` | the checker ran and answered; INV-008's typed reason has no channel on an error, because `verdict` is null there |
 /// | `Unroutable` | `error EpochUnsupported` | "An artifact […] declares a schema or semantic epoch unknown or incompatible with this daemon. Typed rejection, never best-effort decoding (docs/09 T13)" |
@@ -1392,8 +1416,33 @@ enum Lane {
 /// it is read from the claim rather than assumed — the one arm below that does not hard-code
 /// `checked-certificate`.
 ///
+/// # Step 5: a verified claim is bound to the model the daemon holds (bn-3hk4v)
+///
+/// A kernel's `Verified` is a statement about the model the certificate carries or names,
+/// and not yet about the model this daemon holds. RFC 0005 correction 1 leaves the binding
+/// to the caller: a wire-epoch-2 finite-closure claim exposes the carried model's
+/// canonical encoding, and the caller compares it byte for byte with its own model's
+/// identity (ADR-0013). This daemon is that caller, so each `Verified` arm passes through
+/// [`require_model_bound`] before it promotes:
+///
+/// - a claim that trusts anything beyond `envelope-digest-binding` is not bound to the
+///   model. That is every wire-epoch-1, state-type and temporal claim
+///   (`certificate-model-correspondence`), every LRAT claim
+///   (`formula-model-correspondence`) and every SMT claim
+///   (`skeleton-model-correspondence`). It does not reach `validated`:
+///   `InsufficientEvidence`, whose sentence is "the evidence present does not meet the
+///   required assurance class";
+/// - a claim that carries a model is compared, through `bind`, with the model this daemon
+///   holds for the node's snapshot ([`bind_model`]).
+///
+/// The kernel runs first, so a rejected or unsupported certificate is reported as the
+/// kernel reported it, whatever the binding would have said.
+///
 /// [`AssuranceClass`]: continuum_kernel_smt::verdict::AssuranceClass
-fn certificate_check(bytes: &[u8]) -> Result<Checked, Fault> {
+fn certificate_check(
+    bytes: &[u8],
+    bind: impl FnOnce(&[u8]) -> Result<(), Fault>,
+) -> Result<Checked, Fault> {
     let verdict = match continuum_certificate::check_certificate(bytes) {
         Outcome::Unroutable(fault) => return Err(unroutable(fault)),
         Outcome::Checked(verdict) => verdict,
@@ -1413,7 +1462,13 @@ fn certificate_check(bytes: &[u8]) -> Result<Checked, Fault> {
     };
     match &verdict {
         KernelVerdict::Core(verdict) => match verdict {
-            continuum_kernel_core::Verdict::Verified(_) => {
+            continuum_kernel_core::Verdict::Verified(claim) => {
+                require_model_bound(claim.trusted_components().iter().copied())?;
+                // A claim that trusts no correspondence carries its model. A core claim
+                // that did neither would be a kernel this daemon does not know, and it
+                // fails closed rather than promoting on an absent binding.
+                let carried = claim.model_identity().ok_or_else(model_unbound)?;
+                bind(carried)?;
                 checked(ValidationBasis::CheckedCertificate)
             }
             continuum_kernel_core::Verdict::Rejected(rejection) => Err(certificate_rejected(
@@ -1426,7 +1481,8 @@ fn certificate_check(bytes: &[u8]) -> Result<Checked, Fault> {
             continuum_kernel_core::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
         },
         KernelVerdict::Sat(verdict) => match verdict {
-            continuum_kernel_sat::Verdict::Verified(_) => {
+            continuum_kernel_sat::Verdict::Verified(claim) => {
+                require_model_bound(claim.trusted_components().iter().copied())?;
                 checked(ValidationBasis::CheckedCertificate)
             }
             continuum_kernel_sat::Verdict::Rejected(rejection) => Err(certificate_rejected(
@@ -1439,7 +1495,10 @@ fn certificate_check(bytes: &[u8]) -> Result<Checked, Fault> {
             continuum_kernel_sat::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
         },
         KernelVerdict::Smt(verdict) => match verdict {
-            continuum_kernel_smt::Verdict::Verified(claim) => checked(smt_basis(claim)),
+            continuum_kernel_smt::Verdict::Verified(claim) => {
+                require_model_bound(claim.trusted_components().iter().map(String::as_str))?;
+                checked(smt_basis(claim))
+            }
             continuum_kernel_smt::Verdict::Rejected(rejection) => Err(certificate_rejected(
                 family,
                 rejection.reason(),
@@ -1450,8 +1509,14 @@ fn certificate_check(bytes: &[u8]) -> Result<Checked, Fault> {
             continuum_kernel_smt::Verdict::Unsupported(_) => Ok(Checked::Unsupported(family)),
         },
         KernelVerdict::Temporal(verdict) => match verdict {
-            continuum_kernel_temporal::Verdict::Verified(_) => {
-                checked(ValidationBasis::CheckedCertificate)
+            // Every temporal claim lists `certificate-model-correspondence`: the temporal
+            // wire carries its own relation and no model, and the claim exposes no carried
+            // model to compare. So no temporal claim is bound to the model this daemon
+            // holds, and none reaches `validated`. A later model-bound temporal epoch needs
+            // its own binding arm here; until one is written this arm fails closed.
+            continuum_kernel_temporal::Verdict::Verified(claim) => {
+                require_model_bound(claim.trusted_components().iter().copied())?;
+                Err(model_unbound())
             }
             continuum_kernel_temporal::Verdict::Rejected(rejection) => Err(certificate_rejected(
                 family,
@@ -1485,6 +1550,164 @@ fn smt_basis(claim: &continuum_kernel_smt::verdict::CheckedClaim) -> ValidationB
             ValidationBasis::TrustedSolver
         }
     }
+}
+
+/// The only trusted component a claim may still list and reach `validated`.
+///
+/// The kernels' own token. `envelope-digest-binding` is that the envelope's digests name
+/// what they claim to name; at wire epoch 2 its model half is exactly what [`bind_model`]
+/// discharges by comparing bytes. An allowlist rather than a denylist, so a component a
+/// kernel adds later is refused until someone decides this daemon discharges it.
+const DISCHARGED_RESIDUALS: &[&str] = &["envelope-digest-binding"];
+
+/// Step 5's first half: a claim that trusts its model correspondence does not promote.
+///
+/// A wire-epoch-1 finite-closure claim, a state-type claim, every temporal claim, and
+/// every LRAT and SMT claim say in their own trusted components that nothing checked their
+/// relation, formula or skeleton against the model (`*-model-correspondence`). This daemon
+/// cannot supply that check either, so such a claim does not reach the status a
+/// model-bound claim reaches (RFC 0005 correction 1). The answer is a refusal and not an
+/// `inconclusive` result: the checker gave a definite answer, and the evidence it answered
+/// about does not meet the class `validated` requires, which is `InsufficientEvidence`'s
+/// own sentence.
+fn require_model_bound<'token>(
+    mut trusted: impl Iterator<Item = &'token str>,
+) -> Result<(), Fault> {
+    if trusted.any(|component| !DISCHARGED_RESIDUALS.contains(&component)) {
+        return Err(model_unbound());
+    }
+    Ok(())
+}
+
+/// The refusal for a verified claim that is bound to no model.
+fn model_unbound() -> Fault {
+    Fault::new(
+        ErrorCode::InsufficientEvidence,
+        "the kernel verified this certificate, but its claim trusts the correspondence \
+         between its relation and the model; only a claim re-derived from a carried model \
+         the daemon holds reaches validated",
+    )
+}
+
+/// Step 5's second half: the carried model is the model this daemon holds for the
+/// snapshot the node derives from.
+///
+/// The snapshot is the node's own record. `provenance.inputs` is the node's derivation
+/// (RFC 0038 W4 and P2: "derivation, never assertion"), and a certificate is derived from
+/// the model of exactly one snapshot, so the node must name exactly one `ws_` handle there.
+/// The request names no snapshot, and the envelope's `snapshot` is not read: a status
+/// written to the graph is a fact about the node, and a verifying caller must not be able
+/// to choose the model it is checked against.
+///
+/// The steps, each fail-closed:
+///
+/// | # | Link | Refusal |
+/// |---|---|---|
+/// | a | the node names exactly one snapshot the daemon holds a workspace record for | `InsufficientEvidence` |
+/// | b | the caller's grant admits that snapshot (`rule capability.instance_scope`, derived-handle clause); `verify` already decided every input before the kernel ran, so this repeats that decision for the handle the model is read from | `CapabilityDenied` |
+/// | c | the daemon holds a model for it, by `verification.start`'s own resolution | `InsufficientEvidence` |
+/// | d | the carried encoding equals that model's canonical identity, byte for byte (ADR-0013) | `CertificateRejected` |
+///
+/// Step d is a rejection and not an insufficiency: the certificate may be true, but it is
+/// true of another model, so the node claims to be about something it is not. That is the
+/// same finding step 3's [`identity_rejected`] reports for a node filed under an identity it
+/// does not derive, and it carries no `CertificateRejection` data for the same reason: no
+/// kernel rejected anything, so there is no kernel token to relay.
+///
+/// The comparison is on bytes only. The daemon does not decode the carried model: the
+/// kernel already did, and a second decoder here would be a second reading of the grammar.
+/// The held side is `Model::identity`, the model core's canonical encoder, so that encoder
+/// stays a trusted component of the binding (docs/18 C018).
+fn bind_model(
+    call: &Call<'_>,
+    node: &EvidenceNode,
+    state: &DaemonState,
+    services: &Services,
+    carried: &[u8],
+) -> Result<(), Fault> {
+    let snapshot = subject_snapshot(node, state)?;
+    call.derived(Derived::Snapshot(&snapshot))?;
+    let model =
+        super::verification::held_model(state, services, &snapshot).map_err(no_held_model)?;
+    if model.identity().as_bytes() != carried {
+        return Err(Fault::new(
+            ErrorCode::CertificateRejected,
+            "the certificate's carried model is not the model this daemon holds for the \
+             snapshot the node derives from; its claim is about another model",
+        ));
+    }
+    Ok(())
+}
+
+/// The one snapshot a node's derivation names, or the refusal that it names none or
+/// several.
+///
+/// One pass over the inputs. Only an input that names a workspace record counts: a staged
+/// content commitment is spelled in the same `ws_` class (`DaemonState::commit_of`), and a
+/// receipt node's derivation is its own content, so a class test alone would read content as
+/// a snapshot. Every input was decided against the grant before this runs (`verify`), so
+/// resolving them here answers nothing the caller could not already ask. A repeated
+/// spelling of the same handle is one snapshot; two different snapshots are ambiguous, and
+/// the daemon does not choose between them.
+fn subject_snapshot(node: &EvidenceNode, state: &DaemonState) -> Result<WorkspaceHandle, Fault> {
+    let mut named: Option<WorkspaceHandle> = None;
+    for input in &node.inputs {
+        if class_of(input) != Some(ArtifactClass::WorkspaceSnapshot) {
+            continue;
+        }
+        let Ok(handle) = WorkspaceHandle::new(input) else {
+            continue;
+        };
+        if state.workspace(&handle).is_none() {
+            continue;
+        }
+        match &named {
+            None => named = Some(handle),
+            Some(earlier) if *earlier == handle => {}
+            Some(_) => {
+                return Err(Fault::new(
+                    ErrorCode::InsufficientEvidence,
+                    "this certificate node derives from more than one snapshot, so no one \
+                     model is the model its claim must be bound to",
+                ));
+            }
+        }
+    }
+    named.ok_or_else(|| {
+        Fault::new(
+            ErrorCode::InsufficientEvidence,
+            "this certificate node names no snapshot the daemon holds that it derives from, \
+             so the daemon holds no model to bind its claim to",
+        )
+    })
+}
+
+/// The refusal for a snapshot the daemon holds no model for.
+///
+/// One detail per absence, so a caller can tell what to supply. None of them says anything
+/// about the certificate.
+const fn no_held_model(absence: super::verification::NoHeldModel) -> Fault {
+    use super::verification::NoHeldModel;
+    Fault::new(
+        ErrorCode::InsufficientEvidence,
+        match absence {
+            NoHeldModel::UnknownSnapshot => {
+                "the daemon holds no snapshot under the handle this certificate node derives \
+                 from, so it holds no model to bind the claim to"
+            }
+            NoHeldModel::Unsealed => {
+                "the snapshot this certificate node derives from is not sealed, so its model \
+                 is not fixed and the claim is bound to nothing"
+            }
+            NoHeldModel::NoModules => {
+                "the snapshot this certificate node derives from carries no model module"
+            }
+            NoHeldModel::Unregistered => {
+                "the snapshot this certificate node derives from is not a model this \
+                 deployment registered, so the daemon holds no model to bind the claim to"
+            }
+        },
+    )
 }
 
 /// The `CertificateRejected` a routed kernel's own `Rejected` arm produces.

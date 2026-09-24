@@ -134,6 +134,9 @@
 //! [`Promotion`]: continuumd::daemon::evidence::Promotion
 //! [`EvidenceFamily::verifying_as`]: continuumd::daemon::evidence::EvidenceFamily::verifying_as
 
+#[path = "support/model_binding.rs"]
+mod model_binding;
+
 use std::collections::BTreeSet;
 
 use continuum_certificate::{KernelVerdict, Outcome, continuum_kernel_core};
@@ -148,6 +151,7 @@ use continuumd::daemon::family::{Arguments, Payload};
 use continuumd::daemon::identity::Blake3Identity;
 use continuumd::daemon::observe::ObserveFamily;
 use continuumd::daemon::state::{EvidenceNode, StatusWrite};
+use continuumd::daemon::workspace::WorkspaceFamily;
 use continuumd::daemon::{Daemon, OperationOutcome, OperationRequest};
 use continuumd::protocol::envelope::{Budget, RequestEnvelope};
 use continuumd::protocol::handshake::{
@@ -289,6 +293,8 @@ fn daemon_with(untrusted_actor: &'static str) -> Daemon {
         // identity, distinct from every producer in the cast.
         .family(EvidenceFamily::verifying_as(who(CHECKER)))
         .family(ObserveFamily)
+        // For the sealed Die Hard snapshot a certificate node derives from (bn-3hk4v).
+        .family(WorkspaceFamily)
         .build()
 }
 
@@ -606,6 +612,20 @@ fn certificate_node(
         .expect("staging names its content");
     let handle = node_identity(world.daemon.services(), &artifact, CERTIFICATE_PROFILE)
         .expect("the identity seam names the node");
+    // The sealed Die Hard snapshot the certificate derives from, created by the root
+    // service: the daemon binds a verified claim to the model it holds for it (bn-3hk4v).
+    let snapshot = model_binding::die_hard_snapshot(
+        &mut world.daemon,
+        keyed(
+            envelope(
+                "workspace.create",
+                "service:continuumd",
+                "cap_root",
+                "req_seal_die_hard",
+            ),
+            "idem-seal-die-hard",
+        ),
+    );
     let record = EvidenceNode {
         kind: EvidenceNodeKind::Certificate,
         evidence_kind: Some(EvidenceKind::Certificate),
@@ -615,7 +635,7 @@ fn certificate_node(
         producer: who(producer),
         tool: CERTIFICATE_PROFILE.to_owned(),
         created_at: now(),
-        inputs: Vec::new(),
+        inputs: vec![snapshot.as_str().to_owned()],
         idempotency_key: "idem-certificate-append".to_owned(),
         history: vec![StatusWrite {
             status: ClaimStatus::BOTTOM,

@@ -1281,7 +1281,7 @@ fn start(
     let mut explored = None;
     let mut authorize = |minted: &ContinuationHandle, states: u64| {
         explored = Some(states);
-        super::admission::admits_derived(call.grant, Derived::Instance(minted.as_str()))
+        call.admits(Derived::Instance(minted.as_str()))
     };
     let ran = advance(
         &handle,
@@ -1760,6 +1760,59 @@ fn start_handle(
     budget_preimage(&mut preimage, budget);
     epochs_preimage(&mut preimage, services.epochs());
     task_handle(services.identifier(), &preimage)
+}
+
+/// Why this daemon holds no model for a snapshot a certificate names (bn-3hk4v).
+///
+/// Four absences, kept apart so a refusal can say which one it was. Each of them is a
+/// reason the daemon cannot bind a claim to a model, and none of them is a verdict about
+/// the certificate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum NoHeldModel {
+    /// No workspace record is filed under the handle.
+    UnknownSnapshot,
+    /// The workspace is not sealed, so its content, and with it its model, is not fixed.
+    Unsealed,
+    /// The snapshot carries no `.ctm` module, so it names no model source at all.
+    NoModules,
+    /// The snapshot's modules are not a model this deployment registered.
+    Unregistered,
+}
+
+/// The model this daemon holds for `snapshot`, by the resolution `verification.start` uses.
+///
+/// The same three steps and in the same order: the sealed workspace record, the content
+/// identity of its `.ctm` modules ([`model_source`]), and the catalog entry under that
+/// identity. So a certificate bound here is bound to the model a campaign over the same
+/// snapshot would explore, and not to a second reading of the snapshot.
+///
+/// Sealing is required for the reason `verification.start` requires it: a claim bound to
+/// a mutable tree is bound to nothing. Currency is not required. A snapshot a later head
+/// superseded still has exactly the model it had, and a claim about it stays a claim about
+/// it.
+///
+/// The caller decides the snapshot against its grant *before* calling this
+/// (`rule capability.instance_scope`, the derived-handle clause).
+pub(super) fn held_model<'state>(
+    state: &'state DaemonState,
+    services: &Services,
+    snapshot: &crate::protocol::scalar::WorkspaceHandle,
+) -> Result<&'state Model, NoHeldModel> {
+    let record = state
+        .workspace(snapshot)
+        .ok_or(NoHeldModel::UnknownSnapshot)?;
+    if !record.sealed() {
+        return Err(NoHeldModel::Unsealed);
+    }
+    let modules = snapshot_modules(record.descriptor.source());
+    let source = model_source(
+        services.identifier(),
+        modules
+            .iter()
+            .map(|(path, content)| (path.as_str(), content.as_slice())),
+    )
+    .ok_or(NoHeldModel::NoModules)?;
+    state.models().get(&source).ok_or(NoHeldModel::Unregistered)
 }
 
 pub(super) fn no_model() -> Fault {

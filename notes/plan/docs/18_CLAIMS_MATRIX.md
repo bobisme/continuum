@@ -272,8 +272,28 @@ states and 597,184 transitions, is 14,697,631 bytes at epoch 2, against 117,371,
 epoch 1. The kernel checks it and each of its three invariants.
 
 The scope is exact. A wire-epoch-1 claim still lists
-`certificate-model-correspondence` and keeps the old residual. The daemon today
-validates epoch-1 and epoch-2 certificates alike, and it does not compare a claim's
-carried model with the model it holds, so the binding is not yet enforced on the
-system path. The SAT, SMT and temporal kernels have no producer in the workspace, so
-their shrink is not measured.
+`certificate-model-correspondence` and keeps the old residual. On the system path the
+binding is enforced (bn-3hk4v). `evidence.verify` is the one daemon path that accepts a
+certificate as evidence. It promotes a verified finite-closure claim to `validated` only
+when the claim carries a model and that model's encoding equals, byte for byte, the
+model the daemon holds for the sealed snapshot the node derives from
+(`provenance.inputs`). A true certificate about another model is refused with
+`CertificateRejected`. A claim that trusts anything beyond `envelope-digest-binding` is
+refused with `InsufficientEvidence`. That is every wire-epoch-1, state-type and
+temporal claim, and every LRAT and SMT claim, which trusts its formula or skeleton
+correspondence. So is a node that names no held snapshot or two, or a snapshot that is
+unsealed or has no registered model. A caller whose grant does not hold the snapshot is
+refused before the kernel runs.
+`crates/continuumd/tests/c018_model_binding_system_path.rs` holds each case. The daemon
+computes its side with the model core's canonical encoder, the same `identity.rs` the
+producer uses, so that encoder stays trusted: a fault in it changes both sides alike.
+Three more residuals are named, not closed. The model catalog is registered out of band
+and is not checked against the snapshot's `.ctm` bytes, and a re-registration does not
+recheck claims already validated. The claim's property (its class, its invariant token
+and the envelope's property and scope digests) is not compared with the node's claim or
+intent, so a true certificate of a weaker property of the right model still binds. An
+idempotent replay re-decides the snapshot against the presenting grant, because the replay
+record keeps every derived handle the first call decided (cr-3lrkq3).
+No wire operation appends a certificate-class node yet, so the tests file nodes
+through daemon state. The SAT, SMT and temporal kernels have no producer in the
+workspace, so their shrink is not measured.

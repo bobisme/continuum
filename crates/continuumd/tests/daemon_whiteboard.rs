@@ -1494,3 +1494,101 @@ fn negative_a_note_resolves_and_appends_only_through_nodes_in_scope() {
         "an unresolvable reference and an unlisted proposal are the one denial (X1, X2)"
     );
 }
+
+// --- replay re-decides the nodes a note resolved through (bn-3hk4v, cr-3lrkq3) -------------
+
+/// The error detail of a denial.
+fn denial_detail(outcome: &OperationOutcome) -> String {
+    outcome
+        .envelope
+        .error
+        .value()
+        .expect("an error result carries one")
+        .detail
+        .clone()
+}
+
+/// The admission record the last call left.
+fn last_admission(fixture: &Fixture) -> continuumd::daemon::state::AdmissionRecord {
+    fixture
+        .daemon
+        .state()
+        .admissions()
+        .last()
+        .expect("every call is recorded at admission")
+        .clone()
+}
+
+#[test]
+fn a_replay_under_a_grant_without_the_resolving_node_is_denied() {
+    // A decision cites the seeded artifact, so the note resolves through the seeded node
+    // and draws a SUPPORTS edge from it. Neither is named by the request. The replay grant
+    // is the same actor's, and its evidence instance list names every handle the recorded
+    // answer names, and not the seeded node. A fresh compile under it is refused; before
+    // cr-3lrkq3 the replay returned the recorded answer anyway.
+    let mut fixture = fixture();
+    let held = fixture.artifact.as_str().to_owned();
+    let mut note = Note::new(&entry("c-goal", "prop_a", "goal", &[]));
+    note.decisions = vec![entry("c-dec", "prop_dec", "we conclude", &[&held])];
+    let first = compile(&mut fixture, "req_replay_first", "idem-replay", &note);
+    let (nodes, edges, _) = compiled(&first);
+    assert!(!nodes.contains(&fixture.seeded) && !edges.contains(&fixture.seeded));
+
+    let named: Vec<continuumd::protocol::scalar::ArtifactHandle> = nodes
+        .iter()
+        .chain(edges.iter())
+        .map(|handle| {
+            continuumd::protocol::scalar::ArtifactHandle::new(handle.as_str()).expect("an ev_")
+        })
+        .collect();
+    let mut narrow = grant(
+        "cap_author_narrow",
+        "agent:author",
+        AuthorityLevel::Propose,
+        &[],
+    );
+    narrow.instances = Optional::Present(named);
+    fixture
+        .daemon
+        .state_mut()
+        .register_capability(narrow, Some(cap("cap_root")))
+        .expect("an instance-scoped grant registers");
+
+    let replayed = compile_as(
+        &mut fixture,
+        "agent:author",
+        "cap_author_narrow",
+        "req_replay_narrow",
+        "idem-replay",
+        &note,
+    );
+    assert_eq!(
+        replayed.error_code(),
+        Some(ErrorCode::CapabilityDenied),
+        "the replay re-decides the seeded node"
+    );
+    assert_eq!(replayed.payload, Payload::None);
+    let record = last_admission(&fixture);
+    assert!(record.admitted, "the narrow grant passed admission");
+    assert_eq!(
+        record.denial,
+        Some(continuumd::daemon::state::Denial::ReplayAuthority)
+    );
+
+    // The fresh call under the same grant: the single denial, with the same detail.
+    let fresh = compile_as(
+        &mut fixture,
+        "agent:author",
+        "cap_author_narrow",
+        "req_fresh_narrow",
+        "idem-fresh-narrow",
+        &note,
+    );
+    assert_eq!(fresh.error_code(), Some(ErrorCode::CapabilityDenied));
+    assert_eq!(denial_detail(&replayed), denial_detail(&fresh));
+
+    // Anti-vacuity: the full grant still replays the recorded answer.
+    let again = compile(&mut fixture, "req_replay_again", "idem-replay", &note);
+    assert_eq!(again.payload, first.payload, "the recorded answer");
+    assert_eq!(last_admission(&fixture).denial, None);
+}

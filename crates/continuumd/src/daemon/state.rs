@@ -112,7 +112,8 @@ pub enum Denial {
     /// the derived-handle and minted-handle clauses).
     DerivedHandle,
     /// Admission accepted a replay of a recorded mutation, and a handle the recorded outcome
-    /// names is outside the presenting capability's grant.
+    /// names, or a derived handle the first execution admitted (cr-3lrkq3), is outside the
+    /// presenting capability's grant.
     ReplayAuthority,
 }
 
@@ -410,6 +411,12 @@ pub struct Replay {
     /// under a grant that covers it is authorized by construction: everything the outcome
     /// names was admitted under this one (cr-3hcpn4).
     pub grant: crate::protocol::handshake::CapabilityDescriptor,
+    /// Every derived handle the first execution admitted under its grant
+    /// ([`Call::admits`](super::family::Call::admits)). The outcome need not name them: an
+    /// `evidence.verify` answer names the node and not the snapshot its binding read. A
+    /// replay re-decides each one against the presenting grant before it returns anything
+    /// (cr-3lrkq3).
+    pub derived: Vec<super::admission::Consulted>,
     /// The result the first execution produced. A replay returns it with the payload and
     /// every identity-bearing field unchanged, so "the same task or artifact identity" is
     /// returned by construction. Only the per-attempt `request_id` echo and the `audit`

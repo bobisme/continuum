@@ -1796,7 +1796,7 @@ fn resume(
     let mut explored = None;
     let mut authorize = |minted: &ContinuationHandle, states: u64| {
         explored = Some(states);
-        super::admission::admits_derived(call.grant, Derived::Instance(minted.as_str()))
+        call.admits(Derived::Instance(minted.as_str()))
     };
     let ran = verification::advance(
         &task,

@@ -731,8 +731,18 @@ impl Daemon {
                     let mut outcome = replayed(&previous.outcome, envelope, &audit);
                     outcome.recovery =
                         admissible_offers(outcome.recovery, envelope, families, state, services);
-                    if !admission::covers(&grant, &previous.grant)
-                        && !replay_admitted(&outcome, &grant)
+                    // The handles the first execution derived are re-decided too, whatever
+                    // the outcome names: a replay does not run the handler, so its derived
+                    // checks run here or not at all (cr-3lrkq3). Under a covering grant they
+                    // pass by construction; they are decided anyway, so the rule does not
+                    // rest on `covers` being exact.
+                    let derived_admitted = previous
+                        .derived
+                        .iter()
+                        .all(|handle| admission::admits_derived(&grant, handle.as_derived()));
+                    if !derived_admitted
+                        || (!admission::covers(&grant, &previous.grant)
+                            && !replay_admitted(&outcome, &grant))
                     {
                         state.record_denial(audit.as_str(), state::Denial::ReplayAuthority);
                         return Ok(raise(
@@ -770,12 +780,14 @@ impl Daemon {
                 audit_required,
             ));
         };
+        let consulted = std::cell::RefCell::default();
         let call = Call {
             spec,
             envelope,
             arguments: &request.arguments,
             grant: &grant,
             audit: &audit,
+            consulted: &consulted,
         };
         let outcome = match family.handle(&call, state, services, store) {
             Ok(effect) => {
@@ -857,6 +869,7 @@ impl Daemon {
                 Replay {
                     request: replay_key,
                     grant: grant.clone(),
+                    derived: consulted.take().into_iter().collect(),
                     outcome: outcome.clone(),
                 },
             );
